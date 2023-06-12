@@ -62,6 +62,8 @@ antora:
 
 This extension fetches the latest release tag and latest release commit hash from http://github.com/redpanda-data/redpanda. These values are then assigned to the `full-version` and `latest-release-commit` attributes of the latest version of the Redpanda documentation, respectively.
 
+It also fetches the latest version of Redpanda Console and assigns it to the `latest-console-version` attribute in the playbook so that all components have access to it.
+
 ==== Registration example
 
 ```yaml
