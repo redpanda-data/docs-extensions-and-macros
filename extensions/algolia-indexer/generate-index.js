@@ -171,6 +171,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       .replace(/\r/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
+    if (text.length > 4000) text = text.substr(0, 4000)
 
     var tag = `${component.title}-${version}`
 
@@ -186,28 +187,6 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       titles: titles,
       keywords: keywords,
       _tags: [tag]
-    }
-
-    const maxBytes = 10000;
-    let indexItemStr = JSON.stringify(indexItem);
-    let sizeInBytes = Buffer.byteLength(indexItemStr, 'utf8');
-
-    if (sizeInBytes > maxBytes) {
-      console.warn(`IndexItem size exceeds ${maxBytes} bytes, trimming text field...`);
-
-      let excessBytes = sizeInBytes - maxBytes;
-      // Roughly estimate how many characters need to be removed
-      let charsToRemove = Math.ceil(excessBytes / 2); // assuming 2 bytes per character
-
-      indexItem.text = indexItem.text.substring(0, indexItem.text.length - charsToRemove);
-
-      // Recalculate the size after trimming
-      indexItemStr = JSON.stringify(indexItem);
-      sizeInBytes = Buffer.byteLength(indexItemStr, 'utf8');
-
-      if (sizeInBytes > maxBytes) {
-        console.error('Failed to trim the indexItem to fit the size limit');
-      }
     }
 
     algolia[cname][version].push(indexItem)
