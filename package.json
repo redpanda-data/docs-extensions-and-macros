@@ -1,6 +1,6 @@
 {
   "name": "antora-extensions-and-macros",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": ["antora", "extension", "macro", "documentation", "redpanda"],
   "author": {
