@@ -38,8 +38,18 @@ module.exports.register = function ({ config }) {
           globalAttributes = {...globalAttributes, ...fileData};
         }
 
-        // Merge the global attributes with the playbook's asciidoc.attributes object
-        playbook.asciidoc.attributes = {...globalAttributes, ...playbook.asciidoc.attributes};
+      let latestConsoleVersion;
+
+      if (playbook.asciidoc.attributes) {
+        latestConsoleVersion = playbook.asciidoc.attributes['latest-console-version'];
+      }
+
+      // Merge the global attributes with the playbook's asciidoc.attributes object
+      playbook.asciidoc.attributes = {...globalAttributes, ...playbook.asciidoc.attributes};
+
+      if (latestConsoleVersion) {
+        playbook.asciidoc.attributes['latest-console-version'] = latestConsoleVersion;
+      }
 
       } else {
         logger.warn(`Could not fetch global attributes: ${response.statusText}`);
