@@ -16,7 +16,6 @@ module.exports.register = function ({ config }) {
             ...playbook.asciidoc.attributes,
             ...attributes
           };
-          console.log(mergedAttributes)
           for (const key in mergedAttributes) {
             const placeholder = "{" + key + "}";
             const sanitizedValue = sanitizeAttributeValue(mergedAttributes[key]);
