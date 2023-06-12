@@ -1,6 +1,6 @@
 module.exports.register = function ({ config }) {
   const { family = 'attachment' } = config;
-  const logger = this.getLogger('attributes-in-attachments-extension');
+  const logger = this.getLogger('replace-attributes-in-attachments-extension');
 
   const sanitizeAttributeValue = (value) => String(value).replace("@", "");
 

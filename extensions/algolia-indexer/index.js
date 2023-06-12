@@ -20,7 +20,7 @@ function register ({
     ...unknownOptions
   }
 }) {
-  const logger = this.getLogger('algolia-indexer')
+  const logger = this.getLogger('algolia-indexer-extension')
 
   var algoliaIsEnabled = false;
   if (process.env.ALGOLIA_ADMIN_API_KEY) algoliaIsEnabled = true

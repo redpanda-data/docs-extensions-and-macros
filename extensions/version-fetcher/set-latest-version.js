@@ -8,7 +8,7 @@ antora:
 const GetLatestRedpandaVersion = require('./getLatestRedpandaVersion');
 
 module.exports.register = function ({ config }) {
-  const logger = this.getLogger('set-latest-version')
+  const logger = this.getLogger('set-latest-version-extension')
   if (!process.env.GITHUB_TOKEN) return
   this
     .on('contentClassified', async ({ contentCatalog }) => {

@@ -1,12 +1,21 @@
+/* Example use in the playbook
+* antora:
+    extensions:
+ *    - require: ./extensions/add-global-attributes.js
+       org: example
+       repo: test
+       branch: main
+*/
+
 const yaml = require('js-yaml');
 const fetch = require('node-fetch');
 
 module.exports.register = function ({ config }) {
-  const logger = this.getLogger('unlisted-pages-extension')
+  const logger = this.getLogger('global-attributes-extension')
   this
     .on('playbookBuilt', async ({ playbook }) => {
 
-      const globalAttributesUrl = 'https://api.github.com/repos/redpanda-data/documentation/contents/global-attributes?ref=playbook';
+      const globalAttributesUrl = `https://api.github.com/repos/${config.org}/${config.repo}/contents/global-attributes?ref=${config.branch}`;
 
 
       // Request the contents of the directory from the GitHub API
@@ -34,6 +43,7 @@ module.exports.register = function ({ config }) {
 
       } else {
         logger.warn(`Could not fetch global attributes: ${response.statusText}`);
+        return
       }
 
       console.log('Merged global attributes into playbook');

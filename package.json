@@ -1,7 +1,7 @@
 {
   "name": "antora-extensions-and-macros",
-  "version": "1.0.0",
-  "description": "Extensions and macros developed for Redpanda documentation.",
+  "version": "1.2.0",
+  "description": "Antora extensions and macros developed for Redpanda documentation.",
   "license": "ISC",
   "repository": {
     "type": "git",
