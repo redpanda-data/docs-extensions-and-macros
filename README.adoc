@@ -1,0 +1,389 @@
+= Antora Extensions and Macros for Redpanda Docs
+:url-project: https://github.com/JakeSCahill/antora-extensions-and-macros
+:url-git: https://git-scm.com
+:url-git-dl: {url-git}/downloads
+:url-nodejs: https://nodejs.org
+:url-nodejs-releases: https://github.com/nodejs/Release#release-schedule
+:url-nvm-install: {url-nvm}#installation
+
+This library provides https://docs.antora.org/antora/latest/extend/extensions/[Antora extensions] and https://docs.asciidoctor.org/asciidoctor.js/latest/extend/extensions/register/[Asciidoc macros] developed for Redpanda documentation.
+
+== Prerequisites
+
+In order to use this library, you must have Node.js 16 or higher installed on your machine.
+
+Use the following command to install the `antora-extensions-and-macros` package into your project:
+
+[,bash]
+----
+npm i antora-extensions-and-macros
+----
+
+To use the development version instead, refer to the <<Development Quickstart>>.
+
+== Extensions
+
+This section documents the Antora extensions that are provided by this library and how to configure them.
+
+IMPORTANT: Be sure to register each extension under the `antora.extensions` key in the playbook, not the `asciidoc.extensions` key.
+
+=== Algolia indexer
+
+This extension generates an Algolia index for each version of each component. The index entries are then saved to Algolia using the `saveObjects()` method, and also saved as JSON files in the site catalog. JSON files are published to the site root using the following template: `algolia-<component>-<version>.json`.
+
+NOTE: Only pages that include an `<article>` element with the `doc` class are indexed. Pages marked as "noindex" for "robots" are skipped.
+
+==== Required environment variables
+
+- ALGOLIA_ADMIN_API_KEY
+- ALGOLIA_APP_ID
+- ALGOLIA_INDEX_NAME
+
+==== Configuration options
+
+The extension accepts the following configuration options:
+
+excludes (optional)::
+Any elements, classes, or IDs that you want to exclude from the index.
+index-latest-only (optional)::
+Whether to index all versions or just the latest version of a component.
+
+==== Registration example
+
+```yaml
+antora:
+  extensions:
+  - require: 'node_modules/antora-extensions-and-macros/extensions/algolia-indexer/index.js'
+    excludes: ['.thumbs','script', '.page-versions','.feedback-section','.banner-container']
+    index-latest-only: true
+```
+
+=== Version fetcher
+
+This extension fetches the latest release tag and latest release commit hash from http://github.com/redpanda-data/redpanda. These values are then assigned to the `full-version` and `latest-release-commit` attributes of the latest version of the Redpanda documentation, respectively.
+
+==== Registration example
+
+```yaml
+antora:
+  extensions:
+  - 'node_modules/antora-extensions-and-macros/extensions/version-fetcher/set-latest-version.js'
+```
+
+=== Global attributes
+
+This extension fetches the content of all YAML files in a GitHub directory and merges the contents with the `asciidoc.attributes` object in the Antora playbook. This allows you to define Asciidoc attributes in an external repository and automatically include them in your documentation.
+
+[IMPORTANT]
+====
+- The GitHub directory that contains the global attributes must be named `global-attributes`.
+- Only YAML files are supported. Other types of files are ignored.
+- If a key is present in both the global attributes and the playbook's `asciidoc.attributes`, the value in the playbook takes precedence.
+====
+
+==== Configuration options
+
+The extension accepts the following configuration options:
+
+org (required)::
+The GitHub organization that owns the repository.
+
+repo (required)::
+The name of the repository.
+
+branch (required)::
+The branch in the repository where the global attributes are located.
+
+==== Registration example
+
+```yaml
+antora:
+  extensions:
+  - require: 'node_modules/antora-extensions-and-macros/extensions/add-global-attributes.js'
+    org: example
+    repo: test
+    branch: main
+```
+
+=== Replace attributes in attachments
+
+This extension replaces AsciiDoc attribute placeholders with their respective values in attachment files, such as CSS, HTML, and YAML.
+
+[IMPORTANT]
+====
+- By default, this extension processes attachments for the `ROOT` (redpanda) component only. This behavior is hardcoded and cannot be changed via the configuration.
+- The `@` character is removed from attribute values to prevent potential issues with CSS or HTML syntax.
+- If the same attribute placeholder is used multiple times within a file, all instances will be replaced with the attribute's value.
+====
+
+==== Registration example
+
+```yaml
+antora:
+  extensions:
+  - 'node_modules/antora-extensions-and-macros/extensions/replace-attributes-in-attachments.js'
+```
+
+=== Unlisted Pages
+
+This extension identifies and logs any pages that aren't listed in the navigation (nav) file of each version of each component. It then optionally adds these unlisted pages to the end of the navigation tree under a configurable heading.
+
+IMPORTANT: By default, this extension excludes components named 'api'. This behavior is hardcoded and cannot be changed in the configuration.
+
+==== Configuration options
+
+This extension accepts the following configuration options:
+
+addToNavigation (optional)::
+Whether to add unlisted pages to the navigation. The default is `false` (unlisted pages are not added).
+
+unlistedPagesHeading (optional)::
+The heading under which to list the unlisted pages in the navigation. The default is 'Unlisted Pages'.
+
+==== Registration example
+
+```yaml
+antora:
+  extensions:
+  - require: 'node_modules/antora-extensions-and-macros/extensions/unlisted-pages.js'
+    addToNavigation: true
+    unlistedPagesHeading: 'Additional Resources'
+```
+
+== Macros
+
+This section documents the Asciidoc macros that are provided by this library and how to configure them.
+
+IMPORTANT: Be sure to register each extension under the `asciidoc.extensions` key in the playbook, not the `antora.extensions` key.
+
+=== config_ref
+
+This inline macro is used to generate a reference to a configuration value in the Redpanda documentation. The macro's parameters allow for control over the generated reference's format and the type of output produced.
+
+==== Usage
+
+The `config_ref` macro is used in an AsciiDoc document as follows:
+
+[,asciidoc]
+----
+config_ref:configRef,isLink,path[]
+----
+
+The `config_ref` macro takes three parameters:
+
+configRef::
+This is the configuration reference, which is also used to generate the anchor link if `isLink` is `true`.
+
+isLink::
+Whether the output should be a link. If `isLink` is set to `true`, the output will be a cross-reference (xref) to the relevant configuration value.
+
+path::
+This is the path to the document where the configuration value is defined. This parameter is used to to generate the link if `isLink` is `true`.
+
+IMPORTANT: The path must be the name of a document at the root of the `reference` module.
+
+NOTE: The `config_ref` macro is environment-aware. It checks if the document it is being used in is part of a Kubernetes environment by checking if the `env-kubernetes` attribute is set in the document's attributes. Depending on this check, it either prepends `storage.tieredConfig.` to the `configRef` or just uses the `configRef` as is.
+
+For example:
+
+[,asciidoc]
+----
+config_ref:example_config,true,tunable-properties[]
+----
+
+==== Registration example
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - 'node_modules/antora-extensions-and-macros/macros/config-ref.js'
+----
+
+=== glossary and glossterm
+
+The glossary module provides a way to define and reference glossary terms in your AsciiDoc documents.
+
+This module consists of two parts: a block macro (`glossary`) and an inline macro (`glossterm`).
+
+==== Usage
+
+To insert a glossary dlist, use the glossary block macro.
+
+[,asciidoc]
+----
+glossary::[]
+----
+
+Glossary terms defined in the document before the `glossary` macro is used appear as a definition list, sorted by term.
+
+The `glossterm` inline macro is used to reference a term within the text of the document:
+
+[,asciidoc]
+----
+glossterm:myTerm[myDefinition]
+----
+
+It takes two parameters:
+
+term::
+The term to be defined.
+
+definition::
+The definition of the term.
+
+==== Configuration options
+
+glossary-log-terms (optional)::
+Whether to log a textual representation of a definition list item to the console.
+
+glossary-term-role (optional)::
+Role to assign each term. By default, glossary terms are assigned the `glossary-term` role (and thus the class glossary-term in generated html).
+
+glossary-links (optional)::
+Whether to generate links to glossary entries.
+By default, links to the glossary entries are generated from the glossary terms. To avoid this, set the attribute to `false` as either asciidoctor configuration or a header attribute. By default, links are generated to the same page as the glossary term. To specify the target page, set the attribute `glossary-page` as asciidoctor configuration or a header attribute. If you set terms in the <<global-attributes, global `terms` attribute>>, you can provide links to external pages.
+
+glossary-page (optional)::
+Target page for glossary links.
+
+glossary-tooltip (optional)::
+Whether to enable tooltips for the defined terms. Valid values are:
+- title: This uses the browser built-in `title` attribute to display the definition.
+
+- true: This inserts the definition as the value of the attribute `data-glossary-tooltip`.
+
+- data-<attribute-name>​: This inserts the definition as the value of the supplied attribute name, which must start with `data`.
+
+The last two options are intended to support js/css tooltip solutions such as tippy.js.
+
+[IMPORTANT]
+.Multi-page use
+====
+In Antora, a glossary is constructed for each component-version.
+When the `glossary` block macro is evaluated, only terms known as of the rendering can be included.
+Therefore, it is necessary to arrange that the page containing this macro in a component-version be rendered last.
+It may be possible to arrange this by naming the page starting with a lot of 'z’s, such as `zzzzzz-glossary.adoc`.
+====
+
+==== Registration example
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - 'node_modules/antora-extensions-and-macros/macros/glossary.js'
+----
+
+=== helm_ref
+
+This is an inline macro to create links to a Helm `values.yaml` file on ArtifactHub.
+
+==== Usage
+
+In an AsciiDoc document, use the `helm_ref` macro as follows:
+
+[,asciidoc]
+----
+helm_ref:<helmRef>[]
+----
+
+Where `<helmRef>` is the Helm configuration value you want to reference in the `values.yaml` file.
+
+For example:
+
+Given a Helm reference value of `myConfigValue`, you would use the macro like this:
+
+[,asciidoc]
+----
+helm_ref:myConfigValue[]
+----
+
+This will generate the following output:
+
+[,asciidoc]
+----
+For default values and documentation for configuration options, see the https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=myConfigValue[values.yaml] file.
+----
+
+If you do not specify a Helm reference value, the macro generates a link without specifying a path.
+
+==== Registration example
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - 'node_modules/antora-extensions-and-macros/macros/helm-ref.js'
+----
+
+== Development Quickstart
+
+This section provides information on how to develop this project.
+
+=== Prerequisites
+
+To build this project, you need the following software installed on your computer:
+
+* {url-git}[git] (command: `git`)
+* {url-nodejs}[Node.js] (commands: `node`, `npm`, and `npx`)
+
+==== git
+
+First, make sure you have git installed.
+
+[,bash]
+----
+git --version
+----
+
+If not, {url-git-dl}[download and install] the git package for your system.
+
+==== Node.js
+
+Next, make sure that you have Node.js installed (which also provides npm and npx).
+
+[,bash]
+----
+node --version
+----
+
+If this command fails with an error, you don't have Node.js installed.
+
+Now that you have git and Node.js installed, you're ready to start developing on this project.
+
+=== Clone Project
+
+Clone the project using git:
+
+[,bash,subs=attributes+]
+----
+git clone {url-project}
+----
+
+Change into the project directory and stay in this directory when running all subsequent commands.
+
+=== Install Dependencies
+
+Use npm to install the project's dependencies inside the project.
+In your terminal, run the following command:
+
+[,bash]
+----
+npm ci
+----
+
+This command installs the dependencies listed in [.path]`package-lock.json` into the [.path]`node_modules/` directory inside the project.
+This directory should _not_ be committed to the source control repository.
+
+=== Use Project From Source
+
+If you want to use the project locally before it is published, you can specify the path to the extensions in the [.path]`local-antora-playbook.yml` file.
+
+[,yaml]
+----
+asciidoc:
+  attributes:
+  extensions:
+  - '<path-to-local-project>/antora-extensions-and-macros/extensions/<extension-name>'
+----

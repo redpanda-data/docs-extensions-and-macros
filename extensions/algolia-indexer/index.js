@@ -13,32 +13,27 @@ const path                = require('path');
  */
 function register ({
   config: {
-    languages,
     indexLatestOnly,
-    excludes = ['.thumbs','script', '.page-versions','.feedback-section','.banner-container'],
-    snippetLength = 100,
+    excludes,
     ...unknownOptions
   }
 }) {
   const logger = this.getLogger('algolia-indexer-extension')
 
-  var algoliaIsEnabled = false;
-  if (process.env.ALGOLIA_ADMIN_API_KEY) algoliaIsEnabled = true
+  if (!process.env.ALGOLIA_ADMIN_API_KEY || !process.env.ALGOLIA_APP_ID || !process.env.ALGOLIA_INDEX_NAME) return
 
   var client;
   var index;
 
-  if (algoliaIsEnabled) {
-    // Connect and authenticate with Algolia
-    client = algoliasearch(process.env.ALGOLIA_APP_ID, process.env.ALGOLIA_ADMIN_API_KEY);
+  // Connect and authenticate with Algolia
+  client = algoliasearch(process.env.ALGOLIA_APP_ID, process.env.ALGOLIA_ADMIN_API_KEY);
 
-    // Create a new index and add a record
-    index = client.initIndex(process.env.ALGOLIA_INDEX_NAME);
-  }
+  // Create a new index and add a record
+  index = client.initIndex(process.env.ALGOLIA_INDEX_NAME);
 
   if (Object.keys(unknownOptions).length) {
     const keys = Object.keys(unknownOptions)
-    throw new Error(`Unrecognized option${keys.length > 1 ? 's' : ''} specified for ${packageName}: ${keys.join(', ')}`)
+    throw new Error(`Unrecognized option${keys.length > 1 ? 's' : ''} specified: ${keys.join(', ')}`)
   }
 
   this.on('beforePublish', ({ playbook, siteCatalog, contentCatalog }) => {
@@ -48,10 +43,8 @@ function register ({
     Object.keys(algolia).forEach((c) => {
       Object.keys(algolia[c]).forEach((v) => {
         algoliaCount += algolia[c][v].length
-        if (algoliaIsEnabled) {
-          // Save all records to the index
-          index.saveObjects(algolia[c][v]).wait();
-        }
+        // Save all records to the index
+        index.saveObjects(algolia[c][v]).wait();
         siteCatalog.addFile({
           mediaType: 'application/json',
           contents: Buffer.from(
@@ -63,28 +56,26 @@ function register ({
         })
       })
     })
-    if (algoliaIsEnabled) {
-      index.setSettings({
-        attributesForFaceting: [
-          'version',
-          'product'
-        ]
+    index.setSettings({
+      attributesForFaceting: [
+        'version',
+        'product'
+      ]
+    })
+    console.log(`${chalk.bold(algoliaCount)} Algolia index entries created`)
+    // Get and print the count of all records in the index
+    let recordCount = 0;
+    index
+      .browseObjects({
+        query: '', // for all records
+        batch: batch => {
+          recordCount += batch.length;
+        }
       })
-      console.log(`${chalk.bold(algoliaCount)} Algolia index entries created`)
-      // Get and print the count of all records in the index
-      let recordCount = 0;
-      index
-        .browseObjects({
-          query: '', // for all records
-          batch: batch => {
-            recordCount += batch.length;
-          }
-        })
-        .then(() => {
-          console.log('Total Records:', recordCount);
-        })
-        .catch(err => console.log(err));
-    }
+      .then(() => {
+        console.log('Total Records:', recordCount);
+      })
+      .catch(err => console.log(err));
   })
 }
 

@@ -1,8 +1,7 @@
-/* To add custom config, use the config object and pass values to it in the playbook. For example:
+/* Example:
 antora:
   extensions:
   - require: ./extensions/setLatestVersion.js
-    add_to_navigation: true
 */
 
 const GetLatestRedpandaVersion = require('./getLatestRedpandaVersion');
