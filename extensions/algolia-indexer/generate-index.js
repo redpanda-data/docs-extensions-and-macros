@@ -190,7 +190,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
 
     const maxBytes = 10000;
     let indexItemStr = JSON.stringify(indexItem);
-    let sizeInBytes = new Blob([indexItemStr]).size;
+    let sizeInBytes = Buffer.byteLength(indexItemStr, 'utf8');
 
     if (sizeInBytes > maxBytes) {
       console.warn(`IndexItem size exceeds ${maxBytes} bytes, trimming text field...`);
@@ -203,7 +203,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
 
       // Recalculate the size after trimming
       indexItemStr = JSON.stringify(indexItem);
-      sizeInBytes = new Blob([indexItemStr]).size;
+      sizeInBytes = Buffer.byteLength(indexItemStr, 'utf8');
 
       if (sizeInBytes > maxBytes) {
         console.error('Failed to trim the indexItem to fit the size limit');
