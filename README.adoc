@@ -64,6 +64,10 @@ This extension fetches the latest release tag and latest release commit hash fro
 
 It also fetches the latest version of Redpanda Console and assigns it to the `latest-console-version` attribute in the playbook so that all components have access to it.
 
+==== Required environment variables
+
+- REDPANDA_GITHUB_TOKEN: A Personal access token (PAT) that has `repo` permissions for the `redpanda-data` GitHub organization.
+
 ==== Registration example
 
 ```yaml
@@ -82,6 +86,10 @@ This extension fetches the content of all YAML files in a GitHub directory and m
 - Only YAML files are supported. Other types of files are ignored.
 - If a key is present in both the global attributes and the playbook's `asciidoc.attributes`, the value in the playbook takes precedence.
 ====
+
+==== Required environment variables
+
+- GLOBAL_ATTRIBUTES_GITHUB_TOKEN: A Personal access token (PAT) that has `repo` permissions for the GitHub organization defined in `org`.
 
 ==== Configuration options
 

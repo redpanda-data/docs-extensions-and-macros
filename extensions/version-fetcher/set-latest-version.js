@@ -9,7 +9,11 @@ const GetLatestConsoleVersion = require('./getLatestConsoleVersion');
 
 module.exports.register = function ({ config }) {
   const logger = this.getLogger('set-latest-version-extension')
-  if (!process.env.GITHUB_TOKEN) return
+  if (!process.env.REDPANDA_GITHUB_TOKEN) {
+    logger.warn('Cannot get global attributes')
+    logger.warn('REDPANDA_GITHUB_TOKEN environment variable not set')
+    return
+  }
   this
     .on('playbookBuilt', async ({ playbook }) => {
       const LatestConsoleVersion = await GetLatestConsoleVersion();

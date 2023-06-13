@@ -7,7 +7,7 @@ const repo = 'console';
 const github = new OctokitWithRetries({
   userAgent: 'Redpanda Docs',
   baseUrl: 'https://api.github.com',
-  auth: process.env.GITHUB_TOKEN
+  auth: process.env.REDPANDA_GITHUB_TOKEN
 })
 
 var latestConsoleReleaseVersion;
