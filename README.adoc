@@ -33,11 +33,11 @@ This extension generates an Algolia index for each version of each component. Th
 
 NOTE: Only pages that include an `<article>` element with the `doc` class are indexed. Pages marked as "noindex" for "robots" are skipped.
 
-==== Required environment variables
+==== Environment variables
 
-- ALGOLIA_ADMIN_API_KEY
-- ALGOLIA_APP_ID
-- ALGOLIA_INDEX_NAME
+- `ALGOLIA_ADMIN_API_KEY` (required)
+- `ALGOLIA_APP_ID` (required)
+- `ALGOLIA_INDEX_NAME` (required)
 
 ==== Configuration options
 
@@ -64,9 +64,11 @@ This extension fetches the latest release tag and latest release commit hash fro
 
 It also fetches the latest version of Redpanda Console and assigns it to the `latest-console-version` attribute in the playbook so that all components have access to it.
 
-==== Required environment variables
+==== Environment variables
 
-- REDPANDA_GITHUB_TOKEN: A Personal access token (PAT) that has `repo` permissions for the `redpanda-data` GitHub organization.
+- `REDPANDA_GITHUB_TOKEN` (optional): A Personal access token (PAT) that has `repo` permissions for the `redpanda-data` GitHub organization.
+
+NOTE: If you don't set the environment variable, the latest versions may not be made available to your build. When the environment variable is not set, the extension sends unauthenticated requests to GitHub. Unauthenticated requests may result in hitting the API rate limit and cause GitHub to reject the request.
 
 ==== Registration example
 
@@ -87,9 +89,11 @@ This extension fetches the content of all YAML files in a GitHub directory and m
 - If a key is present in both the global attributes and the playbook's `asciidoc.attributes`, the value in the playbook takes precedence.
 ====
 
-==== Required environment variables
+==== Environment variables
 
-- GLOBAL_ATTRIBUTES_GITHUB_TOKEN: A Personal access token (PAT) that has `repo` permissions for the GitHub organization defined in `org`.
+- `GLOBAL_ATTRIBUTES_GITHUB_TOKEN` (optional): A Personal access token (PAT) that has `repo` permissions for the GitHub organization defined in `org`.
+
+NOTE: If you don't set the environment variable, global attributes may not be made available to your build. When the environment variable is not set, the extension sends unauthenticated requests to GitHub. Unauthenticated requests may result in hitting the API rate limit and cause GitHub to reject the request.
 
 ==== Configuration options
 
@@ -252,10 +256,10 @@ Role to assign each term. By default, glossary terms are assigned the `glossary-
 
 glossary-links (optional)::
 Whether to generate links to glossary entries.
-By default, links to the glossary entries are generated from the glossary terms. To avoid this, set the attribute to `false` as either asciidoctor configuration or a header attribute. By default, links are generated to the same page as the glossary term. To specify the target page, set the attribute `glossary-page` as asciidoctor configuration or a header attribute. If you set terms in the <<global-attributes, global `terms` attribute>>, you can provide links to external pages.
+By default, links to the glossary entries are generated from the glossary terms. To avoid this, set the attribute to `false` as either asciidoctor configuration or a header attribute.
 
 glossary-page (optional)::
-Target page for glossary links.
+Target page for glossary links. By default, links are generated to the same page as the glossary term. To specify the target page, set this attribute to the resource ID of a page where the `glossary` block macro is used.
 
 glossary-tooltip (optional)::
 Whether to enable tooltips for the defined terms. Valid values are:

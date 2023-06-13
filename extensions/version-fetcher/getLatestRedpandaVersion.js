@@ -4,11 +4,17 @@ const { retry } = require("@octokit/plugin-retry");
 const OctokitWithRetries = Octokit.plugin(retry);
 const owner = 'redpanda-data';
 const repo = 'redpanda';
-const github = new OctokitWithRetries({
+
+let githubOptions = {
   userAgent: 'Redpanda Docs',
   baseUrl: 'https://api.github.com',
-  auth: process.env.REDPANDA_GITHUB_TOKEN
-})
+};
+
+if (process.env.REDPANDA_GITHUB_TOKEN) {
+  githubOptions.auth = process.env.REDPANDA_GITHUB_TOKEN;
+}
+
+const github = new OctokitWithRetries(githubOptions);
 
 var latestRedpandaReleaseVersion;
 var latestRedpandaReleaseCommitHash;
@@ -18,14 +24,14 @@ module.exports = async () => {
     owner,
     repo,
   }).then(async function(release) {
-    const tag = release.data.tag_name
-    latestRedpandaReleaseVersion = tag.replace('v','')
+    const tag = release.data.tag_name;
+    latestRedpandaReleaseVersion = tag.replace('v','');
     await github.rest.git.getRef({
       owner,
       repo,
       ref: `/tags/${tag}`,
     }).then(async function(tagRef) {
-      const releaseSha = tagRef.data.object.sha
+      const releaseSha = tagRef.data.object.sha;
       await github.rest.git.getTag({
         owner,
         repo,
@@ -33,7 +39,8 @@ module.exports = async () => {
       }).then((tag => latestRedpandaReleaseCommitHash = tag.data.object.sha.substring(0, 7)))
     })
   }).catch((error => {
-    return
+    console.error(error)
+    return null
   }))
-  return [latestRedpandaReleaseVersion, latestRedpandaReleaseCommitHash]
+  return [latestRedpandaReleaseVersion, latestRedpandaReleaseCommitHash];
 };

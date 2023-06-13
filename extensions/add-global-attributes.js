@@ -14,21 +14,24 @@ const OctokitWithRetries = Octokit.plugin(retry);
 
 module.exports.register = function ({ config }) {
   const logger = this.getLogger('global-attributes-extension')
-  if (!process.env.GLOBAL_ATTRIBUTES_GITHUB_TOKEN) {
-    logger.warn('Cannot get global attributes')
-    logger.warn('GITHUB_TOKEN environment variable not set')
-    return
-  }
+
   this
     .on('playbookBuilt', async ({ playbook }) => {
 
       const globalAttributesUrl = `/repos/${config.org}/${config.repo}/contents/global-attributes?ref=${config.branch}`;
 
-      const github = new OctokitWithRetries({
+      let githubOptions = {
         userAgent: 'Redpanda Docs',
         baseUrl: 'https://api.github.com',
-        auth: process.env.GLOBAL_ATTRIBUTES_GITHUB_TOKEN
-      });
+      };
+
+      if(process.env.GLOBAL_ATTRIBUTES_GITHUB_TOKEN){
+        githubOptions.auth = process.env.GLOBAL_ATTRIBUTES_GITHUB_TOKEN;
+      } else {
+        logger.warn('GLOBAL_ATTRIBUTES_GITHUB_TOKEN environment variable not set. Attempting unauthenticated request.')
+      }
+
+      const github = new OctokitWithRetries(githubOptions);
 
       // Request the contents of the directory from the GitHub API
       const response = await github.request('GET ' + globalAttributesUrl);
