@@ -33,29 +33,33 @@ module.exports.register = function ({ config }) {
 
       const github = new OctokitWithRetries(githubOptions);
 
-      // Request the contents of the directory from the GitHub API
-      const response = await github.request('GET ' + globalAttributesUrl);
+      try {
+        // Request the contents of the directory from the GitHub API
+        const response = await github.request('GET ' + globalAttributesUrl);
 
-      if (response.status === 200) {
-        const directoryContents = response.data;
+        if (response.status === 200) {
+          const directoryContents = response.data;
 
-        // Filter out only YAML files
-        const yamlFiles = directoryContents.filter(file => file.name.endsWith('.yaml') || file.name.endsWith('.yml'));
+          // Filter out only YAML files
+          const yamlFiles = directoryContents.filter(file => file.name.endsWith('.yaml') || file.name.endsWith('.yml'));
 
-        let globalAttributes = {};
-        for (let file of yamlFiles) {
-          const fileResponse = await github.request('GET ' + file.download_url);
-          const fileData = yaml.load(fileResponse.data);
-          globalAttributes = {...globalAttributes, ...fileData};
+          let globalAttributes = {};
+          for (let file of yamlFiles) {
+            const fileResponse = await github.request('GET ' + file.download_url);
+            const fileData = yaml.load(fileResponse.data);
+            globalAttributes = {...globalAttributes, ...fileData};
+          }
+
+          playbook.asciidoc.attributes = {...globalAttributes, ...playbook.asciidoc.attributes};
+
+          console.log('Merged global attributes into playbook');
+
+        } else {
+          logger.warn(`Could not fetch global attributes: ${response.statusText}`);
+          return null
         }
-
-        playbook.asciidoc.attributes = {...globalAttributes, ...playbook.asciidoc.attributes};
-
-      } else {
-        logger.warn(`Could not fetch global attributes: ${response.statusText}`);
-        return
+      } catch(error) {
+        logger.warn(error)
       }
-
-      console.log('Merged global attributes into playbook');
     });
 }
