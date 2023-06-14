@@ -59,7 +59,7 @@ module.exports.register = function ({ config }) {
           return null
         }
       } catch(error) {
-        logger.warn(error)
+        logger.warn(error.status + ' Could not get ' + error.response.url)
       }
     });
 }
