@@ -5,6 +5,8 @@
 :url-nodejs: https://nodejs.org
 :url-nodejs-releases: https://github.com/nodejs/Release#release-schedule
 :url-nvm-install: {url-nvm}#installation
+:idprefix:
+:idseparator: -
 ifdef::env-github[]
 :important-caption: :exclamation:
 :note-caption: :paperclip:
@@ -34,7 +36,7 @@ When you have Node.js installed, use the following command to install the `antor
 npm i antora-extensions-and-macros
 ----
 
-To use the development version instead, refer to the <<_development_quickstart,Development Quickstart>>.
+To use the development version instead, refer to the <<development-quickstart,Development Quickstart>>.
 
 == Extensions
 
@@ -235,7 +237,7 @@ The glossary module provides a way to define and reference glossary terms in you
 
 This module consists of two parts: a block macro (`glossary`) and an inline macro (`glossterm`).
 
-NOTE: This macro is a customized version of https://gitlab.com/djencks/asciidoctor-glossary[`asciidoctor-glossary`]. We added the ability to define terms globally in <<_global_attributes, global attributes>> as well as link to external URLs.
+NOTE: This macro is a customized version of https://gitlab.com/djencks/asciidoctor-glossary[`asciidoctor-glossary`]. We added the ability to define terms globally in <<global-attributes, global attributes>> as well as link to external URLs.
 
 ==== Usage
 
@@ -261,7 +263,7 @@ term::
 The term to be defined.
 
 definition (optional)::
-The definition of the term. If the term is defined in the <<_global_attributes, global attributes>>, you can omit the definition as it will always be replaced by the definition in the global attributes.
+The definition of the term. If the term is defined in the <<global-attributes, global attributes>>, you can omit the definition as it will always be replaced by the definition in the global attributes.
 
 ==== Configuration options
 
