@@ -5,21 +5,36 @@
 :url-nodejs: https://nodejs.org
 :url-nodejs-releases: https://github.com/nodejs/Release#release-schedule
 :url-nvm-install: {url-nvm}#installation
+ifdef::env-github[]
+:important-caption: :exclamation:
+:note-caption: :paperclip:
+endif::[]
+:toc:
+:toc-title: Contents
+
+toc::[]
 
 This library provides https://docs.antora.org/antora/latest/extend/extensions/[Antora extensions] and https://docs.asciidoctor.org/asciidoctor.js/latest/extend/extensions/register/[Asciidoc macros] developed for Redpanda documentation.
 
 == Prerequisites
 
-In order to use this library, you must have Node.js 16 or higher installed on your machine.
+To use this library, you must have {url-nodejs}[Node.js] 16 or higher installed on your machine.
 
-Use the following command to install the `antora-extensions-and-macros` package into your project:
+[,bash]
+----
+node --version
+----
+
+If this command fails with an error, you don't have Node.js installed.
+
+When you have Node.js installed, use the following command to install the `antora-extensions-and-macros` package in your project:
 
 [,bash]
 ----
 npm i antora-extensions-and-macros
 ----
 
-To use the development version instead, refer to the <<Development Quickstart>>.
+To use the development version instead, refer to the <<_development_quickstart,Development Quickstart>>.
 
 == Extensions
 
@@ -125,7 +140,7 @@ This extension replaces AsciiDoc attribute placeholders with their respective va
 
 [IMPORTANT]
 ====
-- By default, this extension processes attachments for the `ROOT` (redpanda) component only. This behavior is hardcoded and cannot be changed via the configuration.
+- By default, this extension processes attachments for the `ROOT` (redpanda) component only. This behavior is hardcoded and cannot be changed in the configuration.
 - The `@` character is removed from attribute values to prevent potential issues with CSS or HTML syntax.
 - If the same attribute placeholder is used multiple times within a file, all instances will be replaced with the attribute's value.
 ====
@@ -220,6 +235,8 @@ The glossary module provides a way to define and reference glossary terms in you
 
 This module consists of two parts: a block macro (`glossary`) and an inline macro (`glossterm`).
 
+NOTE: This macro is a customized version of https://gitlab.com/djencks/asciidoctor-glossary[`asciidoctor-glossary`]. We added the ability to define terms globally in <<_global_attributes, global attributes>> as well as link to external URLs.
+
 ==== Usage
 
 To insert a glossary dlist, use the glossary block macro.
@@ -229,7 +246,7 @@ To insert a glossary dlist, use the glossary block macro.
 glossary::[]
 ----
 
-Glossary terms defined in the document before the `glossary` macro is used appear as a definition list, sorted by term.
+Glossary terms defined in the `glossterm` inline macro before the `glossary` macro is used appear as a definition list, sorted by term.
 
 The `glossterm` inline macro is used to reference a term within the text of the document:
 
@@ -243,8 +260,8 @@ It takes two parameters:
 term::
 The term to be defined.
 
-definition::
-The definition of the term.
+definition (optional)::
+The definition of the term. If the term is defined in the <<_global_attributes, global attributes>>, you can omit the definition as it will always be replaced by the definition in the global attributes.
 
 ==== Configuration options
 
@@ -252,7 +269,7 @@ glossary-log-terms (optional)::
 Whether to log a textual representation of a definition list item to the console.
 
 glossary-term-role (optional)::
-Role to assign each term. By default, glossary terms are assigned the `glossary-term` role (and thus the class glossary-term in generated html).
+Role to assign each term. By default, glossary terms are assigned the `glossary-term` role, which gives them the class `glossary-term` in generated html.
 
 glossary-links (optional)::
 Whether to generate links to glossary entries.
@@ -276,7 +293,7 @@ The last two options are intended to support js/css tooltip solutions such as ti
 ====
 In Antora, a glossary is constructed for each component-version.
 When the `glossary` block macro is evaluated, only terms known as of the rendering can be included.
-Therefore, it is necessary to arrange that the page containing this macro in a component-version be rendered last.
+Therefore, it is necessary that the page containing this macro in a component-version be rendered last.
 It may be possible to arrange this by naming the page starting with a lot of 'z’s, such as `zzzzzz-glossary.adoc`.
 ====
 
@@ -344,7 +361,7 @@ To build this project, you need the following software installed on your compute
 
 ==== git
 
-First, make sure you have git installed.
+Make sure you have git installed.
 
 [,bash]
 ----
@@ -355,7 +372,7 @@ If not, {url-git-dl}[download and install] the git package for your system.
 
 ==== Node.js
 
-Next, make sure that you have Node.js installed (which also provides npm and npx).
+Make sure that you have Node.js installed (which also provides npm and npx).
 
 [,bash]
 ----
