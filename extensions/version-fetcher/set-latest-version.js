@@ -6,6 +6,8 @@ antora:
 
 const GetLatestRedpandaVersion = require('./getLatestRedpandaVersion');
 const GetLatestConsoleVersion = require('./getLatestConsoleVersion');
+const chalk = require('chalk')
+
 
 module.exports.register = function ({ config }) {
   const logger = this.getLogger('set-latest-version-extension')
@@ -24,7 +26,7 @@ module.exports.register = function ({ config }) {
           playbook.asciidoc.attributes = {};
         }
         playbook.asciidoc.attributes['latest-console-version'] = LatestConsoleVersion
-        console.log(`Set Redpanda Console version to ${LatestConsoleVersion}`);
+        console.log(`${chalk.green('Set Redpanda Console version to')} ${chalk.bold(LatestConsoleVersion)}`);
       } catch(error) {
         logger.warn(error)
       }
@@ -48,7 +50,7 @@ module.exports.register = function ({ config }) {
 
             component.latest.asciidoc.attributes['full-version'] = `${LatestRedpandaVersion[0]}`;
             component.latest.asciidoc.attributes['latest-release-commit'] = `${LatestRedpandaVersion[1]}`;
-            console.log(`Set Redpanda version to ${LatestRedpandaVersion[0]} ${LatestRedpandaVersion[1]}`)
+            console.log(`${chalk.green('Set Redpanda version to')} ${chalk.bold(LatestRedpandaVersion[0])} ${chalk.bold(LatestRedpandaVersion[1])}`)
           }
         }
       } catch(error) {

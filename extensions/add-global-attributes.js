@@ -11,6 +11,8 @@ const yaml = require('js-yaml');
 const { Octokit } = require("@octokit/rest");
 const { retry } = require("@octokit/plugin-retry");
 const OctokitWithRetries = Octokit.plugin(retry);
+const chalk = require('chalk')
+
 
 module.exports.register = function ({ config }) {
   const logger = this.getLogger('global-attributes-extension')
@@ -50,16 +52,26 @@ module.exports.register = function ({ config }) {
             globalAttributes = {...globalAttributes, ...fileData};
           }
 
-          playbook.asciidoc.attributes = {...globalAttributes, ...playbook.asciidoc.attributes};
+          let mergedAttributes = {
+            ...globalAttributes,
+            ...playbook.asciidoc.attributes
+          };
 
-          console.log('Merged global attributes into playbook');
+          playbook.asciidoc.attributes = mergedAttributes;
+
+          console.log(chalk.green('Merged global attributes into playbook'));
 
         } else {
           logger.warn(`Could not fetch global attributes: ${response.statusText}`);
           return null
         }
       } catch(error) {
-        logger.warn(error.status + ' Could not get ' + error.response.url)
+        if (error.response.url) {
+          logger.warn(error.status + ' Could not get ' + error.response.url)
+        }
+        else {
+          logger.warn(error)
+        }
       }
-    });
+    })
 }

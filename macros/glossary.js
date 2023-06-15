@@ -2,6 +2,7 @@
 
 const $glossaryContexts = Symbol('$glossaryContexts')
 const { posix: path } = require('path')
+const chalk = require('chalk')
 
 module.exports.register = function (registry, config = {}) {
 
@@ -78,8 +79,21 @@ module.exports.register = function (registry, config = {}) {
         const document = parent.document
         const context = vfs.getContext()
         // See if a predefined list of terms is available
-        const termsList = document.getAttribute("terms")
-        const termData = termsList.find((t) => t.term === term) || {};
+        const globalTerms = document.getAttribute("terms") || [];
+        const localTerms = document.getAttribute("local-terms") || [];
+        let mergedTerms;
+        if(globalTerms.length > 0 && localTerms.length > 0){
+            // Convert globalTerms to a Map for fast look up
+            let globalTermsMap = new Map(globalTerms.map(i => [i.term, i]));
+
+            // Create a new array based on localTerms, but replace items if they exist in globalTerms
+            mergedTerms = localTerms.map(item => globalTermsMap.has(item.term) ? globalTermsMap.get(item.term) : item);
+
+            // Update localTerms with the mergedTerms
+            document.setAttribute("terms", mergedTerms);
+            console.log(chalk.green('Merged global terms with local terms'))
+        }
+        const termData = (mergedTerms || []).find((t) => t.term === term) || {};
         const customLink = termData.link;
         var tooltip = document.getAttribute('glossary-tooltip')
         if (tooltip === 'true') tooltip = 'data-glossary-tooltip'
