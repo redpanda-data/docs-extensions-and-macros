@@ -155,7 +155,7 @@ antora:
   - 'node_modules/antora-extensions-and-macros/extensions/replace-attributes-in-attachments.js'
 ```
 
-=== Unlisted Pages
+=== Unlisted pages
 
 This extension identifies and logs any pages that aren't listed in the navigation (nav) file of each version of each component. It then optionally adds these unlisted pages to the end of the navigation tree under a configurable heading.
 
@@ -350,7 +350,7 @@ asciidoc:
     - 'node_modules/antora-extensions-and-macros/macros/helm-ref.js'
 ----
 
-== Development Quickstart
+== Development quickstart
 
 This section provides information on how to develop this project.
 
@@ -385,7 +385,7 @@ If this command fails with an error, you don't have Node.js installed.
 
 Now that you have git and Node.js installed, you're ready to start developing on this project.
 
-=== Clone Project
+=== Clone the project
 
 Clone the project using git:
 
@@ -396,7 +396,7 @@ git clone {url-project}
 
 Change into the project directory and stay in this directory when running all subsequent commands.
 
-=== Install Dependencies
+=== Install dependencies
 
 Use npm to install the project's dependencies inside the project.
 In your terminal, run the following command:
@@ -406,12 +406,12 @@ In your terminal, run the following command:
 npm ci
 ----
 
-This command installs the dependencies listed in [.path]`package-lock.json` into the [.path]`node_modules/` directory inside the project.
+This command installs the dependencies listed in `package-lock.json` into the `node_modules/` directory inside the project.
 This directory should _not_ be committed to the source control repository.
 
-=== Use Project From Source
+=== Use your local project
 
-If you want to use the project locally before it is published, you can specify the path to the extensions in the [.path]`local-antora-playbook.yml` file.
+If you want to use the project locally before it is published, you can specify the path to the extensions in the `local-antora-playbook.yml` file.
 
 [,yaml]
 ----
