@@ -1,5 +1,5 @@
 = Antora Extensions and Macros for Redpanda Docs
-:url-project: https://github.com/JakeSCahill/antora-extensions-and-macros
+:url-project: https://github.com/redpanda-data/docs-extensions-and-macros
 :url-git: https://git-scm.com
 :url-git-dl: {url-git}/downloads
 :url-nodejs: https://nodejs.org
@@ -70,7 +70,7 @@ Whether to index all versions or just the latest version of a component.
 ```yaml
 antora:
   extensions:
-  - require: 'node_modules/antora-extensions-and-macros/extensions/algolia-indexer/index.js'
+  - require: '@redpanda-data/antora-extensions-and-macros/extensions/algolia-indexer/index'
     excludes: ['.thumbs','script', '.page-versions','.feedback-section','.banner-container']
     index-latest-only: true
 ```
@@ -92,7 +92,7 @@ NOTE: If you don't set the environment variable, the latest versions may not be 
 ```yaml
 antora:
   extensions:
-  - 'node_modules/antora-extensions-and-macros/extensions/version-fetcher/set-latest-version.js'
+  - '@redpanda-data/antora-extensions-and-macros/extensions/version-fetcher/set-latest-version'
 ```
 
 === Global attributes
@@ -130,7 +130,7 @@ The branch in the repository where the global attributes are located.
 ```yaml
 antora:
   extensions:
-  - require: 'node_modules/antora-extensions-and-macros/extensions/add-global-attributes.js'
+  - require: '@redpanda-data/antora-extensions-and-macros/extensions/add-global-attributes'
     org: example
     repo: test
     branch: main
@@ -152,7 +152,7 @@ This extension replaces AsciiDoc attribute placeholders with their respective va
 ```yaml
 antora:
   extensions:
-  - 'node_modules/antora-extensions-and-macros/extensions/replace-attributes-in-attachments.js'
+  - '@redpanda-data/antora-extensions-and-macros/extensions/replace-attributes-in-attachments'
 ```
 
 === Unlisted pages
@@ -176,7 +176,7 @@ The heading under which to list the unlisted pages in the navigation. The defaul
 ```yaml
 antora:
   extensions:
-  - require: 'node_modules/antora-extensions-and-macros/extensions/unlisted-pages.js'
+  - require: '@redpanda-data/antora-extensions-and-macros/extensions/unlisted-pages'
     addToNavigation: true
     unlistedPagesHeading: 'Additional Resources'
 ```
@@ -228,7 +228,7 @@ config_ref:example_config,true,tunable-properties[]
 ----
 asciidoc:
   extensions:
-    - 'node_modules/antora-extensions-and-macros/macros/config-ref.js'
+    - '@redpanda-data/antora-extensions-and-macros/macros/config-ref'
 ----
 
 === glossary and glossterm
@@ -305,7 +305,7 @@ It may be possible to arrange this by naming the page starting with a lot of 'zâ
 ----
 asciidoc:
   extensions:
-    - 'node_modules/antora-extensions-and-macros/macros/glossary.js'
+    - '@redpanda-data/antora-extensions-and-macros/macros/glossary'
 ----
 
 === helm_ref
@@ -347,7 +347,7 @@ If you do not specify a Helm reference value, the macro generates a link without
 ----
 asciidoc:
   extensions:
-    - 'node_modules/antora-extensions-and-macros/macros/helm-ref.js'
+    - '@redpanda-data/antora-extensions-and-macros/macros/helm-ref'
 ----
 
 == Development quickstart
