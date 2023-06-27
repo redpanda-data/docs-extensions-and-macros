@@ -1,6 +1,6 @@
 {
-  "name": "antora-extensions-and-macros",
-  "version": "2.5.0",
+  "name": "@redpanda-data/docs-extensions-and-macros",
+  "version": "2.5.1",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": ["antora", "extension", "macro", "documentation", "redpanda"],
   "author": {
@@ -12,10 +12,26 @@
       "email": "jake@redpanda.com"
     }
   ],
+  "exports": {
+    "./extensions/unlisted-pages": {
+      "require": "./extensions/unlisted-pages.js"
+    },
+    "./extensions/replace-attributes-in-attachments": "./extensions/replace-attributes-in-attachments.js",
+    "./extensions/add-global-attributes": "./extensions/add-global-attributes.js",
+    "./extensions/version-fetcher/set-latest-version": "./extensions/version-fetcher/set-latest-version.js",
+    "./extensions/algolia-indexer/index": "./extensions/algolia-indexer/index.js",
+    "./macros/glossary": "./macros/glossary.js",
+    "./macros/config-ref": "./macros/config-ref.js",
+    "./macros/helm-ref": "./macros/helm-ref.js"
+  },
+  "files": [
+    "extensions",
+    "macros"
+  ],
   "license": "ISC",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/JakeSCahill/antora-extensions-and-macros"
+    "url": "git+https://github.com/redpanda-data/docs-extensions-and-macros"
   },
   "dependencies": {
     "@antora/site-generator": "3.1.2",
