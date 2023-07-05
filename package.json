@@ -26,6 +26,7 @@
     "./extensions/add-global-attributes": "./extensions/add-global-attributes.js",
     "./extensions/version-fetcher/set-latest-version": "./extensions/version-fetcher/set-latest-version.js",
     "./extensions/algolia-indexer/index": "./extensions/algolia-indexer/index.js",
+    "./extensions/aggregate-terms": "./extensions/aggregate-terms.js",
     "./macros/glossary": "./macros/glossary.js",
     "./macros/config-ref": "./macros/config-ref.js",
     "./macros/helm-ref": "./macros/helm-ref.js"
