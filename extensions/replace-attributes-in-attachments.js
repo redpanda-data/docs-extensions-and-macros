@@ -7,6 +7,7 @@ module.exports.register = function ({ config }) {
   this.on('documentsConverted', ({playbook, contentCatalog}) => {
     for (const { versions } of contentCatalog.getComponents()) {
       for (const { name: component, version } of versions) {
+        // TODO: will need a better way to filter when we have more content components
         if (component !== 'ROOT') continue;
         const attachments = contentCatalog.findBy({ component, version, family });
         for (const attachment of attachments) {

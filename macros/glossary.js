@@ -12,16 +12,47 @@ module.exports.register = function (registry, config = {}) {
     function getKey (src) {
       return `${src.version}@${src.component}`
     }
-
     const contentCatalog = config.contentCatalog
     if (!contentCatalog[$glossaryContexts]) contentCatalog[$glossaryContexts] = {}
     const glossaryContexts = contentCatalog[$glossaryContexts]
+    // Check if the terms have been cached
+    const sharedKey = 'sharedTerms'
+    if (!glossaryContexts[sharedKey]) {
+      // Get the term files from the 'shared' component
+      const termFiles = contentCatalog.findBy({ component: 'shared', module: 'terms', family: 'partial' })
+      // Extract the term definitions from the files
+      const ATTRIBUTE_REGEX = /^:([a-zA-Z0-9_-]+):[ \t]*(.*)$/gm
+
+      const terms = termFiles.map(file => {
+        const content = file.contents.toString()
+        const attributes = {}
+
+        let match
+        while ((match = ATTRIBUTE_REGEX.exec(content)) !== null) {
+          const [ , name, value ] = match
+          attributes[name] = value
+        }
+
+        if (!attributes['term-name'] || !attributes['hover-text']) {
+          console.warn(`Skipping file ${file.path} due to missing 'term-name' and/or 'hover-text'.`)
+          return null
+        }
+
+        return {
+          term: attributes['term-name'],
+          def: attributes['hover-text'],
+          content
+        }
+      }).filter(Boolean)
+
+      // Store the terms in the cache
+      glossaryContexts[sharedKey] = terms
+    }
     const key = getKey(config.file.src)
     if (!glossaryContexts[key]) {
       glossaryContexts[key] = {
-        gloss: [],
+        gloss: glossaryContexts[sharedKey],
         self: undefined,
-        dlist: undefined,
       }
     }
     const context = glossaryContexts[key]
@@ -34,35 +65,7 @@ module.exports.register = function (registry, config = {}) {
   const IDRX = /[/ _.-]+/g
 
   function termId (term) {
-    return '_glossterm_' + term.toLowerCase().replace(IDRX, '_')
-  }
-
-  function dlistItem (context, term, def) {
-    const id = termId(term)
-    term = `anchor:${id}[${term}]${term}`
-    const termItem = context.self.createListItem(context.dlist, term)
-    const defItem = context.self.createListItem(context.dlist, def)
-    return [[termItem], defItem]
-  }
-
-  function glossaryBlockMacro () {
-    return function () {
-      const self = this
-      self.named('glossary')
-      self.$option('format', 'short') //no target between glossary:: and [params]
-      // self.positionalAttributes(['name', 'parameters'])
-      self.process(function (parent, target, attributes) {
-        const context = vfs.getContext()
-        const dlist = self.createList(parent, 'dlist')
-        context.self = self
-        context.dlist = dlist
-        context.gloss
-          .forEach(({ term, def }) => {
-            dlist.blocks.push(dlistItem(context, term, def))
-          })
-        return dlist
-      })
-    }
+    return term.toLowerCase().replace(IDRX, '-')
   }
 
   const TRX = /(<[a-z]+)([^>]*>.*)/
@@ -78,23 +81,9 @@ module.exports.register = function (registry, config = {}) {
         const term = attributes.term || target
         const document = parent.document
         const context = vfs.getContext()
-        // See if a predefined list of terms is available
-        const globalTerms = document.getAttribute("terms") || [];
         const localTerms = document.getAttribute("local-terms") || [];
-        let mergedTerms;
-        if(globalTerms.length > 0 && localTerms.length > 0){
-            // Convert globalTerms to a Map for fast look up
-            let globalTermsMap = new Map(globalTerms.map(i => [i.term, i]));
-
-            // Create a new array based on localTerms, but replace items if they exist in globalTerms
-            mergedTerms = localTerms.map(item => globalTermsMap.has(item.term) ? globalTermsMap.get(item.term) : item);
-
-            // Update localTerms with the mergedTerms
-            document.setAttribute("terms", mergedTerms);
-            console.log(chalk.green('Merged global terms with local terms'))
-        }
-        const termData = (mergedTerms || []).find((t) => t.term === term) || {};
-        const customLink = termData.link;
+        const localTermData = (localTerms || []).find((t) => t.term === term) || {};
+        const customLink = localTermData.link;
         var tooltip = document.getAttribute('glossary-tooltip')
         if (tooltip === 'true') tooltip = 'data-glossary-tooltip'
         if (tooltip && tooltip !== 'title' && !tooltip.startsWith('data-')) {
@@ -102,13 +91,17 @@ module.exports.register = function (registry, config = {}) {
           tooltip = undefined
         }
         const logTerms = document.hasAttribute('glossary-log-terms')
-        var definition = termData.definition || attributes.definition
+        var definition;
+        const index = context.gloss.findIndex((candidate) => candidate.term === term)
+        if (index >= 0) {
+          definition = context.gloss[index].def
+        } else {
+          definition = localTermData.definition || attributes.definition;
+        }
         if (definition) {
           logTerms && console.log(`${term}::  ${definition}`)
-          addItem(context, term, definition)
         } else if (tooltip) {
-          const index = context.gloss.findIndex((candidate) => candidate.term === term)
-          definition = ~index ? context.gloss[index].def : `${term} not yet defined`
+          definition = `${term} not yet defined`
         }
         const links = document.getAttribute('glossary-links', 'true') === 'true'
         var glossaryPage = document.getAttribute('glossary-page', '')
@@ -120,11 +113,15 @@ module.exports.register = function (registry, config = {}) {
         }
         const glossaryTermRole = document.getAttribute('glossary-term-role', 'glossary-term')
         const attrs = glossaryTermRole ? { role: glossaryTermRole } : {}
-        const inline = links
-          ? customLink
+        var inline;
+        const termExistsInContext = context.gloss.some((candidate) => candidate.term === term);
+        if (termExistsInContext && links) {
+          inline = customLink
             ? self.createInline(parent, 'anchor', target, { type: 'link', target: customLink, attributes: attrs })
             : self.createInline(parent, 'anchor', target, { type: 'xref', target: `${glossaryPage}#${termId(term)}`, reftext: target, attributes: attrs })
-          : self.createInline(parent, 'quoted', target, { attributes: attrs })
+        } else {
+          inline = self.createInline(parent, 'quoted', target, { attributes: attrs })
+        }
         if (tooltip) {
           const a = inline.convert()
           const matches = a.match(TRX)
@@ -139,27 +136,7 @@ module.exports.register = function (registry, config = {}) {
     }
   }
 
-  function addItem (context, term, def) {
-    let i = 0
-    let comp = -1
-    for (; i < context.gloss.length && ((comp = term.localeCompare(context.gloss[i].term)) > 0); i++) {
-    }
-    if (comp < 0) {
-      context.gloss.splice(i, 0, { term, def })
-      if (context.self && context.dlist) {
-        context.dlist.blocks.splice(i, 0, dlistItem(context, term, def))
-      }
-    } else {
-      console.log(`duplicate glossary term ${term}`)
-    }
-  }
-
   function doRegister (registry) {
-    if (typeof registry.blockMacro === 'function') {
-      registry.blockMacro(glossaryBlockMacro())
-    } else {
-      console.warn('no \'blockMacro\' method on alleged registry')
-    }
     if (typeof registry.inlineMacro === 'function') {
       registry.inlineMacro(glossaryInlineMacro())
     } else {

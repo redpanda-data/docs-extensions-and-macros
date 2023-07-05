@@ -1,5 +1,7 @@
 = Antora Extensions and Macros for Redpanda Docs
-:url-project: https://github.com/redpanda-data/docs-extensions-and-macros
+:url-org: https://github.com/redpanda-data
+:url-project: {url-org}/docs-extensions-and-macros
+:url-playbook: {url-org}/docs-site
 :url-git: https://git-scm.com
 :url-git-dl: {url-git}/downloads
 :url-nodejs: https://nodejs.org
@@ -97,33 +99,7 @@ antora:
 
 === Global attributes
 
-This extension fetches the content of all YAML files in a GitHub directory and merges the contents with the `asciidoc.attributes` object in the Antora playbook. This allows you to define Asciidoc attributes in an external repository and automatically include them in your documentation.
-
-[IMPORTANT]
-====
-- The GitHub directory that contains the global attributes must be named `global-attributes`.
-- Only YAML files are supported. Other types of files are ignored.
-- If a key is present in both the global attributes and the playbook's `asciidoc.attributes`, the value in the playbook takes precedence.
-====
-
-==== Environment variables
-
-- `GLOBAL_ATTRIBUTES_GITHUB_TOKEN` (optional): A Personal access token (PAT) that has `repo` permissions for the GitHub organization defined in `org`.
-
-NOTE: If you don't set the environment variable, global attributes may not be made available to your build. When the environment variable is not set, the extension sends unauthenticated requests to GitHub. Unauthenticated requests may result in hitting the API rate limit and cause GitHub to reject the request.
-
-==== Configuration options
-
-The extension accepts the following configuration options:
-
-org (required)::
-The GitHub organization that owns the repository.
-
-repo (required)::
-The name of the repository.
-
-branch (required)::
-The branch in the repository where the global attributes are located.
+This extension collects Asciidoc attributes from the {url-playbook}[`shared` component] and makes them available to all component versions. Having global attributes is useful for consistent configuration of local and production builds.
 
 ==== Registration example
 
@@ -131,9 +107,6 @@ The branch in the repository where the global attributes are located.
 antora:
   extensions:
   - require: '@redpanda-data/docs-extensions-and-macros/extensions/add-global-attributes'
-    org: example
-    repo: test
-    branch: main
 ```
 
 === Replace attributes in attachments
@@ -153,6 +126,27 @@ This extension replaces AsciiDoc attribute placeholders with their respective va
 antora:
   extensions:
   - '@redpanda-data/docs-extensions-and-macros/extensions/replace-attributes-in-attachments'
+```
+
+=== Aggregate terms
+
+This extension aggregates all term pages from the {url-playbook}[`shared` component] and does the following:
+
+- Makes all `term-name` and `hover-text` attributes available to the <<glossterm-macro,`glossterm` macro>>.
+- Looks for glossary pages named `reference:glossary.adoc` in all versions of the Redpanda docs and appends the contents of each term file to the glossary in alphabetical order.
+- If a glossary page is found, sets the `glossary-page` attribute of the `glossterm` macro to `reference:glossary.adoc`.
+
+[IMPORTANT]
+====
+By default, this extension processes glossary pages for the `ROOT` (redpanda) component only. This behavior is hardcoded and cannot be changed in the configuration.
+====
+
+==== Registration example
+
+```yaml
+antora:
+  extensions:
+  - '@redpanda-data/docs-extensions-and-macros/extensions/aggregate-terms'
 ```
 
 === Unlisted pages
@@ -231,30 +225,19 @@ asciidoc:
     - '@redpanda-data/docs-extensions-and-macros/macros/config-ref'
 ----
 
-=== glossary and glossterm
+=== glossterm
 
-The glossary module provides a way to define and reference glossary terms in your AsciiDoc documents.
+The `glossterm` inline macro provides a way to define and reference glossary terms in your AsciiDoc documents.
 
-This module consists of two parts: a block macro (`glossary`) and an inline macro (`glossterm`).
-
-NOTE: This macro is a customized version of https://gitlab.com/djencks/asciidoctor-glossary[`asciidoctor-glossary`]. We added the ability to define terms globally in <<global-attributes, global attributes>> as well as link to external URLs.
+NOTE: This macro is a customized version of https://gitlab.com/djencks/asciidoctor-glossary[`asciidoctor-glossary`].
 
 ==== Usage
 
-To insert a glossary dlist, use the glossary block macro.
+Use the `glossterm` inline macro to reference a term within the text of the document:
 
 [,asciidoc]
 ----
-glossary::[]
-----
-
-Glossary terms defined in the `glossterm` inline macro before the `glossary` macro is used appear as a definition list, sorted by term.
-
-The `glossterm` inline macro is used to reference a term within the text of the document:
-
-[,asciidoc]
-----
-glossterm:myTerm[myDefinition]
+glossterm:my term[myDefinition]
 ----
 
 It takes two parameters:
@@ -263,7 +246,7 @@ term::
 The term to be defined.
 
 definition (optional)::
-The definition of the term. If the term is defined in the <<global-attributes, global attributes>>, you can omit the definition as it will always be replaced by the definition in the global attributes.
+The definition of the term. If the term is defined in the {url-playbook}[`shared` component] or the `local-terms` object of the `antora.yml` file, you can omit the definition as it will always be replaced by those definitions.
 
 ==== Configuration options
 
@@ -289,15 +272,6 @@ Whether to enable tooltips for the defined terms. Valid values are:
 - data-<attribute-name>​: This inserts the definition as the value of the supplied attribute name, which must start with `data`.
 
 The last two options are intended to support js/css tooltip solutions such as tippy.js.
-
-[IMPORTANT]
-.Multi-page use
-====
-In Antora, a glossary is constructed for each component-version.
-When the `glossary` block macro is evaluated, only terms known as of the rendering can be included.
-Therefore, it is necessary that the page containing this macro in a component-version be rendered last.
-It may be possible to arrange this by naming the page starting with a lot of 'z’s, such as `zzzzzz-glossary.adoc`.
-====
 
 ==== Registration example
 
