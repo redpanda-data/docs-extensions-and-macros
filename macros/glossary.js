@@ -115,7 +115,7 @@ module.exports.register = function (registry, config = {}) {
         const attrs = glossaryTermRole ? { role: glossaryTermRole } : {}
         var inline;
         const termExistsInContext = context.gloss.some((candidate) => candidate.term === term);
-        if (termExistsInContext || links) {
+        if ((termExistsInContext && links) || (links && customLink)) {
           inline = customLink
             ? self.createInline(parent, 'anchor', target, { type: 'link', target: customLink, attributes: attrs })
             : self.createInline(parent, 'anchor', target, { type: 'xref', target: `${glossaryPage}#${termId(term)}`, reftext: target, attributes: attrs })
