@@ -18,6 +18,10 @@ module.exports.register = function ({ config }) {
     .on('playbookBuilt', async ({ playbook }) => {
       try {
         const LatestConsoleVersion = await GetLatestConsoleVersion();
+        if (!LatestConsoleVersion) {
+          logger.warn(`Failed to get latest Console version from GitHub`)
+          return
+        }
         if (!playbook.asciidoc) {
           playbook.asciidoc = {};
         }
@@ -37,7 +41,10 @@ module.exports.register = function ({ config }) {
         const components = await contentCatalog.getComponents();
         for (let i = 0; i < components.length; i++) {
           let component = components[i];
-          if (LatestRedpandaVersion.length !== 2) logger.warn('Could not find the latest Redpanda versions - using defaults');
+          if (LatestRedpandaVersion.length !== 2 || !LatestRedpandaVersion[0]) {
+            logger.warn('Failed to get the latest Redpanda versions - using defaults');
+            return
+          }
           if (component.name === 'ROOT') {
 
             if (!component.latest.asciidoc) {

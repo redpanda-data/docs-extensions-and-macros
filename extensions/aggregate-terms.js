@@ -32,8 +32,7 @@ module.exports.register = function ({ config }) {
     try {
       for (const { versions } of components) {
         for (const { name: component, version, asciidoc, title } of versions) {
-          // TODO: will need a better way to filter when we have more content components
-          if (component !== 'ROOT') continue;
+          if (component == 'shared') continue;
           const glossaryPage = contentCatalog.resolvePage(`${version?version +'@':''}${component}:reference:glossary.adoc`);
           if (glossaryPage) {
             asciidoc.attributes['glossary-page'] = 'reference:glossary.adoc'

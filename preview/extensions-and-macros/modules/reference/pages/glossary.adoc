@@ -1,0 +1,3 @@
+= Glossary
+
+This is a test glossary. The `aggregate-terms` extension merges all terms in the `shared/modules/terms/partials/` directory into this file during the build

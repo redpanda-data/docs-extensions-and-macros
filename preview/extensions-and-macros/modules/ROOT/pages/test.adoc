@@ -1,0 +1,25 @@
+= Extensions and Macros Preview
+
+This page is a preview of extensions and macros.
+
+== Terms
+
+Terms can be defined in three ways:
+
+. From `shared/modules/terms/partials`:
++
+The content of this glossterm:test term[] comes from the `preview/shared/modules/terms/partials/test.adoc` file. Each term has a dedicated page that gets merged into the `reference:glossary.adoc` page during the build if one exists. The `aggregate-terms` extension is responsible for merging the content of each file into the glossary. Only terms defined in this way are added to the glossary and given an internal link.
+
+. `local-terms` attribute of a component's `antora.yml` file:
++
+This glossterm:external term[] is defined in the `local-terms` attribute of the `preview/extensions-and-macros/antora.yml` file. This term includes a link to an external source. Use this method when you want to link to an external source for the definition.
+
+. Inline:
++
+This glossterm:term[This description is located in the Asciidoc source of this page] is defined inline on this page. Inline terms do not include an internal link to the glossary page. Inline terms are meant for local testing and development.
+
+== Attachments
+
+By default, Antora does not replace attributes in attachment files. Download this test attachment to make sure that the `replace-attributes-in-attachments` extension replaces the `test-attribute`:
+
+xref:preview:ROOT:attachment$test.yaml[Download attachment]

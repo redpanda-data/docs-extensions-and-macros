@@ -4,22 +4,17 @@ module.exports.register = function ({ config }) {
 
   const sanitizeAttributeValue = (value) => String(value).replace("@", "");
 
-  this.on('documentsConverted', ({playbook, contentCatalog}) => {
+  this.on('documentsConverted', ({contentCatalog}) => {
     for (const { versions } of contentCatalog.getComponents()) {
-      for (const { name: component, version } of versions) {
-        // TODO: will need a better way to filter when we have more content components
-        if (component !== 'ROOT') continue;
+      for (const { name: component, version, asciidoc } of versions) {
         const attachments = contentCatalog.findBy({ component, version, family });
         for (const attachment of attachments) {
           let contentString = String.fromCharCode(...attachment['_contents']);
-          const attributes = attachment.src.origin.descriptor.asciidoc.attributes;
-          const mergedAttributes = {
-            ...playbook.asciidoc.attributes,
-            ...attributes
-          };
-          for (const key in mergedAttributes) {
+          if (!asciidoc.attributes) continue
+          if (!asciidoc.attributes.hasOwnProperty('replace-attributes-in-attachments')) continue;
+          for (const key in asciidoc.attributes) {
             const placeholder = "{" + key + "}";
-            const sanitizedValue = sanitizeAttributeValue(mergedAttributes[key]);
+            const sanitizedValue = sanitizeAttributeValue(asciidoc.attributes[key]);
             contentString = contentString.replace(new RegExp(placeholder, 'g'), sanitizedValue);
           }
           attachment['_contents'] = Buffer.from(contentString, "utf-8");

@@ -115,7 +115,7 @@ This extension replaces AsciiDoc attribute placeholders with their respective va
 
 [IMPORTANT]
 ====
-- By default, this extension processes attachments for the `ROOT` (redpanda) component only. This behavior is hardcoded and cannot be changed in the configuration.
+- This extension processes attachments only if the component version includes the attribute `replace-attributes-in-attachments: true`.
 - The `@` character is removed from attribute values to prevent potential issues with CSS or HTML syntax.
 - If the same attribute placeholder is used multiple times within a file, all instances will be replaced with the attribute's value.
 ====
@@ -133,13 +133,8 @@ antora:
 This extension aggregates all term pages from the {url-playbook}[`shared` component] and does the following:
 
 - Makes all `term-name` and `hover-text` attributes available to the <<glossterm-macro,`glossterm` macro>>.
-- Looks for glossary pages named `reference:glossary.adoc` in all versions of the Redpanda docs and appends the contents of each term file to the glossary in alphabetical order.
-- If a glossary page is found, sets the `glossary-page` attribute of the `glossterm` macro to `reference:glossary.adoc`.
-
-[IMPORTANT]
-====
-By default, this extension processes glossary pages for the `ROOT` (redpanda) component only. This behavior is hardcoded and cannot be changed in the configuration.
-====
+- Looks for glossary pages named `reference:glossary.adoc` in all versions of all components and appends the contents of each term file to the glossary in alphabetical order.
+- If a glossary page is found, sets the `glossary-page` attribute of the <<glossterm, `glossterm` macro>> to `reference:glossary.adoc`.
 
 ==== Registration example
 
