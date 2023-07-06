@@ -33,10 +33,12 @@ module.exports.register = function ({ config }) {
   .on('contentClassified', ({ siteCatalog, contentCatalog }) => {
     const components = contentCatalog.getComponents()
     try {
-      components.forEach(({asciidoc}) => {
-        asciidoc.attributes = _.merge(asciidoc.attributes, siteCatalog.attributeFile);
+      components.forEach(({versions}) => {
+        versions.forEach(({asciidoc}) => {
+          asciidoc.attributes = _.merge(asciidoc.attributes, siteCatalog.attributeFile);
+        })
       });
-      console.log(chalk.green('Merged global attributes into each component.'));
+      console.log(chalk.green('Merged global attributes into each component version.'));
     } catch (error) {
       logger.error(`Error merging attributes: ${error.message}`);
     }

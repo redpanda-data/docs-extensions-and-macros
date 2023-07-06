@@ -1,0 +1,5 @@
+name: shared
+version: ~
+asciidoc:
+  attributes:
+    page-exclude-from-dropdown-selector: true

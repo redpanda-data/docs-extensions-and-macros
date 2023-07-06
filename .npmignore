@@ -1,0 +1,4 @@
+local-antora-playbook.yml
+/modules/*
+/node_modules/*
+antora.yml

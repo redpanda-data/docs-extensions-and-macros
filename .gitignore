@@ -1,2 +1,4 @@
 /node_modules/*
 /wip/*
+/docs/*
+.vscode

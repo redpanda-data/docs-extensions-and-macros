@@ -1,0 +1,2 @@
+* xref:preview:ROOT:test.adoc[]
+* xref:preview:reference:glossary.adoc[]

@@ -1,0 +1,27 @@
+site:
+  title: Redpanda Docs Extensions and Macros
+  start_page: preview:ROOT:test.adoc
+  url: http://localhost:8000
+content:
+  sources:
+  - url: .
+    branches: HEAD
+    start_paths: [preview/extensions-and-macros, preview/shared]
+ui:
+  bundle:
+    url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip
+    snapshot: true
+asciidoc:
+  attributes:
+  extensions:
+  - './macros/glossary'
+  - './macros/config-ref'
+  - './macros/helm-ref'
+antora:
+  extensions:
+  - './extensions/version-fetcher/set-latest-version'
+  - require: './extensions/unlisted-pages'
+  - require: './extensions/replace-attributes-in-attachments'
+  - require: './extensions/add-global-attributes'
+  - require: './extensions/aggregate-terms'
+
