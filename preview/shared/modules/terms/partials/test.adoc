@@ -1,8 +1,6 @@
 == Test term
 :term-name: test term
-:hover-text: This is the description of the term that is used as hover text.
-
-{hover-text}
+:hover-text: This is the description of the term that is used as hover text. More content is available in the glossary.
 
 More content here
 

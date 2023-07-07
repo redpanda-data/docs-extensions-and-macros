@@ -41,19 +41,37 @@ module.exports.register = function ({ config }) {
             const sortedTerms = Object.keys(siteCatalog.terms).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
             for (i = 0; i < sortedTerms.length; i++) {
               const termName = sortedTerms[i];
-              const termContent = siteCatalog.terms[termName];
+              let termContent = siteCatalog.terms[termName];
+              const hoverTextMatch = termContent.match(/:hover-text: (.*)/);
+              const hoverText = hoverTextMatch ? hoverTextMatch[1] : '';
+              const linkMatch = termContent.match(/:link: (.*)/);
+              const link = linkMatch ? linkMatch[1] : '';
+              // If the hover-text attribute is found and the content does not already contain {hover-text}, append it as a new line after the first newline
+              if (hoverText && !termContent.includes('{hover-text}')) {
+                const firstNewlineIndex = termContent.indexOf('\n\n');
+                if (firstNewlineIndex !== -1) {
+                  termContent = termContent.slice(0, firstNewlineIndex + 1) + hoverText + '\n' + termContent.slice(firstNewlineIndex + 1);
+                } else {
+                  // If there's no newline, just append at the end
+                  termContent += '\n' + hoverText;
+                }
+              }
+              // If the link attribute is found, append it at the end of the term content
+              if (link) {
+                termContent += `\n\nFor more details, see ${link}`;
+              }
               newContent += '\n\n' + termContent;
             }
             glossaryPage.contents = Buffer.from(newContent, 'utf8');
 
-            console.log(chalk.green(`Transposed terms into glossary for ${component}.`));
+            console.log(chalk.green(`Merged terms into glossary for ${component} component${version? version: ''}.`));
           } else {
             logger.warn(`Skipping ${title} ${version} - No glossary page (reference:glossary.adoc) found`)
           }
         }
       }
     } catch (error) {
-      logger.error(`Error transposing terms: ${error.message}`);
+      logger.error(`Error merging terms: ${error.message}`);
     }
   });
 }

@@ -23,6 +23,8 @@ module.exports.register = function (registry, config = {}) {
       // Extract the term definitions from the files
       const ATTRIBUTE_REGEX = /^:([a-zA-Z0-9_-]+):[ \t]*(.*)$/gm
 
+      const termMap = new Map();
+
       const terms = termFiles.map(file => {
         const content = file.contents.toString()
         const attributes = {}
@@ -34,15 +36,27 @@ module.exports.register = function (registry, config = {}) {
         }
 
         if (!attributes['term-name'] || !attributes['hover-text']) {
-          console.warn(`Skipping file ${file.path} due to missing 'term-name' and/or 'hover-text'.`)
+          console.warn(`Skipping term ${file.path} due to missing 'term-name' and/or 'hover-text attributes'.`)
           return null
         }
 
-        return {
+        if (termMap.has(attributes['term-name'])) {
+          throw new Error(`Error: Duplicate term-name '${attributes['term-name']}' found in ${file.src.fileUri || file.src.editUrl}.`);
+        }
+
+        termMap.set(attributes['term-name'], true);
+
+        const termObject = {
           term: attributes['term-name'],
           def: attributes['hover-text'],
           content
         }
+
+        if (attributes['link'] && attributes['link'].trim() !== '') {
+          termObject.link = attributes['link']
+        }
+
+        return termObject
       }).filter(Boolean)
 
       // Store the terms in the cache
@@ -81,9 +95,11 @@ module.exports.register = function (registry, config = {}) {
         const term = attributes.term || target
         const document = parent.document
         const context = vfs.getContext()
-        const localTerms = document.getAttribute("local-terms") || [];
-        const localTermData = (localTerms || []).find((t) => t.term === term) || {};
-        const customLink = localTermData.link;
+        const customLinkCandidate = context.gloss.find(candidate => 'link' in candidate && candidate.term === term);
+        let customLink;
+        if (customLinkCandidate) {
+          customLink = customLinkCandidate.link;
+        }
         var tooltip = document.getAttribute('glossary-tooltip')
         if (tooltip === 'true') tooltip = 'data-glossary-tooltip'
         if (tooltip && tooltip !== 'title' && !tooltip.startsWith('data-')) {
@@ -96,7 +112,7 @@ module.exports.register = function (registry, config = {}) {
         if (index >= 0) {
           definition = context.gloss[index].def
         } else {
-          definition = localTermData.definition || attributes.definition;
+          definition = attributes.definition;
         }
         if (definition) {
           logTerms && console.log(`${term}::  ${definition}`)

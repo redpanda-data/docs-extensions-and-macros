@@ -4,19 +4,48 @@ This page is a preview of extensions and macros.
 
 == Terms
 
-Terms can be defined in three ways:
+Terms must be defined in the `terms` module of the `shared` component (`shared/modules/terms/partials`).
 
-. From `shared/modules/terms/partials`:
-+
-The content of this glossterm:test term[] comes from the `preview/shared/modules/terms/partials/test.adoc` file. Each term has a dedicated page that gets merged into the `reference:glossary.adoc` page during the build if one exists. The `aggregate-terms` extension is responsible for merging the content of each file into the glossary. Only terms defined in this way are added to the glossary and given an internal link.
+Each partial file in this module is a term. Each file must include the following attributes:
 
-. `local-terms` attribute of a component's `antora.yml` file:
-+
-This glossterm:external term[] is defined in the `local-terms` attribute of the `preview/extensions-and-macros/antora.yml` file. This term includes a link to an external source. Use this method when you want to link to an external source for the definition.
+- `term-name`: The name of the term.
+- `hover-text`: A short definition of the term to be used as hover-over text.
 
-. Inline:
+If a page called `reference:glossary.adoc` exists in your component version, the contents of each term file gets merged into glossary during the build. Terms are merged in alphabetical order, according to the filename. The `aggregate-terms` extension is responsible for merging the content of each file into the glossary.
+
+To reference a term in a doc topic, use the following syntax:
+
+[,asciidoc]
+----
+glossterm:<term-name>[]
+----
+
+Replace `<term-name>` with the value of the `term-name` attribute in a term file.
+
+The `hover-text` attribute is read from the term file and used to add hover text to the term.
+
+The rules for whether a link to the glossary entry is added to the term, depend on what content is available on the term page:
+
+- If you include only a title and the required `term-name` and `hover-text` attributes, a link to the glossary entry is added to the term.
 +
-This glossterm:term[This description is located in the Asciidoc source of this page] is defined inline on this page. Inline terms do not include an internal link to the glossary page. Inline terms are meant for local testing and development.
+For example: glossterm:hover-only term[]
+- If you include other Asciidoc content in the term page, such as headings, images, or paragraphs, a link to the glossary entry is added to the term so that users can read the full definition.
++
+For example: glossterm:test term[]
+- If you include an external URL in the `link` attribute, a link to that URL is added to the term.
++
+For example: glossterm:external term[]
+
+=== Local development
+
+For local development, you can test what your hover text will look like by adding the description to the macro like so:
+
+[,asciidoc]
+----
+glossterm:term[This description is located in the Asciidoc source of this page]
+----
+
+This glossterm:term[This description is located in the Asciidoc source of this page] is defined inline on this page. Inline terms do not include an internal link to the glossary page.
 
 == Attachments
 
