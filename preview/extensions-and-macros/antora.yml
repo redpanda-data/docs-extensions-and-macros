@@ -7,7 +7,3 @@ asciidoc:
   attributes:
     replace-attributes-in-attachments: true
     test-attribute: This attribute was replaced by the `replace-attributes-in-attachments` extension.
-    local-terms:
-    - term: external term
-      definition: This description comes from the antora.yml file for the preview component.
-      link: https://redpanda.com

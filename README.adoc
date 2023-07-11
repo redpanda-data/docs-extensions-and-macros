@@ -132,9 +132,9 @@ antora:
 
 This extension aggregates all term pages from the {url-playbook}[`shared` component] and does the following:
 
-- Makes all `term-name` and `hover-text` attributes available to the <<glossterm-macro,`glossterm` macro>>.
+- Makes all `term-name`, `hover-text`, and `link` attributes available to the <<glossterm-macro,`glossterm` macro>>.
 - Looks for glossary pages named `reference:glossary.adoc` in all versions of all components and appends the contents of each term file to the glossary in alphabetical order.
-- If a glossary page is found, sets the `glossary-page` attribute of the <<glossterm, `glossterm` macro>> to `reference:glossary.adoc`.
+- If a glossary page is found, sets the `glossary-page` attribute of the <<glossterm, `glossterm` macro>> to `reference:glossary.adoc` so that terms can be linked to the glossary page.
 
 ==== Registration example
 
