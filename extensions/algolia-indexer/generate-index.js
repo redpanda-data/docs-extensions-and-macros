@@ -22,7 +22,6 @@ const chalk       = require('chalk')
  * @returns {SearchIndexData} A data object that contains the Algolia index
  */
 function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, excludes = [], logger } = {}) {
-  if (!process.env.ALGOLIA_ADMIN_API_KEY || !process.env.ALGOLIA_APP_ID || !process.env.ALGOLIA_INDEX_NAME) return
   if (!logger) logger = process.env.NODE_ENV === 'test' ? { info: () => undefined } : console
 
   const algolia = {}
