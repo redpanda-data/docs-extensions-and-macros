@@ -8,8 +8,9 @@ module.exports.register = function ({ config }) {
     for (const { versions } of contentCatalog.getComponents()) {
       for (const { name: component, version, asciidoc } of versions) {
         const attachments = contentCatalog.findBy({ component, version, family });
+        if (component == 'api') continue
         for (const attachment of attachments) {
-          let contentString = String.fromCharCode(...attachment['_contents']);
+          let contentString = attachment['_contents'].toString('utf8');
           if (!asciidoc.attributes) continue
           if (!asciidoc.attributes.hasOwnProperty('replace-attributes-in-attachments')) continue;
           for (const key in asciidoc.attributes) {
