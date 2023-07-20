@@ -19,9 +19,9 @@ asciidoc:
   - './macros/helm-ref'
 antora:
   extensions:
+  - require: './extensions/add-global-attributes'
   - './extensions/version-fetcher/set-latest-version'
   - require: './extensions/unlisted-pages'
   - require: './extensions/replace-attributes-in-attachments'
-  - require: './extensions/add-global-attributes'
   - require: './extensions/aggregate-terms'
 
