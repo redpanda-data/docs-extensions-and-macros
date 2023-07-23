@@ -28,7 +28,7 @@ module.exports.register = function ({ config }) {
         const components = await contentCatalog.getComponents();
         for (let i = 0; i < components.length; i++) {
           let component = components[i];
-          if (component.name !== 'ROOT' || component.name !== 'preview') continue
+          if (component.name !== 'ROOT' && component.name !== 'preview') continue
 
           if (!component.latest.asciidoc) {
             component.latest.asciidoc = {};
