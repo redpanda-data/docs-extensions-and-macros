@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "antora --to-dir docs --fetch local-antora-playbook.yml",
-    "serve": "wds --node-resolve --open preview/test.html --watch --root-dir docs"
+    "serve": "wds --node-resolve --open preview/test --watch --root-dir docs"
   },
   "contributors": [
     {

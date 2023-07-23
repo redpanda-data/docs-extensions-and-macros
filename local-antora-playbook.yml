@@ -9,8 +9,6 @@ content:
   - url: .
     branches: HEAD
     start_paths: [preview/extensions-and-macros, preview/shared]
-  - url: https://github.com/redpanda-data/documentation
-    branches: [v/*, api, home]
 ui:
   bundle:
     url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip

@@ -1,6 +1,7 @@
 name: preview
 title: Extensions and Macros Preview
 version: ~
+start_page: preview:ROOT:test.adoc
 nav:
 - modules/ROOT/nav.adoc
 asciidoc:
