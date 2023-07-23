@@ -123,7 +123,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
 
     let article;
 
-    if (component.name === 'api') {
+    if (cname == 'api') {
       article = root.querySelector('div.api-content');
     } else {
       article = root.querySelector('article.doc');
@@ -180,7 +180,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
 
     let indexItem;
 
-    if (component.name === 'api') {
+    if (cname == 'api') {
       tag = `${redpanda.title}-${redpanda.latest.version}`
       indexItem = {
         title: documentTitle,
@@ -190,6 +190,10 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
         titles: titles,
         _tags: [tag]
       }
+      console.log(cname)
+      console.log(indexItem)
+      algolia[redpanda.name][redpanda.latest.version].push(indexItem)
+      algoliaCount++
     } else {
       indexItem = {
         title: documentTitle,
@@ -204,12 +208,10 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
         keywords: keywords,
         _tags: [tag]
       }
+      algolia[cname][version].push(indexItem)
+      algoliaCount++
     }
-
-    algolia[cname][version].push(indexItem)
-    algoliaCount++
   }
-
   return algolia
 }
 
