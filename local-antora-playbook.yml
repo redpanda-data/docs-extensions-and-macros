@@ -21,6 +21,7 @@ antora:
   extensions:
   - require: './extensions/add-global-attributes'
   - './extensions/version-fetcher/set-latest-version'
+  - './extensions/algolia-indexer/index'
   - require: './extensions/unlisted-pages'
   - require: './extensions/replace-attributes-in-attachments'
   - require: './extensions/aggregate-terms'

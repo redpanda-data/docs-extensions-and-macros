@@ -44,8 +44,6 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     siteUrl = siteUrl.substr(0, siteUrl.length - 1)
   }
   const urlPath = extractUrlPath(siteUrl)
-
-  const documents = {}
   var algoliaCount = 0
 
   for (var i = 0; i < pages.length; i++) {
@@ -70,6 +68,8 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     // When indexLatestOnly is set, we only index the current version.
     const component = contentCatalog.getComponent(page.src.component)
     const home = contentCatalog.getComponent('home')
+    const redpanda = contentCatalog.getComponent('ROOT')
+    console.log(redpanda)
     const thisVersion = contentCatalog.getComponentVersion(component, page.src.version)
     const latestVersion = component.latest
     const isCurrent = thisVersion === latestVersion
@@ -122,11 +122,16 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       }
     }
 
-    // Start handling the article content
-    const article = root.querySelector('article.doc')
+    let article;
+
+    if (component.name === 'api') {
+      article = root.querySelector('div.api-content');
+    } else {
+      article = root.querySelector('article.doc');
+    }
     if (!article) {
       logger.warn(`Page is not an article...skipping ${page.pub.url}`)
-      continue
+      continue;
     }
 
     // handle titles
@@ -172,20 +177,34 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       .trim()
     if (text.length > 4000) text = text.substr(0, 4000)
 
-    var tag = `${component.title}-${version}`
+    let tag = `${component.title}-${version}`
 
-    const indexItem = {
-      title: documentTitle,
-      product: component.title,
-      version: version,
-      image: image? image: '',
-      text: text,
-      breadcrumbs: breadcrumbs,
-      intro: intro,
-      objectID: urlPath + page.pub.url,
-      titles: titles,
-      keywords: keywords,
-      _tags: [tag]
+    let indexItem;
+
+    if (component.name === 'api') {
+      tag = `${redpanda.title}-${redpanda.latest.version}`
+      indexItem = {
+        title: documentTitle,
+        product: redpanda.title,
+        version: redpanda.latest.version,
+        objectID: urlPath + page.pub.url,
+        titles: titles,
+        _tags: [tag]
+      }
+    } else {
+      indexItem = {
+        title: documentTitle,
+        product: component.title,
+        version: version,
+        image: image? image: '',
+        text: text,
+        breadcrumbs: breadcrumbs,
+        intro: intro,
+        objectID: urlPath + page.pub.url,
+        titles: titles,
+        keywords: keywords,
+        _tags: [tag]
+      }
     }
 
     algolia[cname][version].push(indexItem)
