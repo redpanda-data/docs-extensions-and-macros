@@ -69,7 +69,6 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     const component = contentCatalog.getComponent(page.src.component)
     const home = contentCatalog.getComponent('home')
     const redpanda = contentCatalog.getComponent('ROOT')
-    console.log(redpanda)
     const thisVersion = contentCatalog.getComponentVersion(component, page.src.version)
     const latestVersion = component.latest
     const isCurrent = thisVersion === latestVersion
