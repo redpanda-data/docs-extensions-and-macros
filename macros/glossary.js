@@ -75,7 +75,7 @@ module.exports.register = function (registry, config = {}) {
     }
   }
 
-  //characters to replace by '_' in generated idprefix
+  //characters to replace by '-' in generated idprefix
   const IDRX = /[/ _.-]+/g
 
   function termId (term) {
@@ -123,9 +123,11 @@ module.exports.register = function (registry, config = {}) {
         var glossaryPage = document.getAttribute('glossary-page', '')
         if (glossaryPage.endsWith('.adoc')) {
           const page = config.contentCatalog.resolvePage(glossaryPage, config.file.src)
-          const relativizedPath = path.relative(path.dirname(config.file.pub.url), page.pub.url)
-          const prefix = attributes.prefix
-          glossaryPage = prefix ? [prefix, relativizedPath].join('/') : relativizedPath
+          if (page && config.config.attributes['site-url']) {
+            glossaryPage = config.config.attributes['site-url'] + page.pub.url
+          } else if (page) {
+            glossaryPage = path.relative(path.dirname(config.file.pub.url), page.pub.url)
+          }
         }
         const glossaryTermRole = document.getAttribute('glossary-term-role', 'glossary-term')
         const attrs = glossaryTermRole ? { role: glossaryTermRole } : {}
