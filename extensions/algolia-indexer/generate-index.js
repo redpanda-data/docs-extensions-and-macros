@@ -164,13 +164,13 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     if (!(cname in algolia)) algolia[cname] = {}
     if (!(version in algolia[cname])) algolia[cname][version] = []
 
-    // Handle the article text
+    /* Handle the article text
     var text = decode(article.text)
     text = text.replace(/\n/g, ' ')
       .replace(/\r/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
-    if (text.length > 4000) text = text.substr(0, 4000)
+    if (text.length > 4000) text = text.substr(0, 4000)*/
 
     var tag = `${component.title}-${version}`
 
@@ -179,7 +179,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       product: component.title,
       version: version,
       image: image? image: '',
-      text: text,
+      //text: text,
       breadcrumbs: breadcrumbs,
       intro: intro,
       objectID: urlPath + page.pub.url,
