@@ -44,7 +44,11 @@ function register ({
       Object.keys(algolia[c]).forEach((v) => {
         algoliaCount += algolia[c][v].length
         // Save all records to the index
-        index.saveObjects(algolia[c][v]).wait();
+        index.saveObjects(algolia[c][v]).then(() => {
+          console.log(`${chalk.bold(algoliaCount)} Algolia index entries created`)
+        }).catch(error => {
+          console.error(`Error saving objects to Algolia: ${error}`);
+        });
         siteCatalog.addFile({
           mediaType: 'application/json',
           contents: Buffer.from(
@@ -62,7 +66,6 @@ function register ({
         'product'
       ]
     })
-    console.log(`${chalk.bold(algoliaCount)} Algolia index entries created`)
     // Get and print the count of all records in the index
     let recordCount = 0;
     index

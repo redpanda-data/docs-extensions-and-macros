@@ -1,7 +1,9 @@
 site:
   title: Redpanda Docs Extensions and Macros
   start_page: preview:ROOT:test.adoc
-  url: http://localhost:8000
+  url: https://docs-extensions-and-macros.netlify.app
+urls:
+  html_extension_style: indexify
 content:
   sources:
   - url: .
@@ -19,9 +21,10 @@ asciidoc:
   - './macros/helm-ref'
 antora:
   extensions:
+  - require: './extensions/add-global-attributes'
   - './extensions/version-fetcher/set-latest-version'
+  - './extensions/algolia-indexer/index'
   - require: './extensions/unlisted-pages'
   - require: './extensions/replace-attributes-in-attachments'
-  - require: './extensions/add-global-attributes'
   - require: './extensions/aggregate-terms'
 
