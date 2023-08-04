@@ -45,7 +45,7 @@ function register ({
         algoliaCount += algolia[c][v].length
         // Save all records to the index
         index.saveObjects(algolia[c][v]).then(() => {
-          console.log(`${chalk.bold(algoliaCount)} Algolia index entries created`)
+          console.log(`Indexed ${c} version ${v}`)
         }).catch(error => {
           console.error(`Error saving objects to Algolia: ${error}`);
         });
@@ -78,7 +78,7 @@ function register ({
       .then(() => {
         console.log('Total Records:', recordCount);
       })
-      .catch(err => console.log(err));
+      .catch(err => console.log(JSON.stringify(err)));
   })
 }
 
