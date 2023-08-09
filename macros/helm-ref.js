@@ -11,7 +11,7 @@
 
 const buildConfigReference = ({ helmRef }) => {
   let ref = '';
-  ref = helmRef ? `For default values and documentation for configuration options, see the https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=${helmRef}[values.yaml] file.` : `For default values and documentation for configuration options, see the https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values[values.yaml] file.`;
+  ref = helmRef ? `For default values and documentation for configuration options, see the https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=${helmRef}[values.yaml^] file.` : `For default values and documentation for configuration options, see the https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values[values.yaml^] file.`;
   return ref;
 }
 
