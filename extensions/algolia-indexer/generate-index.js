@@ -69,7 +69,6 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     // "current" component version.
     // When indexLatestOnly is set, we only index the current version.
     const component = contentCatalog.getComponent(page.src.component)
-    const home = contentCatalog.getComponent('home')
     const thisVersion = contentCatalog.getComponentVersion(component, page.src.version)
     const latestVersion = component.latest
     const isCurrent = thisVersion === latestVersion
@@ -101,26 +100,6 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
           t: elem.text
         })
       })
-
-    const images = {
-      'get started': 'get-started-icon.png',
-      'develop': 'develop-icon.png',
-      'deploy': 'deploy-icon.png',
-      'manage': 'manage-icon.png'
-    }
-
-    var image = {}
-
-    if (breadcrumbs.length > 1) {
-      const lowercaseBreadcrumb = breadcrumbs[1].t.toLowerCase()
-      for (let key in images) {
-        if (lowercaseBreadcrumb.includes(key)) {
-          image.src = `${home.url}_images/${images[key]}`
-          image.alt = key
-          break
-        }
-      }
-    }
 
     // Start handling the article content
     const article = root.querySelector('article.doc')
@@ -178,7 +157,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       title: documentTitle,
       product: component.title,
       version: version,
-      image: image? image: '',
+      //image: image? image: '',
       //text: text,
       breadcrumbs: breadcrumbs,
       intro: intro,
