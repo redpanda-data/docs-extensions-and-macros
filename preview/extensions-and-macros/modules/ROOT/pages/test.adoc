@@ -47,6 +47,16 @@ glossterm:term[This description is located in the Asciidoc source of this page]
 
 This glossterm:term[This description is located in the Asciidoc source of this page] is defined inline on this page. Inline terms do not include an internal link to the glossary page.
 
+== config_ref
+
+config_ref:test,true,cluster-properties[]
+
+config_ref:test,false[]
+
+== helm_ref
+
+helm_ref:storage[]
+
 == Latest versions
 
 The `version fetcher` extension gets the latest version of Redpanda and Redpanda Console and assigns them to the following attributes:

@@ -1,2 +1,3 @@
 * xref:preview:ROOT:test.adoc[]
+//* xref:preview:reference:cluster-properties.adoc[]
 * xref:preview:reference:glossary.adoc[]

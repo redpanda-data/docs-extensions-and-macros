@@ -29,7 +29,7 @@ function inlineConfigMacro(context) {
       const [configRef, isLink, path] = target.split(',');
       const isKubernetes = parent.getDocument().getAttributes()['env-kubernetes'] !== undefined;
       const content = buildConfigReference({ configRef, isKubernetes, isLink: isLink === 'true', path });
-      return this.createInline(parent, 'quoted', content);
+      return this.createInline(parent, 'quoted', `\`${content}\``, { attributes: {'subs': 'quotes' }});
     });
   }
 }
