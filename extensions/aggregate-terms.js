@@ -66,7 +66,7 @@ module.exports.register = function ({ config }) {
 
             console.log(chalk.green(`Merged terms into glossary for ${component} component${version? version: ''}.`));
           } else {
-            logger.warn(`Skipping ${title} ${version} - No glossary page (reference:glossary.adoc) found`)
+            logger.info(`Skipping ${title} ${version} - No glossary page (reference:glossary.adoc) found`)
           }
         }
       }
