@@ -111,8 +111,8 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     // handle titles
     const h1 = article.querySelector('h1')
     if (!h1) {
-      logger.error(`No H1 in ${page.pub.url}`)
-      process.exit(1)
+      logger.warn(`No H1 in ${page.pub.url}...skipping`)
+      continue
     }
     const documentTitle = h1.text
     h1.remove()
