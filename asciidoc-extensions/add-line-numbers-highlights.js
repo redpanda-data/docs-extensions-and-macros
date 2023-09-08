@@ -6,11 +6,17 @@ function addLineNumbersAndCodeHighlightingAttributes() {
       // Iterate through all attributes of the listing block
       for (let key in attributes) {
         if (key.startsWith('lines')) {
-            if (attributes.role) {
-              listingBlock.setAttribute('role', attributes.role + ' ' + `${key}-${attributes[key]}`);
-            } else {
-              listingBlock.setAttribute('role', `${key}-${attributes[key]} line-numbers`);
+          let newRoleValue = `${key}-${attributes[key]}`;
+
+          if (attributes.role) {
+            if (!attributes.role.includes('line-numbers')) {
+              newRoleValue += ' line-numbers';
             }
+            listingBlock.setAttribute('role', attributes.role + ' ' + newRoleValue);
+          } else {
+            newRoleValue += ' line-numbers';
+            listingBlock.setAttribute('role', newRoleValue);
+          }
         }
       }
     }
