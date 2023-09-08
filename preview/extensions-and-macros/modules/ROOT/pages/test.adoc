@@ -70,3 +70,15 @@ The `version fetcher` extension gets the latest version of Redpanda and Redpanda
 By default, Antora does not replace attributes in attachment files. Download this test attachment to make sure that the `replace-attributes-in-attachments` extension replaces the `test-attribute`:
 
 xref:preview:ROOT:attachment$test.yaml[Download attachment]
+
+== Code highlights
+
+[source,js,lines=1-3+5+6]
+----
+function helloWorld() {
+    console.log("Hello, World!") <sample>;
+    console.log("This is a sample.");
+    console.log("With multiple lines.");
+    console.log("Highlighted using Prism.");
+}
+----

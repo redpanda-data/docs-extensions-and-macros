@@ -40,7 +40,7 @@ npm i @redpanda-data/docs-extensions-and-macros
 
 To use the development version instead, refer to the <<development-quickstart,Development Quickstart>>.
 
-== Extensions
+== Antora Extensions
 
 This section documents the Antora extensions that are provided by this library and how to configure them.
 
@@ -168,6 +168,24 @@ antora:
   - require: '@redpanda-data/docs-extensions-and-macros/extensions/unlisted-pages'
     addToNavigation: true
     unlistedPagesHeading: 'Additional Resources'
+```
+
+== Asciidoc Extensions
+
+This section documents the Asciidoc extensions that are provided by this library and how to configure them.
+
+IMPORTANT: Be sure to register each extension under the `asciidoc.extensions` key in the playbook, not the `antora.extensions` key.
+
+=== Add line numbers and highlights
+
+This extension adds the necessary classes to make line numbers and line highlighting work with Prism.js.
+
+==== Registration example
+
+```yaml
+antora:
+  extensions:
+  - '@redpanda-data/docs-extensions-and-macros/asciidoc-extensions/add-line-numbers-highlights'
 ```
 
 == Macros
