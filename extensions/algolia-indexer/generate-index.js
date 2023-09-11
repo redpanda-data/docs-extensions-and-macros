@@ -59,7 +59,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       }
     )
 
-    // skip pages marked as "noindex" for "robots"
+    // Skip pages marked as "noindex" for "robots"
     const noindex = root.querySelector('meta[name=robots][content=noindex]')
     if (noindex) {
       continue
@@ -104,7 +104,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     // Start handling the article content
     const article = root.querySelector('article.doc')
     if (!article) {
-      logger.warn(`Page is not an article...skipping ${page.pub.url}`)
+      logger.info(`Page is not an article...skipping ${page.pub.url}`)
       continue
     }
 
