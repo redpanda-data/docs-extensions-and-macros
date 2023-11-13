@@ -6,7 +6,6 @@
 
 module.exports.register = function ({ config }) {
   const yaml = require('js-yaml');
-  const _ = require('lodash');
   const logger = this.getLogger('global-attributes-extension');
   const chalk = require('chalk')
 
@@ -29,18 +28,4 @@ module.exports.register = function ({ config }) {
       logger.error(`Error loading attributes: ${error.message}`);
     }
   })
-
-  .on('contentClassified', ({ siteCatalog, contentCatalog }) => {
-    const components = contentCatalog.getComponents()
-    try {
-      components.forEach(({versions}) => {
-        versions.forEach(({asciidoc}) => {
-          asciidoc.attributes = _.merge(asciidoc.attributes, siteCatalog.attributeFile);
-        })
-      });
-      console.log(chalk.green('Merged global attributes into each component version.'));
-    } catch (error) {
-      logger.error(`Error merging attributes: ${error.message}`);
-    }
-  });
 }

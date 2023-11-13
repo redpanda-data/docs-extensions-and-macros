@@ -7,6 +7,7 @@ antora:
 const GetLatestRedpandaVersion = require('./getLatestRedpandaVersion');
 const GetLatestConsoleVersion = require('./getLatestConsoleVersion');
 const chalk = require('chalk')
+const _ = require('lodash');
 
 
 module.exports.register = function ({ config }) {
@@ -15,7 +16,7 @@ module.exports.register = function ({ config }) {
     logger.warn('REDPANDA_GITHUB_TOKEN environment variable not set. Attempting unauthenticated request.');
   }
   this
-    .on('contentClassified', async ({ contentCatalog }) => {
+    .on('contentClassified', async ({ siteCatalog,contentCatalog }) => {
       try {
         const LatestRedpandaVersion = await GetLatestRedpandaVersion();
         const LatestConsoleVersion = await GetLatestConsoleVersion();
@@ -30,6 +31,16 @@ module.exports.register = function ({ config }) {
           let component = components[i];
           if (component.name !== 'ROOT' && component.name !== 'preview') continue
 
+          component.versions.forEach(({name, version, asciidoc}) => {
+            if (siteCatalog.attributeFile) {
+              asciidoc.attributes = _.merge(asciidoc.attributes, siteCatalog.attributeFile);
+            }
+            if (LatestConsoleVersion) {
+              asciidoc.attributes['latest-console-version'] = `${LatestConsoleVersion}`;
+              console.log(`${chalk.green('Set Redpanda Console version to')} ${chalk.bold(LatestConsoleVersion)} in ${name} ${version}`);
+            }
+          })
+
           if (!component.latest.asciidoc) {
             component.latest.asciidoc = {};
           }
@@ -42,14 +53,7 @@ module.exports.register = function ({ config }) {
 
           component.latest.asciidoc.attributes['full-version'] = `${LatestRedpandaVersion[0]}`;
           component.latest.asciidoc.attributes['latest-release-commit'] = `${LatestRedpandaVersion[1]}`;
-          console.log(`${chalk.green('Set Redpanda version to')} ${chalk.bold(LatestRedpandaVersion[0])} ${chalk.bold(LatestRedpandaVersion[1])}`)
-
-          if (LatestConsoleVersion) {
-            for (const { asciidoc } of component.versions) {
-              asciidoc.attributes['latest-console-version'] = `${LatestConsoleVersion}`;
-            }
-            console.log(`${chalk.green('Set Redpanda Console version to')} ${chalk.bold(LatestConsoleVersion)}`);
-          }
+          console.log(`${chalk.green('Set the latest Redpanda version to')} ${chalk.bold(LatestRedpandaVersion[0])} ${chalk.bold(LatestRedpandaVersion[1])}`)
         }
       } catch(error) {
         logger.warn(error)
