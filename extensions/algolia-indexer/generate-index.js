@@ -143,13 +143,37 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     if (!(cname in algolia)) algolia[cname] = {}
     if (!(version in algolia[cname])) algolia[cname][version] = []
 
-    /* Handle the article text
-    var text = decode(article.text)
-    text = text.replace(/\n/g, ' ')
+    // Handle the article text
+    const contentElements = article.querySelectorAll('p, table, li');
+    let contentText = '';
+    let currentSize = 0;
+    // Maximum size in bytes
+    const MAX_SIZE = 50000;
+    const encoder = new TextEncoder();
+    contentElements.forEach(element => {
+      let elementText = '';
+      if (element.tagName === 'TABLE') {
+        element.querySelectorAll('tr').forEach(tr => {
+          tr.querySelectorAll('td, th').forEach(cell => {
+            elementText += cell.text + ' ';
+          });
+        });
+      } else {
+        elementText = decode(element.rawText);
+      }
+      const elementSize = encoder.encode(elementText).length;
+      if (currentSize + elementSize > MAX_SIZE) {
+        return;
+      } else {
+        contentText += elementText;
+        currentSize += elementSize;
+      }
+    });
+
+    var text = contentText.replace(/\n/g, ' ')
       .replace(/\r/g, ' ')
       .replace(/\s+/g, ' ')
-      .trim()
-    if (text.length > 4000) text = text.substr(0, 4000)*/
+      .trim();
 
     var tag = `${component.title}-${version}`
 
@@ -158,7 +182,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       product: component.title,
       version: version,
       //image: image? image: '',
-      //text: text,
+      text: text,
       breadcrumbs: breadcrumbs,
       intro: intro,
       objectID: urlPath + page.pub.url,
