@@ -49,6 +49,7 @@ module.exports.register = function (registry, config = {}) {
         const termObject = {
           term: attributes['term-name'],
           def: attributes['hover-text'],
+          category: attributes['category'] || '',
           content
         }
 
@@ -115,7 +116,7 @@ module.exports.register = function (registry, config = {}) {
           definition = attributes.definition;
         }
         if (definition) {
-          logTerms && console.log(`${term}::  ${definition}`)
+          logTerms && console.log(`${term}:: ${definition}`)
         } else if (tooltip) {
           definition = `${term} not yet defined`
         }
