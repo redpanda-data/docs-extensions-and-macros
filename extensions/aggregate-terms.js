@@ -1,7 +1,7 @@
 /* Example use in the playbook
 * antora:
     extensions:
- *    - require: './extensions/aggregate-terms.js'
+ *    - require: ./extensions/aggregate-terms.js
 */
 
 module.exports.register = function ({ config }) {
