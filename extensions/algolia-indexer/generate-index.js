@@ -59,11 +59,11 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       }
     )
 
-    // Skip pages marked as "noindex" for "robots"
+    /* Skip pages marked as "noindex" for "robots"
     const noindex = root.querySelector('meta[name=robots][content=noindex]')
     if (noindex) {
       continue
-    }
+    }*/
 
     // Compute a flag identifying if the current page is in the
     // "current" component version.
