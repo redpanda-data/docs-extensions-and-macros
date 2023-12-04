@@ -3,9 +3,12 @@
 const generateIndex = require('./generate-index')
 const chalk = require('chalk')
 const algoliasearch = require('algoliasearch')
+const http = require('http')
+const https = require('https')
 const fs = require('fs')
 const path = require('path')
 const _ = require('lodash')
+process.env.UV_THREADPOOL_SIZE=16
 
 /**
  * Algolia indexing for an Antora documentation site.
@@ -26,8 +29,14 @@ function register({
   var client
   var index
 
-  // Connect and authenticate with Algolia
-  client = algoliasearch(process.env.ALGOLIA_APP_ID, process.env.ALGOLIA_ADMIN_API_KEY)
+  const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 100 });
+  const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100 });
+
+  // Connect and authenticate with Algolia using the custom agent
+  client = algoliasearch(process.env.ALGOLIA_APP_ID, process.env.ALGOLIA_ADMIN_API_KEY, {
+    httpAgent: httpAgent,
+    httpsAgent: httpsAgent
+  })
   index = client.initIndex(process.env.ALGOLIA_INDEX_NAME)
 
   if (Object.keys(unknownOptions).length) {
@@ -78,34 +87,27 @@ function register({
           }
         }
 
-        // Upload new records only if the objects have been updated or they are new.
-        // See https://www.algolia.com/doc/api-reference/api-methods/save-objects/
-        if (objectsToUpdate.length) {
-          index.saveObjects(objectsToUpdate)
-            .then(() => {
-              logger.info(`Updated records for ${c} version ${v}`)
-            })
-            .catch(error => {
-              logger.error(`Error updating objects to Algolia: ${error.message}`)
-            })
-        }
-        if (objectsToAdd.length) {
-          index.saveObjects(objectsToAdd)
-            .then(() => {
-              logger.info(`Added records for ${c} version ${v}`)
-            })
-            .catch(error => {
-              logger.error(`Error adding objects to Algolia: ${error.message}`)
-            })
-        }
+        const addObjectActions = objectsToAdd.map(object => ({
+          action: 'addObject',
+          indexName: process.env.ALGOLIA_INDEX_NAME,
+          body: object
+        }));
 
-        siteCatalog.addFile({
-          mediaType: 'application/json',
-          contents: Buffer.from(JSON.stringify(algolia[c][v])),
-          src: { stem: `algolia-${c}` },
-          out: { path: `algolia-${c}-${v}.json` },
-          pub: { url: `/algolia-${c}-${v}.json`, rootPath: '' }
-        })
+        const updateObjectActions = objectsToUpdate.map(object => ({
+          action: 'updateObject',
+          indexName: process.env.ALGOLIA_INDEX_NAME,
+          body: object
+        }));
+
+        const batchActions = [...addObjectActions, ...updateObjectActions];
+
+        // Upload new records only if the objects have been updated or they are new.
+        // See https://www.algolia.com/doc/api-reference/api-methods/batch/?client=javascript
+        await client.multipleBatch(batchActions).then(() => {
+          console.log('Batch operations completed successfully');
+        }).catch(error => {
+          logger.error(`Error uploading records to Algolia: ${error.message}`);
+        });
       }
     }
 
@@ -117,21 +119,11 @@ function register({
     console.log(chalk.green('New records:' + totalObjectsToAdd))
 
     totalObjectsToAdd === 0 && totalObjectsToUpdate === 0 && console.log(chalk.green('No changes made'))
+  })
 
-    try {
-      let recordCount = 0
-
-      await index.browseObjects({
-        query: '',
-        batch: batch => {
-          recordCount += batch.length
-        }
-      })
-
-      console.log(chalk.green('Total records:', recordCount))
-    } catch (err) {
-      logger.error(JSON.stringify(err))
-    }
+  process.on('exit', () => {
+    httpAgent.destroy()
+    httpsAgent.destroy()
   })
 }
 

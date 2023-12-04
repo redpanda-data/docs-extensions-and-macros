@@ -188,7 +188,8 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       objectID: urlPath + page.pub.url,
       titles: titles,
       keywords: keywords,
-      _tags: [tag]
+      type: 'Doc',
+      _tags: [tag, 'docs']
     }
 
     algolia[cname][version].push(indexItem)
