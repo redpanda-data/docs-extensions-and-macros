@@ -67,6 +67,7 @@ function register({
 
     let totalObjectsToUpdate = 0
     let totalObjectsToAdd = 0
+    const objectsToDelete = []
 
     for (const c of Object.keys(algolia)) {
       for (const v of Object.keys(algolia[c])) {
@@ -81,6 +82,7 @@ function register({
               objectsToUpdate.push(obj)
               totalObjectsToUpdate++
             }
+            existingObjectsMap.delete(obj.objectID)
           } else {
             objectsToAdd.push(obj)
             totalObjectsToAdd++
@@ -111,14 +113,24 @@ function register({
       }
     }
 
-    index.setSettings({
-      attributesForFaceting: ['version', 'product']
-    })
+    for (const [objectID, obj] of existingObjectsMap) {
+      if (obj.type === 'Doc' && !obj._tags.includes('apis')) {
+        objectsToDelete.push(objectID)
+      }
+    }
+    if (objectsToDelete.length > 0) {
+      console.log(objectsToDelete)
+      await index.deleteObjects(objectsToDelete).then(() => {
+        console.log(`Deleted ${objectsToDelete.length} outdated records`);
+      }).catch(error => {
+        logger.error(`Error deleting records from Algolia: ${error.message}`);
+      });
+    }
 
     console.log(chalk.green('Updated records:' + totalObjectsToUpdate))
     console.log(chalk.green('New records:' + totalObjectsToAdd))
 
-    totalObjectsToAdd === 0 && totalObjectsToUpdate === 0 && console.log(chalk.green('No changes made'))
+    totalObjectsToAdd === 0 && totalObjectsToUpdate === 0 && console.log(chalk.green('No new records uploaded or existing records updated'))
   })
 
   process.on('exit', () => {
