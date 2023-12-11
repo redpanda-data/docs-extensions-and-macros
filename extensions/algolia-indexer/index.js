@@ -127,10 +127,6 @@ function register({
       });
     }
 
-    index.setSettings({
-      attributesForFaceting: ['version', 'product']
-    })
-
     console.log(chalk.green('Updated records:' + totalObjectsToUpdate))
     console.log(chalk.green('New records:' + totalObjectsToAdd))
 
