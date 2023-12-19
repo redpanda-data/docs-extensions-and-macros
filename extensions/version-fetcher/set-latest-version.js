@@ -7,7 +7,6 @@ antora:
 const GetLatestRedpandaVersion = require('./getLatestRedpandaVersion');
 const GetLatestConsoleVersion = require('./getLatestConsoleVersion');
 const chalk = require('chalk')
-const _ = require('lodash');
 
 
 module.exports.register = function ({ config }) {
@@ -32,9 +31,6 @@ module.exports.register = function ({ config }) {
           if (component.name !== 'ROOT' && component.name !== 'preview') continue
 
           component.versions.forEach(({name, version, asciidoc}) => {
-            if (siteCatalog.attributeFile) {
-              asciidoc.attributes = _.merge(asciidoc.attributes, siteCatalog.attributeFile);
-            }
             if (LatestConsoleVersion) {
               asciidoc.attributes['latest-console-version'] = `${LatestConsoleVersion}`;
               console.log(`${chalk.green('Set Redpanda Console version to')} ${chalk.bold(LatestConsoleVersion)} in ${name} ${version}`);
