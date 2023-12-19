@@ -17,4 +17,4 @@ badge-histogram: 'image:https://img.shields.io/badge/Type-Histogram-brightgreen.
 badge-counter: 'image:https://img.shields.io/badge/Type-Counter-brightgreen.svg[]'
 badge-perf-iops: 'image:https://img.shields.io/badge/Performance-IOPS-yellow.svg[]'
 badge-perf-storage: 'image:https://img.shields.io/badge/Performance-Storage-yellow.svg[]'
-badge-deprecated: 'image:https://img.shields.io/badge/-Deprecated-red.svg[https://docs.redpanda.com/current/upgrade/deprecated/]'
+badge-deprecated: 'image:https://img.shields.io/badge/-Deprecated-red.svg[xref=upgrade:deprecated/index.adoc]'
