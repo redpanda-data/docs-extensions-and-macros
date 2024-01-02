@@ -28,6 +28,8 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
 
   console.log(chalk.cyan('Indexing...'))
 
+  const unixTimestamp = Math.floor(Date.now() / 1000)
+
   // Select indexable pages
   const pages = contentCatalog.getPages((page) => {
     if (!page.out || page.asciidoc?.attributes?.noindex != null) return
@@ -45,7 +47,6 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
   }
   const urlPath = extractUrlPath(siteUrl)
 
-  const documents = {}
   var algoliaCount = 0
 
   for (var i = 0; i < pages.length; i++) {
@@ -181,13 +182,13 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       title: documentTitle,
       product: component.title,
       version: version,
-      //image: image? image: '',
       text: text,
       breadcrumbs: breadcrumbs,
       intro: intro,
       objectID: urlPath + page.pub.url,
       titles: titles,
       keywords: keywords,
+      unixTimestamp: unixTimestamp,
       type: 'Doc',
       _tags: [tag, 'docs']
     }
