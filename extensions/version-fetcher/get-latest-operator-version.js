@@ -16,17 +16,13 @@ if (process.env.REDPANDA_GITHUB_TOKEN) {
 
 const github = new OctokitWithRetries(githubOptions);
 
-var latestOperatorReleaseVersion;
-
 module.exports = async () => {
-  await github.rest.repos.getLatestRelease({
-    owner,
-    repo,
-  }).then((release => {
+  try {
+    const release = await github.rest.repos.getLatestRelease({ owner, repo });
     latestOperatorReleaseVersion = release.data.tag_name;
-  })).catch((error => {
-    console.error(error)
-    return null
-  }))
-  return latestOperatorReleaseVersion;
+    return latestOperatorReleaseVersion;
+  } catch (error) {
+    console.error(error);
+    return null;
+  }
 };

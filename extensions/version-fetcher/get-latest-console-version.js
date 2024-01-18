@@ -19,15 +19,12 @@ const github = new OctokitWithRetries(githubOptions);
 var latestConsoleReleaseVersion;
 
 module.exports = async () => {
-  await github.rest.repos.getLatestRelease({
-    owner,
-    repo,
-  }).then((release => {
-    const tag = release.data.tag_name;
-    latestConsoleReleaseVersion = tag.replace('v','');
-  })).catch((error => {
-    console.error(error)
-    return null
-  }))
-  return latestConsoleReleaseVersion;
+  try {
+    const release = await github.rest.repos.getLatestRelease({ owner, repo });
+    latestConsoleReleaseVersion = release.data.tag_name.replace('v','');
+    return latestConsoleReleaseVersion;
+  } catch (error) {
+    console.error(error);
+    return null;
+  }
 };

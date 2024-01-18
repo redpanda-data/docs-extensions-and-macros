@@ -16,31 +16,24 @@ if (process.env.REDPANDA_GITHUB_TOKEN) {
 
 const github = new OctokitWithRetries(githubOptions);
 
-var latestRedpandaReleaseVersion;
-var latestRedpandaReleaseCommitHash;
-
 module.exports = async () => {
-  await github.rest.repos.getLatestRelease({
-    owner,
-    repo,
-  }).then(async function(release) {
+  try {
+    // Fetch the latest release
+    const release = await github.rest.repos.getLatestRelease({ owner, repo });
     const tag = release.data.tag_name;
-    latestRedpandaReleaseVersion = tag.replace('v','');
-    await github.rest.git.getRef({
-      owner,
-      repo,
-      ref: `/tags/${tag}`,
-    }).then(async function(tagRef) {
-      const releaseSha = tagRef.data.object.sha;
-      await github.rest.git.getTag({
-        owner,
-        repo,
-        tag_sha: releaseSha,
-      }).then((tag => latestRedpandaReleaseCommitHash = tag.data.object.sha.substring(0, 7)))
-    })
-  }).catch((error => {
-    console.error(error)
-    return null
-  }))
-  return [latestRedpandaReleaseVersion, latestRedpandaReleaseCommitHash];
+    latestRedpandaReleaseVersion = tag.replace('v', '');
+
+    // Get reference of the tag
+    const tagRef = await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
+    const releaseSha = tagRef.data.object.sha;
+
+    // Get the tag object to extract the commit hash
+    const tagData = await github.rest.git.getTag({ owner, repo, tag_sha: releaseSha });
+    latestRedpandaReleaseCommitHash = tagData.data.object.sha.substring(0, 7);
+
+    return [latestRedpandaReleaseVersion, latestRedpandaReleaseCommitHash];
+  } catch (error) {
+    console.error(error);
+    return [null, null];
+  }
 };
