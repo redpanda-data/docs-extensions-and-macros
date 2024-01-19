@@ -79,9 +79,11 @@ antora:
 
 === Version fetcher
 
-This extension fetches the latest release tag and latest release commit hash from http://github.com/redpanda-data/redpanda. These values are then assigned to the `full-version` and `latest-release-commit` attributes of the latest version of the Redpanda documentation, respectively.
+This extension fetches the latest release versions from GitHub.
 
-It also fetches the latest version of Redpanda Console and assigns it to the `latest-console-version` attribute in the playbook so that all components have access to it.
+The latest Console version is made available to all versions of the Redpanda docs (`ROOT` component.)
+
+The latest Redpanda version and the latest Redpanda Operator version is made available to the latest version of the `ROOT` component.
 
 ==== Environment variables
 
