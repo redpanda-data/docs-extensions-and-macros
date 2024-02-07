@@ -99,6 +99,75 @@ antora:
   - '@redpanda-data/docs-extensions-and-macros/extensions/version-fetcher/set-latest-version'
 ```
 
+=== Validate attributes
+
+This extension ensures the consistency and validity of page attributes, focusing on validating page categories against a predefined list of valid categories and subcategories. It automatically adds missing parent categories for any specified subcategories and removes any specified categories that are invalid. Additionally, it processes specific environment attributes, setting corresponding page-level attributes when environment conditions are met.
+
+==== Environment variables
+
+This extension does not require any environment variables.
+
+==== Configuration options
+
+There are no configurable options for this extension. It operates based on site attributes defined in `add-global-attributes.js` to determine valid categories and subcategories.
+
+==== Registration example
+
+Register the `validate-attributes` extension in the Antora playbook under the `antora.extensions` key like so:
+
+[source,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/validate-attributes.js'
+----
+
+=== Related docs
+
+This extension enhances the connectivity between lab exercises and relevant documentation by dynamically identifying and linking related documentation pages and other lab exercises based on shared categories and deployment types.
+
+==== Environment variables
+
+This extension operates without requiring any specific environment variables.
+
+==== Configuration options
+
+This extension does not offer configurable options. It uses the inherent attributes of pages to determine relationships based on `page-categories` and deployment types (`env-kubernetes`, `env-linux`, `env-docker`, `page-cloud`).
+
+==== Registration example
+
+To integrate the `related-docs-extension` into your Antora playbook, add it under the `antora.extensions` key as demonstrated below:
+
+[source,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/related-docs-extension.js'
+----
+
+=== Related labs
+
+This extension enriches documentation pages with links to related lab exercises, facilitating a deeper understanding of the content through practical application. It dynamically assigns related labs to each documentation page based on shared categories and deployment types.
+
+==== Environment variables
+
+This extension does not require any environment variables.
+
+==== Configuration options
+
+The extension operates without explicit configuration options. It automatically processes documentation pages to identify and link related labs based on shared `page-categories` attributes and deployment types (`env-kubernetes`, `env-linux`, `env-docker`, `page-cloud`).
+
+==== Registration example
+
+Include the `related-labs-extension` in the Antora playbook under the `antora.extensions` key as follows:
+
+[source,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/related-labs-extension.js'
+----
+
 === Global attributes
 
 This extension collects Asciidoc attributes from the {url-playbook}[`shared` component] and makes them available to all component versions. Having global attributes is useful for consistent configuration of local and production builds.

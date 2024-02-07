@@ -6,6 +6,7 @@ module.exports.register = function ({ config }) {
       contentCatalog.getComponents().forEach(({ versions }) => {
         versions.forEach(({ name: component, version, navigation: nav, url: defaultUrl }) => {
           if (component === 'api') return;
+          if (!nav) return
           const navEntriesByUrl = getNavEntriesByUrl(nav)
           const unlistedPages = contentCatalog
             .findBy({ component, version, family: 'page' })

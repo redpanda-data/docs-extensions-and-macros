@@ -27,7 +27,6 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
   const algolia = {}
 
   console.log(chalk.cyan('Indexing...'))
-
   const unixTimestamp = Math.floor(Date.now() / 1000)
 
   // Select indexable pages
@@ -176,27 +175,48 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       .replace(/\s+/g, ' ')
       .trim();
 
-    var tag = `${component.title}-${version}`
+    var tag = `${component.title}${version ? '-' + version : ''}`
+    var indexItem;
+    const deployment = page.asciidoc?.attributes['env-kubernetes'] ? 'Kubernetes' : page.asciidoc?.attributes['env-linux'] ? 'Linux' : page.asciidoc?.attributes['env-docker'] ? 'Docker' : page.asciidoc?.attributes['page-cloud'] ? 'Redpanda Cloud' : ''
 
-    const indexItem = {
-      title: documentTitle,
-      product: component.title,
-      version: version,
-      text: text,
-      breadcrumbs: breadcrumbs,
-      intro: intro,
-      objectID: urlPath + page.pub.url,
-      titles: titles,
-      keywords: keywords,
-      unixTimestamp: unixTimestamp,
-      type: 'Doc',
-      _tags: [tag, 'docs']
+    const categories = page.asciidoc?.attributes['page-categories']
+    ? page.asciidoc.attributes['page-categories'].split(',').map(category => category.trim())
+    : []
+
+    if (component.name !== 'redpanda-labs'){
+      indexItem = {
+        title: documentTitle,
+        product: component.title,
+        version: version,
+        text: text,
+        breadcrumbs: breadcrumbs,
+        intro: intro,
+        objectID: urlPath + page.pub.url,
+        titles: titles,
+        categories,
+        unixTimestamp: unixTimestamp,
+        type: 'Doc',
+        _tags: [tag, 'docs']
+      }
+    } else {
+      indexItem = {
+        title: documentTitle,
+        categories,
+        deployment,
+        version: version,
+        text: text,
+        intro: intro,
+        objectID: urlPath + page.pub.url,
+        titles: titles,
+        unixTimestamp: unixTimestamp,
+        type: 'Lab',
+        interactive: false,
+        _tags: ['labs']
+      }
     }
-
     algolia[cname][version].push(indexItem)
     algoliaCount++
   }
-
   return algolia
 }
 
