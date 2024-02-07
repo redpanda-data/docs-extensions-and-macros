@@ -1,4 +1,5 @@
 = Extensions and Macros Preview
+:page-categories: some-invalid-category
 
 This page is a preview of extensions and macros.
 
