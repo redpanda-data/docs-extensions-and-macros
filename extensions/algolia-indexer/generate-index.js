@@ -183,28 +183,27 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     ? page.asciidoc.attributes['page-categories'].split(',').map(category => category.trim())
     : []
 
-  indexItem = {
-    title: documentTitle,
-    version: version,
-    text: text,
-    intro: intro,
-    objectID: urlPath + page.pub.url,
-    titles: titles,
-    categories: categories,
-    unixTimestamp: unixTimestamp,
-};
+    var indexItem = {
+      title: documentTitle,
+      version: version,
+      text: text,
+      intro: intro,
+      objectID: urlPath + page.pub.url,
+      titles: titles,
+      categories: categories,
+      unixTimestamp: unixTimestamp,
+    }
 
-if (component.name !== 'redpanda-labs') {
-  indexItem.product = component.title;
-  indexItem.breadcrumbs = breadcrumbs;
-  indexItem.type = 'Doc';
-  indexItem._tags = [tag, 'docs'];
-} else {
-  indexItem.deployment = deployment;
-  indexItem.type = 'Lab';
-  indexItem.interactive = false;
-  indexItem._tags = ['labs'];
-}
+    if (component.name !== 'redpanda-labs') {
+      indexItem.product = component.title;
+      indexItem.breadcrumbs = breadcrumbs;
+      indexItem.type = 'Doc';
+      indexItem._tags = [tag, 'docs'];
+    } else {
+      indexItem.deployment = deployment;
+      indexItem.type = 'Lab';
+      indexItem.interactive = false;
+      indexItem._tags = ['labs'];
     }
     algolia[cname][version].push(indexItem)
     algoliaCount++
