@@ -61,7 +61,8 @@ function getDeploymentType (attributes) {
   return attributes['env-kubernetes'] ? 'Kubernetes'
     : attributes['env-linux'] ? 'Linux'
       : attributes['env-docker'] ? 'Docker'
-        : attributes.cloud ? 'Redpanda Cloud' : ''
+        : attributes.cloud ? 'Redpanda Cloud' 
+        : ''
 }
 
 function hasMatchingCategory (sourcePageCategories, targetPageCategories) {

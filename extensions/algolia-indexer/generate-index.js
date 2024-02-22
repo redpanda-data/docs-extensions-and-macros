@@ -183,36 +183,28 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     ? page.asciidoc.attributes['page-categories'].split(',').map(category => category.trim())
     : []
 
-    if (component.name !== 'redpanda-labs'){
-      indexItem = {
-        title: documentTitle,
-        product: component.title,
-        version: version,
-        text: text,
-        breadcrumbs: breadcrumbs,
-        intro: intro,
-        objectID: urlPath + page.pub.url,
-        titles: titles,
-        categories,
-        unixTimestamp: unixTimestamp,
-        type: 'Doc',
-        _tags: [tag, 'docs']
-      }
-    } else {
-      indexItem = {
-        title: documentTitle,
-        categories,
-        deployment,
-        version: version,
-        text: text,
-        intro: intro,
-        objectID: urlPath + page.pub.url,
-        titles: titles,
-        unixTimestamp: unixTimestamp,
-        type: 'Lab',
-        interactive: false,
-        _tags: ['labs']
-      }
+  indexItem = {
+    title: documentTitle,
+    version: version,
+    text: text,
+    intro: intro,
+    objectID: urlPath + page.pub.url,
+    titles: titles,
+    categories: categories,
+    unixTimestamp: unixTimestamp,
+};
+
+if (component.name !== 'redpanda-labs') {
+  indexItem.product = component.title;
+  indexItem.breadcrumbs = breadcrumbs;
+  indexItem.type = 'Doc';
+  indexItem._tags = [tag, 'docs'];
+} else {
+  indexItem.deployment = deployment;
+  indexItem.type = 'Lab';
+  indexItem.interactive = false;
+  indexItem._tags = ['labs'];
+}
     }
     algolia[cname][version].push(indexItem)
     algoliaCount++
