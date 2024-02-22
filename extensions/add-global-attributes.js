@@ -11,31 +11,31 @@ module.exports.register = function ({ config }) {
   const _ = require('lodash');
 
   this.on('contentAggregated', ({ siteCatalog, contentAggregate }) => {
-    let attributeFile;
     try {
       for (const component of contentAggregate) {
         if (component.name === 'shared') {
-          attributeFile = component.files.find(file => file.path.includes('attributes.yml'));
-          if (!attributeFile) {
-            logger.warn("No attributes.yml file found in 'shared' component.");
+          const attributeFiles = component.files.filter(file => file.path.startsWith('modules/ROOT/partials/') && file.path.endsWith('.yml'));
+          if (!attributeFiles.length) {
+            logger.warn("No YAML attributes files found in 'shared' component.");
           } else {
-            siteCatalog.attributeFile = yaml.load(attributeFile.contents.toString('utf8'));
-            console.log(chalk.green('Loaded attributes from shared component.'));
+            siteCatalog.attributeFile = attributeFiles.reduce((acc, file) => {
+              const fileAttributes = yaml.load(file.contents.toString('utf8'));
+              return _.merge(acc, fileAttributes);
+            }, {});
+            console.log(chalk.green('Loaded global attributes from shared component.'));
           }
-          break
+          break;
         }
       }
     } catch (error) {
       logger.error(`Error loading attributes: ${error.message}`);
     }
   })
-  .on('contentClassified', async ({ siteCatalog,contentCatalog }) => {
+  .on('contentClassified', async ({ siteCatalog, contentCatalog }) => {
     const components = await contentCatalog.getComponents();
     for (let i = 0; i < components.length; i++) {
       let component = components[i];
-      if (component.name !== 'ROOT' && component.name !== 'preview') continue
-
-      component.versions.forEach(({asciidoc}) => {
+      component.versions.forEach(({ asciidoc }) => {
         if (siteCatalog.attributeFile) {
           asciidoc.attributes = _.merge({}, siteCatalog.attributeFile, asciidoc.attributes);
         }

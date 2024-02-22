@@ -27,7 +27,6 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
   const algolia = {}
 
   console.log(chalk.cyan('Indexing...'))
-
   const unixTimestamp = Math.floor(Date.now() / 1000)
 
   // Select indexable pages
@@ -176,27 +175,39 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       .replace(/\s+/g, ' ')
       .trim();
 
-    var tag = `${component.title}-${version}`
+    var tag = `${component.title}${version ? '-' + version : ''}`
+    var indexItem;
+    const deployment = page.asciidoc?.attributes['env-kubernetes'] ? 'Kubernetes' : page.asciidoc?.attributes['env-linux'] ? 'Linux' : page.asciidoc?.attributes['env-docker'] ? 'Docker' : page.asciidoc?.attributes['page-cloud'] ? 'Redpanda Cloud' : ''
 
-    const indexItem = {
+    const categories = page.asciidoc?.attributes['page-categories']
+    ? page.asciidoc.attributes['page-categories'].split(',').map(category => category.trim())
+    : []
+
+    var indexItem = {
       title: documentTitle,
-      product: component.title,
       version: version,
       text: text,
-      breadcrumbs: breadcrumbs,
       intro: intro,
       objectID: urlPath + page.pub.url,
       titles: titles,
-      keywords: keywords,
+      categories: categories,
       unixTimestamp: unixTimestamp,
-      type: 'Doc',
-      _tags: [tag, 'docs']
     }
 
+    if (component.name !== 'redpanda-labs') {
+      indexItem.product = component.title;
+      indexItem.breadcrumbs = breadcrumbs;
+      indexItem.type = 'Doc';
+      indexItem._tags = [tag, 'docs'];
+    } else {
+      indexItem.deployment = deployment;
+      indexItem.type = 'Lab';
+      indexItem.interactive = false;
+      indexItem._tags = ['labs'];
+    }
     algolia[cname][version].push(indexItem)
     algoliaCount++
   }
-
   return algolia
 }
 

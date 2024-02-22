@@ -16,7 +16,7 @@ module.exports.register = function ({ config }) {
     logger.warn('REDPANDA_GITHUB_TOKEN environment variable not set. Attempting unauthenticated request.');
   }
   this
-    .on('contentClassified', async ({ siteCatalog,contentCatalog }) => {
+    .on('contentClassified', async ({ contentCatalog }) => {
       try {
         const LatestRedpandaVersion = await GetLatestRedpandaVersion();
         const LatestConsoleVersion = await GetLatestConsoleVersion();
@@ -33,12 +33,11 @@ module.exports.register = function ({ config }) {
         const components = await contentCatalog.getComponents();
         for (let i = 0; i < components.length; i++) {
           let component = components[i];
-          if (component.name !== 'ROOT' && component.name !== 'preview') continue
 
           component.versions.forEach(({name, version, asciidoc}) => {
             if (LatestConsoleVersion) {
               asciidoc.attributes['latest-console-version'] = `${LatestConsoleVersion}`;
-              console.log(`${chalk.green('Set Redpanda Console version to')} ${chalk.bold(LatestConsoleVersion)} in ${name} ${version}`);
+              logger.info(`Set Redpanda Console version to')} ${LatestConsoleVersion} in ${name} ${version}`);
             }
           })
 
@@ -54,13 +53,16 @@ module.exports.register = function ({ config }) {
 
           component.latest.asciidoc.attributes['full-version'] = `${LatestRedpandaVersion[0]}`;
           component.latest.asciidoc.attributes['latest-release-commit'] = `${LatestRedpandaVersion[1]}`;
-          console.log(`${chalk.green('Set the latest Redpanda version to')} ${chalk.bold(LatestRedpandaVersion[0])} ${chalk.bold(LatestRedpandaVersion[1])}`)
+          logger.info(`Set the latest Redpanda version to ${LatestRedpandaVersion[0]} ${LatestRedpandaVersion[1]}`)
 
           if (!LatestOperatorVersion) continue;
 
           component.latest.asciidoc.attributes['latest-operator-version'] = `${LatestOperatorVersion}`;
-          console.log(`${chalk.green('Set the latest Redpanda Operator version to')} ${chalk.bold(LatestOperatorVersion)}`)
+          logger.info(`Set the latest Redpanda Operator version to ${LatestOperatorVersion}`)
         }
+        console.log(`${chalk.green('Set Redpanda Console version to')} ${chalk.bold(LatestConsoleVersion)}`);
+        console.log(`${chalk.green('Set the latest Redpanda version to')} ${chalk.bold(LatestRedpandaVersion[0])} ${chalk.bold(LatestRedpandaVersion[1])}`)
+        console.log(`${chalk.green('Set the latest Redpanda Operator version to')} ${chalk.bold(LatestOperatorVersion)}`)
       } catch(error) {
         logger.warn(error)
       }

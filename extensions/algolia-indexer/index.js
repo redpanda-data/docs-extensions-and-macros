@@ -114,7 +114,7 @@ function register({
     }
 
     for (const [objectID, obj] of existingObjectsMap) {
-      if (obj.type === 'Doc' && !obj._tags.includes('apis') || !obj.type) {
+      if ((obj.type === 'Doc' && !obj._tags.includes('apis')) || (!obj.type) || (obj.type === 'Lab' && !obj.interactive)) {
         objectsToDelete.push(objectID)
       }
     }
