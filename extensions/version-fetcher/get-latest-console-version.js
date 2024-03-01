@@ -1,6 +1,6 @@
-// Fetch the latest release version from GitHub
 const { Octokit } = require("@octokit/rest");
 const { retry } = require("@octokit/plugin-retry");
+const semver = require("semver");
 const OctokitWithRetries = Octokit.plugin(retry);
 const owner = 'redpanda-data';
 const repo = 'console';
@@ -16,13 +16,29 @@ if (process.env.REDPANDA_GITHUB_TOKEN) {
 
 const github = new OctokitWithRetries(githubOptions);
 
-var latestConsoleReleaseVersion;
-
 module.exports = async () => {
   try {
-    const release = await github.rest.repos.getLatestRelease({ owner, repo });
-    latestConsoleReleaseVersion = release.data.tag_name.replace('v','');
-    return latestConsoleReleaseVersion;
+    // Fetch the latest 10 releases
+    const releases = await github.rest.repos.listReleases({
+      owner,
+      repo,
+      per_page: 10,
+    });
+
+    // Filter valid semver tags and sort them
+    const sortedReleases = releases.data
+      .map(release => release.tag_name.replace(/^v/, ''))
+      .filter(tag => semver.valid(tag))
+      // Sort in descending order to get the highest version first
+      .sort(semver.rcompare);
+
+    if (sortedReleases.length > 0) {
+      // Return the highest version
+      return sortedReleases[0];
+    } else {
+      console.log("No valid semver releases found.");
+      return null;
+    }
   } catch (error) {
     console.error(error);
     return null;

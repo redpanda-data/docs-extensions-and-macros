@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -61,7 +61,8 @@
     "html-entities": "2.3",
     "js-yaml": "^4.1.0",
     "lodash": "^4.17.21",
-    "node-html-parser": "5.4.2-0"
+    "node-html-parser": "5.4.2-0",
+    "semver": "^7.6.0"
   },
   "devDependencies": {
     "@antora/cli": "3.1.4",
