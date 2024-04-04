@@ -175,7 +175,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       .replace(/\s+/g, ' ')
       .trim();
 
-    var tag = `${component.title}${version ? '-' + version : ''}`
+    var tag = `${component.title} ${version ? 'v' + version : ''}`
     var indexItem;
     const deployment = page.asciidoc?.attributes['env-kubernetes'] ? 'Kubernetes' : page.asciidoc?.attributes['env-linux'] ? 'Linux' : page.asciidoc?.attributes['env-docker'] ? 'Docker' : page.asciidoc?.attributes['page-cloud'] ? 'Redpanda Cloud' : ''
 
@@ -198,7 +198,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       indexItem.product = component.title;
       indexItem.breadcrumbs = breadcrumbs;
       indexItem.type = 'Doc';
-      indexItem._tags = [tag, 'docs'];
+      indexItem._tags = [tag];
     } else {
       indexItem.deployment = deployment;
       indexItem.type = 'Lab';
