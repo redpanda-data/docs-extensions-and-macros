@@ -77,7 +77,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
 
     // capture the component name and version
     const cname = component.name
-    const version = page.src.prerelease ? page.src.displayVersion : page.src.version;
+    const version = page.src.origin.descriptor.prerelease ? page.src.origin.descriptor.displayVersion : page.src.version;
 
     // handle the page keywords
     const kw = root.querySelector('meta[name=keywords]')
