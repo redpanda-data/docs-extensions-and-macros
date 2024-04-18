@@ -180,18 +180,9 @@ antora:
   - require: '@redpanda-data/docs-extensions-and-macros/extensions/add-global-attributes'
 ```
 
-=== Modify redirects file
+=== Produce redirects (customization of core Antora)
 
-This extension removes redundant redirects from the Netlify redirects file. The need for this extension arises from an issue where the use of the `indexify` feature in Antora, combined with page aliases, can inadvertently create redirect loops or redundant redirects where the source and target URLs are identical.
-
-The issue is https://antora.zulipchat.com/#narrow/stream/282400-users/topic/Redirect.20Loop.20Issue.20with.20Page.20Renaming.20and.20Indexify/near/433691700[recognized as a bug] within Antora's redirect producer, which does not currently
-check if the source and target URLs are the same before creating a redirect.
-
-The purpose of this script is to scan the `_redirects` file and remove any entries that point
-a URL to itself, which not only prevents redirect loops but also optimizes the redirect process
-by eliminating unnecessary entries. This cleanup helps ensure that the redirects file only contains valid and useful redirection rules.
-
-By integrating this script into the Antora pipeline, we ensure that each build's output is optimized and free from potential issues related to improper redirects, enhancing both site performance and user experience.
+This extension replaces the default `produceRedirects()` function in Antora to handle redirect loops caused by https://docs.antora.org/antora/latest/page/page-aliases/[page aliases]. Normally, page aliases in Antora are used to resolve outdated links without causing issues. However, with https://docs.antora.org/antora/latest/playbook/urls-html-extension-style/#html-extension-style-key[`indexify`], the same URL may inadvertently be used for both the source and target of a redirect, leading to loops. This problem is https://antora.zulipchat.com/#narrow/stream/282400-users/topic/Redirect.20Loop.20Issue.20with.20Page.20Renaming.20and.20Indexify/near/433691700[recognized as a bug] in core Antora. For example, creating a page alias for `modules/manage/security/authorization.adoc` to point to `modules/manage/security/authorization/index.adoc' can lead to a redirect loop where `manage/security/authorization/` points to `manage/security/authorization/`. Furthermore, omitting the alias would lead to `xref not found` errors because Antora relies on the alias to resolve the old xrefs. This extension is necessary until such behaviors are natively supported or fixed in Antora core.
 
 ==== Registration example
 
