@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "3.2.5",
+  "version": "3.2.6",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -35,7 +35,7 @@
     "./extensions/validate-attributes": "./extensions/validate-attributes.js",
     "./extensions/find-related-docs": "./extensions/find-related-docs.js",
     "./extensions/find-related-labs": "./extensions/find-related-labs.js",
-    "./extensions/modify-redirects": "./extensions/modify-redirects.js",
+    "./extensions/modify-redirects": "./extensions/produce-redirects.js",
     "./extensions/algolia-indexer/index": "./extensions/algolia-indexer/index.js",
     "./extensions/aggregate-terms": "./extensions/aggregate-terms.js",
     "./macros/glossary": "./macros/glossary.js",
