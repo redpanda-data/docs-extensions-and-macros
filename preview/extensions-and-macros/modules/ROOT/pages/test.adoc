@@ -32,12 +32,7 @@ glossterm:<term-name>[,<custom-link-text>]
 
 Here, replace `<custom-link-text>` with your text that will appear as the link. For example:
 
-[,asciidoc]
-----
-glossterm:seed server[,seed servers]
-----
-
-This will display "seed servers" as the link text but will still link to the "seed server" term definition.
+glossterm:test term[,This link text is custom.]
 
 The `hover-text` attribute is read from the term file and used to add hover text to the term.
 
