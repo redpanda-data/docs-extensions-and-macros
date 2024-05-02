@@ -23,6 +23,17 @@ glossterm:<term-name>[]
 
 Replace `<term-name>` with the value of the `term-name` attribute in a term file.
 
+To add custom link text for a term, which can be useful for displaying plurals or context-specific variations of the term without changing the term reference, use this syntax:
+
+[,asciidoc]
+----
+glossterm:<term-name>[,<custom-link-text>]
+----
+
+Here, replace `<custom-link-text>` with your text that will appear as the link. For example:
+
+glossterm:test term[,This link text is custom.]
+
 The `hover-text` attribute is read from the term file and used to add hover text to the term.
 
 The rules for whether a link to the glossary entry is added to the term, depend on what content is available on the term page:

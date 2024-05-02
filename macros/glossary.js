@@ -91,9 +91,10 @@ module.exports.register = function (registry, config = {}) {
       self.named('glossterm')
       //Specifying the regexp allows spaces in the term.
       self.$option('regexp', /glossterm:([^[]+)\[(|.*?[^\\])\]/)
-      self.positionalAttributes(['definition'])
+      self.positionalAttributes(['definition', 'customText']);
       self.process(function (parent, target, attributes) {
         const term = attributes.term || target
+        const customText = attributes.customText || term;
         const document = parent.document
         const context = vfs.getContext()
         const customLinkCandidate = context.gloss.find(candidate => 'link' in candidate && candidate.term === term);
@@ -136,10 +137,10 @@ module.exports.register = function (registry, config = {}) {
         const termExistsInContext = context.gloss.some((candidate) => candidate.term === term);
         if ((termExistsInContext && links) || (links && customLink)) {
           inline = customLink
-            ? self.createInline(parent, 'anchor', target, { type: 'link', target: customLink, attributes: { ...attrs, window: '_blank', rel: 'noopener noreferrer' } })
-            : self.createInline(parent, 'anchor', target, { type: 'xref', target: `${glossaryPage}#${termId(term)}`, reftext: target, attributes: attrs })
+            ? self.createInline(parent, 'anchor', customText, { type: 'link', target: customLink, attributes: { ...attrs, window: '_blank', rel: 'noopener noreferrer' } })
+            : self.createInline(parent, 'anchor', customText, { type: 'xref', target: `${glossaryPage}#${termId(term)}`, reftext: customText, attributes: attrs })
         } else {
-          inline = self.createInline(parent, 'quoted', target, { attributes: attrs })
+          inline = self.createInline(parent, 'quoted', customText, { attributes: attrs })
         }
         if (tooltip) {
           const a = inline.convert()
