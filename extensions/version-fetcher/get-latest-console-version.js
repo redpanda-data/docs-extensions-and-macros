@@ -18,11 +18,11 @@ const github = new OctokitWithRetries(githubOptions);
 
 module.exports = async () => {
   try {
-    // Fetch the latest 10 releases
     const releases = await github.rest.repos.listReleases({
       owner,
       repo,
-      per_page: 10,
+      page: 1,
+      per_page: 50
     });
 
     // Filter valid semver tags and sort them

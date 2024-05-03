@@ -1,7 +1,8 @@
-// Fetch the latest release version from GitHub
 const { Octokit } = require("@octokit/rest");
 const { retry } = require("@octokit/plugin-retry");
+const semver = require("semver");
 const OctokitWithRetries = Octokit.plugin(retry);
+
 const owner = 'redpanda-data';
 const repo = 'redpanda';
 
@@ -18,22 +19,40 @@ const github = new OctokitWithRetries(githubOptions);
 
 module.exports = async () => {
   try {
-    // Fetch the latest release
-    const release = await github.rest.repos.getLatestRelease({ owner, repo });
-    const tag = release.data.tag_name;
-    latestRedpandaReleaseVersion = tag.replace('v', '');
+    // Fetch all the releases from the repository
+    const releases = await github.rest.repos.listReleases({
+      owner,
+      repo,
+      page: 1,
+      per_page: 50
+    });
 
-    // Get reference of the tag
-    const tagRef = await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
-    const releaseSha = tagRef.data.object.sha;
+    // Filter valid semver tags and sort them to find the highest version
+    const sortedReleases = releases.data
+      .map(release => release.tag_name.replace(/^v/, ''))
+      .filter(tag => semver.valid(tag))
+      // Sort in descending order to get the highest version first
+      .sort(semver.rcompare);
+    console.log(sortedReleases)
 
-    // Get the tag object to extract the commit hash
-    const tagData = await github.rest.git.getTag({ owner, repo, tag_sha: releaseSha });
-    latestRedpandaReleaseCommitHash = tagData.data.object.sha.substring(0, 7);
+    if (sortedReleases.length > 0) {
+      const latestRedpandaReleaseVersion = sortedReleases[0];
 
-    return [latestRedpandaReleaseVersion, latestRedpandaReleaseCommitHash];
+      // Get the commit hash for the highest version tag
+      const commitData = await github.rest.git.getRef({
+        owner,
+        repo,
+        ref: `tags/v${latestRedpandaReleaseVersion}`
+      });
+      const latestRedpandaReleaseCommitHash = commitData.data.object.sha;
+
+      return [latestRedpandaReleaseVersion, latestRedpandaReleaseCommitHash.substring(0, 7)];
+    } else {
+      console.log("No valid semver releases found for Redpanda.");
+      return [null, null];
+    }
   } catch (error) {
-    console.error(error);
+    console.error('Failed to fetch Redpanda release information:', error);
     return [null, null];
   }
 };
