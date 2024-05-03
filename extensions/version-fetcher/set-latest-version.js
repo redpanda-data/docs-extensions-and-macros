@@ -1,70 +1,70 @@
-/* Example:
-antora:
-  extensions:
-  - require: ./extensions/setLatestVersion.js
-*/
-
 const GetLatestRedpandaVersion = require('./get-latest-redpanda-version');
 const GetLatestConsoleVersion = require('./get-latest-console-version');
 const GetLatestOperatorVersion = require('./get-latest-operator-version');
-const chalk = require('chalk')
-
+const GetLatestHelmChartVersion = require('./get-latest-redpanda-helm-version');
+const chalk = require('chalk');
 
 module.exports.register = function ({ config }) {
-  const logger = this.getLogger('set-latest-version-extension')
+  const logger = this.getLogger('set-latest-version-extension');
   if (!process.env.REDPANDA_GITHUB_TOKEN) {
     logger.warn('REDPANDA_GITHUB_TOKEN environment variable not set. Attempting unauthenticated request.');
   }
-  this
-    .on('contentClassified', async ({ contentCatalog }) => {
-      try {
-        const LatestRedpandaVersion = await GetLatestRedpandaVersion();
-        const LatestConsoleVersion = await GetLatestConsoleVersion();
-        const LatestOperatorVersion = await GetLatestOperatorVersion();
-        if (LatestRedpandaVersion.length !== 2 || !LatestRedpandaVersion[0]) {
-          logger.warn('Failed to get the latest Redpanda version - using defaults');
-        }
-        if (!LatestConsoleVersion) {
-          logger.warn(`Failed to get latest Console version from GitHub - using default`)
-        }
-        if (!LatestOperatorVersion) {
-          logger.warn(`Failed to get latest Operator version from GitHub - using default`)
-        }
-        const components = await contentCatalog.getComponents();
-        for (let i = 0; i < components.length; i++) {
-          let component = components[i];
 
-          component.versions.forEach(({name, version, asciidoc}) => {
-            if (LatestConsoleVersion) {
-              asciidoc.attributes['latest-console-version'] = `${LatestConsoleVersion}`;
-              logger.info(`Set Redpanda Console version to')} ${LatestConsoleVersion} in ${name} ${version}`);
-            }
-          })
+  this.on('contentClassified', async ({ contentCatalog }) => {
+    try {
+      const results = await Promise.allSettled([
+        GetLatestRedpandaVersion(),
+        GetLatestConsoleVersion(),
+        GetLatestOperatorVersion(),
+        GetLatestHelmChartVersion()
+      ]);
 
-          if (!component.latest.asciidoc) {
-            component.latest.asciidoc = {};
+      // Extracting results with fallbacks if promises were rejected
+      const LatestRedpandaVersion = results[0].status === 'fulfilled' ? results[0].value : null;
+      const LatestConsoleVersion = results[1].status === 'fulfilled' ? results[1].value : null;
+      const LatestOperatorVersion = results[2].status === 'fulfilled' ? results[2].value : null;
+      const LatestHelmChartVersion = results[3].status === 'fulfilled' ? results[3].value : null;
+
+      const components = await contentCatalog.getComponents();
+      components.forEach(component => {
+        component.versions.forEach(({ name, version, asciidoc }) => {
+          if (LatestConsoleVersion) {
+            asciidoc.attributes['latest-console-version'] = LatestConsoleVersion;
+            logger.info(`Set Redpanda Console version to ${LatestConsoleVersion} in ${name} ${version}`);
           }
+        });
 
-          if (!component.latest.asciidoc.attributes) {
-            component.latest.asciidoc.attributes = {};
-          }
-
-          if (LatestRedpandaVersion.length !== 2 || !LatestRedpandaVersion[0]) continue;
-
-          component.latest.asciidoc.attributes['full-version'] = `${LatestRedpandaVersion[0]}`;
-          component.latest.asciidoc.attributes['latest-release-commit'] = `${LatestRedpandaVersion[1]}`;
-          logger.info(`Set the latest Redpanda version to ${LatestRedpandaVersion[0]} ${LatestRedpandaVersion[1]}`)
-
-          if (!LatestOperatorVersion) continue;
-
-          component.latest.asciidoc.attributes['latest-operator-version'] = `${LatestOperatorVersion}`;
-          logger.info(`Set the latest Redpanda Operator version to ${LatestOperatorVersion}`)
+        if (!component.latest.asciidoc) {
+          component.latest.asciidoc = { attributes: {} };
         }
-        console.log(`${chalk.green('Set Redpanda Console version to')} ${chalk.bold(LatestConsoleVersion)}`);
-        console.log(`${chalk.green('Set the latest Redpanda version to')} ${chalk.bold(LatestRedpandaVersion[0])} ${chalk.bold(LatestRedpandaVersion[1])}`)
-        console.log(`${chalk.green('Set the latest Redpanda Operator version to')} ${chalk.bold(LatestOperatorVersion)}`)
-      } catch(error) {
-        logger.warn(error)
-      }
-    })
-}
+
+        // Handle each version setting with appropriate logging
+        if (LatestRedpandaVersion) {
+          component.latest.asciidoc.attributes['full-version'] = LatestRedpandaVersion[0];
+          component.latest.asciidoc.attributes['latest-release-commit'] = LatestRedpandaVersion[1];
+          logger.info(`Set the latest Redpanda version to ${LatestRedpandaVersion[0]} ${LatestRedpandaVersion[1]}`);
+        } else {
+          logger.warn("Failed to get the latest Redpanda version - using defaults");
+        }
+
+        if (LatestOperatorVersion) {
+          component.latest.asciidoc.attributes['latest-operator-version'] = LatestOperatorVersion;
+          logger.info(`Set the latest Redpanda Operator version to ${LatestOperatorVersion}`);
+        } else {
+          logger.warn("Failed to get the latest Operator version from GitHub - using default");
+        }
+
+        if (LatestHelmChartVersion) {
+          component.latest.asciidoc.attributes['latest-redpanda-helm-chart-version'] = LatestHelmChartVersion;
+          logger.info(`Set the latest Redpanda Helm chart version to ${LatestHelmChartVersion}`);
+        } else {
+          logger.warn("Failed to get the latest Helm Chart version - using default");
+        }
+      });
+
+      console.log(`${chalk.green('Updated Redpanda documentation versions successfully.')}`);
+    } catch (error) {
+      logger.error(`Error updating versions: ${error}`);
+    }
+  });
+};
