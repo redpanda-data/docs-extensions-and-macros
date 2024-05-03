@@ -27,6 +27,7 @@ antora:
   - './extensions/algolia-indexer/index'
   - require: './extensions/unlisted-pages'
   - require: './extensions/replace-attributes-in-attachments'
+  - require: './extensions/unpublish-pages'
   - require: './extensions/validate-attributes'
   - require: './extensions/find-related-docs'
   - require: './extensions/find-related-labs'
