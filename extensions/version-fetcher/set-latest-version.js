@@ -6,7 +6,7 @@ const chalk = require('chalk')
 const semver = require('semver')
 
 module.exports.register = function ({ config }) {
-  const logger = this.getLogger('set-latest-version-extension')
+  const logger = this.getLogger('set-latest-version-extension');
   if (!process.env.REDPANDA_GITHUB_TOKEN) {
     logger.warn('REDPANDA_GITHUB_TOKEN environment variable not set. Attempting unauthenticated request.')
   }
