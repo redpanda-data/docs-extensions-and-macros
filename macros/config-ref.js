@@ -13,12 +13,12 @@ const buildConfigReference = ({ configRef, isKubernetes, isLink, path }) => {
   let ref = '';
   if (isLink) {
     if (isKubernetes) {
-      ref = `xref:reference:${path}.adoc#${configRef}[storage.tieredConfig.${configRef}]`;
+      ref = `xref:reference:${path}.adoc#${configRef}[storage.tiered.config.${configRef}]`;
     } else {
       ref = `xref:reference:${path}.adoc#${configRef}[${configRef}]`;
     }
   } else {
-    ref = isKubernetes ? `storage.tieredConfig.${configRef}` : `${configRef}`;
+    ref = isKubernetes ? `storage.tiered.config.${configRef}` : `${configRef}`;
   }
   return ref;
 }
