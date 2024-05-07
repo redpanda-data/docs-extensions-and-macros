@@ -33,7 +33,6 @@ module.exports = async () => {
       .filter(tag => semver.valid(tag))
       // Sort in descending order to get the highest version first
       .sort(semver.rcompare);
-    console.log(sortedReleases)
 
     if (sortedReleases.length > 0) {
       const latestRedpandaReleaseVersion = sortedReleases[0];
