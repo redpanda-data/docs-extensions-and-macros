@@ -8,5 +8,5 @@ asciidoc:
   attributes:
     replace-attributes-in-attachments: true
     test-attribute: This attribute was replaced by the `replace-attributes-in-attachments` extension.
-    full-version: 'This should get replaced'
+    full-version: 23.2.1
     latest-release-commit: 'This should get replaced'
