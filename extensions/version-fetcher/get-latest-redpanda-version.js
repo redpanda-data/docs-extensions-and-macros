@@ -30,7 +30,7 @@ module.exports = async () => {
     // Filter valid semver tags and sort them to find the highest version
     const sortedReleases = releases.data
       .map(release => release.tag_name.replace(/^v/, ''))
-      .filter(tag => semver.valid(tag))
+      .filter(tag => semver.valid(tag) && !tag.match(/rc-\d+$/))  // Exclude 'rc-{number}' suffixes
       // Sort in descending order to get the highest version first
       .sort(semver.rcompare);
 
