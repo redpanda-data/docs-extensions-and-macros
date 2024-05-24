@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "3.2.12",
+  "version": "3.3.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -30,6 +30,7 @@
       "require": "./extensions/unlisted-pages.js"
     },
     "./extensions/replace-attributes-in-attachments": "./extensions/replace-attributes-in-attachments.js",
+    "./extensions/generate-rp-connect-categories": "./extensions/generate-rp-connect-categories.js",
     "./extensions/add-global-attributes": "./extensions/add-global-attributes.js",
     "./extensions/version-fetcher/set-latest-version": "./extensions/version-fetcher/set-latest-version.js",
     "./extensions/validate-attributes": "./extensions/validate-attributes.js",
@@ -40,6 +41,7 @@
     "./extensions/algolia-indexer/index": "./extensions/algolia-indexer/index.js",
     "./extensions/aggregate-terms": "./extensions/aggregate-terms.js",
     "./macros/glossary": "./macros/glossary.js",
+    "./macros/rp-connect-components": "./macros/rp-connect-components.js",
     "./macros/config-ref": "./macros/config-ref.js",
     "./macros/helm-ref": "./macros/helm-ref.js"
   },

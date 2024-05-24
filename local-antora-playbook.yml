@@ -19,12 +19,14 @@ asciidoc:
   - './macros/glossary'
   - './macros/config-ref'
   - './macros/helm-ref'
+  - './macros/rp-connect-components'
   - './asciidoc-extensions/add-line-numbers-highlights'
 antora:
   extensions:
   - require: './extensions/add-global-attributes'
   - './extensions/version-fetcher/set-latest-version'
   - './extensions/algolia-indexer/index'
+  - require: './extensions/generate-rp-connect-categories'
   - require: './extensions/unlisted-pages'
   - require: './extensions/replace-attributes-in-attachments'
   - require: './extensions/unpublish-pages'

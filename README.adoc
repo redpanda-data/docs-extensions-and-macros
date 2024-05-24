@@ -77,6 +77,22 @@ antora:
     index-latest-only: true
 ```
 
+=== Component category aggregator
+
+This extension maps Redpanda Connect component data into a structured format:
+
+- Maps original component names to common names.
+- Populates `connectCategoriesData` and `flatComponentsData` attributes.
+- Skips deprecated components.
+
+==== Registration Example
+
+```yaml
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/generate-rp-connect-categories'
+```
+
 === Version fetcher
 
 This extension fetches the latest release versions from GitHub.
@@ -419,6 +435,66 @@ asciidoc:
   extensions:
     - '@redpanda-data/docs-extensions-and-macros/macros/helm-ref'
 ----
+
+=== components_by_category
+
+This macro generates a tabbed interface to display Redpanda Connect components by category.
+
+The categories are fetched from the `connectCategoriesData` that's generated in the << Component category aggregator>> extension.
+
+==== Usage
+
+```asciidoc
+components_by_category::[<type>]
+```
+
+==== Registration example
+
+```yaml
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/rp-connect-components'
+```
+
+=== component_table
+
+This macro generates a searchable table of all Redpanda Connect components with filters for support and type.
+
+The types are fetched from the `flatComponentsData` that's generated in the << Component category aggregator>> extension.
+
+==== Usage
+
+```asciidoc
+component_table::[]
+```
+
+==== Registration example
+
+```yaml
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/rp-connect-components'
+```
+
+=== component_type_dropdown
+
+This macro generates a dropdown of other supported types for a particular component, allowing users to switch between different types.
+
+The types are fetched from the `flatComponentsData` that's generated in the << Component category aggregator>> extension.
+
+==== Usage
+
+```asciidoc
+component_type_dropdown::[]
+```
+
+==== Registration example
+
+```yaml
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/rp-connect-components'
+```
 
 == Development quickstart
 
