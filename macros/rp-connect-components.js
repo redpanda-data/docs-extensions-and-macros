@@ -153,20 +153,43 @@ module.exports.register = function (registry, context) {
     }
   }
   }
+  function getQueryParams() {
+    const params = {};
+    const searchParams = new URLSearchParams(window.location.search);
+    searchParams.forEach((value, key) => {
+      params[key] = value;
+    });
+    return params;
+  }
+
+  function capitalizeFirstLetter(string) {
+    return string.charAt(0).toUpperCase() + string.slice(1);
+  }
 
   function updateComponentUrl(select, redirect) {
-  const anchor = select.closest('tr').querySelector('a');
-  anchor.href = select.value;
-  if (redirect) {
-    window.location.href = select.value; // Redirect to the new URL
-  }
+    const anchor = select.closest('tr').querySelector('a');
+    anchor.href = select.value;
+    if (redirect) {
+      window.location.href = select.value; // Redirect to the new URL
+    }
   }
   // Initialize Choices.js for type dropdowns
   document.addEventListener('DOMContentLoaded', function() {
-  const typeDropdowns = document.querySelectorAll('.type-dropdown');
-  typeDropdowns.forEach(dropdown => {
-    new Choices(dropdown, { searchEnabled: false,  allowHTML: true});
-  });
+    const params = getQueryParams();
+    if (params.search) {
+      document.getElementById('componentTableSearch').value = params.search;
+    }
+    if (params.support) {
+      document.getElementById('supportFilter').value = capitalizeFirstLetter(params.support);
+    }
+    if (params.type) {
+      document.getElementById('typeFilter').value = params.type;
+    }
+    filterComponentTable();
+    const typeDropdowns = document.querySelectorAll('.type-dropdown');
+    typeDropdowns.forEach(dropdown => {
+      new Choices(dropdown, { searchEnabled: false,  allowHTML: true});
+    });
   });
   </script>`;
 
