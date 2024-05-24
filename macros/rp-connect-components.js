@@ -6,7 +6,7 @@ module.exports.register = function (registry, context) {
   // Add the category tabs for components
   registry.blockMacro(function () {
     const self = this;
-    self.named('componentsbycategory');
+    self.named('components_by_category');
     self.positionalAttributes(['type']);
     self.process((parent, target, attrs) => {
       const type = attrs.type;
@@ -60,7 +60,7 @@ module.exports.register = function (registry, context) {
   // Add the searchable table of all components (component catalog)
   registry.blockMacro(function () {
     const self = this;
-    self.named('componenttable');
+    self.named('component_table');
     self.process((parent, target, attrs) => {
       const flatComponentsData = context.config?.attributes?.flatComponentsData || []
 
@@ -176,7 +176,7 @@ module.exports.register = function (registry, context) {
   // Add the block macro for displaying a dropdown of other supported types
   registry.blockMacro(function () {
     const self = this;
-    self.named('componenttypedropdown');
+    self.named('component_type_dropdown');
     self.process((parent, target, attrs) => {
       const attributes = parent.getDocument().getAttributes();
       const name = attributes['doctitle'];
