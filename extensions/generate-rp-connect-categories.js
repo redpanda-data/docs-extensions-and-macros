@@ -4,8 +4,7 @@ module.exports.register = function ({ config }) {
   const logger = this.getLogger('redpanda-connect-category-aggregation-extension');
 
   // Component name mapping for common names
-  const componentNameMap = {}
-    /*
+  const componentNameMap = {
     "aws_kinesis_data_streams": "AWS Kinesis Data Streams",
     "aws_kinesis_firehose": "AWS Kinesis Firehose",
     "aws_kinesis": "AWS Kinesis",
@@ -57,81 +56,80 @@ module.exports.register = function ({ config }) {
     "ristretto": "Ristretto",
     "schema_registry": "Schema Registry",
     "sentry": "Sentry",
+    "splunk_hec": "Splunk",
+    "snowflake_put": "Snowflake",
     "socket": "Socket",
     "sql": "SQL",
     "sqlite": "SQLite",
     "trino": "Trino",
-    "wasm": "Wasm (WebAssembly)",
+    "wasm": "WebAssembly",
     "websocket": "WebSocket",
-    "twitter_search": "X (Twitter)",
+    "twitter_search": "X/Twitter",
     "xml": "XML"
   };
-  */
 
   const certifiedConnectors = {
-    "aws_kinesis_firehose": ["output"],
-    "aws_s3": ["input", "output"],
-    "aws_sqs": ["input", "output"],
-    "sql_raw": ["input", "output", "processor"],
-    "sql_insert": ["output", "processor"],
-    "sql_select": ["input", "output", "processor"],
-    "aws_kinesis": ["input", "output"],
-    "csv": ["input"],
-    "generate": ["input"],
-    "redis_scan": ["input"],
-    "opensearch": ["output"],
-    "redis_hash": ["output"],
     "amqp_0_9": ["input", "output"],
-    "file": ["input", "output"],
-    "http_client": ["input", "output"],
-    "http_server": ["input", "output"],
-    "kafka": ["input", "output"],
-    "kafka_franz": ["input", "output"],
-    "nats": ["input", "output"],
-    "nats_jetstream": ["input", "output"],
-    "nats_kv": ["input", "output"],
-    "redis_list": ["input", "output"],
-    "redis_pubsub": ["input", "output"],
-    "redis_streams": ["input", "output"],
-    "socket": ["input", "output"],
-    "socket_server": ["input", "output"],
-    "websocket": ["input", "output"],
-    "sftp": ["output"],
     "archive": ["processor"],
     "aws_dynamodb_partiql": ["processor"],
+    "aws_kinesis": ["input", "output"],
+    "aws_kinesis_firehose": ["output"],
     "aws_lambda": ["processor"],
+    "aws_s3": ["input", "output"],
+    "aws_sqs": ["input", "output"],
     "bloblang": ["processor"],
     "bounds_check": ["processor"],
     "cache": ["processor"],
     "cached": ["processor"],
     "command": ["processor"],
     "compress": ["processor"],
+    "csv": ["input"],
     "decompress": ["processor"],
     "dedupe": ["processor"],
+    "file": ["input", "output"],
+    "generate": ["input"],
     "group_by": ["processor"],
     "group_by_value": ["processor"],
     "http": ["processor"],
+    "http_client": ["input", "output"],
+    "http_server": ["input", "output"],
     "javascript": ["processor"],
     "jmespath": ["processor"],
     "jq": ["processor"],
     "json_schema": ["processor"],
+    "kafka": ["input", "output"],
+    "kafka_franz": ["input", "output"],
     "log": ["processor"],
     "mapping": ["processor"],
     "metric": ["processor"],
     "mutation": ["processor"],
-    "nats_kv": ["processor"],
+    "nats": ["input", "output"],
+    "nats_jetstream": ["input", "output"],
+    "nats_kv": ["input", "output", "processor"],
     "nats_request_reply": ["processor"],
+    "opensearch": ["output"],
     "parquet_decode": ["processor"],
     "parquet_encode": ["processor"],
     "protobuf": ["processor"],
     "rate_limit": ["processor"],
     "redis": ["processor"],
+    "redis_hash": ["output"],
+    "redis_list": ["input", "output"],
+    "redis_pubsub": ["input", "output"],
     "redis_script": ["processor"],
+    "redis_streams": ["input", "output"],
     "schema_registry_decode": ["processor"],
     "schema_registry_encode": ["processor"],
     "select_parts": ["processor"],
+    "sftp": ["output"],
     "sleep": ["processor"],
+    "socket": ["input", "output"],
+    "socket_server": ["input", "output"],
+    "sql_insert": ["output", "processor"],
+    "sql_raw": ["input", "output", "processor"],
+    "sql_select": ["input", "output", "processor"],
     "unarchive": ["processor"],
+    "websocket": ["input", "output"],
     "workflow": ["processor"]
   };
 
@@ -175,6 +173,7 @@ module.exports.register = function ({ config }) {
 
         if (typeMatch) {
           const fileType = typeMatch[1];
+
           let status = statusMatch ? statusMatch[1] : 'community';
           //if (status === 'beta' || status === 'experimental') status = 'community';
           //if (status === 'stable') status = 'certified';
@@ -188,13 +187,6 @@ module.exports.register = function ({ config }) {
           } else {
             status = 'community';
           }
-
-          // Replace :status: attribute with :page-status:
-          content = content.replace(/:status: .*/, `:page-status: ${status}`);
-          content = content.replace(/:driver-support: .*/, driverSupportMatch ? `:page-driver-support: ${driverSupportMatch[1]}` : ':page-driver-support:');
-          content = content.replace(/:cache-support: .*/, cacheSupportMatch ? `:page-cache-support: ${cacheSupportMatch[1]}` : ':page-cache-support:');
-          content = content.replace(/:enterprise: true/, enterpriseMatch ? ':page-enterprise: true' : ':page-enterprise:');
-          file.contents = Buffer.from(content, 'utf8');
 
           const commonName = componentNameMap?.[name] ?? name;
 
