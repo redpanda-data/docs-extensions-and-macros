@@ -183,7 +183,7 @@ module.exports.register = function ({ config }) {
           if (status === 'deprecated') return;
 
           // Override status to "certified" if in the lookup table
-          if (certifiedConnectors[name] && certifiedConnectors[name].includes(fileType)) {
+          if (certifiedConnectors[name] && certifiedConnectors[name].includes(fileType) || enterpriseMatch) {
             status = 'certified';
           } else {
             status = 'community';
