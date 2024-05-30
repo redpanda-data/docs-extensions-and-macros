@@ -175,7 +175,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       .replace(/\s+/g, ' ')
       .trim();
 
-    var tag = `${component.title} ${version ? 'v' + version : ''}`
+    var tag = `${component.title} ${version ? 'v' + version : ''}`.trim();
     var indexItem;
     const deployment = page.asciidoc?.attributes['env-kubernetes'] ? 'Kubernetes' : page.asciidoc?.attributes['env-linux'] ? 'Linux' : page.asciidoc?.attributes['env-docker'] ? 'Docker' : page.asciidoc?.attributes['page-cloud'] ? 'Redpanda Cloud' : ''
 
