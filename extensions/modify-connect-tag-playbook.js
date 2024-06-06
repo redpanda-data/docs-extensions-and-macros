@@ -19,7 +19,7 @@ module.exports.register = function ({ config }) {
       });
       this.updateVariables({ playbook: newPlaybook });
     } catch (error) {
-      console.error('Failed to update playbook with the latest tag:', error);
+      console.error('Failed to update playbook with the latest Redpanda Connect tag:', error);
     }
   });
 }
