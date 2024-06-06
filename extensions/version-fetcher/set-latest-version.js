@@ -2,6 +2,7 @@ const GetLatestRedpandaVersion = require('./get-latest-redpanda-version')
 const GetLatestConsoleVersion = require('./get-latest-console-version')
 const GetLatestOperatorVersion = require('./get-latest-operator-version')
 const GetLatestHelmChartVersion = require('./get-latest-redpanda-helm-version')
+const GetLatestConnectVersion = require('./get-latest-connect')
 const chalk = require('chalk')
 const semver = require('semver')
 
@@ -17,13 +18,15 @@ module.exports.register = function ({ config }) {
         GetLatestRedpandaVersion(),
         GetLatestConsoleVersion(),
         GetLatestOperatorVersion(),
-        GetLatestHelmChartVersion()
+        GetLatestHelmChartVersion(),
+        GetLatestConnectVersion()
       ])
 
       const LatestRedpandaVersion = results[0].status === 'fulfilled' ? results[0].value : null
       const LatestConsoleVersion = results[1].status === 'fulfilled' ? results[1].value : null
       const LatestOperatorVersion = results[2].status === 'fulfilled' ? results[2].value : null
       const LatestHelmChartVersion = results[3].status === 'fulfilled' ? results[3].value : null
+      const LatestConnectVersion = results[4].status === 'fulfilled' ? results[4].value : null
 
       const components = await contentCatalog.getComponents()
       components.forEach(component => {
@@ -31,6 +34,10 @@ module.exports.register = function ({ config }) {
           if (LatestConsoleVersion) {
             asciidoc.attributes['latest-console-version'] = `${LatestConsoleVersion}@`
             logger.info(`Set Redpanda Console version to ${LatestConsoleVersion} in ${name} ${version}`)
+          }
+          if (LatestConnectVersion) {
+            asciidoc.attributes['latest-connect-version'] = `${LatestConnectVersion}@`
+            logger.info(`Set Redpanda Connect version to ${LatestConnectVersion} in ${name} ${version}`)
           }
         })
 

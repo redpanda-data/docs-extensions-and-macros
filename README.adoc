@@ -44,13 +44,13 @@ To use the development version instead, refer to the <<development-quickstart,De
 
 This section documents the Antora extensions that are provided by this library and how to configure them.
 
-IMPORTANT: Be sure to register each extension under the `antora.extensions` key in the playbook, not the `asciidoc.extensions` key.
+IMPORTANT: Ensure you register each extension under the `antora.extensions` key in the playbook, not the `asciidoc.extensions` key.
 
 === Algolia indexer
 
 This extension generates an Algolia index for each version of each component. The index entries are then saved to Algolia using the `saveObjects()` method, and also saved as JSON files in the site catalog. JSON files are published to the site root using the following template: `algolia-<component>-<version>.json`.
 
-NOTE: Only pages that include an `<article>` element with the `doc` class are indexed. Pages marked as "noindex" for "robots" are skipped.
+NOTE: Only pages that include an `<article>` element with the `doc` class are indexed.
 
 ==== Environment variables
 
@@ -85,6 +85,14 @@ This extension maps Redpanda Connect component data into a structured format:
 - Populates `connectCategoriesData` and `flatComponentsData` attributes.
 - Skips deprecated components.
 
+==== Environment variables
+
+This extension does not require any environment variables.
+
+==== Configuration options
+
+There are no configurable options for this extension.
+
 ==== Registration Example
 
 ```yaml
@@ -93,19 +101,41 @@ antora:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/generate-rp-connect-categories'
 ```
 
-=== Version fetcher
+=== Redpanda Connect tag modifier
 
-This extension fetches the latest release versions from GitHub.
-
-The latest Console version is made available to all versions of the Redpanda docs (`ROOT` component.)
-
-The latest Redpanda version and the latest Redpanda Operator version is made available to the latest version of the `ROOT` component.
+This extension updates the playbook to use the latest release tag for the Redpanda Connect documentation. It ensures that the Redpanda Connect documentation is always pulled from the latest release tag available on GitHub.
 
 ==== Environment variables
 
 - `REDPANDA_GITHUB_TOKEN` (optional): A Personal access token (PAT) that has `repo` permissions for the `redpanda-data` GitHub organization.
 
-NOTE: If you don't set the environment variable, the latest versions may not be made available to your build. When the environment variable is not set, the extension sends unauthenticated requests to GitHub. Unauthenticated requests may result in hitting the API rate limit and cause GitHub to reject the request.
+NOTE: If you don't set the environment variable, the latest version of Redpanda Connect may not be fetched. When the environment variable is not set, the extension sends unauthenticated requests to GitHub. Unauthenticated requests may result in hitting the API rate limit and cause GitHub to reject the request. In this case the fallback version is used. This version is defined in the playbook where the extension is registered.
+
+==== Configuration options
+
+There are no configurable options for this extension.
+
+==== Registration Example
+
+```yaml
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/modify-connect-tag-playbook'
+```
+
+=== Version fetcher
+
+This extension fetches the latest release versions from GitHub.
+
+The latest versions of Redpanda Console and Redpanda Connect are made available to all versions of all Antora components.
+
+The latest Redpanda version and the latest Redpanda Operator version are made available to the latest version of the `ROOT` component (Redpanda docs).
+
+==== Environment variables
+
+- `REDPANDA_GITHUB_TOKEN` (optional): A Personal access token (PAT) that has `repo` permissions for the `redpanda-data` GitHub organization.
+
+NOTE: If you don't set the environment variable, the latest versions may not be fetched. When the environment variable is not set, the extension sends unauthenticated requests to GitHub. Unauthenticated requests may result in hitting the API rate limit and cause GitHub to reject the request.
 
 ==== Registration example
 
@@ -188,6 +218,14 @@ antora:
 
 This extension collects Asciidoc attributes from the {url-playbook}[`shared` component] and makes them available to all component versions. Having global attributes is useful for consistent configuration of local and production builds.
 
+==== Environment variables
+
+This extension does not require any environment variables.
+
+==== Configuration options
+
+There are no configurable options for this extension.
+
 ==== Registration example
 
 ```yaml
@@ -199,6 +237,14 @@ antora:
 === Produce redirects (customization of core Antora)
 
 This extension replaces the default https://gitlab.com/antora/antora/-/tree/v3.1.x/packages/redirect-producer[`produceRedirects()` function] in Antora to handle redirect loops caused by https://docs.antora.org/antora/latest/page/page-aliases/[page aliases]. Normally, page aliases in Antora are used to resolve outdated links without causing issues. However, with https://docs.antora.org/antora/latest/playbook/urls-html-extension-style/#html-extension-style-key[`indexify`], the same URL may inadvertently be used for both the source and target of a redirect, leading to loops. This problem is https://antora.zulipchat.com/#narrow/stream/282400-users/topic/Redirect.20Loop.20Issue.20with.20Page.20Renaming.20and.20Indexify/near/433691700[recognized as a bug] in core Antora. For example, creating a page alias for `modules/manage/security/authorization.adoc` to point to `modules/manage/security/authorization/index.adoc' can lead to a redirect loop where `manage/security/authorization/` points to `manage/security/authorization/`. Furthermore, omitting the alias would lead to `xref not found` errors because Antora relies on the alias to resolve the old xrefs. This extension is necessary until such behaviors are natively supported or fixed in Antora core.
+
+==== Environment variables
+
+This extension does not require any environment variables.
+
+==== Configuration options
+
+There are no configurable options for this extension.
 
 ==== Registration example
 
@@ -219,6 +265,14 @@ This extension replaces AsciiDoc attribute placeholders with their respective va
 - If the same attribute placeholder is used multiple times within a file, all instances will be replaced with the attribute's value.
 ====
 
+==== Environment variables
+
+This extension does not require any environment variables.
+
+==== Configuration options
+
+There are no configurable options for this extension.
+
 ==== Registration example
 
 ```yaml
@@ -235,6 +289,14 @@ This extension aggregates all term pages from the {url-playbook}[`shared` compon
 - Looks for glossary pages named `reference:glossary.adoc` in all versions of all components and appends the contents of each term file to the glossary in alphabetical order.
 - If a glossary page is found, sets the `glossary-page` attribute of the <<glossterm, `glossterm` macro>> to `reference:glossary.adoc` so that terms can be linked to the glossary page.
 
+==== Environment variables
+
+This extension does not require any environment variables.
+
+==== Configuration options
+
+There are no configurable options for this extension.
+
 ==== Registration example
 
 ```yaml
@@ -248,6 +310,10 @@ antora:
 This extension identifies and logs any pages that aren't listed in the navigation (nav) file of each version of each component. It then optionally adds these unlisted pages to the end of the navigation tree under a configurable heading.
 
 IMPORTANT: By default, this extension excludes components named 'api'. This behavior is hardcoded and cannot be changed in the configuration.
+
+==== Environment variables
+
+This extension does not require any environment variables.
 
 ==== Configuration options
 
