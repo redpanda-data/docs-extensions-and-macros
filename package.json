@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "3.3.3",
+  "version": "3.4.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -33,6 +33,7 @@
     "./extensions/generate-rp-connect-categories": "./extensions/generate-rp-connect-categories.js",
     "./extensions/add-global-attributes": "./extensions/add-global-attributes.js",
     "./extensions/version-fetcher/set-latest-version": "./extensions/version-fetcher/set-latest-version.js",
+    "./extensions/modify-connect-tag-playbook": "./extensions/modify-connect-tag-playbook.js",
     "./extensions/validate-attributes": "./extensions/validate-attributes.js",
     "./extensions/find-related-docs": "./extensions/find-related-docs.js",
     "./extensions/unpublish-pages": "./extensions/unpublish-pages.js",
