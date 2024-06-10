@@ -14,7 +14,7 @@ module.exports.register = function () {
       const component = contentCatalog.getComponent(componentName);
 
       // Check if the component has a latest prerelease
-      const prerelease = component ? component.latestPrerelease : null;
+      const prerelease = component && component.latestPrerelease ? component.latestPrerelease : false;
 
       // Check the conditions for unpublishing the page
       const shouldUnpublish = (
