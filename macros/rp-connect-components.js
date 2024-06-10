@@ -3,38 +3,6 @@
 module.exports.register = function (registry, context) {
   let tabsCounter = 1; // Counter for generating unique IDs
 
-  const driverNameMap = {
-    "gocosmos": "Azure Cosmos DB",
-    "clickhouse": "ClickHouse",
-    "oracle": "Oracle",
-    "mssql": "Microsoft SQL Server",
-    "mysql": "MYSQL",
-    "snowflake": "Snowflake",
-    "postgresql": "PostgreSQL",
-    "postgres": "PostgreSQL",
-    "sqlite": "SQLite",
-    "trino": "Trino",
-  }
-
-  const cacheNameMap = {
-    "aws_dynamodb": "AWS DynamoDB",
-    "memcached": "Memcached",
-    "redis": "Redis",
-    "aws_s3": "AWS S3",
-    "memory": "Memory",
-    "ristretto": "Ristretto",
-    "couchbase": "Couchbase",
-    "mongodb": "MongoDB",
-    "sql": "SQL",
-    "file": "File",
-    "multilevel": "Multilevel",
-    "ttlru": "TTL LRU",
-    "gcp_cloud_storage": "GCP Cloud Storage",
-    "nats_kv": "NATS KV",
-    "lru": "LRU",
-    "noop": "Noop",
-  };
-
   // Add the category tabs for components
   registry.blockMacro(function () {
     const self = this;
@@ -96,6 +64,8 @@ module.exports.register = function (registry, context) {
     self.named('component_table');
     self.process((parent, target, attrs) => {
       const flatComponentsData = context.config?.attributes?.flatComponentsData || [];
+      const driverNameMap = context.config?.attributes?.drivers || [];
+      const cacheNameMap = context.config?.attributes?.caches || [];
       const driverSupportData = context.config?.attributes?.driverSupportData || {};
       const cacheSupportData = context.config?.attributes?.cacheSupportData || {};
 
@@ -150,8 +120,9 @@ module.exports.register = function (registry, context) {
           const drivers = driverSupportData[item.originalName].split(', ');
           drivers.forEach(driverSupportPair => {
             const [driver, support] = driverSupportPair.split('=');
-            // Map driver name to common name
-            const driverName = driverNameMap[driver] || driver;
+            // Find the common name
+            const driverNameEntry = driverNameMap.find(driverItem => driverItem.key === driver)
+            const driverName = driverNameEntry ? driverNameEntry.name : driver
 
             // Filter for types of input, processor, and output only
             const filteredTypes = item.types.filter(typeOption => ['input', 'processor', 'output'].includes(typeOption.type));
@@ -174,8 +145,9 @@ module.exports.register = function (registry, context) {
           const caches = cacheSupportData[item.originalName].split(', ');
           caches.forEach(cacheSupportPair => {
             const [cache, support] = cacheSupportPair.split('=');
-            // Map driver name to common name
-            const cacheName = cacheNameMap[cache] || cache;
+            // Find the common name
+            const cacheNameEntry = cacheNameMap.find(cacheItem => cacheItem.key === cache)
+            const cacheName = cacheNameEntry ? cacheNameEntry.name : cache
 
             // Filter for types of input, processor, and output only
             const filteredTypes = item.types.filter(typeOption => ['input', 'processor', 'output'].includes(typeOption.type));
