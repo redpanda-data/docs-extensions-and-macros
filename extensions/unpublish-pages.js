@@ -1,10 +1,11 @@
 'use strict';
 
 module.exports.register = function () {
-  this.on('documentsConverted', ({ contentCatalog }) => {
+  this.on('documentsConverted', ({ siteCatalog, contentCatalog }) => {
     // Get all pages that have an `out` property
     const pages = contentCatalog.getPages((page) => page.out);
     let componentName;
+    siteCatalog.unpublishedPages = []
 
     // Iterate over each page
     pages.forEach((page) => {
@@ -25,6 +26,7 @@ module.exports.register = function () {
 
       // If any condition is met, unpublish the page
       if (shouldUnpublish) {
+        siteCatalog.unpublishedPages.push(page.pub.url)
         delete page.out;
       }
     });

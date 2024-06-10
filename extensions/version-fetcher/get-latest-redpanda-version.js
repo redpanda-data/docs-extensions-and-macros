@@ -30,12 +30,13 @@ module.exports = async () => {
     // Filter valid semver tags and sort them to find the highest version
     const sortedReleases = releases.data
       .map(release => release.tag_name.replace(/^v/, ''))
-      .filter(tag => semver.valid(tag) && !tag.match(/rc\d+$/))  // Exclude 'rc-{number}' suffixes
+      .filter(tag => semver.valid(tag))  // Include all valid semver tags
       // Sort in descending order to get the highest version first
       .sort(semver.rcompare);
 
     if (sortedReleases.length > 0) {
-      const latestRedpandaReleaseVersion = sortedReleases[0];
+      const latestRedpandaReleaseVersion = sortedReleases.find(tag => !tag.includes('rc'));
+      const latestRcReleaseVersion = sortedReleases.find(tag => tag.includes('rc'));
 
       // Get the commit hash for the highest version tag
       const commitData = await github.rest.git.getRef({
@@ -45,13 +46,32 @@ module.exports = async () => {
       });
       const latestRedpandaReleaseCommitHash = commitData.data.object.sha;
 
-      return [latestRedpandaReleaseVersion, latestRedpandaReleaseCommitHash.substring(0, 7)];
+      let latestRcReleaseCommitHash = null;
+      if (latestRcReleaseVersion) {
+        const rcCommitData = await github.rest.git.getRef({
+          owner,
+          repo,
+          ref: `tags/v${latestRcReleaseVersion}`
+        });
+        latestRcReleaseCommitHash = rcCommitData.data.object.sha;
+      }
+
+      return {
+        latestRedpandaRelease: {
+          version: latestRedpandaReleaseVersion,
+          commitHash: latestRedpandaReleaseCommitHash.substring(0, 7)
+        },
+        latestRcRelease: latestRcReleaseVersion ? {
+          version: latestRcReleaseVersion,
+          commitHash: latestRcReleaseCommitHash.substring(0, 7)
+        } : null
+      };
     } else {
       console.log("No valid semver releases found for Redpanda.");
-      return [null, null];
+      return { latestRedpandaRelease: null, latestRcRelease: null };
     }
   } catch (error) {
     console.error('Failed to fetch Redpanda release information:', error);
-    return [null, null];
+    return { latestRedpandaRelease: null, latestRcRelease: null };
   }
 };

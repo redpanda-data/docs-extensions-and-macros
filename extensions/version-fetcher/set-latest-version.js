@@ -45,12 +45,16 @@ module.exports.register = function ({ config }) {
           component.latest.asciidoc = { attributes: {} }
         }
 
-        if (LatestRedpandaVersion && semver.valid(LatestRedpandaVersion[0])) {
+        if (LatestRedpandaVersion && semver.valid(LatestRedpandaVersion.latestRedpandaRelease.version)) {
           let currentVersion = component.latest.asciidoc.attributes['full-version'] || '0.0.0'
-          if (semver.gt(LatestRedpandaVersion[0], currentVersion)) {
-            component.latest.asciidoc.attributes['full-version'] = `${LatestRedpandaVersion[0]}@`
-            component.latest.asciidoc.attributes['latest-release-commit'] = `${LatestRedpandaVersion[1]}@`
-            logger.info(`Updated to latest Redpanda version: ${LatestRedpandaVersion[0]} with commit: ${LatestRedpandaVersion[1]}`)
+          if (semver.gt(LatestRedpandaVersion.latestRedpandaRelease.version, currentVersion)) {
+            component.latest.asciidoc.attributes['full-version'] = `${LatestRedpandaVersion.latestRedpandaRelease.version}@`
+            component.latest.asciidoc.attributes['latest-release-commit'] = `${LatestRedpandaVersion.latestRedpandaRelease.commitHash}@`
+            logger.info(`Updated to latest Redpanda version: ${LatestRedpandaVersion.latestRedpandaRelease.version} with commit: ${LatestRedpandaVersion.latestRedpandaRelease.commitHash}`)
+          } if(LatestRedpandaVersion && LatestRedpandaVersion.latestRcRelease) {
+              component.latest.asciidoc.attributes['redpanda-beta-version'] = `${LatestRedpandaVersion.latestRcRelease.version}@`
+              component.latest.asciidoc.attributes['redpanda-beta-commit'] = `${LatestRedpandaVersion.latestRcRelease.commitHash}@`
+              logger.info(`Updated to latest Redpanda RC version: ${LatestRedpandaVersion.latestRcRelease.version} with commit: ${LatestRedpandaVersion.latestRcRelease.commitHash}`)
           }
         }
 
