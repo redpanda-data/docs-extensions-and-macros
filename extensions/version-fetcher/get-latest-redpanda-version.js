@@ -27,10 +27,11 @@ module.exports = async () => {
       per_page: 50
     });
 
-    // Filter valid semver tags and sort them to find the highest version
+    // Filter valid semver tags, exclude drafts, and sort them to find the highest version
     const sortedReleases = releases.data
+      .filter(release => !release.draft)
       .map(release => release.tag_name.replace(/^v/, ''))
-      .filter(tag => semver.valid(tag))  // Include all valid semver tags
+      .filter(tag => semver.valid(tag))
       // Sort in descending order to get the highest version first
       .sort(semver.rcompare);
 
@@ -48,6 +49,7 @@ module.exports = async () => {
 
       let latestRcReleaseCommitHash = null;
       if (latestRcReleaseVersion) {
+        console.log(latestRcReleaseVersion)
         const rcCommitData = await github.rest.git.getRef({
           owner,
           repo,
