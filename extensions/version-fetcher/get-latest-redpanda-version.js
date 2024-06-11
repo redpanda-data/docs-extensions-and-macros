@@ -49,7 +49,6 @@ module.exports = async () => {
 
       let latestRcReleaseCommitHash = null;
       if (latestRcReleaseVersion) {
-        console.log(latestRcReleaseVersion)
         const rcCommitData = await github.rest.git.getRef({
           owner,
           repo,
