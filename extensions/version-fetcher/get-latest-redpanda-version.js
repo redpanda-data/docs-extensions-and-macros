@@ -58,10 +58,10 @@ module.exports = async () => {
       }
 
       return {
-        latestRedpandaRelease: {
+        latestRedpandaRelease: latestRedpandaReleaseVersion ? {
           version: latestRedpandaReleaseVersion,
           commitHash: latestRedpandaReleaseCommitHash.substring(0, 7)
-        },
+        } : null ,
         latestRcRelease: latestRcReleaseVersion ? {
           version: latestRcReleaseVersion,
           commitHash: latestRcReleaseCommitHash.substring(0, 7)
