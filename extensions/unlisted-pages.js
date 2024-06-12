@@ -16,7 +16,7 @@ module.exports.register = function ({ config }) {
         const unlistedPages = contentCatalog
           .findBy({ component, version, family: 'page' })
           .reduce((collector, page) => {
-            if (siteCatalog.unpublishedPages.includes(page.pub.url)) {
+            if (siteCatalog.unpublishedPages?.includes(page.pub.url)) {
               logger.info({ file: page.src, source: page.src.origin }, 'removing unpublished page from nav tree');
               removePageFromNav(nav, page.pub.url); // Remove the page from navigationCatalog
               return collector; // Skip adding this page to the collector
