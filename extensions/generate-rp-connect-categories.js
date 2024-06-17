@@ -1,236 +1,119 @@
-'use strict';
+'use strict'
 
 module.exports.register = function ({ config }) {
-  const logger = this.getLogger('redpanda-connect-category-aggregation-extension');
-
-  // Component name mapping for common names
-  const componentNameMap = {
-    "aws_kinesis_data_streams": "AWS Kinesis Data Streams",
-    "aws_kinesis_firehose": "AWS Kinesis Firehose",
-    "aws_kinesis": "AWS Kinesis",
-    "aws_sqs": "AWS SQS",
-    "aws_sns": "AWS SNS",
-    "azure_cosmosdb": "Azure Cosmos DB",
-    "azure_table_storage": "Azure Table Storage",
-    "gcp_bigquery": "GCP BigQuery",
-    "oracle": "Oracle",
-    "snowflake_put": "Snowflake",
-    "aws_dynamodb": "AWS DynamoDB",
-    "azure_blob_storage": "Azure Blob Storage",
-    "aws_s3": "AWS S3",
-    "cassandra": "Cassandra",
-    "gcp_cloud_storage": "GCP Cloud Storage",
-    "amqp": "AMQP",
-    "avro": "Avro",
-    "awk": "AWK",
-    "aws_lambda": "AWS Lambda",
-    "azure_queue_storage": "Azure Queue Storage",
-    "clickhouse": "ClickHouse",
-    "cockroachdb_changefeed": "CockroachDB",
-    "couchbase": "Couchbase",
-    "csv": "CSV",
-    "discord": "Discord",
-    "elasticsearch": "Elasticsearch",
-    "kafka_franz": "Franz-go",
-    "gcp_pubsub": "GCP Pub/Sub",
-    "grok": "Grok",
-    "hdfs": "HDFS",
-    "http": "HTTP",
-    "javascript": "JavaScript",
-    "jmespath": "JMESPath",
-    "json_schema": "JSON Schema",
-    "kafka": "Kafka",
-    "memcached": "Memcached",
-    "msgpack": "MessagePack",
-    "mongodb": "MongoDB",
-    "mqtt": "MQTT",
-    "mysql": "MySQL",
-    "nats": "NATS",
-    "nsq": "NSQ",
-    "opensearch": "OpenSearch",
-    "parquet": "Parquet",
-    "postgresql": "PostgreSQL",
-    "protobuf": "Protobuf",
-    "pulsar": "Pulsar",
-    "redis": "Redis",
-    "ristretto": "Ristretto",
-    "schema_registry": "Schema Registry",
-    "sentry": "Sentry",
-    "splunk_hec": "Splunk",
-    "snowflake_put": "Snowflake",
-    "socket": "Socket",
-    "sql": "SQL",
-    "sqlite": "SQLite",
-    "trino": "Trino",
-    "wasm": "WebAssembly",
-    "websocket": "WebSocket",
-    "twitter_search": "X/Twitter",
-    "xml": "XML"
-  };
-
-  const certifiedConnectors = {
-    "amqp_0_9": ["input", "output"],
-    "archive": ["processor"],
-    "aws_dynamodb_partiql": ["processor"],
-    "aws_kinesis": ["input", "output"],
-    "aws_kinesis_firehose": ["output"],
-    "aws_lambda": ["processor"],
-    "aws_s3": ["input", "output"],
-    "aws_sqs": ["input", "output"],
-    "bloblang": ["processor"],
-    "bounds_check": ["processor"],
-    "cache": ["processor"],
-    "cached": ["processor"],
-    "command": ["processor"],
-    "compress": ["processor"],
-    "csv": ["input"],
-    "decompress": ["processor"],
-    "dedupe": ["processor"],
-    "file": ["input", "output"],
-    "generate": ["input"],
-    "group_by": ["processor"],
-    "group_by_value": ["processor"],
-    "http": ["processor"],
-    "http_client": ["input", "output"],
-    "http_server": ["input", "output"],
-    "javascript": ["processor"],
-    "jmespath": ["processor"],
-    "jq": ["processor"],
-    "json_schema": ["processor"],
-    "kafka": ["input", "output"],
-    "kafka_franz": ["input", "output"],
-    "log": ["processor"],
-    "mapping": ["processor"],
-    "metric": ["processor"],
-    "mutation": ["processor"],
-    "nats": ["input", "output"],
-    "nats_jetstream": ["input", "output"],
-    "nats_kv": ["input", "output", "processor"],
-    "nats_request_reply": ["processor"],
-    "opensearch": ["output"],
-    "parquet_decode": ["processor"],
-    "parquet_encode": ["processor"],
-    "protobuf": ["processor"],
-    "rate_limit": ["processor"],
-    "redis": ["processor"],
-    "redis_hash": ["output"],
-    "redis_list": ["input", "output"],
-    "redis_pubsub": ["input", "output"],
-    "redis_script": ["processor"],
-    "redis_streams": ["input", "output"],
-    "schema_registry_decode": ["processor"],
-    "schema_registry_encode": ["processor"],
-    "select_parts": ["processor"],
-    "sftp": ["output"],
-    "sleep": ["processor"],
-    "socket": ["input", "output"],
-    "socket_server": ["input", "output"],
-    "sql_insert": ["output", "processor"],
-    "sql_raw": ["input", "output", "processor"],
-    "sql_select": ["input", "output", "processor"],
-    "unarchive": ["processor"],
-    "websocket": ["input", "output"],
-    "workflow": ["processor"]
-  };
+  const logger = this.getLogger('redpanda-connect-category-aggregation-extension')
 
   this.once('contentClassified', ({ siteCatalog, contentCatalog }) => {
-    const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'redpanda-connect');
+    const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'redpanda-connect')
     if (!redpandaConnect || !redpandaConnect.latest) {
-      logger.info('Could not find the redpanda-connect component');
-      return;
+      logger.info('Could not find the redpanda-connect component')
+      return
     }
 
-    const descriptions = redpandaConnect.latest.asciidoc.attributes.categories;
-    if (!descriptions) {
-      logger.info('No categories attribute found in redpanda-connect component');
-      return;
+    const descriptions = redpandaConnect.latest.asciidoc.attributes.categories
+    const componentNameMap = redpandaConnect.latest.asciidoc.attributes.components
+    const certifiedConnectors = redpandaConnect.latest.asciidoc.attributes['certified-components']
+
+    if (!descriptions || !componentNameMap || !certifiedConnectors) {
+      if (!descriptions) {
+        logger.error('No categories attribute found in redpanda-connect component')
+      }
+      if (!componentNameMap) {
+        logger.error('No components attribute found in redpanda-connect component')
+      }
+      if (!certifiedConnectors) {
+        logger.error('No certified-components attribute found in redpanda-connect component')
+      }
+      return
     }
 
-    const connectCategoriesData = {};
-    const flatComponentsData = [];
-    const driverSupportData = {};
-    const cacheSupportData = {};
-    const types = Object.keys(descriptions);
+    const connectCategoriesData = {}
+    const flatComponentsData = []
+    const driverSupportData = {}
+    const cacheSupportData = {}
+    const types = Object.keys(descriptions)
 
     // Initialize connectCategoriesData for each type
     types.forEach(type => {
-      connectCategoriesData[type] = [];
-    });
+      connectCategoriesData[type] = []
+    })
 
     try {
-      const files = contentCatalog.findBy({ component: 'redpanda-connect', family: 'page' });
+      const files = contentCatalog.findBy({ component: 'redpanda-connect', family: 'page' })
 
       files.forEach(file => {
-        let content = file.contents.toString('utf8');
-        const categoryMatch = /:categories: (.*)/.exec(content);
-        const typeMatch = /:type: (.*)/.exec(content);
-        const statusMatch = /:status: (.*)/.exec(content);
-        const driverSupportMatch = /:driver-support: (.*)/.exec(content);
-        const cacheSupportMatch = /:cache-support: (.*)/.exec(content);
-        const enterpriseMatch = /:enterprise: true/.exec(content);
-        const pubUrl = file.pub.url;
-        const name = file.src.stem;
+        let content = file.contents.toString('utf8')
+        const categoryMatch = /:categories: (.*)/.exec(content)
+        const typeMatch = /:type: (.*)/.exec(content)
+        const statusMatch = /:status: (.*)/.exec(content)
+        const driverSupportMatch = /:driver-support: (.*)/.exec(content)
+        const cacheSupportMatch = /:cache-support: (.*)/.exec(content)
+        const enterpriseMatch = /:enterprise: true/.exec(content)
+        const pubUrl = file.pub.url
+        const name = file.src.stem
 
         if (typeMatch) {
-          const fileType = typeMatch[1];
+          const fileType = typeMatch[1]
 
-          let status = statusMatch ? statusMatch[1] : 'community';
-          //if (status === 'beta' || status === 'experimental') status = 'community';
-          //if (status === 'stable') status = 'certified';
+          let status = statusMatch ? statusMatch[1] : 'community'
 
           // Skip deprecated components
-          if (status === 'deprecated') return;
+          if (status === 'deprecated') return
+
+          const isCertified = certifiedConnectors.some(connector => connector.name === name)
 
           // Override status to "certified" if in the lookup table
-          if (certifiedConnectors[name] && certifiedConnectors[name].includes(fileType) || enterpriseMatch) {
-            status = 'certified';
+          if (isCertified || enterpriseMatch) {
+            status = 'certified'
           } else {
-            status = 'community';
+            status = 'community'
           }
 
-          const commonName = componentNameMap?.[name] ?? name;
+          // Find the common name
+          const componentNameEntry = componentNameMap.find(component => component.key === name)
+          const commonName = componentNameEntry ? componentNameEntry.name : name
 
           // Populate connectCategoriesData
           if (types.includes(fileType) && categoryMatch) {
-            const categories = categoryMatch[1].replace(/[\[\]"]/g, '').split(',').map(category => category.trim());
+            const categories = categoryMatch[1].replace(/[\[\]"]/g, '').split(',').map(category => category.trim())
             categories.forEach(category => {
-              let categoryObj = connectCategoriesData[fileType].find(cat => cat.name === category);
+              let categoryObj = connectCategoriesData[fileType].find(cat => cat.name === category)
 
               if (!categoryObj) {
-                categoryObj = descriptions[fileType].find(desc => desc.name === category) || { name: category, description: "" };
-                categoryObj.items = [];
-                connectCategoriesData[fileType].push(categoryObj);
+                categoryObj = descriptions[fileType].find(desc => desc.name === category) || { name: category, description: "" }
+                categoryObj.items = []
+                connectCategoriesData[fileType].push(categoryObj)
               }
 
-              categoryObj.items.push({ name: commonName, url: pubUrl, status: status });
-            });
+              categoryObj.items.push({ name: commonName, url: pubUrl, status: status })
+            })
           }
 
           // Populate flatComponentsData
-          let flatItem = flatComponentsData.find(item => item.name === commonName);
+          let flatItem = flatComponentsData.find(item => item.name === commonName)
           if (!flatItem) {
-            flatItem = { name: commonName, originalName: name, support: status, types: [], enterprise: enterpriseMatch ? true : false};
-            flatComponentsData.push(flatItem);
+            flatItem = { name: commonName, originalName: name, support: status, types: [], enterprise: enterpriseMatch ? true : false}
+            flatComponentsData.push(flatItem)
           }
 
           if (!flatItem.types.some(type => type.type === fileType)) {
-            flatItem.types.push({ type: fileType, url: pubUrl, enterprise: enterpriseMatch? true : false, support: status});
+            flatItem.types.push({ type: fileType, url: pubUrl, enterprise: enterpriseMatch? true : false, support: status})
           }
 
           // Populate support data
-          if (driverSupportMatch) driverSupportData[name] = driverSupportMatch[1];
-          if (cacheSupportMatch) cacheSupportData[name] = cacheSupportMatch[1];
+          if (driverSupportMatch) driverSupportData[name] = driverSupportMatch[1]
+          if (cacheSupportMatch) cacheSupportData[name] = cacheSupportMatch[1]
         }
-      });
+      })
 
-      redpandaConnect.latest.asciidoc.attributes.connectCategoriesData = connectCategoriesData;
-      redpandaConnect.latest.asciidoc.attributes.flatComponentsData = flatComponentsData;
-      redpandaConnect.latest.asciidoc.attributes.driverSupportData = driverSupportData;
-      redpandaConnect.latest.asciidoc.attributes.cacheSupportData = cacheSupportData;
+      redpandaConnect.latest.asciidoc.attributes.connectCategoriesData = connectCategoriesData
+      redpandaConnect.latest.asciidoc.attributes.flatComponentsData = flatComponentsData
+      redpandaConnect.latest.asciidoc.attributes.driverSupportData = driverSupportData
+      redpandaConnect.latest.asciidoc.attributes.cacheSupportData = cacheSupportData
 
-      logger.info(`Added Redpanda Connect data to latest Asciidoc object: ${JSON.stringify({ connectCategoriesData, flatComponentsData }, null, 2)}`);
+      logger.info(`Added Redpanda Connect data to latest Asciidoc object: ${JSON.stringify({ connectCategoriesData, flatComponentsData }, null, 2)}`)
     } catch (error) {
-      logger.error(`Error processing Redpanda Connect files: ${error.message}`);
+      logger.error(`Error processing Redpanda Connect files: ${error.message}`)
     }
-  });
-};
+  })
+}
