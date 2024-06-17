@@ -60,7 +60,7 @@ module.exports.register = function ({ config }) {
           // Skip deprecated components
           if (status === 'deprecated') return
 
-          const isCertified = certifiedConnectors.some(connector => connector.name === name && connector.types.includes(fileType))
+          const isCertified = certifiedConnectors.some(connector => connector.name === name)
 
           // Override status to "certified" if in the lookup table
           if (isCertified || enterpriseMatch) {
