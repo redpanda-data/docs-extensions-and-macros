@@ -13,8 +13,9 @@ module.exports.register = function ({ config }) {
     const descriptions = redpandaConnect.latest.asciidoc.attributes.categories
     const componentNameMap = redpandaConnect.latest.asciidoc.attributes.components
     const certifiedConnectors = redpandaConnect.latest.asciidoc.attributes['certified-components']
+    const enterpriseConnectors = redpandaConnect.latest.asciidoc.attributes['enterprise-components']
 
-    if (!descriptions || !componentNameMap || !certifiedConnectors) {
+    if (!descriptions || !componentNameMap || !certifiedConnectors || !enterpriseConnectors) {
       if (!descriptions) {
         logger.error('No categories attribute found in redpanda-connect component')
       }
@@ -23,6 +24,9 @@ module.exports.register = function ({ config }) {
       }
       if (!certifiedConnectors) {
         logger.error('No certified-components attribute found in redpanda-connect component')
+      }
+      if (!enterpriseConnectors) {
+        logger.error('No enterprise-components attribute found in redpanda-connect component')
       }
       return
     }
@@ -48,7 +52,6 @@ module.exports.register = function ({ config }) {
         const statusMatch = /:status: (.*)/.exec(content)
         const driverSupportMatch = /:driver-support: (.*)/.exec(content)
         const cacheSupportMatch = /:cache-support: (.*)/.exec(content)
-        const enterpriseMatch = /:enterprise: true/.exec(content)
         const pubUrl = file.pub.url
         const name = file.src.stem
 
@@ -62,8 +65,10 @@ module.exports.register = function ({ config }) {
 
           const isCertified = certifiedConnectors.some(connector => connector.name === name)
 
+          const isEnterprise = enterpriseConnectors.some(connector => connector === name)
+
           // Override status to "certified" if in the lookup table
-          if (isCertified || enterpriseMatch) {
+          if (isCertified || isEnterprise) {
             status = 'certified'
           } else {
             status = 'community'
@@ -92,12 +97,12 @@ module.exports.register = function ({ config }) {
           // Populate flatComponentsData
           let flatItem = flatComponentsData.find(item => item.name === commonName)
           if (!flatItem) {
-            flatItem = { name: commonName, originalName: name, support: status, types: [], enterprise: enterpriseMatch ? true : false}
+            flatItem = { name: commonName, originalName: name, support: status, types: [], enterprise: isEnterprise ? true : false}
             flatComponentsData.push(flatItem)
           }
 
           if (!flatItem.types.some(type => type.type === fileType)) {
-            flatItem.types.push({ type: fileType, url: pubUrl, enterprise: enterpriseMatch? true : false, support: status})
+            flatItem.types.push({ type: fileType, url: pubUrl, enterprise: isEnterprise? true : false, support: status})
           }
 
           // Populate support data
