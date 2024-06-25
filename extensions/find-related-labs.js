@@ -35,6 +35,7 @@ function findRelated(labPage, sourceCategoryList, sourceDeploymentType, logger) 
     return {
       title: labPage.asciidoc.doctitle,
       url: labPage.pub.url,
+      description: labPage.asciidoc.attributes.description,
     }
   }
   return null
