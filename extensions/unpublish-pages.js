@@ -24,7 +24,6 @@ module.exports.register = function () {
 
       // Unpublish the shouldUnpublish pages
       if (shouldUnpublish) {
-        console.log(page.asciidoc?.attributes['page-component-version-is-prerelease'])
         siteCatalog.unpublishedPages.push(page.pub.url)
         delete page.out;
       }
