@@ -14,7 +14,7 @@ module.exports.register = function ({ config }) {
         if (source) {
           const latestTag = await GetLatestConnectTag();
           if (latestTag) {
-            source.tags[0] = latestTag;
+            source.tags[0] = `v${latestTag}`;
             this.updateVariables({ playbook });
           }
         }

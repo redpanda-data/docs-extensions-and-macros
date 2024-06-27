@@ -1,40 +1,33 @@
-module.exports.register = function ({ config }) {
-  const { family = 'attachment' } = config;
-  const logger = this.getLogger('replace-attributes-in-attachments-extension');
+'use strict';
 
-  const sanitizeAttributeValue = (value) => String(value).replace("@", "");
+module.exports.register = function () {
+  this.on('contentClassified', ({ contentCatalog }) => {
+    const componentVersionTable = contentCatalog.getComponents().reduce((componentMap, component) => {
+      componentMap[component.name] = component.versions.reduce((versionMap, componentVersion) => {
+        versionMap[componentVersion.version] = componentVersion;
+        return versionMap;
+      }, {});
+      return componentMap;
+    }, {});
 
-  this.on('contentClassified', ({contentCatalog}) => {
-    for (const { versions } of contentCatalog.getComponents()) {
-      for (const { name: component, version, asciidoc } of versions) {
-        const attachments = contentCatalog.findBy({ component, version, family });
-        if (component == 'api') continue;
-        for (const attachment of attachments) {
-          let contentString = attachment['_contents'].toString('utf8');
-          if (!asciidoc.attributes) continue;
-
-          // Replace general attributes
-          for (const key in asciidoc.attributes) {
-            const placeholder = "{" + key + "}";
-            const sanitizedValue = sanitizeAttributeValue(asciidoc.attributes[key]);
-            contentString = contentString.replace(new RegExp(placeholder, 'g'), sanitizedValue);
-          }
-
-
-          // Specific replacements for YAML files
-          if (attachment.out.path.endsWith('.yaml') || attachment.out.path.endsWith('.yml')) {
-            const redpandaVersionRegex = /(\$\{REDPANDA_VERSION[^\}]*\})/g;
-            const redpandaConsoleVersionRegex = /(\$\{REDPANDA_CONSOLE_VERSION[^\}]*\})/g;
-            const fullVersion = asciidoc.attributes['full-version'] ? sanitizeAttributeValue(asciidoc.attributes['full-version']) : '';
-            const latestConsoleVersion = asciidoc.attributes['latest-console-version'] ? sanitizeAttributeValue(asciidoc.attributes['latest-console-version']) : '';
-
-            contentString = contentString.replace(redpandaVersionRegex, fullVersion);
-            contentString = contentString.replace(redpandaConsoleVersionRegex, latestConsoleVersion);
-          }
-
-          attachment['_contents'] = Buffer.from(contentString, "utf-8");
-        }
-      }
-    }
+    contentCatalog.findBy({ family: 'attachment' }).forEach((attachment) => {
+      const componentVersion = componentVersionTable[attachment.src.component][attachment.src.version];
+      let attributes = componentVersion.asciidoc?.attributes;
+      if (!attributes) return;
+      attributes = Object.entries(attributes).reduce((accum, [name, val]) => {
+        const stringValue = String(val); // Ensure val is a string
+        accum[name] = stringValue.endsWith('@') ? stringValue.slice(0, stringValue.length - 1) : stringValue;
+        return accum;
+      }, {});
+      let modified;
+      const result = attachment.contents.toString().replace(/\{([\p{Alpha}\d_][\p{Alpha}\d_-]*)\}/gu, (match, name) => {
+        if (!(name in attributes)) return match;
+        modified = true;
+        let value = attributes[name];
+        if (value.endsWith('@')) value = value.slice(0, value.length - 1);
+        return value;
+      });
+      if (modified) attachment.contents = Buffer.from(result);
+    });
   });
-}
+};

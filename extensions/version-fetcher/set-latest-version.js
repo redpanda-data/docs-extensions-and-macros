@@ -30,7 +30,13 @@ module.exports.register = function ({ config }) {
 
       const components = await contentCatalog.getComponents()
       components.forEach(component => {
+        let prerelease = component.latestPrerelease;
         component.versions.forEach(({ name, version, asciidoc }) => {
+          // This attribute is used for conditionally rendering content for beta releases.
+          // It is also used in the `unpublish-pages` extension to unpublish beta pages that aren't part of a beta version.
+          if (prerelease && prerelease.version === version) {
+            asciidoc.attributes['page-component-version-is-prerelease'] = 'true'
+          }
           if (LatestConsoleVersion) {
             asciidoc.attributes['latest-console-version'] = `${LatestConsoleVersion}@`
             logger.info(`Set Redpanda Console version to ${LatestConsoleVersion} in ${name} ${version}`)
