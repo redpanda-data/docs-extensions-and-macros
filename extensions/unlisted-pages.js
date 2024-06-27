@@ -7,10 +7,8 @@ module.exports.register = function ({ config }) {
   this.on('navigationBuilt', ({ siteCatalog, contentCatalog }) => {
     contentCatalog.getComponents().forEach(({ versions }) => {
       versions.forEach(({ name: component, version, navigation: nav, url: defaultUrl }) => {
-        if (component === 'api') return;
+        if (component === 'api' || component === 'redpanda-labs') return;
         if (!nav) return;
-        const currentComponent = contentCatalog.getComponent(component);
-        const prerelease = currentComponent && currentComponent.latestPrerelease ? currentComponent.latestPrerelease : false;
 
         const navEntriesByUrl = getNavEntriesByUrl(nav);
         const unlistedPages = contentCatalog
