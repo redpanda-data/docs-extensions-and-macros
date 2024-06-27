@@ -14,19 +14,17 @@ module.exports.register = function () {
       pageVersion = page.asciidoc?.attributes['page-component-version'];
       const component = contentCatalog.getComponent(componentName);
 
-      // Check if the page is part of the beta version
-      const isPrerelease = component && pageVersion && component.latestPrerelease && component.latestPrerelease.version === pageVersion;
-
       // Check the conditions for unpublishing the page
       const shouldUnpublish = (
         page.asciidoc?.attributes['page-unpublish'] ||
         (page.asciidoc?.attributes['publish-only-during-beta']
-        && !isPrerelease // No beta version available, meaning the beta period has ended
+        && !page.asciidoc?.attributes['page-component-version-is-prerelease'] // Not part of a beta version, meaning the beta period has ended
       )
       );
 
       // Unpublish the shouldUnpublish pages
       if (shouldUnpublish) {
+        console.log(page.asciidoc?.attributes['page-component-version-is-prerelease'])
         siteCatalog.unpublishedPages.push(page.pub.url)
         delete page.out;
       }
