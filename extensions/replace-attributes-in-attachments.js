@@ -1,40 +1,42 @@
-module.exports.register = function ({ config }) {
-  const { family = 'attachment' } = config;
-  const logger = this.getLogger('replace-attributes-in-attachments-extension');
+'use strict';
 
-  const sanitizeAttributeValue = (value) => String(value).replace("@", "");
+module.exports.register = function () {
+  this.on('contentClassified', ({ contentCatalog }) => {
+    // Create a lookup table for component versions
+    const componentVersionTable = contentCatalog.getComponents().reduce((componentMap, component) => {
+      componentMap[component.name] = component.versions.reduce((versionMap, componentVersion) => {
+        versionMap[componentVersion.version] = componentVersion;
+        return versionMap;
+      }, {});
+      return componentMap;
+    }, {});
 
-  this.on('contentClassified', ({contentCatalog}) => {
-    for (const { versions } of contentCatalog.getComponents()) {
-      for (const { name: component, version, asciidoc } of versions) {
-        const attachments = contentCatalog.findBy({ component, version, family });
-        if (component == 'api') continue;
-        for (const attachment of attachments) {
-          let contentString = attachment['_contents'].toString('utf8');
-          if (!asciidoc.attributes) continue;
+    // Process each attachment
+    contentCatalog.findBy({ family: 'attachment' }).forEach((attachment) => {
+      // Get the corresponding component version
+      const componentVersion = componentVersionTable[attachment.src.component]?.[attachment.src.version];
+      if (!componentVersion) return;
 
-          // Replace general attributes
-          for (const key in asciidoc.attributes) {
-            const placeholder = "{" + key + "}";
-            const sanitizedValue = sanitizeAttributeValue(asciidoc.attributes[key]);
-            contentString = contentString.replace(new RegExp(placeholder, 'g'), sanitizedValue);
-          }
+      let attributes = componentVersion.asciidoc?.attributes;
+      if (!attributes) return;
 
+      // Remove trailing '@' from attribute values
+      attributes = Object.entries(attributes).reduce((accum, [name, val]) => {
+        accum[name] = val && val.endsWith('@') ? val.slice(0, val.length - 1) : val;
+        return accum;
+      }, {});
 
-          // Specific replacements for YAML files
-          if (attachment.out.path.endsWith('.yaml') || attachment.out.path.endsWith('.yml')) {
-            const redpandaVersionRegex = /(\$\{REDPANDA_VERSION[^\}]*\})/g;
-            const redpandaConsoleVersionRegex = /(\$\{REDPANDA_CONSOLE_VERSION[^\}]*\})/g;
-            const fullVersion = asciidoc.attributes['full-version'] ? sanitizeAttributeValue(asciidoc.attributes['full-version']) : '';
-            const latestConsoleVersion = asciidoc.attributes['latest-console-version'] ? sanitizeAttributeValue(asciidoc.attributes['latest-console-version']) : '';
+      let modified;
+      const result = attachment.contents.toString().replace(/\{([\p{Alpha}\d_][\p{Alpha}\d_-]*)\}/gu, (match, name) => {
+        if (!(name in attributes)) return match;
+        modified = true;
+        let value = attributes[name];
+        if (value.endsWith('@')) value = value.slice(0, value.length - 1);
+        return value;
+      });
 
-            contentString = contentString.replace(redpandaVersionRegex, fullVersion);
-            contentString = contentString.replace(redpandaConsoleVersionRegex, latestConsoleVersion);
-          }
-
-          attachment['_contents'] = Buffer.from(contentString, "utf-8");
-        }
-      }
-    }
+      // Update the attachment contents if modified
+      if (modified) attachment.contents = Buffer.from(result);
+    });
   });
-}
+};
