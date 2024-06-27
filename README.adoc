@@ -38,17 +38,17 @@ When you have Node.js installed, use the following command to install the `antor
 npm i @redpanda-data/docs-extensions-and-macros
 ----
 
-To use the development version instead, refer to the <<development-quickstart,Development Quickstart>>.
+To use the development version, refer to the <<development-quickstart,Development Quickstart>>.
 
 == Antora Extensions
 
-This section documents the Antora extensions that are provided by this library and how to configure them.
+This section documents the Antora extensions provided by this library and how to configure them.
 
 IMPORTANT: Ensure you register each extension under the `antora.extensions` key in the playbook, not the `asciidoc.extensions` key.
 
 === Algolia indexer
 
-This extension generates an Algolia index for each version of each component. The index entries are then saved to Algolia using the `saveObjects()` method, and also saved as JSON files in the site catalog. JSON files are published to the site root using the following template: `algolia-<component>-<version>.json`.
+This extension generates an Algolia index for each version of each component. The index entries are then saved to Algolia using the `saveObjects()` method, and also saved as JSON files in the site catalog. JSON files are published to the site root using the template `algolia-<component>-<version>.json`.
 
 NOTE: Only pages that include an `<article>` element with the `doc` class are indexed.
 
@@ -127,9 +127,19 @@ antora:
 
 This extension fetches the latest release versions from GitHub.
 
-The latest versions of Redpanda Console and Redpanda Connect are made available to all versions of all Antora components.
+The following attributes are available to all versions of all Antora components:
 
-The latest Redpanda version and the latest Redpanda Operator version are made available to the latest version of the `ROOT` component (Redpanda docs).
+`latest-console-version`: The latest release version of Redpanda Console.
+`latest-connect-version`: The latest release version of Redpanda Connect.
+`redpanda-beta-version`: The latest RC version of Redpanda.
+`redpanda-beta-commit`: The commit hash for the latest RC version of Redpanda.
+
+The following attributes are available to the latest version of the `ROOT` component (Redpanda docs):
+
+`full-version`: The latest release version of Redpanda.
+`latest-release-commit`: The commit hash for the latest release version of Redpanda.
+`latest-operator-version`: The latest release version of the Redpanda Operator.
+`latest-redpanda-helm-chart-version`: The latest release version of the Redpanda Helm chart.
 
 ==== Environment variables
 
