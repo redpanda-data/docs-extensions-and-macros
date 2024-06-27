@@ -11,7 +11,7 @@ module.exports.register = function () {
     this.replaceFunctions({
       produceRedirects (playbook, aliases) {
         if ('findBy' in aliases) aliases = aliases.findBy({ family: 'alias' }) // @deprecated remove in Antora 4
-        if (!aliases.length) return []
+        if (!(aliases = aliases.filter((it) => it.pub.url !== it.rel.pub.url)).length) return []
         let siteUrl = playbook.site.url
         if (siteUrl) siteUrl = stripTrailingSlash(siteUrl, '')
         const directoryRedirects = (playbook.urls.htmlExtensionStyle || 'default') !== 'default'
@@ -32,7 +32,6 @@ module.exports.register = function () {
           default:
             return unpublish(aliases)
         }
-        return produceRedirectsDelegate.call(this, playbook, aliases)
       }
     })
   })
@@ -72,7 +71,6 @@ function extractUrlPath (url) {
 
 function createHttpdHtaccess (files, urlPath, directoryRedirects = false) {
   const rules = files.reduce((accum, file) => {
-    if (isRedirectLoop(file)) return accum
     delete file.out
     let fromUrl = file.pub.url
     fromUrl = ~fromUrl.indexOf('%20') ? `'${urlPath}${fromUrl.replace(ENCODED_SPACE_RX, ' ')}'` : urlPath + fromUrl
@@ -97,7 +95,6 @@ function createHttpdHtaccess (files, urlPath, directoryRedirects = false) {
 // however, we keep it when generating the rules for clarity
 function createNetlifyRedirects (files, urlPath, addDirectoryRedirects = false, useForceFlag = true) {
   const rules = files.reduce((accum, file) => {
-    if (isRedirectLoop(file)) return accum
     delete file.out
     const fromUrl = urlPath + file.pub.url
     const toUrl = urlPath + file.rel.pub.url
@@ -117,7 +114,6 @@ function createNetlifyRedirects (files, urlPath, addDirectoryRedirects = false, 
 
 function createNginxRewriteConf (files, urlPath) {
   const rules = files.map((file) => {
-    if (isRedirectLoop(file)) return ''
     delete file.out
     let fromUrl = file.pub.url
     fromUrl = ~fromUrl.indexOf('%20') ? `'${urlPath}${fromUrl.replace(ENCODED_SPACE_RX, ' ')}'` : urlPath + fromUrl
@@ -135,7 +131,6 @@ function createNginxRewriteConf (files, urlPath) {
 
 function populateStaticRedirectFiles(files, siteUrl) {
   for (const file of files) {
-    if (isRedirectLoop(file)) continue
     const content = createStaticRedirectContents(file, siteUrl) + '\n';
     file.contents = Buffer.from(content);
   }
@@ -164,10 +159,5 @@ function stripTrailingSlash (str, root = '/') {
 
 function regexpEscape (str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // don't escape "-" since it's meaningless in a literal
-}
-
-function isRedirectLoop (file) {
-  if (file.pub.url === file.rel.pub.url) return true
-  return false
 }
 
