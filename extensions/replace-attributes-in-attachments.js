@@ -28,13 +28,12 @@ module.exports.register = function () {
         const redpandaConsoleVersionRegex = /(\$\{REDPANDA_CONSOLE_VERSION[^\}]*\})/g;
         let fullVersion = attributes['full-version'] ? sanitizeAttributeValue(attributes['full-version']) : '';
         const latestConsoleVersion = attributes['latest-console-version'] ? sanitizeAttributeValue(attributes['latest-console-version']) : '';
-
-        if (attributes['page-component-version-is-prerelease'] === 'true') {
+        if (attributes['page-component-version-is-prerelease']) {
           fullVersion = attributes['redpanda-beta-version'] ? sanitizeAttributeValue(attributes['redpanda-beta-version']) : fullVersion;
         }
-
         contentString = contentString.replace(redpandaVersionRegex, fullVersion);
         contentString = contentString.replace(redpandaConsoleVersionRegex, latestConsoleVersion);
+        modified = true;
       }
 
       const result = contentString.replace(/\{([\p{Alpha}\d_][\p{Alpha}\d_-]*)\}/gu, (match, name) => {
