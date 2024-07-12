@@ -81,7 +81,7 @@ The `version fetcher` extension gets the latest version of Redpanda and Redpanda
 
 == Attachments
 
-By default, Antora does not replace attributes in attachment files. Download this test attachment to make sure that the `replace-attributes-in-attachments` extension replaces the `test-attribute`:
+By default, Antora does not replace attributes in attachment files. Download this test attachment to make sure that the correct elements were replaced:
 
 xref:preview:ROOT:attachment$test.yaml[Download attachment]
 

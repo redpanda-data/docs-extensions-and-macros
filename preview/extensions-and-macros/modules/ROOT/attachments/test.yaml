@@ -1,2 +1,4 @@
 test:
   hello: {test-attribute}
+  image: docker.redpanda.com/redpandadata/redpanda:v${REDPANDA_VERSION:?Set a Redpanda version}
+  console-image: docker.redpanda.com/redpandadata/console:v${REDPANDA_CONSOLE_VERSION:?Set a Redpanda Console version}
