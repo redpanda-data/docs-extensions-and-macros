@@ -26,8 +26,12 @@ module.exports.register = function () {
       if (attachment.out.path.endsWith('.yaml') || attachment.out.path.endsWith('.yml')) {
         const redpandaVersionRegex = /(\$\{REDPANDA_VERSION[^\}]*\})/g;
         const redpandaConsoleVersionRegex = /(\$\{REDPANDA_CONSOLE_VERSION[^\}]*\})/g;
-        const fullVersion = attributes['full-version'] ? sanitizeAttributeValue(attributes['full-version']) : '';
+        let fullVersion = attributes['full-version'] ? sanitizeAttributeValue(attributes['full-version']) : '';
         const latestConsoleVersion = attributes['latest-console-version'] ? sanitizeAttributeValue(attributes['latest-console-version']) : '';
+
+        if (attributes['page-component-version-is-prerelease'] === 'true') {
+          fullVersion = attributes['redpanda-beta-version'] ? sanitizeAttributeValue(attributes['redpanda-beta-version']) : fullVersion;
+        }
 
         contentString = contentString.replace(redpandaVersionRegex, fullVersion);
         contentString = contentString.replace(redpandaConsoleVersionRegex, latestConsoleVersion);
