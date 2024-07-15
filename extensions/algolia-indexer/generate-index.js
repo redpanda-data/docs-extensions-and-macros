@@ -203,7 +203,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       indexItem.deployment = deployment;
       indexItem.type = 'Lab';
       indexItem.interactive = false;
-      indexItem._tags = ['labs'];
+      indexItem._tags = [tag];
     }
     algolia[cname][version].push(indexItem)
     algoliaCount++
