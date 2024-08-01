@@ -4,7 +4,7 @@ module.exports.register = function ({ config }) {
   const logger = this.getLogger('related-labs-extension');
 
   this.on('documentsConverted', async ({ contentCatalog, siteCatalog }) => {
-    const docs = contentCatalog.findBy({ component: 'ROOT', family: 'page' });
+    const docs = contentCatalog.findBy({ family: 'page' });
     docs.forEach((docPage) => {
       const relatedLabs = []
       const sourceAttributes = docPage.asciidoc.attributes
@@ -31,7 +31,7 @@ function findRelated(labPage, sourceCategoryList, sourceDeploymentType, logger) 
   const targetCategoryList = pageCategories.split(',').map(c => c.trim());
   const targetDeploymentType = getDeploymentType(targetAttributes)
   const categoryMatch = hasMatchingCategory(sourceCategoryList, targetCategoryList)
-  if (categoryMatch && (!targetDeploymentType ||sourceDeploymentType === targetDeploymentType || targetDeploymentType === 'Docker')) {
+  if (categoryMatch && (!targetDeploymentType ||sourceDeploymentType === targetDeploymentType || (targetDeploymentType === 'Docker' && !sourceDeploymentType))) {
     return {
       title: labPage.asciidoc.doctitle,
       url: labPage.pub.url,
@@ -45,7 +45,8 @@ function getDeploymentType (attributes) {
   return attributes['env-kubernetes'] ? 'Kubernetes'
     : attributes['env-linux'] ? 'Linux'
       : attributes['env-docker'] ? 'Docker'
-        : attributes.cloud ? 'Redpanda Cloud' : ''
+        : attributes['env-cloud'] ? 'Redpanda Cloud'
+          : attributes['page-cloud'] ? 'Redpanda Cloud' : ''
 }
 
 function hasMatchingCategory (sourcePageCategories, targetPageCategories) {
