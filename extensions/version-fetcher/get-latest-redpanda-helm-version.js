@@ -1,20 +1,19 @@
-const { Octokit } = require("@octokit/rest");
-const { retry } = require("@octokit/plugin-retry");
-const yaml = require('js-yaml');
-const OctokitWithRetries = Octokit.plugin(retry);
-
-const githubOptions = {
-  userAgent: 'Redpanda Docs',
-  baseUrl: 'https://api.github.com',
-  auth: process.env.REDPANDA_GITHUB_TOKEN
-};
-
-const github = new OctokitWithRetries(githubOptions);
-const owner = 'redpanda-data';
-const repo = 'helm-charts';
-const path = 'charts/redpanda/Chart.yaml';
-
 module.exports = async () => {
+  const { Octokit } = await import("@octokit/rest");
+  const { retry } = await import("@octokit/plugin-retry");
+  const yaml = await import('js-yaml');
+  const OctokitWithRetries = Octokit.plugin(retry);
+
+  const githubOptions = {
+    userAgent: 'Redpanda Docs',
+    baseUrl: 'https://api.github.com',
+    auth: process.env.REDPANDA_GITHUB_TOKEN
+  };
+
+  const github = new OctokitWithRetries(githubOptions);
+  const owner = 'redpanda-data';
+  const repo = 'helm-charts';
+  const path = 'charts/redpanda/Chart.yaml';
   try {
     const response = await github.repos.getContent({
       owner: owner,
