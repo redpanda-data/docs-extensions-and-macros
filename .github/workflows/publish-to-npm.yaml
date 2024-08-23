@@ -37,5 +37,5 @@ jobs:
         with:
           token: ${{ env.ACTIONS_BOT_TOKEN }}
           repository: redpanda-data/docs
-          event-type: trigger-update
+          event-type: trigger-npm-update
           client-payload: '{"commit_sha": "${{ github.sha }}"}'
