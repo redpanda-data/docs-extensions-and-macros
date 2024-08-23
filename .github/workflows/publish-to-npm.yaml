@@ -18,6 +18,7 @@ jobs:
         with:
           secret-ids: |
             ,sdlc/prod/github/npm_token
+            ,sdlc/prod/github/actions_bot_token
           parse-json-secrets: true
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,3 +33,9 @@ jobs:
       - name: Check published version
         if: ${{ steps.publish.outputs.type }}
         run: echo "Version changed!"
+      - uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ env.ACTIONS_BOT_TOKEN }}
+          repository: redpanda-data/docs
+          event-type: trigger-update
+          client-payload: '{"commit_sha": "${{ github.sha }}"}'
