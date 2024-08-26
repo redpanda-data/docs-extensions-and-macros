@@ -1,7 +1,87 @@
 'use strict';
 
 module.exports.register = function (registry, context) {
+  
+  function filterComponentTable() {
+    // Retrieve and standardize filter inputs
+    const nameInput = document.getElementById('componentTableSearch').value.trim().toLowerCase();
+    const supportFilter = Array.from(document.querySelector('#supportFilter').selectedOptions).map(option => option.value);
+    const typeFilter = Array.from(document.querySelector('#typeFilter').selectedOptions).map(option => option.value);
+
+    const table = document.getElementById('componentTable');
+    const trs = table.getElementsByTagName('tr');
+
+    for (let i = 1; i < trs.length; i++) {
+        const row = trs[i];
+        const nameTd = row.querySelector('td[id^="componentName-"]');
+        const supportTd = row.querySelector('td[id^="componentSupport-"]');
+        const typeTd = row.querySelector('td[id^="componentType-"]');
+        const typeDropdown = typeTd ? typeTd.querySelector('.type-dropdown') : null;
+
+        if (nameTd && supportTd && typeTd) {
+            const nameText = nameTd.textContent.trim().toLowerCase();
+            const supportText = supportTd.textContent.trim().toLowerCase();
+            const typeText = typeTd.textContent.trim().toLowerCase().split(', ').map(item => item.trim());
+
+            // Determine if the row should be shown
+            const showRow =  
+            
+            
+            ( (!nameInput || nameText.includes(nameInput))   && 
+            (typeFilter.some(value => typeText.includes(value))) &&
+            (supportFilter.some(value => supportText.includes(value)))
+            )
+
+            row.style.display = showRow ? '' : 'none';
+
+            if (showRow && typeFilter && typeDropdown) {
+                const matchingOption = Array.from(typeDropdown.options).find(option => option.text.toLowerCase() === typeFilter);
+                if (matchingOption) {
+                    typeDropdown.value = matchingOption.value;
+                    updateComponentUrl(typeDropdown, false);
+                }
+            }
+        } else {
+            row.style.display = 'none'; // Hide row if cells are missing
+        }
+    }
+}
+
+  const capitalize = s => s && s[0].toUpperCase() + s.slice(1) // capitalize the first letter
+
   let tabsCounter = 1; // Counter for generating unique IDs
+
+  const driverNameMap = {
+    "gocosmos": "Azure Cosmos DB",
+    "clickhouse": "ClickHouse",
+    "oracle": "Oracle",
+    "mssql": "Microsoft SQL Server",
+    "mysql": "MYSQL",
+    "snowflake": "Snowflake",
+    "postgresql": "PostgreSQL",
+    "postgres": "PostgreSQL",
+    "sqlite": "SQLite",
+    "trino": "Trino",
+  }
+
+  const cacheNameMap = {
+    "aws_dynamodb": "AWS DynamoDB",
+    "memcached": "Memcached",
+    "redis": "Redis",
+    "aws_s3": "AWS S3",
+    "memory": "Memory",
+    "ristretto": "Ristretto",
+    "couchbase": "Couchbase",
+    "mongodb": "MongoDB",
+    "sql": "SQL",
+    "file": "File",
+    "multilevel": "Multilevel",
+    "ttlru": "TTL LRU",
+    "gcp_cloud_storage": "GCP Cloud Storage",
+    "nats_kv": "NATS KV",
+    "lru": "LRU",
+    "noop": "Noop",
+  };
 
   // Add the category tabs for components
   registry.blockMacro(function () {
@@ -64,158 +144,110 @@ module.exports.register = function (registry, context) {
     self.named('component_table');
     self.process((parent, target, attrs) => {
       const flatComponentsData = context.config?.attributes?.flatComponentsData || [];
-      const driverNameMap = context.config?.attributes?.drivers || [];
-      const cacheNameMap = context.config?.attributes?.caches || [];
       const driverSupportData = context.config?.attributes?.driverSupportData || {};
       const cacheSupportData = context.config?.attributes?.cacheSupportData || {};
 
       // Sort flatComponentsData alphabetically by name
       flatComponentsData.sort((a, b) => a.name.localeCompare(b.name));
 
-      let tableHtml = `
-      <div class="table-filters">
-        <input class="table-search" type="text" id="componentTableSearch" onkeyup="filterComponentTable()" placeholder="Search for components...">
-        <select class="type-dropdown" id="supportFilter" onchange="filterComponentTable()">
-          <option value="">All Support</option>`;
+      const createOptions = (values) => 
+        values.map(value => `<option selected value="${value}">${capitalize(value)}</option>`).join('');
 
-      // Extract unique support values for the filter
-      const uniqueSupportValues = [...new Set(Object.values(driverSupportData).flatMap(support => support.split(', ').map(pair => pair.split('=')[1])))];
-      uniqueSupportValues.forEach(support => {
-        tableHtml += `<option value="${support}">${support.charAt(0).toUpperCase() + support.slice(1)}</option>`;
-      });
-
-      tableHtml += `
-        </select>
-        <select class="type-dropdown" id="typeFilter" onchange="filterComponentTable()">
-          <option value="">All Types</option>`;
-
-      // Extract unique types for the filter, only include input, processor, and output
+      // Filter components to get unique types and support values. Types accepted: ['input', 'processor', 'output']
       const uniqueTypes = [...new Set(flatComponentsData.flatMap(item => item.types.map(typeObj => typeObj.type)))].filter(type => ['input', 'processor', 'output'].includes(type));
-      uniqueTypes.forEach(type => {
-        tableHtml += `<option value="${type}">${type.charAt(0).toUpperCase() + type.slice(1)}</option>`;
-      });
+      const uniqueSupportValues = [...new Set(Object.values(driverSupportData).flatMap(support => support.split(', ').map(pair => pair.split('=')[1])))];
 
-      tableHtml += `
-        </select>
-      </div>
+      let tableHtml = `
+        <div class="table-filters">
+          <input class="table-search" type="text" id="componentTableSearch" onkeyup="filterComponentTable()" placeholder="Search for components...">
+          <label for="typeFilter">Type:</label>
+          <select multiple class="type-dropdown" id="typeFilter" onchange="filterComponentTable()">
+            ${createOptions(uniqueTypes)}
+          </select>
+          <label for="supportFilter">Support:</label>
+          <select multiple class="type-dropdown" id="supportFilter" onchange="filterComponentTable()">
+            ${createOptions(uniqueSupportValues)}
+          </select>
+        </div>
+      `;
+
+      tableHtml +=`
       <table class="tableblock frame-all grid-all stripes-even no-clip stretch component-table" id="componentTable">
         <colgroup>
-          <col style="width: 33.3%;">
-          <col style="width: 33.3%;">
-          <col style="width: 33.3%;">
+          <col style="width: 25%;">
+          <col style="width: 25%;">
+          <col style="width: 25%;">
+          <col style="width: 25%;">
         </colgroup>
         <thead>
           <tr>
-            <th class="tableblock halign-left valign-top">Connector</th>
-            <th class="tableblock halign-left valign-top">Support</th>
-            <th class="tableblock halign-left valign-top">Type</th>
+            <th class="tableblock halign-left valign-top">Name</th>
+            <th class="tableblock halign-left valign-top">Connector Type</th>
+            <th class="tableblock halign-left valign-top">Support Level</th>
+            <th class="tableblock halign-left valign-top">Licensed</th>
           </tr>
         </thead>
         <tbody>`;
 
-      flatComponentsData.forEach(item => {
-        const commonName = item.originalName !== item.name ? ` <small>(${item.name})</small>`: '';
-        const isEnterprise = item.enterprise ? '<span class="enterprise-label" title="Requires an Enterprise Edition license">Enterprise</span>' : '';
-        if (driverSupportData[item.originalName]) {
-          const drivers = driverSupportData[item.originalName].split(', ');
-          drivers.forEach(driverSupportPair => {
-            const [driver, support] = driverSupportPair.split('=');
-            // Find the common name
-            const driverNameEntry = driverNameMap.find(driverItem => driverItem.key === driver)
-            const driverName = driverNameEntry ? driverNameEntry.name : driver
-
-            // Filter for types of input, processor, and output only
+        flatComponentsData.forEach(item => {
+          let id=0
+          const commonName = item.originalName !== item.name ? ` <small>(${item.name})</small>`: '';
+          const isEnterprise = item.enterprise ? '<span class="enterprise-label" title="Requires an Enterprise Edition license">Enterprise</span>' : '';
+          
+          const processItem = (supportPair, type, nameMap) => {
+            let name, support;
+            if (type) {
+              [name, support] = supportPair.split('=');
+              name = (nameMap && nameMap[name]) || name;
+            } else {
+              support = item.support;
+            }
+        
             const filteredTypes = item.types.filter(typeOption => ['input', 'processor', 'output'].includes(typeOption.type));
             if (filteredTypes.length > 0) {
-              const typeDropdown = filteredTypes.length > 1
-                ? `<select class="type-dropdown" onchange="updateComponentUrl(this, true)">
-                    ${filteredTypes.map(typeOption => `<option value="${typeOption.url}">${typeOption.type.charAt(0).toUpperCase() + typeOption.type.slice(1)}</option>`).join('')}
-                  </select>`
-                : filteredTypes[0].type.charAt(0).toUpperCase() + filteredTypes[0].type.slice(1);
-
+              const typeLinks = filteredTypes.map(typeOption => 
+                `<a href="${typeOption.url}">${capitalize(typeOption.type)}</a>`
+              ).join(', ');
+        
+              const additionalInfo = type ? `<br><span>${name} ${type}</span>` : '';
+        
               tableHtml += `
-                <tr>
-                  <td class="tableblock halign-left valign-top"><p class="tableblock"><p class="enterprise-label-container">${isEnterprise}</p><code><a href="${filteredTypes[0].url}">${item.originalName}</a></code> ${commonName}<br><span style="font-size:0.9rem;">${driverName} driver</span></p></td>
-                  <td class="tableblock halign-left valign-top"><p class="tableblock">${support.charAt(0).toUpperCase() + support.slice(1)}</p></td>
-                  <td class="tableblock halign-left valign-top"><p class="tableblock">${typeDropdown}</p></td>
-                </tr>`;
-            }
-          });
-        } else if (cacheSupportData[item.originalName]) {
-          const caches = cacheSupportData[item.originalName].split(', ');
-          caches.forEach(cacheSupportPair => {
-            const [cache, support] = cacheSupportPair.split('=');
-            // Find the common name
-            const cacheNameEntry = cacheNameMap.find(cacheItem => cacheItem.key === cache)
-            const cacheName = cacheNameEntry ? cacheNameEntry.name : cache
-
-            // Filter for types of input, processor, and output only
-            const filteredTypes = item.types.filter(typeOption => ['input', 'processor', 'output'].includes(typeOption.type));
-            if (filteredTypes.length > 0) {
-              const typeDropdown = filteredTypes.length > 1
-                ? `<select class="type-dropdown" onchange="updateComponentUrl(this, true)">
-                    ${filteredTypes.map(typeOption => `<option value="${typeOption.url}">${typeOption.type.charAt(0).toUpperCase() + typeOption.type.slice(1)}</option>`).join('')}
-                  </select>`
-                : filteredTypes[0].type.charAt(0).toUpperCase() + filteredTypes[0].type.slice(1);
-
-              tableHtml += `
-                <tr>
-                  <td class="tableblock halign-left valign-top"><p class="tableblock"><p class="enterprise-label-container">${isEnterprise}</p><code><a href="${filteredTypes[0].url}">${item.originalName}</a></code> ${commonName}<br><span style="font-size:0.9rem;">${cacheName}</span></p></td>
-                  <td class="tableblock halign-left valign-top"><p class="tableblock">${support.charAt(0).toUpperCase() + support.slice(1)}</p></td>
-                  <td class="tableblock halign-left valign-top"><p class="tableblock">${typeDropdown}</p></td>
-                </tr>`;
-            }
-          });
-        } else {
-          // Filter for types of input, processor, and output only
-          const filteredTypes = item.types.filter(typeOption => ['input', 'processor', 'output'].includes(typeOption.type));
-          if (filteredTypes.length > 0) {
-            const typeDropdown = filteredTypes.length > 1
-              ? `<select class="type-dropdown" onchange="updateComponentUrl(this, true)">
-                  ${filteredTypes.map(typeObj => `<option value="${typeObj.url}">${typeObj.type.charAt(0).toUpperCase() + typeObj.type.slice(1)}</option>`).join('')}
-                </select>`
-              : filteredTypes[0].type.charAt(0).toUpperCase() + filteredTypes[0].type.slice(1);
-
-            tableHtml += `
-              <tr>
-                <td class="tableblock halign-left valign-top"><p class="tableblock"><p class="enterprise-label-container">${isEnterprise}</p><code><a href="${filteredTypes[0].url}">${item.originalName}</a></code> ${commonName}</p></td>
-                <td class="tableblock halign-left valign-top"><p class="tableblock">${item.support.charAt(0).toUpperCase() + item.support.slice(1)}</p></td>
-                <td class="tableblock halign-left valign-top"><p class="tableblock">${typeDropdown}</p></td>
+              <tr id="row-${id}">
+                <td class="tableblock halign-left valign-top" id="componentName-${id}">
+                  <p class="tableblock">
+                    <p class="enterprise-label-container">${isEnterprise}</p>
+                    <code><a href="${filteredTypes[0].url}">${item.originalName}</a></code>${commonName}${additionalInfo}
+                  </p>
+                </td>
+                <td class="tableblock halign-left valign-top" id="componentType-${id}">
+                  <p class="tableblock">${typeLinks}</p>
+                </td>
+                <td class="tableblock halign-left valign-top" id="componentSupport-${id}">
+                  <p class="tableblock">${capitalize(support)}</p>
+                </td>
+                <td class="tableblock halign-left valign-top" id="componentLicense-${id}">
+                  <p class="tableblock">No</p>
+                </td>
               </tr>`;
+            }
+          };
+        
+          if (driverSupportData[item.originalName]) {
+            driverSupportData[item.originalName].split(', ').forEach(pair => processItem(pair, 'driver', driverNameMap));
+          } else if (cacheSupportData[item.originalName]) {
+            cacheSupportData[item.originalName].split(', ').forEach(pair => processItem(pair, 'cache', cacheNameMap));
+          } else {
+            processItem(null, '', null);
           }
-        }
-      });
+          id++;
+        });
 
       tableHtml += `
         </tbody>
       </table>
       <script>
-      function filterComponentTable() {
-        const nameInput = document.getElementById('componentTableSearch').value.toLowerCase();
-        const supportFilter = document.getElementById('supportFilter').value;
-        const typeFilter = document.getElementById('typeFilter').value;
-        const table = document.getElementById('componentTable');
-        const trs = table.getElementsByTagName('tr');
+      ${filterComponentTable}
 
-        for (let i = 1; i < trs.length; i++) {
-          const nameTd = trs[i].getElementsByTagName('td')[0];
-          const supportTd = trs[i].getElementsByTagName('td')[1];
-          const typeTd = trs[i].getElementsByTagName('td')[2];
-          const typeDropdown = typeTd.querySelector('.type-dropdown');
-          let showRow =
-            (!nameInput || nameTd.textContent.toLowerCase().includes(nameInput)) &&
-            (!supportFilter || supportTd.textContent.toLowerCase() === supportFilter.toLowerCase()) &&
-            (!typeFilter || (typeDropdown ? Array.from(typeDropdown.options).some(option => option.text.toLowerCase() === typeFilter.toLowerCase()) : typeTd.textContent.toLowerCase().includes(typeFilter.toLowerCase())));
-
-          trs[i].style.display = showRow ? '' : 'none';
-
-          if (showRow && typeFilter && typeDropdown) {
-            const matchingOption = Array.from(typeDropdown.options).find(option => option.text.toLowerCase() === typeFilter.toLowerCase());
-            typeDropdown.value = matchingOption.value;
-            updateComponentUrl(typeDropdown, false);
-          }
-        }
-      }
 
       function getQueryParams() {
         const params = {};
@@ -224,10 +256,6 @@ module.exports.register = function (registry, context) {
           params[key] = value;
         });
         return params;
-      }
-
-      function capitalizeFirstLetter(string) {
-        return string.charAt(0).toUpperCase() + string.slice(1);
       }
 
       function updateComponentUrl(select, redirect) {
@@ -253,7 +281,10 @@ module.exports.register = function (registry, context) {
         filterComponentTable();
         const typeDropdowns = document.querySelectorAll('.type-dropdown');
         typeDropdowns.forEach(dropdown => {
-          new Choices(dropdown, { searchEnabled: false, allowHTML: true });
+          new Choices(dropdown, { 
+            searchEnabled: false, 
+            allowHTML: true,
+            removeItemButton: true });
         });
       });
       </script>`;
@@ -316,7 +347,7 @@ module.exports.register = function (registry, context) {
         <div class="page-type-dropdown">
           <p>Type: </p>
           <select class="type-dropdown" onchange="window.location.href=this.value">
-            ${sortedTypes.map(typeObj => `<option value="${typeObj.url}" data-support="${typeObj.support}">${typeObj.type.charAt(0).toUpperCase() + typeObj.type.slice(1)}</option>`).join('')}
+            ${sortedTypes.map(typeObj => `<option value="${typeObj.url}" data-support="${typeObj.support}">${capitalize(typeObj.type)}</option>`).join('')}
           </select>
         </div>
         <script>
