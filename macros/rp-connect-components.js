@@ -51,6 +51,38 @@ module.exports.register = function (registry, context) {
 
   let tabsCounter = 1; // Counter for generating unique IDs
 
+  const driverNameMap = {
+    "gocosmos": "Azure Cosmos DB",
+    "clickhouse": "ClickHouse",
+    "oracle": "Oracle",
+    "mssql": "Microsoft SQL Server",
+    "mysql": "MYSQL",
+    "snowflake": "Snowflake",
+    "postgresql": "PostgreSQL",
+    "postgres": "PostgreSQL",
+    "sqlite": "SQLite",
+    "trino": "Trino",
+  }
+
+  const cacheNameMap = {
+    "aws_dynamodb": "AWS DynamoDB",
+    "memcached": "Memcached",
+    "redis": "Redis",
+    "aws_s3": "AWS S3",
+    "memory": "Memory",
+    "ristretto": "Ristretto",
+    "couchbase": "Couchbase",
+    "mongodb": "MongoDB",
+    "sql": "SQL",
+    "file": "File",
+    "multilevel": "Multilevel",
+    "ttlru": "TTL LRU",
+    "gcp_cloud_storage": "GCP Cloud Storage",
+    "nats_kv": "NATS KV",
+    "lru": "LRU",
+    "noop": "Noop",
+  };
+
   // Add the category tabs for components
   registry.blockMacro(function () {
     const self = this;
@@ -112,8 +144,6 @@ module.exports.register = function (registry, context) {
     self.named('component_table');
     self.process((parent, target, attrs) => {
       const flatComponentsData = context.config?.attributes?.flatComponentsData || [];
-      const driverNameMap = context.config?.attributes?.drivers || [];
-      const cacheNameMap = context.config?.attributes?.caches || [];
       const driverSupportData = context.config?.attributes?.driverSupportData || {};
       const cacheSupportData = context.config?.attributes?.cacheSupportData || {};
 
