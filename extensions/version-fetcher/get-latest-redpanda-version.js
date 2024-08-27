@@ -1,22 +1,5 @@
-module.exports = async () => {
-  const { Octokit } = await import("@octokit/rest");
-  const { retry } = await import("@octokit/plugin-retry");
-  const semver = await import("semver");
-  const OctokitWithRetries = Octokit.plugin(retry);
-
-  const owner = 'redpanda-data';
-  const repo = 'redpanda';
-
-  let githubOptions = {
-    userAgent: 'Redpanda Docs',
-    baseUrl: 'https://api.github.com',
-  };
-
-  if (process.env.REDPANDA_GITHUB_TOKEN) {
-    githubOptions.auth = process.env.REDPANDA_GITHUB_TOKEN;
-  }
-
-  const github = new OctokitWithRetries(githubOptions);
+module.exports = async (github, owner, repo) => {
+  const semver = require('semver')
   try {
     // Fetch all the releases from the repository
     const releases = await github.rest.repos.listReleases({

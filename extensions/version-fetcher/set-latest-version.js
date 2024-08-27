@@ -1,25 +1,40 @@
-const GetLatestRedpandaVersion = require('./get-latest-redpanda-version')
-const GetLatestConsoleVersion = require('./get-latest-console-version')
-const GetLatestOperatorVersion = require('./get-latest-operator-version')
-const GetLatestHelmChartVersion = require('./get-latest-redpanda-helm-version')
-const GetLatestConnectVersion = require('./get-latest-connect')
-const chalk = require('chalk')
-const semver = require('semver')
-
 module.exports.register = function ({ config }) {
+  const GetLatestRedpandaVersion = require('./get-latest-redpanda-version')
+  const GetLatestConsoleVersion = require('./get-latest-console-version')
+  const GetLatestOperatorVersion = require('./get-latest-operator-version')
+  const GetLatestHelmChartVersion = require('./get-latest-redpanda-helm-version')
+  const GetLatestConnectVersion = require('./get-latest-connect')
+  const chalk = require('chalk')
   const logger = this.getLogger('set-latest-version-extension')
   if (!process.env.REDPANDA_GITHUB_TOKEN) {
     logger.warn('REDPANDA_GITHUB_TOKEN environment variable not set. Attempting unauthenticated request.')
   }
 
   this.on('contentClassified', async ({ contentCatalog }) => {
+    const { Octokit } = await import("@octokit/rest");
+    const { retry } = await import("@octokit/plugin-retry");
+    const semver = await import("semver");
+    const OctokitWithRetries = Octokit.plugin(retry);
+
+    const owner = 'redpanda-data';
+
+    let githubOptions = {
+      userAgent: 'Redpanda Docs',
+      baseUrl: 'https://api.github.com',
+    };
+
+    if (process.env.REDPANDA_GITHUB_TOKEN) {
+      githubOptions.auth = process.env.REDPANDA_GITHUB_TOKEN;
+    }
+
+    const github = new OctokitWithRetries(githubOptions);
     try {
       const results = await Promise.allSettled([
-        GetLatestRedpandaVersion(),
-        GetLatestConsoleVersion(),
-        GetLatestOperatorVersion(),
-        GetLatestHelmChartVersion(),
-        GetLatestConnectVersion()
+        GetLatestRedpandaVersion(github, owner, 'redpanda'),
+        GetLatestConsoleVersion(github, owner, 'console'),
+        GetLatestOperatorVersion(github, owner, 'redpanda-operator'),
+        GetLatestHelmChartVersion(github, owner, 'helm-charts', 'charts/redpanda/Chart.yaml'),
+        GetLatestConnectVersion(github, owner, 'connect')
       ])
 
       const LatestRedpandaVersion = results[0].status === 'fulfilled' ? results[0].value : null
