@@ -516,7 +516,7 @@ asciidoc:
 
 This macro generates a tabbed interface to display Redpanda Connect components by category.
 
-The categories are fetched from the `connectCategoriesData` that's generated in the << Component category aggregator>> extension.
+The categories are fetched from the `connectCategoriesData` that's generated in the <<Component category aggregator>> extension.
 
 ==== Usage
 
