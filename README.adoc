@@ -536,7 +536,7 @@ asciidoc:
 
 This macro generates a searchable table of all Redpanda Connect components with filters for support and type.
 
-The types are fetched from the `flatComponentsData` that's generated in the << Component category aggregator>> extension.
+The types are fetched from the `flatComponentsData` that's generated in the <<Component category aggregator>> extension.
 
 ==== Usage
 
@@ -556,7 +556,7 @@ asciidoc:
 
 This macro generates a dropdown of other supported types for a particular component, allowing users to switch between different types.
 
-The types are fetched from the `flatComponentsData` that's generated in the << Component category aggregator>> extension.
+The types are fetched from the `flatComponentsData` that's generated in the <<Component category aggregator>> extension.
 
 ==== Usage
 
