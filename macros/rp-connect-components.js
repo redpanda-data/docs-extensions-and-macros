@@ -86,7 +86,7 @@ module.exports.register = function (registry, context) {
       const typesArray = Array.from(types.entries())
       .map(([type, { url, isCloudSupported }]) => {
           if (isCloudSupported) {
-              return url ? `<a href="../${url}">${type}</a>` : `<span>${type}</span>`;
+              return url ? `<a href="${url}/">${type}</a>` : `<span>${type}</span>`;
           } else {
               return '';
           }
@@ -100,7 +100,7 @@ module.exports.register = function (registry, context) {
         .join('');
 
       const connectorNameHtml = firstUrl
-        ? `<code><a href="../${firstUrl}">${connector}</a></code>`
+        ? `<code><a href="${firstUrl}/">${connector}</a></code>`
         : `<code><span>${connector}</span></code>`;
 
       if (isCloud) {
@@ -364,7 +364,7 @@ module.exports.register = function (registry, context) {
         <div class="page-type-dropdown">
           <p>Type: </p>
           <select class="type-dropdown" onchange="window.location.href=this.value">
-            ${sortedTypes.map(typeObj => `<option value="../${typeObj.url}" data-support="${typeObj.support}">${capitalize(typeObj.type)}</option>`).join('')}
+            ${sortedTypes.map(typeObj => `<option value="../${typeObj.url}/" data-support="${typeObj.support}">${capitalize(typeObj.type)}</option>`).join('')}
           </select>
         </div>
         <script>
