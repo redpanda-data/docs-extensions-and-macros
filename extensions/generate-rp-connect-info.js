@@ -39,6 +39,7 @@ module.exports.register = function ({ config,contentCatalog }) {
             }).on('error', (error) => {
                 reject(error);
                 logger.error('Error fetching or parsing CSV data:', error);
+                logger.error(error.stack);
             });
         });
     }
