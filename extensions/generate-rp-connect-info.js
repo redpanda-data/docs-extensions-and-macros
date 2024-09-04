@@ -56,26 +56,27 @@ module.exports.register = function ({ config,contentCatalog }) {
 
     function enrichCsvDataWithUrls(parsedData, connectPages, logger) {
         return parsedData.data.map(row => {
-          const connector = row.connector;
-          const type = row.type;
-          let url = '';
-      
-          for (const file of connectPages) {
-            const filePath = file.path;
-            if (filePath.endsWith(`${connector}.adoc`) && filePath.includes(`pages/${type}s/`)) {
-              url = `${type}s/${connector}`;
-              break;
-            }
+          // Create a new object with trimmed keys and values
+        const trimmedRow = Object.fromEntries(
+          Object.entries(row).map(([key, value]) => [key.trim(), value.trim()])
+        );
+        const connector = trimmedRow.connector;
+        const type = trimmedRow.type;
+        let url = '';
+        for (const file of connectPages) {
+          const filePath = file.path;
+          if (filePath.endsWith(`${connector}.adoc`) && filePath.includes(`pages/${type}s/`)) {
+            url = `../${type}s/${connector}`;
+            break;
           }
-      
-          if (!url) {
-            logger.warn(`No matching URL found for connector: ${connector} of type: ${type}`);
-          }
-      
-          return {
-            ...row,
-            url: url
-          };
+        }
+        if (!url) {
+          logger.warn(`No matching URL found for connector: ${connector} of type: ${type}`);
+        }
+        return {
+          ...trimmedRow,
+          url: url
+        };
         });
       }
 }
