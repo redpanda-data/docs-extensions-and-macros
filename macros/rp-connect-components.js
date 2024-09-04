@@ -6,66 +6,68 @@ module.exports.register = function (registry, context) {
     // Retrieve and standardize filter inputs
     const nameInput = document.getElementById('componentTableSearch').value.trim().toLowerCase();
     const typeFilter = Array.from(document.querySelector('#typeFilter').selectedOptions).map(option => option.value);
-    
+
     // Check if the supportFilter element exists
     const supportFilterElement = document.querySelector('#supportFilter');
-    const supportFilter = supportFilterElement 
-        ? Array.from(supportFilterElement.selectedOptions).map(option => option.value)
-        : [];
+    const supportFilter = supportFilterElement
+      ? Array.from(supportFilterElement.selectedOptions).map(option => option.value)
+      : [];
 
     const table = document.getElementById('componentTable');
     const trs = table.getElementsByTagName('tr');
 
     for (let i = 1; i < trs.length; i++) {
-        const row = trs[i];
-        const nameTd = row.querySelector('td[id^="componentName-"]');
-        const typeTd = row.querySelector('td[id^="componentType-"]');
-        const supportTd = row.querySelector('td[id^="componentSupport-"]');
-        const typeDropdown = typeTd ? typeTd.querySelector('.type-dropdown') : null;
+      const row = trs[i];
+      const nameTd = row.querySelector('td[id^="componentName-"]');
+      const typeTd = row.querySelector('td[id^="componentType-"]');
+      const supportTd = row.querySelector('td[id^="componentSupport-"]');
+      const typeDropdown = typeTd ? typeTd.querySelector('.type-dropdown') : null;
 
-        if (nameTd && typeTd) {
-            const nameText = nameTd.textContent.trim().toLowerCase();
-            const typeText = typeTd.textContent.trim().toLowerCase().split(', ').map(item => item.trim());
-            const supportText = supportTd ? supportTd.textContent.trim().toLowerCase() : '';
+      if (nameTd && typeTd) {
+        const nameText = nameTd.textContent.trim().toLowerCase();
+        const typeText = typeTd.textContent.trim().toLowerCase().split(', ').map(item => item.trim());
+        const supportText = supportTd ? supportTd.textContent.trim().toLowerCase() : '';
 
-            // Determine if the row should be shown
-            const showRow =
-                ((!nameInput || nameText.includes(nameInput)) &&
-                (typeFilter.length === 0 || typeFilter.some(value => typeText.includes(value))) &&
-                (!supportTd || supportFilter.length === 0 || supportFilter.some(value => supportText.includes(value)))
-                );
+        // Determine if the row should be shown
+        const showRow =
+          ((!nameInput || nameText.includes(nameInput)) &&
+            (typeFilter.length === 0 || typeFilter.some(value => typeText.includes(value))) &&
+            (!supportTd || supportFilter.length === 0 || supportFilter.some(value => supportText.includes(value)))
+          );
 
-            row.style.display = showRow ? '' : 'none';
+        row.style.display = showRow ? '' : 'none';
 
-            if (showRow && typeFilter.length > 0 && typeDropdown) {
-                const matchingOption = Array.from(typeDropdown.options).find(option => 
-                    typeFilter.includes(option.text.toLowerCase())
-                );
-                if (matchingOption) {
-                    typeDropdown.value = matchingOption.value;
-                    updateComponentUrl(typeDropdown, false);
-                }
-            }
-        } else {
-            row.style.display = 'none'; // Hide row if essential cells are missing
+        if (showRow && typeFilter.length > 0 && typeDropdown) {
+          const matchingOption = Array.from(typeDropdown.options).find(option =>
+            typeFilter.includes(option.text.toLowerCase())
+          );
+          if (matchingOption) {
+            typeDropdown.value = matchingOption.value;
+            updateComponentUrl(typeDropdown, false);
+          }
         }
+      } else {
+        row.style.display = 'none'; // Hide row if essential cells are missing
+      }
     }
-}
+  }
 
   const capitalize = s => s && s[0].toUpperCase() + s.slice(1);
 
   function processConnectors(parsedData) {
     return parsedData.data.reduce((connectors, row) => {
-      const { connector, commercial_name, type, support_level, is_licensed, url } = row;
+      const { connector, commercial_name, type, support_level, is_cloud_supported, is_licensed, url } = row;
+      let isCloudSupported = is_cloud_supported === 'y'
       if (!connectors[connector]) {
         connectors[connector] = {
           types: new Map(),
           supportLevels: new Map(),
           isLicensed: is_licensed === 'y' ? 'Yes' : 'No',
+          isCloudConnectorSupported : isCloudSupported,
           urls: new Set()
         };
       }
-      connectors[connector].types.set(capitalize(type), url);
+      connectors[connector].types.set(capitalize(type), { url, isCloudSupported });
       if (url) connectors[connector].urls.add(url);
       if (!connectors[connector].supportLevels.has(support_level)) {
         connectors[connector].supportLevels.set(support_level, new Set());
@@ -75,29 +77,51 @@ module.exports.register = function (registry, context) {
     }, {});
   }
 
+
   function generateConnectorsHTMLTable(connectors, isCloud) {
     return Object.entries(connectors).map(([connector, details], id) => {
-      const { types, supportLevels, isLicensed, urls } = details;
-      const firstUrl = urls.values().next().value || '#';
-      const typesStr = Array.from(types.entries())
-        .map(([type, url]) => `<a href="../${url || '#'}">${type}</a>`)
-        .join(', ');
+      const { types, supportLevels, isCloudConnectorSupported, isLicensed, urls } = details;
+      const firstUrl = urls.size > 0 ? urls.values().next().value : null;
+
+      const typesArray = Array.from(types.entries())
+      .map(([type, { url, isCloudSupported }]) => {
+          if (isCloudSupported) {
+              return url ? `<a href="../${url}">${type}</a>` : `<span>${type}</span>`;
+          } else {
+              return '';
+          }
+      })
+      .filter(item => item !== '');
+
+      const typesStr = typesArray.join(', ');
+
       const supportLevelStr = Array.from(supportLevels.entries())
         .map(([level, names]) => `<p><b>${capitalize(level)}</b>: ${Array.from(names).join(', ')}</p>`)
         .join('');
 
-      return isCloud
-        ? `<tr id="row-${id}">
+      const connectorNameHtml = firstUrl
+        ? `<code><a href="../${firstUrl}">${connector}</a></code>`
+        : `<code><span>${connector}</span></code>`;
+
+      if (isCloud) {
+        if (isCloudConnectorSupported) {
+          return `
+            <tr id="row-${id}">
+              <td class="tableblock halign-left valign-top" id="componentName-${id}">
+                <p class="tableblock">${connectorNameHtml}</p>
+              </td>
+              <td class="tableblock halign-left valign-top" id="componentType-${id}">
+                <p class="tableblock">${typesStr}</p>
+              </td>
+            </tr>`;
+        } else {
+          return '';
+        }
+      } else {
+        return `
+          <tr id="row-${id}">
             <td class="tableblock halign-left valign-top" id="componentName-${id}">
-              <p class="tableblock"><code><a href="../${firstUrl}">${connector}</a></code></p>
-            </td>
-            <td class="tableblock halign-left valign-top" id="componentType-${id}">
-              <p class="tableblock">${typesStr}</p>
-            </td>
-          </tr>`
-        : `<tr id="row-${id}">
-            <td class="tableblock halign-left valign-top" id="componentName-${id}">
-              <p class="tableblock"><code><a href="${firstUrl}">${connector}</a></code></p>
+              <p class="tableblock">${connectorNameHtml}</p>
             </td>
             <td class="tableblock halign-left valign-top" id="componentType-${id}">
               <p class="tableblock">${typesStr}</p>
@@ -109,8 +133,11 @@ module.exports.register = function (registry, context) {
               <p class="tableblock">${isLicensed}</p>
             </td>
           </tr>`;
-    }).join('');
+      }
+    }).filter(row => row !== '').join(''); // Filter out empty rows
   }
+
+
 
   let tabsCounter = 1; // Counter for generating unique IDs
 
@@ -197,15 +224,15 @@ module.exports.register = function (registry, context) {
             ${createOptions(types)}
           </select>
           `
-          if(!isCloud){
-            tableHtml+=`
+      if (!isCloud) {
+        tableHtml += `
             <br><label for="supportFilter" id="labelForSupportFilter">Support:</label>
                <select multiple class="type-dropdown" id="supportFilter" onchange="filterComponentTable()">
                  ${createOptions(uniqueSupportLevel)}
                </select>`
-          }
-        
-        tableHtml+=`</div>
+      }
+
+      tableHtml += `</div>
         <table class="tableblock frame-all grid-all stripes-even no-clip stretch component-table" id="componentTable">
           <colgroup>
             ${isCloud
@@ -281,25 +308,25 @@ module.exports.register = function (registry, context) {
       const attributes = parent.getDocument().getAttributes();
       const name = attributes['doctitle'];
       const type = attributes['type'];
-  
+
       if (!name || !type) {
         return self.createBlock(parent, 'pass', '');
       }
-  
+
       const csvData = context.config?.attributes?.csvData || [];
       const componentRows = csvData.data.filter(row => row.connector.trim().toLowerCase() === name.trim().toLowerCase());
-  
+
       if (componentRows.length === 0) {
         return self.createBlock(parent, 'pass', '');
       }
-  
+
       // Process types from CSV
       const types = componentRows.map(row => ({
         type: row.type.trim(),
         support: row.support_level.trim(),
         url: row.url ? row.url.trim() : '#'
       }));
-  
+
       // Move the current page's type to the first position in the dropdown
       const sortedTypes = [...types];
       const currentTypeIndex = sortedTypes.findIndex(typeObj => typeObj.type === type);
@@ -307,7 +334,7 @@ module.exports.register = function (registry, context) {
         const [currentType] = sortedTypes.splice(currentTypeIndex, 1);
         sortedTypes.unshift(currentType);
       }
-  
+
       // Check if the component requires an Enterprise license (based on support level)
       let enterpriseAdmonition = '';
       if (componentRows.some(row => row.support_level.toLowerCase() === 'enterprise')) {
@@ -329,7 +356,7 @@ module.exports.register = function (registry, context) {
           </table>
         </div>`;
       }
-  
+
       // Create the dropdown for types
       let typeDropdown = '';
       if (sortedTypes.length > 1) {
