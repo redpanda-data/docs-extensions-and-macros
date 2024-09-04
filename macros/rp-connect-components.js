@@ -6,10 +6,12 @@ module.exports.register = function (registry, context) {
     // Retrieve and standardize filter inputs
     const nameInput = document.getElementById('componentTableSearch').value.trim().toLowerCase();
     const typeFilter = Array.from(document.querySelector('#typeFilter').selectedOptions).map(option => option.value);
-    const supportFilter = Array.from(document.querySelector('#supportFilter').selectedOptions).map(option => option.value);
-
-    // Check if the "Support" label is hidden
-    const isSupportHidden = getComputedStyle(document.getElementById('labelForSupportFilter')).display === 'none';
+    
+    // Check if the supportFilter element exists
+    const supportFilterElement = document.querySelector('#supportFilter');
+    const supportFilter = supportFilterElement 
+        ? Array.from(supportFilterElement.selectedOptions).map(option => option.value)
+        : [];
 
     const table = document.getElementById('componentTable');
     const trs = table.getElementsByTagName('tr');
@@ -29,14 +31,16 @@ module.exports.register = function (registry, context) {
             // Determine if the row should be shown
             const showRow =
                 ((!nameInput || nameText.includes(nameInput)) &&
-                (typeFilter.some(value => typeText.includes(value))) &&
-                (isSupportHidden || !supportTd || supportFilter.length === 0 || supportFilter.some(value => supportText.includes(value)))
-            );
+                (typeFilter.length === 0 || typeFilter.some(value => typeText.includes(value))) &&
+                (!supportTd || supportFilter.length === 0 || supportFilter.some(value => supportText.includes(value)))
+                );
 
             row.style.display = showRow ? '' : 'none';
 
-            if (showRow && typeFilter && typeDropdown) {
-                const matchingOption = Array.from(typeDropdown.options).find(option => option.text.toLowerCase() === typeFilter);
+            if (showRow && typeFilter.length > 0 && typeDropdown) {
+                const matchingOption = Array.from(typeDropdown.options).find(option => 
+                    typeFilter.includes(option.text.toLowerCase())
+                );
                 if (matchingOption) {
                     typeDropdown.value = matchingOption.value;
                     updateComponentUrl(typeDropdown, false);
@@ -48,17 +52,11 @@ module.exports.register = function (registry, context) {
     }
 }
 
-
-
-
-  const capitalize = s => s && s[0].toUpperCase() + s.slice(1) // capitalize the first letter
+  const capitalize = s => s && s[0].toUpperCase() + s.slice(1);
 
   function processConnectors(parsedData) {
-    const connectors = {};
-
-    parsedData.data.forEach(row => {
+    return parsedData.data.reduce((connectors, row) => {
       const { connector, commercial_name, type, support_level, is_licensed, url } = row;
-
       if (!connectors[connector]) {
         connectors[connector] = {
           types: new Map(),
@@ -67,78 +65,51 @@ module.exports.register = function (registry, context) {
           urls: new Set()
         };
       }
-
-      // Add types with their corresponding URLs
       connectors[connector].types.set(capitalize(type), url);
-
-      // Add URL to the set of URLs
-      if (url) {
-        connectors[connector].urls.add(url);
-      }
-
-      // Group support levels by commercial name
+      if (url) connectors[connector].urls.add(url);
       if (!connectors[connector].supportLevels.has(support_level)) {
         connectors[connector].supportLevels.set(support_level, new Set());
       }
       connectors[connector].supportLevels.get(support_level).add(commercial_name);
-    });
-
-    return connectors;
+      return connectors;
+    }, {});
   }
 
   function generateConnectorsHTMLTable(connectors, isCloud) {
-    let html = '';
-    let id = 0;
-
-    for (const [connector, details] of Object.entries(connectors)) {
+    return Object.entries(connectors).map(([connector, details], id) => {
       const { types, supportLevels, isLicensed, urls } = details;
-
       const firstUrl = urls.values().next().value || '#';
+      const typesStr = Array.from(types.entries())
+        .map(([type, url]) => `<a href="${url || '#'}">${type}</a>`)
+        .join(', ');
+      const supportLevelStr = Array.from(supportLevels.entries())
+        .map(([level, names]) => `<p><b>${capitalize(level)}</b>: ${Array.from(names).join(', ')}</p>`)
+        .join('');
 
-      let typesStr = Array.from(types.entries()).map(([type, url]) =>
-        `<a href="${url || '#'}">${type}</a>`
-      ).join(', ');
-
-      let supportLevelStr = '';
-      supportLevels.forEach((commercialNames, level) => {
-        supportLevelStr += `<p><b>${capitalize(level)}</b>: ${Array.from(commercialNames).join(', ')} </p>`;
-      });
-
-      if (isCloud) {
-        html += `<tr id="row-${id}">
-        <td class="tableblock halign-left valign-top" id="componentName-${id}">
-            <p class="tableblock">
-                <code><a href="${firstUrl}">${connector}</a></code>
-            </p>
-        </td>
-        <td class="tableblock halign-left valign-top" id="componentType-${id}">
-            <p class="tableblock">${typesStr}</p>
-        </td>
-        </tr>`;
-      }
-      else {
-        html += `<tr id="row-${id}">
+      return isCloud
+        ? `<tr id="row-${id}">
             <td class="tableblock halign-left valign-top" id="componentName-${id}">
-                <p class="tableblock">
-                    <code><a href="${firstUrl}">${connector}</a></code>
-                </p>
+              <p class="tableblock"><code><a href="${firstUrl}">${connector}</a></code></p>
             </td>
             <td class="tableblock halign-left valign-top" id="componentType-${id}">
-                <p class="tableblock">${typesStr}</p>
+              <p class="tableblock">${typesStr}</p>
+            </td>
+          </tr>`
+        : `<tr id="row-${id}">
+            <td class="tableblock halign-left valign-top" id="componentName-${id}">
+              <p class="tableblock"><code><a href="${firstUrl}">${connector}</a></code></p>
+            </td>
+            <td class="tableblock halign-left valign-top" id="componentType-${id}">
+              <p class="tableblock">${typesStr}</p>
             </td>
             <td class="tableblock halign-left valign-top" id="componentSupport-${id}">
-                <p class="tableblock">${supportLevelStr.trim()}</p>
+              <p class="tableblock">${supportLevelStr.trim()}</p>
             </td>
             <td class="tableblock halign-left valign-top" id="componentLicense-${id}">
-                <p class="tableblock">${isLicensed}</p>
+              <p class="tableblock">${isLicensed}</p>
             </td>
-            </tr>`;
-      }
-
-
-      id++;
-    }
-    return html;
+          </tr>`;
+    }).join('');
   }
 
   let tabsCounter = 1; // Counter for generating unique IDs
@@ -203,7 +174,6 @@ module.exports.register = function (registry, context) {
     const self = this;
     self.named('component_table');
     self.process((parent, target, attrs) => {
-      // Retrieve the value passed as `abc`
       const isCloud = attrs["is_cloud"];
       const csvData = context.config?.attributes?.csvData || [];
       const types = new Set();
@@ -227,120 +197,83 @@ module.exports.register = function (registry, context) {
             ${createOptions(types)}
           </select>
           `
-      if (isCloud) {
-        tableHtml += `
-          <label style="
-    display: none; for="supportFilter" id="labelForSupportFilter">Support:</label>
-          <select style="
-    display: none; multiple class="type-dropdown" id="supportFilter" onchange="filterComponentTable()">
-            ${createOptions(uniqueSupportLevel)}
-          </select>
-      `;
-      }
-
-      else {
-        tableHtml += `
-            <label for="supportFilter">Support:</label>
-            <select multiple class="type-dropdown" id="supportFilter" onchange="filterComponentTable()">
-              ${createOptions(uniqueSupportLevel)}
-            </select>
-        `;
-      }
-
-      tableHtml += `
-      </div>`
-
-      if (isCloud) {
-        tableHtml += `
+          if(!isCloud){
+            tableHtml+=`
+            <br><label for="supportFilter" id="labelForSupportFilter">Support:</label>
+               <select multiple class="type-dropdown" id="supportFilter" onchange="filterComponentTable()">
+                 ${createOptions(uniqueSupportLevel)}
+               </select>`
+          }
+        
+        tableHtml+=`</div>
         <table class="tableblock frame-all grid-all stripes-even no-clip stretch component-table" id="componentTable">
-        <colgroup>
-          <col style="width: 50%;">
-          <col style="width: 50%;">
-        </colgroup>
-        <thead>
-          <tr>
-            <th class="tableblock halign-left valign-top">Name</th>
-            <th class="tableblock halign-left valign-top">Connector Type</th>
-          </tr>
-        </thead>
-        <tbody>`;
-
-      }
-
-      else {
-        tableHtml += `
-      <table class="tableblock frame-all grid-all stripes-even no-clip stretch component-table" id="componentTable">
-        <colgroup>
-          <col style="width: 25%;">
-          <col style="width: 25%;">
-          <col style="width: 25%;">
-          <col style="width: 25%;">
-        </colgroup>
-        <thead>
-          <tr>
-            <th class="tableblock halign-left valign-top">Name</th>
-            <th class="tableblock halign-left valign-top">Connector Type</th>
-            <th class="tableblock halign-left valign-top">Support Level</th>
-            <th class="tableblock halign-left valign-top">Enterprise Licensed</th>
-          </tr>
-        </thead>
-        <tbody>`;
-
-      }
-
-      const processedConnectors = processConnectors(csvData);
-      const connectorsHTMLTable = generateConnectorsHTMLTable(processedConnectors, isCloud);
-      tableHtml += connectorsHTMLTable;
-      tableHtml += '</tbody></table>';
-      tableHtml += `
-      <script>
-      ${filterComponentTable}
-
-
-      function getQueryParams() {
-        const params = {};
-        const searchParams = new URLSearchParams(window.location.search);
-        searchParams.forEach((value, key) => {
-          params[key] = value;
-        });
-        return params;
-      }
-
-      function updateComponentUrl(select, redirect) {
-        const anchor = select.closest('tr').querySelector('a');
-        anchor.href = select.value;
-        if (redirect) {
-          window.location.href = select.value; // Redirect to the new URL
+          <colgroup>
+            ${isCloud
+          ? '<col style="width: 50%;"><col style="width: 50%;">'
+          : '<col style="width: 25%;"><col style="width: 25%;"><col style="width: 25%;"><col style="width: 25%;">'
         }
-      }
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="tableblock halign-left valign-top">Name</th>
+              <th class="tableblock halign-left valign-top">Connector Type</th>
+              ${isCloud ? '' : `
+              <th class="tableblock halign-left valign-top">Support Level</th>
+              <th class="tableblock halign-left valign-top">Enterprise Licensed</th>`}
+            </tr>
+          </thead>
+          <tbody>
+            ${generateConnectorsHTMLTable(processConnectors(csvData), isCloud)}
+          </tbody>
+        </table>
+        <script>
+        ${filterComponentTable.toString()}
 
-      // Initialize Choices.js for type dropdowns
-      document.addEventListener('DOMContentLoaded', function(isCloud) {
-      const params = getQueryParams();
-      if (params.search) {
-        document.getElementById('componentTableSearch').value = params.search;
-      }
-      if (params.type) {
-        document.getElementById('typeFilter').value = params.type;
-      }
-        if (params.support) {
-          document.getElementById('supportFilter').value = params.support;
+        function getQueryParams() {
+          const params = {};
+          const searchParams = new URLSearchParams(window.location.search);
+          searchParams.forEach((value, key) => {
+            params[key] = value;
+          });
+          return params;
         }
-      
-      filterComponentTable();
-      const typeDropdowns = document.querySelectorAll('.type-dropdown');
-      typeDropdowns.forEach(dropdown => {
-        new Choices(dropdown, { 
-          searchEnabled: false, 
-          allowHTML: true,
-          removeItemButton: true });
+
+        function updateComponentUrl(select, redirect) {
+          const anchor = select.closest('tr').querySelector('a');
+          anchor.href = select.value;
+          if (redirect) {
+            window.location.href = select.value; // Redirect to the new URL
+          }
+        }
+
+        // Initialize Choices.js for type dropdowns
+        document.addEventListener('DOMContentLoaded', function() {
+        const params = getQueryParams();
+        if (params.search) {
+          document.getElementById('componentTableSearch').value = params.search;
+        }
+        if (params.type) {
+          document.getElementById('typeFilter').value = params.type;
+        }
+          if (params.support) {
+            document.getElementById('supportFilter').value = params.support;
+          }
+        
+        filterComponentTable();
+        const typeDropdowns = document.querySelectorAll('.type-dropdown');
+        typeDropdowns.forEach(dropdown => {
+          new Choices(dropdown, { 
+            searchEnabled: false, 
+            allowHTML: true,
+            removeItemButton: true });
+          });
         });
-      });
-      </script>`;
+        </script>`;
 
       return self.createBlock(parent, 'pass', tableHtml);
     });
   });
+
   // Add the block macro for displaying a dropdown of other supported types
   registry.blockMacro(function () {
     const self = this;
