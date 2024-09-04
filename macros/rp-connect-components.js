@@ -80,7 +80,7 @@ module.exports.register = function (registry, context) {
       const { types, supportLevels, isLicensed, urls } = details;
       const firstUrl = urls.values().next().value || '#';
       const typesStr = Array.from(types.entries())
-        .map(([type, url]) => `<a href="${url || '#'}">${type}</a>`)
+        .map(([type, url]) => `<a href="../${url || '#'}">${type}</a>`)
         .join(', ');
       const supportLevelStr = Array.from(supportLevels.entries())
         .map(([level, names]) => `<p><b>${capitalize(level)}</b>: ${Array.from(names).join(', ')}</p>`)
@@ -89,7 +89,7 @@ module.exports.register = function (registry, context) {
       return isCloud
         ? `<tr id="row-${id}">
             <td class="tableblock halign-left valign-top" id="componentName-${id}">
-              <p class="tableblock"><code><a href="${firstUrl}">${connector}</a></code></p>
+              <p class="tableblock"><code><a href="../${firstUrl}">${connector}</a></code></p>
             </td>
             <td class="tableblock halign-left valign-top" id="componentType-${id}">
               <p class="tableblock">${typesStr}</p>
@@ -274,7 +274,6 @@ module.exports.register = function (registry, context) {
     });
   });
 
-  // Add the block macro for displaying a dropdown of other supported types
   registry.blockMacro(function () {
     const self = this;
     self.named('component_type_dropdown');
@@ -282,21 +281,36 @@ module.exports.register = function (registry, context) {
       const attributes = parent.getDocument().getAttributes();
       const name = attributes['doctitle'];
       const type = attributes['type'];
-
+  
       if (!name || !type) {
         return self.createBlock(parent, 'pass', '');
       }
-
-      const flatComponentsData = context.config?.attributes?.flatComponentsData || []
-      const component = flatComponentsData.find(item => item.originalName === name);
-
-      if (!component) {
+  
+      const csvData = context.config?.attributes?.csvData || [];
+      const componentRows = csvData.data.filter(row => row.connector.trim().toLowerCase() === name.trim().toLowerCase());
+  
+      if (componentRows.length === 0) {
         return self.createBlock(parent, 'pass', '');
       }
-
-      // Check if the component requires an Enterprise license
+  
+      // Process types from CSV
+      const types = componentRows.map(row => ({
+        type: row.type.trim(),
+        support: row.support_level.trim(),
+        url: row.url ? row.url.trim() : '#'
+      }));
+  
+      // Move the current page's type to the first position in the dropdown
+      const sortedTypes = [...types];
+      const currentTypeIndex = sortedTypes.findIndex(typeObj => typeObj.type === type);
+      if (currentTypeIndex !== -1) {
+        const [currentType] = sortedTypes.splice(currentTypeIndex, 1);
+        sortedTypes.unshift(currentType);
+      }
+  
+      // Check if the component requires an Enterprise license (based on support level)
       let enterpriseAdmonition = '';
-      if (component.enterprise) {
+      if (componentRows.some(row => row.support_level.toLowerCase() === 'enterprise')) {
         enterpriseAdmonition = `
         <div class="admonitionblock note">
           <table>
@@ -315,21 +329,15 @@ module.exports.register = function (registry, context) {
           </table>
         </div>`;
       }
-
-      // Move the page's current type to the first position in the dropdown
-      const sortedTypes = [...component.types];
-      const currentTypeIndex = sortedTypes.findIndex(typeObj => typeObj.type === type);
-      if (currentTypeIndex !== -1) {
-        const [currentType] = sortedTypes.splice(currentTypeIndex, 1);
-        sortedTypes.unshift(currentType);
-      }
+  
+      // Create the dropdown for types
       let typeDropdown = '';
-      if (component.types.length > 1) {
+      if (sortedTypes.length > 1) {
         typeDropdown = `
         <div class="page-type-dropdown">
           <p>Type: </p>
           <select class="type-dropdown" onchange="window.location.href=this.value">
-            ${sortedTypes.map(typeObj => `<option value="${typeObj.url}" data-support="${typeObj.support}">${capitalize(typeObj.type)}</option>`).join('')}
+            ${sortedTypes.map(typeObj => `<option value="../${typeObj.url}" data-support="${typeObj.support}">${capitalize(typeObj.type)}</option>`).join('')}
           </select>
         </div>
         <script>

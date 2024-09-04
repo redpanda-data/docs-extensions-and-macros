@@ -55,7 +55,7 @@ module.exports.register = function ({ config,contentCatalog }) {
           for (const file of connectPages) {
             const filePath = file.path;
             if (filePath.endsWith(`${connector}.adoc`) && filePath.includes(`pages/${type}s/`)) {
-              url = `../${type}s/${connector}`;
+              url = `${type}s/${connector}`;
               break;
             }
           }
