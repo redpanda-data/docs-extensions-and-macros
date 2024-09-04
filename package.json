@@ -31,6 +31,7 @@
     },
     "./extensions/replace-attributes-in-attachments": "./extensions/replace-attributes-in-attachments.js",
     "./extensions/generate-rp-connect-categories": "./extensions/generate-rp-connect-categories.js",
+    "./extensions/generate-rp-connect-info": "./extensions/generate-rp-connect-info.js",
     "./extensions/add-global-attributes": "./extensions/add-global-attributes.js",
     "./extensions/version-fetcher/set-latest-version": "./extensions/version-fetcher/set-latest-version.js",
     "./extensions/modify-connect-tag-playbook": "./extensions/modify-connect-tag-playbook.js",
@@ -57,6 +58,9 @@
     "url": "git+https://github.com/redpanda-data/docs-extensions-and-macros"
   },
   "dependencies": {
+    "@octokit/core": "^6.1.2",
+    "@octokit/plugin-retry": "^7.1.1",
+    "@octokit/rest": "^21.0.1",
     "algoliasearch": "^4.17.0",
     "chalk": "4.1.2",
     "gulp": "^4.0.2",
@@ -65,10 +69,8 @@
     "js-yaml": "^4.1.0",
     "lodash": "^4.17.21",
     "node-html-parser": "5.4.2-0",
-    "semver": "^7.6.0",
-    "@octokit/core": "^6.1.2",
-    "@octokit/plugin-retry": "^7.1.1",
-    "@octokit/rest": "^21.0.1"
+    "papaparse": "^5.4.1",
+    "semver": "^7.6.0"
   },
   "devDependencies": {
     "@antora/cli": "3.1.4",

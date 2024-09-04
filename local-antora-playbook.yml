@@ -27,6 +27,7 @@ antora:
   - './extensions/version-fetcher/set-latest-version'
   - './extensions/algolia-indexer/index'
   - require: './extensions/generate-rp-connect-categories'
+  - require: './extensions/generate-rp-connect-info'
   - require: './extensions/unlisted-pages'
   - require: './extensions/replace-attributes-in-attachments'
   - require: './extensions/unpublish-pages'
