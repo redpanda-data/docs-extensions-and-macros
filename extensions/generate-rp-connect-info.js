@@ -12,6 +12,14 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; */
 module.exports.register = function ({ config,contentCatalog }) {
     const logger = this.getLogger('redpanda-connect-info-extension');
 
+    async function loadOctokit() {
+      const { Octokit } = await import('@octokit/rest');
+      if (!process.env.GITHUB_TOKEN) return new Octokit()
+      return new Octokit({
+        auth: process.env.GITHUB_TOKEN,
+      });
+    }
+
     this.once('contentClassified', async ({ siteCatalog, contentCatalog }) => {
         const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'redpanda-connect')
         if (!redpandaConnect) return
