@@ -14,9 +14,9 @@ module.exports.register = function ({ config,contentCatalog }) {
 
     async function loadOctokit() {
       const { Octokit } = await import('@octokit/rest');
-      if (!process.env.GITHUB_TOKEN) return new Octokit()
+      if (!process.env.REDPANDA_GITHUB_TOKEN) return new Octokit()
       return new Octokit({
-        auth: process.env.GITHUB_TOKEN,
+        auth: process.env.REDPANDA_GITHUB_TOKEN,
       });
     }
 
