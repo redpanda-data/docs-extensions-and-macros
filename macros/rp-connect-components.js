@@ -5,47 +5,51 @@ module.exports.register = function (registry, context) {
   function filterComponentTable() {
     // Retrieve and standardize filter inputs
     const nameInput = document.getElementById('componentTableSearch').value.trim().toLowerCase();
-    const supportFilter = Array.from(document.querySelector('#supportFilter').selectedOptions).map(option => option.value);
     const typeFilter = Array.from(document.querySelector('#typeFilter').selectedOptions).map(option => option.value);
+    const supportFilter = Array.from(document.querySelector('#supportFilter').selectedOptions).map(option => option.value);
+
+    // Check if the "Support" label is hidden
+    const isSupportHidden = getComputedStyle(document.getElementById('labelForSupportFilter')).display === 'none';
 
     const table = document.getElementById('componentTable');
     const trs = table.getElementsByTagName('tr');
 
     for (let i = 1; i < trs.length; i++) {
-      const row = trs[i];
-      const nameTd = row.querySelector('td[id^="componentName-"]');
-      const supportTd = row.querySelector('td[id^="componentSupport-"]');
-      const typeTd = row.querySelector('td[id^="componentType-"]');
-      const typeDropdown = typeTd ? typeTd.querySelector('.type-dropdown') : null;
+        const row = trs[i];
+        const nameTd = row.querySelector('td[id^="componentName-"]');
+        const typeTd = row.querySelector('td[id^="componentType-"]');
+        const supportTd = row.querySelector('td[id^="componentSupport-"]');
+        const typeDropdown = typeTd ? typeTd.querySelector('.type-dropdown') : null;
 
-      if (nameTd && supportTd && typeTd) {
-        const nameText = nameTd.textContent.trim().toLowerCase();
-        const supportText = supportTd.textContent.trim().toLowerCase();
-        const typeText = typeTd.textContent.trim().toLowerCase().split(', ').map(item => item.trim());
+        if (nameTd && typeTd) {
+            const nameText = nameTd.textContent.trim().toLowerCase();
+            const typeText = typeTd.textContent.trim().toLowerCase().split(', ').map(item => item.trim());
+            const supportText = supportTd ? supportTd.textContent.trim().toLowerCase() : '';
 
-        // Determine if the row should be shown
-        const showRow =
+            // Determine if the row should be shown
+            const showRow =
+                ((!nameInput || nameText.includes(nameInput)) &&
+                (typeFilter.some(value => typeText.includes(value))) &&
+                (isSupportHidden || !supportTd || supportFilter.length === 0 || supportFilter.some(value => supportText.includes(value)))
+            );
 
+            row.style.display = showRow ? '' : 'none';
 
-          ((!nameInput || nameText.includes(nameInput)) &&
-            (typeFilter.some(value => typeText.includes(value))) &&
-            (supportFilter.some(value => supportText.includes(value)))
-          )
-
-        row.style.display = showRow ? '' : 'none';
-
-        if (showRow && typeFilter && typeDropdown) {
-          const matchingOption = Array.from(typeDropdown.options).find(option => option.text.toLowerCase() === typeFilter);
-          if (matchingOption) {
-            typeDropdown.value = matchingOption.value;
-            updateComponentUrl(typeDropdown, false);
-          }
+            if (showRow && typeFilter && typeDropdown) {
+                const matchingOption = Array.from(typeDropdown.options).find(option => option.text.toLowerCase() === typeFilter);
+                if (matchingOption) {
+                    typeDropdown.value = matchingOption.value;
+                    updateComponentUrl(typeDropdown, false);
+                }
+            }
+        } else {
+            row.style.display = 'none'; // Hide row if essential cells are missing
         }
-      } else {
-        row.style.display = 'none'; // Hide row if cells are missing
-      }
     }
-  }
+}
+
+
+
 
   const capitalize = s => s && s[0].toUpperCase() + s.slice(1) // capitalize the first letter
 
@@ -82,7 +86,7 @@ module.exports.register = function (registry, context) {
     return connectors;
   }
 
-  function generateConnectorsHTMLTable(connectors,isCloud) {
+  function generateConnectorsHTMLTable(connectors, isCloud) {
     let html = '';
     let id = 0;
 
@@ -99,8 +103,8 @@ module.exports.register = function (registry, context) {
       supportLevels.forEach((commercialNames, level) => {
         supportLevelStr += `<p><b>${capitalize(level)}</b>: ${Array.from(commercialNames).join(', ')} </p>`;
       });
-      
-      if(isCloud){
+
+      if (isCloud) {
         html += `<tr id="row-${id}">
         <td class="tableblock halign-left valign-top" id="componentName-${id}">
             <p class="tableblock">
@@ -112,7 +116,7 @@ module.exports.register = function (registry, context) {
         </td>
         </tr>`;
       }
-      else{
+      else {
         html += `<tr id="row-${id}">
             <td class="tableblock halign-left valign-top" id="componentName-${id}">
                 <p class="tableblock">
@@ -131,7 +135,7 @@ module.exports.register = function (registry, context) {
             </tr>`;
       }
 
-      
+
       id++;
     }
     return html;
@@ -199,7 +203,7 @@ module.exports.register = function (registry, context) {
     const self = this;
     self.named('component_table');
     self.process((parent, target, attrs) => {
-       // Retrieve the value passed as `abc`
+      // Retrieve the value passed as `abc`
       const isCloud = attrs["is_cloud"];
       const csvData = context.config?.attributes?.csvData || [];
       const types = new Set();
@@ -223,19 +227,30 @@ module.exports.register = function (registry, context) {
             ${createOptions(types)}
           </select>
           `
-        if(!isCloud){
-          tableHtml+=`
-          <label for="supportFilter">Support:</label>
-          <select multiple class="type-dropdown" id="supportFilter" onchange="filterComponentTable()">
+      if (isCloud) {
+        tableHtml += `
+          <label style="
+    display: none; for="supportFilter" id="labelForSupportFilter">Support:</label>
+          <select style="
+    display: none; multiple class="type-dropdown" id="supportFilter" onchange="filterComponentTable()">
             ${createOptions(uniqueSupportLevel)}
           </select>
       `;
       }
 
+      else {
+        tableHtml += `
+            <label for="supportFilter">Support:</label>
+            <select multiple class="type-dropdown" id="supportFilter" onchange="filterComponentTable()">
+              ${createOptions(uniqueSupportLevel)}
+            </select>
+        `;
+      }
+
       tableHtml += `
       </div>`
 
-      if(isCloud){
+      if (isCloud) {
         tableHtml += `
         <table class="tableblock frame-all grid-all stripes-even no-clip stretch component-table" id="componentTable">
         <colgroup>
@@ -249,11 +264,11 @@ module.exports.register = function (registry, context) {
           </tr>
         </thead>
         <tbody>`;
-        
+
       }
 
-      else{
-      tableHtml += `
+      else {
+        tableHtml += `
       <table class="tableblock frame-all grid-all stripes-even no-clip stretch component-table" id="componentTable">
         <colgroup>
           <col style="width: 25%;">
@@ -274,7 +289,7 @@ module.exports.register = function (registry, context) {
       }
 
       const processedConnectors = processConnectors(csvData);
-      const connectorsHTMLTable = generateConnectorsHTMLTable(processedConnectors,isCloud);
+      const connectorsHTMLTable = generateConnectorsHTMLTable(processedConnectors, isCloud);
       tableHtml += connectorsHTMLTable;
       tableHtml += '</tbody></table>';
       tableHtml += `
@@ -300,24 +315,25 @@ module.exports.register = function (registry, context) {
       }
 
       // Initialize Choices.js for type dropdowns
-      document.addEventListener('DOMContentLoaded', function() {
-        const params = getQueryParams();
-        if (params.search) {
-          document.getElementById('componentTableSearch').value = params.search;
-        }
+      document.addEventListener('DOMContentLoaded', function(isCloud) {
+      const params = getQueryParams();
+      if (params.search) {
+        document.getElementById('componentTableSearch').value = params.search;
+      }
+      if (params.type) {
+        document.getElementById('typeFilter').value = params.type;
+      }
         if (params.support) {
           document.getElementById('supportFilter').value = params.support;
         }
-        if (params.type) {
-          document.getElementById('typeFilter').value = params.type;
-        }
-        filterComponentTable();
-        const typeDropdowns = document.querySelectorAll('.type-dropdown');
-        typeDropdowns.forEach(dropdown => {
-          new Choices(dropdown, { 
-            searchEnabled: false, 
-            allowHTML: true,
-            removeItemButton: true });
+      
+      filterComponentTable();
+      const typeDropdowns = document.querySelectorAll('.type-dropdown');
+      typeDropdowns.forEach(dropdown => {
+        new Choices(dropdown, { 
+          searchEnabled: false, 
+          allowHTML: true,
+          removeItemButton: true });
         });
       });
       </script>`;
