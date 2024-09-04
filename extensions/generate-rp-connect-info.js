@@ -2,20 +2,24 @@
 const https = require('https');
 const Papa = require('papaparse');
 
-//const csvUrl = 'https://raw.githubusercontent.com/redpanda-data/rp-connect-docs/connect-csv/redpanda_connect.csv';
-const csvUrl = 'https://localhost:3000/csv';
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+const CSV_PATH = 'redpanda_connect.csv'
+const GITHUB_OWNER = 'redpanda-data'
+const GITHUB_REPO = 'rp-connect-docs'
+const GITHUB_REF = 'connect-csv'
+/* const csvUrl = 'https://localhost:3000/csv';
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; */
 
 module.exports.register = function ({ config,contentCatalog }) {
     const logger = this.getLogger('redpanda-connect-info-extension');
 
     this.once('contentClassified', async ({ siteCatalog, contentCatalog }) => {
         const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'redpanda-connect')
+        if (!redpandaConnect) return
         const pages = contentCatalog.getPages()
         try {
             // Fetch CSV data and parse it
-            const csvData = await fetchCSV(csvUrl);
-            const parsedData = Papa.parse(csvData, { header: true });
+            const csvData = await fetchCSV();
+            const parsedData = Papa.parse(csvData, { header: true, skipEmptyLines: true });
             const enrichedData = enrichCsvDataWithUrls(parsedData,pages,logger);
             parsedData.data = enrichedData
             redpandaConnect.latest.asciidoc.attributes.csvData = parsedData;  
@@ -26,22 +30,20 @@ module.exports.register = function ({ config,contentCatalog }) {
         }
     });
 
-    function fetchCSV(url) {
-        return new Promise((resolve, reject) => {
-            https.get(url, (response) => {
-                let data = '';
-                response.on('data', (chunk) => {
-                    data += chunk;
-                });
-                response.on('end', () => {
-                    resolve(data);
-                });
-            }).on('error', (error) => {
-                reject(error);
-                logger.error('Error fetching or parsing CSV data:', error);
-                logger.error(error.stack);
-            });
+  async function fetchCSV() {
+      const octokit = await loadOctokit();
+      try {
+        const { data: fileContent } = await octokit.rest.repos.getContent({
+          owner: GITHUB_OWNER,
+          repo: GITHUB_REPO,
+          path: CSV_PATH,
+          ref: GITHUB_REF,
         });
+        return Buffer.from(fileContent.content, 'base64').toString('utf8');
+      } catch (error) {
+        console.error('Error fetching Redpanda Connect catalog from GitHub:', error);
+        return [];
+      }
     }
 
     function enrichCsvDataWithUrls(parsedData, connectPages, logger) {
