@@ -9,8 +9,8 @@ const GITHUB_REF = 'connect-csv'
 /* const csvUrl = 'https://localhost:3000/csv';
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; */
 
-module.exports.register = function ({ config, contentCatalog }) {
-  const logger = this.getLogger('redpanda-connect-info-extension');
+module.exports.register = function ({ config,contentCatalog }) {
+    const logger = this.getLogger('redpanda-connect-info-extension');
 
   async function loadOctokit() {
     const { Octokit } = await import('@octokit/rest');
@@ -22,6 +22,7 @@ module.exports.register = function ({ config, contentCatalog }) {
 
   this.once('contentClassified', async ({ siteCatalog, contentCatalog }) => {
     const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'redpanda-connect')
+    const redpandaCloud = contentCatalog.getComponents().find(component => component.name === 'redpanda-cloud')
     if (!redpandaConnect) return
     const pages = contentCatalog.getPages()
     try {
@@ -31,6 +32,7 @@ module.exports.register = function ({ config, contentCatalog }) {
       const enrichedData = enrichCsvDataWithUrls(parsedData, pages, logger);
       parsedData.data = enrichedData
       redpandaConnect.latest.asciidoc.attributes.csvData = parsedData;
+      redpandaCloud.latest.asciidoc.attributes.csvData = parsedData;
 
     } catch (error) {
       logger.error('Error fetching or parsing CSV data:', error.message);
