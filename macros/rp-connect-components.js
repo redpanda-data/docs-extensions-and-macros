@@ -85,11 +85,16 @@ module.exports.register = function (registry, context) {
 
       const typesArray = Array.from(types.entries())
       .map(([type, { url, isCloudSupported }]) => {
-          if (isCloudSupported) {
-              return url ? `<a href="${url}/">${type}</a>` : `<span>${type}</span>`;
-          } else {
-              return '';
-          }
+          if(isCloud){
+            if (isCloudSupported) {
+                return url ? `<a href="${url}/">${type}</a>` : `<span>${type}</span>`;
+            } else {
+                return '';
+            }
+        }
+        else{
+          return url ? `<a href="${url}/">${type}</a>` : `<span>${type}</span>`;
+        }
       })
       .filter(item => item !== '');
 
