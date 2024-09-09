@@ -220,7 +220,7 @@ module.exports.register = function (registry, context) {
 
       const createOptions = (values) =>
         Array.from(values)
-          .map(value => `<option selected value="${value}">${capitalize(value)}</option>`)
+          .map(value => `<option selected value="${value}">${capitalize(value).replace("_"," ")}</option>`)
           .join('');
 
       let tableHtml = `
