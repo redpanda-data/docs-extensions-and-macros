@@ -15,7 +15,7 @@ content:
     branches: main
     start_paths: [docs,'*/docs']
   - url: https://github.com/redpanda-data/rp-connect-docs
-    branches: feature-2540-additional-single-sourcing
+    branches: main
   - url: https://github.com/redpanda-data/cloud-docs
     branches: feature-2540_RPCN_Cloud_docs
 ui:
