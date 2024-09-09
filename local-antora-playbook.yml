@@ -9,6 +9,11 @@ content:
   - url: .
     branches: HEAD
     start_paths: [preview/extensions-and-macros, preview/shared]
+  - url: https://github.com/redpanda-data/docs
+    branches: [main, v/*, api, shared, 'site-search', '!v-end-of-life/*']
+  - url: https://github.com/redpanda-data/redpanda-labs
+    branches: main
+    start_paths: [docs,'*/docs']
   - url: https://github.com/redpanda-data/rp-connect-docs
     branches: feature-2540-additional-single-sourcing
   - url: https://github.com/redpanda-data/cloud-docs
