@@ -5,7 +5,7 @@ const Papa = require('papaparse');
 const CSV_PATH = 'redpanda_connect.csv'
 const GITHUB_OWNER = 'redpanda-data'
 const GITHUB_REPO = 'rp-connect-docs'
-const GITHUB_REF = 'connect-csv'
+const GITHUB_REF = 'main'
 /* const csvUrl = 'https://localhost:3000/csv';
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; */
 
