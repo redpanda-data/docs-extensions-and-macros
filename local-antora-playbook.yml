@@ -9,6 +9,8 @@ content:
   - url: .
     branches: HEAD
     start_paths: [preview/extensions-and-macros, preview/shared]
+  - url: https://github.com/redpanda-data/rp-connect-docs
+    branches: main
 ui:
   bundle:
     url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip
@@ -27,6 +29,7 @@ antora:
   - './extensions/version-fetcher/set-latest-version'
   - './extensions/algolia-indexer/index'
   - require: './extensions/generate-rp-connect-categories'
+  - require: './extensions/generate-rp-connect-info'
   - require: './extensions/unlisted-pages'
   - require: './extensions/replace-attributes-in-attachments'
   - require: './extensions/unpublish-pages'
