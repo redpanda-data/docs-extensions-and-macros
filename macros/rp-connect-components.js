@@ -101,8 +101,15 @@ module.exports.register = function (registry, context) {
       const typesStr = typesArray.join(', ');
 
       const supportLevelStr = Array.from(supportLevels.entries())
-        .map(([level, names]) => `<p><b>${capitalize(level)}</b>: ${Array.from(names).join(', ')}</p>`)
-        .join('');
+      .sort(([levelA], [levelB]) => levelA.localeCompare(levelB))  // Sort by level alphabetically
+      .map(([level, names]) => {
+          if (supportLevels.size === 1) {
+              return `<p>${capitalize(level)}</p>`;
+          } else {
+              return `<p><b>${capitalize(level)}</b>: ${Array.from(names).join(', ')}</p>`;
+          }
+      })
+      .join('');
 
       const connectorNameHtml = firstUrl
         ? `<code><a href="${firstUrl}/">${connector}</a></code>`
