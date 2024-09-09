@@ -262,7 +262,7 @@ function generateConnectorsHTMLTable(connectors, isCloud) {
       }
 
       tableHtml += `</div>
-        <table class="tableblock frame-all grid-all stripes-even no-clip stretch component-table" id="componentTable">
+        <table class="tableblock frame-all grid-all stripes-even no-clip stretch component-table sortable" id="componentTable">
           <colgroup>
             ${isCloud
           ? '<col style="width: 50%;"><col style="width: 50%;">'
