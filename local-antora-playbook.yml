@@ -10,7 +10,9 @@ content:
     branches: HEAD
     start_paths: [preview/extensions-and-macros, preview/shared]
   - url: https://github.com/redpanda-data/rp-connect-docs
-    branches: main
+    branches: feature-2540-additional-single-sourcing
+  - url: https://github.com/redpanda-data/cloud-docs
+    branches: feature-2540_RPCN_Cloud_docs
 ui:
   bundle:
     url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip
