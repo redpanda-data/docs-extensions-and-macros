@@ -1,7 +1,6 @@
 'use strict';
 
 module.exports.register = function (registry, context) {
-
   function filterComponentTable() {
     // Retrieve and standardize filter inputs
     const nameInput = document.getElementById('componentTableSearch').value.trim().toLowerCase();
@@ -56,45 +55,51 @@ module.exports.register = function (registry, context) {
 
   function processConnectors(parsedData) {
     return parsedData.data.reduce((connectors, row) => {
-      const { connector, commercial_name, type, support_level, is_cloud_supported, is_licensed, url } = row;
-      let isCloudSupported = is_cloud_supported === 'y'
-      if (!connectors[connector]) {
-        connectors[connector] = {
-          types: new Map(),
-          supportLevels: new Map(),
-          isLicensed: is_licensed === 'y' ? 'Yes' : 'No',
-          isCloudConnectorSupported : isCloudSupported,
-          urls: new Set()
-        };
-      }
-      connectors[connector].types.set(capitalize(type), { url, isCloudSupported });
-      if (url) connectors[connector].urls.add(url);
-      if (!connectors[connector].supportLevels.has(support_level)) {
-        connectors[connector].supportLevels.set(support_level, new Set());
-      }
-      connectors[connector].supportLevels.get(support_level).add(commercial_name);
-      return connectors;
+        const { connector, commercial_name, type, support_level, is_cloud_supported, is_licensed, url } = row;
+        const isCloudSupported = is_cloud_supported === 'y';
+
+        if (!connectors[connector]) {
+            connectors[connector] = {
+                types: new Map(),
+                supportLevels: new Map(),
+                isLicensed: is_licensed === 'y' ? 'Yes' : 'No',
+                isCloudConnectorSupported: false, 
+                urls: new Set()
+            };
+        }
+        connectors[connector].types.set(capitalize(type), { url });
+
+        // Check at the connector level if any type supports cloud
+        if (isCloudSupported) {
+            connectors[connector].isCloudConnectorSupported = true;
+        }
+
+        // Update supportLevels with commercial name and cloud support info
+        if (!connectors[connector].supportLevels.has(support_level)) {
+            connectors[connector].supportLevels.set(support_level, []);
+        }
+
+        connectors[connector].supportLevels.get(support_level).push({
+            commercial_name,
+            isCloudSupported
+        });
+
+        if (url) connectors[connector].urls.add(url);
+
+        return connectors;
     }, {});
-  }
+}
 
 
-  function generateConnectorsHTMLTable(connectors, isCloud) {
-    return Object.entries(connectors).map(([connector, details], id) => {
+
+function generateConnectorsHTMLTable(connectors, isCloud) {
+  return Object.entries(connectors).map(([connector, details], id) => {
       const { types, supportLevels, isCloudConnectorSupported, isLicensed, urls } = details;
       const firstUrl = urls.size > 0 ? urls.values().next().value : null;
 
       const typesArray = Array.from(types.entries())
-      .map(([type, { url, isCloudSupported }]) => {
-          if(isCloud){
-            if (isCloudSupported) {
-                return url ? `<a href="${url}/">${type}</a>` : `<span>${type}</span>`;
-            } else {
-                return '';
-            }
-        }
-        else{
+      .map(([type, { url }]) => {
           return url ? `<a href="${url}/">${type}</a>` : `<span>${type}</span>`;
-        }
       })
       .filter(item => item !== '');
 
@@ -102,54 +107,59 @@ module.exports.register = function (registry, context) {
 
       const supportLevelStr = Array.from(supportLevels.entries())
       .sort(([levelA], [levelB]) => levelA.localeCompare(levelB))  // Sort by level alphabetically
-      .map(([level, names]) => {
+      .map(([level, commercialNames]) => {
+          const filteredNames = commercialNames
+              .filter(({ isCloudSupported }) => !isCloud || isCloudSupported)
+              .map(({ commercial_name }) => commercial_name);
+
+          if (filteredNames.length === 0) return ''; // Skip levels with no cloud-supported names
+
           if (supportLevels.size === 1) {
-              return `<p>${capitalize(level)}</p>`;
+              return `<p>${capitalize(level)}: ${filteredNames.join(', ')}</p>`;
           } else {
-              return `<p><b>${capitalize(level)}</b>: ${Array.from(names).join(', ')}</p>`;
+              return `<p><b>${capitalize(level)}</b>: ${filteredNames.join(', ')}</p>`;
           }
       })
+      .filter(item => item !== '') 
       .join('');
 
       const connectorNameHtml = firstUrl
-        ? `<code><a href="${firstUrl}/">${connector}</a></code>`
-        : `<code><span>${connector}</span></code>`;
+          ? `<code><a href="${firstUrl}/">${connector}</a></code>`
+          : `<code><span>${connector}</span></code>`;
 
       if (isCloud) {
-        if (isCloudConnectorSupported) {
-          return `
-            <tr id="row-${id}">
-              <td class="tableblock halign-left valign-top" id="componentName-${id}">
-                <p class="tableblock">${connectorNameHtml}</p>
-              </td>
-              <td class="tableblock halign-left valign-top" id="componentType-${id}">
-                <p class="tableblock">${typesStr}</p>
-              </td>
-            </tr>`;
-        } else {
-          return '';
-        }
+          if (isCloudConnectorSupported && supportLevelStr.trim() !== '') {
+              return `
+                  <tr id="row-${id}">
+                      <td class="tableblock halign-left valign-top" id="componentName-${id}">
+                          <p class="tableblock">${connectorNameHtml}</p>
+                      </td>
+                      <td class="tableblock halign-left valign-top" id="componentType-${id}">
+                          <p class="tableblock">${typesStr}</p>
+                      </td>
+                  </tr>`;
+          } else {
+              return '';
+          }
       } else {
-        return `
-          <tr id="row-${id}">
-            <td class="tableblock halign-left valign-top" id="componentName-${id}">
-              <p class="tableblock">${connectorNameHtml}</p>
-            </td>
-            <td class="tableblock halign-left valign-top" id="componentType-${id}">
-              <p class="tableblock">${typesStr}</p>
-            </td>
-            <td class="tableblock halign-left valign-top" id="componentSupport-${id}">
-              <p class="tableblock">${supportLevelStr.trim()}</p>
-            </td>
-            <td class="tableblock halign-left valign-top" id="componentLicense-${id}">
-              <p class="tableblock">${isLicensed}</p>
-            </td>
-          </tr>`;
+          return `
+              <tr id="row-${id}">
+                  <td class="tableblock halign-left valign-top" id="componentName-${id}">
+                      <p class="tableblock">${connectorNameHtml}</p>
+                  </td>
+                  <td class="tableblock halign-left valign-top" id="componentType-${id}">
+                      <p class="tableblock">${typesStr}</p>
+                  </td>
+                  <td class="tableblock halign-left valign-top" id="componentSupport-${id}">
+                      <p class="tableblock">${supportLevelStr.trim()}</p>
+                  </td>
+                  <td class="tableblock halign-left valign-top" id="componentLicense-${id}">
+                      <p class="tableblock">${isLicensed}</p>
+                  </td>
+              </tr>`;
       }
-    }).filter(row => row !== '').join(''); // Filter out empty rows
-  }
-
-
+  }).filter(row => row !== '').join(''); // Filter out empty rows
+}
 
   let tabsCounter = 1; // Counter for generating unique IDs
 
