@@ -55,7 +55,7 @@ module.exports.register = function (registry, context) {
   const capitalize = s => s && s[0].toUpperCase() + s.slice(1);
 
   function processConnectors(parsedData) {
-    return parsedData.data.reduce((connectors, row) => {
+    return parsedData.reduce((connectors, row) => {
       const { connector, commercial_name, type, support_level, is_cloud_supported, is_licensed, url } = row;
       let isCloudSupported = is_cloud_supported === 'y'
       if (!connectors[connector]) {
@@ -154,7 +154,7 @@ module.exports.register = function (registry, context) {
     self.process((parent, target, attrs) => {
       const type = attrs.type;
       const categoriesData = context.config?.attributes?.connectCategoriesData || null
-      if (!categoriesData) return console.error ('CSV data is not available. Make sure your playbook includes the generate-rp-connect-categories extension.')
+      if (!categoriesData) return console.error (`Category data is not available for ${parent.getDocument().getAttributes()['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-categories extension.`)
       const categories = categoriesData[type] || null;
       const currentTabsId = `tabs-${tabsCounter++}`; // Unique ID for this set of tabs
       if (!categories) return
@@ -208,12 +208,12 @@ module.exports.register = function (registry, context) {
     self.named('component_table');
     self.process((parent, target, attrs) => {
       const isCloud = parent.getDocument().getAttributes()['env-cloud'] !== undefined;
-      const csvData = context.config?.attributes?.csvData || null;
-      if (!csvData) return console.error('CSV data is not available. Make sure your playbook includes the generate-rp-connect-info extension.')
+      const csvData = context.config?.attributes?.csvData?.data || null;
+      if (!csvData) return console.error(`CSV data is not available for ${parent.getDocument().getAttributes()['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`)
       const types = new Set();
       const uniqueSupportLevel = new Set();
 
-      csvData.data.forEach(row => {
+      csvData.forEach(row => {
         if (row.type) types.add(row.type);
         if (row.support_level) uniqueSupportLevel.add(row.support_level);
       });
@@ -320,9 +320,9 @@ module.exports.register = function (registry, context) {
         return self.createBlock(parent, 'pass', '');
       }
 
-      const csvData = context.config?.attributes?.csvData || null;
-      if (!csvData) return console.error('CSV data is not available. Make sure your playbook includes the generate-rp-connect-info extension.')
-      const componentRows = csvData.data.filter(row => row.connector.trim().toLowerCase() === name.trim().toLowerCase());
+      const csvData = context.config?.attributes?.csvData?.data || null;
+      if (!csvData) return console.error(`CSV data is not available for ${attributes['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`)
+      const componentRows = csvData.filter(row => row.connector.trim().toLowerCase() === name.trim().toLowerCase());
 
       if (componentRows.length === 0) {
         return self.createBlock(parent, 'pass', '');

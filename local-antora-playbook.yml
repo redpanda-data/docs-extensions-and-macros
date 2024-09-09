@@ -10,7 +10,7 @@ content:
     branches: HEAD
     start_paths: [preview/extensions-and-macros, preview/shared]
   - url: https://github.com/redpanda-data/docs
-    branches: [main, v/*, api, shared, 'site-search', '!v-end-of-life/*']
+    branches: [main, v/*, api, 'site-search', '!v-end-of-life/*']
   - url: https://github.com/redpanda-data/redpanda-labs
     branches: main
     start_paths: [docs,'*/docs']
@@ -25,6 +25,7 @@ ui:
 asciidoc:
   attributes:
   extensions:
+  - '@asciidoctor/tabs'
   - './macros/glossary'
   - './macros/config-ref'
   - './macros/helm-ref'
