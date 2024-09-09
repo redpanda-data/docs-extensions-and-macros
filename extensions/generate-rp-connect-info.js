@@ -31,8 +31,10 @@ module.exports.register = function ({ config,contentCatalog }) {
       const parsedData = Papa.parse(csvData, { header: true, skipEmptyLines: true });
       const enrichedData = enrichCsvDataWithUrls(parsedData, pages, logger);
       parsedData.data = enrichedData
-      redpandaConnect.latest.asciidoc.attributes.csvData = parsedData;
-      redpandaCloud.latest.asciidoc.attributes.csvData = parsedData;
+      if(redpandaConnect)
+        redpandaConnect.latest.asciidoc.attributes.csvData = parsedData;
+      if(redpandaCloud)
+        redpandaCloud.latest.asciidoc.attributes.csvData = parsedData;
 
     } catch (error) {
       logger.error('Error fetching or parsing CSV data:', error.message);
