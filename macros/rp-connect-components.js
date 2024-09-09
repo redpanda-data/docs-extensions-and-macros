@@ -153,7 +153,8 @@ module.exports.register = function (registry, context) {
     self.positionalAttributes(['type']);
     self.process((parent, target, attrs) => {
       const type = attrs.type;
-      const categoriesData = context.config?.attributes?.connectCategoriesData || {}
+      const categoriesData = context.config?.attributes?.connectCategoriesData || null
+      if (!categoriesData) return console.error (`Category data is not available for ${parent.getDocument().getAttributes()['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-categories extension.`)
       const categories = categoriesData[type] || null;
       const currentTabsId = `tabs-${tabsCounter++}`; // Unique ID for this set of tabs
       if (!categories) return
@@ -206,8 +207,9 @@ module.exports.register = function (registry, context) {
     const self = this;
     self.named('component_table');
     self.process((parent, target, attrs) => {
-      const isCloud = attrs["is_cloud"];
-      const csvData = context.config?.attributes?.csvData || [];
+      const isCloud = parent.getDocument().getAttributes()['env-cloud'] !== undefined;
+      const csvData = context.config?.attributes?.csvData || null;
+      if (!csvData) return console.error(`CSV data is not available for ${parent.getDocument().getAttributes()['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`)
       const types = new Set();
       const uniqueSupportLevel = new Set();
 
@@ -318,7 +320,8 @@ module.exports.register = function (registry, context) {
         return self.createBlock(parent, 'pass', '');
       }
 
-      const csvData = context.config?.attributes?.csvData || [];
+      const csvData = context.config?.attributes?.csvData || null;
+      if (!csvData) return console.error(`CSV data is not available for ${attributes['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`)
       const componentRows = csvData.data.filter(row => row.connector.trim().toLowerCase() === name.trim().toLowerCase());
 
       if (componentRows.length === 0) {

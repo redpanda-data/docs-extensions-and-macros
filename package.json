@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "3.6.1",
+  "version": "3.6.2",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -58,6 +58,7 @@
     "url": "git+https://github.com/redpanda-data/docs-extensions-and-macros"
   },
   "dependencies": {
+    "@asciidoctor/tabs": "^1.0.0-beta.6",
     "@octokit/core": "^6.1.2",
     "@octokit/plugin-retry": "^7.1.1",
     "@octokit/rest": "^21.0.1",

@@ -9,8 +9,15 @@ content:
   - url: .
     branches: HEAD
     start_paths: [preview/extensions-and-macros, preview/shared]
+  - url: https://github.com/redpanda-data/docs
+    branches: [main, v/*, api, 'site-search', '!v-end-of-life/*']
+  - url: https://github.com/redpanda-data/redpanda-labs
+    branches: main
+    start_paths: [docs,'*/docs']
   - url: https://github.com/redpanda-data/rp-connect-docs
     branches: main
+  - url: https://github.com/redpanda-data/cloud-docs
+    branches: feature-2540_RPCN_Cloud_docs
 ui:
   bundle:
     url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip
@@ -18,6 +25,7 @@ ui:
 asciidoc:
   attributes:
   extensions:
+  - '@asciidoctor/tabs'
   - './macros/glossary'
   - './macros/config-ref'
   - './macros/helm-ref'
