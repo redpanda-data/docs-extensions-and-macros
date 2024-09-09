@@ -58,6 +58,7 @@
     "url": "git+https://github.com/redpanda-data/docs-extensions-and-macros"
   },
   "dependencies": {
+    "@asciidoctor/tabs": "^1.0.0-beta.6",
     "@octokit/core": "^6.1.2",
     "@octokit/plugin-retry": "^7.1.1",
     "@octokit/rest": "^21.0.1",
