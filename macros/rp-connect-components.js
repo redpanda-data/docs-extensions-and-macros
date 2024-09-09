@@ -108,19 +108,24 @@ function generateConnectorsHTMLTable(connectors, isCloud) {
       const supportLevelStr = Array.from(supportLevels.entries())
       .sort(([levelA], [levelB]) => levelA.localeCompare(levelB))  // Sort by level alphabetically
       .map(([level, commercialNames]) => {
-          const filteredNames = commercialNames
-              .filter(({ isCloudSupported }) => !isCloud || isCloudSupported)
-              .map(({ commercial_name }) => commercial_name);
+          let filteredNames = commercialNames;
 
-          if (filteredNames.length === 0) return ''; // Skip levels with no cloud-supported names
-
+          if (isCloud) {
+              filteredNames = commercialNames
+                  .filter(({ isCloudSupported }) => isCloudSupported)
+                  .map(({ commercial_name }) => commercial_name);
+          } else {
+              filteredNames = commercialNames.map(({ commercial_name }) => commercial_name);
+          }
+          filteredNames = [...new Set(filteredNames)];
+          if (filteredNames.length === 0) return '';
           if (supportLevels.size === 1) {
-              return `<p>${capitalize(level)}: ${filteredNames.join(', ')}</p>`;
+              return `<p>${capitalize(level)}</p>`;
           } else {
               return `<p><b>${capitalize(level)}</b>: ${filteredNames.join(', ')}</p>`;
           }
       })
-      .filter(item => item !== '') 
+      .filter(item => item !== '')
       .join('');
 
       const connectorNameHtml = firstUrl
