@@ -17,7 +17,7 @@ content:
   - url: https://github.com/redpanda-data/rp-connect-docs
     branches: main
   - url: https://github.com/redpanda-data/cloud-docs
-    branches: feature-2540_RPCN_Cloud_docs
+    branches: main
 ui:
   bundle:
     url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip
