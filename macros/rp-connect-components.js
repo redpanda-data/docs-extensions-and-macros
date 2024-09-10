@@ -2,16 +2,15 @@
 
 module.exports.register = function (registry, context) {
   function filterComponentTable() {
-    // Retrieve and standardize filter inputs
     const nameInput = document.getElementById('componentTableSearch').value.trim().toLowerCase();
     const typeFilter = Array.from(document.querySelector('#typeFilter').selectedOptions).map(option => option.value);
-
-    // Check if the supportFilter element exists
     const supportFilterElement = document.querySelector('#supportFilter');
     const supportFilter = supportFilterElement
       ? Array.from(supportFilterElement.selectedOptions).map(option => option.value)
       : [];
-
+    // Get the Enterprise Support filter from URL or dropdown
+    const params = getQueryParams();
+    const enterpriseSupportFilter = params.support === 'enterprise';  // Check if support=enterprise is in the URL
     const table = document.getElementById('componentTable');
     const trs = table.getElementsByTagName('tr');
 
@@ -20,31 +19,23 @@ module.exports.register = function (registry, context) {
       const nameTd = row.querySelector('td[id^="componentName-"]');
       const typeTd = row.querySelector('td[id^="componentType-"]');
       const supportTd = row.querySelector('td[id^="componentSupport-"]');
-      const typeDropdown = typeTd ? typeTd.querySelector('.type-dropdown') : null;
+      const enterpriseSupportTd = row.querySelector('td[id^="componentLicense-"]'); // Assuming this contains 'Yes' or 'No'
 
-      if (nameTd && typeTd) {
+      if (nameTd && typeTd && enterpriseSupportTd) {
         const nameText = nameTd.textContent.trim().toLowerCase();
         const typeText = typeTd.textContent.trim().toLowerCase().split(', ').map(item => item.trim());
         const supportText = supportTd ? supportTd.textContent.trim().toLowerCase() : '';
+        const enterpriseSupportText = enterpriseSupportTd.textContent.trim().toLowerCase();  // Yes or No
 
         // Determine if the row should be shown
         const showRow =
           ((!nameInput || nameText.includes(nameInput)) &&
             (typeFilter.length === 0 || typeFilter.some(value => typeText.includes(value))) &&
-            (!supportTd || supportFilter.length === 0 || supportFilter.some(value => supportText.includes(value)))
+            (!supportTd || supportFilter.length === 0 || supportFilter.some(value => supportText.includes(value))) &&
+            (!enterpriseSupportFilter || supportText.includes('enterprise') || enterpriseSupportText === 'yes')  // Filter by enterprise support
           );
 
         row.style.display = showRow ? '' : 'none';
-
-        if (showRow && typeFilter.length > 0 && typeDropdown) {
-          const matchingOption = Array.from(typeDropdown.options).find(option =>
-            typeFilter.includes(option.text.toLowerCase())
-          );
-          if (matchingOption) {
-            typeDropdown.value = matchingOption.value;
-            updateComponentUrl(typeDropdown, false);
-          }
-        }
       } else {
         row.style.display = 'none'; // Hide row if essential cells are missing
       }
@@ -289,8 +280,9 @@ function generateConnectorsHTMLTable(connectors, isCloud) {
           const params = {};
           const searchParams = new URLSearchParams(window.location.search);
           searchParams.forEach((value, key) => {
-            params[key] = value;
+            params[key] = value.toLowerCase();
           });
+
           return params;
         }
 
@@ -311,9 +303,9 @@ function generateConnectorsHTMLTable(connectors, isCloud) {
         if (params.type) {
           document.getElementById('typeFilter').value = params.type;
         }
-          if (params.support) {
-            document.getElementById('supportFilter').value = params.support;
-          }
+        if (params.support) {
+          document.getElementById('supportFilter').value = params.support;
+        }
         
         filterComponentTable();
         const typeDropdowns = document.querySelectorAll('.type-dropdown');
