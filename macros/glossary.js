@@ -82,7 +82,7 @@ module.exports.register = function (registry, config = {}) {
     }
   }
 
-  // Characters to replace by '-' in generated idprefix (no brackets in this regex)
+  // Characters to replace by '-' in generated idprefix
   const IDRX = /[\/ _.-]+/g
 
   function termId(term) {
