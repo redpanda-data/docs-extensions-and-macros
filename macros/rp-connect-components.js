@@ -31,8 +31,8 @@ module.exports.register = function (registry, context) {
         const showRow =
           ((!nameInput || nameText.includes(nameInput)) &&
             (typeFilter.length === 0 || typeFilter.some(value => typeText.includes(value))) &&
-            (!supportTd || supportFilter.length === 0 || supportFilter.some(value => supportText.includes(value))) &&
-            (!enterpriseSupportTd || !enterpriseSupportFilter || supportText.includes('enterprise') || enterpriseSupportText === 'yes')  // Filter by enterprise support
+            (supportFilter.length === 0 || supportFilter.some(value => supportText.includes(value))) &&
+            (!enterpriseSupportFilter || supportText.includes('enterprise') || enterpriseSupportText === 'yes')  // Filter by enterprise support
           );
 
         row.style.display = showRow ? '' : 'none';
