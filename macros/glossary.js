@@ -27,6 +27,11 @@ module.exports.register = function (registry, config = {}) {
 
       const terms = termFiles.map(file => {
         const content = file.contents.toString()
+        // Split content by lines and get the first non-empty line as the title
+        const lines = content.split('\n').map(line => line.trim())
+        const firstNonEmptyLine = lines.find(line => line.length > 0)
+        // Remove leading '=' characters (AsciiDoc syntax) and trim whitespace
+        const pageTitle = firstNonEmptyLine ? firstNonEmptyLine.replace(/^=+\s*/, '') : '#'
         const attributes = {}
 
         let match
@@ -50,6 +55,7 @@ module.exports.register = function (registry, config = {}) {
           term: attributes['term-name'],
           def: attributes['hover-text'],
           category: attributes['category'] || '',
+          pageTitle,
           content
         }
 
@@ -76,12 +82,15 @@ module.exports.register = function (registry, config = {}) {
     }
   }
 
-  //characters to replace by '-' in generated idprefix
-  const IDRX = /[/ _.-]+/g
+  // Characters to replace by '-' in generated idprefix (no brackets in this regex)
+  const IDRX = /[\/ _.-]+/g
 
-  function termId (term) {
-    return term.toLowerCase().replace(IDRX, '-')
+  function termId(term) {
+    // Remove brackets before replacing other characters
+    const noBracketsTerm = term.replace(/[\[\]\(\)]/g, '') // Remove brackets
+    return noBracketsTerm.toLowerCase().replace(IDRX, '-')
   }
+
 
   const TRX = /(<[a-z]+)([^>]*>.*)/
 
@@ -91,7 +100,7 @@ module.exports.register = function (registry, config = {}) {
       self.named('glossterm')
       //Specifying the regexp allows spaces in the term.
       self.$option('regexp', /glossterm:([^[]+)\[(|.*?[^\\])\]/)
-      self.positionalAttributes(['definition', 'customText']);
+      self.positionalAttributes(['definition', 'customText']); // Allows for specifying custom link text
       self.process(function (parent, target, attributes) {
         const term = attributes.term || target
         const customText = attributes.customText || term;
@@ -110,9 +119,11 @@ module.exports.register = function (registry, config = {}) {
         }
         const logTerms = document.hasAttribute('glossary-log-terms')
         var definition;
+        var pageTitle;
         const index = context.gloss.findIndex((candidate) => candidate.term === term)
         if (index >= 0) {
           definition = context.gloss[index].def
+          pageTitle = context.gloss[index].pageTitle
         } else {
           definition = attributes.definition;
         }
@@ -138,7 +149,7 @@ module.exports.register = function (registry, config = {}) {
         if ((termExistsInContext && links) || (links && customLink)) {
           inline = customLink
             ? self.createInline(parent, 'anchor', customText, { type: 'link', target: customLink, attributes: { ...attrs, window: '_blank', rel: 'noopener noreferrer' } })
-            : self.createInline(parent, 'anchor', customText, { type: 'xref', target: `${glossaryPage}#${termId(term)}`, reftext: customText, attributes: attrs })
+            : self.createInline(parent, 'anchor', customText, { type: 'xref', target: `${glossaryPage}#${termId(pageTitle)}`, reftext: customText, attributes: attrs })
         } else {
           inline = self.createInline(parent, 'quoted', customText, { attributes: attrs })
         }
