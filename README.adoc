@@ -226,7 +226,7 @@ antora:
 
 === Global attributes
 
-This extension collects Asciidoc attributes from the {url-playbook}[`shared` component] and makes them available to all component versions. Having global attributes is useful for consistent configuration of local and production builds.
+This extension collects Asciidoc attributes from the {url-playbook}[`shared` component] or a local YAML file and makes them available to all component versions. Having global attributes is useful for consistent configuration of local and production builds.
 
 ==== Environment variables
 
@@ -234,15 +234,20 @@ This extension does not require any environment variables.
 
 ==== Configuration options
 
-There are no configurable options for this extension.
+The extension accepts the following configuration options:
+
+attributespath (optional):: Specifies the path to a local YAML file that contains global attributes. If this is provided, the extension will load attributes from this file first. If this path is not provided or no valid attributes are found in the file, the extension will fall back to loading attributes from the `shared` component.
 
 ==== Registration example
 
-```yaml
+```yml
 antora:
   extensions:
   - require: '@redpanda-data/docs-extensions-and-macros/extensions/add-global-attributes'
+    attributespath: './local-attributes.yml'
 ```
+
+In this example, the `attributespath` option points to a local YAML file (`./local-attributes.yml`), which contains the global attributes. The extension will load attributes from this file first before falling back to the `shared` component.
 
 === Produce redirects (customization of core Antora)
 
@@ -305,15 +310,32 @@ This extension does not require any environment variables.
 
 ==== Configuration options
 
-There are no configurable options for this extension.
+The extension accepts the following configuration options:
+
+termspath (optional):: Specifies the path to a local directory containing term files (in `.adoc` format). If this path is provided, the extension will attempt to load terms from this directory first. If this path is not provided or no valid terms are found in the specified directory, the extension will fall back to loading terms from the `shared` component.
+
+Term files should follow the following structure:
+
+```asciidoc
+:category: Documentation
+:hover-text: This is a description of the term.
+:link: https://example.com
+
+== Term Title
+
+This is the detailed description of the term.
+```
 
 ==== Registration example
 
-```yaml
+```yml
 antora:
   extensions:
-  - '@redpanda-data/docs-extensions-and-macros/extensions/aggregate-terms'
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/aggregate-terms'
+    termspath: './local-terms/'
 ```
+
+In this example, the `termspath` option points to a local directory (./local-terms/), where the term files are stored. The extension will load terms from this directory first before falling back to the `shared` component.
 
 === Unlisted pages
 

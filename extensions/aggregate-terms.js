@@ -4,10 +4,18 @@
  *    - require: ./extensions/aggregate-terms.js
 */
 
+const fs = require('fs');
+const path = require('path');
+
+const TERMS_PATH = 'modules/terms/partials/';  // Default path within the 'shared' component
+
 module.exports.register = function ({ config }) {
   const logger = this.getLogger('term-aggregation-extension');
   const chalk = require('chalk');
 
+  /**
+   * Function to process term content, extracting hover text and links.
+   */
   function processTermContent(termContent) {
     const hoverTextMatch = termContent.match(/:hover-text: (.*)/);
     const hoverText = hoverTextMatch ? hoverTextMatch[1] : '';
@@ -27,32 +35,91 @@ module.exports.register = function ({ config }) {
     return termContent;
   }
 
+  /**
+   * Load terms from a specified local path if provided.
+   */
+  function loadLocalTerms(siteCatalog, termsPath) {
+    try {
+      const resolvedPath = path.resolve(termsPath);
+      if (!fs.existsSync(resolvedPath)) {
+        logger.warn(`Local terms path "${termsPath}" does not exist.`);
+        return false;
+      }
+
+      const termFiles = fs.readdirSync(resolvedPath).filter(file => file.endsWith('.adoc'));
+      if (!termFiles.length) {
+        logger.warn(`No term files found in local path "${termsPath}".`);
+        return false;
+      }
+
+      termFiles.forEach(file => {
+        const filePath = path.join(resolvedPath, file);
+        const termContent = fs.readFileSync(filePath, 'utf8');
+        const categoryMatch = /:category: (.*)/.exec(termContent);
+        const category = categoryMatch ? categoryMatch[1] : 'Miscellaneous';
+
+        const formattedCategory = category.charAt(0).toUpperCase() + category.slice(1);
+
+        if (!siteCatalog.termsByCategory[formattedCategory]) {
+          siteCatalog.termsByCategory[formattedCategory] = [];
+        }
+
+        siteCatalog.termsByCategory[formattedCategory].push({ name: file, content: termContent });
+      });
+
+      console.log(chalk.green(`Categorized terms from local terms path "${termsPath}".`));
+      return true;
+
+    } catch (error) {
+      logger.error(`Error loading local terms from "${termsPath}": ${error.message}`);
+      return false;
+    }
+  }
+
   this.on('contentAggregated', ({ siteCatalog, contentAggregate }) => {
     try {
       siteCatalog.termsByCategory = {};
+      let termsLoaded = false;
 
-      for (const component of contentAggregate) {
-        if (component.name === 'shared') {
-          const termFiles = component.files.filter(file => file.path.includes('modules/terms/partials/'));
+      // Try to load terms from the local path if provided
+      if (config.termspath) {
+        termsLoaded = loadLocalTerms(siteCatalog, config.termspath);
+      }
 
-          termFiles.forEach(file => {
-            const termContent = file.contents.toString('utf8');
-            const categoryMatch = /:category: (.*)/.exec(termContent);
-            var category = categoryMatch ? categoryMatch[1] : 'Miscellaneous'; // Default category
+      // If no local terms were loaded, fallback to the 'shared' component
+      if (!termsLoaded) {
+        let sharedComponentFound = false;
 
-            category = category.charAt(0).toUpperCase() + category.slice(1);
+        for (const component of contentAggregate) {
+          if (component.name === 'shared') {
+            sharedComponentFound = true;
+            const termFiles = component.files.filter(file => file.path.includes(TERMS_PATH));
 
-            if (!siteCatalog.termsByCategory[category]) {
-              siteCatalog.termsByCategory[category] = [];
-            }
+            termFiles.forEach(file => {
+              const termContent = file.contents.toString('utf8');
+              const categoryMatch = /:category: (.*)/.exec(termContent);
+              const category = categoryMatch ? categoryMatch[1] : 'Miscellaneous';
 
-            siteCatalog.termsByCategory[category].push({ name: file.basename, content: termContent });
-          });
+              const formattedCategory = category.charAt(0).toUpperCase() + category.slice(1);
 
-          console.log(chalk.green('Categorized terms from shared component.'));
-          break;
+              if (!siteCatalog.termsByCategory[formattedCategory]) {
+                siteCatalog.termsByCategory[formattedCategory] = [];
+              }
+
+              siteCatalog.termsByCategory[formattedCategory].push({ name: file.basename, content: termContent });
+            });
+
+            console.log(chalk.green('Categorized terms from shared component.'));
+            break;
+          }
+        }
+
+        // If no 'shared' component is found, log a warning
+        if (!sharedComponentFound) {
+          logger.warn(`No component named 'shared' found in the content and no valid local terms path provided. Terms will not be added to the glossary.`);
         }
       }
+
     } catch (error) {
       logger.error(`Error categorizing terms: ${error.message}`);
     }
