@@ -55,7 +55,7 @@ module.exports.register = function ({ config }) {
         for (const component of contentAggregate) {
           if (component.name === 'shared') {
             sharedComponentFound = true;
-            const attributeFiles = component.files.filter(file => file.path.startsWith(ATTRIBUTES_PATH) && file.path.endsWith('.yml'));
+            const attributeFiles = component.files.filter(file => (file.path.startsWith(ATTRIBUTES_PATH) && file.path.endsWith('.yml')));
 
             if (!attributeFiles.length) {
               logger.warn(`No YAML attributes files found in 'shared' component in ${ATTRIBUTES_PATH}.`);
