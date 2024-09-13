@@ -11,7 +11,9 @@ module.exports.register = function ({ config }) {
 
   this.on('documentsConverted', async ({ contentCatalog, siteCatalog }) => {
     // Retrieve valid categories and subcategories from site attributes defined in add-global-attributes.js.
+    if (!siteCatalog.attributeFile) return logger.warn('No global attributes file available - skipping attribute validation. Check global-attributes-extension for errors')
     const validCategories = siteCatalog.attributeFile['page-valid-categories'];
+    if (!validCategories) return logger.warn('No page-valid-categories attribute found - skipping attribute validation')
     const categoryMap = createCategoryMap(validCategories);
     const pages = contentCatalog.findBy({ family: 'page' });
     pages.forEach((page) => {
