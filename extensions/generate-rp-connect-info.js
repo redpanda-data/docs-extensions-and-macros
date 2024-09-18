@@ -28,6 +28,7 @@ module.exports.register = function ({ config }) {
   this.once('contentClassified', async ({ contentCatalog }) => {
     const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'redpanda-connect');
     const redpandaCloud = contentCatalog.getComponents().find(component => component.name === 'redpanda-cloud');
+    const preview = contentCatalog.getComponents().find(component => component.name === 'preview');
     if (!redpandaConnect) return;
     const pages = contentCatalog.getPages();
 
@@ -43,6 +44,10 @@ module.exports.register = function ({ config }) {
       }
       if (redpandaCloud) {
         redpandaCloud.latest.asciidoc.attributes.csvData = parsedData;
+      }
+      // For previewing the data on our extensions site
+      if (preview) {
+        preview.latest.asciidoc.attributes.csvData = parsedData;
       }
 
     } catch (error) {
