@@ -82,7 +82,53 @@ module.exports.register = function ({ config }) {
     }
   }
 
-  function enrichCsvDataWithUrls(parsedData, connectPages, logger) {
+  /**
+   * This function enriches the parsed CSV data with URLs for Redpanda Connect and Redpanda Cloud.
+   * It processes each row from the parsed CSV, checks if cloud support is available, and then appends
+   * the corresponding URLs from the pages provided for both Redpanda Connect and Redpanda Cloud.
+   * 
+   * Expected data structure for each row in the CSV:
+   * 
+   * {
+   *   "connector": "workflow",                   // The unique name of the connector.
+   *   "type": "processor",                       // The type of connector.
+   *   "commercial_name": "workflow",             // The commercial name of the connector.
+   *   "available_connect_version": "0.0.0",      // The version of Redpanda Connect that supports this connector.
+   *   "support_level": "certified",              // Support level for the connector (e.g., 'certified', 'community').
+   *   "deprecated": "n",                         // 'y' if the connector is deprecated, 'n' otherwise.
+   *   "is_cloud_supported": "y",                 // 'y' if supported on Redpanda Cloud, 'n' otherwise.
+   *   "cloud_ai": "y",                           // 'y' if cloud-specific AI features are supported.
+   *   "is_licensed": "n",                        // 'y' if the connector requires an enterprise license.
+   * }
+   *
+   * The function enriches this structure with two additional fields:
+   * - `redpandaConnectUrl`: The URL to the connector's page on Redpanda Connect.
+   * - `redpandaCloudUrl`: The URL to the connector's page on Redpanda Cloud (if cloud support is available).
+   *
+   * @param {object} parsedData - The CSV data parsed into an object. Contains the connector details.
+   * @param {array} pages - The list of pages to map the URLs, where the URLs for Redpanda Connect and Redpanda Cloud are found.
+   * @param {object} logger - The logger used for error handling.
+   *
+   * @returns {array} - The enriched data, where each row contains the original CSV data and additional URLs:
+   *
+   * [
+   *   {
+   *     "connector": "workflow",
+   *     "type": "processor",
+   *     "commercial_name": "workflow",
+   *     "available_connect_version": "0.0.0",
+   *     "support_level": "certified",
+   *     "deprecated": "n",
+   *     "is_cloud_supported": "y",
+   *     "cloud_ai": "y",
+   *     "is_licensed": "n",
+   *     "redpandaConnectUrl": "/redpanda-connect/components/processors/workflow/", // URL for Redpanda Connect.
+   *     "redpandaCloudUrl": "/redpanda-cloud/develop/connect/components/processors/workflow/" // URL for Redpanda Cloud (if supported).
+   *   },
+   *   ...
+   * ]
+   */
+  function enrichCsvDataWithUrls(parsedData, pages, logger) {
     return parsedData.data.map(row => {
       // Create a new object with trimmed keys and values
       const trimmedRow = Object.fromEntries(
@@ -90,20 +136,47 @@ module.exports.register = function ({ config }) {
       );
       const connector = trimmedRow.connector;
       const type = trimmedRow.type;
-      let url = '';
-      for (const file of connectPages) {
+      const isCloudSupported = trimmedRow.is_cloud_supported === 'y'; // Check cloud support
+
+      // Variables for the Redpanda Connect and Cloud URLs
+      let redpandaConnectUrl = '';
+      let redpandaCloudUrl = '';
+
+      // Iterate over all pages to look for both Redpanda Connect and Cloud URLs
+      for (const file of pages) {
+        const component = file.src.component;
         const filePath = file.path;
-        if (filePath.endsWith(`${connector}.adoc`) && filePath.includes(`pages/${type}s/`)) {
-          url = `../${type}s/${connector}`;
-          break;
+
+        // Check for Redpanda Connect URLs
+        if (
+          component === 'redpanda-connect' &&
+          filePath.endsWith(`${connector}.adoc`) &&
+          filePath.includes(`pages/${type}s/`)
+        ) {
+          redpandaConnectUrl = file.pub.url;
+        }
+
+        // Only check for Redpanda Cloud URLs if cloud is supported
+        if (
+          isCloudSupported &&
+          component === 'redpanda-cloud' &&
+          filePath.endsWith(`${connector}.adoc`) &&
+          filePath.includes(`${type}s/`)
+        ) {
+          redpandaCloudUrl = file.pub.url;
         }
       }
-      if (!url) {
+
+      // Log a warning if neither URL was found (only warn for missing cloud if it should support cloud)
+      if (!redpandaConnectUrl && (!redpandaCloudUrl && isCloudSupported)) {
         logger.warn(`No matching URL found for connector: ${connector} of type: ${type}`);
       }
+
+      // Return enriched data with both URLs
       return {
         ...trimmedRow,
-        url: url
+        redpandaConnectUrl,
+        redpandaCloudUrl,
       };
     });
   }
