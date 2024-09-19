@@ -55,6 +55,40 @@ module.exports.register = function (registry, context) {
     }
   }
 
+  /**
+   * Gets the first URL (either Redpanda Connect or Redpanda Cloud) for a given connector from the typesArray.
+   * If the cloud option is enabled (`isCloud = true`), it prefers the Redpanda Cloud URL; otherwise, it returns the Redpanda Connect URL.
+   * 
+   * @param {Array} typesArray - An array of types where each type has a list of commercial names with URLs.
+   * @param {boolean} isCloud - A flag to indicate if Cloud URLs should be prioritized.
+   * @returns {string} - The first found URL (either Redpanda Connect or Cloud), or an empty string if no URL is available.
+   */
+  function getFirstUrlFromTypesArray(typesArray, isCloud) {
+    for (const [type, commercialNames] of typesArray) {
+      for (const commercialName in commercialNames) {
+        const { urls = {} } = commercialNames[commercialName];
+        const redpandaConnectUrl = urls.redpandaConnectUrl || '';
+        const redpandaCloudUrl = urls.redpandaCloudUrl || '';
+
+        // Return Cloud URL if isCloud is true and Cloud URL exists
+        if (isCloud && redpandaCloudUrl) {
+          return redpandaCloudUrl;
+        }
+
+        // Return Connect URL if isCloud is false or no Cloud URL exists
+        if (!isCloud && redpandaConnectUrl) {
+          return redpandaConnectUrl;
+        }
+
+        // If Cloud URL exists but isCloud is false, fallback to Cloud URL if no Connect URL exists
+        if (!isCloud && redpandaCloudUrl) {
+          return redpandaCloudUrl;
+        }
+      }
+    }
+    return ''; // Return an empty string if no URL is found
+  }
+
   const capitalize = s => s && s[0].toUpperCase() + s.slice(1);
 
   /**
@@ -361,12 +395,14 @@ module.exports.register = function (registry, context) {
           ? `<a href="${firstCloudSupportedType.urls.redpandaCloudUrl}">Yes</a>`
           : 'No';
 
+        const firstUrl = getFirstUrlFromTypesArray(Array.from(types.entries()), isCloud);
+
         // Logic for showAllInfo = true and isCloud = false
         if (showAllInfo && !isCloud) {
           return `
             <tr id="row-${id}">
               <td class="tableblock halign-left valign-top" id="componentName-${id}">
-                <p class="tableblock"><code>${connector}</code></p>
+                <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a></p>
               </td>
               <td class="tableblock halign-left valign-top" id="componentType-${id}">
                 <p class="tableblock">${typesArray}</p> <!-- Display types linked to Connect URL only -->
@@ -387,7 +423,7 @@ module.exports.register = function (registry, context) {
           return `
             <tr id="row-${id}">
               <td class="tableblock halign-left valign-top" id="componentName-${id}">
-                <p class="tableblock"><code>${connector}</code></p>
+                <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a></p>
               </td>
               <td class="tableblock halign-left valign-top" id="componentType-${id}">
                 ${typesArray} <!-- Display bulleted list for cloud types if commercial name differs -->
@@ -398,7 +434,7 @@ module.exports.register = function (registry, context) {
         return `
           <tr id="row-${id}">
             <td class="tableblock halign-left valign-top" id="componentName-${id}">
-              <p class="tableblock"><code>${connector}</code></p>
+              <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a></p>
             </td>
             <td class="tableblock halign-left valign-top" id="componentType-${id}">
               <p class="tableblock">${typesArray}</p> <!-- Display types without commercial names -->
