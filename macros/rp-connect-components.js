@@ -541,7 +541,7 @@ module.exports.register = function (registry, context) {
 
       if (showAllInfo) {
         tableHtml += `
-          <br><label for="cloudSupportFilter">Cloud Support:</label>
+          <br><label for="cloudSupportFilter">Available in Cloud:</label>
           <select class="type-dropdown" id="cloudSupportFilter" onchange="filterComponentTable()">
             <option value="">All</option>
             <option value="yes">Yes</option>
