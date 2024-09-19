@@ -9,6 +9,7 @@ module.exports.register = function (registry, context) {
   function filterComponentTable() {
     const nameInput = document.getElementById('componentTableSearch').value.trim().toLowerCase();
     const typeFilter = Array.from(document.querySelector('#typeFilter').selectedOptions).map(option => option.value);
+    const cloudSupportInput= document.getElementById('cloudSupportFilter')?.value;
 
     // Check for the existence of support and enterprise license filters (optional)
     const supportFilterElement = document.querySelector('#supportFilter');
@@ -45,7 +46,8 @@ module.exports.register = function (registry, context) {
            (!supportTd || supportFilter.length === 0 || supportFilter.some(value => supportText.includes(value))) &&  // Filter by support if present
            (!enterpriseSupportFilter || !enterpriseSupportTd || supportText.includes('enterprise') || enterpriseSupportText === 'yes') // Filter by enterprise support if 'support=enterprise' is in the URL
            &&
-           (!cloudSupportFilter || !cloudSupportTd || supportText.includes('cloud') || cloudSupportText === 'yes') // Filter by cloud support if 'support=cloud' is in the URL
+           (!cloudSupportFilter || !cloudSupportTd || supportText.includes('cloud') || cloudSupportText === 'yes') &&  // Filter by cloud support if 'support=cloud' is in the URL
+           (!cloudSupportInput || cloudSupportText === cloudSupportInput)
           );
 
         row.style.display = showRow ? '' : 'none';
@@ -537,6 +539,17 @@ module.exports.register = function (registry, context) {
         `;
       }
 
+      if (showAllInfo) {
+        tableHtml += `
+          <br><label for="cloudSupportFilter">Cloud Support:</label>
+          <select class="type-dropdown" id="cloudSupportFilter" onchange="filterComponentTable()">
+            <option value="">All</option>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+          `;
+      }
+
       tableHtml += `</div>
         <table class="tableblock frame-all grid-all stripes-even no-clip stretch component-table sortable" id="componentTable">
           <colgroup>
@@ -553,7 +566,7 @@ module.exports.register = function (registry, context) {
               ${showAllInfo ? `
                 <th class="tableblock halign-left valign-top">Support Level</th>
                 <th class="tableblock halign-left valign-top">Enterprise Licensed</th>
-                <th class="tableblock halign-left valign-top">Cloud Support</th>
+                <th class="tableblock halign-left valign-top">Available in Cloud</th>
               ` : isCloud ? '' : `
                 <th class="tableblock halign-left valign-top">Support Level</th>
                 <th class="tableblock halign-left valign-top">Enterprise Licensed</th>`}
