@@ -1,17 +1,11 @@
-/* Example use in the playbook
-* antora:
-    extensions:
- *    - require: ./extensions/generate-rp-connect-info.js
-*/
-
 'use strict'
 const fs = require('fs');
 const path = require('path');
 const Papa = require('papaparse');
 
-const CSV_PATH = 'redpanda_connect.csv'
+const CSV_PATH = 'internal/plugins/info.csv'
 const GITHUB_OWNER = 'redpanda-data'
-const GITHUB_REPO = 'rp-connect-docs'
+const GITHUB_REPO = 'connect'
 const GITHUB_REF = 'main'
 
 module.exports.register = function ({ config }) {
@@ -28,6 +22,7 @@ module.exports.register = function ({ config }) {
   this.once('contentClassified', async ({ contentCatalog }) => {
     const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'redpanda-connect');
     const redpandaCloud = contentCatalog.getComponents().find(component => component.name === 'redpanda-cloud');
+    const preview = contentCatalog.getComponents().find(component => component.name === 'preview');
     if (!redpandaConnect) return;
     const pages = contentCatalog.getPages();
 
@@ -35,7 +30,7 @@ module.exports.register = function ({ config }) {
       // Fetch CSV data (either from local file or GitHub)
       const csvData = await fetchCSV(config.csvpath);
       const parsedData = Papa.parse(csvData, { header: true, skipEmptyLines: true });
-      const enrichedData = enrichCsvDataWithUrls(parsedData, pages, logger);
+      const enrichedData = translateCsvData(parsedData, pages, logger);
       parsedData.data = enrichedData;
 
       if (redpandaConnect) {
@@ -43,6 +38,10 @@ module.exports.register = function ({ config }) {
       }
       if (redpandaCloud) {
         redpandaCloud.latest.asciidoc.attributes.csvData = parsedData;
+      }
+      // For previewing the data on our extensions site
+      if (preview) {
+        preview.latest.asciidoc.attributes.csvData = parsedData;
       }
 
     } catch (error) {
@@ -82,28 +81,82 @@ module.exports.register = function ({ config }) {
     }
   }
 
-  function enrichCsvDataWithUrls(parsedData, connectPages, logger) {
+  /**
+   * Translates the parsed CSV data into our expected format.
+   * If "enterprise" is found in the `support` column, it is replaced with "certified" in the output.
+   *
+   * @param {object} parsedData - The CSV data parsed into an object.
+   * @param {array} pages - The list of pages to map the URLs (used for enrichment with URLs).
+   * @param {object} logger - The logger used for error handling.
+   *
+   * @returns {array} - The translated and enriched data.
+   */
+  function translateCsvData(parsedData, pages, logger) {
     return parsedData.data.map(row => {
       // Create a new object with trimmed keys and values
       const trimmedRow = Object.fromEntries(
         Object.entries(row).map(([key, value]) => [key.trim(), value.trim()])
       );
-      const connector = trimmedRow.connector;
+
+      // Map fields from the trimmed row to the desired output
+      const connector = trimmedRow.name;
       const type = trimmedRow.type;
-      let url = '';
-      for (const file of connectPages) {
+      const commercial_name = trimmedRow.commercial_name;
+      const available_connect_version = trimmedRow.version;
+      const deprecated = trimmedRow.deprecated.toLowerCase() === 'y' ? 'y' : 'n';
+      const is_cloud_supported = trimmedRow.cloud.toLowerCase() === 'y' ? 'y' : 'n';
+      const cloud_ai = trimmedRow.cloud_with_gpu.toLowerCase() === 'y' ? 'y' : 'n';
+      // Handle enterprise to certified conversion and set enterprise license flag
+      const originalSupport = trimmedRow.support.toLowerCase();
+      const support_level = originalSupport === 'enterprise' ? 'certified' : originalSupport;
+      const is_licensed = originalSupport === 'enterprise' ? 'Yes' : 'No';
+
+      // Redpanda Connect and Cloud enrichment URLs
+      let redpandaConnectUrl = '';
+      let redpandaCloudUrl = '';
+
+      // Look for both Redpanda Connect and Cloud URLs
+      for (const file of pages) {
+        const component = file.src.component;
         const filePath = file.path;
-        if (filePath.endsWith(`${connector}.adoc`) && filePath.includes(`pages/${type}s/`)) {
-          url = `../${type}s/${connector}`;
-          break;
+
+        if (
+          component === 'redpanda-connect' &&
+          filePath.endsWith(`/${connector}.adoc`) &&
+          filePath.includes(`pages/${type}s/`)
+        ) {
+          redpandaConnectUrl = file.pub.url;
+        }
+
+        // Only check for Redpanda Cloud URLs if cloud is supported
+        if (
+          is_cloud_supported === 'y' &&
+          component === 'redpanda-cloud' &&
+          filePath.endsWith(`/${connector}.adoc`) &&
+          filePath.includes(`${type}s/`)
+        ) {
+          redpandaCloudUrl = file.pub.url;
         }
       }
-      if (!url) {
-        logger.warn(`No matching URL found for connector: ${connector} of type: ${type}`);
+
+      // Log a warning if neither URL was found (only warn for missing cloud if it should support cloud)
+      if (!redpandaConnectUrl && (!redpandaCloudUrl && is_cloud_supported === 'y')) {
+        logger.info(`Docs missing for: ${connector} of type: ${type}`);
       }
+
+      // Return the translated and enriched row
       return {
-        ...trimmedRow,
-        url: url
+        connector,
+        type,
+        commercial_name,
+        available_connect_version,
+        support_level,  // "enterprise" is replaced with "certified"
+        deprecated,
+        is_cloud_supported,
+        cloud_ai,
+        is_licensed,  // "Yes" if the original support level was "enterprise"
+        redpandaConnectUrl,
+        redpandaCloudUrl,
       };
     });
   }

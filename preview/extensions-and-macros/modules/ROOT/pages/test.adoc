@@ -96,3 +96,7 @@ function helloWorld() {
     console.log("Highlighted using Prism.");
 }
 ----
+
+== Connector table with all data
+
+component_table::[all]
