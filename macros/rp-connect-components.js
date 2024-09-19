@@ -366,7 +366,7 @@ module.exports.register = function (registry, context) {
           return `
             <tr id="row-${id}">
               <td class="tableblock halign-left valign-top" id="componentName-${id}">
-                <p class="tableblock">${connector}</p>
+                <p class="tableblock"><code>${connector}</code></p>
               </td>
               <td class="tableblock halign-left valign-top" id="componentType-${id}">
                 <p class="tableblock">${typesArray}</p> <!-- Display types linked to Connect URL only -->
@@ -387,7 +387,7 @@ module.exports.register = function (registry, context) {
           return `
             <tr id="row-${id}">
               <td class="tableblock halign-left valign-top" id="componentName-${id}">
-                <p class="tableblock">${connector}</p>
+                <p class="tableblock"><code>${connector}</code></p>
               </td>
               <td class="tableblock halign-left valign-top" id="componentType-${id}">
                 ${typesArray} <!-- Display bulleted list for cloud types if commercial name differs -->
@@ -398,7 +398,7 @@ module.exports.register = function (registry, context) {
         return `
           <tr id="row-${id}">
             <td class="tableblock halign-left valign-top" id="componentName-${id}">
-              <p class="tableblock">${connector}</p>
+              <p class="tableblock"><code>${connector}</code></p>
             </td>
             <td class="tableblock halign-left valign-top" id="componentType-${id}">
               <p class="tableblock">${typesArray}</p> <!-- Display types without commercial names -->
