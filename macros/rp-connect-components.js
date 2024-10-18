@@ -619,7 +619,7 @@ module.exports.register = function (registry, context) {
   });
 
   /**
-   * Registers a block macro to generate a dropdown for component types and display metadata about the selected component.
+   * Registers a block macro to display metadata about the selected component.
    *
    * This macro creates a dropdown to select different types of a connector component, such as Input, Output, or Processor.
    * It also provides links to the corresponding Cloud or Self-Managed documentation for the selected component type, and  displays information on whether the connector requires an enterprise license.
@@ -697,11 +697,13 @@ module.exports.register = function (registry, context) {
         sortedTypes.unshift(currentType);
       }
       // Check if the component requires an Enterprise license (based on support level)
-      const requiresEnterprise = componentRows.some(row => row.is_licensed.toLowerCase() === 'yes');
       let enterpriseLicenseInfo = '';
-      if (requiresEnterprise) {
-        enterpriseLicenseInfo = `
-          <p><strong>License</strong>: This component requires an <a href="https://redpanda.com/compare-platform-editions" target="_blank">Enterprise license</a>. To upgrade, contact <a href="https://redpanda.com/try-redpanda?section=enterprise-trial" target="_blank" rel="noopener">Redpanda sales</a>.</p>`;
+      if (component !== 'Cloud') {
+        const requiresEnterprise = componentRows.some(row => row.is_licensed.toLowerCase() === 'yes');
+        if (requiresEnterprise) {
+          enterpriseLicenseInfo = `
+            <p><strong>License</strong>: This component requires an <a href="https://redpanda.com/compare-platform-editions" target="_blank">Enterprise license</a>. To upgrade, contact <a href="https://redpanda.com/try-redpanda?section=enterprise-trial" target="_blank" rel="noopener">Redpanda sales</a>.</p>`;
+        }
       }
       const isCloudSupported = componentRows.some(row => row.is_cloud_supported === 'y');
       let availableInInfo = '';
