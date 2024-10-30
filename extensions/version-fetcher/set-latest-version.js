@@ -77,11 +77,8 @@ module.exports.register = function ({ config }) {
 
           // Special handling for Redpanda RC versions if in beta
           if (latestVersions.redpanda?.latestRcRelease?.version) {
-            const betaVersion = sanitizeVersion(latestVersions.redpanda.latestRcRelease.version);
-            asciidoc.attributes['redpanda-beta-version'] = betaVersion;
-            asciidoc.attributes['redpanda-beta-tag'] = `v${betaVersion}`;
+            setVersionAndTagAttributes(asciidoc, 'redpanda-beta', latestVersions.redpanda.latestRcRelease.version, name, version)
             asciidoc.attributes['redpanda-beta-commit'] = latestVersions.redpanda.latestRcRelease.commitHash;
-            logger.info(`Set Redpanda RC version ${betaVersion} (tag: v${betaVersion}) in ${name} ${version}`);
           }
         });
 
@@ -91,7 +88,7 @@ module.exports.register = function ({ config }) {
         if (semver.valid(latestVersions.redpanda?.latestRedpandaRelease?.version)) {
           const currentVersion = component.latest.asciidoc.attributes['full-version'] || '0.0.0';
           if (semver.gt(latestVersions.redpanda.latestRedpandaRelease.version, currentVersion)) {
-            component.latest.asciidoc.attributes['full-version'] = latestVersions.redpanda.latestRedpandaRelease.version;
+            component.latest.asciidoc.attributes['full-version'] = sanitizeVersion(latestVersions.redpanda.latestRedpandaRelease.version);
             setVersionAndTagAttributes(component.latest.asciidoc, 'latest-redpanda', latestVersions.redpanda.latestRedpandaRelease.version);
             component.latest.asciidoc.attributes['latest-release-commit'] = latestVersions.redpanda.latestRedpandaRelease.commitHash;
             logger.info(`Updated Redpanda release version to ${latestVersions.redpanda.latestRedpandaRelease.version}`);
@@ -110,12 +107,12 @@ module.exports.register = function ({ config }) {
     if (versionData) {
       const versionWithoutPrefix = sanitizeVersion(versionData);
       asciidoc.attributes[`${baseName}-version`] = versionWithoutPrefix; // Without "v" prefix
-      asciidoc.attributes[`${baseName}-tag`] = `v${versionWithoutPrefix}`; // With "v" prefix
+      asciidoc.attributes[`${baseName}-tag`] = `${versionData}`;
 
       if (name && version) {
-        logger.info(`Set ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to v${versionWithoutPrefix} in ${name} ${version}`);
+        logger.info(`Set ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to ${versionData} in ${name} ${version}`);
       } else {
-        logger.info(`Updated ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to v${versionWithoutPrefix}`);
+        logger.info(`Updated ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to ${versionData}`);
       }
     }
   }

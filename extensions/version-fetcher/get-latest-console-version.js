@@ -1,5 +1,5 @@
 module.exports = async (github, owner, repo) => {
-  const semver = require('semver')
+  const semver = require('semver');
   try {
     const releases = await github.rest.repos.listReleases({
       owner,
@@ -8,15 +8,14 @@ module.exports = async (github, owner, repo) => {
       per_page: 50
     });
 
-    // Filter valid semver tags and sort them
+    // Filter tags with valid semver format
     const sortedReleases = releases.data
-      .map(release => release.tag_name.replace(/^v/, ''))
-      .filter(tag => semver.valid(tag))
-      // Sort in descending order to get the highest version first
-      .sort(semver.rcompare);
+      .map(release => release.tag_name)
+      .filter(tag => semver.valid(tag.replace(/^v/, '')))
+      .sort((a, b) => semver.rcompare(a.replace(/^v/, ''), b.replace(/^v/, '')));
 
     if (sortedReleases.length > 0) {
-      // Return the highest version
+      // Return the highest version with "v" prefix
       return sortedReleases[0];
     } else {
       console.log("No valid semver releases found.");
