@@ -59,7 +59,7 @@ module.exports.register = function ({ config }) {
             asciidoc.attributes['page-component-version-is-prerelease'] = 'true';
           }
 
-          // Conditionally set operator and helm chart attributes only if data is available
+          // Set operator and helm chart attributes
           if (latestVersions.operator) {
             asciidoc.attributes['latest-operator-version'] = latestVersions.operator;
           }
