@@ -1,3 +1,5 @@
+'use strict';
+
 module.exports.register = function ({ config }) {
   const GetLatestRedpandaVersion = require('./get-latest-redpanda-version');
   const GetLatestConsoleVersion = require('./get-latest-console-version');
@@ -41,11 +43,11 @@ module.exports.register = function ({ config }) {
       ]);
 
       const latestVersions = {
-        redpanda: latestRedpandaResult.status === 'fulfilled' ? latestRedpandaResult.value : null,
-        console: latestConsoleResult.status === 'fulfilled' ? latestConsoleResult.value : null,
-        operator: latestOperatorResult.status === 'fulfilled' ? latestOperatorResult.value : null,
-        helmChart: latestHelmChartResult.status === 'fulfilled' ? latestHelmChartResult.value : null,
-        connect: latestConnectResult.status === 'fulfilled' ? latestConnectResult.value : null,
+        redpanda: latestRedpandaResult.status === 'fulfilled' ? latestRedpandaResult.value : {},
+        console: latestConsoleResult.status === 'fulfilled' ? latestConsoleResult.value : undefined,
+        operator: latestOperatorResult.status === 'fulfilled' ? latestOperatorResult.value : undefined,
+        helmChart: latestHelmChartResult.status === 'fulfilled' ? latestHelmChartResult.value : undefined,
+        connect: latestConnectResult.status === 'fulfilled' ? latestConnectResult.value : undefined,
       };
 
       const components = await contentCatalog.getComponents();
@@ -57,30 +59,44 @@ module.exports.register = function ({ config }) {
             asciidoc.attributes['page-component-version-is-prerelease'] = 'true';
           }
 
-          setVersionAttribute(asciidoc, 'latest-console-version', latestVersions.console, name, version);
-          setVersionAttribute(asciidoc, 'latest-connect-version', latestVersions.connect, name, version);
+          // Conditionally set operator and helm chart attributes only if data is available
+          if (latestVersions.operator) {
+            asciidoc.attributes['latest-operator-version'] = latestVersions.operator;
+          }
+          if (latestVersions.helmChart) {
+            asciidoc.attributes['latest-redpanda-helm-chart-version'] = latestVersions.helmChart;
+          }
 
+          // Set attributes for console and connect versions
+          if (latestVersions.console) {
+            setVersionAndTagAttributes(asciidoc, 'latest-console', latestVersions.console, name, version);
+          }
+          if (latestVersions.connect) {
+            setVersionAndTagAttributes(asciidoc, 'latest-connect', latestVersions.connect, name, version);
+          }
+
+          // Special handling for Redpanda RC versions if in beta
           if (latestVersions.redpanda?.latestRcRelease?.version) {
-            asciidoc.attributes['redpanda-beta-version'] = `v${latestVersions.redpanda.latestRcRelease.version}`;
-            asciidoc.attributes['redpanda-beta-commit'] = `${latestVersions.redpanda.latestRcRelease.commitHash}`;
-            logger.info(`Set Redpanda RC version ${latestVersions.redpanda.latestRcRelease.version} in ${name} ${version}`);
+            const betaVersion = sanitizeVersion(latestVersions.redpanda.latestRcRelease.version);
+            asciidoc.attributes['redpanda-beta-version'] = betaVersion;
+            asciidoc.attributes['redpanda-beta-tag'] = `v${betaVersion}`;
+            asciidoc.attributes['redpanda-beta-commit'] = latestVersions.redpanda.latestRcRelease.commitHash;
+            logger.info(`Set Redpanda RC version ${betaVersion} (tag: v${betaVersion}) in ${name} ${version}`);
           }
         });
 
         if (!component.latest.asciidoc) component.latest.asciidoc = { attributes: {} };
 
+        // For Redpanda GA version, set both latest-redpanda-version and latest-redpanda-tag if available
         if (semver.valid(latestVersions.redpanda?.latestRedpandaRelease?.version)) {
           const currentVersion = component.latest.asciidoc.attributes['full-version'] || '0.0.0';
           if (semver.gt(latestVersions.redpanda.latestRedpandaRelease.version, currentVersion)) {
-            component.latest.asciidoc.attributes['full-version'] = `${latestVersions.redpanda.latestRedpandaRelease.version}`;
-            component.latest.asciidoc.attributes['latest-redpanda-version'] = `v${latestVersions.redpanda.latestRedpandaRelease.version}`;
-            component.latest.asciidoc.attributes['latest-release-commit'] = `${latestVersions.redpanda.latestRedpandaRelease.commitHash}`;
+            component.latest.asciidoc.attributes['full-version'] = latestVersions.redpanda.latestRedpandaRelease.version;
+            setVersionAndTagAttributes(component.latest.asciidoc, 'latest-redpanda', latestVersions.redpanda.latestRedpandaRelease.version);
+            component.latest.asciidoc.attributes['latest-release-commit'] = latestVersions.redpanda.latestRedpandaRelease.commitHash;
             logger.info(`Updated Redpanda release version to ${latestVersions.redpanda.latestRedpandaRelease.version}`);
           }
         }
-
-        setVersionAttribute(component.latest.asciidoc, 'latest-operator-version', latestVersions.operator);
-        setVersionAttribute(component.latest.asciidoc, 'latest-redpanda-helm-chart-version', latestVersions.helmChart);
       });
 
       console.log(chalk.green('Updated Redpanda documentation versions successfully.'));
@@ -89,14 +105,23 @@ module.exports.register = function ({ config }) {
     }
   });
 
-  function setVersionAttribute(asciidoc, attributeName, versionData, name, version) {
+  // Helper function to set both latest-*version and latest-*tag attributes
+  function setVersionAndTagAttributes(asciidoc, baseName, versionData, name = '', version = '') {
     if (versionData) {
-      asciidoc.attributes[attributeName] = `${versionData}`;
+      const versionWithoutPrefix = sanitizeVersion(versionData);
+      asciidoc.attributes[`${baseName}-version`] = versionWithoutPrefix; // Without "v" prefix
+      asciidoc.attributes[`${baseName}-tag`] = `v${versionWithoutPrefix}`; // With "v" prefix
+
       if (name && version) {
-        logger.info(`Set ${attributeName} to ${versionData} in ${name} ${version}`);
+        logger.info(`Set ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to v${versionWithoutPrefix} in ${name} ${version}`);
       } else {
-        logger.info(`Updated ${attributeName} to ${versionData}`);
+        logger.info(`Updated ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to v${versionWithoutPrefix}`);
       }
     }
+  }
+
+  // Helper function to sanitize version by removing "v" prefix
+  function sanitizeVersion(version) {
+    return version.replace(/^v/, '');
   }
 };

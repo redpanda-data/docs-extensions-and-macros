@@ -1,8 +1,7 @@
 'use strict';
+const semver = require('semver');
 
 module.exports.register = function () {
-  const sanitizeAttributeValue = (value) => String(value).replace('@', '');
-
   this.on('contentClassified', ({ contentCatalog }) => {
     const componentVersionTable = contentCatalog.getComponents().reduce((componentMap, component) => {
       componentMap[component.name] = component.versions.reduce((versionMap, componentVersion) => {
@@ -17,7 +16,7 @@ module.exports.register = function () {
       if (!componentVersion?.asciidoc?.attributes) return;
 
       const attributes = Object.entries(componentVersion.asciidoc.attributes).reduce((accum, [name, val]) => {
-        const stringValue = String(val); // Convert val to a string
+        const stringValue = String(val);
         accum[name] = stringValue.endsWith('@') ? sanitizeAttributeValue(stringValue) : stringValue;
         return accum;
       }, {});
@@ -25,27 +24,35 @@ module.exports.register = function () {
       let contentString = attachment.contents.toString();
       let modified = false;
 
-      // Set replacements for Docker repos based on prerelease status
-      const isPrerelease = attributes['page-component-version-is-prerelease'];
-      const consoleRepo = isPrerelease ? 'console-unstable' : 'console';
+    // Determine if we're using the tag or version attributes
+    // We introduced tag attributes in Self-Managed 24.3
+    const isPrerelease = attributes['page-component-version-is-prerelease'];
+    const componentVersionNumber = formatVersion(componentVersion.version || '');
+    const useTagAttributes = isPrerelease || (componentVersionNumber && semver.gte(componentVersionNumber, '24.3.0') && componentVersion.title === 'Self-Managed');
+
+    // Set replacements based on the condition
+    const redpandaVersion = isPrerelease
+      ? sanitizeAttributeValue(attributes['redpanda-beta-tag'] || '')
+      : (useTagAttributes
+      ? sanitizeAttributeValue(attributes['latest-redpanda-tag'] || '')
+      : sanitizeAttributeValue(attributes['full-version'] || ''));
+
+      const consoleVersion = useTagAttributes
+        ? sanitizeAttributeValue(attributes['latest-console-tag'] || '')
+        : sanitizeAttributeValue(attributes['latest-console-version'] || '');
       const redpandaRepo = isPrerelease ? 'redpanda-unstable' : 'redpanda';
+      const consoleRepo = 'console';
 
-      // YAML-specific Replacements
+      // YAML-specific replacements
       if (attachment.out.path.endsWith('.yaml') || attachment.out.path.endsWith('.yml')) {
-        const fullVersion = isPrerelease && attributes['redpanda-beta-version']
-          ? sanitizeAttributeValue(attributes['redpanda-beta-version'])
-          : sanitizeAttributeValue(attributes['full-version'] || '');
-        const latestConsoleVersion = sanitizeAttributeValue(attributes['latest-console-version'] || '');
-
-        // Replace the Docker repo placeholders based on the prerelease status
         contentString = replacePlaceholder(contentString, /\$\{REDPANDA_DOCKER_REPO:[^\}]*\}/g, redpandaRepo);
         contentString = replacePlaceholder(contentString, /\$\{CONSOLE_DOCKER_REPO:[^\}]*\}/g, consoleRepo);
-        contentString = replacePlaceholder(contentString, /\$\{REDPANDA_VERSION[^\}]*\}/g, fullVersion);
-        contentString = replacePlaceholder(contentString, /\$\{REDPANDA_CONSOLE_VERSION[^\}]*\}/g, latestConsoleVersion);
+        contentString = replacePlaceholder(contentString, /\$\{REDPANDA_VERSION[^\}]*\}/g, redpandaVersion);
+        contentString = replacePlaceholder(contentString, /\$\{REDPANDA_CONSOLE_VERSION[^\}]*\}/g, consoleVersion);
         modified = true;
       }
 
-      // General attribute replacements (excluding uppercase)
+      // General attribute replacements (excluding uppercase with underscores)
       const result = contentString.replace(/\{([a-z][\p{Alpha}\d_-]*)\}/gu, (match, name) => {
         if (!(name in attributes)) return match;
         modified = true;
@@ -60,4 +67,11 @@ module.exports.register = function () {
   function replacePlaceholder(content, regex, replacement) {
     return content.replace(regex, replacement);
   }
+
+  const sanitizeAttributeValue = (value) => String(value).replace('@', '');
+
+  const formatVersion = (version) => {
+    if (!version) return null;
+    return semver.valid(version) ? version : `${version}.0`;
+  };
 };
