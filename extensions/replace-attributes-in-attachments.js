@@ -1,7 +1,8 @@
 'use strict';
 
 module.exports.register = function () {
-  const sanitizeAttributeValue = (value) => String(value).replace("@", "");
+  const sanitizeAttributeValue = (value) => String(value).replace('@', '');
+
   this.on('contentClassified', ({ contentCatalog }) => {
     const componentVersionTable = contentCatalog.getComponents().reduce((componentMap, component) => {
       componentMap[component.name] = component.versions.reduce((versionMap, componentVersion) => {
@@ -12,39 +13,51 @@ module.exports.register = function () {
     }, {});
 
     contentCatalog.findBy({ family: 'attachment' }).forEach((attachment) => {
-      const componentVersion = componentVersionTable[attachment.src.component][attachment.src.version];
-      let attributes = componentVersion.asciidoc?.attributes;
-      if (!attributes) return;
-      attributes = Object.entries(attributes).reduce((accum, [name, val]) => {
-        const stringValue = String(val); // Ensure val is a string
-        accum[name] = stringValue.endsWith('@') ? stringValue.slice(0, stringValue.length - 1) : stringValue;
+      const componentVersion = componentVersionTable[attachment.src.component]?.[attachment.src.version];
+      if (!componentVersion?.asciidoc?.attributes) return;
+
+      const attributes = Object.entries(componentVersion.asciidoc.attributes).reduce((accum, [name, val]) => {
+        const stringValue = String(val); // Convert val to a string
+        accum[name] = stringValue.endsWith('@') ? sanitizeAttributeValue(stringValue) : stringValue;
         return accum;
       }, {});
-      let modified;
+
       let contentString = attachment.contents.toString();
-      // Specific replacements for YAML files
+      let modified = false;
+
+      // Set replacements for Docker repos based on prerelease status
+      const isPrerelease = attributes['page-component-version-is-prerelease'];
+      const consoleRepo = isPrerelease ? 'console-unstable' : 'console';
+      const redpandaRepo = isPrerelease ? 'redpanda-unstable' : 'redpanda';
+
+      // YAML-specific Replacements
       if (attachment.out.path.endsWith('.yaml') || attachment.out.path.endsWith('.yml')) {
-        const redpandaVersionRegex = /(\$\{REDPANDA_VERSION[^\}]*\})/g;
-        const redpandaConsoleVersionRegex = /(\$\{REDPANDA_CONSOLE_VERSION[^\}]*\})/g;
-        let fullVersion = attributes['full-version'] ? sanitizeAttributeValue(attributes['full-version']) : '';
-        const latestConsoleVersion = attributes['latest-console-version'] ? sanitizeAttributeValue(attributes['latest-console-version']) : '';
-        if (attributes['page-component-version-is-prerelease']) {
-          fullVersion = attributes['redpanda-beta-version'] ? sanitizeAttributeValue(attributes['redpanda-beta-version']) : fullVersion;
-        }
-        contentString = contentString.replace(redpandaVersionRegex, fullVersion);
-        contentString = contentString.replace(redpandaConsoleVersionRegex, latestConsoleVersion);
+        const fullVersion = isPrerelease && attributes['redpanda-beta-version']
+          ? sanitizeAttributeValue(attributes['redpanda-beta-version'])
+          : sanitizeAttributeValue(attributes['full-version'] || '');
+        const latestConsoleVersion = sanitizeAttributeValue(attributes['latest-console-version'] || '');
+
+        // Replace the Docker repo placeholders based on the prerelease status
+        contentString = replacePlaceholder(contentString, /\$\{REDPANDA_DOCKER_REPO:[^\}]*\}/g, redpandaRepo);
+        contentString = replacePlaceholder(contentString, /\$\{CONSOLE_DOCKER_REPO:[^\}]*\}/g, consoleRepo);
+        contentString = replacePlaceholder(contentString, /\$\{REDPANDA_VERSION[^\}]*\}/g, fullVersion);
+        contentString = replacePlaceholder(contentString, /\$\{REDPANDA_CONSOLE_VERSION[^\}]*\}/g, latestConsoleVersion);
         modified = true;
       }
 
-      const result = contentString.replace(/\{([\p{Alpha}\d_][\p{Alpha}\d_-]*)\}/gu, (match, name) => {
+      // General attribute replacements (excluding uppercase)
+      const result = contentString.replace(/\{([a-z][\p{Alpha}\d_-]*)\}/gu, (match, name) => {
         if (!(name in attributes)) return match;
         modified = true;
-        let value = attributes[name];
-        if (value.endsWith('@')) value = value.slice(0, value.length - 1);
-        return value;
+        return attributes[name];
       });
 
       if (modified) attachment.contents = Buffer.from(result);
     });
   });
+
+  // Helper function to replace placeholders with attribute values
+  function replacePlaceholder(content, regex, replacement) {
+    return content.replace(regex, replacement);
+  }
 };
