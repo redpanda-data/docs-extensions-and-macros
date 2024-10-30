@@ -9,4 +9,5 @@ asciidoc:
     replace-attributes-in-attachments: true
     test-attribute: This attribute was replaced by the `replace-attributes-in-attachments` extension.
     full-version: 23.2.1
+    latest-redpanda-version: v23.2.1
     latest-release-commit: 'This should get replaced'

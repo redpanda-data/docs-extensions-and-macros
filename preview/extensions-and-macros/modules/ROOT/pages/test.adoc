@@ -74,6 +74,7 @@ helm_ref:storage[]
 The `version fetcher` extension gets the latest version of Redpanda and Redpanda Console and assigns them to the following attributes:
 
 - `\{full-version}`: {full-version}
+- `\{latest-redpanda-version}`: {latest-redpanda-version}
 - `\{latest-release-commit}`: {latest-release-commit}
 - `\{latest-console-version}`: {latest-console-version}
 - `\{latest-operator-version}`: {latest-operator-version}
