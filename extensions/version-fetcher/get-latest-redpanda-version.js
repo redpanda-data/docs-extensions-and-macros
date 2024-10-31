@@ -11,21 +11,20 @@ module.exports = async (github, owner, repo) => {
 
     // Filter valid semver tags, exclude drafts, and sort them to find the highest version
     const sortedReleases = releases.data
-      .filter(release => !release.draft)
-      .map(release => release.tag_name.replace(/^v/, ''))
-      .filter(tag => semver.valid(tag))
-      // Sort in descending order to get the highest version first
-      .sort(semver.rcompare);
-
+    .filter(release => !release.draft)
+    .map(release => release.tag_name)
+    .filter(tag => semver.valid(tag.replace(/^v/, '')))
+    .sort((a, b) => semver.rcompare(a.replace(/^v/, ''), b.replace(/^v/, '')));
+  
     if (sortedReleases.length > 0) {
-      const latestRedpandaReleaseVersion = sortedReleases.find(tag => !tag.includes('rc'));
-      const latestRcReleaseVersion = sortedReleases.find(tag => tag.includes('rc'));
+      const latestRedpandaReleaseVersion = sortedReleases.find(tag => !tag.includes('-rc'));
+      const latestRcReleaseVersion = sortedReleases.find(tag => tag.includes('-rc'));
 
       // Get the commit hash for the highest version tag
       const commitData = await github.rest.git.getRef({
         owner,
         repo,
-        ref: `tags/v${latestRedpandaReleaseVersion}`
+        ref: `tags/${latestRedpandaReleaseVersion}`
       });
       const latestRedpandaReleaseCommitHash = commitData.data.object.sha;
 
@@ -34,7 +33,7 @@ module.exports = async (github, owner, repo) => {
         const rcCommitData = await github.rest.git.getRef({
           owner,
           repo,
-          ref: `tags/v${latestRcReleaseVersion}`
+          ref: `tags/${latestRcReleaseVersion}`
         });
         latestRcReleaseCommitHash = rcCommitData.data.object.sha;
       }
