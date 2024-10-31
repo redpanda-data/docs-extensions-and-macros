@@ -74,7 +74,6 @@ module.exports.register = function ({ config }) {
           if (latestVersions.connect) {
             setVersionAndTagAttributes(asciidoc, 'latest-connect', latestVersions.connect, name, version);
           }
-
           // Special handling for Redpanda RC versions if in beta
           if (latestVersions.redpanda?.latestRcRelease?.version) {
             setVersionAndTagAttributes(asciidoc, 'redpanda-beta', latestVersions.redpanda.latestRcRelease.version, name, version)
@@ -88,8 +87,9 @@ module.exports.register = function ({ config }) {
         if (semver.valid(latestVersions.redpanda?.latestRedpandaRelease?.version)) {
           const currentVersion = component.latest.asciidoc.attributes['full-version'] || '0.0.0';
           if (semver.gt(latestVersions.redpanda.latestRedpandaRelease.version, currentVersion)) {
+            // Required for backwards compatibility. Some docs still use full-version
             component.latest.asciidoc.attributes['full-version'] = sanitizeVersion(latestVersions.redpanda.latestRedpandaRelease.version);
-            setVersionAndTagAttributes(component.latest.asciidoc, 'latest-redpanda', latestVersions.redpanda.latestRedpandaRelease.version);
+            setVersionAndTagAttributes(component.latest.asciidoc, 'latest-redpanda', latestVersions.redpanda.latestRedpandaRelease.version, component.latest.name, component.latest.version);
             component.latest.asciidoc.attributes['latest-release-commit'] = latestVersions.redpanda.latestRedpandaRelease.commitHash;
             logger.info(`Updated Redpanda release version to ${latestVersions.redpanda.latestRedpandaRelease.version}`);
           }
