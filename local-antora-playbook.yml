@@ -10,7 +10,7 @@ content:
     branches: HEAD
     start_paths: [preview/extensions-and-macros, preview/shared]
   - url: https://github.com/redpanda-data/docs
-    branches: [main, v/*, api, 'site-search', '!v-end-of-life/*']
+    branches: [main, v/*, api, v-WIP/24.3, 'site-search', '!v-end-of-life/*']
   - url: https://github.com/redpanda-data/redpanda-labs
     branches: main
     start_paths: [docs,'*/docs']

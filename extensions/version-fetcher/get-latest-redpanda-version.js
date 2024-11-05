@@ -9,13 +9,12 @@ module.exports = async (github, owner, repo) => {
       per_page: 50
     });
 
-    // Filter valid semver tags, exclude drafts, and sort them to find the highest version
+    // Filter valid semver tags and sort them to find the highest version
     const sortedReleases = releases.data
-    .filter(release => !release.draft)
     .map(release => release.tag_name)
     .filter(tag => semver.valid(tag.replace(/^v/, '')))
     .sort((a, b) => semver.rcompare(a.replace(/^v/, ''), b.replace(/^v/, '')));
-  
+
     if (sortedReleases.length > 0) {
       const latestRedpandaReleaseVersion = sortedReleases.find(tag => !tag.includes('-rc'));
       const latestRcReleaseVersion = sortedReleases.find(tag => tag.includes('-rc'));
