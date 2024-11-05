@@ -75,6 +75,7 @@ The `version fetcher` extension gets the latest version of Redpanda and Redpanda
 
 - `\{full-version}`: {full-version}
 - `\{latest-redpanda-version}`: {latest-redpanda-version}
+- `\{redpanda-beta-version}`: {redpanda-beta-version}
 - `\{latest-release-commit}`: {latest-release-commit}
 - `\{latest-console-version}`: {latest-console-version}
 - `\{latest-operator-version}`: {latest-operator-version}

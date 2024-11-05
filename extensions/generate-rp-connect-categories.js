@@ -6,7 +6,7 @@ module.exports.register = function ({ config }) {
   this.once('contentClassified', ({ siteCatalog, contentCatalog }) => {
     const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'redpanda-connect')
     if (!redpandaConnect || !redpandaConnect.latest) {
-      logger.info('Could not find the redpanda-connect component')
+      logger.warn('Could not find the redpanda-connect component. Skipping category creation.')
       return
     }
 
@@ -116,7 +116,8 @@ module.exports.register = function ({ config }) {
       redpandaConnect.latest.asciidoc.attributes.driverSupportData = driverSupportData
       redpandaConnect.latest.asciidoc.attributes.cacheSupportData = cacheSupportData
 
-      logger.info(`Added Redpanda Connect data to latest Asciidoc object: ${JSON.stringify({ connectCategoriesData, flatComponentsData }, null, 2)}`)
+      logger.info(`Added Redpanda Connect data to latest Asciidoc object.`)
+      logger.debug(`${JSON.stringify({ connectCategoriesData, flatComponentsData }, null, 2)}`)
     } catch (error) {
       logger.error(`Error processing Redpanda Connect files: ${error.message}`)
     }
