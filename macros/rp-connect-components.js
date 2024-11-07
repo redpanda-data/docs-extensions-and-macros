@@ -389,13 +389,15 @@ module.exports.register = function (registry, context) {
             supportLevelStr += `<p>${certifiedDrivers}${certifiedDrivers && communityDrivers ? '</br> ' : ''}${communityDrivers}</p>`;
           }
         }
-        // Build the cloud support column
+        // Build the cloud support column and include the connector URL where a connector page is available. Otherwise, just mark as available.
         const firstCloudSupportedType = Array.from(types.entries())
           .map(([_, commercialNames]) => Object.values(commercialNames).find(({ isCloudSupported }) => isCloudSupported))
-          .find(entry => entry && entry.urls.redpandaCloudUrl);
+          .find(entry => entry);
         const cloudLinkDisplay = firstCloudSupportedType
-          ? `<a href="${firstCloudSupportedType.urls.redpandaCloudUrl}">Yes</a>`
-          : 'No';
+          ? firstCloudSupportedType.urls.redpandaCloudUrl
+            ? `<a href="${firstCloudSupportedType.urls.redpandaCloudUrl}">Yes</a>`
+          : `Yes`
+        : 'No';
 
         const firstUrl = getFirstUrlFromTypesArray(Array.from(types.entries()), isCloud);
 
