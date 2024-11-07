@@ -69,7 +69,7 @@ module.exports.register = function ({ config }) {
 
           // Set attributes for console and connect versions
           if (latestVersions.console) {
-            setVersionAndTagAttributes(asciidoc, 'latest-console', latestVersions.console, name, version);
+            setVersionAndTagAttributes(asciidoc, 'latest-console', latestVersions.console.latestStableRelease, name, version);
           }
           if (latestVersions.connect) {
             setVersionAndTagAttributes(asciidoc, 'latest-connect', latestVersions.connect, name, version);
@@ -77,6 +77,7 @@ module.exports.register = function ({ config }) {
           // Special handling for Redpanda RC versions if in beta
           if (latestVersions.redpanda?.latestRcRelease?.version) {
             setVersionAndTagAttributes(asciidoc, 'redpanda-beta', latestVersions.redpanda.latestRcRelease.version, name, version)
+            setVersionAndTagAttributes(asciidoc, 'console-beta', latestVersions.console.latestBetaRelease, name, version);
             asciidoc.attributes['redpanda-beta-commit'] = latestVersions.redpanda.latestRcRelease.commitHash;
           }
         });
@@ -91,12 +92,18 @@ module.exports.register = function ({ config }) {
             component.latest.asciidoc.attributes['full-version'] = sanitizeVersion(latestVersions.redpanda.latestRedpandaRelease.version);
             setVersionAndTagAttributes(component.latest.asciidoc, 'latest-redpanda', latestVersions.redpanda.latestRedpandaRelease.version, component.latest.name, component.latest.version);
             component.latest.asciidoc.attributes['latest-release-commit'] = latestVersions.redpanda.latestRedpandaRelease.commitHash;
-            logger.info(`Updated Redpanda release version to ${latestVersions.redpanda.latestRedpandaRelease.version}`);
           }
         }
       });
 
       console.log(chalk.green('Updated Redpanda documentation versions successfully.'));
+      logger.info(`Latest Redpanda version: ${latestVersions.redpanda.latestRedpandaRelease.version}`);
+      if (latestVersions.redpanda.latestRCRelease) logger.info(`Latest Redpanda beta version: ${latestVersions.redpanda.latestRCRelease.version}`);
+      logger.info(`Latest Connect version: ${latestVersions.connect}`);
+      logger.info(`Latest Console version: ${latestVersions.console.latestStableRelease}`);
+      if (latestVersions.console.latestBetaRelease) logger.info(`Latest Console beta version: ${latestVersions.console.latestBetaRelease}`);
+      logger.info(`Latest Redpanda Helm chart version: ${latestVersions.helmChart}`);
+      logger.info(`Latest Operator version: ${latestVersions.operator}`);
     } catch (error) {
       logger.error(`Error updating versions: ${error}`);
     }
@@ -110,9 +117,9 @@ module.exports.register = function ({ config }) {
       asciidoc.attributes[`${baseName}-tag`] = `${versionData}`;
 
       if (name && version) {
-        logger.info(`Set ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to ${versionData} in ${name} ${version}`);
+        logger.debug(`Set ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to ${versionData} in ${name} ${version}`);
       } else {
-        logger.info(`Updated ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to ${versionData}`);
+        logger.debug(`Updated ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to ${versionData}`);
       }
     }
   }
