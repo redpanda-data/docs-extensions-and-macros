@@ -54,7 +54,7 @@ module.exports.register = function ({ config }) {
       }
 
       if (uniqueRelatedDocs.length > 0 || uniqueRelatedLabs.length > 0) {
-        logger.info(`Set related docs and labs attributes for ${labPage.asciidoc.doctitle}`);
+        logger.debug(`Set related docs and labs attributes for ${labPage.asciidoc.doctitle}`);
       }
     });
   });

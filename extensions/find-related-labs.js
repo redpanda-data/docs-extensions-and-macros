@@ -19,7 +19,7 @@ module.exports.register = function ({ config }) {
       })
       if (!relatedLabs.length) return
       docPage.asciidoc.attributes['page-related-labs'] = JSON.stringify(relatedLabs)
-      logger.info(`Set page-related-labs attribute for ${docPage.asciidoc.doctitle} to ${docPage.asciidoc.attributes['page-related-labs']}`)
+      logger.debug(`Set page-related-labs attribute for ${docPage.asciidoc.doctitle} to ${docPage.asciidoc.attributes['page-related-labs']}`)
     })
   })
 }

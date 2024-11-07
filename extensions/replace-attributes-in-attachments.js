@@ -37,9 +37,12 @@ module.exports.register = function () {
       ? sanitizeAttributeValue(attributes['latest-redpanda-tag'] || '')
       : sanitizeAttributeValue(attributes['full-version'] || ''));
 
-      const consoleVersion = useTagAttributes
-        ? sanitizeAttributeValue(attributes['latest-console-tag'] || '')
-        : sanitizeAttributeValue(attributes['latest-console-version'] || '');
+      const consoleVersion = isPrerelease
+      ? sanitizeAttributeValue(attributes['console-beta-tag'] || '')
+      : (useTagAttributes
+      ? sanitizeAttributeValue(attributes['latest-console-tag'] || '')
+      : sanitizeAttributeValue(attributes['latest-console-version'] || ''));
+
       const redpandaRepo = isPrerelease ? 'redpanda-unstable' : 'redpanda';
       const consoleRepo = 'console';
 
