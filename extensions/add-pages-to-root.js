@@ -21,6 +21,7 @@ module.exports.register = function ({ config }) {
             path: basename, // Add the file to the root directory
           },
         });
+        delete resource.out
       } else {
         logger.warn(`File not resolved: ${filePath}`);
       }
