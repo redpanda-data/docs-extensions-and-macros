@@ -30,6 +30,7 @@
       "require": "./extensions/unlisted-pages.js"
     },
     "./extensions/replace-attributes-in-attachments": "./extensions/replace-attributes-in-attachments.js",
+    "./extensions/add-pages-to-root": "./extensions/add-pages-to-root.js",
     "./extensions/generate-rp-connect-categories": "./extensions/generate-rp-connect-categories.js",
     "./extensions/generate-rp-connect-info": "./extensions/generate-rp-connect-info.js",
     "./extensions/add-global-attributes": "./extensions/add-global-attributes.js",

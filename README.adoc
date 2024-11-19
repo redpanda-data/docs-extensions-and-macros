@@ -46,6 +46,41 @@ This section documents the Antora extensions provided by this library and how to
 
 IMPORTANT: Ensure you register each extension under the `antora.extensions` key in the playbook, not the `asciidoc.extensions` key.
 
+=== Add pages to root
+
+The `add-pages-to-root` extension allows you to copy files from your Antora content catalog to the root of the site during the build process. This is particularly useful for files like `llms.txt` or any custom files that need to be directly accessible at the site's root level.
+
+This extension processes a list of file paths provided in the playbook configuration, locates those files in the Antora content catalog, and adds them to the site's root directory during the publishing phase. Each file's content and basename are preserved in the process.
+
+==== Environment variables
+
+This extension does not require any environment variables.
+
+==== Configuration options
+
+Add the `add-pages-to-root` extension to your Antora playbook under the `antora.extensions` key, and specify the list of files to process in the `files` configuration.
+
+[source,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/add-pages-to-root'
+      files:
+        - modules/ROOT/attachments/custom-file.txt
+----
+
+==== Registration example
+
+[source,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/add-pages-to-root'
+      files:
+        - modules/ROOT/attachments/robots.txt
+        - modules/ROOT/attachments/.nojekyll
+----
+
 === Algolia indexer
 
 This extension generates an Algolia index for each version of each component. The index entries are then saved to Algolia using the `saveObjects()` method, and also saved as JSON files in the site catalog. JSON files are published to the site root using the template `algolia-<component>-<version>.json`.
