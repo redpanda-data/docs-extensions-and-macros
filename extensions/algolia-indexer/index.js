@@ -103,7 +103,7 @@ function register({
         // Upload new records only if the objects have been updated or they are new.
         // See https://www.algolia.com/doc/api-reference/api-methods/batch/?client=javascript
         await client.multipleBatch(batchActions).then(() => {
-          console.log('Batch operations completed successfully');
+          logger.info('Batch operations completed successfully');
         }).catch(error => {
           logger.error(`Error uploading records to Algolia: ${error.message}`);
         });
