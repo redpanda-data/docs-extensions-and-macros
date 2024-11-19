@@ -108,7 +108,7 @@ module.exports.register = function ({ config }) {
               siteCatalog.termsByCategory[formattedCategory].push({ name: file.basename, content: termContent });
             });
 
-            logger.info('Categorized terms from shared component.'));
+            logger.info('Categorized terms from shared component.');
             break;
           }
         }
@@ -149,7 +149,7 @@ module.exports.register = function ({ config }) {
             });
 
             glossaryPage.contents = Buffer.from(glossaryContent, 'utf8');
-            logger.info(`Merged terms into glossary for ${component} component${version ? ' version ' + version : ''}.`));
+            logger.info(`Merged terms into glossary for ${component} component${version ? ' version ' + version : ''}.`);
           } else {
             logger.info(`Skipping ${title} ${version ? ' version ' + version : ''} - No glossary page (reference:glossary.adoc) found`);
           }
