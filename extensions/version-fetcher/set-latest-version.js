@@ -6,7 +6,6 @@ module.exports.register = function ({ config }) {
   const GetLatestOperatorVersion = require('./get-latest-operator-version');
   const GetLatestHelmChartVersion = require('./get-latest-redpanda-helm-version');
   const GetLatestConnectVersion = require('./get-latest-connect');
-  const chalk = require('chalk');
   const logger = this.getLogger('set-latest-version-extension');
 
   if (!process.env.REDPANDA_GITHUB_TOKEN) {
@@ -96,7 +95,7 @@ module.exports.register = function ({ config }) {
         }
       });
 
-      console.log(chalk.green('Updated Redpanda documentation versions successfully.'));
+      logger.info('Updated Redpanda documentation versions successfully.');
       logger.info(`Latest Redpanda version: ${latestVersions.redpanda.latestRedpandaRelease.version}`);
       if (latestVersions.redpanda.latestRCRelease) logger.info(`Latest Redpanda beta version: ${latestVersions.redpanda.latestRCRelease.version}`);
       logger.info(`Latest Connect version: ${latestVersions.connect}`);
