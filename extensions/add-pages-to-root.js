@@ -1,6 +1,7 @@
 module.exports.register = function ({ config }) {
   this.on('beforePublish', ({ siteCatalog, contentCatalog }) => {
     const logger = this.getLogger('add-pages-to-site-root');
+    if (!config.files.length) return logger.debug('No files to add to root')
 
     logger.debug('Files to process:', config.files);
 
