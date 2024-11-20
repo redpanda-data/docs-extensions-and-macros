@@ -141,7 +141,7 @@ module.exports.register = function ({ config }) {
 
       // Log a warning if neither URL was found (only warn for missing cloud if it should support cloud)
       if (!redpandaConnectUrl && (!redpandaCloudUrl && is_cloud_supported === 'y')) {
-        logger.info(`Docs missing for: ${connector} of type: ${type}`);
+        logger.warn(`Docs missing for: ${connector} of type: ${type}`);
       }
 
       // Return the translated and enriched row

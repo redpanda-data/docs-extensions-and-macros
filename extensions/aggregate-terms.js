@@ -11,7 +11,6 @@ const TERMS_PATH = 'modules/terms/partials/';  // Default path within the 'share
 
 module.exports.register = function ({ config }) {
   const logger = this.getLogger('term-aggregation-extension');
-  const chalk = require('chalk');
 
   /**
    * Function to process term content, extracting hover text and links.
@@ -67,7 +66,7 @@ module.exports.register = function ({ config }) {
         siteCatalog.termsByCategory[formattedCategory].push({ name: file, content: termContent });
       });
 
-      console.log(chalk.green(`Categorized terms from local terms path "${termsPath}".`));
+      logger.info(`Categorized terms from local terms path "${termsPath}".`);
       return true;
 
     } catch (error) {
@@ -109,7 +108,7 @@ module.exports.register = function ({ config }) {
               siteCatalog.termsByCategory[formattedCategory].push({ name: file.basename, content: termContent });
             });
 
-            console.log(chalk.green('Categorized terms from shared component.'));
+            logger.info('Categorized terms from shared component.');
             break;
           }
         }
@@ -150,7 +149,7 @@ module.exports.register = function ({ config }) {
             });
 
             glossaryPage.contents = Buffer.from(glossaryContent, 'utf8');
-            console.log(chalk.green(`Merged terms into glossary for ${component} component${version ? ' version ' + version : ''}.`));
+            logger.info(`Merged terms into glossary for ${component} component${version ? ' version ' + version : ''}.`);
           } else {
             logger.info(`Skipping ${title} ${version ? ' version ' + version : ''} - No glossary page (reference:glossary.adoc) found`);
           }

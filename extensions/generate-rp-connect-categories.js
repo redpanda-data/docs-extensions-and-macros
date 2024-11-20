@@ -116,7 +116,7 @@ module.exports.register = function ({ config }) {
       redpandaConnect.latest.asciidoc.attributes.driverSupportData = driverSupportData
       redpandaConnect.latest.asciidoc.attributes.cacheSupportData = cacheSupportData
 
-      logger.info(`Added Redpanda Connect data to latest Asciidoc object.`)
+      logger.debug(`Added Redpanda Connect data to latest Asciidoc object.`)
       logger.debug(`${JSON.stringify({ connectCategoriesData, flatComponentsData }, null, 2)}`)
     } catch (error) {
       logger.error(`Error processing Redpanda Connect files: ${error.message}`)

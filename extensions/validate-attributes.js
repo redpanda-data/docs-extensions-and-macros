@@ -34,7 +34,7 @@ function processEnvironmentAttributes(page, logger) {
       // If the env attribute exists, set a corresponding page- attribute for use in the UI
       const pageEnvAttr = `page-${envAttr}`;
       page.asciidoc.attributes[pageEnvAttr] = true;
-      logger.info(`Set '${pageEnvAttr}' for ${page.asciidoc.attributes['page-relative-src-path']}`);
+      logger.debug(`Set '${pageEnvAttr}' for ${page.asciidoc.attributes['page-relative-src-path']}`);
     }
   });
 }
@@ -53,7 +53,7 @@ function validateCategories(pageCategoryList, pageInfo, categoryMap, logger) {
       if (!adjustedCategories.has(parentCategory)) {
         // Add the parent category since it's missing
         adjustedCategories.add(parentCategory);
-        logger.info(`Added missing parent category '${parentCategory}' for subcategory '${category}' in ${pageInfo}`);
+        logger.debug(`Added missing parent category '${parentCategory}' for subcategory '${category}' in ${pageInfo}`);
       }
     }
     // Check if the current category is not a valid category or subcategory

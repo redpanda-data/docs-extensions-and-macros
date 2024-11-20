@@ -13,7 +13,6 @@ const ATTRIBUTES_PATH = 'modules/ROOT/partials/';  // Default path within the 's
 
 module.exports.register = function ({ config }) {
   const logger = this.getLogger('global-attributes-extension');
-  const chalk = require('chalk');
 
   /**
    * Load global attributes from a specified local file if provided.
@@ -30,7 +29,7 @@ module.exports.register = function ({ config }) {
       const fileAttributes = yaml.load(fileContents);
 
       siteCatalog.attributeFile = _.merge({}, fileAttributes);
-      console.log(chalk.green(`Loaded global attributes from local file "${localAttributesFile}".`));
+      logger.info(`Loaded global attributes from local file "${localAttributesFile}".`);
       return true;  // Return true if the local attributes were successfully loaded
 
     } catch (error) {
@@ -64,7 +63,7 @@ module.exports.register = function ({ config }) {
                 const fileAttributes = yaml.load(file.contents.toString('utf8'));
                 return _.merge(acc, fileAttributes);
               }, {});
-              console.log(chalk.green('Loaded global attributes from shared component.'));
+              logger.info('Loaded global attributes from shared component.');
             }
             break;
           }

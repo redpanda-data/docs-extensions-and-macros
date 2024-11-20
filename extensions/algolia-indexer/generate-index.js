@@ -104,7 +104,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     // Start handling the article content
     const article = root.querySelector('article.doc')
     if (!article) {
-      logger.info(`Page is not an article...skipping ${page.pub.url}`)
+      logger.warn(`Page is not an article...skipping ${page.pub.url}`)
       continue
     }
 

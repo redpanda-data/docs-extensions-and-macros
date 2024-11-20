@@ -1,12 +1,9 @@
 'use strict'
 
 const generateIndex = require('./generate-index')
-const chalk = require('chalk')
 const algoliasearch = require('algoliasearch')
 const http = require('http')
 const https = require('https')
-const fs = require('fs')
-const path = require('path')
 const _ = require('lodash')
 process.env.UV_THREADPOOL_SIZE=16
 
@@ -106,7 +103,7 @@ function register({
         // Upload new records only if the objects have been updated or they are new.
         // See https://www.algolia.com/doc/api-reference/api-methods/batch/?client=javascript
         await client.multipleBatch(batchActions).then(() => {
-          console.log('Batch operations completed successfully');
+          logger.info('Batch operations completed successfully');
         }).catch(error => {
           logger.error(`Error uploading records to Algolia: ${error.message}`);
         });
@@ -127,10 +124,10 @@ function register({
       });
     }
 
-    console.log(chalk.green('Updated records:' + totalObjectsToUpdate))
-    console.log(chalk.green('New records:' + totalObjectsToAdd))
+    logger.info('Updated records:' + totalObjectsToUpdate)
+    logger.info('New records:' + totalObjectsToAdd)
 
-    totalObjectsToAdd === 0 && totalObjectsToUpdate === 0 && console.log(chalk.green('No new records uploaded or existing records updated'))
+    totalObjectsToAdd === 0 && totalObjectsToUpdate === 0 && logger.info('No new records uploaded or existing records updated')
   })
 
   process.on('exit', () => {
