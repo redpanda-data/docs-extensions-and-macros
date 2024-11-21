@@ -48,7 +48,7 @@ IMPORTANT: Ensure you register each extension under the `antora.extensions` key 
 
 === Add Bloblang samples to pages
 
-The `collect-bloblang-samples` processes Bloblang examples from YAML files in the `examples` directory of the `redpanda-connect` component. This extension ensures that these examples are accessible as structured data for use in UI components or documentation, such as sample dropdowns in a Bloblang playground.
+The `collect-bloblang-samples` extension processes Bloblang examples from YAML files in the `examples` directory of the `redpanda-connect` component. This extension ensures that these examples are accessible as structured data for use in UI components or documentation, such as sample dropdowns in a Bloblang playground.
 
 It validates, sorts, and attaches the processed examples as a JSON object to the Antora page attributes. The extension ensures examples have unique titles, mandatory fields (`input` and `mapping`), and are sorted in alphabetical order.
 
@@ -58,7 +58,7 @@ This extension does not require any environment variables.
 
 ==== Configuration options
 
-To enable the `bloblang-samples-extension`, add it to your Antora playbook under the `antora.extensions` key. No additional configuration is required.
+To enable the extension, add it to your Antora playbook under the `antora.extensions` key. No additional configuration is required.
 
 [,yaml]
 ----
