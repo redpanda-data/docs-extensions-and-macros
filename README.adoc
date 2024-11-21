@@ -46,6 +46,62 @@ This section documents the Antora extensions provided by this library and how to
 
 IMPORTANT: Ensure you register each extension under the `antora.extensions` key in the playbook, not the `asciidoc.extensions` key.
 
+=== Add Bloblang samples to pages
+
+The `collect-bloblang-samples` processes Bloblang examples from YAML files in the `examples` directory of the `redpanda-connect` component. This extension ensures that these examples are accessible as structured data for use in UI components or documentation, such as sample dropdowns in a Bloblang playground.
+
+It validates, sorts, and attaches the processed examples as a JSON object to the Antora page attributes. The extension ensures examples have unique titles, mandatory fields (`input` and `mapping`), and are sorted in alphabetical order.
+
+==== Environment variables
+
+This extension does not require any environment variables.
+
+==== Configuration options
+
+To enable the `bloblang-samples-extension`, add it to your Antora playbook under the `antora.extensions` key. No additional configuration is required.
+
+[,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/collect-bloblang-samples'
+----
+
+==== Example Bloblang YAML file
+
+The following YAML file is an example of how to define a Bloblang sample:
+
+[,yaml]
+----
+title: Hello world
+input: |
+  {
+    "message": "hello world"
+  }
+mapping: |
+  root.message = this.message.uppercase()
+----
+
+==== Sample output
+
+The processed examples are added as JSON to the `page-bloblang-samples` attribute. For example:
+
+[,json]
+----
+{
+  "hello-world.yaml": {
+    "title": "Hello world",
+    "input": "{\n  \"message\": \"hello world\"\n}\n",
+    "mapping": "root.message = this.message.uppercase()\n"
+  },
+  "array-processing.yaml": {
+    "title": "Array processing",
+    "input": "{\n  \"numbers\": [1, 2, 3, 4, 5]\n}\n",
+    "mapping": "root.even_numbers = this.numbers.filter(n -> n % 2 == 0)"
+  }
+}
+----
+
 === Add pages to root
 
 The `add-pages-to-root` extension allows you to copy files from your Antora content catalog to the root of the site during the build process. This is particularly useful for files like `llms.txt` or any custom files that need to be directly accessible at the site's root level.
