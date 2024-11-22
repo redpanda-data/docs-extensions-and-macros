@@ -90,6 +90,13 @@ By default, Antora does not replace attributes in attachment files. Download thi
 
 xref:preview:ROOT:attachment$test.yaml[Download attachment]
 
+== Bloblang samples
+
+[,json,subs="attributes+"]
+----
+{page-bloblang-samples}
+----
+
 == Code highlights
 
 [source,js,lines=1-3+5+6]
