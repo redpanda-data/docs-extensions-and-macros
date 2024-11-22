@@ -38,6 +38,7 @@ antora:
   - './extensions/algolia-indexer/index'
   - require: './extensions/generate-rp-connect-categories'
   - require: './extensions/generate-rp-connect-info'
+  - require: './extensions/collect-bloblang-samples'
   - require: './extensions/add-pages-to-root'
   - require: './extensions/unlisted-pages'
   - require: './extensions/replace-attributes-in-attachments'
