@@ -704,7 +704,7 @@ module.exports.register = function (registry, context) {
         const requiresEnterprise = componentRows.some(row => row.is_licensed.toLowerCase() === 'yes');
         if (requiresEnterprise) {
           enterpriseLicenseInfo = `
-            <p><strong>License</strong>: This component requires an <a href="https://redpanda.com/compare-platform-editions" target="_blank">Enterprise license</a>. To upgrade, contact <a href="https://redpanda.com/try-redpanda?section=enterprise-trial" target="_blank" rel="noopener">Redpanda sales</a>.</p>`;
+            <p><strong>License</strong>: This component requires an <a href="https://docs.redpanda.com/redpanda-connect/get-started/licensing/" target="_blank">Enterprise license</a>. To upgrade, go to the <a href="https://www.redpanda.com/upgrade" target="_blank" rel="noopener">Redpanda website</a>.</p>`;
         }
       }
       const isCloudSupported = componentRows.some(row => row.is_cloud_supported === 'y');
