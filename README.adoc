@@ -255,26 +255,20 @@ antora:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/generate-index-data-extension'
       data:
         sets:
+          console_ui:
+            component: ROOT # search the ROOT component (Redpanda docs)
+            version: '24.3' # search for version 24.3 of the component
+            family: page # look for pages
+            filter: console/ui # look for pages where the URL includes this pattern
+            attribute_name: console-ui-index # store the result in this attribute
+            output_file: redpanda-labs/docker-labs-index.json # save the data to this file
           docker_labs:
             component: redpanda-labs
             family: page
             filter: docker-compose
             env_type: Docker
             version: 'latest'
-            output_file: redpanda-labs/docker-labs-index.json
             attribute_name: docker-labs-index
-          console_ui:
-            component: ROOT
-            family: page
-            version: '1.5.0' # Specific version for versioned component
-            attribute_name: console-ui-index
-          unversioned_set:
-            component: unversioned-component
-            family: page
-            filter: example-filter
-            env_type: ExampleEnv
-            # version: omitted because the component is unversioned
-            attribute_name: example-index
 ----
 
 === Redpanda Connect tag modifier
