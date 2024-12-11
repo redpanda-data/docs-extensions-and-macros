@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "3.10.1",
+  "version": "3.11.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -33,6 +33,7 @@
     "./extensions/add-pages-to-root": "./extensions/add-pages-to-root.js",
     "./extensions/collect-bloblang-samples": "./extensions/collect-bloblang-samples.js",
     "./extensions/generate-rp-connect-categories": "./extensions/generate-rp-connect-categories.js",
+    "./extensions/generate-index-data": "./extensions/generate-index-data.js",
     "./extensions/generate-rp-connect-info": "./extensions/generate-rp-connect-info.js",
     "./extensions/add-global-attributes": "./extensions/add-global-attributes.js",
     "./extensions/version-fetcher/set-latest-version": "./extensions/version-fetcher/set-latest-version.js",

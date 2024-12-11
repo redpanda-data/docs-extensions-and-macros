@@ -37,6 +37,15 @@ antora:
   - './extensions/version-fetcher/set-latest-version'
   - './extensions/algolia-indexer/index'
   - require: './extensions/generate-rp-connect-categories'
+  - require: './extensions/generate-index-data'
+    data:
+      sets:
+        docker_labs:
+          component: redpanda-labs
+          family: page
+          filter: docker-compose
+          env_type: Docker
+          attribute_name: docker-labs-index
   - require: './extensions/generate-rp-connect-info'
   - require: './extensions/collect-bloblang-samples'
   - require: './extensions/add-pages-to-root'

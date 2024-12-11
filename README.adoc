@@ -52,6 +52,24 @@ The `collect-bloblang-samples` extension processes Bloblang examples from YAML f
 
 It validates, sorts, and attaches the processed examples as a JSON object to the Antora page attributes. The extension ensures examples have unique titles, mandatory fields (`input` and `mapping`), and are sorted in alphabetical order.
 
+The processed examples are added as JSON to the `page-bloblang-samples` attribute. For example:
+
+[,json]
+----
+{
+  "hello-world.yaml": {
+    "title": "Hello world",
+    "input": "{\n  \"message\": \"hello world\"\n}\n",
+    "mapping": "root.message = this.message.uppercase()\n"
+  },
+  "array-processing.yaml": {
+    "title": "Array processing",
+    "input": "{\n  \"numbers\": [1, 2, 3, 4, 5]\n}\n",
+    "mapping": "root.even_numbers = this.numbers.filter(n -> n % 2 == 0)"
+  }
+}
+----
+
 ==== Environment variables
 
 This extension does not require any environment variables.
@@ -80,26 +98,6 @@ input: |
   }
 mapping: |
   root.message = this.message.uppercase()
-----
-
-==== Sample output
-
-The processed examples are added as JSON to the `page-bloblang-samples` attribute. For example:
-
-[,json]
-----
-{
-  "hello-world.yaml": {
-    "title": "Hello world",
-    "input": "{\n  \"message\": \"hello world\"\n}\n",
-    "mapping": "root.message = this.message.uppercase()\n"
-  },
-  "array-processing.yaml": {
-    "title": "Array processing",
-    "input": "{\n  \"numbers\": [1, 2, 3, 4, 5]\n}\n",
-    "mapping": "root.even_numbers = this.numbers.filter(n -> n % 2 == 0)"
-  }
-}
 ----
 
 === Add pages to root
@@ -183,13 +181,101 @@ This extension does not require any environment variables.
 
 There are no configurable options for this extension.
 
-==== Registration Example
+==== Registration example
 
 ```yaml
 antora:
   extensions:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/generate-rp-connect-categories'
 ```
+
+=== Generate index data extension
+
+This extension generates data about doc pages based on a configurable set of filters and saves it to the given attribute in all component versions. This extension allows you to define multiple indexing criteria, such as component, family, filter, environment type, and version. The generated data is stored in the provided `attribute_name` so that you can use it within your AsciiDoc pages or UI templates to present categorized lists of links and descriptions.
+
+The generated data is an array of objects, where each object corresponds to a doc page that matches the specified criteria. Each object contains the following properties:
+
+- `title` (string):
+The title of the doc page.
+
+- `url` (string):
+The URL of the doc page relative to the site root.
+
+- `description` (string, optional):
+A brief description of the page, sourced from the `:description:` attribute in the AsciiDoc file. If the description attribute is not defined, this field will be an empty string.
+
+```js
+{
+    title: 'Manage Debug Bundles in Redpanda Console',
+    url: '/current/console/ui/generate-bundle/',
+    description: 'Learn how to generate, download, and delete debug bundles in Redpanda Console for comprehensive cluster diagnostics.'
+  },
+```
+
+==== Environment variables
+
+This extension does not require any environment variables.
+
+==== Configuration options
+
+The extension accepts the following configuration options within the Antora playbook:
+
+- `data.sets` (required):
+  An object defining one or more index sets. Each set must include the following parameters:
+
+  - `component` (string, required):
+    The name of the Antora component from which to gather pages.
+
+  - `family` (string, required):
+    The family of pages to include (typically `'page'`).
+
+  - `filter` (string, optional):
+    A substring to match within page URLs to further filter the pages.
+
+  - `env_type` (string, optional):
+    The deployment type to match, such as Docker, Kubernetes, Linux, or Redpanda Cloud. This corresponds to values of `env-*` attributes in the AsciiDoc pages.
+
+  - `version` (string, optional):
+    The version of the component to target. Can be a specific version number or `latest` to automatically resolve to the most recent version.
+
+  - `output_file` (string, optional):
+    The path where the generated JSON index file will be saved in the site catalog. If omitted, the JSON file will not be created.
+
+  - `attribute_name` (string, required):
+    The name of the AsciiDoc page attribute where the generated JSON data will be assigned. This attribute can be referenced in your documentation to render dynamic indexes.
+
+==== Registration example
+
+To enable the `generate-index-data-extension`, add it to your Antora playbook under the `antora.extensions` key and configure the necessary options as shown below:
+
+[source,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/generate-index-data-extension'
+      data:
+        sets:
+          docker_labs:
+            component: redpanda-labs
+            family: page
+            filter: docker-compose
+            env_type: Docker
+            version: 'latest'
+            output_file: redpanda-labs/docker-labs-index.json
+            attribute_name: docker-labs-index
+          console_ui:
+            component: ROOT
+            family: page
+            version: '1.5.0' # Specific version for versioned component
+            attribute_name: console-ui-index
+          unversioned_set:
+            component: unversioned-component
+            family: page
+            filter: example-filter
+            env_type: ExampleEnv
+            # version: omitted because the component is unversioned
+            attribute_name: example-index
+----
 
 === Redpanda Connect tag modifier
 

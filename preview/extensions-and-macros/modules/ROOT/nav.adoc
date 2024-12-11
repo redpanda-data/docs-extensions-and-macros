@@ -1,3 +1,3 @@
 * xref:preview:ROOT:test.adoc[]
-//* xref:preview:reference:cluster-properties.adoc[]
+* xref:preview:ROOT:docker-labs.adoc[]
 * xref:preview:reference:glossary.adoc[]
