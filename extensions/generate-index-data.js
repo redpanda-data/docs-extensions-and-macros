@@ -8,7 +8,7 @@ module.exports.register = function ({ config }) {
     // Ensure data.sets exists and is an object
     const setsConfig = _.get(config, 'data.sets', {});
     if (!setsConfig || Object.keys(setsConfig).length === 0) {
-      logger.warn('No index sets defined in the configuration. Skipping index generation.');
+      logger.info('No index sets defined in the configuration. Skipping index data generation.');
       return;
     }
 
