@@ -189,27 +189,42 @@ antora:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/generate-rp-connect-categories'
 ```
 
-=== Generate index data extension
+=== Generate index data
 
-This extension generates data about doc pages based on a configurable set of filters and saves it to the given attribute in all component versions. This extension allows you to define multiple indexing criteria, such as component, family, filter, environment type, and version. The generated data is stored in the provided `attribute_name` so that you can use it within your AsciiDoc pages or UI templates to present categorized lists of links and descriptions.
+The `generate-index-data` extension creates structured index data about doc pages based on configurable filters. The indexed data is saved to a specified attribute in all component versions, enabling the dynamic generation of categorized links and descriptions within your docs using UI templates.
 
-The generated data is an array of objects, where each object corresponds to a doc page that matches the specified criteria. Each object contains the following properties:
+This extension allows you to define multiple indexing criteria, such as component, URL filter, and environment type.
 
-- `title` (string):
-The title of the doc page.
+The generated data is an array of objects, where each object represents a component version. Each object contains the following properties:
 
-- `url` (string):
-The URL of the doc page relative to the site root.
+- `component` (string):
+  The name of the Antora component.
 
-- `description` (string, optional):
-A brief description of the page, sourced from the `:description:` attribute in the AsciiDoc file. If the description attribute is not defined, this field will be an empty string.
+- `version` (string):
+  The version of the component.
 
-```js
-{
-    title: 'Manage Debug Bundles in Redpanda Console',
-    url: '/current/console/ui/generate-bundle/',
-    description: 'Learn how to generate, download, and delete debug bundles in Redpanda Console for comprehensive cluster diagnostics.'
-  },
+- `pages` (array):
+  A list of pages that match the indexing criteria. Each page contains:
+** `title` (string): The title of the doc page.
+** `url` (string): The URL of the doc page relative to the site root.
+** `description` (string): A brief description sourced from the `:description:` attribute in the AsciiDoc file. Defaults to an empty string if not provided.
+
+Example:
+
+```json
+[
+  {
+    "component": "ROOT",
+    "version": "24.3",
+    "pages": [
+      {
+        "title": "Manage Debug Bundles in Redpanda Console",
+        "url": "/current/console/ui/generate-bundle/",
+        "description": "Learn how to generate, download, and delete debug bundles in Redpanda Console for comprehensive cluster diagnostics."
+      },
+    ]
+  }
+]
 ```
 
 ==== Environment variables
@@ -218,58 +233,65 @@ This extension does not require any environment variables.
 
 ==== Configuration options
 
-The extension accepts the following configuration options within the Antora playbook:
+The extension accepts the following options in the Antora playbook.
 
-- `data.sets` (required):
-  An object defining one or more index sets. Each set must include the following parameters:
+NOTE: Ensure filters are well-defined to minimize unnecessary processing. Avoid overly broad configurations in `data.sets`.
 
-  - `component` (string, required):
-    The name of the Antora component from which to gather pages.
+- `data.sets` (required): An object defining one or more indexing configurations. Each configuration (or set) accepts the following options:
 
-  - `family` (string, required):
-    The family of pages to include (typically `'page'`).
+** `component` (string, required): The Antora component to search for pages.
 
-  - `filter` (string, optional):
-    A substring to match within page URLs to further filter the pages.
+** `attribute_name` (string, required): The attribute name to assign the generated index data. This allows pages and templates to reference the index.
 
-  - `env_type` (string, optional):
-    The deployment type to match, such as Docker, Kubernetes, Linux, or Redpanda Cloud. This corresponds to values of `env-*` attributes in the AsciiDoc pages.
+** `filter` (string, optional): A substring to match within page URLs.
 
-  - `version` (string, optional):
-    The version of the component to target. Can be a specific version number or `latest` to automatically resolve to the most recent version.
+** `env_type` (string, optional): Matches pages with environment-specific attributes (e.g., Docker, Kubernetes).
 
-  - `output_file` (string, optional):
-    The path where the generated JSON index file will be saved in the site catalog. If omitted, the JSON file will not be created.
+** `output_file` (string, optional): Save the generated index data as a JSON file at the specified path. If not provided, no file is created.
 
-  - `attribute_name` (string, required):
-    The name of the AsciiDoc page attribute where the generated JSON data will be assigned. This attribute can be referenced in your documentation to render dynamic indexes.
+==== Example configuration
 
-==== Registration example
+Here's an example configuration to enable the generate-index-data-extension:
 
-To enable the `generate-index-data-extension`, add it to your Antora playbook under the `antora.extensions` key and configure the necessary options as shown below:
-
-[source,yaml]
-----
+```yaml
 antora:
   extensions:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/generate-index-data-extension'
       data:
         sets:
           console_ui:
-            component: ROOT # search the ROOT component (Redpanda docs)
-            version: '24.3' # search for version 24.3 of the component
-            family: page # look for pages
-            filter: console/ui # look for pages where the URL includes this pattern
-            attribute_name: console-ui-index # store the result in this attribute
-            output_file: redpanda-labs/docker-labs-index.json # save the data to this file
+            component: ROOT  # Search the ROOT component
+            filter: console/ui # Filter pages containing this substring in their URL
+            attribute_name: console-ui-index # Save the result in this attribute
+            output_file: redpanda-labs/console-ui-index.json # Save data to this file
           docker_labs:
             component: redpanda-labs
-            family: page
             filter: docker-compose
             env_type: Docker
-            version: 'latest'
             attribute_name: docker-labs-index
-----
+```
+
+==== Use the generated data
+
+The index data can be referenced in AsciiDoc pages by specifying the following required attributes:
+
+```asciidoc
+= CONSOLE UI
+:page-index-data: console-ui-index <1>
+:page-role: index-list <2>
+```
+
+<1> The attribute whose data you want to display on the page. This must match an attribute configured in the extension.
+<2> The page role. This role specfies the UI template that renders the data in the `page-index-data` on the page.
+
+You can optionally display pages only if they match the component and version of the current Asciidoc page by adding the `:page-match-component-version:` attribute.
+
+```asciidoc
+= CONSOLE UI
+:page-index-data: console-ui-index
+:page-role: index-list
+:page-match-component-version: ''
+```
 
 === Redpanda Connect tag modifier
 

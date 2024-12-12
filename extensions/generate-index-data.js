@@ -16,50 +16,30 @@ module.exports.register = function ({ config }) {
       // Process each defined index set
       for (const [setName, setParams] of Object.entries(setsConfig)) {
         logger.info(`Processing index set: ${setName}`);
-        const { component, family, filter, env_type, version, output_file, attribute_name } = setParams;
+        const { component, filter, env_type, output_file, attribute_name } = setParams;
 
         // Validate required parameters
-        const missingParams = [];
+        const requiredParams = ['component', 'attribute_name'];
 
-        if (!component) missingParams.push('component');
-        if (!family) missingParams.push('family');
-        if (!attribute_name) missingParams.push('attribute_name');
+        const missingParams = requiredParams.filter(param => !setParams[param]);
 
         if (missingParams.length > 0) {
-          logger.warn(`Missing required parameter(s) (${missingParams.join(', ')}) for set "${setName}". Skipping.`);
+          logger.warn(`One or more required parameters are missing: ${missingParams.join(', ')} for set "${setName}". Skipping.`);
           continue;
-        }
-
-        // Determine the target version
-        let targetVersion = version || null;
-
-        if (version === 'latest') {
-          // Retrieve the component to access 'latest'
-          const componentObj = contentCatalog.getComponents().find(comp => comp.name === component);
-          if (componentObj && componentObj.latest && componentObj.latest.version) {
-            targetVersion = componentObj.latest.version;
-            logger.debug(`Resolved 'latest' to version "${targetVersion}" for component "${component}".`);
-          } else {
-            targetVersion = null; // Represents unversioned
-            logger.info(`Component "${component}" is unversioned. Using the sole available version.`);
-          }
         }
 
         // Gather items based on the target version
         const items = gatherItems(contentCatalog, {
           component,
-          family,
           filter,
           env_type,
-          version: targetVersion
         }, logger);
 
         if (!items.length) {
-          logger.warn(`No items found for set "${setName}". Skipping output.`);
           continue;
         }
 
-        const uniqueItems = deduplicateItems(items);
+        const uniqueItems = deduplicateAndSortItems(items);
         await addDataAttributeToComponents(uniqueItems, contentCatalog, attribute_name, logger);
         if (output_file) createIndexFile(uniqueItems, siteCatalog, output_file, logger);
       }
@@ -72,93 +52,114 @@ module.exports.register = function ({ config }) {
 /**
  * Gathers items (pages) from the contentCatalog based on the provided setParams.
  * setParams should contain:
- *   - component (string): Component name to search
- *   - family (string): Family of pages (usually 'page')
- *   - version (string|null): The component version ('latest', specific version, or null for unversioned)
+ *   - component (string, required): Component name to search
  *   - filter (string, optional): A substring to match in the URL or other criteria
  *   - env_type (string, optional): Deployment type to match ('Docker', 'Kubernetes', 'Linux', 'Redpanda Cloud')
  */
 function gatherItems(contentCatalog, setParams, logger) {
-  const { component, family, filter, env_type, version } = setParams;
-  let pages = [];
+  const { component, filter, env_type } = setParams;
 
-  if (version) {
-    // Specific version or 'latest' resolved to a version
-    pages = contentCatalog.findBy({ component, family, version });
-    logger.debug(`Gathering pages for component "${component}" version "${version}". Found ${pages.length} pages.`);
-  } else {
-    // Unversioned component: gather all pages without specifying version
-    pages = contentCatalog.findBy({ component, family });
-    logger.debug(`Gathering pages for unversioned component "${component}". Found ${pages.length} pages.`);
+  // Find the component in the catalog
+  const componentObj = contentCatalog.getComponents().find(comp => comp.name === component);
+  if (!componentObj) {
+    logger.warn(`Component "${component}" not found in the content catalog.`);
+    return [];
   }
 
-  // Filter pages based on provided criteria
-  const matched = pages.filter(page => {
-    const deploymentType = getDeploymentType(page.asciidoc.attributes);
-    const urlMatches = filter ? page.pub.url.includes(filter) : true;
-    const envMatches = env_type ? (deploymentType === env_type) : true;
+  const result = [];
 
-    return urlMatches && envMatches;
+  // Iterate through all versions of the component
+  componentObj.versions.forEach(versionObj => {
+    const versionPages = contentCatalog.findBy({ component, family: 'page', version: versionObj.version });
+
+    logger.debug(`Gathering pages for component "${component}" version "${versionObj.version}". Found ${versionPages.length} pages.`);
+
+    // Filter pages based on criteria
+    const matchedPages = versionPages.filter(page => {
+      const deploymentType = getDeploymentType(page.asciidoc.attributes);
+      const urlMatches = filter ? page.pub.url.includes(filter) : true;
+      const envMatches = env_type ? (deploymentType === env_type) : true;
+
+      return urlMatches && envMatches;
+    });
+
+    // Map matched pages to the desired structure
+    const pages = matchedPages.map(page => ({
+      title: page.asciidoc.doctitle,
+      url: page.pub.url,
+      description: page.asciidoc.attributes.description || ''
+    }));
+
+    // Add the component and version structure, even if pages is empty
+    result.push({
+      component,
+      version: versionObj.version,
+      pages
+    });
+
+    logger.debug(`Processed ${pages.length} pages for version "${versionObj.version}".`);
   });
 
-  logger.debug(`Found ${matched.length} items in component "${component}" matching filter "${filter}", env_type "${env_type || 'N/A'}".`);
-
-  const mappedItems = matched.map(page => ({
-    title: page.asciidoc.doctitle,
-    url: page.pub.url,
-    description: page.asciidoc.attributes.description || '',
-  }));
-
-  const sortedItems = mappedItems.sort((a, b) => {
-    const titleA = a.title.toUpperCase();
-    const titleB = b.title.toUpperCase();
-    if (titleA < titleB) return -1;
-    if (titleA > titleB) return 1;
-    return 0;
-  });
-
-  logger.debug(`Sorted ${sortedItems.length} items alphabetically by title.`);
-
-  return sortedItems;
+  logger.debug(`Completed gathering items for component "${component}".`);
+  return result;
 }
 
 /**
- * Deduplicates items by their URL.
+ * Deduplicates items by their URL and returns them in alphabetical order by title.
  */
-function deduplicateItems(items) {
-  const seen = new Set();
-  return items.filter(item => {
-    if (seen.has(item.url)) return false;
-    seen.add(item.url);
-    return true;
+function deduplicateAndSortItems(items) {
+  return items.map(item => {
+    const seenUrls = new Set();
+
+    // Deduplicate pages by URL
+    const deduplicatedPages = item.pages.filter(page => {
+      if (seenUrls.has(page.url)) {
+        return false;
+      }
+      seenUrls.add(page.url);
+      return true;
+    });
+
+    // Sort pages alphabetically by title
+    const sortedPages = deduplicatedPages.sort((a, b) => {
+      const titleA = a.title.toLowerCase();
+      const titleB = b.title.toLowerCase();
+      if (titleA < titleB) return -1;
+      if (titleA > titleB) return 1;
+      return 0;
+    });
+
+    return {
+      ...item,
+      pages: sortedPages
+    };
   });
 }
 
 /**
  * Add the gathered data as an attribute to all components.
- * 
+ *
  * @param {Array} data - The deduplicated items to set as an attribute.
  * @param {Object} contentCatalog - The content catalog from Antora.
  * @param {string} attributeName - The name of the attribute to set.
  * @param {Object} logger - The Antora logger.
  */
 async function addDataAttributeToComponents(data, contentCatalog, attributeName, logger) {
-  if (!attributeName) {
-    logger.warn('No attribute_name provided for this data set, skipping attribute injection.');
-    return;
-  }
+  try {
+    const jsonData = JSON.stringify(data, null, 2);
+    const components = await contentCatalog.getComponents();
 
-  const jsonData = JSON.stringify(data, null, 2);
-  const components = await contentCatalog.getComponents();
-
-  components.forEach(component => {
-    component.versions.forEach(({ name, asciidoc }) => {
-      asciidoc.attributes[attributeName] = jsonData;
-      logger.debug(`Set attribute "${attributeName}" on component "${name}".`);
+    components.forEach(component => {
+      component.versions.forEach(({ name, asciidoc }) => {
+        asciidoc.attributes[attributeName] = jsonData;
+        logger.debug(`Set attribute "${attributeName}" on component "${name}".`);
+      });
     });
-  });
 
-  logger.info(`Added "${attributeName}" attribute to relevant component versions.`);
+    logger.info(`Added "${attributeName}" attribute to relevant component versions.`);
+  } catch (error) {
+    logger.error(`Failed to add data attribute "${attributeName}": ${error.message}`);
+  }
 }
 
 /**
@@ -166,7 +167,7 @@ async function addDataAttributeToComponents(data, contentCatalog, attributeName,
  */
 function createIndexFile(data, siteCatalog, outputFile, logger) {
   if (!outputFile) {
-    logger.warn('No output_file specified, skipping JSON file creation.');
+    logger.info('No output_file specified, skipping JSON file creation.');
     return;
   }
 
