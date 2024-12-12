@@ -140,7 +140,8 @@ module.exports.register = function ({ config }) {
       }
 
       // Log a warning if neither URL was found (only warn for missing cloud if it should support cloud)
-      if (!redpandaConnectUrl && (!redpandaCloudUrl && is_cloud_supported === 'y')) {
+      // Ignore sql_driver connectors because they are not real connectors and only used as a utility for grouping sql driver types.
+      if (!connector.includes('sql_driver') && !redpandaConnectUrl && (!redpandaCloudUrl && is_cloud_supported === 'y')) {
         logger.warn(`Docs missing for: ${connector} of type: ${type}`);
       }
 
