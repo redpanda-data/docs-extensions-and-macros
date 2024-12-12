@@ -1,0 +1,6 @@
+= Docker Compose Labs
+:page-index-data: docker-labs-index
+:page-role: index-list
+:description: Test to make sure that a list of Docker labs is generated.
+
+{description}
