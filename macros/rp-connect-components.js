@@ -704,7 +704,7 @@ module.exports.register = function (registry, context) {
         const requiresEnterprise = componentRows.some(row => row.is_licensed.toLowerCase() === 'yes');
         if (requiresEnterprise) {
           enterpriseLicenseInfo = `
-            <p><strong>License</strong>: This component requires an <a href="https://docs.redpanda.com/redpanda-connect/get-started/licensing/" target="_blank">enterprise license</a>. You can either <a href="https://www.redpanda.com/upgrade" target="_blank">upgrade to an Enterprise Edition license</a>, or <a href="https://www.redpanda.com/upgrade" target="_blank" rel="noopener">generate a trial license key</a> that's valid for 30 days.</p>`;
+            <p><strong>License</strong>: This component requires an <a href="https://docs.redpanda.com/redpanda-connect/get-started/licensing/" target="_blank">enterprise license</a>. You can either <a href="https://www.redpanda.com/upgrade" target="_blank">upgrade to an Enterprise Edition license</a>, or <a href="http://redpanda.com/try-enterprise" target="_blank" rel="noopener">generate a trial license key</a> that's valid for 30 days.</p>`;
         }
       }
       const isCloudSupported = componentRows.some(row => row.is_cloud_supported === 'y');
