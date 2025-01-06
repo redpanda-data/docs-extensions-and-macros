@@ -56,9 +56,9 @@ antora:
         - '**/*.yml'
   - require: './extensions/archive-attachments'
     data:
-      output_archive: redpanda-quickstart.tar.gz
+      output_archive: test.tar.gz
       file_patterns:
-        - "**/test-resources/**/docker-compose/**/*"
+        - "**/*.yaml"
   - require: './extensions/unpublish-pages'
   - require: './extensions/validate-attributes'
   - require: './extensions/find-related-docs'
