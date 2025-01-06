@@ -1,80 +1,143 @@
 'use strict';
-const semver = require('semver');
 
-module.exports.register = function () {
+const semver = require('semver');
+const micromatch = require('micromatch');
+const formatVersion = require('./util/format-version.js');
+const sanitize = require('./util/sanitize-attributes.js');
+
+module.exports.register = function ({ config }) {
+  const logger = this.getLogger('replace-attributes-extension');
+
+  // Retrieve and validate configuration
+  const filePatterns = config.data?.files || [];
+  const userReplacements = config.data?.custom_replacements || [];
+
+  if (filePatterns.length === 0) {
+    logger.warn('No `files` patterns provided. Skipping replacement.');
+    return;
+  }
+
+  // Precompile glob matchers for performance
+  const matchers = micromatch.matcher(filePatterns, { dot: true });
+
+  // Precompile user replacements
+  const compiledUserReplacements = userReplacements.map(({ search, replace }) => ({
+    regex: new RegExp(search, 'g'),
+    replace,
+  }));
+
   this.on('contentClassified', ({ contentCatalog }) => {
+    // Build a lookup table: [componentName][version] -> componentVersion
     const componentVersionTable = contentCatalog.getComponents().reduce((componentMap, component) => {
-      componentMap[component.name] = component.versions.reduce((versionMap, componentVersion) => {
-        versionMap[componentVersion.version] = componentVersion;
+      componentMap[component.name] = component.versions.reduce((versionMap, compVer) => {
+        versionMap[compVer.version] = compVer;
         return versionMap;
       }, {});
       return componentMap;
     }, {});
 
-    contentCatalog.findBy({ family: 'attachment' }).forEach((attachment) => {
-      const componentVersion = componentVersionTable[attachment.src.component]?.[attachment.src.version];
-      if (!componentVersion?.asciidoc?.attributes) return;
+    // Fetch all attachments
+    const attachments = contentCatalog.findBy({ family: 'attachment' });
+    logger.debug(`Found ${attachments.length} attachments to process.`);
 
-      const attributes = Object.entries(componentVersion.asciidoc.attributes).reduce((accum, [name, val]) => {
-        const stringValue = String(val);
-        accum[name] = stringValue.endsWith('@') ? sanitizeAttributeValue(stringValue) : stringValue;
-        return accum;
-      }, {});
+    attachments.forEach((attachment) => {
+      const { component, version } = attachment.src;
+      const componentVer = componentVersionTable[component]?.[version];
 
-      let contentString = attachment.contents.toString();
-      let modified = false;
-
-    // Determine if we're using the tag or version attributes
-    // We introduced tag attributes in Self-Managed 24.3
-    const isPrerelease = attributes['page-component-version-is-prerelease'];
-    const componentVersionNumber = formatVersion(componentVersion.version || '');
-    const useTagAttributes = isPrerelease || (componentVersionNumber && semver.gte(componentVersionNumber, '24.3.0') && componentVersion.title === 'Self-Managed');
-
-    // Set replacements based on the condition
-    const redpandaVersion = isPrerelease
-      ? sanitizeAttributeValue(attributes['redpanda-beta-tag'] || '')
-      : (useTagAttributes
-      ? sanitizeAttributeValue(attributes['latest-redpanda-tag'] || '')
-      : sanitizeAttributeValue(attributes['full-version'] || ''));
-
-      const consoleVersion = isPrerelease
-      ? sanitizeAttributeValue(attributes['console-beta-tag'] || '')
-      : (useTagAttributes
-      ? sanitizeAttributeValue(attributes['latest-console-tag'] || '')
-      : sanitizeAttributeValue(attributes['latest-console-version'] || ''));
-
-      const redpandaRepo = isPrerelease ? 'redpanda-unstable' : 'redpanda';
-      const consoleRepo = 'console';
-
-      // YAML-specific replacements
-      if (attachment.out.path.endsWith('.yaml') || attachment.out.path.endsWith('.yml')) {
-        contentString = replacePlaceholder(contentString, /\$\{REDPANDA_DOCKER_REPO:[^\}]*\}/g, redpandaRepo);
-        contentString = replacePlaceholder(contentString, /\$\{CONSOLE_DOCKER_REPO:[^\}]*\}/g, consoleRepo);
-        contentString = replacePlaceholder(contentString, /\$\{REDPANDA_VERSION[^\}]*\}/g, redpandaVersion);
-        contentString = replacePlaceholder(contentString, /\$\{REDPANDA_CONSOLE_VERSION[^\}]*\}/g, consoleVersion);
-        modified = true;
+      if (!componentVer?.asciidoc?.attributes) {
+        // Skip attachments without asciidoc attributes
+        return;
       }
 
-      // General attribute replacements (excluding uppercase with underscores)
-      const result = contentString.replace(/\{([a-z][\p{Alpha}\d_-]*)\}/gu, (match, name) => {
-        if (!(name in attributes)) return match;
-        modified = true;
-        return attributes[name];
-      });
+      const filePath = attachment.out.path;
 
-      if (modified) attachment.contents = Buffer.from(result);
+      if (!matchers(filePath)) {
+        // Skip files that don't match the patterns
+        return;
+      }
+
+      logger.debug(`Processing attachment: ${filePath}`);
+
+      // Compute dynamic replacements specific to this componentVersion
+      const dynamicReplacements = getDynamicReplacements(componentVer, logger);
+
+      // Precompile dynamic replacements for this attachment
+      const compiledDynamicReplacements = dynamicReplacements.map(({ search, replace }) => ({
+        regex: new RegExp(search, 'g'),
+        replace,
+      }));
+
+      // Combine dynamic and user replacements
+      const allReplacements = [...compiledDynamicReplacements, ...compiledUserReplacements];
+
+      // Convert buffer to string once
+      let contentStr = attachment.contents.toString('utf8');
+
+      // Apply all replacements in a single pass
+      contentStr = applyAllReplacements(contentStr, allReplacements);
+
+      // Expand AsciiDoc attributes
+      contentStr = expandAsciiDocAttributes(contentStr, componentVer.asciidoc.attributes);
+
+      // Convert back to buffer
+      attachment.contents = Buffer.from(contentStr, 'utf8');
     });
   });
-
-  // Helper function to replace placeholders with attribute values
-  function replacePlaceholder(content, regex, replacement) {
-    return content.replace(regex, replacement);
-  }
-
-  const sanitizeAttributeValue = (value) => String(value).replace('@', '');
-
-  const formatVersion = (version) => {
-    if (!version) return null;
-    return semver.valid(version) ? version : `${version}.0`;
-  };
 };
+
+/* -----------------------------
+   Helper: Build dynamic placeholders
+----------------------------- */
+function getDynamicReplacements(componentVersion, logger) {
+  const attrs = componentVersion.asciidoc.attributes;
+  const isPrerelease = attrs['page-component-version-is-prerelease'];
+  const versionNum = formatVersion(componentVersion.version || '', semver);
+  const is24_3plus =
+    versionNum && semver.gte(versionNum, '24.3.0') && componentVersion.title === 'Self-Managed';
+  const useTagAttributes = isPrerelease || is24_3plus;
+
+  // Derive Redpanda / Console versions
+  const redpandaVersion = isPrerelease
+    ? sanitize(attrs['redpanda-beta-tag'] || '')
+    : useTagAttributes
+    ? sanitize(attrs['latest-redpanda-tag'] || '')
+    : sanitize(attrs['full-version'] || '');
+  const consoleVersion = isPrerelease
+    ? sanitize(attrs['console-beta-tag'] || '')
+    : useTagAttributes
+    ? sanitize(attrs['latest-console-tag'] || '')
+    : sanitize(attrs['latest-console-version'] || '');
+
+  const redpandaRepo = isPrerelease ? 'redpanda-unstable' : 'redpanda';
+  const consoleRepo = 'console';
+
+  return [
+    { search: '\\$\\{REDPANDA_DOCKER_REPO:[^}]*\\}', replace: redpandaRepo },
+    { search: '\\$\\{CONSOLE_DOCKER_REPO:[^}]*\\}', replace: consoleRepo },
+    { search: '\\$\\{REDPANDA_VERSION[^}]*\\}', replace: redpandaVersion },
+    { search: '\\$\\{REDPANDA_CONSOLE_VERSION[^}]*\\}', replace: consoleVersion },
+  ];
+}
+
+/* -----------------------------
+   Helper: Apply an array of { regex, replace } to a string in a single pass
+----------------------------- */
+function applyAllReplacements(content, replacements) {
+  replacements.sort((a, b) => b.regex.source.length - a.regex.source.length);
+
+  replacements.forEach(({ regex, replace }) => {
+    content = content.replace(regex, replace);
+  });
+
+  return content;
+}
+
+/* -----------------------------
+   Helper: Expand {my-attribute}
+----------------------------- */
+function expandAsciiDocAttributes(content, attributes) {
+  return content.replace(/\{([a-z][\p{Alpha}\d_-]*)\}/gu, (match, name) => {
+    if (!(name in attributes)) return match;
+    return sanitize(attributes[name]);
+  });
+}
