@@ -92,7 +92,7 @@ xref:preview:ROOT:attachment$test.yaml[Download attachment]
 
 The archive attachments extension is configured to archive all YAML files for each component version. Test the extension by downloading this archive for the Cloud docs:
 
-link:/cloud-test.tar.gz[Download archive]
+link:/test.tar.gz[Download archive]
 
 == Bloblang samples
 

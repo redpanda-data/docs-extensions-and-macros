@@ -179,27 +179,35 @@ This extension does not require any environment variables.
 
 The extension accepts the following options in the Antora playbook.
 
-- `output_archive` (required): The name of the archive file to be created and placed at the site root. Example: `'redpanda-quickstart.tar.gz'`.
+Configure the extension in your Antora playbook by defining an array of archive configurations under `data.archives`. Each archive configuration includes:
 
-- `file_patterns` (required): An array of glob patterns that specify which attachment paths to include in the archive. These patterns determine the files and directories to be packaged based on their paths within the content catalog.
+output_archive (string, required):: The name of the generated archive file.
 
-NOTE: Ensure that `file_patterns` accurately reflect the paths of the attachments you wish to archive. Overly broad patterns may include unintended files, while overly restrictive patterns might exclude necessary resources.
+component (string, required):: The name of the Antora component whose attachments should be archived.
+
+file_patterns (array of strings, required):: Glob patterns specifying which attachment paths to include in the archive.
+
+NOTE: Ensure that `file_patterns` accurately reflect the paths of the attachments you want to archive. Overly broad patterns may include unintended files, while overly restrictive patterns might exclude necessary resources.
 
 ==== Example configuration
 
-Here's an example configuration to enable the archive-creation extension:
+Here's an example configuration to enable the extension:
 
 ```yaml
 antora:
   extensions:
     - require: '../docs-extensions-and-macros/extensions/archive-creation-extension.js'
-      output_archive: 'redpanda-quickstart.tar.gz' <1>
-      file_patterns:
-        - '**/test-resources/**/docker-compose/**' <2>
+      data:
+        archives:
+          - output_archive: 'redpanda-quickstart.tar.gz' <1>
+            component: 'ROOT' <2>
+            file_patterns:
+              - '**/test-resources/**/docker-compose/**' <3>
 ```
 
 <1> Defines the name of the generated archive placed at the site root.
-<2> Lists the glob patterns to match attachment paths for inclusion in the archive.
+<2> Defines the name of the component in which to search for attachments.
+<3> Lists the glob patterns to match attachment paths for inclusion in the archive.
 +
 - `**`: Matches any number of directories.
 - `/test-resources/`: Specifies that the matching should occur within the `test-resources/` directory.
@@ -520,7 +528,7 @@ antora:
 
 === Replace attributes in attachments
 
-This extension replaces AsciiDoc attribute placeholders with their respective values in attachment files, such as CSS, HTML, and YAML.
+This extension automates the replacement of AsciiDoc attribute placeholders with their respective values within attachment files, such as CSS, HTML, and YAML.
 
 [NOTE]
 ====
@@ -534,27 +542,46 @@ This extension does not require any environment variables.
 
 ==== Configuration options
 
-The extension accepts the following options in the Antora playbook.
+The extension accepts the following configuration options in the Antora playbook:
 
-- `data.files` (required): An array of glob patterns specifying which attachment files to process. These patterns determine the files that will undergo attribute replacement based on their paths within the content catalog.
+data.replacements (required):: An array of replacement configurations. Each configuration can target multiple components and define specific file patterns and custom replacement rules.
 
-- `custom_replacements` (optional): Lists the custom search-and-replace rules to be applied to the matched files.
+* `components` (array of strings, required): Lists the names of the Antora components whose attachments should undergo attribute replacement.
 
-NOTE: Ensure that `data.files` accurately reflect the paths of the attachments you wish to use. Overly broad patterns may include unintended files, while overly restrictive patterns might exclude necessary resources.
+* `file_patterns` (array of strings, required): Glob patterns specifying which attachment files to process. These patterns determine the files that will undergo attribute replacement based on their paths within the content catalog.
 
-==== Registration example
+* `custom_replacements` (array of objects, optional): Defines custom search-and-replace rules to be applied to the matched files. Each rule consists of:
+** `search` (string, required): A regular expression pattern to search for within the file content.
+** `replace` (string, required): The string to replace each match found by the `search` pattern.
+
+NOTE: Ensure that `file_patterns` accurately reflect the paths of the attachments you want to process. Overly broad patterns may include unintended files, while overly restrictive patterns might exclude necessary resources.
+
+==== Registration Example
+
+This is an example of how to register and configure the `replace-attributes-in-attachments` extension in your Antora playbook. This example demonstrates defining multiple replacement configurations, each targeting different components and specifying their own file patterns and custom replacements.
 
 ```yaml
 antora:
   extensions:
-  - '@redpanda-data/docs-extensions-and-macros/extensions/replace-attributes-in-attachments'
-  data:
-    files:
-      - '**/*.yml'
-      - '**/*.yaml'
-    custom_replacements:
-      - search: 'shadow indexing'
-        replace: 'Tiered Storage'
+    - require: './extensions/replace-attributes-in-attachments'
+      data:
+        replacements:
+          - components:
+              - 'ROOT'
+              - 'redpanda-labs'
+            file_patterns:
+              - '**/docker-compose.yaml'
+              - '**/docker-compose.yml'
+            custom_replacements:
+              - search: ''\\$\\{CONFIG_FILE:[^}]*\\}''
+                replace: 'console.yaml'
+          - components:
+              - 'API'
+            file_patterns:
+              - '**/api-docs/**/resources/**'
+            custom_replacements:
+              - search: '\\$\\{API_ENDPOINT:[^}]*\\}'
+                replace: 'https://api.example.com'
 ```
 
 === Aggregate terms

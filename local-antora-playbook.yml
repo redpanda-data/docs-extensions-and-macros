@@ -4,6 +4,8 @@ site:
   url: https://docs-extensions-and-macros.netlify.app
 urls:
   html_extension_style: indexify
+output:
+  clean: true
 content:
   sources:
   - url: .
@@ -51,14 +53,20 @@ antora:
   - require: './extensions/unlisted-pages'
   - require: './extensions/replace-attributes-in-attachments'
     data:
-      files:
-        - '**/*.yaml'
-        - '**/*.yml'
+      replacements:
+        - components:
+          - 'ROOT'
+          - 'redpanda-labs'
+          file_patterns:
+            - '**/docker-compose.yaml'
+            - '**/docker-compose.yml'
   - require: './extensions/archive-attachments'
     data:
-      output_archive: test.tar.gz
-      file_patterns:
-        - "**/*.yaml"
+      archives:
+        - component: 'preview'
+          output_archive: 'test.tar.gz'
+          file_patterns:
+            - '**/test.yaml'
   - require: './extensions/unpublish-pages'
   - require: './extensions/validate-attributes'
   - require: './extensions/find-related-docs'

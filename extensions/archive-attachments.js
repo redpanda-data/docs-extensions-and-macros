@@ -7,7 +7,7 @@ const micromatch = require('micromatch');
 const { PassThrough } = require('stream');
 
 /**
- * Utility function to create a tar.gz archive in memory.
+ * Create a tar.gz archive in memory.
  * @param {string} tempDir - The temporary directory containing files to archive.
  * @returns {Promise<Buffer>} - A promise that resolves to the tar.gz buffer.
  */
@@ -35,16 +35,11 @@ function createTarInMemory(tempDir) {
 
 module.exports.register = function ({ config }) {
   const logger = this.getLogger('archive-attachments-extension');
-  const outputArchive = config.data?.output_archive;
-  const filePatterns = config.data?.file_patterns || [];
+  const archives = config.data?.archives || [];
 
   // Validate configuration
-  if (!outputArchive) {
-    logger.info('No `output_archive` provided. Archive creation skipped.');
-    return;
-  }
-  if (!filePatterns.length) {
-    logger.info('No `file_patterns` provided. Archive creation skipped.');
+  if (!archives.length) {
+    logger.info('No `archives` configurations provided. Archive creation skipped.');
     return;
   }
 
@@ -53,15 +48,40 @@ module.exports.register = function ({ config }) {
 
     const components = contentCatalog.getComponents();
 
-    for (const comp of components) {
+    for (const archiveConfig of archives) {
+      const { output_archive, component, file_patterns } = archiveConfig;
+
+      // Validate individual archive configuration
+      if (!output_archive) {
+        logger.warn('An `archive` configuration is missing `output_archive`. Skipping this archive.');
+        continue;
+      }
+      if (!component) {
+        logger.warn(`Archive "${output_archive}" is missing component config. Skipping this archive.`);
+        continue;
+      }
+      if (!file_patterns || !file_patterns.length) {
+        logger.warn(`Archive "${output_archive}" has no file_patterns config. Skipping this archive.`);
+        continue;
+      }
+
+      logger.debug(`Processing archive: ${output_archive} for component: ${component}`);
+
+      // Find the specified component
+      const comp = components.find((c) => c.name === component);
+      if (!comp) {
+        logger.warn(`Component "${component}" not found. Skipping archive "${output_archive}".`);
+        continue;
+      }
+
       for (const compVer of comp.versions) {
         const compName = comp.name;
         const compVersion = compVer.version;
-        const latest = comp.latest?.version || 0;
+        const latest = comp.latest?.version || '';
 
-        const isLatest = latest === compVersion ? true : false
+        const isLatest = latest === compVersion;
 
-        logger.debug(`Processing component: ${compName}, version: ${compVersion}`);
+        logger.debug(`Processing component version: ${compName}@${compVersion}`);
 
         // Gather attachments for this component version
         const attachments = contentCatalog.findBy({
@@ -77,9 +97,9 @@ module.exports.register = function ({ config }) {
           continue;
         }
 
-        // Filter attachments based on filePatterns
+        // Filter attachments based on file_patterns
         const matched = attachments.filter((attachment) =>
-          micromatch.isMatch(attachment.out.path, filePatterns)
+          micromatch.isMatch(attachment.out.path, file_patterns)
         );
 
         logger.debug(`Matched ${matched.length} attachments for ${compName}@${compVersion}`);
@@ -121,7 +141,7 @@ module.exports.register = function ({ config }) {
           logger.debug(`Tar creation completed for ${compName}@${compVersion}`);
 
           // Define the output path for the archive in the site
-          const archiveOutPath = `${compVer.title}${compVersion?'-' + compVersion:''}-${outputArchive}`.toLowerCase()
+          const archiveOutPath = `${compVer.title}${compVersion ? '-' + compVersion : ''}-${output_archive}`.toLowerCase();
 
           // Add the archive to siteCatalog
           siteCatalog.addFile({
@@ -132,11 +152,11 @@ module.exports.register = function ({ config }) {
           if (isLatest) {
             siteCatalog.addFile({
               contents: archiveBuffer,
-              out: { path: path.basename(outputArchive) },
+              out: { path: path.basename(output_archive) },
             });
           }
 
-          logger.info(`Archive added to site at: ${archiveOutPath}`);
+          logger.info(`Archive "${archiveOutPath}" added to site.`);
 
         } catch (error) {
           logger.error(`Error processing ${compName}@${compVersion}:`, error);
@@ -146,11 +166,12 @@ module.exports.register = function ({ config }) {
             fs.rmSync(tempDir, { recursive: true, force: true });
             logger.debug(`Cleaned up temporary directory: ${tempDir}`);
           } catch (cleanupError) {
-            logger.error(`Error cleaning up tempDir ${tempDir}:`, cleanupError);
+            logger.error(`Error cleaning up tempDir "${tempDir}":`, cleanupError);
           }
         }
       }
     }
+
     logger.info('Archive creation process completed');
   });
 };
