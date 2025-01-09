@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "3.11.4",
+  "version": "3.11.2",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -48,8 +48,7 @@
     "./macros/glossary": "./macros/glossary.js",
     "./macros/rp-connect-components": "./macros/rp-connect-components.js",
     "./macros/config-ref": "./macros/config-ref.js",
-    "./macros/helm-ref": "./macros/helm-ref.js",
-    "./macros/bloblang-snippet": "./macros/bloblang-snippet.js"
+    "./macros/helm-ref": "./macros/helm-ref.js"
   },
   "files": [
     "extensions",

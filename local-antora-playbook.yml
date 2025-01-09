@@ -28,7 +28,6 @@ asciidoc:
   - '@asciidoctor/tabs'
   - './macros/glossary'
   - './macros/config-ref'
-  - './macros/bloblang-snippet'
   - './macros/helm-ref'
   - './macros/rp-connect-components'
   - './asciidoc-extensions/add-line-numbers-highlights'
