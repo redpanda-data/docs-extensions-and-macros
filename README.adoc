@@ -165,6 +165,71 @@ antora:
     index-latest-only: true
 ```
 
+=== Archive attachments
+
+The `archive-attachments` extension automates the packaging of specific attachment files into a compressed archive (`.tar.gz`) based on configurable patterns. This archive is then made available to the generated site, allowing users to easily download grouped resources such as Docker Compose configurations.
+
+This extension enables you to define which files and directories to include in the archive, ensuring that only relevant content is packaged and accessible.
+
+==== Environment variables
+
+This extension does not require any environment variables.
+
+==== Configuration options
+
+The extension accepts the following options in the Antora playbook.
+
+Configure the extension in your Antora playbook by defining an array of archive configurations under `data.archives`. Each archive configuration includes:
+
+output_archive (string, required):: The name of the generated archive file.
+
+component (string, required):: The name of the Antora component whose attachments should be archived.
+
+file_patterns (array of strings, required):: Glob patterns specifying which attachment paths to include in the archive.
+
+NOTE: Ensure that `file_patterns` accurately reflect the paths of the attachments you want to archive. Overly broad patterns may include unintended files, while overly restrictive patterns might exclude necessary resources.
+
+==== Example configuration
+
+Here's an example configuration to enable the extension:
+
+```yaml
+antora:
+  extensions:
+    - require: '../docs-extensions-and-macros/extensions/archive-creation-extension.js'
+      data:
+        archives:
+          - output_archive: 'redpanda-quickstart.tar.gz' <1>
+            component: 'ROOT' <2>
+            file_patterns:
+              - '**/test-resources/**/docker-compose/**' <3>
+```
+
+<1> Defines the name of the generated archive placed at the site root.
+<2> Defines the name of the component in which to search for attachments.
+<3> Lists the glob patterns to match attachment paths for inclusion in the archive.
++
+- `**`: Matches any number of directories.
+- `/test-resources/`: Specifies that the matching should occur within the `test-resources/` directory.
+- `/docker-compose/`: Targets the `docker-compose/` directory and all its subdirectories.
+- `**:` Ensures that all files and nested directories within `docker-compose/` are included.
+
+=== Behavior with multiple components/versions
+
+*Scenario*: Multiple components and/or multiple versions of the same component contain attachments that match the defined file_patterns.
+
+*Outcome*: Separate archives for each component version.
+
+For each matching (component, version) pair, the extension creates a distinct archive named `<version>-<output_archive>`. For example:
+`24.3-redpanda-quickstart.tar.gz`.
+
+These archives are placed at the site root, ensuring they are easily accessible and do not overwrite each other.
+
+For the latest version of each component, the extension also adds the archive using the base `output_archive` name. As a result, the latest archives are accessible through a consistent filename, facilitating easy downloads without needing to reference version numbers.
+
+Because each archive has a unique filename based on the component version, there is no risk of archives overwriting each other.
+The only exception is the archive for the latest version, which consistently uses the `output_archive` name.
+
 === Component category aggregator
 
 This extension maps Redpanda Connect component data into a structured format:
@@ -463,11 +528,10 @@ antora:
 
 === Replace attributes in attachments
 
-This extension replaces AsciiDoc attribute placeholders with their respective values in attachment files, such as CSS, HTML, and YAML.
+This extension automates the replacement of AsciiDoc attribute placeholders with their respective values within attachment files, such as CSS, HTML, and YAML.
 
-[IMPORTANT]
+[NOTE]
 ====
-- This extension processes attachments only if the component version includes the attribute `replace-attributes-in-attachments: true`.
 - The `@` character is removed from attribute values to prevent potential issues with CSS or HTML syntax.
 - If the same attribute placeholder is used multiple times within a file, all instances will be replaced with the attribute's value.
 ====
@@ -478,14 +542,46 @@ This extension does not require any environment variables.
 
 ==== Configuration options
 
-There are no configurable options for this extension.
+The extension accepts the following configuration options in the Antora playbook:
 
-==== Registration example
+data.replacements (required):: An array of replacement configurations. Each configuration can target multiple components and define specific file patterns and custom replacement rules.
+
+* `components` (array of strings, required): Lists the names of the Antora components whose attachments should undergo attribute replacement.
+
+* `file_patterns` (array of strings, required): Glob patterns specifying which attachment files to process. These patterns determine the files that will undergo attribute replacement based on their paths within the content catalog.
+
+* `custom_replacements` (array of objects, optional): Defines custom search-and-replace rules to be applied to the matched files. Each rule consists of:
+** `search` (string, required): A regular expression pattern to search for within the file content.
+** `replace` (string, required): The string to replace each match found by the `search` pattern.
+
+NOTE: Ensure that `file_patterns` accurately reflect the paths of the attachments you want to process. Overly broad patterns may include unintended files, while overly restrictive patterns might exclude necessary resources.
+
+==== Registration Example
+
+This is an example of how to register and configure the `replace-attributes-in-attachments` extension in your Antora playbook. This example demonstrates defining multiple replacement configurations, each targeting different components and specifying their own file patterns and custom replacements.
 
 ```yaml
 antora:
   extensions:
-  - '@redpanda-data/docs-extensions-and-macros/extensions/replace-attributes-in-attachments'
+    - require: './extensions/replace-attributes-in-attachments'
+      data:
+        replacements:
+          - components:
+              - 'ROOT'
+              - 'redpanda-labs'
+            file_patterns:
+              - '**/docker-compose.yaml'
+              - '**/docker-compose.yml'
+            custom_replacements:
+              - search: ''\\$\\{CONFIG_FILE:[^}]*\\}''
+                replace: 'console.yaml'
+          - components:
+              - 'API'
+            file_patterns:
+              - '**/api-docs/**/resources/**'
+            custom_replacements:
+              - search: '\\$\\{API_ENDPOINT:[^}]*\\}'
+                replace: 'https://api.example.com'
 ```
 
 === Aggregate terms

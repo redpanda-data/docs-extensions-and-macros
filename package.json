@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "3.11.4",
+  "version": "4.1.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -30,6 +30,7 @@
       "require": "./extensions/unlisted-pages.js"
     },
     "./extensions/replace-attributes-in-attachments": "./extensions/replace-attributes-in-attachments.js",
+    "./extensions/archive-attachments": "./extensions/archive-attachments.js",
     "./extensions/add-pages-to-root": "./extensions/add-pages-to-root.js",
     "./extensions/collect-bloblang-samples": "./extensions/collect-bloblang-samples.js",
     "./extensions/generate-rp-connect-categories": "./extensions/generate-rp-connect-categories.js",
@@ -73,9 +74,11 @@
     "html-entities": "2.3",
     "js-yaml": "^4.1.0",
     "lodash": "^4.17.21",
+    "micromatch": "^4.0.8",
     "node-html-parser": "5.4.2-0",
     "papaparse": "^5.4.1",
-    "semver": "^7.6.0"
+    "semver": "^7.6.0",
+    "tar": "^7.4.3"
   },
   "devDependencies": {
     "@antora/cli": "3.1.4",
