@@ -90,6 +90,10 @@ By default, Antora does not replace attributes in attachment files. Download thi
 
 xref:preview:ROOT:attachment$test.yaml[Download attachment]
 
+The archive attachments extension is configured to archive all YAML files for the `preview` component. Test the extension by downloading this archive. It should contain the `test.yaml` file and include all replacements made by the replace-attributes-in-attachments extension.
+
+link:/test.tar.gz[Download archive]
+
 == Bloblang samples
 
 [,json,subs="attributes+"]
