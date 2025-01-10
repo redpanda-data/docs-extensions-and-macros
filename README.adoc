@@ -220,14 +220,14 @@ antora:
 
 *Outcome*: Separate archives for each component version.
 
-For each matching (component, version) pair, the extension creates a distinct archive named `<component-title>-<version>-<output_archive>`. For example:
-`self-managed-24.3-redpanda-quickstart.tar.gz`.
+For each matching (component, version) pair, the extension creates a distinct archive named `<version>-<output_archive>`. For example:
+`24.3-redpanda-quickstart.tar.gz`.
 
 These archives are placed at the site root, ensuring they are easily accessible and do not overwrite each other.
 
 For the latest version of each component, the extension also adds the archive using the base `output_archive` name. As a result, the latest archives are accessible through a consistent filename, facilitating easy downloads without needing to reference version numbers.
 
-Because each archive has a unique filename based on the component and version, there is no risk of archives overwriting each other.
+Because each archive has a unique filename based on the component version, there is no risk of archives overwriting each other.
 The only exception is the archive for the latest version, which consistently uses the `output_archive` name.
 
 === Component category aggregator
