@@ -13,7 +13,7 @@ module.exports.register = function ({ config }) {
       return;
     }
 
-    eolConfigs.forEach(({ component: componentName, eol_months, warning_weeks, eol_doc, upgrade_doc }) => {
+    eolConfigs.forEach(({ component: componentName, supported_months, warning_weeks, eol_doc, upgrade_doc }) => {
       if (!eol_doc || !upgrade_doc) {
         logger.error(
           `End-of-life configuration for component "${component}" is missing required attributes. ` +
@@ -21,7 +21,7 @@ module.exports.register = function ({ config }) {
         );
         return;
       }
-      const resolvedEOLMonths = eol_months && eol_months > 0 ? eol_months : 12; // Default: 12 months
+      const resolvedEOLMonths = supported_months && supported_months > 0 ? supported_months : 12; // Default: 12 months
       const resolvedWarningWeeks = warning_weeks && warning_weeks > 0 ? warning_weeks : 6; // Default: 6 weeks
 
       logger.info(

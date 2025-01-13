@@ -263,8 +263,8 @@ The extension leverages configuration settings provided in the Antora playbook t
 The extension computes whether a page is nearing EoL or past EoL based on the `page-release-date` attribute and configured settings.
 It injects the following attributes into each page, making them available for use in UI templates:
 
-- `page-is-nearing-eol`: Indicates if the page is within the warning period before EOL. Calculated using `(page-release-date + eol_months) - warning_weeks`.
-- `page-is-past-eol`: Indicates if the page has passed its EOL. Calculated using `today > (page-release-date + eol_months)`.
+- `page-is-nearing-eol`: Indicates if the page is within the warning period before EOL. Calculated using `(page-release-date + supported_months) - warning_weeks`.
+- `page-is-past-eol`: Indicates if the page has passed its EOL. Calculated using `today > (page-release-date + supported_months)`.
 - `page-eol-date`: The calculated EoL date in a human-readable format.
 - `page-eol-doc`: The link to the supported versions policy or EoL documentation.
 - `page-upgrade-doc`: The link to upgrade instructions.
@@ -280,7 +280,7 @@ To enable and configure the extension, add it to the `antora.extensions` section
 `component` (required):: The component name to which the configuration applies.
 `eol_doc` (required):: A link to the supported versions policy or EoL documentation.
 `upgrade_doc` (required):: A link to the upgrade instructions.
-`eol_months` (optional, default: 12):: The number of months after the publish date when the documentation reaches its EoL.
+`supported_months` (optional, default: 12):: The number of months after the publish date when the documentation reaches its EoL.
 `warning_weeks` (optional, default: 6):: The number of weeks before EoL when the documentation is considered to be nearing EoL. Can be used to decide when to notify users of the upcoming EoL status.
 
 [,yaml]
@@ -291,7 +291,7 @@ antora:
       data:
         eol_settings:
           - component: 'ROOT'
-            eol_months: 18
+            supported_months: 18
             warning_weeks: 8
             eol_doc: https://support.redpanda.com/hc/en-us/articles/20617574366743-Redpanda-Supported-Versions
             upgrade_doc: ROOT:upgrade:index.adoc
@@ -309,12 +309,12 @@ antora:
       data:
         eol_settings:
           - component: 'ROOT'
-            eol_months: 12
+            supported_months: 12
             warning_weeks: 6
             eol_doc: https://example.com/supported-versions
             upgrade_doc: ROOT:upgrade:index.adoc
           - component: 'example-docs'
-            eol_months: 24
+            supported_months: 24
             warning_weeks: 12
             eol_doc: https://example.com/example-supported-versions
             upgrade_doc: example-docs:upgrade:index.adoc
