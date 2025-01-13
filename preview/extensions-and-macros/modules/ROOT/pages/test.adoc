@@ -101,6 +101,18 @@ link:/test.tar.gz[Download archive]
 {page-bloblang-samples}
 ----
 
+== End-of-life attributes
+
+This section provides a test for the compute-end-of-life extension as an example of what it generates.
+
+The `preview` component is configured with a release date of {page-release-date}. The extension then generates the following data for the UI to use to build and display a notification banner for EoL versions:
+
+- `\{page-is-nearing-eol}`: {page-is-nearing-eol}
+- `\{page-is-past-eol}`: {page-is-past-eol}
+- `\{page-eol-date}`: {page-eol-date}
+- `\{page-eol-doc}`: {page-eol-doc}
+- `\{page-upgrade-doc}`: {page-upgrade-doc}
+
 == Code highlights
 
 [source,js,lines=1-3+5+6]

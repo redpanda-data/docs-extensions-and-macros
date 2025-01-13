@@ -254,6 +254,90 @@ antora:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/generate-rp-connect-categories'
 ```
 
+=== Compute end-of-life extension
+
+This extension calculates and attaches metadata related to the end-of-life (EoL) status of docs pages, such as nearing EoL, past EoL, and associated EoL dates. This metadata can be used to display relevant banners or messages in docs to inform users about the lifecycle of each version.
+
+The extension leverages configuration settings provided in the Antora playbook to apply EoL calculations, specify the warning period, and include links to upgrade documentation and EoL policies.
+
+The extension computes whether a page is nearing EoL or past EoL based on the `page-release-date` attribute and configured settings.
+It injects the following attributes into each page, making them available for use in UI templates:
+
+- `page-is-nearing-eol`: Indicates if the page is nearing its EoL.
+- `page-is-past-eol`: Indicates if the page has reached its EoL.
+- `page-eol-date`: The calculated EoL date in a human-readable format.
+- `page-eol-doc`: The link to the supported versions policy or EoL documentation.
+- `page-upgrade-doc`: The link to upgrade instructions.
+
+==== Environment variables
+
+This extension does not require any environment variables.
+
+==== Configuration options
+
+To enable and configure the extension, add it to the `antora.extensions` section of your Antora playbook. Define the EoL settings under the `data.eol_settings` key with the following options:
+
+`component` (required):: The component name to which the configuration applies.
+`eol_doc` (required):: A link to the supported versions policy or EoL documentation.
+`upgrade_doc` (required):: A link to the upgrade instructions.
+`eol_months` (optional, default: 12):: The number of months after the publish date when the documentation reaches its EoL.
+`warning_weeks` (optional, default: 6):: The number of weeks before EoL when the documentation is considered to be nearing EoL. Can be used to decide when to notify users of the upcoming EoL status.
+
+[,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/end-of-life'
+      data:
+        eol_settings:
+          - component: 'ROOT'
+            eol_months: 18
+            warning_weeks: 8
+            eol_doc: https://support.redpanda.com/hc/en-us/articles/20617574366743-Redpanda-Supported-Versions
+            upgrade_doc: ROOT:upgrade:index.adoc
+----
+
+==== Registration example
+
+You can register the extension with a customized configuration for different components in your playbook:
+
+[,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/compute-end-of-life'
+      data:
+        eol_settings:
+          - component: 'ROOT'
+            eol_months: 12
+            warning_weeks: 6
+            eol_doc: https://example.com/supported-versions
+            upgrade_doc: ROOT:upgrade:index.adoc
+          - component: 'example-docs'
+            eol_months: 24
+            warning_weeks: 12
+            eol_doc: https://example.com/example-supported-versions
+            upgrade_doc: example-docs:upgrade:index.adoc
+----
+
+
+==== Example Handlebars template:
+
+[,handlebars]
+----
+{{#if page.attributes.is-nearing-eol}}
+  <div class="banner-container nearing-eol">
+    This documentation will reach its end of life on {{page.attributes.eol-date}}.
+    Please <a href="{{resolve-resource page.attributes.upgrade-doc}}">upgrade to a supported version</a>.
+  </div>
+{{else if page.attributes.is-past-eol}}
+  <div class="banner-container past-eol">
+    This documentation reached its end of life on {{page.attributes.eol-date}}.
+    See our <a href="{{page.attributes.eol-doc}}" target="_blank">supported versions policy</a>.
+  </div>
+{{/if}}
+----
+
 === Generate index data
 
 The `generate-index-data` extension creates structured index data about doc pages based on configurable filters. The indexed data is saved to a specified attribute in all component versions, enabling the dynamic generation of categorized links and descriptions within your docs using UI templates.
