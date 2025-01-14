@@ -263,8 +263,8 @@ The extension leverages configuration settings provided in the Antora playbook t
 The extension computes whether a page is nearing EoL or past EoL based on the `page-release-date` attribute and configured settings.
 It injects the following attributes into each page, making them available for use in UI templates:
 
-- `page-is-nearing-eol`: Indicates if the page is within the warning period before EOL. Calculated using `(page-release-date + supported_months) - warning_weeks`.
-- `page-is-past-eol`: Indicates if the page has passed its EOL. Calculated using `today > (page-release-date + supported_months)`.
+- `page-is-nearing-eol`: Indicates if the page is within the warning period before EoL. Calculated using `(page-release-date + supported_months) - warning_weeks`.
+- `page-is-past-eol`: Indicates if the page has passed its EoL. Calculated using `today > (page-release-date + supported_months)`.
 - `page-eol-date`: The calculated EoL date in a human-readable format. Calculated using `page-release-date + supported_months`.
 - `page-eol-doc`: The URL to the supported versions policy or EoL documentation.
 - `page-upgrade-doc`: The Antora resource ID to a document containing upgrade instructions.
