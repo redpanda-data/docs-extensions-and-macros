@@ -6,7 +6,7 @@ nav:
 - modules/ROOT/nav.adoc
 asciidoc:
   attributes:
-    page-release-date: 2024-03-01
+    page-release-date: 2024-04-01
     replace-attributes-in-attachments: true
     test-attribute: This attribute was replaced by the `replace-attributes-in-attachments` extension.
     full-version: 23.2.1

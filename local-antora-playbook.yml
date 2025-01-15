@@ -72,7 +72,7 @@ antora:
       eol_settings:
         - component: 'preview'
           supported_months: 12
-          warning_weeks: 6
+          warning_weeks: 8
           eol_doc: https://support.redpanda.com/hc/en-us/articles/20617574366743-Redpanda-Supported-Versions
           upgrade_doc: ROOT:upgrade:index.adoc
   - require: './extensions/unpublish-pages'
