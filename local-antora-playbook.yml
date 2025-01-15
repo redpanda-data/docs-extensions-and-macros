@@ -68,6 +68,14 @@ antora:
           output_archive: 'test.tar.gz'
           file_patterns:
             - '**/test.yaml'
+  - require: './extensions/compute-end-of-life'
+    data:
+      eol_settings:
+        - component: 'preview'
+          supported_months: 12
+          warning_weeks: 8
+          eol_doc: https://support.redpanda.com/hc/en-us/articles/20617574366743-Redpanda-Supported-Versions
+          upgrade_doc: ROOT:upgrade:index.adoc
   - require: './extensions/unpublish-pages'
   - require: './extensions/validate-attributes'
   - require: './extensions/find-related-docs'
