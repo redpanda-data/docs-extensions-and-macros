@@ -287,7 +287,7 @@ To enable and configure the extension, add it to the `antora.extensions` section
 ----
 antora:
   extensions:
-    - require: '@redpanda-data/docs-extensions-and-macros/extensions/end-of-life'
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/compute-end-of-life'
       data:
         eol_settings:
           - component: 'ROOT'
