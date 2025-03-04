@@ -123,7 +123,7 @@ antora:
         - home:ROOT:attachment$custom-file.txt
 ----
 
-==== Registration example
+==== Registration
 
 [source,yaml]
 ----
@@ -155,7 +155,7 @@ Any elements, classes, or IDs that you want to exclude from the index.
 index-latest-only (optional)::
 Whether to index all versions or just the latest version of a component.
 
-==== Registration example
+==== Registration
 
 ```yaml
 antora:
@@ -246,7 +246,7 @@ This extension does not require any environment variables.
 
 There are no configurable options for this extension.
 
-==== Registration example
+==== Registration
 
 ```yaml
 antora:
@@ -297,7 +297,7 @@ antora:
             upgrade_doc: ROOT:upgrade:index.adoc
 ----
 
-==== Registration example
+==== Registration
 
 You can register the extension with a customized configuration for different components in your playbook:
 
@@ -456,7 +456,7 @@ NOTE: If you don't set the environment variable, the latest version of Redpanda 
 
 There are no configurable options for this extension.
 
-==== Registration Example
+==== Registration
 
 ```yaml
 antora:
@@ -488,7 +488,7 @@ The following attributes are available to the latest version of the `ROOT` compo
 
 NOTE: If you don't set the environment variable, the latest versions may not be fetched. When the environment variable is not set, the extension sends unauthenticated requests to GitHub. Unauthenticated requests may result in hitting the API rate limit and cause GitHub to reject the request.
 
-==== Registration example
+==== Registration
 
 ```yaml
 antora:
@@ -508,7 +508,7 @@ This extension does not require any environment variables.
 
 There are no configurable options for this extension. It operates based on site attributes defined in `add-global-attributes.js` to determine valid categories and subcategories.
 
-==== Registration example
+==== Registration
 
 Register the `validate-attributes` extension in the Antora playbook under the `antora.extensions` key like so:
 
@@ -531,7 +531,7 @@ This extension operates without requiring any specific environment variables.
 
 This extension does not offer configurable options. It uses the inherent attributes of pages to determine relationships based on `page-categories` and deployment types (`env-kubernetes`, `env-linux`, `env-docker`, `page-cloud`).
 
-==== Registration example
+==== Registration
 
 To integrate the `related-docs-extension` into your Antora playbook, add it under the `antora.extensions` key as demonstrated below:
 
@@ -554,7 +554,7 @@ This extension does not require any environment variables.
 
 The extension operates without explicit configuration options. It automatically processes documentation pages to identify and link related labs based on shared `page-categories` attributes and deployment types (`env-kubernetes`, `env-linux`, `env-docker`, `page-cloud`).
 
-==== Registration example
+==== Registration
 
 Include the `related-labs-extension` in the Antora playbook under the `antora.extensions` key as follows:
 
@@ -579,7 +579,7 @@ The extension accepts the following configuration options:
 
 attributespath (optional):: Specifies the path to a local YAML file that contains global attributes. If this is provided, the extension will load attributes from this file first. If this path is not provided or no valid attributes are found in the file, the extension will fall back to loading attributes from the `shared` component.
 
-==== Registration example
+==== Registration
 
 ```yml
 antora:
@@ -602,7 +602,7 @@ This extension does not require any environment variables.
 
 There are no configurable options for this extension.
 
-==== Registration example
+==== Registration
 
 ```yaml
 antora:
@@ -640,7 +640,7 @@ data.replacements (required):: An array of replacement configurations. Each conf
 
 NOTE: Ensure that `file_patterns` accurately reflect the paths of the attachments you want to process. Overly broad patterns may include unintended files, while overly restrictive patterns might exclude necessary resources.
 
-==== Registration Example
+==== Registration
 
 This is an example of how to register and configure the `replace-attributes-in-attachments` extension in your Antora playbook. This example demonstrates defining multiple replacement configurations, each targeting different components and specifying their own file patterns and custom replacements.
 
@@ -698,7 +698,7 @@ Term files should follow the following structure:
 This is the detailed description of the term.
 ```
 
-==== Registration example
+==== Registration
 
 ```yml
 antora:
@@ -729,7 +729,7 @@ Whether to add unlisted pages to the navigation. The default is `false` (unliste
 unlistedPagesHeading (optional)::
 The heading under which to list the unlisted pages in the navigation. The default is 'Unlisted Pages'.
 
-==== Registration example
+==== Registration
 
 ```yaml
 antora:
@@ -749,7 +749,7 @@ IMPORTANT: Be sure to register each extension under the `asciidoc.extensions` ke
 
 This extension adds the necessary classes to make line numbers and line highlighting work with Prism.js.
 
-==== Registration example
+==== Registration
 
 ```yaml
 antora:
@@ -798,7 +798,7 @@ For example:
 config_ref:example_config,true,tunable-properties[]
 ----
 
-==== Registration example
+==== Registration
 
 [,yaml]
 ----
@@ -806,6 +806,67 @@ asciidoc:
   extensions:
     - '@redpanda-data/docs-extensions-and-macros/macros/config-ref'
 ----
+
+=== data_template
+
+The `data_template` macro provides a way to dynamically generate AsciiDoc content by combining external or local data sources with Handlebars templates. When you use the `data_template` block macro, the extension performs the following steps:
+
+* Resolves the `dataPath` attribute to locate a data file (in JSON, YAML, or raw text format).
+* Fetches and caches external resources or reads local files from the Antora content catalog.
+* Parses the data file.
+* Compiles the block's content as a Handlebars template, injecting the parsed data.
+* Processes the resulting text as AsciiDoc using Asciidoctor to generate the final HTML output.
+
+By default, Handlebars escapes HTML to prevent potential security issues. However, if your data includes AsciiDoc markup (such as headings, lists, or formatting directives), escaping it will prevent Asciidoctor from converting the markup correctly.
+
+To ensure that your AsciiDoc syntax is preserved during template rendering, **use the triple curly braces syntax** in your Handlebars templates. For example, if your JSON file contains a `description` field with AsciiDoc content, reference it like this:
+
+[source,handlebars]
+----
+{{{description}}}
+----
+
+This tells Handlebars to output the content unescaped, allowing Asciidoctor to process the raw AsciiDoc markup correctly.
+
+==== Usage
+
+In an AsciiDoc document, you can invoke the data template macro as follows:
+
+[,asciidoc]
+----
+[data_template, ROOT:example$connect.json]
+--
+Version: {{{version}}}
+
+{{#each buffers}}
+
+=== {{{this.name}}}
+
+Status: {{{this.status}}}
+
+{{#if (eq this.name 'memory')}}
+This is a custom description for the memory buffer.
+{{else}}
+{{{this.summary}}}
+{{/if}}
+
+{{/each}}
+
+--
+----
+
+==== Registration
+
+Register the macro in your Antora playbook under the `asciidoc.extensions` key:
+
+[source,yaml]
+----
+asciidoc:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/macros/data-template'
+----
+
+This configuration ensures that during the build process, the data template macro is executed to fetch, parse, and render data as part of your docs.
 
 === glossterm
 
@@ -855,7 +916,7 @@ Whether to enable tooltips for the defined terms. Valid values are:
 
 The last two options are intended to support js/css tooltip solutions such as tippy.js.
 
-==== Registration example
+==== Registration
 
 [,yaml]
 ----
@@ -897,7 +958,7 @@ For default values and documentation for configuration options, see the https://
 
 If you do not specify a Helm reference value, the macro generates a link without specifying a path.
 
-==== Registration example
+==== Registration
 
 [,yaml]
 ----
@@ -918,7 +979,7 @@ The categories are fetched from the `connectCategoriesData` that's generated in 
 components_by_category::[<type>]
 ```
 
-==== Registration example
+==== Registration
 
 ```yaml
 asciidoc:
@@ -938,7 +999,7 @@ The types are fetched from the `flatComponentsData` that's generated in the <<Co
 component_table::[]
 ```
 
-==== Registration example
+==== Registration
 
 ```yaml
 asciidoc:
@@ -958,7 +1019,7 @@ The types are fetched from the `flatComponentsData` that's generated in the <<Co
 component_type_dropdown::[]
 ```
 
-==== Registration example
+==== Registration
 
 ```yaml
 asciidoc:
