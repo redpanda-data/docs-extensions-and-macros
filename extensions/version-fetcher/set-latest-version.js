@@ -3,7 +3,7 @@
 module.exports.register = function ({ config }) {
   const GetLatestRedpandaVersion = require('./get-latest-redpanda-version');
   const GetLatestConsoleVersion = require('./get-latest-console-version');
-  const GetLatestOperatorVersion = require('./get-latest-operator-version');
+  const GetLatestOperatorVersion = require('./fetch-latest-docker-tag');
   const GetLatestHelmChartVersion = require('./get-latest-redpanda-helm-version');
   const GetLatestConnectVersion = require('./get-latest-connect');
   const logger = this.getLogger('set-latest-version-extension');
@@ -25,6 +25,7 @@ module.exports.register = function ({ config }) {
       auth: process.env.REDPANDA_GITHUB_TOKEN || undefined,
     };
     const github = new OctokitWithRetries(githubOptions);
+    const dockerNamespace = 'redpandadata'
 
     try {
       const [
@@ -36,7 +37,7 @@ module.exports.register = function ({ config }) {
       ] = await Promise.allSettled([
         GetLatestRedpandaVersion(github, owner, 'redpanda'),
         GetLatestConsoleVersion(github, owner, 'console'),
-        GetLatestOperatorVersion(github, owner, 'redpanda-operator'),
+        GetLatestOperatorVersion(dockerNamespace, 'redpanda-operator'),
         GetLatestHelmChartVersion(github, owner, 'helm-charts', 'charts/redpanda/Chart.yaml'),
         GetLatestConnectVersion(github, owner, 'connect'),
       ]);
@@ -49,6 +50,8 @@ module.exports.register = function ({ config }) {
         connect: latestConnectResult.status === 'fulfilled' ? latestConnectResult.value : undefined,
       };
 
+      console.log(latestVersions)
+
       const components = await contentCatalog.getComponents();
       components.forEach(component => {
         const prerelease = component.latestPrerelease;
@@ -58,24 +61,25 @@ module.exports.register = function ({ config }) {
             asciidoc.attributes['page-component-version-is-prerelease'] = 'true';
           }
 
-          // Set operator and helm chart attributes
-          if (latestVersions.operator) {
-            asciidoc.attributes['latest-operator-version'] = latestVersions.operator;
-          }
-          if (latestVersions.helmChart) {
-            asciidoc.attributes['latest-redpanda-helm-chart-version'] = latestVersions.helmChart;
-          }
+          // Set operator and helm chart attributes via helper function
+          updateAttributes(asciidoc, [
+            { condition: latestVersions.operator, key: 'latest-operator-version', value: latestVersions.operator },
+            { condition: latestVersions.helmChart, key: 'latest-redpanda-helm-chart-version', value: latestVersions.helmChart }
+          ]);
 
           // Set attributes for console and connect versions
-          if (latestVersions.console) {
-            setVersionAndTagAttributes(asciidoc, 'latest-console', latestVersions.console.latestStableRelease, name, version);
-          }
-          if (latestVersions.connect) {
-            setVersionAndTagAttributes(asciidoc, 'latest-connect', latestVersions.connect, name, version);
-          }
+          [
+            { condition: latestVersions.console, baseName: 'latest-console', value: latestVersions.console?.latestStableRelease },
+            { condition: latestVersions.connect, baseName: 'latest-connect', value: latestVersions.connect }
+          ].forEach(mapping => {
+            if (mapping.condition && mapping.value) {
+              setVersionAndTagAttributes(asciidoc, mapping.baseName, mapping.value, name, version);
+            }
+          });
+
           // Special handling for Redpanda RC versions if in beta
           if (latestVersions.redpanda?.latestRcRelease?.version) {
-            setVersionAndTagAttributes(asciidoc, 'redpanda-beta', latestVersions.redpanda.latestRcRelease.version, name, version)
+            setVersionAndTagAttributes(asciidoc, 'redpanda-beta', latestVersions.redpanda.latestRcRelease.version, name, version);
             setVersionAndTagAttributes(asciidoc, 'console-beta', latestVersions.console.latestBetaRelease, name, version);
             asciidoc.attributes['redpanda-beta-commit'] = latestVersions.redpanda.latestRcRelease.commitHash;
           }
@@ -126,5 +130,14 @@ module.exports.register = function ({ config }) {
   // Helper function to sanitize version by removing "v" prefix
   function sanitizeVersion(version) {
     return version.replace(/^v/, '');
+  }
+
+  // Helper function to update multiple attributes based on a list of mappings
+  function updateAttributes(asciidoc, mappings) {
+    mappings.forEach(({ condition, key, value }) => {
+      if (condition) {
+        asciidoc.attributes[key] = value;
+      }
+    });
   }
 };
