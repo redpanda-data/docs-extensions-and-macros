@@ -29,7 +29,7 @@ module.exports = async (dockerNamespace, dockerRepo) => {
     // This helps ensure we work only with tags that represent valid version numbers.
     let versionTags = data.results.filter(tag => versionRegex.test(tag.name));
 
-    // If the repository is "redpanda-operator", ignore any tags starting with "v23".
+    // If the repository is "redpanda-operator", ignore any tags starting with the old "v22 or "v23" versions.
     if (dockerRepo === 'redpanda-operator') {
       versionTags = versionTags.filter(tag => !/^(v22|v23)/.test(tag.name));
     }
