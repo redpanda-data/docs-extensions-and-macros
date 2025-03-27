@@ -63,7 +63,7 @@ module.exports.register = function ({ config }) {
 
           // Set operator and helm chart attributes via helper function
           updateAttributes(asciidoc, [
-            { condition: latestVersions.operator, key: 'latest-operator-version', value: latestVersions.operator },
+            { condition: latestVersions.operator, key: 'latest-operator-version', value: latestVersions.operator?.latestStableRelease },
             { condition: latestVersions.helmChart, key: 'latest-redpanda-helm-chart-version', value: latestVersions.helmChart }
           ]);
 
@@ -80,8 +80,13 @@ module.exports.register = function ({ config }) {
           // Special handling for Redpanda RC versions if in beta
           if (latestVersions.redpanda?.latestRcRelease?.version) {
             setVersionAndTagAttributes(asciidoc, 'redpanda-beta', latestVersions.redpanda.latestRcRelease.version, name, version);
-            setVersionAndTagAttributes(asciidoc, 'console-beta', latestVersions.console.latestBetaRelease, name, version);
             asciidoc.attributes['redpanda-beta-commit'] = latestVersions.redpanda.latestRcRelease.commitHash;
+          }
+          if (latestVersions.console?.latestBetaRelease) {
+            setVersionAndTagAttributes(asciidoc, 'console-beta', latestVersions.console.latestBetaRelease, name, version);
+          }
+          if (latestVersions.operator?.latestBetaRelease) {
+            setVersionAndTagAttributes(asciidoc, 'operator-beta', latestVersions.operator.latestBetaRelease, name, version);
           }
         });
 
