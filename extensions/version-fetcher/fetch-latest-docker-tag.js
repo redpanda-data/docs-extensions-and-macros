@@ -1,10 +1,12 @@
 /**
- * Fetches the latest version tag from Docker Hub for a given repository.
+ * Fetches the latest stable and beta version tags from Docker Hub for a given repository.
  *
+ * The function separates tags into stable (tags not including "-beta") and beta (tags including "-beta"),
+ * sorts each group by their major.minor version in descending order, and returns the top tag from each.
  *
  * @param {string} dockerNamespace - The Docker Hub namespace (organization or username)
  * @param {string} dockerRepo - The repository name on Docker Hub
- * @returns {Promise<string|null>} The latest version tag or null if none is found.
+ * @returns {Promise<{ latestStableRelease: string|null, latestBetaRelease: string|null }>}
  */
 module.exports = async (dockerNamespace, dockerRepo) => {
   const { default: fetch } = await import('node-fetch');
@@ -20,28 +22,23 @@ module.exports = async (dockerNamespace, dockerRepo) => {
 
     const data = await response.json();
 
-    // Define a regular expression to capture the major and minor version numbers.
-    // The regex /^v(\d+)\.(\d+)/ matches tags that start with "v", followed by digits (major),
-    // a period, and more digits (minor). It works for tags like "v2.3.8-24.3.6" or "v25.1-k8s4".
+    // Regex to capture major and minor version numbers (e.g. "v2.3")
     const versionRegex = /^v(\d+)\.(\d+)/;
 
-    // Filter the list of tags to include only those that match our expected version pattern.
-    // This helps ensure we work only with tags that represent valid version numbers.
-    let versionTags = data.results.filter(tag => versionRegex.test(tag.name));
+    // Filter tags to include only those matching the version pattern.
+    let tags = data.results.filter(tag => versionRegex.test(tag.name));
 
-    // If the repository is "redpanda-operator", ignore any tags starting with "v23".
+    // For specific repositories (e.g. "redpanda-operator"), you might want to filter out certain versions.
     if (dockerRepo === 'redpanda-operator') {
-      versionTags = versionTags.filter(tag => !/^(v22|v23)/.test(tag.name));
+      tags = tags.filter(tag => !/^(v22|v23)/.test(tag.name));
     }
 
-    if (versionTags.length === 0) {
-      console.warn('No version tags found.');
-      return null;
-    }
+    // Separate stable and beta tags.
+    const stableTags = tags.filter(tag => !tag.name.includes('-beta'));
+    const betaTags = tags.filter(tag => tag.name.includes('-beta'));
 
-    // Sort the filtered tags in descending order based on their major and minor version numbers.
-    // This sorting ignores any additional patch or suffix details and focuses only on the major.minor value.
-    versionTags.sort((a, b) => {
+    // Helper function to sort tags in descending order based on major and minor version numbers.
+    const sortTags = (a, b) => {
       const aMatch = a.name.match(versionRegex);
       const bMatch = b.name.match(versionRegex);
       const aMajor = parseInt(aMatch[1], 10);
@@ -49,18 +46,28 @@ module.exports = async (dockerNamespace, dockerRepo) => {
       const bMajor = parseInt(bMatch[1], 10);
       const bMinor = parseInt(bMatch[2], 10);
 
-      // Compare by major version first; if equal, compare by minor version.
       if (aMajor !== bMajor) {
         return bMajor - aMajor;
       }
       return bMinor - aMinor;
-    });
+    };
 
-    // Return the name of the tag with the highest major.minor version.
-    return versionTags[0].name;
+    const sortedStable = stableTags.sort(sortTags);
+    const sortedBeta = betaTags.sort(sortTags);
+
+    const latestStableReleaseVersion = sortedStable.length ? sortedStable[0].name : null;
+    const latestBetaReleaseVersion = sortedBeta.length ? sortedBeta[0].name : null;
+
+    return {
+      latestStableRelease: latestStableReleaseVersion || null,
+      latestBetaRelease: latestBetaReleaseVersion || null
+    };
 
   } catch (error) {
-    console.error('Error fetching latest Docker tag:', error);
-    return null;
+    console.error('Error fetching Docker tags:', error);
+    return {
+      latestStableRelease: null,
+      latestBetaRelease: null
+    };
   }
 };
