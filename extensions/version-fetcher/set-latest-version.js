@@ -50,6 +50,8 @@ module.exports.register = function ({ config }) {
         connect: latestConnectResult.status === 'fulfilled' ? latestConnectResult.value : undefined,
       };
 
+      console.log(latestVersions)
+
       const components = await contentCatalog.getComponents();
       components.forEach(component => {
         const prerelease = component.latestPrerelease;
