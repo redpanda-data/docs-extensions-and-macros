@@ -50,8 +50,6 @@ module.exports.register = function ({ config }) {
         connect: latestConnectResult.status === 'fulfilled' ? latestConnectResult.value : undefined,
       };
 
-      console.log(latestVersions)
-
       const components = await contentCatalog.getComponents();
       components.forEach(component => {
         const prerelease = component.latestPrerelease;
@@ -64,7 +62,7 @@ module.exports.register = function ({ config }) {
           // Set operator and helm chart attributes via helper function
           updateAttributes(asciidoc, [
             { condition: latestVersions.operator, key: 'latest-operator-version', value: latestVersions.operator?.latestStableRelease },
-            { condition: latestVersions.helmChart, key: 'latest-redpanda-helm-chart-version', value: latestVersions.helmChart }
+            { condition: latestVersions.helmChart, key: 'latest-redpanda-helm-chart-version', value: latestVersions.helmChart?.latestStableRelease }
           ]);
 
           // Set attributes for console and connect versions
@@ -87,6 +85,9 @@ module.exports.register = function ({ config }) {
           }
           if (latestVersions.operator?.latestBetaRelease) {
             setVersionAndTagAttributes(asciidoc, 'operator-beta', latestVersions.operator.latestBetaRelease, name, version);
+          }
+          if (latestVersions.helmChart?.latestBetaRelease) {
+            setVersionAndTagAttributes(asciidoc, 'helm-beta', latestVersions.helmChart.latestBetaRelease, name, version);
           }
         });
 
