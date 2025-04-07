@@ -3,7 +3,7 @@
 module.exports.register = function ({ config }) {
   const GetLatestRedpandaVersion = require('./get-latest-redpanda-version');
   const GetLatestConsoleVersion = require('./get-latest-console-version');
-  const GetLatestOperatorVersion = require('./fetch-latest-docker-tag');
+  const GetLatestDockerTag = require('./fetch-latest-docker-tag');
   const GetLatestHelmChartVersion = require('./get-latest-redpanda-helm-version');
   const GetLatestConnectVersion = require('./get-latest-connect');
   const logger = this.getLogger('set-latest-version-extension');
@@ -36,8 +36,8 @@ module.exports.register = function ({ config }) {
         latestConnectResult,
       ] = await Promise.allSettled([
         GetLatestRedpandaVersion(github, owner, 'redpanda'),
-        GetLatestConsoleVersion(github, owner, 'console'),
-        GetLatestOperatorVersion(dockerNamespace, 'redpanda-operator'),
+        GetLatestDockerTag(dockerNamespace, 'console'),
+        GetLatestDockerTag(dockerNamespace, 'redpanda-operator'),
         GetLatestHelmChartVersion(github, owner, 'helm-charts', 'charts/redpanda/Chart.yaml'),
         GetLatestConnectVersion(github, owner, 'connect'),
       ]);
