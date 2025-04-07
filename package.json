@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "4.2.4",
+  "version": "4.2.5",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -12,7 +12,13 @@
   "author": {
     "name": "Redpanda Docs Team"
   },
+  "bin": {
+    "doc-tools": "./bin/doc-tools.js"
+  },
   "scripts": {
+    "install-test-dependencies": "doc-tools install-test-dependencies",
+    "get-redpanda-version": "doc-tools get-redpanda-version",
+    "get-console-version": "doc-tools get-console-version",
     "build": "antora --to-dir docs --fetch local-antora-playbook.yml",
     "serve": "wds --node-resolve --open preview/test/ --watch --root-dir docs"
   },
@@ -55,7 +61,9 @@
   "files": [
     "extensions",
     "asciidoc-extensions",
-    "macros"
+    "macros",
+    "bin",
+    "scripts"
   ],
   "license": "ISC",
   "repository": {
