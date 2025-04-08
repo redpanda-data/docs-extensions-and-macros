@@ -1,14 +1,37 @@
-// Import the version fetcher module
+#!/usr/bin/env node
+
 const GetLatestRedpandaVersion = require('../extensions/version-fetcher/get-latest-redpanda-version.js');
 const yaml = require('js-yaml');
 const fs = require('fs');
 
-// Fetch the latest release version from GitHub
 const owner = 'redpanda-data';
+const repo = 'redpanda';
 
 // Parse command-line arguments
 const args = process.argv.slice(2);
+const showHelp = args.includes('--help') || args.includes('-h');
 const betaFlag = args.includes('--beta');
+const useAntora = args.includes('--from-antora');
+let beta = false;
+
+if (useAntora) {
+  beta = getPrereleaseFromAntora(); // true or false from antora.yml
+} else if (betaFlag) {
+  beta = true;
+}
+
+if (showHelp) {
+  console.log(`
+Usage: doc-tools get-redpanda-version [options]
+
+Options:
+  --beta            Prefer the latest beta (RC) version if available
+  --from-antora     Use prerelease flag from antora.yml (if --beta not passed)
+  --help            Show this help message
+`);
+  process.exit(0);
+}
+
 
 function getPrereleaseFromAntora() {
   try {
@@ -19,21 +42,12 @@ function getPrereleaseFromAntora() {
     if (error.code !== 'ENOENT') {
       console.error("Error reading antora.yml file:", error);
     }
-    return undefined; // Fallback to --beta later
+    return false;
   }
 }
 
-// Try antora.yml, fallback to CLI flag
-const antoraPrerelease = getPrereleaseFromAntora();
-const beta = typeof antoraPrerelease === 'boolean' ? antoraPrerelease : betaFlag;
-
-// Conditionally set DOCKER_REPO for subsequent test steps such as the Docker Compose file
-if (beta) {
-  REDPANDA_DOCKER_REPO = 'redpanda-unstable';
-} else {
-  REDPANDA_DOCKER_REPO = 'redpanda';
-}
-const repo = 'redpanda';
+// Conditionally set DOCKER_REPO for subsequent test steps such as Docker Compose
+let REDPANDA_DOCKER_REPO = beta ? 'redpanda-unstable' : 'redpanda';
 
 async function loadOctokit() {
   const { Octokit } = await import('@octokit/rest');
@@ -57,16 +71,17 @@ async function loadOctokit() {
     if (!LatestRedpandaVersion) {
       throw new Error('Failed to fetch the latest Redpanda version');
     }
-    // Determine the release version based on the beta flag, with a fallback to stable release if RC is null
+
     const latestRedpandaReleaseVersion = beta
-      ? (LatestRedpandaVersion.latestRcRelease && LatestRedpandaVersion.latestRcRelease.version
-      ? LatestRedpandaVersion.latestRcRelease.version
-      : `${LatestRedpandaVersion.latestRedpandaRelease.version}`)
-    : `${LatestRedpandaVersion.latestRedpandaRelease.version}`;
+      ? (LatestRedpandaVersion.latestRcRelease?.version || LatestRedpandaVersion.latestRedpandaRelease.version)
+      : LatestRedpandaVersion.latestRedpandaRelease.version;
 
-    if (!LatestRedpandaVersion.latestRcRelease) REDPANDA_DOCKER_REPO = 'redpanda'
+    // If no RC exists, use the stable docker repo
+    if (!LatestRedpandaVersion.latestRcRelease) {
+      REDPANDA_DOCKER_REPO = 'redpanda';
+    }
 
-    // Print both version and Docker repo for Doc Detective to capture
+    // Output version and Docker repo for Doc Detective to pick up
     console.log(`REDPANDA_VERSION=${latestRedpandaReleaseVersion}`);
     console.log(`REDPANDA_DOCKER_REPO=${REDPANDA_DOCKER_REPO}`);
   } catch (error) {

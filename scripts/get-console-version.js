@@ -10,8 +10,29 @@ const CONSOLE_DOCKER_REPO = 'console';
 
 // Parse command-line arguments
 const args = process.argv.slice(2);
-console.log(args)
+const showHelp = args.includes('--help') || args.includes('-h');
 const betaFlag = args.includes('--beta');
+const useAntora = args.includes('--from-antora');
+let beta = false;
+
+if (useAntora) {
+  beta = getPrereleaseFromAntora(); // true or false from antora.yml
+} else if (betaFlag) {
+  beta = true;
+}
+
+if (showHelp) {
+  console.log(`
+Usage: doc-tools get-console-version [options]
+
+Options:
+  --beta            Prefer the latest beta (RC) version if available
+  --from-antora     Use prerelease flag from antora.yml (if --beta not passed)
+  --help            Show this help message
+`);
+  process.exit(0);
+}
+
 
 function getPrereleaseFromAntora() {
   try {
@@ -19,18 +40,12 @@ function getPrereleaseFromAntora() {
     const antoraConfig = yaml.load(fileContents);
     return antoraConfig.prerelease === true;
   } catch (error) {
-    // Only log if file was expected but not found
     if (error.code !== 'ENOENT') {
       console.error("Error reading antora.yml file:", error);
     }
-    return undefined; // So we can fallback to --beta later
+    return false;
   }
 }
-
-// Try antora.yml, fallback to CLI flag
-const antoraPrerelease = getPrereleaseFromAntora();
-const beta = typeof antoraPrerelease === 'boolean' ? antoraPrerelease : betaFlag;
-console.log(beta)
 
 async function loadOctokit() {
   const { Octokit } = await import('@octokit/rest');
