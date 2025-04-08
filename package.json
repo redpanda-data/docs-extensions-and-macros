@@ -87,7 +87,8 @@
     "node-html-parser": "5.4.2-0",
     "papaparse": "^5.4.1",
     "semver": "^7.6.0",
-    "tar": "^7.4.3"
+    "tar": "^7.4.3",
+    "tree-sitter": "^0.22.4"
   },
   "devDependencies": {
     "@antora/cli": "3.1.4",

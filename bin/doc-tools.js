@@ -3,9 +3,7 @@
 const { spawnSync } = require('child_process');
 const path = require('path');
 
-const args = process.argv.slice(2);
-const command = args[0];
-const commandArgs = args.slice(1); // <-- everything after the command
+const [command, ...restArgs] = process.argv.slice(2);
 
 function runScript(script, isNode = false) {
   const finalArgs = isNode ? ['node', script, ...commandArgs] : [script, ...commandArgs];
@@ -22,6 +20,9 @@ switch (command) {
     break;
   case 'get-console-version':
     runScript(path.join(__dirname, '../scripts/get-console-version.js'), true);
+    break;
+  case 'props':
+    require('../lib/props')(restArgs);
     break;
   default:
     console.log(`Unknown command: ${command}`);

@@ -2,3 +2,9 @@
 /wip/*
 /docs/*
 .vscode
+gen/
+tmp/
+docker-compose.yml
+docker-compose/
+venv/
+__pycache__/
