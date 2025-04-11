@@ -213,7 +213,8 @@ function applyAllReplacements(content, replacements) {
   replacements.sort((a, b) => b.regex.source.length - a.regex.source.length);
 
   replacements.forEach(({ regex, replace }) => {
-    content = content.replace(regex, replace);
+    const freshRegex = new RegExp(regex.source, regex.flags);
+    content = content.replace(freshRegex, replace);
   });
 
   return content;

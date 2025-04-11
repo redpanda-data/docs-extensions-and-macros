@@ -1,5 +1,5 @@
 module.exports = async (github, owner, repo) => {
-  const semver = require('semver')
+  const semver = require('semver');
   try {
     // Fetch all the releases from the repository
     const releases = await github.rest.repos.listReleases({
@@ -11,46 +11,52 @@ module.exports = async (github, owner, repo) => {
 
     // Filter valid semver tags and sort them to find the highest version
     const sortedReleases = releases.data
-    .map(release => release.tag_name)
-    .filter(tag => semver.valid(tag.replace(/^v/, '')))
-    .sort((a, b) => semver.rcompare(a.replace(/^v/, ''), b.replace(/^v/, '')));
+      .filter(release => semver.valid(release.tag_name.replace(/^v/, '')))
+      .sort((a, b) => semver.rcompare(
+        a.tag_name.replace(/^v/, ''),
+        b.tag_name.replace(/^v/, '')
+      ));
 
-    if (sortedReleases.length > 0) {
-      const latestRedpandaReleaseVersion = sortedReleases.find(tag => !tag.includes('-rc'));
-      const latestRcReleaseVersion = sortedReleases.find(tag => tag.includes('-rc'));
+    // Find latest non-RC release that is NOT a draft
+    const latestRedpandaRelease = sortedReleases.find(
+      release => !release.tag_name.includes('-rc') && !release.draft
+    );
 
-      // Get the commit hash for the highest version tag
+    // Find latest RC release (can be draft or not, adjust if needed)
+    const latestRcRelease = sortedReleases.find(
+      release => release.tag_name.includes('-rc')
+    );
+
+    let latestRedpandaReleaseCommitHash = null;
+    if (latestRedpandaRelease) {
       const commitData = await github.rest.git.getRef({
         owner,
         repo,
-        ref: `tags/${latestRedpandaReleaseVersion}`
+        ref: `tags/${latestRedpandaRelease.tag_name}`
       });
-      const latestRedpandaReleaseCommitHash = commitData.data.object.sha;
-
-      let latestRcReleaseCommitHash = null;
-      if (latestRcReleaseVersion) {
-        const rcCommitData = await github.rest.git.getRef({
-          owner,
-          repo,
-          ref: `tags/${latestRcReleaseVersion}`
-        });
-        latestRcReleaseCommitHash = rcCommitData.data.object.sha;
-      }
-
-      return {
-        latestRedpandaRelease: latestRedpandaReleaseVersion ? {
-          version: latestRedpandaReleaseVersion,
-          commitHash: latestRedpandaReleaseCommitHash.substring(0, 7)
-        } : null ,
-        latestRcRelease: latestRcReleaseVersion ? {
-          version: latestRcReleaseVersion,
-          commitHash: latestRcReleaseCommitHash.substring(0, 7)
-        } : null
-      };
-    } else {
-      console.log("No valid semver releases found for Redpanda.");
-      return { latestRedpandaRelease: null, latestRcRelease: null };
+      latestRedpandaReleaseCommitHash = commitData.data.object.sha;
     }
+
+    let latestRcReleaseCommitHash = null;
+    if (latestRcRelease) {
+      const rcCommitData = await github.rest.git.getRef({
+        owner,
+        repo,
+        ref: `tags/${latestRcRelease.tag_name}`
+      });
+      latestRcReleaseCommitHash = rcCommitData.data.object.sha;
+    }
+
+    return {
+      latestRedpandaRelease: latestRedpandaRelease ? {
+        version: latestRedpandaRelease.tag_name,
+        commitHash: latestRedpandaReleaseCommitHash.substring(0, 7)
+      } : null,
+      latestRcRelease: latestRcRelease ? {
+        version: latestRcRelease.tag_name,
+        commitHash: latestRcReleaseCommitHash.substring(0, 7)
+      } : null
+    };
   } catch (error) {
     console.error('Failed to fetch Redpanda release information:', error);
     return { latestRedpandaRelease: null, latestRcRelease: null };
