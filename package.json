@@ -50,7 +50,8 @@
     "./macros/glossary": "./macros/glossary.js",
     "./macros/rp-connect-components": "./macros/rp-connect-components.js",
     "./macros/config-ref": "./macros/config-ref.js",
-    "./macros/helm-ref": "./macros/helm-ref.js"
+    "./macros/helm-ref": "./macros/helm-ref.js",
+    "./macros/data-template": "./macros/data-template.js"
   },
   "files": [
     "extensions",
@@ -74,6 +75,7 @@
     "handlebars": "^4.7.8",
     "html-entities": "2.3",
     "js-yaml": "^4.1.0",
+    "jsonpath-plus": "^10.3.0",
     "lodash": "^4.17.21",
     "micromatch": "^4.0.8",
     "node-html-parser": "5.4.2-0",

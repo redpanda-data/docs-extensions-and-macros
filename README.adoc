@@ -763,6 +763,108 @@ This section documents the Asciidoc macros that are provided by this library and
 
 IMPORTANT: Be sure to register each extension under the `asciidoc.extensions` key in the playbook, not the `antora.extensions` key.
 
+=== data_template
+
+The `data_template` block processor lets you render dynamic AsciiDoc content from external or local data sources (JSON, YAML, or plain text) using Handlebars templates.
+
+This is useful for generating documentation from structured data like config fields, component metadata, or examples.
+
+=== Usage
+
+You can use the `data_template` block macro to dynamically generate AsciiDoc content from structured data files such as JSON or YAML. The macro uses a Handlebars template to render the data.
+
+[source,asciidoc]
+----
+[data_template, ROOT:example$connect.json]
+--
+== Component: {{{name}}}
+
+Summary: {{{summary}}}
+
+{{#each fields}}
+=== {{name}}
+
+*Type*: `{{type}}`
+
+{{{description}}}
+{{/each}}
+--
+----
+
+The block content is a Handlebars template. Fields from the data file are injected into this template during site build.
+
+The macro accepts one or two positional attributes:
+
+1. The first attribute (`dataPath`) is required and should be the resource ID of the data file.
+2. The second attribute (`overrides`) is optional and allows you to override or merge values from a secondary file.
+
+You can apply overrides by specifying a second file:
+
+[source,asciidoc]
+----
+[data_template, ROOT:example$connect.json, ROOT:example$overrides.json]
+--
+...template content...
+--
+----
+
+In this case:
+
+- The macro first loads and parses `connect.json`.
+- Then it loads `overrides.json` and **merges** its values into the base file.
+- Arrays of objects (such as fields or processors) are merged by matching objects with the same `name` key.
+- The result is passed into the Handlebars template.
+
+This is useful for tweaking content (like updating a `description`) without modifying the original source file.
+
+==== Triple mustaches
+
+When your data contains AsciiDoc markup (like lists, admonitions, or headings), use triple curly braces:
+
+[source,handlebars]
+----
+{{{description}}}
+----
+
+This tells Handlebars to not escape the content, so Asciidoctor can render it correctly.
+
+==== Handlebars helpers
+
+The following helpers are available inside templates:
+
+* `eq`, `ne` — Equality helpers.
+* `uppercase` — Converts text to uppercase.
+* `renderConnectFields` — Renders config fields for Redpanda Connect.
+* `renderConnectExamples` — Renders usage examples.
+* `selectByJsonPath` — Selects items from the data using a JSONPath expression.
+
+==== Registration
+
+To use this macro, register it in your Antora playbook:
+
+[source,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/data-template'
+----
+
+==== Example
+
+You can use the `selectByJsonPath` helper to filter data. For example, if you want to render only the `redis` processor's fields from a JSON file, you can do it like this:
+
+[source,asciidoc]
+----
+[data_template, redpanda-connect:ROOT:example$connect.json]
+--
+{{#selectByJsonPath this "$.processors[?(@.name=='redis')]" }}
+{{renderConnectFields this.config.children}}
+{{/selectByJsonPath}}
+--
+----
+
+This will render only the fields for the `redis` processor.
+
 === config_ref
 
 This inline macro is used to generate a reference to a configuration value in the Redpanda documentation. The macro's parameters allow for control over the generated reference's format and the type of output produced.
