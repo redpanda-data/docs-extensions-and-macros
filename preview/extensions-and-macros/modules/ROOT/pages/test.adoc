@@ -163,19 +163,26 @@ This is a custom description for the memory buffer.
 
 --
 
-This example targets the memory buffer specifically.
+This example overrides the `memory` buffer with a custom description.
 
-[data_template, ROOT:example$connect.json]
+[data_template, ROOT:example$connect.json, ROOT:example$overrides.json]
 --
-{{#findByName buffers "memory"}}
-=== {{{name}}}
+Version: {{{version}}}
 
-Status: {{{status}}}
+{{#each buffers}}
 
+=== {{{this.name}}}
+
+Status: {{{this.status}}}
+
+{{#if (eq this.name 'memory')}}
 This is a custom description for the memory buffer.
 {{else}}
-Buffer "memory" not found.
-{{/findByName}}
+{{{this.summary}}}
+{{/if}}
+
+{{/each}}
+
 --
 
 === Let's try external data sources
