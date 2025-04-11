@@ -372,39 +372,44 @@ handlebars.registerHelper('selectByJsonPath', selectByJsonPath);
  * @returns {Object}        The updated `target` object.
  */
 function mergeOverrides(target, overrides) {
-  if (!overrides || typeof overrides !== 'object') {
-    return target;
-  }
+  if (!overrides || typeof overrides !== 'object') return target;
 
   for (let key in overrides) {
-    // If both sides are arrays, merge matching items by `name`.
+    // Handle arrays by matching items on 'name'
     if (Array.isArray(target[key]) && Array.isArray(overrides[key])) {
       target[key] = target[key].map(item => {
         const overrideItem = overrides[key].find(o => o.name === item.name);
         if (overrideItem) {
-          // You could update specific fields here (e.g. 'description', 'type'),
-          // or copy all fields from overrideItem.
-          for (const field of Object.keys(overrideItem)) {
-            item[field] = overrideItem[field];
-          }
-          // Recursively merge any deeper structures.
+          // Only override allowed fields if they are explicitly defined
+          ['description', 'type'].forEach(field => {
+            if (overrideItem.hasOwnProperty(field)) {
+              item[field] = overrideItem[field];
+            }
+          });
+
+          // Recursively handle nested children
           item = mergeOverrides(item, overrideItem);
         }
         return item;
       });
 
-    // If both are objects, merge them recursively.
-    } else if (typeof target[key] === 'object' && typeof overrides[key] === 'object') {
+    // Recurse into nested objects
+    } else if (
+      typeof target[key] === 'object' &&
+      typeof overrides[key] === 'object' &&
+      !Array.isArray(target[key]) &&
+      !Array.isArray(overrides[key])
+    ) {
       target[key] = mergeOverrides(target[key], overrides[key]);
 
-    // Otherwise, just overwrite the field in the target.
-    } else {
+    // Only override top-level description/type if defined in overrides
+    } else if (['description', 'type'].includes(key) && overrides.hasOwnProperty(key)) {
       target[key] = overrides[key];
     }
   }
-
   return target;
 }
+
 
 function processData_TemplateBlock(parent, reader, attrs, config, extensionRef) {
   const catalog = config.contentCatalog;
@@ -564,7 +569,7 @@ function processData_TemplateBlock(parent, reader, attrs, config, extensionRef) 
 }
 
 module.exports.register = (registry, context) => {
-  if (!registry || !context) return;
+  if (!registry && context) return;
 
   const toProc = (fn) => Object.defineProperty(fn, '$$arity', { value: fn.length });
 
@@ -581,5 +586,6 @@ module.exports.register = (registry, context) => {
   }
 
   registry.$groups().$store('data-template-ext', toProc(createExtensionGroup(context)));
+  return registry
 };
 
