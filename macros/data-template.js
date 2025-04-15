@@ -575,7 +575,7 @@ module.exports.register = (registry, context) => {
 
   function createExtensionGroup({ contentCatalog, file }) {
     return function () {
-      registry.block('data_template', function () {
+      this.block('data_template', function () {
         this.positionalAttributes(['dataPath', 'overrides']);
         this.onContext('open');
         this.process((parent, reader, attrs) => {
