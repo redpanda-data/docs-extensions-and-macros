@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "4.2.5",
+  "version": "4.3.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -50,7 +50,8 @@
     "./macros/glossary": "./macros/glossary.js",
     "./macros/rp-connect-components": "./macros/rp-connect-components.js",
     "./macros/config-ref": "./macros/config-ref.js",
-    "./macros/helm-ref": "./macros/helm-ref.js"
+    "./macros/helm-ref": "./macros/helm-ref.js",
+    "./macros/data-template": "./macros/data-template.js"
   },
   "files": [
     "extensions",
@@ -71,15 +72,19 @@
     "chalk": "4.1.2",
     "gulp": "^4.0.2",
     "gulp-connect": "^5.7.0",
+    "handlebars": "^4.7.8",
     "html-entities": "2.3",
     "js-yaml": "^4.1.0",
+    "jsonpath-plus": "^10.3.0",
     "lodash": "^4.17.21",
     "micromatch": "^4.0.8",
     "node-fetch": "^3.3.2",
     "node-html-parser": "5.4.2-0",
     "papaparse": "^5.4.1",
     "semver": "^7.6.0",
-    "tar": "^7.4.3"
+    "sync-request": "^6.1.0",
+    "tar": "^7.4.3",
+    "yaml": "^2.7.0"
   },
   "devDependencies": {
     "@antora/cli": "3.1.4",
