@@ -3,43 +3,51 @@ set -euo pipefail
 
 # Usage: start-cluster.sh <tag>
 TAG="${1:-latest}"
-WORK_DIR="$(pwd)"
 
-# Compute MAJOR_MINOR for quickstart URL
-if [[ "$TAG" == "latest" ]]; then
-  MAJOR_MINOR="latest"
-else
-  MAJOR_MINOR=$(echo "$TAG" | sed -E 's/^v?([0-9]+\.[0-9]+).*$/\1/')
+# Where this script lives (utils/)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# One level up is the package root, where we expect docker‑compose/
+PACKAGE_ROOT="$(cd "$SCRIPT_DIR"/.. && pwd)"
+QUICKSTART_DIR="$PACKAGE_ROOT/docker-compose"
+
+# Remember where the user called us from
+CALLER_PWD="$(pwd)"
+
+# Default quickstart version
+MAJOR_MINOR="latest"
+if [[ "$TAG" != "latest" ]]; then
+  MAJOR_MINOR="$(echo "$TAG" | sed -E 's/^v?([0-9]+\.[0-9]+).*$/\1/')"
 fi
 
-# Ensure we have a docker-compose/ dir
-if [[ ! -d "docker-compose" ]]; then
-  echo "Fetching Redpanda quickstart for $MAJOR_MINOR…"
+# Fetch quickstart into package root if needed
+if [[ ! -d "$QUICKSTART_DIR" ]]; then
+  echo "📥 Fetching Redpanda quickstart for ${MAJOR_MINOR}…"
   if [[ "$TAG" == "latest" ]]; then
-    curl -sSL https://docs.redpanda.com/redpanda-quickstart.tar.gz | tar xzf -
+    curl -sSL https://docs.redpanda.com/redpanda-quickstart.tar.gz \
+      | tar -C "$PACKAGE_ROOT" -xzf -
   else
-    curl -sSL "https://docs.redpanda.com/${MAJOR_MINOR}-redpanda-quickstart.tar.gz" | tar xzf -
+    curl -sSL "https://docs.redpanda.com/${MAJOR_MINOR}-redpanda-quickstart.tar.gz" \
+      | tar -C "$PACKAGE_ROOT" -xzf -
   fi
 
-  # After extraction we expect to see a folder named docker-compose
-  if [[ ! -d "docker-compose" ]]; then
-    echo "❌ Expected a 'docker-compose' directory but none was found. Exiting."
+  if [[ ! -d "$QUICKSTART_DIR" ]]; then
+    echo "❌ Expected '$QUICKSTART_DIR' but none was found after extraction."
     exit 1
   fi
 fi
 
-# Now cd in and run Docker commands
-cd docker-compose
+# Switch into the quickstart dir and (re)start the cluster
+cd "$QUICKSTART_DIR"
 
-# Tear down any running cluster
 if docker compose ps | grep -q Up; then
-  echo "Stopping existing cluster…"
+  echo "🛑 Stopping existing cluster…"
   docker compose down --volumes
 fi
 
-# Bring it back up
-echo "Starting Redpanda cluster…"
+echo "▶️  Starting Redpanda cluster…"
 docker compose up -d
 
-# Return to caller
-cd "$WORK_DIR"
+# Return to original directory
+cd "$CALLER_PWD"
+echo "✅ Cluster is up (quickstart version: ${MAJOR_MINOR})"

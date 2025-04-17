@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+set -euo pipefail
+
+# Remember where we started so we can always come back
+ORIGINAL_PWD="$(pwd)"
+
+# All "utils/…" calls should be relative to this script’s dir
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE="${1:-metrics}"
 TAG="${2:-latest}"
@@ -6,27 +13,28 @@ DOCKER_REPO="${3:-redpanda}"
 CONSOLE_TAG="${4:-latest}"
 CONSOLE_REPO="${5:-console}"
 
-# If TAG contains "rc" (such as v25.1.1-rc3), switch to the unstable repo
+# if it's an RC tag, switch Docker repo
 shopt -s nocasematch
-if [[ "$TAG" =~ rc[0-9]* ]]; then
+if [[ "$TAG" =~ rc[0-9]+ ]]; then
   DOCKER_REPO="redpanda-unstable"
 fi
 shopt -u nocasematch
+
+if [[ "$TAG" == "latest" ]]; then
+  MAJOR_MINOR="latest"
+else
+  MAJOR_MINOR="$(echo "$TAG" | sed -E 's/^v?([0-9]+\.[0-9]+).*$/\1/')"
+fi
 
 export REDPANDA_VERSION="$TAG"
 export REDPANDA_DOCKER_REPO="$DOCKER_REPO"
 export REDPANDA_CONSOLE_VERSION="$CONSOLE_TAG"
 export REDPANDA_CONSOLE_DOCKER_REPO="$CONSOLE_REPO"
 
-# Start cluster
-utils/start-cluster.sh "$TAG"
+# Start up the cluster
+"$SCRIPT_DIR"/start-cluster.sh "$TAG"
 
-MAJOR_MINOR="latest"
-if [[ "$TAG" != "latest" ]]; then
-  MAJOR_MINOR=$(echo "$TAG" | sed -E 's/^v?([0-9]+\.[0-9]+).*$/\1/')
-fi
-
-# Wait based on mode
+# Wait for it to settle
 if [[ "$MODE" == "metrics" ]]; then
   echo "Waiting 120 seconds for metrics to be available…"
   sleep 120
@@ -35,24 +43,26 @@ else
   sleep 30
 fi
 
-# Back to repo root
-cd "$(pwd)"
+# Go back to where we were
+cd "$ORIGINAL_PWD"
 
-# Create venv
-if [[ "$MODE" == "metrics" ]]; then
-  utils/python-venv.sh venv tools/metrics/requirements.txt
-fi
+# Ensure Python venv (always create under utils/venv)
+"$SCRIPT_DIR"/python-venv.sh \
+  "$SCRIPT_DIR"/venv \
+  "$SCRIPT_DIR"/../tools/metrics/requirements.txt
 
-# Run the right tool
 if [[ "$MODE" == "metrics" ]]; then
-  venv/bin/python tools/metrics/metrics.py "$MAJOR_MINOR"
+  "$SCRIPT_DIR"/venv/bin/python \
+    "$SCRIPT_DIR"/../tools/metrics/metrics.py \
+    "$MAJOR_MINOR"
 else
-  venv/bin/python tools/gen-rpk-ascii.py "$MAJOR_MINOR"
+  "$SCRIPT_DIR"/venv/bin/python \
+    "$SCRIPT_DIR"/../tools/gen-rpk-ascii.py \
+    "$MAJOR_MINOR"
 fi
 
-echo "Redpanda cluster docs generated successfully!"
+echo "✅ Redpanda cluster docs generated successfully!"
 
-echo "Stopping the cluster…"
-# Tear down
-cd docker-compose
+# Tear down the cluster
+cd "$SCRIPT_DIR"/../docker-compose
 docker compose down --volumes
