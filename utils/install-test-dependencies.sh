@@ -87,7 +87,7 @@ ensure_dependencies_installed
 check_rpk_installed() {
     if command -v rpk &>/dev/null; then
         echo "rpk is already installed. Version information:"
-        rpk version
+        rpk --version
         return 0
     else
         return 1
@@ -118,7 +118,7 @@ if [ "${OS}" == "Darwin" ]; then
 
     # Verify installation
     echo "rpk has been installed. Version information:"
-    rpk version
+    rpk --version
     exit 0
 fi
 
@@ -149,7 +149,7 @@ if [ "${OS}" == "Linux" ]; then
 
     # Verify installation
     echo "rpk has been installed. Version information:"
-    rpk version
+    rpk --version
     exit 0
 fi
 

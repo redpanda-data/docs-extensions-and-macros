@@ -63,7 +63,9 @@
     "asciidoc-extensions",
     "macros",
     "bin",
-    "scripts"
+    "utils",
+    "tools",
+    "docker-compose"
   ],
   "license": "ISC",
   "repository": {
