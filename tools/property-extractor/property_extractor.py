@@ -78,7 +78,6 @@ def get_files_with_properties(file_pairs, treesitter_parser, cpp_language):
         if any(path in implementation_value for path in file_paths):
             if len(properties) > 0:
                 files_with_properties.append((fp, properties))
-                logging.info(f"Properties found in '{fp.implementation}'.")
 
     
 

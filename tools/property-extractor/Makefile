@@ -43,7 +43,7 @@ venv: $(TOOL_ROOT)/requirements.txt
 	  echo "🐍 Creating virtual environment in $(VENV)..."; \
 	  python3 -m venv $(VENV); \
 	  $(VENV)/bin/pip install --upgrade pip --quiet; \
-	  $(VENV)/bin/pip install --no-cache-dir -r --quiet $<; \
+	  $(VENV)/bin/pip install --no-cache-dir -r $<; \
 	else \
 	  echo "🐍 Virtual environment already exists at $(VENV)"; \
 	fi
