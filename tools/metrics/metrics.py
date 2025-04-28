@@ -43,7 +43,6 @@ def parse_metrics(metrics_text):
     - Works regardless of # HELP / # TYPE order
     - Captures # UNIT metadata if present
     """
-    import re, logging
 
     lines = metrics_text.splitlines()
 

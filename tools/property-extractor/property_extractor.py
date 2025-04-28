@@ -87,8 +87,8 @@ def get_files_with_properties(file_pairs, treesitter_parser, cpp_language):
 def transform_files_with_properties(files_with_properties):
     type_transformer = TypeTransformer()
     transformers = [
-        TypeTransformer(),
         EnterpriseTransformer(), ## this must be the first, as it modifies current data
+        TypeTransformer(),
         MetaParamTransformer(),
         BasicInfoTransformer(),
         IsNullableTransformer(),
@@ -129,12 +129,16 @@ def transform_files_with_properties(files_with_properties):
 def merge_properties_and_definitions(properties, definitions):
     for name in properties:
         property = properties[name]
-
-        if property["type"] in definitions:
-            properties[name]["type"] = "#/definitions/" + property["type"]
-        elif property["type"] == "array" and property["items"]["type"] in definitions:
+        # guard against missing "type"
+        prop_type = property.get("type")
+        if prop_type and prop_type in definitions:
+            properties[name]["type"] = f"#/definitions/{prop_type}"
+        elif (
+            prop_type == "array"
+            and property.get("items", {}).get("type") in definitions
+        ):
             properties[name]["items"]["type"] = (
-                "#/definitions/" + property["items"]["type"]
+                f"#/definitions/{property['items']['type']}"
             )
 
     return dict(properties=properties, definitions=definitions)
