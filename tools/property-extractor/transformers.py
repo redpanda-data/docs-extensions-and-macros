@@ -335,11 +335,9 @@ class AliasTransformer:
 
 
 class EnterpriseTransformer:
-    def accepts(self, property, file_pair):
-        if property['type'] is not None and 'enterprise' in property['type']:
-            return True
-        return False
-    
+    def accepts(self, info, file_pair):
+        return bool(info.get('type') and 'enterprise' in info['type'])
+
     def parse(self, property, info, file_pair):
         if info['params'] is not None:
             enterpriseValue = info['params'][0]['value']

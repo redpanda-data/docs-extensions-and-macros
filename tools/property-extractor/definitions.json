@@ -41,7 +41,7 @@
                 "type": "string"
             },
             "config": {
-                "$ref": "#/defintions/config::tls_config"
+                "$ref": "#/definitions/config::tls_config"
             }
         }
     },
@@ -67,7 +67,7 @@
         }
     },
     "tls_config": {
-        "$ref": "#/defintions/config::tls_config"
+        "$ref": "#/definitions/config::tls_config"
     },
     "config::rest_authn_endpoint": {
         "defined_in": "https://github.com/redpanda-data/redpanda/blob/dev/src/v/config/rest_authn_endpoint.h#L42",

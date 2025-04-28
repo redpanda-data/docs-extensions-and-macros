@@ -4,7 +4,7 @@ set -euo pipefail
 # Remember where we started so we can always come back
 ORIGINAL_PWD="$(pwd)"
 
-# All "utils/…" calls should be relative to this script’s dir
+# All "cli-utils…" calls should be relative to this script’s dir
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE="${1:-metrics}"
@@ -46,7 +46,7 @@ fi
 # Go back to where we were
 cd "$ORIGINAL_PWD"
 
-# Ensure Python venv (always create under utils/venv)
+# Ensure Python venv (always create under cli-utilsvenv)
 "$SCRIPT_DIR"/python-venv.sh \
   "$SCRIPT_DIR"/venv \
   "$SCRIPT_DIR"/../tools/metrics/requirements.txt
@@ -66,3 +66,6 @@ echo "✅ Redpanda cluster docs generated successfully!"
 # Tear down the cluster
 cd "$SCRIPT_DIR"/../docker-compose
 docker compose down --volumes
+
+# Return to the original directory
+cd "$ORIGINAL_PWD"

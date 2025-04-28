@@ -112,7 +112,7 @@ programCli
   .command('install-test-dependencies')
   .description('Install packages for doc test workflows')
   .action(() => {
-    const scriptPath = path.join(__dirname, '../utils/install-test-dependencies.sh');
+    const scriptPath = path.join(__dirname, '../cli-utils/install-test-dependencies.sh');
     const result = spawnSync(scriptPath, { stdio: 'inherit', shell: true });
     process.exit(result.status);
   });
@@ -180,7 +180,7 @@ automation
       options.consoleTag,
       options.consoleDockerRepo
     ];
-    const scriptPath = path.join(__dirname, '../utils/generate-cluster-docs.sh');
+    const scriptPath = path.join(__dirname, '../cli-utils/generate-cluster-docs.sh');
     console.log(`Running ${scriptPath} with arguments: ${args.join(' ')}`);
     const result = spawnSync('bash', [scriptPath, ...args], { stdio: 'inherit', shell: true });
     process.exit(result.status);
@@ -223,7 +223,7 @@ automation
       options.consoleTag,
       options.consoleDockerRepo
     ];
-    const scriptPath = path.join(__dirname, '../utils/generate-cluster-docs.sh');
+    const scriptPath = path.join(__dirname, '../cli-utils/generate-cluster-docs.sh');
     console.log(`Running ${scriptPath} with arguments: ${args.join(' ')}`);
     const result = spawnSync('bash', [scriptPath, ...args], { stdio: 'inherit', shell: true });
     process.exit(result.status);

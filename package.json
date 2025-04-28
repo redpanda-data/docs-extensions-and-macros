@@ -61,10 +61,11 @@
   },
   "files": [
     "extensions",
+    "extension-utils",
     "asciidoc-extensions",
     "macros",
     "bin",
-    "utils",
+    "cli-utils",
     "tools",
     "docker-compose"
   ],

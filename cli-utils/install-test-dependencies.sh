@@ -129,7 +129,8 @@ if [ "${OS}" == "Linux" ]; then
 
     # Download latest version of rpk
     echo "Downloading ${FILENAME}..."
-    curl -LO "${URL_BASE}/latest/download/${FILENAME}" || { echo "Failed to download rpk"; exit 1; }
+    curl -Lf --retry 3 -O "${URL_BASE}/latest/download/${FILENAME}" \
+        || { echo "Failed to download rpk"; exit 1; }
 
     # Ensure the target directory exists
     mkdir -p $HOME/.local/bin || { echo "Failed to create directory"; exit 1; }

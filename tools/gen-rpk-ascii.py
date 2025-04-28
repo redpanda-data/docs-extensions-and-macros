@@ -49,9 +49,9 @@ def cmp_rpk_ascii(dir1, dir2, outdir=""):
                                     print("Wrote " + outfile)
 
 class Flag:
-    def __init__(self, value, type, explanation):
+    def __init__(self, value: str, flag_type: str, explanation: str):
         self.value = value
-        self.type = type
+        self.flag_type = flag_type
         self.explanation = explanation
 
 
@@ -286,7 +286,7 @@ def build_dict(cmd_dict, executed_command, explanation, usage, it_flags, flag_li
 
     if it_flags:
         for flag in flag_list:
-            cmd['flags'][flag.value] = { "type" : flag.type.strip(), "description" : flag.explanation}
+            cmd['flags'][flag.value] = { "type" : flag.flag_type.strip(), "description" : flag.explanation}
 
     cmd_dict[executed_command] = cmd
     return cmd_dict
@@ -332,7 +332,7 @@ def build_ascii(ascii_result, executed_command, explanation, usage, it_flags, fl
     for flag in flag_list:
         ascii_result += "\n\n"
         ascii_result += "|" + flag.value + " |"
-        ascii_result += flag.type + " |"
+        ascii_result += flag.flag_type + " |"
         ascii_result += flag.explanation
 
     ascii_result += "\n|==="

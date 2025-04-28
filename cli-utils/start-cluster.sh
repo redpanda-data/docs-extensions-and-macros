@@ -4,7 +4,7 @@ set -euo pipefail
 # Usage: start-cluster.sh <tag>
 TAG="${1:-latest}"
 
-# Where this script lives (utils/)
+# Where this script lives (cli-utils)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # One level up is the package root, where we expect docker‑compose/
@@ -24,10 +24,10 @@ fi
 if [[ ! -d "$QUICKSTART_DIR" ]]; then
   echo "📥 Fetching Redpanda quickstart for ${MAJOR_MINOR}…"
   if [[ "$TAG" == "latest" ]]; then
-    curl -sSL https://docs.redpanda.com/redpanda-quickstart.tar.gz \
-      | tar -C "$PACKAGE_ROOT" -xzf -
+	  curl -sSLf --retry 3 https://docs.redpanda.com/redpanda-quickstart.tar.gz \
+	  | tar -C "$PACKAGE_ROOT" -xzf -
   else
-    curl -sSL "https://docs.redpanda.com/${MAJOR_MINOR}-redpanda-quickstart.tar.gz" \
+    curl -sSLf --retry 3 "https://docs.redpanda.com/${MAJOR_MINOR}-redpanda-quickstart.tar.gz" \
       | tar -C "$PACKAGE_ROOT" -xzf -
   fi
 

@@ -1,6 +1,15 @@
 const fs = require('fs');
 const { execSync } = require('child_process');
 const pandoc = require('node-pandoc');
+// Fail fast if required CLIs are missing
+['pandoc', 'kramdoc'].forEach(cmd => {
+  try {
+    execSync(`command -v ${cmd}`, { stdio: 'ignore' });
+  } catch {
+    console.error(`Required dependency "${cmd}" not found in PATH`);
+    process.exit(1);
+  }
+});
 const os = require('os');
 const path = require('path');
 

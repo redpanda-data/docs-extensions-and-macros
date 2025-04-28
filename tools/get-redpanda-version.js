@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const GetLatestRedpandaVersion = require('../extensions/version-fetcher/get-latest-redpanda-version.js');
-const { getPrereleaseFromAntora } = require('../utils/beta-from-antora.js');
+const { getPrereleaseFromAntora } = require('../cli-utils/beta-from-antora.js');
 
 /**
  * Fetches and prints the latest Redpanda version and Docker repository.

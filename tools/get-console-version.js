@@ -4,7 +4,7 @@ const yaml = require('js-yaml');
 const fs = require('fs');
 const path = require('path');
 const GetLatestConsoleVersion = require('../extensions/version-fetcher/get-latest-console-version.js');
-const { getPrereleaseFromAntora } = require('../utils/beta-from-antora.js');
+const { getPrereleaseFromAntora } = require('../cli-utils/beta-from-antora.js');
 
 /**
  * Fetches and prints the latest Console version and Docker repo.

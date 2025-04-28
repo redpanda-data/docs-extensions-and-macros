@@ -4,7 +4,6 @@ import requests
 import re
 import json
 import logging
-import glob
 
 '''
 ## How it works
@@ -36,43 +35,71 @@ def fetch_metrics(url):
 
 def parse_metrics(metrics_text):
     """
-    Parse metrics text into a structured dictionary.
-    Logs metrics that do not have a # TYPE entry.
+    Parse Prometheus exposition text into a structured dict of:
+      metric_name → { description, type, labels: [<label_keys>] }
+    Robust against any ordering of # HELP/# TYPE and handles samples
+    both with and without labels.
     """
-    metrics = {}
-    lines = metrics_text.splitlines()
-    current_metric = None
+    import re
+    import logging
 
+    # Gather HELP/type metadata
+    meta = {}      # name → { 'description':…, 'type':… }
+    lines = metrics_text.splitlines()
     for line in lines:
         if line.startswith("# HELP"):
-            # Extract metric name and description
-            match = re.match(r"# HELP (\S+) (.+)", line)
-            if match:
-                current_metric = match.group(1)
-                description = match.group(2)
-                metrics[current_metric] = {"description": description, "type": None, "labels": {}}
+            m = re.match(r"# HELP\s+(\S+)\s+(.+)", line)
+            if m:
+                name, desc = m.group(1), m.group(2)
+                meta.setdefault(name, {})['description'] = desc
         elif line.startswith("# TYPE"):
-            # Extract metric type
-            if current_metric:
-                match = re.match(r"# TYPE (\S+) (\S+)", line)
-                if match and match.group(1) == current_metric:
-                    metrics[current_metric]["type"] = match.group(2)
-        elif current_metric and not line.startswith("#"):
-            # Extract labels and values
-            match = re.match(r"(\S+)\{(.+)\} (.+)", line)
-            if match:
-                metric_name = match.group(1)
-                if metric_name == current_metric:
-                    labels = match.group(2)
-                    label_keys = [item.split("=")[0] for item in labels.split(",")]
-                    metrics[current_metric]["labels"] = label_keys
+            m = re.match(r"# TYPE\s+(\S+)\s+(\S+)", line)
+            if m:
+                name, t = m.group(1), m.group(2)
+                meta.setdefault(name, {})['type'] = t
+
+    # Collect label keys from every sample line
+    label_map = {}  # name → set(label_keys)
+    for line in lines:
+        if line.startswith("#"):
+            continue
+
+        # try labelled sample: metric{a="1",b="2"} 42
+        m_lbl = re.match(r"^(\S+)\{(.+?)\}\s+(.+)", line)
+        if m_lbl:
+            name, labels_str = m_lbl.group(1), m_lbl.group(2)
+            keys = [kv.split("=", 1)[0] for kv in labels_str.split(",")]
+        else:
+            # fallback to unlabelled: metric 42
+            m_unlbl = re.match(r"^(\S+)\s+(.+)", line)
+            if m_unlbl:
+                name, keys = m_unlbl.group(1), []
+            else:
+                continue
+
+        label_map.setdefault(name, set()).update(keys)
+
+    # Merge into final structure, warn on missing pieces
+    metrics = {}
+    all_names = set(meta) | set(label_map)
+    for name in sorted(all_names):
+        desc = meta.get(name, {}).get("description")
+        t    = meta.get(name, {}).get("type")
+        labels = sorted(label_map.get(name, []))
+
+        if desc is None:
+            logging.warning(f"Metric '{name}' has samples but no # HELP.")
+            desc = ""
+        if t is None:
+            logging.warning(f"Metric '{name}' has no # TYPE entry.")
+
+        metrics[name] = {
+            "description": desc,
+            "type": t,
+            "labels": labels
+        }
 
     logging.info(f"Extracted {len(metrics)} metrics.")
-
-    # Log metrics without a type
-    for metric, data in metrics.items():
-        if data["type"] is None:
-            logging.warning(f"Metric '{metric}' does not have an associated # TYPE entry.")
     return metrics
 
 def output_asciidoc(metrics, adoc_file):

@@ -5,8 +5,6 @@ from copy import deepcopy
 import itertools as it
 import re
 
-# Temp
-import sys
 
 HEADER_QUERY = """
 (field_declaration
@@ -56,20 +54,17 @@ def parse_cpp_header(treesitter_parser, cpp_language, source_code):
     current_declaration = None
     current_type = None
 
-    for i in captures:
-        node = i[0]
-        if node.type == "field_identifier":
+    for node, label in captures:
+        if label == "name":
             property_name = node.text.decode("utf-8")
-
             properties[property_name]["name_in_file"] = property_name
             properties[property_name]["type"] = current_type
             properties[property_name]["declaration"] = current_declaration
-
-            current_declaration = None
             current_type = None
-        elif node.type == "template_type":
+            current_declaration = None
+        elif label == "type":
             current_type = node.text.decode("utf-8")
-        elif node.type == "field_declaration":
+        elif label == "declaration":
             current_declaration = node.text.decode("utf-8")
 
     return properties
