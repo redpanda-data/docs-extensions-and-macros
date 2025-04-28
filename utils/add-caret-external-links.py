@@ -25,9 +25,15 @@ def process_file(file_path):
         updated_lines.append(line)
 
     # Write the updated content back to the file
-    with open(file_path, 'w', encoding='utf-8') as file:
-        file.write('\n'.join(updated_lines))
-
+-    with open(file_path, 'w', encoding='utf-8') as file:
+-        file.write('\n'.join(updated_lines))
++    try:
++        with open(file_path, 'w', encoding='utf-8') as file:
++            file.write('\n'.join(updated_lines))
++    except Exception as e:
++        print(f"Error writing to {file_path}: {e}")
++        return False
++    return True
 # Get the directory of the current script
 script_directory = os.path.dirname(os.path.abspath(__file__))
 
@@ -35,13 +41,14 @@ script_directory = os.path.dirname(os.path.abspath(__file__))
 directory_path = os.path.join(script_directory, '..', 'modules')
 
 # List of excluded file paths (relative paths)
+# List of excluded file paths (relative paths)
 exclusion_list = [
-    'reference\\pages\\redpanda-operator\\crd.adoc',
-    'reference\\pages\\k-console-helm-spec.adoc',
-    'reference\\pages\\crd.adoc',
-    'reference\\pages\\k-redpanda-helm-spec.adoc',
-    'reference\\partials\\bundle-contents-k8s.adoc',
-    'reference\\partials\\bundle-contents-linux.adoc'
+    os.path.join('reference', 'pages', 'redpanda-operator', 'crd.adoc'),
+    os.path.join('reference', 'pages', 'k-console-helm-spec.adoc'),
+    os.path.join('reference', 'pages', 'crd.adoc'),
+    os.path.join('reference', 'pages', 'k-redpanda-helm-spec.adoc'),
+    os.path.join('reference', 'partials', 'bundle-contents-k8s.adoc'),
+    os.path.join('reference', 'partials', 'bundle-contents-linux.adoc'),
 ]
 
 # Function to process all .adoc files in a directory

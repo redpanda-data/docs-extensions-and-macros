@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -euo pipefail
 echo "Please enter the name of the first branch:"
 read branch1
 echo "Please enter the name of the second branch:"

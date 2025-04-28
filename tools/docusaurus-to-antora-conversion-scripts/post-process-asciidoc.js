@@ -2,19 +2,31 @@ const fs = require('fs');
 const path = require('path');
 
 function processFile(file) {
-  const content = fs.readFileSync(file, 'utf-8');
+  let content;
+  try {
+    content = fs.readFileSync(file, 'utf-8');
+  } catch (err) {
+    console.error(`Error reading file ${file}: ${err.message}`);
+    return;
+  }
 
   const newContent = content.replace(
-    /link:(\.\.\/)+([\w/-]+)(#?[\w/-]*)(\[.+?\])/g,
+    /link:(\.\.\/)+([\w/.-]+)(#?[\w/.-]*)(\[.+?\])/g,
     (match, dots, linkPath, anchor, linkText) => {
       const depth = dots.match(/\.\.\//g).length;
       const pathParts = linkPath.split('/');
-      const newPath = pathParts.slice(0, pathParts.length - depth).join(':');
+      // Ensure we don't go beyond the available path parts
+      const startIndex = Math.max(0, pathParts.length - depth);
+      const newPath = pathParts.slice(0, startIndex).join(':');
       return `xref:${newPath}:${pathParts[pathParts.length - 1]}.adoc${anchor || ''}${linkText}`;
     }
   );
 
-  fs.writeFileSync(file, newContent, 'utf-8');
+  try {
+    fs.writeFileSync(file, newContent, 'utf-8');
+  } catch (err) {
+    console.error(`Error writing file ${file}: ${err.message}`);
+  }
 }
 
 function processDirectory(directory) {

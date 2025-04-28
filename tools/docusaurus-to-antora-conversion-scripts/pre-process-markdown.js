@@ -21,17 +21,17 @@ function markdownToAsciidoc(markdown) {
   const tempMarkdownPath = path.join(os.tmpdir(), 'temp_markdown.md');
   fs.writeFileSync(tempMarkdownPath, markdown, 'utf-8');
 
+  let result;
   try {
     const command = `kramdoc -o - "${tempMarkdownPath}"`;
-    const result = execSync(command, { encoding: 'utf-8' });
-
-    fs.unlinkSync(tempMarkdownPath);
-    return result;
+    result = execSync(command, { encoding: 'utf-8' });
   } catch (err) {
-    fs.unlinkSync(tempMarkdownPath);
     console.error(`Error converting Markdown to AsciiDoc: ${err.message}`);
-    return markdown;
+    result = markdown;
+  } finally {
+    fs.unlinkSync(tempMarkdownPath);
   }
+  return result;
 }
 
 function processTabs(match) {

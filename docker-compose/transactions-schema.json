@@ -14,8 +14,8 @@
     },
     "price": {
       "type": "string",
-      "pattern": "^XXX \\d+\\.\\d{6}$",
-      "description": "A string representing the price of the product, including a currency code followed by the amount."
+      "pattern": "^[A-Z]{3} \\d+(?:\\.\\d{2})?$",
+      "description": "A string representing the price of the product, including a currency code (ISO 4217) and an amount with two decimal places by default."
     },
     "product_url": {
       "type": "string",
