@@ -6,6 +6,12 @@ if ! command -v pandoc &> /dev/null; then
   exit 1
 fi
 
+if ! command -v kramdoc &> /dev/null; then
+  echo "Error: Kramdoc is not installed."
+  echo "Please install kramdoc using: gem install kramdown-asciidoc"
+  exit 1
+fi
+
 SOURCE_DIRECTORY="$1"
 
 if [ -z "$SOURCE_DIRECTORY" ]; then
@@ -32,7 +38,7 @@ function remove_leading_tabs() {
 
 function preprocess_markdown() {
   local markdown_file="$1"
-  node pre-process-markdown.js "$markdown_file"
+  node "$(dirname "$0")/pre-process-markdown.js" "$markdown_file"
 }
 
 # Convert a Markdown file to AsciiDoc and add the description

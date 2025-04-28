@@ -92,11 +92,12 @@ function verifyPropertyDependencies() {
 
 function verifyMetricsDependencies() {
   checkPython();
-  checkCommandExists('curl');
-  checkCommandExists('tar');
+  if (!checkCommandExists('curl') || !checkCommandExists('tar')) {
+    // `checkCommandExists` already prints a helpful message.
+    process.exit(1);
+  }
   checkDocker();
 }
-
 // --------------------------------------------------------------------
 // Main CLI Definition
 // --------------------------------------------------------------------
