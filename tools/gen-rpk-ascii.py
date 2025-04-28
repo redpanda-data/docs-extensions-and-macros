@@ -55,7 +55,7 @@ class Flag:
         self.explanation = explanation
 
 
-# Execute a subprocess inside a Linux machine. If the command is multi level (ex. rpk acl create) is generates a bigger list
+# Execute a subprocess inside a Linux machine. If the command is multi level (such as rpk acl create) it generates a bigger list
 def execute_process(commands):
     if len(commands) > 0:
         commands = commands[0].split(" ")
@@ -87,7 +87,7 @@ def get_explanation(process_line):
     return explanation_line
 
 
-# Get the usage of the command. If it's initial command, look for available commands. If it's a final a command, then look for flags. Finally if neither are present, extract the usage. Example:
+# Get the usage of the command. If it's an initial command, look for available commands. If it's a final command, then look for flags. Finally if neither are present, extract the usage. Example:
 """ Usage:
   rpk [command]
 
@@ -259,33 +259,33 @@ def extract_all_flag(line):
             explanation = explanation[explanation.find(" ") :]
 
         if re.search(r"\bstring\b", explanation):
-            type = "string"
+            flag_type = "string"
             explanation = re.sub(r"\bstring\b", "", explanation)
         elif re.search(r"\bstrings\b", flag):
-            type = "strings"
+            flag_type = "strings"
             explanation = re.sub(r"\bstrings\b", "", explanation)
         elif re.search(r"\bstringArray\b", flag):
-            type = "stringArray"
+            flag_type = "stringArray"
             explanation = re.sub(r"\bstringArray\b", "", explanation)
         elif re.search(r"\bint\b", flag):
-            type = "int"
+            flag_type = "int"
             explanation = re.sub(r"\bint\b", "", explanation)
         elif re.search(r"\bint16\b", flag):
-            type = "int16"
+            flag_type = "int16"
             explanation = re.sub(r"\bint16\b", "", explanation)
         elif re.search(r"\bint32\b", flag):
-            type = "int32"
+            flag_type = "int32"
             explanation = re.sub(r"\bint32\b", "", explanation)
         elif re.search(r"\bint32Slice\b", flag):
-            type = "int32"
+            flag_type = "int32"
             explanation = re.sub(r"\bint32Array\b", "", explanation)
         elif re.search(r"\bduration\b", flag):
-            type = "duration"
+            flag_type = "duration"
             explanation = re.sub(r"\bduration\b", "", explanation)
         else:
-            type = "-"
+            flag_type = "-"
         explanation = assert_period(explanation.strip())
-        flag_set.append(Flag(value, type, explanation))
+        flag_set.append(Flag(value, flag_type, explanation))
     return flag_set
 
 # Build dictionary of commands

@@ -196,8 +196,12 @@ def main():
     definitions = None
 
     if options.definitions:
-        with open(options.definitions) as json_file:
-            definitions = json.load(json_file)
+        try:
+            with open(options.definitions) as json_file:
+                definitions = json.load(json_file)
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to parse definitions file: {e}")
+            sys.exit(1)
 
     treesitter_dir = os.path.join(os.getcwd(), "tree-sitter/tree-sitter-cpp")
     destination_path = os.path.join(treesitter_dir, "tree-sitter-cpp.so")
@@ -221,11 +225,14 @@ def main():
     json_output = json.dumps(properties_and_definitions, indent=4, sort_keys=True)
 
     if options.output:
-        with open(options.output, "w+") as json_file:
-            json_file.write(json_output)
+        try:
+            with open(options.output, "w+") as json_file:
+                json_file.write(json_output)
+        except IOError as e:
+            logging.error(f"Failed to write output file: {e}")
+            sys.exit(1)
     else:
         print(json_output)
-
 
 if __name__ == "__main__":
     main()

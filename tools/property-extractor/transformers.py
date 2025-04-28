@@ -218,16 +218,16 @@ class SimpleDefaultValuesTransformer:
             pass
         elif isinstance(default, PropertyBag):
             property["default"] = default
-        elif re.search("^-?[0-9][0-9']*$", default):  # integers
-            property["default"] = int(default.replace("[^0-9-]", ""))
-        elif re.search(r"^-?[0-9]+(\.[0-9]+)$", default):  # floats
-            property["default"] = float(default.replace("[^0-9]", ""))
+        elif re.search(r"^-?[0-9][0-9']*$", default):  # integers (allow digit group separators)
+           property["default"] = int(re.sub(r"[^0-9-]", "", default))
+        elif re.search(r"^-?[0-9]+(\.[0-9]+)?$", default):  # floats
+           property["default"] = float(re.sub(r"[^0-9.\-]", "", default))
         elif re.search("^(true|false)$", default):  # booleans
             property["default"] = True if default == "true" else False
-        elif re.search("^{[^:]+$", default):  # string lists
+        elif re.search(r"^\{[^:]+\}$", default):  # string lists
             property["default"] = [
                 normalize_string(s)
-                for s in re.sub("{([^}]+)}", "\\1", default).split(",")
+                for s in re.sub(r"{([^}]+)}", r"\1", default).split(",")
             ]
         else:
             # File sizes.
@@ -310,6 +310,7 @@ class ExperimentalTransformer:
         return info.get("type") is not None and info["type"].startswith(("development_", "hidden_when_default_"))
     def parse(self, property, info, file_pair):
         property["is_experimental_property"] = True
+        return property
 
 
 class AliasTransformer:
@@ -364,7 +365,7 @@ class MetaParamTransformer:
         Transform into a structured dictionary.
         """
         if 'params' not in info or info['params'] is None:
-            return
+            return property
 
         iterable_params = info['params']
         for param in iterable_params:

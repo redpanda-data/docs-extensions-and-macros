@@ -48,8 +48,8 @@ export REDPANDA_CONSOLE_DOCKER_REPO="$CONSOLE_REPO"
 
 # Wait for it to settle
 if [[ "$MODE" == "metrics" ]]; then
-  echo "Waiting 120 seconds for metrics to be available…"
-  sleep 120
+  echo "Waiting 300 seconds for metrics to be available…"
+  sleep 300
 else
   echo "Waiting 30 seconds for cluster to be ready…"
   sleep 30

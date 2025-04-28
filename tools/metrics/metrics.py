@@ -100,24 +100,23 @@ def parse_metrics(metrics_text):
     metrics = {}
     all_names = set(meta) | set(label_map)
     for name in sorted(all_names):
-        for name in sorted(all_names):
-            desc = meta.get(name, {}).get("description")
-            mtype = meta.get(name, {}).get("type")
-            unit = meta.get(name, {}).get("unit")
-            labels = sorted(label_map.get(name, []))
+        desc = meta.get(name, {}).get("description")
+        mtype = meta.get(name, {}).get("type")
+        unit = meta.get(name, {}).get("unit")
+        labels = sorted(label_map.get(name, []))
 
-            if desc is None:
-                logging.warning(f"Metric '{name}' has samples but no # HELP.")
-                desc = ""
-            if mtype is None:
-                logging.warning(f"Metric '{name}' has no # TYPE entry.")
+        if desc is None:
+            logging.warning(f"Metric '{name}' has samples but no # HELP.")
+            desc = ""
+        if mtype is None:
+            logging.warning(f"Metric '{name}' has no # TYPE entry.")
 
-            metrics[name] = {
-                "description": desc,
-                "type": mtype,
-                "unit": unit,
-                "labels": labels
-            }
+        metrics[name] = {
+            "description": desc,
+            "type": mtype,
+            "unit": unit,
+            "labels": labels
+        }
 
     logging.info(f"Extracted {len(metrics)} metrics.")
     return metrics

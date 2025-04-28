@@ -265,7 +265,8 @@ services:
       - -X user=superuser
       - -X pass=secretpassword
       - -X brokers=redpanda-0:9092
-      - --topic-config=redpanda.iceberg.mode=key_value
+      - --topic-config
+      - redpanda.iceberg.mode=key_value
     image: docker.redpanda.com/redpandadata/${REDPANDA_DOCKER_REPO:-redpanda}:${REDPANDA_VERSION:-latest}
     networks:
       - redpanda_network
@@ -314,7 +315,7 @@ services:
     networks:
       - redpanda_network
     depends_on:
-    - deploytransform
+      - deploytransform
   ####################
   # rpk container to deploy the pre-built data transform #
   # See https://docs.redpanda.com/current/develop/data-transforms/deploy/

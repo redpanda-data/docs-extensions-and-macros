@@ -36,6 +36,8 @@ cloud_storage_api_endpoint: minio
 cloud_storage_api_endpoint_port: 9000
 cloud_storage_disable_tls: true
 cloud_storage_bucket: redpanda
+cloud_storage_enable_remote_write: true
+cloud_storage_enable_remote_read: true
 # Forces segments to be uploaded to Tiered Storage faster for the purposes of the quickstart
 # https://docs.redpanda.com/current/reference/properties/object-storage-properties/#cloud_storage_segment_max_upload_interval_sec
 cloud_storage_segment_max_upload_interval_sec: 60
