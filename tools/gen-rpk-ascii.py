@@ -61,8 +61,18 @@ def execute_process(commands):
         commands = commands[0].split(" ")
     commands_to_execute = basic_commands_docker + rpk_basic_command + commands
     commands_to_execute.append("-h")
-    process = subprocess.run(commands_to_execute, stdout=subprocess.PIPE)
-    return process.stdout.decode("utf-8")
+    try:
+        process = subprocess.run(
+            commands_to_execute,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        return process.stdout.decode("utf-8")
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing command: {' '.join(commands_to_execute)}")
+        print(f"Error message: {e.stderr.decode('utf-8')}")
+        sys.exit(1)
 
 
 # Get the explanation written before the usage. Example:
@@ -137,10 +147,9 @@ def get_commands(process_line):
         ]
     else:
         full_command = process_line[process_line.find("Available Commands:") :]
-
     commands = full_command[: full_command.find("Flags:")]
-    return commands.lstrip("Available Commands:")
-
+    prefix = "Available Commands:"
+    return commands[len(prefix):] if commands.startswith(prefix) else commands
 
 # Extract lines for the flags from a command. Example:
 """ Available Commands:

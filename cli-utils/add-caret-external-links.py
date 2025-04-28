@@ -59,8 +59,10 @@ def process_directory(directory_path):
                 file_path = os.path.join(root, file)
                 relative_file_path = os.path.relpath(file_path, directory_path)
                 if relative_file_path not in exclusion_list:
-                    process_file(file_path)
-                    print(f"Processed: {file_path}")
+                    if process_file(file_path):
+                        print(f"Processed: {file_path}")
+                    else:
+                        print(f"Failed to process: {file_path}")
 
 # Call the function with the constructed directory path
 process_directory(directory_path)

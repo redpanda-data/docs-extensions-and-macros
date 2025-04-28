@@ -20,7 +20,7 @@ For more info, see: ${helpURL}`);
 
 function checkCommandExists(command) {
   try {
-    execSync(`${command} --version`, { stdio: 'ignore' });
+    execSync(`which ${command}`, { stdio: 'ignore' });
     return true;
   } catch (error) {
     console.error(`Error: \`${command}\` is required but not found. Please install \`${command}\` and try again.`);
@@ -203,6 +203,9 @@ automation
     if (result.error) {
       console.error('Failed to run `make build`:', result.error.message);
       process.exit(1);
+    } else if (result.status !== 0) {
+      console.error(`make build exited with status code ${result.status}`);
+      process.exit(result.status);
     }
     process.exit(result.status);
     });

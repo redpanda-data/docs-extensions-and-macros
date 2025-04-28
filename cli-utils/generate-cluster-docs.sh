@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Check if Docker is installed and running
+if ! command -v docker &> /dev/null; then
+  echo "❌ Docker is not installed or not in PATH. Please install Docker to continue."
+  exit 1
+fi
+
+# Check if Docker daemon is running
+if ! docker info &> /dev/null; then
+  echo "❌ Docker daemon is not running. Please start Docker to continue."
+  exit 1
+fi
+
 # Remember where we started so we can always come back
 ORIGINAL_PWD="$(pwd)"
 

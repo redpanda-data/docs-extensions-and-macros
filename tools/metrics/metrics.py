@@ -36,18 +36,20 @@ def fetch_metrics(url):
 def parse_metrics(metrics_text):
     """
     Parse Prometheus exposition text into a dict:
-      metric_name → { description, type, labels: [<label_keys>] }
+      metric_name → { description, type, unit, labels: [<label_keys>] }
 
     - Strips empty `{}` on unlabelled samples
     - Propagates HELP/TYPE from base metrics onto _bucket, _count, _sum
     - Works regardless of # HELP / # TYPE order
+    - Captures # UNIT metadata if present
     """
     import re, logging
 
     lines = metrics_text.splitlines()
 
     # Gather HELP/TYPE metadata in any order
-    meta = {}  # name → { 'description': str, 'type': str }
+    # Gather HELP/TYPE metadata in any order
+    meta = {}  # name → { 'description': str, 'type': str, 'unit': str }
     for line in lines:
         if line.startswith("# HELP"):
             m = re.match(r"# HELP\s+(\S+)\s+(.+)", line)
@@ -59,7 +61,11 @@ def parse_metrics(metrics_text):
             if m:
                 name, mtype = m.groups()
                 meta.setdefault(name, {})['type'] = mtype
-
+        elif line.startswith("# UNIT"):
+            m = re.match(r"# UNIT\s+(\S+)\s+(.+)", line)
+            if m:
+                name, unit = m.groups()
+                meta.setdefault(name, {})['unit'] = unit
     # Collect label keys from _every_ sample line
     label_map = {}  # name → set(label_keys)
     for line in lines:
@@ -94,21 +100,24 @@ def parse_metrics(metrics_text):
     metrics = {}
     all_names = set(meta) | set(label_map)
     for name in sorted(all_names):
-        desc = meta.get(name, {}).get("description")
-        mtype = meta.get(name, {}).get("type")
-        labels = sorted(label_map.get(name, []))
+        for name in sorted(all_names):
+            desc = meta.get(name, {}).get("description")
+            mtype = meta.get(name, {}).get("type")
+            unit = meta.get(name, {}).get("unit")
+            labels = sorted(label_map.get(name, []))
 
-        if desc is None:
-            logging.warning(f"Metric '{name}' has samples but no # HELP.")
-            desc = ""
-        if mtype is None:
-            logging.warning(f"Metric '{name}' has no # TYPE entry.")
+            if desc is None:
+                logging.warning(f"Metric '{name}' has samples but no # HELP.")
+                desc = ""
+            if mtype is None:
+                logging.warning(f"Metric '{name}' has no # TYPE entry.")
 
-        metrics[name] = {
-            "description": desc,
-            "type": mtype,
-            "labels": labels
-        }
+            metrics[name] = {
+                "description": desc,
+                "type": mtype,
+                "unit": unit,
+                "labels": labels
+            }
 
     logging.info(f"Extracted {len(metrics)} metrics.")
     return metrics
@@ -120,6 +129,8 @@ def output_asciidoc(metrics, adoc_file):
             f.write(f"=== {name}\n\n")
             f.write(f"{data['description']}\n\n")
             f.write(f"*Type*: {data['type']}")
+            if data.get("unit"):
+                f.write(f"\n\n*Unit*: {data['unit']}")
             if data["labels"]:
                 f.write("\n\n*Labels*:\n")
                 for label in data["labels"]:

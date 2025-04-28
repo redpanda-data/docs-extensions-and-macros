@@ -20,7 +20,7 @@ if [ -z "$SOURCE_DIRECTORY" ]; then
   exit 1
 fi
 
-OUTPUT_DIRECTORY="../modules"
+OUTPUT_DIRECTORY="$(cd "$(dirname "$0")/../modules" && pwd)"
 
 # Create the output and partials directories if they don't exist
 mkdir -p "$OUTPUT_DIRECTORY"
@@ -61,11 +61,19 @@ function convert_markdown_to_asciidoc() {
 
   # Remove the head element from the source Markdown file and save it
   local cleaned_content="$(echo "$content" | sed '/<head>/,/<\/head>/d')"
-  local cleaned_file="$(mktemp)"
+  # Remove the head element from the source Markdown file and save it
+  local cleaned_content
+  cleaned_content=$(echo "$content" | sed '/<head>/,/<\/head>/d')
+  local cleaned_file
+  cleaned_file=$(mktemp)
   echo "$cleaned_content" > "$cleaned_file"
 
   # Convert the cleaned Markdown file to AsciiDoc using Kramdoc
-  local asciidoc_content="$(kramdoc -o - "$cleaned_file")"
+  local asciidoc_content
+  asciidoc_content=$(kramdoc -o - "$cleaned_file")
+
+  # Clean up temporary file
+  rm -f "$cleaned_file"
 
   # Insert the description attribute on the second line of the AsciiDoc content
   asciidoc_content="$(echo "$asciidoc_content" | awk -v desc="$description" 'NR==1{print; print ":description: " desc ""; next} 1')"
@@ -77,11 +85,30 @@ function convert_markdown_to_asciidoc() {
 }
 
 # Convert all Markdown files in the source directory
+# Initialize counters
+success_count=0
+failure_count=0
+
 while IFS= read -r -d '' markdown_file; do
-  output_file="$(echo "$markdown_file" | sed "s|$SOURCE_DIRECTORY|$OUTPUT_DIRECTORY|" | sed 's|\.mdx$|.adoc|' | sed 's|\(.*\)/\(.*\)|\1/pages/\2|')"
-  convert_markdown_to_asciidoc "$markdown_file" "$output_file"
-  # Run the Node.js script to process the output file
-  node post-process-asciidoc.js "$output_file"
+  output_file="$(echo "$markdown_file" \
+    | sed "s|$SOURCE_DIRECTORY|$OUTPUT_DIRECTORY|" \
+    | sed 's|\.mdx$|.adoc|' \
+    | sed 's|\(.*\)/\(.*\)|\1/pages/\2|')"
+
+  if convert_markdown_to_asciidoc "$markdown_file" "$output_file"; then
+    # Run the Node.js script to process the output file
+    if node "$(dirname "$0")/post-process-asciidoc.js" "$output_file"; then
+      success_count=$((success_count + 1))
+    else
+      echo "Error: Failed to post-process ${output_file}"
+      failure_count=$((failure_count + 1))
+    fi
+  else
+    echo "Error: Failed to convert ${markdown_file}"
+    failure_count=$((failure_count + 1))
+  fi
 done < <(find "$SOURCE_DIRECTORY" -name "*.mdx" -print0)
+
+echo "Conversion complete. Success: ${success_count}, Failures: ${failure_count}"
 
 echo "All Markdown files converted to AsciiDoc."
