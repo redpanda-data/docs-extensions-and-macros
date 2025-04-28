@@ -62,6 +62,22 @@ class NeedsRestartTransformer:
             )
         property["needs_restart"] = needs_restart != "no"  # True by default, unless we find "no"
 
+class GetsRestoredTransformer:
+    def accepts(self, info, file_pair):
+        # only run if the third param blob exists and has our flag
+        return (
+            len(info.get("params", [])) > 2
+            and isinstance(info["params"][2].get("value"), dict)
+            and "gets_restored" in info["params"][2]["value"]
+        )
+
+    def parse(self, property, info, file_pair):
+        raw = info["params"][2]["value"]["gets_restored"]
+        # strip off e.g. "gets_restored::no" → "no"
+        flag = re.sub(r"^.*::", "", raw)
+        # store as boolean
+        property["gets_restored"] = (flag != "no")
+
 
 class VisibilityTransformer:
     def accepts(self, info, file_pair):

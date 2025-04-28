@@ -94,6 +94,7 @@ def transform_files_with_properties(files_with_properties):
         IsNullableTransformer(),
         IsArrayTransformer(type_transformer),
         NeedsRestartTransformer(),
+        GetsRestoredTransformer(),
         VisibilityTransformer(),
         DeprecatedTransformer(),
         IsSecretTransformer(),
@@ -132,7 +133,7 @@ def merge_properties_and_definitions(properties, definitions):
         # guard against missing "type"
         prop_type = property.get("type")
         if prop_type and prop_type in definitions:
-            properties[name]["type"] = f"#/definitions/{prop_type}"
+            properties[name]["type"] = "#/definitions/{prop_type}"
         elif (
             prop_type == "array"
             and property.get("items", {}).get("type") in definitions

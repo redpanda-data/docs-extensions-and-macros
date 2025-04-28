@@ -251,6 +251,10 @@ def generate_property_doc(key, value):
         restart = "Yes" if value.get("needs_restart", False) else "No"
         lines.append(f"*Requires restart:* {restart}\n\n")
 
+    if "gets_restored" in value:
+        restored = "Yes" if value.get("gets_restored", False) else "No"
+        lines.append(f"*Gets restored during cluster restore:* {restored}\n\n")
+
     visibility = value.get("visibility") or "user"
     lines.append(f"*Visibility:* `{visibility}`\n\n")
 
