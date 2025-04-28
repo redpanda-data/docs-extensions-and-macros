@@ -307,8 +307,7 @@ class FriendlyDefaultTransformer:
 
 class ExperimentalTransformer:
     def accepts(self, info, file_pair):
-        if info.get("type") is not None:
-            return info["type"].startswith(("development_", "hidden_when_default_"))
+        return info.get("type") is not None and info["type"].startswith(("development_", "hidden_when_default_"))
     def parse(self, property, info, file_pair):
         property["is_experimental_property"] = True
 
@@ -344,6 +343,7 @@ class EnterpriseTransformer:
             property['enterprise_value'] = enterpriseValue
             property['is_enterprise'] = True
             del info['params'][0]
+            return property
 
 
 class MetaParamTransformer:

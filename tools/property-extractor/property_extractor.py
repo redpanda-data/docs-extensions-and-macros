@@ -85,6 +85,7 @@ def get_files_with_properties(file_pairs, treesitter_parser, cpp_language):
 
 
 def transform_files_with_properties(files_with_properties):
+    type_transformer = TypeTransformer()
     transformers = [
         TypeTransformer(),
         EnterpriseTransformer(), ## this must be the first, as it modifies current data
