@@ -23,10 +23,8 @@ make --version
 +
 [,bash]
 ----
-git clone https://github.com/redpanda-data/docs.git
-cd docs
-git checkout autogen
-git submodule update --init --recursive
+git clone https://github.com/redpanda-data/docs-extensions-and-macros.git
+cd docs-extensions-and-macros
 ----
 
 == Generate properties

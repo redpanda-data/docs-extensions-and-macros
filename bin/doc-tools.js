@@ -124,7 +124,6 @@ programCli
   .option('--from-antora', 'Read prerelease flag from local antora.yml')
   .action(async (options) => {
     try {
-      // call the module you created directly
       await require('../tools/get-redpanda-version.js')(options);
     } catch (err) {
       console.error(err);
@@ -166,7 +165,6 @@ const commonOptions = {
 automation
   .command('metrics-docs')
   .description('Extract Redpanda metrics and generate JSON/AsciiDoc docs')
-  .option('-d, --debug', 'Enable debug logging (show all stdout)')
   .option('--tag <tag>', 'Redpanda tag (default: latest)', commonOptions.tag)
   .option('--docker-repo <repo>', 'Redpanda Docker repository (default: redpanda or redpanda-unstable when --tag is an RC version)', commonOptions.dockerRepo)
   .option('--console-tag <tag>', 'Redpanda Console tag (default: latest)', commonOptions.consoleTag)
@@ -192,7 +190,6 @@ automation
 automation
   .command('property-docs')
   .description('Extract properties from Redpanda source')
-  .option('-d, --debug', 'Enable debug logging (show all stdout)')
   .option('--tag <tag>', 'Git tag or branch of Redpanda to extract from (default: dev)', 'dev')
   .action((options) => {
     verifyPropertyDependencies();
