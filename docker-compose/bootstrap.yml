@@ -48,9 +48,18 @@ enable_consumer_group_metrics:
   - "group"
   - "partition"
   - "consumer_lag"
-# Lower the interval for the quickstart
+# Lower the interval for the autogeneration of consumer group metrics.
 # https://docs.redpanda.com/current/reference/properties/cluster-properties/#consumer_group_lag_collection_interval_sec
 consumer_group_lag_collection_interval_sec: 60
 # Enable Redpanda to collect host metrics.
 # https://docs.redpanda.com/current/reference/properties/cluster-properties/#enable_host_metrics
 enable_host_metrics: true
+# Enable for Iceberg metrics
+iceberg_enabled: true
+# Set up Iceberg REST catalog configuration
+iceberg_catalog_type: rest
+iceberg_rest_catalog_endpoint: http://catalog:8181
+# Credentials are required, but the catalog ignores them
+iceberg_rest_catalog_client_id: catalog
+iceberg_rest_catalog_client_secret: catalog123
+iceberg_catalog_commit_interval_ms: 5000

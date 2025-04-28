@@ -35,67 +35,78 @@ def fetch_metrics(url):
 
 def parse_metrics(metrics_text):
     """
-    Parse Prometheus exposition text into a structured dict of:
+    Parse Prometheus exposition text into a dict:
       metric_name → { description, type, labels: [<label_keys>] }
-    Robust against any ordering of # HELP/# TYPE and handles samples
-    both with and without labels.
-    """
-    import re
-    import logging
 
-    # Gather HELP/type metadata
-    meta = {}      # name → { 'description':…, 'type':… }
+    - Strips empty `{}` on unlabelled samples
+    - Propagates HELP/TYPE from base metrics onto _bucket, _count, _sum
+    - Works regardless of # HELP / # TYPE order
+    """
+    import re, logging
+
     lines = metrics_text.splitlines()
+
+    # Gather HELP/TYPE metadata in any order
+    meta = {}  # name → { 'description': str, 'type': str }
     for line in lines:
         if line.startswith("# HELP"):
             m = re.match(r"# HELP\s+(\S+)\s+(.+)", line)
             if m:
-                name, desc = m.group(1), m.group(2)
+                name, desc = m.groups()
                 meta.setdefault(name, {})['description'] = desc
         elif line.startswith("# TYPE"):
             m = re.match(r"# TYPE\s+(\S+)\s+(\S+)", line)
             if m:
-                name, t = m.group(1), m.group(2)
-                meta.setdefault(name, {})['type'] = t
+                name, mtype = m.groups()
+                meta.setdefault(name, {})['type'] = mtype
 
-    # Collect label keys from every sample line
+    # Collect label keys from _every_ sample line
     label_map = {}  # name → set(label_keys)
     for line in lines:
         if line.startswith("#"):
             continue
 
-        # try labelled sample: metric{a="1",b="2"} 42
+        # labelled: foo{a="1",b="2"}  42
         m_lbl = re.match(r"^(\S+)\{(.+?)\}\s+(.+)", line)
         if m_lbl:
-            name, labels_str = m_lbl.group(1), m_lbl.group(2)
-            keys = [kv.split("=", 1)[0] for kv in labels_str.split(",")]
+            name, labels_str, _ = m_lbl.groups()
+            keys = [kv.split("=",1)[0] for kv in labels_str.split(",")]
         else:
-            # fallback to unlabelled: metric 42
-            m_unlbl = re.match(r"^(\S+)\s+(.+)", line)
-            if m_unlbl:
-                name, keys = m_unlbl.group(1), []
-            else:
+            # unlabelled, maybe with stray {}: foo{} 42  or just foo 42
+            m_unlbl = re.match(r"^(\S+?)(?:\{\})?\s+(.+)", line)
+            if not m_unlbl:
                 continue
+            name, _ = m_unlbl.groups()
+            keys = []
 
         label_map.setdefault(name, set()).update(keys)
 
-    # Merge into final structure, warn on missing pieces
+    # Propagate HELP/TYPE from base histograms/summaries
+    for series in list(label_map):
+        for suffix in ("_bucket", "_count", "_sum"):
+            if series.endswith(suffix):
+                base = series[:-len(suffix)]
+                if base in meta:
+                    meta.setdefault(series, {}).update(meta[base])
+                break
+
+    # Merge into final metrics dict, with warnings
     metrics = {}
     all_names = set(meta) | set(label_map)
     for name in sorted(all_names):
         desc = meta.get(name, {}).get("description")
-        t    = meta.get(name, {}).get("type")
+        mtype = meta.get(name, {}).get("type")
         labels = sorted(label_map.get(name, []))
 
         if desc is None:
             logging.warning(f"Metric '{name}' has samples but no # HELP.")
             desc = ""
-        if t is None:
+        if mtype is None:
             logging.warning(f"Metric '{name}' has no # TYPE entry.")
 
         metrics[name] = {
             "description": desc,
-            "type": t,
+            "type": mtype,
             "labels": labels
         }
 
