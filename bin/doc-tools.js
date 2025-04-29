@@ -233,6 +233,32 @@ automation
     process.exit(result.status);
   });
 
+programCli
+.command('fetch')
+.description('Fetch a file or directory from GitHub and save locally')
+.requiredOption('-o, --owner <owner>', 'GitHub repo owner or org')
+.requiredOption('-r, --repo <repo>', 'GitHub repo name')
+.requiredOption('-p, --remote-path <path>', 'Path in the repo to fetch')
+.requiredOption('-d, --save-dir <dir>', 'Local directory to save into')
+.option('-f, --filename <name>', 'Custom filename to save as')
+.action(async (options) => {
+  try {
+    const fetchFromGithub = await require('../tools/fetch-from-github.js');
+    // options.owner, options.repo, options.remotePath, options.saveDir, options.filename
+    await fetchFromGithub(
+      options.owner,
+      options.repo,
+      options.remotePath,
+      options.saveDir,
+      options.filename
+    );
+  } catch (err) {
+    console.error('❌', err.message);
+    process.exit(1);
+  }
+});
+
+
 // Attach the automation group to the main program.
 programCli.addCommand(automation);
 

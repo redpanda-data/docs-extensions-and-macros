@@ -8,3 +8,4 @@ venv/
 __pycache__/
 gen/
 tree-sitter/
+test/
