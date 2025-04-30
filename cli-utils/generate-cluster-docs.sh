@@ -58,7 +58,7 @@ fi
 # Go back to where we were
 cd "$ORIGINAL_PWD"
 
-# Ensure Python venv (always create under cli-utilsvenv)
+# Ensure Python venv (always create under cli-utils/venv)
 "$SCRIPT_DIR"/python-venv.sh \
   "$SCRIPT_DIR"/venv \
   "$SCRIPT_DIR"/../tools/metrics/requirements.txt
@@ -66,11 +66,11 @@ cd "$ORIGINAL_PWD"
 if [[ "$MODE" == "metrics" ]]; then
   "$SCRIPT_DIR"/venv/bin/python \
     "$SCRIPT_DIR"/../tools/metrics/metrics.py \
-    "$MAJOR_MINOR"
+    "$TAG"
 else
   "$SCRIPT_DIR"/venv/bin/python \
     "$SCRIPT_DIR"/../tools/gen-rpk-ascii.py \
-    "$MAJOR_MINOR"
+    "$TAG"
 fi
 
 echo "✅ Redpanda cluster docs generated successfully!"

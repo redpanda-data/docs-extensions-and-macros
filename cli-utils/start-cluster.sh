@@ -50,4 +50,4 @@ docker compose up -d
 
 # Return to original directory
 cd "$CALLER_PWD"
-echo "✅ Cluster is up (quickstart version: ${MAJOR_MINOR})"
+echo "✅ Cluster is up (version: ${TAG})"
