@@ -22,8 +22,8 @@ const jsonpath = require('jsonpath-plus');
 const yaml = require('yaml');
 // For synchronous HTTP fetching.
 const request = require('sync-request');
-const computeOut = require('../util/compute-out.js');
-const createAsciiDocFile = require('../util/create-asciidoc-file.js');
+const computeOut = require('../extension-utils/compute-out.js');
+const createAsciiDocFile = require('../extension-utils/create-asciidoc-file.js');
 
 // In-memory cache for external resources (avoid repeated network calls)
 const externalCache = new Map();
