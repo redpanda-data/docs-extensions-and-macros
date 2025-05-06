@@ -5,6 +5,20 @@ const { Command } = require('commander');
 const path = require('path');
 const fs = require('fs');
 
+function findRepoRoot(start = process.cwd()) {
+  let dir = start;
+  while (dir !== path.parse(dir).root) {
+    // marker could be a .git folder or package.json or anything you choose
+    if (fs.existsSync(path.join(dir, '.git')) ||
+        fs.existsSync(path.join(dir, 'package.json'))) {
+      return dir;
+    }
+    dir = path.dirname(dir);
+  }
+  console.error('❌ Could not find repo root (no .git or package.json in any parent)');
+  process.exit(1);
+}
+
 // --------------------------------------------------------------------
 // Dependency check functions
 // --------------------------------------------------------------------
@@ -107,7 +121,7 @@ const programCli = new Command();
 programCli
   .name('doc-tools')
   .description('Redpanda Document Automation CLI')
-  .version('1.0.0');
+  .version('1.0.1');
 
 // Top-level commands.
 programCli
@@ -293,6 +307,40 @@ automation
     }
 
     process.exit(0);
+  });
+
+programCli
+  .command('link-readme <subdir> <targetFilename>')
+  .description('Symlink a README.adoc into docs/modules/<module>/pages/')
+  .action((subdir, targetFilename) => {
+    const repoRoot = findRepoRoot();
+    const normalized = subdir.replace(/\/+$/, '');
+    const moduleName = normalized.split('/')[0];
+
+    const projectDir = path.join(repoRoot, normalized);
+    const pagesDir   = path.join(repoRoot, 'docs', 'modules', moduleName, 'pages');
+    const sourceFile = path.join(repoRoot, normalized, 'README.adoc');
+    const destLink   = path.join(pagesDir, targetFilename);
+
+    if (!fs.existsSync(projectDir)) {
+      console.error(`❌ Project directory not found: ${projectDir}`);
+      process.exit(1);
+    }
+    if (!fs.existsSync(sourceFile)) {
+      console.error(`❌ README.adoc not found in ${normalized}`);
+      process.exit(1);
+    }
+
+    fs.mkdirSync(pagesDir, { recursive: true });
+    const relPath = path.relative(pagesDir, sourceFile);
+
+    try {
+      fs.symlinkSync(relPath, destLink);
+      console.log(`✔️  Linked ${relPath} → ${destLink}`);
+    } catch (err) {
+      console.error(`❌ Failed to create symlink: ${err.message}`);
+      process.exit(1);
+    }
   });
 
 programCli
