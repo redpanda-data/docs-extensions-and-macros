@@ -310,24 +310,26 @@ automation
   });
 
 programCli
-  .command('link-readme <subdir> <targetFilename>')
+  .command('link-readme')
   .description('Symlink a README.adoc into docs/modules/<module>/pages/')
-  .action((subdir, targetFilename) => {
+  .requiredOption('-s, --subdir <subdir>', 'Relative path to the lab project subdirectory')
+  .requiredOption('-t, --target <filename>', 'Name of the target AsciiDoc file in pages/')
+  .action((options) => {
     const repoRoot = findRepoRoot();
-    const normalized = subdir.replace(/\/+$/, '');
+    const normalized = options.subdir.replace(/\/+$/, '');
     const moduleName = normalized.split('/')[0];
 
     const projectDir = path.join(repoRoot, normalized);
     const pagesDir   = path.join(repoRoot, 'docs', 'modules', moduleName, 'pages');
-    const sourceFile = path.join(repoRoot, normalized, 'README.adoc');
-    const destLink   = path.join(pagesDir, targetFilename);
+    const sourceFile = path.join(projectDir, 'README.adoc');
+    const destLink   = path.join(pagesDir, options.target);
 
     if (!fs.existsSync(projectDir)) {
       console.error(`❌ Project directory not found: ${projectDir}`);
       process.exit(1);
     }
     if (!fs.existsSync(sourceFile)) {
-      console.error(`❌ README.adoc not found in ${normalized}`);
+      console.error(`❌ README.adoc not found in ${projectDir}`);
       process.exit(1);
     }
 
@@ -342,6 +344,7 @@ programCli
       process.exit(1);
     }
   });
+
 
 programCli
 .command('fetch')
