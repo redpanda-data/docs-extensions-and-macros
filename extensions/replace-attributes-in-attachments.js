@@ -182,7 +182,7 @@ function getDynamicReplacements(componentVersion, logger) {
   const versionNum = formatVersion(componentVersion.version || '', semver);
   const is24_3plus =
     versionNum && semver.gte(versionNum, '24.3.0') && componentVersion.title === 'Self-Managed';
-  const useTagAttributes = isPrerelease || is24_3plus;
+  const useTagAttributes = isPrerelease || is24_3plus || componentVersion.title === 'Labs';
 
   // Derive Redpanda / Console versions
   const redpandaVersion = isPrerelease
