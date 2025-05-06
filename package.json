@@ -61,6 +61,7 @@
   },
   "files": [
     "extensions",
+    "extension-utils",
     "asciidoc-extensions",
     "macros",
     "bin",
