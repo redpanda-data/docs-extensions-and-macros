@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 
 const { execSync, spawnSync } = require('child_process');
+const os                    = require('os');
 const { Command } = require('commander');
 const path = require('path');
 const fs = require('fs');
+const {determineDocsBranch} = require( '../cli-utils/self-managed-docs-branch.js')
+const fetchFromGithub = require('../tools/fetch-from-github.js');
+const { urlToXref } = require('../cli-utils/convert-doc-links.js');
+
 
 function findRepoRoot(start = process.cwd()) {
   let dir = start;
@@ -22,96 +27,96 @@ function findRepoRoot(start = process.cwd()) {
 // --------------------------------------------------------------------
 // Dependency check functions
 // --------------------------------------------------------------------
-function checkDependency(command, versionArg, name, helpURL) {
+function fail(msg) {
+  console.error(`❌ ${msg}`);
+  process.exit(1);
+}
+
+/**
+ * Ensure a tool is installed (and optionally that it responds to a version flag).
+ *
+ * @param {string} cmd            The binary name (such as 'docker', 'helm-docs')
+ * @param {object} [opts]
+ * @param {string} [opts.versionFlag='--version']  What to append to check it runs
+ * @param {string} [opts.help]    A one-liner hint (URL or install command)
+ */
+function requireTool(cmd, { versionFlag = '--version', help = '' } = {}) {
   try {
-    execSync(`${command} ${versionArg}`, { stdio: 'ignore' });
-  } catch (error) {
-    console.error(`Error: ${name} is required but not found or not working properly.
-Please install ${name} and try again.
-For more info, see: ${helpURL}`);
-    process.exit(1);
+    execSync(`${cmd} ${versionFlag}`, { stdio: 'ignore' });
+  } catch {
+    const hint = help ? `\n→ ${help}` : '';
+    fail(`'${cmd}' is required but not found or not working.${hint}`);
   }
 }
 
-function checkCommandExists(command) {
-  try {
-    execSync(`which ${command}`, { stdio: 'ignore' });
-    return true;
-  } catch (error) {
-    console.error(`Error: \`${command}\` is required but not found. Please install \`${command}\` and try again.`);
-    return false;
-  }
+// Simple existence only (no version flag)
+function requireCmd(cmd, help) {
+  requireTool(cmd, { versionFlag: '--help', help });
 }
 
-function checkMake() {
-  if (!checkCommandExists('make')) {
-    console.error('Error: `make` is required but not found. Please install `make` to use the automation Makefile. For help, see: https://www.google.com/search?q=how+to+install+make');
-    process.exit(1);
-  }
-}
+// --------------------------------------------------------------------
+// Special validators
+// --------------------------------------------------------------------
 
-function checkPython() {
+function requirePython(minMajor = 3, minMinor = 10) {
   const candidates = ['python3', 'python'];
-  let found = false;
-
-  for (const cmd of candidates) {
+  for (const p of candidates) {
     try {
-      const versionOutput = execSync(`${cmd} --version`, {
-        encoding: 'utf8',
-        stdio: ['pipe', 'pipe', 'ignore']
-      }).trim();
-      // versionOutput looks like "Python 3.x.y"
-      const versionString = versionOutput.split(' ')[1];
-      const [major, minor] = versionString.split('.').map(Number);
-      if (major > 3 || (major === 3 && minor >= 10)) {
-        found = true;
-        break;
+      const out = execSync(`${p} --version`, { encoding: 'utf8' }).trim();
+      const [maj, min] = out.split(' ')[1].split('.').map(Number);
+      if (maj > minMajor || (maj === minMajor && min >= minMinor)) {
+        return;
       } else {
-        console.error(`Error: Python 3.10 or higher is required. Detected version: ${versionString}`);
-        process.exit(1);
+        fail(`Detected ${out}. Python ${minMajor}.${minMinor}+ is required.`);
       }
     } catch {
-      // this candidate didn’t exist or errored—try the next one
+      // ignore and try the next candidate
     }
   }
-  if (!found) {
-    console.error('Error: Python 3.10 or higher is required but not found.\nPlease install Python and ensure `python3 --version` or `python --version` returns at least 3.10: https://www.geeksforgeeks.org/how-to-install-python-on-mac/');
-    process.exit(1);
-  }
+  fail(`Python ${minMajor}.${minMinor}+ not found.` +
+       `\n→ install with your package manager, or https://python.org`);
 }
 
-function checkCompiler() {
-  const gccInstalled = checkCommandExists('gcc');
-  const clangInstalled = checkCommandExists('clang');
-  if (!gccInstalled && !clangInstalled) {
-    console.error('Error: A C++ compiler (such as gcc or clang) is required but not found. Please install one: https://osxdaily.com/2023/05/02/how-install-gcc-mac/');
-    process.exit(1);
-  }
-}
-
-function checkDocker() {
-  checkDependency('docker', '--version', 'Docker', 'https://docs.docker.com/get-docker/');
+function requireDockerDaemon() {
+  requireTool('docker', { help: 'https://docs.docker.com/get-docker/' });
   try {
     execSync('docker info', { stdio: 'ignore' });
-  } catch (error) {
-    console.error('Error: Docker daemon appears to be not running. Please start Docker.');
-    process.exit(1);
+  } catch {
+    fail('Docker daemon does not appear to be running. Please start Docker.');
   }
+}
+
+// --------------------------------------------------------------------
+// Grouped checks
+// --------------------------------------------------------------------
+
+function verifyCrdDependencies() {
+  requireCmd('git',             'install Git: https://git-scm.com/downloads');
+  requireCmd('crd-ref-docs', 'https://github.com/elastic/crd-ref-docs');
+}
+
+function verifyHelmDependencies() {
+  requireCmd('helm-docs', 'https://github.com/norwoodj/helm-docs');
+  requireCmd('pandoc',     'brew install pandoc or https://pandoc.org');
+  requireCmd('git',             'install Git: https://git-scm.com/downloads');
 }
 
 function verifyPropertyDependencies() {
-  checkMake();
-  checkPython();
-  checkCompiler();
+  requireCmd('make',       'your OS package manager');
+  requirePython();
+  // at least one compiler:
+  try { execSync('gcc --version', { stdio: 'ignore' }); }
+  catch {
+    try { execSync('clang --version', { stdio: 'ignore' }); }
+    catch { fail('A C++ compiler (gcc or clang) is required.'); }
+  }
 }
 
 function verifyMetricsDependencies() {
-  checkPython();
-  if (!checkCommandExists('curl') || !checkCommandExists('tar')) {
-    // `checkCommandExists` already prints a helpful message.
-    process.exit(1);
-  }
-  checkDocker();
+  requirePython();
+  requireCmd('curl');
+  requireCmd('tar');
+  requireDockerDaemon();
 }
 // --------------------------------------------------------------------
 // Main CLI Definition
@@ -121,7 +126,7 @@ const programCli = new Command();
 programCli
   .name('doc-tools')
   .description('Redpanda Document Automation CLI')
-  .version('1.0.1');
+  .version('1.1.0');
 
 // Top-level commands.
 programCli
@@ -161,12 +166,71 @@ programCli
     }
   });
 
+  programCli
+  .command('link-readme')
+  .description('Symlink a README.adoc into docs/modules/<module>/pages/')
+  .requiredOption('-s, --subdir <subdir>', 'Relative path to the lab project subdirectory')
+  .requiredOption('-t, --target <filename>', 'Name of the target AsciiDoc file in pages/')
+  .action((options) => {
+    const repoRoot = findRepoRoot();
+    const normalized = options.subdir.replace(/\/+$/, '');
+    const moduleName = normalized.split('/')[0];
+
+    const projectDir = path.join(repoRoot, normalized);
+    const pagesDir   = path.join(repoRoot, 'docs', 'modules', moduleName, 'pages');
+    const sourceFile = path.join(projectDir, 'README.adoc');
+    const destLink   = path.join(pagesDir, options.target);
+
+    if (!fs.existsSync(projectDir)) {
+      console.error(`❌ Project directory not found: ${projectDir}`);
+      process.exit(1);
+    }
+    if (!fs.existsSync(sourceFile)) {
+      console.error(`❌ README.adoc not found in ${projectDir}`);
+      process.exit(1);
+    }
+
+    fs.mkdirSync(pagesDir, { recursive: true });
+    const relPath = path.relative(pagesDir, sourceFile);
+
+    try {
+      fs.symlinkSync(relPath, destLink);
+      console.log(`✔️  Linked ${relPath} → ${destLink}`);
+    } catch (err) {
+      console.error(`❌ Failed to create symlink: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+programCli
+.command('fetch')
+.description('Fetch a file or directory from GitHub and save locally')
+.requiredOption('-o, --owner <owner>', 'GitHub repo owner or org')
+.requiredOption('-r, --repo <repo>', 'GitHub repo name')
+.requiredOption('-p, --remote-path <path>', 'Path in the repo to fetch')
+.requiredOption('-d, --save-dir <dir>', 'Local directory to save into')
+.option('-f, --filename <name>', 'Custom filename to save as')
+.action(async (options) => {
+  try {
+    await fetchFromGithub(
+      options.owner,
+      options.repo,
+      options.remotePath,
+      options.saveDir,
+      options.filename
+    );
+  } catch (err) {
+    console.error('❌', err.message);
+    process.exit(1);
+  }
+});
+
 // Create an "automation" subcommand group.
 const automation = new Command('generate')
   .description('Run docs automations (properties, metrics, and rpk docs generation)');
 
 // --------------------------------------------------------------------
-// Automation Subcommands: Delegate to a unified Bash script internally.
+// Automation subcommands
 // --------------------------------------------------------------------
 
 // Common options for both automation tasks.
@@ -216,7 +280,7 @@ function diffDirs(kind, oldTag, newTag) {
 automation
   .command('metrics-docs')
   .description('Extract Redpanda metrics and generate JSON/AsciiDoc docs')
-  .option('--tag <tag>', 'Redpanda tag (default: latest)', commonOptions.tag)
+  .option('--tag <tag>', 'Redpanda tag', commonOptions.tag)
   .option('--docker-repo <repo>', '...', commonOptions.dockerRepo)
   .option('--console-tag <tag>', '...', commonOptions.consoleTag)
   .option('--console-docker-repo <repo>', '...', commonOptions.consoleDockerRepo)
@@ -248,7 +312,7 @@ automation
 automation
   .command('property-docs')
   .description('Extract properties from Redpanda source')
-  .option('--tag <tag>', 'Git tag or branch to extract from (default: dev)', 'dev')
+  .option('--tag <tag>', 'Git tag or branch to extract from', 'dev')
   .option('--diff <oldTag>', 'Also diff autogenerated properties from <oldTag> → <tag>')
   .action((options) => {
     verifyPropertyDependencies();
@@ -309,66 +373,266 @@ automation
     process.exit(0);
   });
 
-  programCli
-  .command('link-readme')
-  .description('Symlink a README.adoc into docs/modules/<module>/pages/')
-  .requiredOption('-s, --subdir <subdir>', 'Relative path to the lab project subdirectory')
-  .requiredOption('-t, --target <filename>', 'Name of the target AsciiDoc file in pages/')
-  .action((options) => {
+automation
+  .command('helm-spec')
+  .description(`Generate AsciiDoc spec for one or more Helm charts (supports local dirs or GitHub URLs)`)
+  .option(
+    '--chart-dir <dir|url>',
+    'Chart directory (contains Chart.yaml) or a root containing multiple charts, or a GitHub URL',
+    'https://github.com/redpanda-data/redpanda-operator/charts'
+  )
+  .option(
+    '-t, --tag <ref>',
+    'Branch or tag to clone when using a GitHub URL'
+  )
+  .option(
+    '--readme <file>',
+    'Relative README.md path inside each chart dir',
+    'README.md'
+  )
+  .option(
+    '--output-dir <dir>',
+    'Where to write all generated AsciiDoc files',
+    'modules/reference/pages'
+  )
+  .option(
+    '--output-suffix <suffix>',
+    'Suffix to append to each chart name (including extension)',
+    '-helm-spec.adoc'
+  )
+  .action(opts => {
+    verifyHelmDependencies()
+
+    // Prepare chart-root (local or GitHub) ───────────────────────
+    let root = opts.chartDir
+    let tmpClone = null
+
+    if (/^https?:\/\/github\.com\//.test(root)) {
+      if (!opts.tag) {
+        console.error('❌ When using a GitHub URL you must pass --tag')
+        process.exit(1)
+      }
+      const u     = new URL(root)
+      const parts = u.pathname.replace(/\.git$/, '').split('/').filter(Boolean)
+      if (parts.length < 2) {
+        console.error(`❌ Invalid GitHub URL: ${root}`)
+        process.exit(1)
+      }
+      const [owner, repo, ...sub] = parts
+      const repoUrl = `https://${u.host}/${owner}/${repo}.git`
+      const ref     = opts.tag
+
+      console.log(`🔎 Verifying ${repoUrl}@${ref}…`)
+      const ok = spawnSync('git', [
+        'ls-remote','--exit-code', repoUrl,
+        `refs/heads/${ref}`, `refs/tags/${ref}`
+      ], { stdio:'ignore' }).status === 0
+      if (!ok) {
+        console.error(`❌ ${ref} not found on ${repoUrl}`)
+        process.exit(1)
+      }
+
+      tmpClone = fs.mkdtempSync(path.join(os.tmpdir(), 'helm-'))
+      console.log(`⏳ Cloning ${repoUrl}@${ref} → ${tmpClone}`)
+      if (spawnSync('git', [
+        'clone','--depth','1','--branch',ref,
+        repoUrl, tmpClone
+      ], { stdio:'inherit' }).status !== 0) {
+        console.error('❌ git clone failed')
+        process.exit(1)
+      }
+      root = sub.length ? path.join(tmpClone, sub.join('/')) : tmpClone
+    }
+
+    // Discover charts ─────────────────────────────────────────────
+    if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+      console.error(`❌ Chart root not found: ${root}`)
+      process.exit(1)
+    }
+    // single-chart?
+    let charts = []
+    if (fs.existsSync(path.join(root,'Chart.yaml'))) {
+      charts = [root]
+    } else {
+      charts = fs.readdirSync(root)
+        .map(n => path.join(root,n))
+        .filter(p => fs.existsSync(path.join(p,'Chart.yaml')))
+    }
+    if (charts.length === 0) {
+      console.error(`❌ No charts found under: ${root}`)
+      process.exit(1)
+    }
+
+    // Ensure output-dir exists ────────────────────────────────────
+    const outDir = path.resolve(opts.outputDir)
+    fs.mkdirSync(outDir, { recursive: true })
+
+    // Process each chart ─────────────────────────────────────────
+    for (const chartPath of charts) {
+      const name = path.basename(chartPath)
+      console.log(`\n🔨 Processing chart "${name}"…`)
+
+      // Regenerate README.md
+      console.log(`  ⏳ helm-docs in ${chartPath}`)
+      let r = spawnSync('helm-docs', { cwd: chartPath, stdio: 'inherit' })
+      if (r.status !== 0) process.exit(r.status)
+
+      // Convert Markdown → AsciiDoc
+      const md = path.join(chartPath, opts.readme)
+      if (!fs.existsSync(md)) {
+        console.error(`❌ README not found: ${md}`)
+        process.exit(1)
+      }
+      const outFile = path.join(outDir, `${name}${opts.outputSuffix}`)
+      console.log(`  ⏳ pandoc ${md} → ${outFile}`)
+      fs.mkdirSync(path.dirname(outFile), { recursive: true })
+      r = spawnSync('pandoc', [ md, '-t', 'asciidoc', '-o', outFile ], { stdio:'inherit' })
+      if (r.status !== 0) process.exit(r.status)
+
+      // Post-process tweaks
+      let doc = fs.readFileSync(outFile, 'utf8')
+      doc = doc
+        .replace(/(\[\d+\])\]\./g, '$1\\].')
+        .replace(/^== # (.*)$/gm, '= $1')
+        .replace(/^== description: (.*)$/gm, ':description: $1')
+        .replace(/https:\/\/docs\.redpanda\.com[^\s\]\[\)"]+/g, url => {
+          try { return urlToXref(url); }
+          catch (err) {
+            console.warn(`⚠️ urlToXref failed on ${url}: ${err.message}`);
+            return url;
+          }
+        });
+      fs.writeFileSync(outFile, doc, 'utf8')
+
+      console.log(`✅ Wrote ${outFile}`)
+    }
+
+    // Cleanup ───────────────────────────────────────────────────
+    if (tmpClone) fs.rmSync(tmpClone, { recursive: true, force: true })
+  })
+
+automation
+  .command('crd-spec')
+  .description('Generate Kubernetes CRD reference AsciiDoc (auto-picks docs branch if run inside redpanda-data/docs)')
+  .requiredOption('-t, --tag <operatorTag>',
+    'Operator release tag or branch, such as operator/v25.1.2')
+  .option('-s, --source-path <src>',
+    'CRD Go types dir or GitHub URL',
+    'https://github.com/redpanda-data/redpanda-operator/operator/api/redpanda/v1alpha2')
+  .option('-d, --depth <n>',
+    'How many levels deep',
+    '10')
+  .option('--templates-dir <dir>',
+    'Asciidoctor templates dir',
+    '.github/crd-config/templates/asciidoctor/operator')
+  .option('--output <file>',
+    'Where to write the generated AsciiDoc file',
+    'modules/reference/pages/k-crd.adoc')
+  .action(async opts => {
+    verifyCrdDependencies();
+
+    // Fetch upstream config ──────────────────────────────────────────
+    const configTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'crd-config-'));
+    console.log('🔧 Fetching crd-ref-docs-config.yaml from redpanda-operator@main…');
+    await fetchFromGithub(
+      'redpanda-data',
+      'redpanda-operator',
+      'operator/crd-ref-docs-config.yaml',
+      configTmp,
+      'crd-ref-docs-config.yaml'
+    );
+    const configPath = path.join(configTmp, 'crd-ref-docs-config.yaml');
+
+    // Detect docs repo context ───────────────────────────────────────
     const repoRoot = findRepoRoot();
-    const normalized = options.subdir.replace(/\/+$/, '');
-    const moduleName = normalized.split('/')[0];
+    const pkg      = JSON.parse(fs.readFileSync(path.join(repoRoot,'package.json'),'utf8'));
+    const inDocs   = pkg.name === 'redpanda-docs-playbook'
+                   || (pkg.repository && pkg.repository.url.includes('redpanda-data/docs'));
+    let docsBranch = null;
 
-    const projectDir = path.join(repoRoot, normalized);
-    const pagesDir   = path.join(repoRoot, 'docs', 'modules', moduleName, 'pages');
-    const sourceFile = path.join(projectDir, 'README.adoc');
-    const destLink   = path.join(pagesDir, options.target);
+    if (!inDocs) {
+      console.warn('⚠️  Not inside redpanda-data/docs; skipping branch suggestion.');
+    } else {
+      try {
+        docsBranch = await determineDocsBranch(opts.tag);
+        console.log(`Detected docs repo; you should commit to branch '${docsBranch}'.`);
+      } catch (err) {
+        console.error(`❌ Unable to determine docs branch: ${err.message}`);
+        process.exit(1);
+      }
+    }
 
-    if (!fs.existsSync(projectDir)) {
-      console.error(`❌ Project directory not found: ${projectDir}`);
+    // Validate templates ─────────────────────────────────────────────
+    if (!fs.existsSync(opts.templatesDir)) {
+      console.error(`❌ Templates directory not found: ${opts.templatesDir}`);
       process.exit(1);
     }
-    if (!fs.existsSync(sourceFile)) {
-      console.error(`❌ README.adoc not found in ${projectDir}`);
-      process.exit(1);
+
+    // Prepare source (local folder or GitHub URL) ───────────────────
+    let localSrc = opts.sourcePath;
+    let tmpSrc;
+    if (/^https?:\/\/github\.com\//.test(opts.sourcePath)) {
+      const u     = new URL(opts.sourcePath);
+      const parts = u.pathname.split('/').filter(Boolean);
+      if (parts.length < 2) {
+        console.error(`❌ Invalid GitHub URL: ${opts.sourcePath}`);
+        process.exit(1);
+      }
+      const [owner, repo, ...subpathParts] = parts;
+      const repoUrl = `https://${u.host}/${owner}/${repo}`;
+      const subpath = subpathParts.join('/');
+      // Verify tag/branch exists
+      console.log(`🔎 Verifying "${opts.tag}" in ${repoUrl}…`);
+      const ok = spawnSync('git', [
+        'ls-remote','--exit-code', repoUrl,
+        `refs/tags/${opts.tag}`, `refs/heads/${opts.tag}`
+      ], { stdio:'ignore' }).status === 0;
+      if (!ok) {
+        console.error(`❌ Tag or branch "${opts.tag}" not found on ${repoUrl}`);
+        process.exit(1);
+      }
+      // Clone
+      tmpSrc = fs.mkdtempSync(path.join(os.tmpdir(), 'crd-src-'));
+      console.log(`⏳ Cloning ${repoUrl}@${opts.tag} → ${tmpSrc}`);
+      if (spawnSync('git', ['clone','--depth','1','--branch',opts.tag,repoUrl,tmpSrc],{stdio:'inherit'}).status !== 0) {
+        console.error('❌ git clone failed'); process.exit(1);
+      }
+      // Point at subfolder if any
+      localSrc = subpath ? path.join(tmpSrc, subpath) : tmpSrc;
+      if (!fs.existsSync(localSrc)) {
+        console.error(`❌ Subdirectory not found in repo: ${subpath}`); process.exit(1);
+      }
     }
 
-    fs.mkdirSync(pagesDir, { recursive: true });
-    const relPath = path.relative(pagesDir, sourceFile);
+    // Ensure output directory exists ────────────────────────────────
+    const outputDir = path.dirname(opts.output);
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
 
-    try {
-      fs.symlinkSync(relPath, destLink);
-      console.log(`✔️  Linked ${relPath} → ${destLink}`);
-    } catch (err) {
-      console.error(`❌ Failed to create symlink: ${err.message}`);
-      process.exit(1);
+    // Run crd-ref-docs ───────────────────────────────────────────────
+    const args = [
+      '--source-path',   localSrc,
+      '--max-depth',     opts.depth,
+      '--templates-dir', opts.templatesDir,
+      '--config',        configPath,
+      '--renderer',      'asciidoctor',
+      '--output-path',   opts.output
+    ];
+    console.log(`⏳ Running crd-ref-docs ${args.join(' ')}`);
+    if (spawnSync('crd-ref-docs', args, { stdio:'inherit' }).status !== 0) {
+      console.error('❌ crd-ref-docs failed'); process.exit(1);
+    }
+
+    // Cleanup ────────────────────────────────────────────────────────
+    if (tmpSrc)    fs.rmSync(tmpSrc,    { recursive: true, force: true });
+    fs.rmSync(configTmp, { recursive: true, force: true });
+
+    console.log(`✅ CRD docs generated at ${opts.output}`);
+    if (inDocs) {
+      console.log(`➡️  Don't forget to commit your changes on branch '${docsBranch}'.`);
     }
   });
-
-programCli
-.command('fetch')
-.description('Fetch a file or directory from GitHub and save locally')
-.requiredOption('-o, --owner <owner>', 'GitHub repo owner or org')
-.requiredOption('-r, --repo <repo>', 'GitHub repo name')
-.requiredOption('-p, --remote-path <path>', 'Path in the repo to fetch')
-.requiredOption('-d, --save-dir <dir>', 'Local directory to save into')
-.option('-f, --filename <name>', 'Custom filename to save as')
-.action(async (options) => {
-  try {
-    const fetchFromGithub = await require('../tools/fetch-from-github.js');
-    // options.owner, options.repo, options.remotePath, options.saveDir, options.filename
-    await fetchFromGithub(
-      options.owner,
-      options.repo,
-      options.remotePath,
-      options.saveDir,
-      options.filename
-    );
-  } catch (err) {
-    console.error('❌', err.message);
-    process.exit(1);
-  }
-});
 
 
 // Attach the automation group to the main program.
