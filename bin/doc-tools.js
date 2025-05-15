@@ -10,6 +10,14 @@ const fetchFromGithub = require('../tools/fetch-from-github.js');
 const { urlToXref } = require('../cli-utils/convert-doc-links.js');
 
 
+/**
+ * Searches upward from a starting directory to locate the repository root.
+ *
+ * Traverses parent directories from the specified start path, returning the first directory containing either a `.git` folder or a `package.json` file. Exits the process with an error if no such directory is found.
+ *
+ * @param {string} [start] - The directory to begin the search from. Defaults to the current working directory.
+ * @returns {string} The absolute path to the repository root directory.
+ */
 function findRepoRoot(start = process.cwd()) {
   let dir = start;
   while (dir !== path.parse(dir).root) {
@@ -26,19 +34,25 @@ function findRepoRoot(start = process.cwd()) {
 
 // --------------------------------------------------------------------
 // Dependency check functions
-// --------------------------------------------------------------------
+/**
+ * Prints an error message to stderr and exits the process with a non-zero status.
+ *
+ * @param {string} msg - The error message to display before exiting.
+ */
 function fail(msg) {
   console.error(`❌ ${msg}`);
   process.exit(1);
 }
 
 /**
- * Ensure a tool is installed (and optionally that it responds to a version flag).
+ * Ensures that a specified command-line tool is installed and operational.
  *
- * @param {string} cmd            The binary name (such as 'docker', 'helm-docs')
- * @param {object} [opts]
- * @param {string} [opts.versionFlag='--version']  What to append to check it runs
- * @param {string} [opts.help]    A one-liner hint (URL or install command)
+ * Attempts to execute the tool with a version flag to verify its presence. If the tool is missing or fails to run, the process exits with an error message and optional installation hint.
+ *
+ * @param {string} cmd - The name of the tool to check (e.g., 'docker', 'helm-docs').
+ * @param {object} [opts] - Optional settings.
+ * @param {string} [opts.versionFlag='--version'] - The flag used to test the tool's execution.
+ * @param {string} [opts.help] - An optional hint or installation instruction shown on failure.
  */
 function requireTool(cmd, { versionFlag = '--version', help = '' } = {}) {
   try {
@@ -49,14 +63,28 @@ function requireTool(cmd, { versionFlag = '--version', help = '' } = {}) {
   }
 }
 
-// Simple existence only (no version flag)
+/**
+ * Ensures that a command-line tool is installed by checking if it responds to the `--help` flag.
+ *
+ * @param {string} cmd - The name of the command-line tool to check.
+ * @param {string} [help] - Optional help text to display if the tool is not found.
+ *
+ * @throws {Error} If the specified command is not found or does not respond to `--help`.
+ */
 function requireCmd(cmd, help) {
   requireTool(cmd, { versionFlag: '--help', help });
 }
 
 // --------------------------------------------------------------------
 // Special validators
-// --------------------------------------------------------------------
+/**
+ * Ensures that Python with a minimum required version is installed and available in the system PATH.
+ *
+ * Checks for either `python3` or `python` executables and verifies that the version is at least the specified minimum (default: 3.10). Exits the process with an error message if the requirement is not met.
+ *
+ * @param {number} [minMajor=3] - Minimum required major version of Python.
+ * @param {number} [minMinor=10] - Minimum required minor version of Python.
+ */
 
 function requirePython(minMajor = 3, minMinor = 10) {
   const candidates = ['python3', 'python'];
@@ -77,6 +105,11 @@ function requirePython(minMajor = 3, minMinor = 10) {
        `\n→ install with your package manager, or https://python.org`);
 }
 
+/**
+ * Ensures that the Docker CLI is installed and the Docker daemon is running.
+ *
+ * @throws {Error} If Docker is not installed or the Docker daemon is not running.
+ */
 function requireDockerDaemon() {
   requireTool('docker', { help: 'https://docs.docker.com/get-docker/' });
   try {
@@ -88,19 +121,33 @@ function requireDockerDaemon() {
 
 // --------------------------------------------------------------------
 // Grouped checks
-// --------------------------------------------------------------------
+/**
+ * Ensures that required dependencies for generating CRD documentation are installed.
+ *
+ * Verifies the presence of the {@link git} and {@link crd-ref-docs} command-line tools, exiting the process with an error message if either is missing.
+ */
 
 function verifyCrdDependencies() {
   requireCmd('git',             'install Git: https://git-scm.com/downloads');
   requireCmd('crd-ref-docs', 'https://github.com/elastic/crd-ref-docs');
 }
 
+/**
+ * Ensures that all required tools for Helm documentation generation are installed.
+ *
+ * Checks for the presence of `helm-docs`, `pandoc`, and `git`, exiting the process with an error if any are missing.
+ */
 function verifyHelmDependencies() {
   requireCmd('helm-docs', 'https://github.com/norwoodj/helm-docs');
   requireCmd('pandoc',     'brew install pandoc or https://pandoc.org');
   requireCmd('git',             'install Git: https://git-scm.com/downloads');
 }
 
+/**
+ * Ensures all dependencies required for generating property documentation are installed.
+ *
+ * Checks for the presence of `make`, Python 3.10 or newer, and at least one C++ compiler (`gcc` or `clang`). Exits the process with an error message if any dependency is missing.
+ */
 function verifyPropertyDependencies() {
   requireCmd('make',       'your OS package manager');
   requirePython();
@@ -112,6 +159,13 @@ function verifyPropertyDependencies() {
   }
 }
 
+/**
+ * Ensures all required dependencies for generating Redpanda metrics documentation are installed.
+ *
+ * Verifies that Python 3.10+, `curl`, and `tar` are available, and that the Docker daemon is running.
+ *
+ * @throws {Error} If any required dependency is missing or the Docker daemon is not running.
+ */
 function verifyMetricsDependencies() {
   requirePython();
   requireCmd('curl');

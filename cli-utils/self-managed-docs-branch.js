@@ -3,8 +3,11 @@ const yaml = require('js-yaml');
 const { spawnSync } = require('child_process');
 
 /**
- * Fetches the latest documented Self-Managed version from the remote docs repo's antora.yml
- * @returns {Promise<string>} example: "25.1"
+ * Retrieves the current Self-Managed documentation version from the remote antora.yml file.
+ *
+ * @returns {Promise<string>} Resolves with the version string (e.g., "25.1").
+ *
+ * @throws {Error} If the antora.yml file cannot be fetched, parsed, or if the version field is missing.
  */
 function fetchRemoteAntoraVersion() {
   const url = 'https://raw.githubusercontent.com/redpanda-data/docs/main/antora.yml'
@@ -32,10 +35,14 @@ function fetchRemoteAntoraVersion() {
 }
 
 /**
- * Given an operator tag (such as "operator/v25.1.2" or "v25.1.2") and
- * the remote Antora version (such as "25.1"), decide which docs branch to use.
+ * Determines the appropriate documentation branch for a given operator tag based on the remote Antora version.
  *
- * Throws if the chosen branch does not exist on origin.
+ * Normalizes the input tag, extracts the major.minor version, and applies version-specific logic to select the correct branch. Verifies that the chosen branch exists in the remote repository.
+ *
+ * @param {string} operatorTag - The operator tag to evaluate (e.g., "operator/v25.1.2" or "v25.1.2").
+ * @returns {Promise<string>} The name of the documentation branch to use.
+ *
+ * @throws {Error} If the tag cannot be parsed or if the determined branch does not exist in the remote repository.
  */
 async function determineDocsBranch(operatorTag) {
   // Strip any "operator/" prefix

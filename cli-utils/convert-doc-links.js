@@ -1,15 +1,14 @@
 const { URL } = require('url');
 
 /**
- * Convert a docs.redpanda.com URL (optionally suffixed with “[label]”) into
- * an Antora xref resource ID, preserving that label in brackets.
+ * Converts a docs.redpanda.com URL, optionally suffixed with a label in brackets, into an Antora xref resource ID string.
  *
- * Example:
- *   urlToXref('https://docs.redpanda.com/v25.1/reference/configuration/[Config]')
- *   // → 'xref:reference:configuration.adoc[Config]'
+ * If the input includes a label in square brackets (e.g., `[Label]`), the label is preserved and appended to the resulting xref.
  *
- * @param {string} input
- * @returns {string}
+ * @param {string} input - A docs.redpanda.com URL, optionally followed by a label in square brackets.
+ * @returns {string} The corresponding Antora xref resource ID, with the label preserved if present.
+ *
+ * @throws {Error} If the input is not a valid URL or does not belong to docs.redpanda.com.
  */
 function urlToXref(input) {
   // Peel off an optional “[label]”
