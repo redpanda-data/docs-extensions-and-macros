@@ -539,7 +539,7 @@ automation
         console.error(`❌ README not found: ${md}`)
         process.exit(1)
       }
-      const outFile = path.join(outDir, `${name}${opts.outputSuffix}`)
+      const outFile = path.join(outDir, `k-${name}${opts.outputSuffix}`)
       console.log(`  ⏳ pandoc ${md} → ${outFile}`)
       fs.mkdirSync(path.dirname(outFile), { recursive: true })
       r = spawnSync('pandoc', [ md, '-t', 'asciidoc', '-o', outFile ], { stdio:'inherit' })
