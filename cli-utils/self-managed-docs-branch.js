@@ -21,7 +21,7 @@ function fetchRemoteAntoraVersion() {
       res.on('end', () => {
         try {
           const cfg = yaml.load(body)
-          if (typeof cfg.version == null) {
+          if (cfg.version == null) {
             throw new Error('version field missing')
           }
           const version = String(cfg.version).trim()
@@ -50,9 +50,8 @@ async function determineDocsBranch(operatorTag) {
   // Pull in the remote Antora version
   const ANTORA = await fetchRemoteAntoraVersion()
   // Extract v<major>.<minor>
-  const filtered = TAG.match(/^v([0-9]+\.[0-9]+)/)
-    ? `v${RegExp.$1}`
-    : null
+  const mm = TAG.match(/^v(\d+\.\d+)/)
+  const filtered = mm ? `v${mm[1]}` : null
 
   if (!filtered) {
     throw new Error(`Could not parse major.minor from ${TAG}`)
