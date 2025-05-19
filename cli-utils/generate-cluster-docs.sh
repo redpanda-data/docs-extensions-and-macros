@@ -73,7 +73,7 @@ else
     "$TAG"
 fi
 
-echo "✅ Redpanda cluster docs generated successfully!"
+echo "✅ $MODE docs generated successfully!"
 
 # Tear down the cluster
 cd "$SCRIPT_DIR"/../docker-compose

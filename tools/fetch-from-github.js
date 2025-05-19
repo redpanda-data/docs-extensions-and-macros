@@ -12,8 +12,8 @@ async function loadOctokit() {
       : new Octokit();
 
     if (!process.env.VBOT_GITHUB_API_TOKEN) {
-      console.warn(
-        'Warning: No GitHub token found (VBOT_GITHUB_API_TOKEN). API rate limits will be restricted.'
+      console.info(
+        'No GitHub token found (VBOT_GITHUB_API_TOKEN).'
       );
     }
   }
