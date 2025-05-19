@@ -59,21 +59,23 @@ function requireTool(cmd, { versionFlag = '--version', help = '' } = {}) {
     execSync(`${cmd} ${versionFlag}`, { stdio: 'ignore' });
   } catch {
     const hint = help ? `\n→ ${help}` : '';
-    fail(`'${cmd}' is required but not found or not working.${hint}`);
+    fail(`'${cmd}' is required but not found.${hint}`);
   }
 }
 
 /**
- * Ensures that a command-line tool is installed by checking if it responds to the `--help` flag.
+ * Ensures that a command-line tool is installed by checking if it responds to a specified flag.
  *
  * @param {string} cmd - The name of the command-line tool to check.
  * @param {string} [help] - Optional help text to display if the tool is not found.
+ * @param {string} [versionFlag='--help'] - The flag to use when checking if the tool is installed.
  *
- * @throws {Error} If the specified command is not found or does not respond to `--help`.
+ * @throws {Error} If the specified command is not found or does not respond to the specified flag.
  */
-function requireCmd(cmd, help) {
-  requireTool(cmd, { versionFlag: '--help', help });
+function requireCmd(cmd, help, versionFlag = '--version') {
+  requireTool(cmd, { versionFlag, help });
 }
+
 
 // --------------------------------------------------------------------
 // Special validators
@@ -126,9 +128,58 @@ function requireDockerDaemon() {
  */
 
 function verifyCrdDependencies() {
-  requireCmd('git',             'install Git: https://git-scm.com/downloads');
-  requireCmd('crd-ref-docs', 'https://github.com/elastic/crd-ref-docs');
-}
+  requireCmd('git',             'Install Git: https://git-scm.com/downloads');
+  requireCmd(
+    'crd-ref-docs',
+    `
+  The 'crd-ref-docs' command is required but was not found.
+
+  To install it, follow these steps (for macOS):
+
+  1. Determine your architecture:
+     Run: \`uname -m\`
+
+  2. Download and install:
+
+  - For Apple Silicon (M1/M2/M3):
+    curl -fLO https://github.com/elastic/crd-ref-docs/releases/download/v0.1.0/crd-ref-docs_0.1.0_Darwin_arm64.tar.gz
+    tar -xzf crd-ref-docs_0.1.0_Darwin_arm64.tar.gz
+    chmod +x crd-ref-docs
+    sudo mv crd-ref-docs /usr/local/bin/
+
+  - For Intel (x86_64):
+    curl -fLO https://github.com/elastic/crd-ref-docs/releases/download/v0.1.0/crd-ref-docs_0.1.0_Darwin_x86_64.tar.gz
+    tar -xzf crd-ref-docs_0.1.0_Darwin_x86_64.tar.gz
+    chmod +x crd-ref-docs
+    sudo mv crd-ref-docs /usr/local/bin/
+
+  For more details, visit: https://github.com/elastic/crd-ref-docs
+    `.trim()
+  );
+  requireCmd(
+    'go',
+    `
+  The 'go' command (Golang) is required but was not found.
+
+  To install it on macOS:
+
+  Option 1: Install via Homebrew (recommended):
+    brew install go
+
+  Option 2: Download directly from the official site:
+    1. Visit: https://go.dev/dl/
+    2. Download the appropriate installer for macOS.
+    3. Run the installer and follow the instructions.
+
+  After installation, verify it works:
+    go version
+
+  For more details, see: https://go.dev/doc/install
+    `.trim(),
+  'version'
+  );
+
+  }
 
 /**
  * Ensures that all required tools for Helm documentation generation are installed.
@@ -136,8 +187,37 @@ function verifyCrdDependencies() {
  * Checks for the presence of `helm-docs`, `pandoc`, and `git`, exiting the process with an error if any are missing.
  */
 function verifyHelmDependencies() {
-  requireCmd('helm-docs', 'https://github.com/norwoodj/helm-docs');
-  requireCmd('pandoc',     'brew install pandoc or https://pandoc.org');
+  requireCmd(
+    'helm-docs',
+    `
+  The 'helm-docs' command is required but was not found.
+
+  To install it, follow these steps (for macOS):
+
+  1. Determine your architecture:
+     Run: \`uname -m\`
+
+  2. Download and install:
+
+  - For Apple Silicon (M1/M2/M3):
+    curl -fLO https://github.com/norwoodj/helm-docs/releases/download/v1.11.0/helm-docs_1.11.0_Darwin_arm64.tar.gz
+    tar -xzf helm-docs_1.11.0_Darwin_arm64.tar.gz
+    chmod +x helm-docs
+    sudo mv helm-docs /usr/local/bin/
+
+  - For Intel (x86_64):
+    curl -fLO https://github.com/norwoodj/helm-docs/releases/download/v1.11.0/helm-docs_1.11.0_Darwin_x86_64.tar.gz
+    tar -xzf helm-docs_1.11.0_Darwin_x86_64.tar.gz
+    chmod +x helm-docs
+    sudo mv helm-docs /usr/local/bin/
+
+  Alternatively, if you use Homebrew:
+    brew install norwoodj/tap/helm-docs
+
+  For more details, visit: https://github.com/norwoodj/helm-docs
+    `.trim()
+  );
+    requireCmd('pandoc',     'brew install pandoc or https://pandoc.org');
   requireCmd('git',             'install Git: https://git-scm.com/downloads');
 }
 
