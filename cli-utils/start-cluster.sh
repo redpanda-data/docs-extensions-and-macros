@@ -20,12 +20,22 @@ if [[ "$TAG" != "latest" ]]; then
   MAJOR_MINOR="$(echo "$TAG" | sed -E 's/^v?([0-9]+\.[0-9]+).*$/\1/')"
 fi
 
+# Conditionally override quickstart dir for >= 25.1
+if [[ "$MAJOR_MINOR" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+  major="${BASH_REMATCH[1]}"
+  minor="${BASH_REMATCH[2]}"
+
+  if (( major > 25 )) || (( major == 25 && minor >= 1 )); then
+    QUICKSTART_DIR="$PACKAGE_ROOT/docker-compose/25.1"
+  fi
+fi
+
 # Fetch quickstart into package root if needed
 if [[ ! -d "$QUICKSTART_DIR" ]]; then
   echo "📥 Fetching Redpanda quickstart for ${MAJOR_MINOR}…"
   if [[ "$TAG" == "latest" ]]; then
-	  curl -sSLf --retry 3 https://docs.redpanda.com/redpanda-quickstart.tar.gz \
-	  | tar -C "$PACKAGE_ROOT" -xzf -
+    curl -sSLf --retry 3 https://docs.redpanda.com/redpanda-quickstart.tar.gz \
+      | tar -C "$PACKAGE_ROOT" -xzf -
   else
     curl -sSLf --retry 3 "https://docs.redpanda.com/${MAJOR_MINOR}-redpanda-quickstart.tar.gz" \
       | tar -C "$PACKAGE_ROOT" -xzf -
