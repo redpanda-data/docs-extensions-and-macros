@@ -33,7 +33,6 @@ asciidoc:
   - './macros/helm-ref'
   - './macros/rp-connect-components'
   - './asciidoc-extensions/add-line-numbers-highlights'
-  - './macros/data-template.js'
 antora:
   extensions:
   - require: './extensions/add-global-attributes'
