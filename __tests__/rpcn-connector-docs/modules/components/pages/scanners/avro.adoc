@@ -1,0 +1,74 @@
+= avro
+// tag::single-source[]
+:type: scanner
+:status: stable
+
+// © 2024 Redpanda Data Inc.
+
+
+component_type_dropdown::[]
+
+
+Consume a stream of Avro OCF datum.
+
+
+[tabs]
+======
+Common::
++
+--
+
+```yml
+# Common configuration fields, showing default values
+avro: {}
+```
+
+--
+Advanced::
++
+--
+
+```yml
+# All configuration fields, showing default values
+avro:
+  raw_json: false
+```
+
+--
+======
+
+== Avro JSON format
+
+This scanner creates documents formatted as https://avro.apache.org/docs/current/specification/[Avro JSON^] when decoding with Avro schemas. In this format, the value of a union is encoded in JSON as follows:
+
+- If the union's type is `null`, it is encoded as a JSON `null`.
+- Otherwise, the union is encoded as a JSON object with one name/value pair. The `"name"` is the type's name and the `"value"` is the recursively encoded value. For Avro's named types (record, fixed or enum), the user-specified name is used. For other types, the type name is used.
+
+For example, the union schema `["null","string","Transaction"]`, where `Transaction` is a record name, would encode:
+
+- The `null` as a JSON `null`
+- The string `"a"` as `{"string": "a"}`
+- A `Transaction` instance as `{"Transaction": {...}}`, where `{...}` indicates the JSON encoding of a `Transaction` instance
+
+Alternatively, you can create documents in https://pkg.go.dev/github.com/linkedin/goavro/v2#NewCodecForStandardJSONFull[standard/raw JSON format^] by setting the field <<raw_json,`raw_json`>> to `true`.
+
+== Metadata
+
+This scanner emits the following metadata for each message:
+
+- The `@avro_schema` field: The canonical Avro schema.
+- The `@avro_schema_fingerprint` field: The schema ID or fingerprint.
+
+
+== Fields
+
+=== `raw_json`
+
+Whether messages should be decoded into normal JSON (JSON that meets the expectations of regular internet JSON) rather than https://avro.apache.org/docs/current/specification/[Avro JSON^]. If `true`, the schema returned from the subject is decoded as https://pkg.go.dev/github.com/linkedin/goavro/v2#NewCodecForStandardJSONFull[standard JSON^] instead of as https://pkg.go.dev/github.com/linkedin/goavro/v2#NewCodec[Avro JSON^]. For more details on the difference between standard JSON and Avro JSON, see the https://github.com/linkedin/goavro/blob/5ec5a5ee7ec82e16e6e2b438d610e1cab2588393/union.go#L224-L249[comment in Goavro^] and the https://github.com/linkedin/goavro[underlying library used for Avro serialization^].
+
+
+*Type*: `bool`
+
+*Default*: `false`
+
+// end::single-source[]

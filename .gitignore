@@ -9,4 +9,3 @@ __pycache__/
 gen/
 tree-sitter/
 test/
-modules/

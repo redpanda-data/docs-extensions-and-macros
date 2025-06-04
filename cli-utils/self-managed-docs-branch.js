@@ -56,7 +56,7 @@ async function determineDocsBranch(operatorTag) {
   if (!filtered) {
     throw new Error(`Could not parse major.minor from ${TAG}`)
   }
-
+  // We started versioning the operator in line with Redpanda core versions. But when v2.4.x was the latest version, the docs were still on 25.1 and v25.1.x of the operator was still in beta. So we need to handle this special case.
   let branch
   if (filtered === 'v2.4') {
     if (ANTORA === '25.1') {
@@ -64,6 +64,7 @@ async function determineDocsBranch(operatorTag) {
     } else {
       branch = 'v/24.3'
     }
+  // For all other versions use the v<major>.<minor> branch unless it is the current version, in which case we use 'main'.
   } else if (filtered === `v${ANTORA}`) {
     branch = 'main'
   } else {

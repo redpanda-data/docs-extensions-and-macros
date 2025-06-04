@@ -1,0 +1,20 @@
+= none
+// tag::single-source[]
+:type: tracer
+:status: stable
+
+// © 2024 Redpanda Data Inc.
+
+
+component_type_dropdown::[]
+
+
+Do not send tracing events anywhere.
+
+```yml
+# Config fields, showing default values
+tracer:
+  none: {}
+```
+
+// end::single-source[]

@@ -1,0 +1,1 @@
+module.exports = obj => yaml.stringify(obj).trim()

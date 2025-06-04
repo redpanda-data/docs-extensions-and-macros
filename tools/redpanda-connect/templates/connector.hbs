@@ -1,0 +1,18 @@
+= {{{name}}}
+// tag::single-source[]
+:type: {{type}}
+:status: {{status}}
+:categories: [{{#each categories}}{{#if @first}}{{this}}{{else}}, {{this}}{{/if}}{{/each}}]
+:description: {{#if summary}}{{{summary}}}{{else if description}}{{description}}{{else}}TODO: Missing description. Please provide a summary or description.{{/if}}
+
+component_type_dropdown::[]
+
+{{> intro}}
+
+{{#if (or this.config.children children)}}
+include::redpanda-connect:components:partial$fields/{{type}}s/{{name}}.adoc[]
+{{/if}}
+
+{{#if this.examples}}
+include::redpanda-connect:components:partial$examples/{{type}}s/{{name}}.adoc[]
+{{/if}}
