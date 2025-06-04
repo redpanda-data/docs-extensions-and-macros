@@ -19,8 +19,16 @@ module.exports = function renderConnectExamples(examples) {
       output += `${example.summary}\n\n`;
     }
     if (example.config) {
+      if (typeof example.config !== 'string') {
+        console.warn('Example config must be a string, skipping');
+        return;
+      }
+      const configContent = example.config.trim();
+      if (configContent.includes('----')) {
+        console.warn('Example config contains AsciiDoc delimiters, this may break rendering');
+      }
       output += '[source,yaml]\n----\n';
-      output += example.config.trim() + '\n';
+      output += configContent + '\n';
       output += '----\n\n';
     }
   });

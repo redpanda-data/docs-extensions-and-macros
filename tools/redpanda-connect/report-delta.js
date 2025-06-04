@@ -93,7 +93,7 @@ function printDeltaReport(oldIndex, newIndex) {
         if (type === 'config') {
           rawFieldObj = (newMap[cKey].raw.children || []).find(f => f.name === fName);
         } else {
-          rawFieldObj = (newMap[cKey].raw.config.children || []).find(f => f.name === fName);
+          rawFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
         }
 
         let introducedIn = rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version);

@@ -10,6 +10,16 @@ const yaml = require('yaml');
  * @returns {string}             – one line, including comment if needed
  */
 module.exports = function renderLeafField(field, indentLevel) {
+  if (!field || typeof field !== 'object') {
+    throw new Error('renderLeafField: field must be an object');
+  }
+  if (typeof indentLevel !== 'number' || indentLevel < 0) {
+    throw new Error('renderLeafField: indentLevel must be a non-negative number');
+  }
+  if (!field.name || typeof field.name !== 'string') {
+    throw new Error('renderLeafField: field.name must be a non-empty string');
+  }
+
   const indent = ' '.repeat(indentLevel);
   const name = field.name;
 
@@ -36,7 +46,7 @@ module.exports = function renderLeafField(field, indentLevel) {
 
     // Otherwise, default is a primitive (string/number/bool)
     if (field.type === 'string') {
-      return `${indent}${name}: "${field.default}"`;
+      return `${indent}${name}: ${yaml.stringify(field.default)}`;
     }
     return `${indent}${name}: ${field.default}`;
   }
