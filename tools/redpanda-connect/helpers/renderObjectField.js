@@ -10,6 +10,12 @@ const renderLeafField = require('./renderLeafField');
  * @returns {string[]}           – an array of lines (parent + children)
  */
 module.exports = function renderObjectField(field, indentLevel) {
+  if (!field || !field.name || !Array.isArray(field.children)) {
+    throw new Error('renderObjectField requires a field object with name and children array');
+  }
+  if (typeof indentLevel !== 'number' || indentLevel < 0) {
+    throw new Error('indentLevel must be a non-negative number');
+  }
   const lines = [];
   const indent = ' '.repeat(indentLevel);
 

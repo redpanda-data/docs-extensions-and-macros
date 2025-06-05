@@ -13,7 +13,8 @@ module.exports = function renderConnectExamples(examples) {
   let output = '';
   examples.forEach(example => {
     if (example.title) {
-      output += `=== ${example.title}\n\n`;
+      const sanitizedTitle = example.title.replace(/[=]/g, '\\=');
+      output += `=== ${sanitizedTitle}\n\n`;
     }
     if (example.summary) {
       output += `${example.summary}\n\n`;

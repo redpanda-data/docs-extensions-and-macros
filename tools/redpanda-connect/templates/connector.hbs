@@ -2,8 +2,8 @@
 // tag::single-source[]
 :type: {{type}}
 :status: {{status}}
-:categories: [{{#each categories}}{{#if @first}}{{this}}{{else}}, {{this}}{{/if}}{{/each}}]
-:description: {{#if summary}}{{{summary}}}{{else if description}}{{description}}{{else}}TODO: Missing description. Please provide a summary or description.{{/if}}
+:categories: [{{join categories ", "}}]
+:description: {{#if summary}}{{{summary}}}{{else if description}}{{description}}{{else}}TODO: Missing description. Add a description in the overrides file or source data.{{/if}}
 
 component_type_dropdown::[]
 
@@ -16,3 +16,5 @@ include::redpanda-connect:components:partial$fields/{{type}}s/{{name}}.adoc[]
 {{#if this.examples}}
 include::redpanda-connect:components:partial$examples/{{type}}s/{{name}}.adoc[]
 {{/if}}
+
+// end::single-source[]

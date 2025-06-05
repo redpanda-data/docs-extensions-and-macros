@@ -4,6 +4,7 @@ module.exports = {
   uppercase:       require('./uppercase.js'),
   eq:              require('./eq.js'),
   ne:              require('./ne.js'),
+  join:              require('./join.js'),
   or:              require('./or.js'),
   toYaml:              require('./toYaml.js'),
   isObject:              require('./isObject.js'),

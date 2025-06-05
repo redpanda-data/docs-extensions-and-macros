@@ -39,6 +39,9 @@ function registerPartial(name, filePath) {
  */
 function mergeOverrides(target, overrides) {
   if (!overrides || typeof overrides !== 'object') return target;
+  if (!target || typeof target !== 'object') {
+    throw new Error('Target must be a valid object');
+  }
   for (const key in overrides) {
     if (Array.isArray(target[key]) && Array.isArray(overrides[key])) {
       // Merge two parallel arrays by matching items on `.name`
@@ -47,7 +50,7 @@ function mergeOverrides(target, overrides) {
         if (overrideItem) {
           // Overwrite description/type if present
           ['description', 'type'].forEach(field => {
-            if (overrideItem.hasOwnProperty(field)) {
+            if (Object.hasOwn(overrideItem, field)) {
               item[field] = overrideItem[field];
             }
           });
@@ -64,7 +67,7 @@ function mergeOverrides(target, overrides) {
     ) {
       // Deep-merge plain objects
       target[key] = mergeOverrides(target[key], overrides[key]);
-    } else if (['description', 'type'].includes(key) && overrides.hasOwnProperty(key)) {
+    } else if (['description', 'type'].includes(key) && Object.hasOwn(overrides, key)) {
       // Overwrite the primitive
       target[key] = overrides[key];
     }

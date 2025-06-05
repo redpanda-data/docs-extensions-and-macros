@@ -8,10 +8,24 @@ const handlebars = require('handlebars');
  *   {{commonConfig this.type this.name this.config.children}}
  */
 module.exports = function commonConfig(type, connectorName, children) {
-  if (typeof type !== 'string' || typeof connectorName !== 'string' || !Array.isArray(children)) {
+  if (typeof type !== 'string' || !type.trim()) {
+    console.warn('commonConfig: type must be a non-empty string');
+    return '';
+  }
+  if (typeof connectorName !== 'string' || !connectorName.trim()) {
+    console.warn('commonConfig: connectorName must be a non-empty string');
+    return '';
+  }
+  if (!Array.isArray(children)) {
+    console.warn('commonConfig: children must be an array');
     return '';
   }
 
-  const yamlText = buildConfigYaml(type, connectorName, children, /*includeAdvanced=*/ false);
-  return new handlebars.SafeString(yamlText);
+  try {
+    const yamlText = buildConfigYaml(type, connectorName, children, /*includeAdvanced=*/ false);
+    return new handlebars.SafeString(yamlText);
+  } catch (error) {
+    console.error('Error in commonConfig helper:', error);
+    return new handlebars.SafeString('<!-- Error generating configuration -->');
+  }
 }

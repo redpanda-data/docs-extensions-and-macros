@@ -33,15 +33,19 @@ module.exports = function renderLeafField(field, indentLevel) {
   if (field.default !== undefined) {
     // If default is itself an object or array → dump as YAML block
     if (typeof field.default === 'object') {
-      // Turn the object/array into a YAML string. We also need to indent that block
-      const rawYaml = yaml.stringify(field.default).trim();
-      // Indent each line of rawYaml by (indentLevel + 2) spaces:
-      const indentedYaml = rawYaml
-        .split('\n')
-        .map(line => ' '.repeat(indentLevel + 2) + line)
-        .join('\n');
-      // Print:
-      return `${indent}${name}:\n${indentedYaml}`;
+        try {
+          // Turn the object/array into a YAML string. We also need to indent that block
+          const rawYaml = yaml.stringify(field.default).trim();
+          // Indent each line of rawYaml by (indentLevel + 2) spaces:
+          const indentedYaml = rawYaml
+          .split('\n')
+          .map(line => ' '.repeat(indentLevel + 2) + line)
+          .join('\n');
+          return `${indent}${name}:\n${indentedYaml}`;
+        } catch (error) {
+          console.warn(`Failed to serialize default value for field ${field.name}:`, error);
+          return `${indent}${name}: {} # Error serializing default value`;
+        }
     }
 
     // Otherwise, default is a primitive (string/number/bool)
