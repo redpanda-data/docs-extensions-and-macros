@@ -1,0 +1,20 @@
+= {{{name}}}
+// tag::single-source[]
+:type: {{type}}
+:status: {{status}}
+:categories: [{{join categories ", "}}]
+:description: {{#if summary}}{{{summary}}}{{else if description}}{{description}}{{else}}TODO: Missing description. Add a description in the overrides file or source data.{{/if}}
+
+component_type_dropdown::[]
+
+{{> intro}}
+
+{{#if (or this.config.children children)}}
+include::redpanda-connect:components:partial$fields/{{type}}s/{{name}}.adoc[]
+{{/if}}
+
+{{#if this.examples}}
+include::redpanda-connect:components:partial$examples/{{type}}s/{{name}}.adoc[]
+{{/if}}
+
+// end::single-source[]
