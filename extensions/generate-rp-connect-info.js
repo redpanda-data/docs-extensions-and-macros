@@ -82,14 +82,14 @@ module.exports.register = function ({ config }) {
   }
 
   /**
-   * Translates the parsed CSV data into our expected format.
-   * If "enterprise" is found in the `support` column, it is replaced with "certified" in the output.
+   * Transforms and enriches parsed CSV connector data with normalized fields and documentation URLs.
    *
-   * @param {object} parsedData - The CSV data parsed into an object.
-   * @param {array} pages - The list of pages to map the URLs (used for enrichment with URLs).
-   * @param {object} logger - The logger used for error handling.
+   * Each row is trimmed, mapped to expected output fields, and enriched with documentation URLs for Redpanda Connect and Cloud components if available. The `support` field is normalized, and licensing information is derived. Logs a warning if documentation URLs are missing for non-deprecated, non-SQL driver connectors that indicate cloud support.
    *
-   * @returns {array} - The translated and enriched data.
+   * @param {object} parsedData - Parsed CSV data containing connector rows.
+   * @param {array} pages - Array of page objects used to resolve documentation URLs.
+   * @param {object} logger - Logger instance for warning about missing documentation.
+   * @returns {array} Array of enriched connector objects with normalized fields and URLs.
    */
   function translateCsvData(parsedData, pages, logger) {
     return parsedData.data.map(row => {
