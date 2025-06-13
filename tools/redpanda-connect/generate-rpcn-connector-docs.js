@@ -171,6 +171,10 @@ async function generateRpcnConnectorDocs(options) {
       }
 
       if (writeFullDrafts) {
+        if (item.status === 'deprecated') {
+          console.log(`Skipping draft for deprecated component: ${type}/${name}`);
+          continue;
+        }
         let content;
         try {
           content = compiledTemplate(item);

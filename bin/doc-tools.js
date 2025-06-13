@@ -269,7 +269,7 @@ function verifyMetricsDependencies() {
 // --------------------------------------------------------------------
 const programCli = new Command();
 
-programCli.name('doc-tools').description('Redpanda Document Automation CLI').version('1.1.0');
+programCli.name('doc-tools').description('Redpanda Document Automation CLI').version('1.1.1');
 
 // Top-level commands.
 programCli
