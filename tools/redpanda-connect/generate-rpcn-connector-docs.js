@@ -54,6 +54,10 @@ function mergeOverrides(target, overrides) {
               item[field] = overrideItem[field];
             }
           });
+          // Copy through selfManagedOnly flag
+          if (Object.hasOwn(overrideItem, 'selfManagedOnly')) {
+            item.selfManagedOnly = overrideItem.selfManagedOnly;
+          }
           // Recurse for nested children
           item = mergeOverrides(item, overrideItem);
         }
