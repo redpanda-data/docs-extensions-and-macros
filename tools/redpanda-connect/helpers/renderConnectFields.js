@@ -1,5 +1,3 @@
-'use strict';
-
 const yaml = require('yaml');
 const renderYamlList = require('./renderYamlList');
 const handlebars = require('handlebars');
@@ -28,13 +26,12 @@ module.exports = function renderConnectFields(children, prefix = '') {
   sorted.forEach(child => {
     if (child.is_deprecated || !child.name) return;
 
-    // Normalize type: string-array becomes true 'array'
+    // Normalize type
     const displayType =
       child.type === 'string' && child.kind === 'array'
         ? 'array'
         : child.type;
 
-    // Build the AsciiDoc block for this field
     let block = '';
     const isArray = child.kind === 'array';
     const currentPath = prefix
@@ -46,17 +43,16 @@ module.exports = function renderConnectFields(children, prefix = '') {
     if (child.description) {
       block += `${child.description}\n\n`;
     }
-
-    if (child.is_secret === true) {
+    if (child.is_secret) {
       block += `include::redpanda-connect:components:partial$secret_warning.adoc[]\n\n`;
     }
-
     if (child.version) {
       block += `ifndef::env-cloud[]\nRequires version ${child.version} or later.\nendif::[]\n\n`;
     }
 
     block += `*Type*: \`${displayType}\`\n\n`;
 
+    // Default
     if (child.type !== 'object' && child.default !== undefined) {
       if (typeof child.default !== 'object') {
         const display = child.default === '' ? '""' : String(child.default);
@@ -67,31 +63,23 @@ module.exports = function renderConnectFields(children, prefix = '') {
       }
     }
 
-    if (
-      child.annotated_options &&
-      Array.isArray(child.annotated_options) &&
-      child.annotated_options.length > 0
-    ) {
-      block += '[cols="1m,2a"]\n';
-      block += '|===\n';
-      block += '|Option |Summary\n\n';
-      child.annotated_options.forEach(optionPair => {
-        if (Array.isArray(optionPair) && optionPair.length >= 2) {
-          block += `|${optionPair[0]}\n|${optionPair[1]}\n\n`;
-        }
+    // Annotated options
+    if (child.annotated_options && child.annotated_options.length) {
+      block += `[cols=\"1m,2a\"]\n|===\n|Option |Summary\n\n`;
+      child.annotated_options.forEach(([opt, summary]) => {
+        block += `|${opt}\n|${summary}\n\n`;
       });
-      block += '|===\n\n';
+      block += `|===\n\n`;
     }
 
-    if (child.options && Array.isArray(child.options) && child.options.length > 0) {
+    // Options list
+    if (child.options && child.options.length) {
       block += `*Options*: ${child.options.map(opt => `\`${opt}\``).join(', ')}\n\n`;
     }
 
+    // Examples
     if (child.examples && child.examples.length) {
-      block += '[source,yaml]\n----\n';
-      block += '# Examples:\n';
-
-      // ...examples rendering logic unchanged...
+      block += `[source,yaml]\n----\n# Examples:\n`;
       if (child.type === 'string') {
         if (child.kind === 'array') {
           block += renderYamlList(child.name, child.examples);
@@ -99,10 +87,9 @@ module.exports = function renderConnectFields(children, prefix = '') {
           child.examples.forEach(example => {
             if (typeof example === 'string' && example.includes('\n')) {
               block += `${child.name}: |-\n`;
-              const indented = example.split('\n').map(line => '  ' + line).join('\n');
-              block += `${indented}\n`;
+              block += example.split('\n').map(line => '  ' + line).join('\n') + '\n';
             } else {
-              block += `${child.name}: ${example}\n`;
+              block += `${child.name}: \`${example}\`\n`;
             }
           });
           block += '\n';
@@ -112,7 +99,7 @@ module.exports = function renderConnectFields(children, prefix = '') {
           block += renderYamlList(child.name, child.examples);
         } else {
           child.examples.forEach(example => {
-            block += `${child.name}: ${example}\n`;
+            block += `${child.name}: \`${String(example)}\`\n`;
           });
           block += '\n';
         }
@@ -123,33 +110,29 @@ module.exports = function renderConnectFields(children, prefix = '') {
           child.examples.forEach(example => {
             if (typeof example === 'object') {
               const snippet = yaml.stringify(example).trim();
-              const formatted = snippet
-                .split('\n')
-                .map(line => '  ' + line)
-                .join('\n');
-              block += `${child.name}:\n${formatted}\n`;
+              block += `${child.name}:\n`;
+              block += snippet.split('\n').map(line => '  ' + line).join('\n') + '\n';
             } else {
-              block += `${child.name}: ${example}\n`;
+              block += `${child.name}: \`${String(example)}\`\n`;
             }
           });
           block += '\n';
         }
       } else {
         child.examples.forEach(example => {
-          block += `${child.name}: ${example}\n`;
+          block += `${child.name}: \`${String(example)}\`\n`;
         });
         block += '\n';
       }
-
-      block += '----\n\n';
+      block += `----\n\n`;
     }
 
-    // Render nested children
-    if (child.children && Array.isArray(child.children) && child.children.length > 0) {
+    // Nested
+    if (child.children && child.children.length) {
       block += renderConnectFields(child.children, currentPath);
     }
 
-    // Wrap in cloud-guard if selfManagedOnly
+    // Cloud guard
     if (child.selfManagedOnly) {
       output += `ifndef::env-cloud[]\n${block}endif::[]\n\n`;
     } else {
