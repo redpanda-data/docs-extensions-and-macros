@@ -27,10 +27,14 @@ module.exports = function renderConnectFields(children, prefix = '') {
     if (child.is_deprecated || !child.name) return;
 
     // Normalize type
-    const displayType =
-      child.type === 'string' && child.kind === 'array'
-        ? 'array'
-        : child.type;
+    let displayType;
+    if (child.type === 'string' && child.kind === 'array') {
+      displayType = 'array';
+    } else if (child.type === 'unknown' && child.kind === 'map') {
+      displayType = 'object';
+    } else {
+      displayType = child.type;
+    }
 
     let block = '';
     const isArray = child.kind === 'array';
