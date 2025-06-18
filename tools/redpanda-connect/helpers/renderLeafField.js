@@ -31,34 +31,57 @@ module.exports = function renderLeafField(field, indentLevel) {
 
   // If a default is provided, use it:
   if (field.default !== undefined) {
-    // If default is itself an object or array → dump as YAML block
+    // Empty array inline
+    if (Array.isArray(field.default) && field.default.length === 0) {
+      return `${indent}${name}: []`;
+    }
+    // Empty object inline
+    if (
+      field.default !== null &&
+      typeof field.default === 'object' &&
+      !Array.isArray(field.default) &&
+      Object.keys(field.default).length === 0
+    ) {
+      return `${indent}${name}: {}`;
+    }
+
+    // Complex object/array: dump as YAML block
     if (typeof field.default === 'object') {
-        try {
-          // Turn the object/array into a YAML string. We also need to indent that block
-          const rawYaml = yaml.stringify(field.default).trim();
-          // Indent each line of rawYaml by (indentLevel + 2) spaces:
-          const indentedYaml = rawYaml
+      try {
+        const rawYaml = yaml.stringify(field.default).trim();
+        const indentedYaml = rawYaml
           .split('\n')
           .map(line => ' '.repeat(indentLevel + 2) + line)
           .join('\n');
-          return `${indent}${name}:\n${indentedYaml}`;
-        } catch (error) {
-          console.warn(`Failed to serialize default value for field ${field.name}:`, error);
-          return `${indent}${name}: {} # Error serializing default value`;
-        }
+        return `${indent}${name}:\n${indentedYaml}`;
+      } catch (error) {
+        console.warn(`Failed to serialize default for ${field.name}:`, error);
+        return `${indent}${name}: {} # Error serializing default`;
+      }
     }
 
-    // Otherwise, default is a primitive (string/number/bool)
-    if (field.type === 'string') {
-      return `${indent}${name}: ${yaml.stringify(field.default)}`;
+    // Primitive default: string, number, boolean
+    let value;
+    if (typeof field.default === 'string') {
+      // Preserve existing quotes
+      if (field.default.startsWith('"') && field.default.endsWith('"')) {
+        value = field.default;
+      } else if (field.default === '') {
+        value = '""';
+      } else {
+        value = field.default;
+      }
+    } else {
+      value = String(field.default);
     }
-    return `${indent}${name}: ${field.default}`;
+
+    return `${indent}${name}: ${value}`;
   }
 
-  // No default → choose representation based on kind
+  // No default → choose representation
   if (field.kind === 'array') {
     return `${indent}${name}: [] ${comment}`;
   } else {
     return `${indent}${name}: "" ${comment}`;
   }
-}
+};

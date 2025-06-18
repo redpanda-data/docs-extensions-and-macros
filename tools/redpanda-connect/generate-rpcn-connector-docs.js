@@ -185,7 +185,7 @@ async function generateRpcnConnectorDocs(options) {
           partialFiles.push(path.relative(process.cwd(), fPath));
         }
 
-        if (examplesOut.trim()) {
+        if (examplesOut.trim() && type !== 'bloblang-functions' && type !== 'bloblang-methods') {
           const ePath = path.join(examplesOutRoot, type, `${name}.adoc`);
           fs.mkdirSync(path.dirname(ePath), { recursive: true });
           fs.writeFileSync(ePath, examplesOut);

@@ -546,22 +546,27 @@ automation
     }
 
     if (options.draftMissing) {
-      console.log('⏳ Drafting missing connectors...');
+      console.log('⏳ Drafting missing connectors…');
       try {
         const connectorList = await parseCSVConnectors(options.csv, console);
-        const validConnectors = connectorList.filter(row => row.name && row.type);
+        const validConnectors = connectorList.filter(r => r.name && r.type);
 
-        const pagesRoot = path.resolve(process.cwd(), 'modules/components/pages');
+        const roots = {
+          pages:   path.resolve(process.cwd(), 'modules/components/pages'),
+          partials:path.resolve(process.cwd(), 'modules/components/partials/components'),
+        };
+
+        // find any connector that has NO .adoc under pages/TYPEs or partials/TYPEs
         const allMissing = validConnectors.filter(({ name, type }) => {
-          if (!name || !type) {
-            console.warn(`⚠️  Skipping invalid connector entry:`, { name, type });
-            return false;
-          }
-          const expected = path.join(pagesRoot, `${type}s`, `${name}.adoc`);
-          return !fs.existsSync(expected);
+          const relPath = path.join(`${type}s`, `${name}.adoc`);
+          const existsInAny = Object.values(roots).some(root =>
+            fs.existsSync(path.join(root, relPath))
+          );
+          return !existsInAny;
         });
 
-        const missingConnectors = allMissing.filter(({ name }) => !name.includes('sql_driver'));
+        // still skip sql_driver
+        const missingConnectors = allMissing.filter(c => !c.name.includes('sql_driver'));
 
         if (missingConnectors.length === 0) {
           console.log('✅ All connectors (excluding sql_drivers) already have docs—nothing to draft.');
@@ -572,17 +577,20 @@ automation
           });
           console.log('');
 
+          // build your filtered JSON as before…
           const rawData = fs.readFileSync(dataFile, 'utf8');
           const dataObj = JSON.parse(rawData);
-
           const filteredDataObj = {};
+
           for (const [key, arr] of Object.entries(dataObj)) {
             if (!Array.isArray(arr)) {
               filteredDataObj[key] = arr;
               continue;
             }
             filteredDataObj[key] = arr.filter(component =>
-              missingConnectors.some(m => m.name === component.name && `${m.type}s` === key)
+              missingConnectors.some(
+                m => m.name === component.name && `${m.type}s` === key
+              )
             );
           }
 
@@ -590,12 +598,12 @@ automation
           fs.writeFileSync(tempDataPath, JSON.stringify(filteredDataObj, null, 2), 'utf8');
 
           const draftResult = await generateRpcnConnectorDocs({
-            data: tempDataPath,
-            overrides: options.overrides,
-            template: options.templateMain,
-            templateFields: options.templateFields,
-            templateExamples: options.templateExamples,
-            templateIntro: options.templateIntro,
+            data:            tempDataPath,
+            overrides:       options.overrides,
+            template:        options.templateMain,
+            templateFields:  options.templateFields,
+            templateExamples:options.templateExamples,
+            templateIntro:   options.templateIntro,
             writeFullDrafts: true
           });
 
