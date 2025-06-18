@@ -15,11 +15,12 @@ module.exports = function renderYamlList(name, exampleGroups) {
       // Scalars
       if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
         let value = String(item);
-        // Preserve explicit quotes or wrap '*' in quotes
-        if ((value.startsWith('"') && value.endsWith('"')) || value === '*') {
-          // Already quoted or special '*'
-        } else {
-          value = value;
+        // Quote when needed: already-quoted scalars stay as-is; otherwise quote `*`
+        // and any value containing YAML-special characters.
+        if (!(value.startsWith('"') && value.endsWith('"'))) {
+          if (value === '*' || /[:\[\]\{\},&>|%@`]/.test(value)) {
+            value = `"${value}"`;
+          }
         }
         out += `  - ${value}\n`;
       } else {
