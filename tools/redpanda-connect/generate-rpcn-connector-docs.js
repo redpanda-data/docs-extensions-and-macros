@@ -54,6 +54,10 @@ function mergeOverrides(target, overrides) {
               item[field] = overrideItem[field];
             }
           });
+          // Copy through selfManagedOnly flag
+          if (Object.hasOwn(overrideItem, 'selfManagedOnly')) {
+            item.selfManagedOnly = overrideItem.selfManagedOnly;
+          }
           // Recurse for nested children
           item = mergeOverrides(item, overrideItem);
         }
@@ -75,6 +79,26 @@ function mergeOverrides(target, overrides) {
   return target;
 }
 
+/**
+ * Generates documentation files for RPCN connectors using Handlebars templates.
+ *
+ * Depending on the {@link writeFullDrafts} flag, generates either partial documentation files for connector fields and examples, or full draft documentation for each connector component. Supports merging override data and skips draft generation for components marked as deprecated.
+ *
+ * @param {Object} options - Configuration options for documentation generation.
+ * @param {string} options.data - Path to the connector data file (JSON or YAML).
+ * @param {string} [options.overrides] - Optional path to a JSON file with override data.
+ * @param {string} options.template - Path to the main Handlebars template.
+ * @param {string} [options.templateIntro] - Path to the intro partial template (used in full draft mode).
+ * @param {string} [options.templateFields] - Path to the fields partial template.
+ * @param {string} [options.templateExamples] - Path to the examples partial template.
+ * @param {boolean} options.writeFullDrafts - If true, generates full draft documentation; otherwise, generates partials.
+ * @returns {Promise<Object>} An object summarizing the number and paths of generated partials and drafts.
+ *
+ * @throws {Error} If reading or parsing input files fails, or if template rendering fails for a component.
+ *
+ * @remark
+ * When generating full drafts, components with a `status` of `'deprecated'` are skipped.
+ */
 async function generateRpcnConnectorDocs(options) {
   const {
     data,
@@ -171,6 +195,10 @@ async function generateRpcnConnectorDocs(options) {
       }
 
       if (writeFullDrafts) {
+        if (String(item.status || '').toLowerCase() === 'deprecated') {
+          console.log(`Skipping draft for deprecated component: ${type}/${name}`);
+          continue;
+        }
         let content;
         try {
           content = compiledTemplate(item);

@@ -1,9 +1,6 @@
-'use strict';
-
 const yaml = require('yaml');
 const renderYamlList = require('./renderYamlList');
 const handlebars = require('handlebars');
-
 
 /**
  * Renders the children of a configuration object into AsciiDoc.
@@ -27,120 +24,125 @@ module.exports = function renderConnectFields(children, prefix = '') {
   prefix = typeof prefix === 'string' ? prefix : '';
 
   sorted.forEach(child => {
-    if (child.is_deprecated) {
-      return;
+    if (child.is_deprecated || !child.name) return;
+
+    // Normalize type
+    let displayType;
+    if (child.type === 'string' && child.kind === 'array') {
+      displayType = 'array';
+    } else if (child.type === 'unknown' && child.kind === 'map') {
+      displayType = 'object';
+    } else {
+      displayType = child.type;
     }
+
+    let block = '';
     const isArray = child.kind === 'array';
-    if (!child.name) return;
     const currentPath = prefix
       ? `${prefix}.${child.name}${isArray ? '[]' : ''}`
       : `${child.name}${isArray ? '[]' : ''}`;
 
-    output += `=== \`${currentPath}\`\n\n`;
+    block += `=== \`${currentPath}\`\n\n`;
 
     if (child.description) {
-      output += `${child.description}\n\n`;
+      block += `${child.description}\n\n`;
     }
-
-    if (child.is_secret === true) {
-      output += `include::redpanda-connect:components:partial$secret_warning.adoc[]\n\n`;
+    if (child.is_secret) {
+      block += `include::redpanda-connect:components:partial$secret_warning.adoc[]\n\n`;
     }
-
     if (child.version) {
-      output += `ifndef::env-cloud[]\nRequires version ${child.version} or later.\nendif::[]\n\n`;
+      block += `ifndef::env-cloud[]\nRequires version ${child.version} or later.\nendif::[]\n\n`;
     }
 
-    output += `*Type*: \`${child.type}\`\n\n`;
+    block += `*Type*: \`${displayType}\`\n\n`;
 
+    // Default
     if (child.type !== 'object' && child.default !== undefined) {
       if (typeof child.default !== 'object') {
         const display = child.default === '' ? '""' : String(child.default);
-        output += `*Default*: \`${display}\`\n\n`;
+        block += `*Default*: \`${display}\`\n\n`;
       } else {
         const defYaml = yaml.stringify(child.default).trim();
-        output += `*Default*:\n[source,yaml]\n----\n${defYaml}\n----\n\n`;
+        block += `*Default*:\n[source,yaml]\n----\n${defYaml}\n----\n\n`;
       }
     }
 
-    if (
-      child.annotated_options &&
-      Array.isArray(child.annotated_options) &&
-      child.annotated_options.length > 0
-    ) {
-      output += '[cols="1m,2a"]\n';
-      output += '|===\n';
-      output += '|Option |Summary\n\n';
-      child.annotated_options.forEach(optionPair => {
-        if (Array.isArray(optionPair) && optionPair.length >= 2) {
-          output += `|${optionPair[0]}\n|${optionPair[1]}\n\n`;
-        }
+    // Annotated options
+    if (child.annotated_options && child.annotated_options.length) {
+      block += `[cols=\"1m,2a\"]\n|===\n|Option |Summary\n\n`;
+      child.annotated_options.forEach(([opt, summary]) => {
+        block += `|${opt}\n|${summary}\n\n`;
       });
-      output += '|===\n\n';
+      block += `|===\n\n`;
     }
 
-    if (child.options && Array.isArray(child.options) && child.options.length > 0) {
-      output += `*Options*: ${child.options.map(opt => `\`${opt}\``).join(', ')}\n\n`;
+    // Options list
+    if (child.options && child.options.length) {
+      block += `*Options*: ${child.options.map(opt => `\`${opt}\``).join(', ')}\n\n`;
     }
 
+    // Examples
     if (child.examples && child.examples.length) {
-      output += '[source,yaml]\n----\n';
-      output += '# Examples:\n';
-
+      block += `[source,yaml]\n----\n# Examples:\n`;
       if (child.type === 'string') {
         if (child.kind === 'array') {
-          output += renderYamlList(child.name, child.examples);
+          block += renderYamlList(child.name, child.examples);
         } else {
           child.examples.forEach(example => {
             if (typeof example === 'string' && example.includes('\n')) {
-              output += `${child.name}: |-\n`;
-              const indentedLines = example.split('\n').map(line => '  ' + line).join('\n');
-              output += `${indentedLines}\n`;
+              block += `${child.name}: |-\n`;
+              block += example.split('\n').map(line => '  ' + line).join('\n') + '\n';
             } else {
-              output += `${child.name}: ${example}\n`;
+              block += `${child.name}: \`${example}\`\n`;
             }
           });
-          output += '\n';
+          block += '\n';
         }
       } else if (child.type === 'processor') {
         if (child.kind === 'array') {
-          output += renderYamlList(child.name, child.examples);
+          block += renderYamlList(child.name, child.examples);
         } else {
           child.examples.forEach(example => {
-            output += `${child.name}: ${example}\n`;
+            block += `${child.name}: \`${String(example)}\`\n`;
           });
-          output += '\n';
+          block += '\n';
         }
       } else if (child.type === 'object') {
         if (child.kind === 'array') {
-          output += renderYamlList(child.name, child.examples);
+          block += renderYamlList(child.name, child.examples);
         } else {
           child.examples.forEach(example => {
             if (typeof example === 'object') {
               const snippet = yaml.stringify(example).trim();
-              const lines = snippet.split('\n');
-              // Prefix two spaces to every line
-              const formattedLines = lines.map(line => '  ' + line).join('\n');
-              output += `${child.name}:\n${formattedLines}\n`;
+              block += `${child.name}:\n`;
+              block += snippet.split('\n').map(line => '  ' + line).join('\n') + '\n';
             } else {
-              output += `${child.name}: ${example}\n`;
+              block += `${child.name}: \`${String(example)}\`\n`;
             }
           });
-          output += '\n';
+          block += '\n';
         }
       } else {
         child.examples.forEach(example => {
-          output += `${child.name}: ${example}\n`;
+          block += `${child.name}: \`${String(example)}\`\n`;
         });
-        output += '\n';
+        block += '\n';
       }
-
-      output += '----\n\n';
+      block += `----\n\n`;
     }
 
-    if (child.children && Array.isArray(child.children) && child.children.length > 0) {
-      output += renderConnectFields(child.children, currentPath);
+    // Nested
+    if (child.children && child.children.length) {
+      block += renderConnectFields(child.children, currentPath);
+    }
+
+    // Cloud guard
+    if (child.selfManagedOnly) {
+      output += `ifndef::env-cloud[]\n${block}endif::[]\n\n`;
+    } else {
+      output += block;
     }
   });
 
   return new handlebars.SafeString(output);
-}
+};
