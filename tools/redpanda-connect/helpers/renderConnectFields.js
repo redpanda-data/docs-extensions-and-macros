@@ -26,7 +26,7 @@ module.exports = function renderConnectFields(children, prefix = '') {
   sorted.forEach(child => {
     if (child.is_deprecated || !child.name) return;
 
-    // Normalize type
+    // Normalize type: arrays and unknown-map as object
     let displayType;
     if (child.type === 'string' && child.kind === 'array') {
       displayType = 'array';
@@ -56,27 +56,49 @@ module.exports = function renderConnectFields(children, prefix = '') {
 
     block += `*Type*: \`${displayType}\`\n\n`;
 
-    // Default
-    if (child.type !== 'object' && child.default !== undefined) {
-      if (typeof child.default !== 'object') {
-        const display = child.default === '' ? '""' : String(child.default);
-        block += `*Default*: \`${display}\`\n\n`;
-      } else {
+    // Default value
+    if (child.default !== undefined) {
+      // Empty array
+      if (Array.isArray(child.default) && child.default.length === 0) {
+        block += `*Default*: \`[]\`\n\n`;
+      }
+      // Empty object
+      else if (
+        child.default !== null &&
+        typeof child.default === 'object' &&
+        !Array.isArray(child.default) &&
+        Object.keys(child.default).length === 0
+      ) {
+        block += `*Default*: \`{}\`\n\n`;
+      }
+      // Complex object/array
+      else if (typeof child.default === 'object') {
         const defYaml = yaml.stringify(child.default).trim();
         block += `*Default*:\n[source,yaml]\n----\n${defYaml}\n----\n\n`;
       }
+      // Primitive
+      else {
+        const display = typeof child.default === 'string'
+          ? (child.default.startsWith('"') && child.default.endsWith('"')
+              ? child.default
+              : child.default === ''
+              ? '""'
+              : child.default)
+          : String(child.default);
+        block += `*Default*: \`${display}\`\n\n`;
+      }
     }
 
-    // Annotated options
+    // Annotated options table
     if (child.annotated_options && child.annotated_options.length) {
-      block += `[cols=\"1m,2a\"]\n|===\n|Option |Summary\n\n`;
+      block += `[cols="1m,2a"]\n|===\n|Option |Summary\n\n`;
       child.annotated_options.forEach(([opt, summary]) => {
         block += `|${opt}\n|${summary}\n\n`;
       });
       block += `|===\n\n`;
     }
 
-    // Options list
+    // Simple options list
     if (child.options && child.options.length) {
       block += `*Options*: ${child.options.map(opt => `\`${opt}\``).join(', ')}\n\n`;
     }
@@ -84,54 +106,27 @@ module.exports = function renderConnectFields(children, prefix = '') {
     // Examples
     if (child.examples && child.examples.length) {
       block += `[source,yaml]\n----\n# Examples:\n`;
-      if (child.type === 'string') {
-        if (child.kind === 'array') {
-          block += renderYamlList(child.name, child.examples);
-        } else {
-          child.examples.forEach(example => {
-            if (typeof example === 'string' && example.includes('\n')) {
-              block += `${child.name}: |-\n`;
-              block += example.split('\n').map(line => '  ' + line).join('\n') + '\n';
-            } else {
-              block += `${child.name}: \`${example}\`\n`;
-            }
-          });
-          block += '\n';
-        }
-      } else if (child.type === 'processor') {
-        if (child.kind === 'array') {
-          block += renderYamlList(child.name, child.examples);
-        } else {
-          child.examples.forEach(example => {
-            block += `${child.name}: \`${String(example)}\`\n`;
-          });
-          block += '\n';
-        }
-      } else if (child.type === 'object') {
-        if (child.kind === 'array') {
-          block += renderYamlList(child.name, child.examples);
-        } else {
-          child.examples.forEach(example => {
-            if (typeof example === 'object') {
-              const snippet = yaml.stringify(example).trim();
-              block += `${child.name}:\n`;
-              block += snippet.split('\n').map(line => '  ' + line).join('\n') + '\n';
-            } else {
-              block += `${child.name}: \`${String(example)}\`\n`;
-            }
-          });
-          block += '\n';
-        }
+      if (child.kind === 'array') {
+        block += renderYamlList(child.name, child.examples);
       } else {
         child.examples.forEach(example => {
-          block += `${child.name}: \`${String(example)}\`\n`;
+          if (typeof example === 'object') {
+            const snippet = yaml.stringify(example).trim();
+            block += `${child.name}:\n`;
+            block += snippet.split('\n').map(line => '  ' + line).join('\n') + '\n';
+          } else if (typeof example === 'string' && example.includes('\n')) {
+            block += `${child.name}: |-\n`;
+            block += example.split('\n').map(line => '  ' + line).join('\n') + '\n';
+          } else {
+            // Primitive values
+            block += `${child.name}: ${example}\n`;
+          }
         });
-        block += '\n';
       }
       block += `----\n\n`;
     }
 
-    // Nested
+    // Nested children
     if (child.children && child.children.length) {
       block += renderConnectFields(child.children, currentPath);
     }
