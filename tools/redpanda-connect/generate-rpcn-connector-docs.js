@@ -35,47 +35,99 @@ function registerPartial(name, filePath) {
 
 /**
  * Deep-merge `overrides` into `target`. Only 'description', 'type',
- * plus nested array/object entries get overridden; other keys remain intact.
+ * 'annotated_field', 'examples', and known nested fields are overridden.
  */
 function mergeOverrides(target, overrides) {
   if (!overrides || typeof overrides !== 'object') return target;
   if (!target || typeof target !== 'object') {
     throw new Error('Target must be a valid object');
   }
+
+  const scalarKeys = ['description', 'type', 'annotated_field'];
+
   for (const key in overrides) {
+    // === Handle annotated_options ===
+    if (key === 'annotated_options' && Array.isArray(overrides[key]) && Array.isArray(target[key])) {
+      const overrideMap = new Map(overrides[key].map(([name, desc]) => [name, desc]));
+
+      target[key] = target[key].map(([name, desc]) => {
+        if (overrideMap.has(name)) {
+          return [name, overrideMap.get(name)];
+        }
+        return [name, desc];
+      });
+
+      const existingNames = new Set(target[key].map(([name]) => name));
+      for (const [name, desc] of overrides[key]) {
+        if (!existingNames.has(name)) {
+          target[key].push([name, desc]);
+        }
+      }
+      continue;
+    }
+
+    // === Handle examples ===
+    if (key === 'examples' && Array.isArray(overrides[key]) && Array.isArray(target[key])) {
+      const overrideMap = new Map(overrides[key].map(o => [o.title, o]));
+
+      target[key] = target[key].map(example => {
+        const override = overrideMap.get(example.title);
+        if (override) {
+          return {
+            ...example,
+            ...(override.summary && { summary: override.summary }),
+            ...(override.config && { config: override.config }),
+          };
+        }
+        return example;
+      });
+
+      const existingTitles = new Set(target[key].map(e => e.title));
+      for (const example of overrides[key]) {
+        if (!existingTitles.has(example.title)) {
+          target[key].push(example);
+        }
+      }
+      continue;
+    }
+
+    // === Merge arrays of objects with .name ===
     if (Array.isArray(target[key]) && Array.isArray(overrides[key])) {
-      // Merge two parallel arrays by matching items on `.name`
       target[key] = target[key].map(item => {
         const overrideItem = overrides[key].find(o => o.name === item.name);
         if (overrideItem) {
-          // Overwrite description/type if present
-          ['description', 'type'].forEach(field => {
+          scalarKeys.forEach(field => {
             if (Object.hasOwn(overrideItem, field)) {
               item[field] = overrideItem[field];
             }
           });
-          // Copy through selfManagedOnly flag
           if (Object.hasOwn(overrideItem, 'selfManagedOnly')) {
             item.selfManagedOnly = overrideItem.selfManagedOnly;
           }
-          // Recurse for nested children
-          item = mergeOverrides(item, overrideItem);
+          return mergeOverrides(item, overrideItem);
         }
         return item;
       });
-    } else if (
+      continue;
+    }
+
+    // === Merge nested objects ===
+    if (
       typeof target[key] === 'object' &&
       typeof overrides[key] === 'object' &&
       !Array.isArray(target[key]) &&
       !Array.isArray(overrides[key])
     ) {
-      // Deep-merge plain objects
       target[key] = mergeOverrides(target[key], overrides[key]);
-    } else if (['description', 'type'].includes(key) && Object.hasOwn(overrides, key)) {
-      // Overwrite the primitive
+      continue;
+    }
+
+    // === Overwrite scalar keys ===
+    if (scalarKeys.includes(key) && Object.hasOwn(overrides, key)) {
       target[key] = overrides[key];
     }
   }
+
   return target;
 }
 
