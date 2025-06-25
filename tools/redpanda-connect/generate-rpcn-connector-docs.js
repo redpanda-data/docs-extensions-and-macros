@@ -43,7 +43,7 @@ function mergeOverrides(target, overrides) {
     throw new Error('Target must be a valid object');
   }
 
-  const scalarKeys = ['description', 'type', 'annotated_field'];
+  const scalarKeys = ['description', 'type', 'annotated_field', 'version'];
 
   for (const key in overrides) {
     // === Handle annotated_options ===
