@@ -115,40 +115,58 @@ module.exports.register = function ({ config }) {
       let redpandaConnectUrl = '';
       let redpandaCloudUrl = '';
 
+      function isConnectorDocPath (filePath, type) {
+        const dirsToCheck = [
+          `pages/${type}s/`,
+          `partials/components/${type}s/`
+        ];
+        return dirsToCheck.some(dir => filePath.includes(dir));
+      }
+
+      function isCloudDoc(file, connector, type) {
+        return (
+          file.src.component === 'redpanda-cloud' &&
+          file.path.includes(`connect/components/${type}s/${connector}.adoc`)
+        );
+      }
+
       // Look for both Redpanda Connect and Cloud URLs
       for (const file of pages) {
-        const component = file.src.component;
-        const filePath = file.path;
+        const { component } = file.src;      // such as 'redpanda-connect'
+        const { path: filePath } = file;     // such as modules/.../pages/sinks/foo.adoc
 
         if (
           component === 'redpanda-connect' &&
           filePath.endsWith(`/${connector}.adoc`) &&
-          filePath.includes(`pages/${type}s/`)
+          isConnectorDocPath(filePath, type)
         ) {
           redpandaConnectUrl = file.pub.url;
         }
 
-        // Only check for Redpanda Cloud URLs if cloud is supported
-        if (
-          is_cloud_supported === 'y' &&
-          component === 'redpanda-cloud' &&
-          filePath.endsWith(`/${connector}.adoc`) &&
-          filePath.includes(`${type}s/`)
-        ) {
+        // -------------------------------------------------
+        // Redpanda Cloud (only if cloud supported)
+        // -------------------------------------------------
+        if (is_cloud_supported === 'y' && isCloudDoc(file, connector, type)) {
           redpandaCloudUrl = file.pub.url;
         }
       }
 
-      // Log a warning if neither URL was found and the component is not deprecated
       if (
         deprecated !== 'y' &&
         !connector.includes('sql_driver') &&
         !redpandaConnectUrl &&
-        (!redpandaCloudUrl && is_cloud_supported === 'y')
+        !(is_cloud_supported === 'y' && redpandaCloudUrl)
       ) {
-        logger.warn(`Docs missing for: ${connector} of type: ${type}`);
+        logger.warn(`Self-Managed docs missing for: ${connector} of type: ${type}`);
       }
 
+      if (
+        is_cloud_supported === 'y' &&
+        !redpandaCloudUrl &&
+        redpandaConnectUrl
+      ) {
+        logger.warn(`Cloud docs missing for: ${connector} of type: ${type}`);
+      }
 
       // Return the translated and enriched row
       return {
