@@ -485,7 +485,16 @@ automation
   .option('--template-examples <path>', 'Examples section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/examples-partials.hbs'))
   .option('--overrides <path>', 'Optional JSON file with overrides')
   .action(async (options) => {
-    let success = true;
+    requireTool('rpk', {
+      versionFlag: '--version',
+      help: 'rpk is not installed. Install rpk: https://docs.redpanda.com/current/get-started/rpk-install/'
+    });
+
+    requireTool('rpk connect', {
+      versionFlag: '--version',
+      help: 'rpk connect is not installed. Run rpk connect install before continuing.'
+    });
+
     const dataDir = path.resolve(process.cwd(), options.dataDir);
     fs.mkdirSync(dataDir, { recursive: true });
 
@@ -495,7 +504,6 @@ automation
     let dataFile;
     if (options.fetchConnectors) {
       try {
-        execSync('rpk --version', { stdio: 'ignore' });
         newVersion = getRpkConnectVersion();
         const tmpFile = path.join(dataDir, `connect-${newVersion}.tmp.json`);
         const finalFile = path.join(dataDir, `connect-${newVersion}.json`);
@@ -512,7 +520,7 @@ automation
         console.log(`✅ Fetched and saved: ${finalFile}`);
       } catch (err) {
         console.error(`❌ Failed to fetch connectors: ${err.message}`);
-        success = false;
+        process.exit(1);
       }
     } else {
       const candidates = fs.readdirSync(dataDir).filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f));
@@ -542,7 +550,7 @@ automation
       partialFiles    = result.partialFiles;
     } catch (err) {
       console.error(`❌ Failed to generate partials: ${err.message}`);
-      success = false;
+      process.exit(1);
     }
 
     if (options.draftMissing) {
@@ -613,7 +621,7 @@ automation
         }
       } catch (err) {
         console.error(`❌ Could not draft missing: ${err.message}`);
-        success = false;
+        process.exit(1);
       }
     }
 
@@ -667,8 +675,7 @@ automation
     console.log('\n📄 Summary:');
     console.log(`   • Run time: ${timestamp}`);
     console.log(`   • Version used: ${newVersion}`);
-
-    process.exit(success ? 0 : 1);
+    process.exit(0);
   });
 
 automation
