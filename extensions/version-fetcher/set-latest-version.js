@@ -4,7 +4,7 @@ module.exports.register = function ({ config }) {
   const GetLatestRedpandaVersion = require('./get-latest-redpanda-version');
   const GetLatestConsoleVersion = require('./get-latest-console-version');
   const GetLatestDockerTag = require('./fetch-latest-docker-tag');
-  const GetLatestHelmChartVersion = require('./get-latest-redpanda-helm-version');
+  const GetLatestHelmChartVersionFromOperator = require('./get-latest-redpanda-helm-version-from-operator');
   const GetLatestConnectVersion = require('./get-latest-connect');
   const logger = this.getLogger('set-latest-version-extension');
 
@@ -32,15 +32,41 @@ module.exports.register = function ({ config }) {
         latestRedpandaResult,
         latestConsoleResult,
         latestOperatorResult,
-        latestHelmChartResult,
         latestConnectResult,
       ] = await Promise.allSettled([
         GetLatestRedpandaVersion(github, owner, 'redpanda'),
         GetLatestDockerTag(dockerNamespace, 'console'),
         GetLatestDockerTag(dockerNamespace, 'redpanda-operator'),
-        GetLatestHelmChartVersion(github, owner, 'helm-charts', 'charts/redpanda/Chart.yaml'),
         GetLatestConnectVersion(github, owner, 'connect'),
       ]);
+      
+      // Get the Helm chart version after we have the operator version (for both stable and beta)
+      let latestHelmChartResult = { status: 'rejected', reason: 'Operator result not fulfilled' };
+      
+      if (latestOperatorResult.status === 'fulfilled') {
+        try {
+          const helmChartVersions = await GetLatestHelmChartVersionFromOperator(
+            github, 
+            owner, 
+            'redpanda-operator', 
+            latestOperatorResult.value?.latestStableRelease,
+            latestOperatorResult.value?.latestBetaRelease
+          );
+          
+          latestHelmChartResult = { 
+            status: 'fulfilled', 
+            value: helmChartVersions 
+          };
+        } catch (error) {
+          latestHelmChartResult = { 
+            status: 'rejected', 
+            reason: error.message || 'Unknown error fetching Helm chart version'
+          };
+          logger.error(`Helm chart lookup failed: ${error.message || error}`);
+        }
+      } else {
+        logger.error(`Helm chart lookup failed: Operator version not available`);
+      }
 
       const latestVersions = {
         redpanda: latestRedpandaResult.status === 'fulfilled' ? latestRedpandaResult.value : {},
@@ -105,14 +131,12 @@ module.exports.register = function ({ config }) {
         }
       });
 
-      logger.info('Updated Redpanda documentation versions successfully.');
-      logger.info(`Latest Redpanda version: ${latestVersions.redpanda.latestRedpandaRelease.version}`);
-      if (latestVersions.redpanda.latestRCRelease) logger.info(`Latest Redpanda beta version: ${latestVersions.redpanda.latestRCRelease.version}`);
-      logger.info(`Latest Connect version: ${latestVersions.connect}`);
-      logger.info(`Latest Console version: ${latestVersions.console.latestStableRelease}`);
-      if (latestVersions.console.latestBetaRelease) logger.info(`Latest Console beta version: ${latestVersions.console.latestBetaRelease}`);
-      logger.info(`Latest Redpanda Helm chart version: ${latestVersions.helmChart}`);
-      logger.info(`Latest Operator version: ${latestVersions.operator}`);
+      logger.info('Updated Redpanda documentation versions successfully:');
+      logger.info(`- Redpanda: ${latestVersions.redpanda.latestRedpandaRelease.version}${latestVersions.redpanda.latestRCRelease ? ', beta: ' + latestVersions.redpanda.latestRCRelease.version : ''}`);
+      logger.info(`- Connect: ${latestVersions.connect}`);
+      logger.info(`- Console: ${latestVersions.console.latestStableRelease}${latestVersions.console.latestBetaRelease ? ', beta: ' + latestVersions.console.latestBetaRelease : ''}`);
+      logger.info(`- Operator: ${latestVersions.operator?.latestStableRelease || 'unknown'}${latestVersions.operator?.latestBetaRelease ? ', beta: ' + latestVersions.operator.latestBetaRelease : ''}`);
+      logger.info(`- Helm chart: ${latestVersions.helmChart?.latestStableRelease || 'unknown'}${latestVersions.helmChart?.latestBetaRelease ? ', beta: ' + latestVersions.helmChart.latestBetaRelease : ''}`);
     } catch (error) {
       logger.error(`Error updating versions: ${error}`);
     }
