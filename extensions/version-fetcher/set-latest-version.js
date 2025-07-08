@@ -132,7 +132,7 @@ module.exports.register = function ({ config }) {
       });
 
       logger.info('Updated Redpanda documentation versions successfully:');
-      logger.info(`- Redpanda: ${latestVersions.redpanda.latestRedpandaRelease.version}${latestVersions.redpanda.latestRCRelease ? ', beta: ' + latestVersions.redpanda.latestRCRelease.version : ''}`);
+      logger.info(`- Redpanda: ${latestVersions.redpanda.latestRedpandaRelease.version}${latestVersions.redpanda.latestRcRelease ? ', beta: ' + latestVersions.redpanda.latestRcRelease.version : ''}`);
       logger.info(`- Connect: ${latestVersions.connect}`);
       logger.info(`- Console: ${latestVersions.console.latestStableRelease}${latestVersions.console.latestBetaRelease ? ', beta: ' + latestVersions.console.latestBetaRelease : ''}`);
       logger.info(`- Operator: ${latestVersions.operator?.latestStableRelease || 'unknown'}${latestVersions.operator?.latestBetaRelease ? ', beta: ' + latestVersions.operator.latestBetaRelease : ''}`);
