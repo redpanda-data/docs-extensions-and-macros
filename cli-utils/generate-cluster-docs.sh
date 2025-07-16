@@ -2,6 +2,13 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+# Function to log with timestamp (only for key operations)
+log_step() {
+  echo "[$(date '+%H:%M:%S')] $1"
+}
+
+log_step "🚀 Starting cluster setup..."
+
 ###############################################################################
 # Pre-flight: Ensure Docker is available and running
 ###############################################################################
@@ -12,6 +19,11 @@ fi
 
 if ! docker info &> /dev/null; then
   echo "❌ Docker daemon is not running. Please start Docker to continue."
+  exit 1
+fi
+
+if ! command -v curl &> /dev/null; then
+  echo "❌ curl is not installed or not in PATH. Please install curl to continue."
   exit 1
 fi
 
@@ -56,20 +68,36 @@ export REDPANDA_CONSOLE_DOCKER_REPO="$CONSOLE_REPO"
 ###############################################################################
 # Start Redpanda cluster
 ###############################################################################
+log_step "� Starting Redpanda cluster..."
 "$SCRIPT_DIR/start-cluster.sh" "$TAG"
 
 # Wait for the cluster to settle
 if [[ "$MODE" == "metrics" ]]; then
-  echo "⏳ Waiting 300 seconds for metrics to be available…"
-  sleep 300
+  log_step "⏳ Waiting for metrics endpoint..."
+  
+  # Wait for metrics endpoint to be responsive
+  timeout=300
+  counter=0
+  metrics_url="http://localhost:19644/public_metrics/"
+  
+  while ! curl -f -s "$metrics_url" > /dev/null 2>&1; do
+    if [ $counter -ge $timeout ]; then
+      echo "❌ Metrics endpoint did not become ready within ${timeout}s"
+      exit 1
+    fi
+    sleep 10
+    counter=$((counter + 10))
+  done
+  
+  log_step "✅ Metrics endpoint ready"
 else
-  echo "⏳ Waiting 30 seconds for cluster to be ready…"
   sleep 30
 fi
 
 ###############################################################################
 # Python virtual environment setup
 ###############################################################################
+log_step "🐍 Setting up Python environment..."
 "$SCRIPT_DIR/python-venv.sh" \
   "$SCRIPT_DIR/venv" \
   "$SCRIPT_DIR/../tools/metrics/requirements.txt"
@@ -77,6 +105,8 @@ fi
 ###############################################################################
 # Run documentation generator
 ###############################################################################
+log_step "📝 Generating $MODE documentation..."
+
 if [[ "$MODE" == "metrics" ]]; then
   "$SCRIPT_DIR/venv/bin/python" \
     "$SCRIPT_DIR/../tools/metrics/metrics.py" "$TAG"
@@ -85,11 +115,12 @@ else
     "$SCRIPT_DIR/../tools/gen-rpk-ascii.py" "$TAG"
 fi
 
-echo "✅ $MODE docs generated successfully!"
+log_step "✅ Documentation generated successfully"
 
 # Tear down the cluster
+log_step "🧹 Cleaning up cluster..."
 cd "$SCRIPT_DIR"/../docker-compose
-docker compose -p "$PROJECT_NAME" down --volumes
+docker compose -p "$PROJECT_NAME" down --volumes > /dev/null 2>&1
 
 # Return to the original directory
 cd "$ORIGINAL_PWD" || exit 1
