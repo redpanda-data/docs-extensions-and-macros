@@ -4,7 +4,7 @@ IFS=$'\n\t'
 
 # Function to log with timestamp (only for key operations)
 log_step() {
-  echo "[$(date '+%H:%M:%S')] $1"
+  echo "[$(date '+%H:%M:%S')] $1" 
 }
 
 log_step "🚀 Starting cluster setup..."

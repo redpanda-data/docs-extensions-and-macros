@@ -7,7 +7,7 @@ set -euo pipefail
 VENV_DIR="${1:-venv}"
 REQ_FILE="${2:-requirements.txt}"
 
-echo "Recreating Python venv at $VENV_DIR..."
+echo "Recreating Python venv at $VENV_DIR..." 
 rm -rf "$VENV_DIR"
 python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install --upgrade pip --quiet
