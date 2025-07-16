@@ -30,6 +30,12 @@ module.exports = function renderConnectFields(children, prefix = '') {
     let displayType;
     if (child.type === 'string' && child.kind === 'array') {
       displayType = 'array';
+    } else if (child.type === 'unknown' && child.kind === 'map') {
+      displayType = 'object';
+    } else if (child.type === 'unknown' && child.kind === 'array') {
+      displayType = 'array';
+    } else if (child.type === 'unknown' && child.kind === 'list') {
+      displayType = 'array';
     } else {
       displayType = child.type;
     }
