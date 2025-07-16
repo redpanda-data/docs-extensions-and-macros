@@ -26,12 +26,10 @@ module.exports = function renderConnectFields(children, prefix = '') {
   sorted.forEach(child => {
     if (child.is_deprecated || !child.name) return;
 
-    // Normalize type: arrays and unknown-map as object
+    // Normalize types
     let displayType;
     if (child.type === 'string' && child.kind === 'array') {
       displayType = 'array';
-    } else if (child.type === 'unknown' && child.kind === 'map') {
-      displayType = 'object';
     } else {
       displayType = child.type;
     }
