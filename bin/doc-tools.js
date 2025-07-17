@@ -310,8 +310,6 @@ To fix this on macOS:
 4. Verify the fix:
    echo '#include <functional>' | ${cppCompiler || 'clang++'} -x c++ -fsyntax-only -
 
-Common cause: This error often happens when someone has Node.js but hasn't installed
-the development tools needed to compile native modules.`);
   }
 }
 
