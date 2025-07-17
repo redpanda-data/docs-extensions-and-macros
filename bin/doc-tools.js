@@ -308,8 +308,8 @@ To fix this on macOS:
    sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
 
 4. Verify the fix:
-   echo '#include <functional>' | ${cppCompiler || 'clang++'} -x c++ -fsyntax-only -
-
+   echo '#include <functional>' | \${cppCompiler || 'clang++'} -x c++ -fsyntax-only -
+`);
   }
 }
 
