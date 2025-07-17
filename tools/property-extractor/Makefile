@@ -77,6 +77,10 @@ treesitter:
 	@if [ ! -d "$(TREESITTER_DIR)" ]; then \
 	  git clone https://github.com/tree-sitter/tree-sitter-cpp.git "$(TREESITTER_DIR)"; \
 	fi
+	@echo "🔄 Ensuring tree-sitter-cpp is at compatible version v0.20.5…"
+	@cd "$(TREESITTER_DIR)" && \
+	  git fetch --tags -q && \
+	  git checkout -q v0.20.5
 	@echo "🔧 Generating parser in $(TREESITTER_DIR)…"
 	@cd "$(TREESITTER_DIR)" && npm install --silent && $(TREE_SITTER) generate
 
