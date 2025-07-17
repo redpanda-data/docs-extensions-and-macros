@@ -234,19 +234,84 @@ For more details, visit: https://github.com/norwoodj/helm-docs
 /**
  * Ensures all dependencies required for generating property documentation are installed.
  *
- * Checks for the presence of `make`, Python 3.10 or newer, and at least one C++ compiler (`gcc` or `clang`). Exits the process with an error message if any dependency is missing.
+ * Checks for the presence of `make`, Python 3.10 or newer, C++ compiler, and C++ standard library headers.
+ * Exits the process with an error message if any dependency is missing.
  */
 function verifyPropertyDependencies() {
   requireCmd('make', 'Your OS package manager');
   requirePython();
+
+  // Check for C++ compiler
+  let cppCompiler = null;
   try {
     execSync('gcc --version', { stdio: 'ignore' });
+    cppCompiler = 'gcc';
   } catch {
     try {
       execSync('clang --version', { stdio: 'ignore' });
+      cppCompiler = 'clang';
     } catch {
-      fail('A C++ compiler (gcc or clang) is required.');
+      fail(`A C++ compiler (gcc or clang) is required for tree-sitter compilation.
+
+On macOS, install Xcode Command Line Tools:
+  xcode-select --install
+
+On Linux (Ubuntu/Debian):
+  sudo apt update && sudo apt install build-essential
+
+On Linux (CentOS/RHEL/Fedora):
+  sudo yum groupinstall "Development Tools"
+  # or on newer versions:
+  sudo dnf groupinstall "Development Tools"
+
+After installation, verify with:
+  gcc --version
+  # or
+  clang --version`);
     }
+  }
+
+  // Check for C++ standard library headers (critical for tree-sitter compilation)
+  let tempDir = null;
+  try {
+    const testProgram = '#include <functional>\nint main() { return 0; }';
+    tempDir = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'cpp-test-'));
+    const tempFile = require('path').join(tempDir, 'test.cpp');
+    require('fs').writeFileSync(tempFile, testProgram);
+
+    const compileCmd = cppCompiler === 'gcc' ? 'gcc' : 'clang++';
+    execSync(`${compileCmd} -x c++ -fsyntax-only "${tempFile}"`, { stdio: 'ignore' });
+    require('fs').rmSync(tempDir, { recursive: true, force: true });
+  } catch {
+    // Clean up temp directory if it was created
+    if (tempDir) {
+      try {
+        require('fs').rmSync(tempDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+    fail(`C++ standard library headers are missing or incomplete.
+
+This error typically means:
+1. No C++ compiler is installed, OR
+2. Xcode Command Line Tools are missing/incomplete
+
+To fix this on macOS:
+1. Install Xcode Command Line Tools:
+   xcode-select --install
+
+2. If already installed, reset the developer path:
+   sudo xcode-select --reset
+
+3. For Xcode users, ensure correct path:
+   sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+
+4. Verify the fix:
+   echo '#include <functional>' | ${cppCompiler || 'clang++'} -x c++ -fsyntax-only -
+
+Common cause: This error often happens when someone has Node.js but hasn't installed
+the development tools needed to compile native modules.`);
   }
 }
 
