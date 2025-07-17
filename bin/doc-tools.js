@@ -397,8 +397,28 @@ function runClusterDocs(mode, tag, options) {
   
   console.log(`🚀 Starting cluster (${mode}/${tag})...`);
   
+  // Detect the correct bash path for cross-platform compatibility
+  let bashPath = 'bash';
+  try {
+    // Try to get the actual path to bash
+    const bashLocation = execSync('which bash', { encoding: 'utf8' }).trim();
+    if (bashLocation) {
+      bashPath = bashLocation;
+    }
+  } catch {
+    // Fallback to common paths if 'which' fails
+    if (fs.existsSync('/usr/bin/bash')) {
+      bashPath = '/usr/bin/bash';
+    } else if (fs.existsSync('/bin/bash')) {
+      bashPath = '/bin/bash';
+    }
+  }
+  
+  console.log(`🔧 Using bash at: ${bashPath}`);
+  
   const startTime = Date.now();
-  const r = spawnSync('bash', [script, ...args], { stdio: 'inherit', shell: true });
+  // Run bash with explicit options to ensure it behaves correctly
+  const r = spawnSync(bashPath, ['--', script, ...args], { stdio: 'inherit' });
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
   
   if (r.status !== 0) {
