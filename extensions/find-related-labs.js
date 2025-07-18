@@ -31,7 +31,7 @@ function findRelated(labPage, sourceCategoryList, sourceDeploymentType, logger) 
   const targetCategoryList = pageCategories.split(',').map(c => c.trim());
   const targetDeploymentType = getDeploymentType(targetAttributes)
   const categoryMatch = hasMatchingCategory(sourceCategoryList, targetCategoryList)
-  if (categoryMatch && (!targetDeploymentType ||sourceDeploymentType === targetDeploymentType || (targetDeploymentType === 'Docker' && !sourceDeploymentType))) {
+  if (categoryMatch && isCompatibleDeployment(sourceDeploymentType, targetDeploymentType)) {
     return {
       title: labPage.asciidoc.doctitle,
       url: labPage.pub.url,
@@ -51,4 +51,21 @@ function getDeploymentType (attributes) {
 
 function hasMatchingCategory (sourcePageCategories, targetPageCategories) {
   return sourcePageCategories.every((category) => targetPageCategories.includes(category))
+}
+
+function isCompatibleDeployment (sourceDeploymentType, targetDeploymentType) {
+  // If no target deployment type specified, it's compatible with everything
+  if (!targetDeploymentType) return true
+
+  // Cloud pages show only cloud labs
+  if (sourceDeploymentType === 'Redpanda Cloud') {
+    return targetDeploymentType === 'Redpanda Cloud'
+  }
+
+  // All other cases (Kubernetes, Docker, Linux, or no deployment type) show Docker and Kubernetes
+  if (targetDeploymentType === 'Docker' || targetDeploymentType === 'Kubernetes') {
+    return true
+  }
+
+  return false
 }
