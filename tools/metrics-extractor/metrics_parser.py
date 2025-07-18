@@ -128,205 +128,62 @@ def extract_labels_from_code(code_context):
     return sorted(list(labels))
 
 
-def find_group_end_line(group_start_line, lines):
-    """Find where an add_group block ends by tracking brace nesting"""
-    # First, we need to find the opening brace of the metrics list
-    brace_count = 0
-    paren_count = 0
-    in_group = False
-    found_opening_brace = False
-    
-    for i in range(group_start_line, min(len(lines), group_start_line + 200)):
-        line = lines[i]
-        
-        for j, char in enumerate(line):
-            if char == '(':
-                paren_count += 1
-            elif char == ')':
-                paren_count -= 1
-                if found_opening_brace and brace_count == 0 and paren_count == 0:
-                    # We've closed all braces and parentheses
-                    return i
-            elif char == '{':
-                if not found_opening_brace and paren_count > 0:
-                    # This is the opening brace of the metrics list
-                    found_opening_brace = True
-                    brace_count = 1
-                elif found_opening_brace:
-                    brace_count += 1
-            elif char == '}':
-                if found_opening_brace and brace_count > 0:
-                    brace_count -= 1
-                    if brace_count == 0:
-                        # We've closed the metrics list
-                        # Now look for the closing parenthesis and semicolon
-                        # Could be on this line or the next
-                        remaining = line[j+1:].strip()
-                        if ')' in remaining:
-                            return i
-                        elif i + 1 < len(lines):
-                            next_line = lines[i + 1].strip()
-                            if next_line.startswith(')'):
-                                return i + 1
-    
-    return None
-
-
-def extract_metrics_group_name(call_expr, source_code):
-    """Extract the metrics group name from add_group or metric_group calls.
-    
-    This function checks if the metric is actually within the bounds of an add_group
-    block by matching opening and closing braces.
+def find_group_name_from_ast(metric_call_expr_node):
     """
-    current_line = call_expr.start_point[0]
-    current_column = call_expr.start_point[1]
-    source_text = source_code.decode('utf-8', errors='ignore')
-    lines = source_text.split('\n')
-    
-    # Search backwards up to 300 lines for group declarations
-    search_start = max(0, current_line - 300)
-    
-    # Find all potential group declarations with their positions and end lines
-    all_groups = []
-    
-    for i in range(search_start, current_line + 1):
-        line = lines[i]
-        
-        # Look for prometheus_sanitize::metrics_name patterns first (most accurate)
-        prometheus_match = re.search(
-            r'(?:_metrics|_public_metrics)\.add_group\s*\(\s*prometheus_sanitize::metrics_name\s*\(\s*["\']([^"\']+)["\']', 
-            line
-        )
-        if prometheus_match:
-            end_line = find_group_end_line(i, lines)
-            if end_line is not None:
-                all_groups.append({
-                    'start': i,
-                    'end': end_line,
-                    'name': prometheus_match.group(1),
-                    'type': "prometheus_add_group"
-                })
-                logger.debug(f"Found group '{prometheus_match.group(1)}' from line {i} to {end_line}")
-            continue
-            
-        # Look for metric_group patterns
-        metric_group_match = re.search(
-            r'metric_group\s*\(\s*prometheus_sanitize::metrics_name\s*\(\s*["\']([^"\']+)["\']', 
-            line
-        )
-        if metric_group_match:
-            end_line = find_group_end_line(i, lines)
-            if end_line is not None:
-                all_groups.append({
-                    'start': i,
-                    'end': end_line,
-                    'name': metric_group_match.group(1),
-                    'type': "prometheus_metric_group"
-                })
-            continue
-            
-        # Fallback to simpler patterns
-        simple_add_match = re.search(r'\.add_group\s*\(\s*["\']([^"\']+)["\']', line)
-        if simple_add_match:
-            end_line = find_group_end_line(i, lines)
-            if end_line is not None:
-                all_groups.append({
-                    'start': i,
-                    'end': end_line,
-                    'name': simple_add_match.group(1),
-                    'type': "simple_add_group"
-                })
-            continue
-            
-        simple_metric_match = re.search(r'metric_group\s*\(\s*["\']([^"\']+)["\']', line)
-        if simple_metric_match:
-            end_line = find_group_end_line(i, lines)
-            if end_line is not None:
-                all_groups.append({
-                    'start': i,
-                    'end': end_line,
-                    'name': simple_metric_match.group(1),
-                    'type': "simple_metric_group"
-                })
-    
-    # Now find which group contains our metric
-    # We need to find the innermost group that contains the metric
-    containing_groups = []
-    for group in all_groups:
-        if group['start'] <= current_line <= group['end']:
-            containing_groups.append(group)
-    
-    if containing_groups:
-        # Sort by start line (descending) to get the innermost group
-        containing_groups.sort(key=lambda g: g['start'], reverse=True)
-        best_group = containing_groups[0]
-        logger.debug(f"Metric at line {current_line} is in group '{best_group['name']}' (lines {best_group['start']}-{best_group['end']})")
-        return best_group['name']
-    
-    logger.debug(f"No group name found for metric at line {current_line}")
-    return None
-
-
-def is_metric_within_group_bounds(group_line, metric_line, metric_column, lines):
-    """Check if a metric is within the bounds of an add_group call by matching braces.
-    
-    This function is now deprecated in favor of find_group_end_line, but kept for reference.
+    Traverse up the AST from a metric definition to find the enclosing 
+    add_group call and extract its name. This is more reliable than regex.
     """
-    group_end_line = find_group_end_line(group_line, lines)
-    if group_end_line is not None:
-        return group_line <= metric_line <= group_end_line
-    return False
-
-
-def find_metrics_group_context(call_expr, source_code, tree_root):
-    """Find the metrics group by analyzing the containing function context"""
-    current_line = call_expr.start_point[0]
-    
-    # Find the containing function or method
-    current_node = call_expr
+    current_node = metric_call_expr_node
     while current_node:
-        if current_node.type in ['function_definition', 'method_definition', 'constructor_definition']:
-            # Found the containing function, search within it
-            function_text = source_code[current_node.start_byte:current_node.end_byte].decode('utf-8', errors='ignore')
-            
-            # Look for add_group calls within this function
-            add_group_match = re.search(
-                r'(?:_metrics|_public_metrics)\.add_group\s*\(\s*prometheus_sanitize::metrics_name\s*\(\s*["\']([^"\']+)["\']', 
-                function_text, 
-                re.MULTILINE | re.DOTALL
-            )
-            if add_group_match:
-                return add_group_match.group(1)
-            
-            # Also check for the pattern where add_group might be on multiple lines
-            multiline_match = re.search(
-                r'\.add_group\s*\(\s*\n?\s*prometheus_sanitize::metrics_name\s*\(\s*["\']([^"\']+)["\']',
-                function_text,
-                re.MULTILINE | re.DOTALL
-            )
-            if multiline_match:
-                return multiline_match.group(1)
-            
+        # We are looking for a call expression, e.g., _metrics.add_group(...)
+        if current_node.type == 'call_expression':
+            function_node = current_node.child_by_field_name('function')
+            if function_node and function_node.text.decode('utf-8').endswith('.add_group'):
+                # This is an add_group call. Now, get its arguments.
+                args_node = current_node.child_by_field_name('arguments')
+                if not args_node or args_node.named_child_count == 0:
+                    continue
+
+                # The first argument should be prometheus_sanitize::metrics_name(...)
+                first_arg_node = args_node.named_children[0]
+                
+                # Check if this argument is a call to prometheus_sanitize::metrics_name
+                if first_arg_node.type == 'call_expression':
+                    inner_function = first_arg_node.child_by_field_name('function')
+                    inner_args = first_arg_node.child_by_field_name('arguments')
+                    
+                    if inner_function and '::metrics_name' in inner_function.text.decode('utf-8'):
+                        # Found it. Extract the string literal from its arguments.
+                        if inner_args and inner_args.named_child_count > 0:
+                            group_name_node = inner_args.named_children[0]
+                            if group_name_node.type == 'string_literal':
+                                return unquote_string(group_name_node.text.decode('utf-8'))
+                # Handle simple string literal as group name
+                elif first_arg_node.type == 'string_literal':
+                    return unquote_string(first_arg_node.text.decode('utf-8'))
+
         current_node = current_node.parent
-    
     return None
 
 
 def construct_full_metric_name(group_name, metric_name):
     """Construct the full Prometheus metric name from group and metric name"""
     if not group_name or group_name == "unknown":
+        # Fallback if group name is not found
         return f"redpanda_{metric_name}"
     
-    # Convert group name to Prometheus format
-    # Replace colons with underscores and ensure redpanda prefix
+    # Sanitize the group name: replace special characters with underscores.
     sanitized_group = group_name.replace(':', '_').replace('-', '_')
     
-    # The group name might already have 'redpanda_' prefix or not
+    # Ensure the 'redpanda' prefix is present. The group name from prometheus_sanitize
+    # might or might not have it.
     if not sanitized_group.startswith('redpanda_'):
-        sanitized_group = f"redpanda_{sanitized_group}"
+        full_group_name = f"redpanda_{sanitized_group}"
+    else:
+        full_group_name = sanitized_group
     
-    # The full metric name is: <sanitized_group>_<metric_name>
-    return f"{sanitized_group}_{metric_name}"
+    # The full metric name is: <full_group_name>_<metric_name>
+    return f"{full_group_name}_{metric_name}"
 
 
 def parse_cpp_file(file_path, treesitter_parser, cpp_language, filter_namespace=None):
@@ -345,104 +202,75 @@ def parse_cpp_file(file_path, treesitter_parser, cpp_language, filter_namespace=
     
     metrics_bag = MetricsBag()
     
-    # Simple query to find all call expressions
-    simple_query = """
-    (call_expression
-        function: (qualified_identifier) @function
-        arguments: (argument_list) @args)
-    """
+    # A general query to find all function calls
+    simple_query = cpp_language.query("(call_expression) @call")
     
     try:
-        query = cpp_language.query(simple_query)
-        captures = query.captures(tree.root_node)
+        captures = simple_query.captures(tree.root_node)
         
-        for node, label in captures:
-            if label == "function":
-                function_text = node.text.decode("utf-8", errors="ignore")
-                
-                # Check if this is a metrics function we're interested in
-                metric_type = None
-                constructor = None
-                
-                if function_text in ["sm::make_gauge", "seastar::metrics::make_gauge"]:
-                    metric_type = "gauge"
-                    constructor = "make_gauge"
-                elif function_text in ["sm::make_counter", "seastar::metrics::make_counter"]:
-                    metric_type = "counter"
-                    constructor = "make_counter"
-                elif function_text in ["sm::make_histogram", "seastar::metrics::make_histogram"]:
-                    metric_type = "histogram"
-                    constructor = "make_histogram"
-                elif function_text in ["sm::make_total_bytes", "seastar::metrics::make_total_bytes"]:
-                    metric_type = "counter"
-                    constructor = "make_total_bytes"
-                elif function_text in ["sm::make_derive", "seastar::metrics::make_derive"]:
-                    metric_type = "counter"
-                    constructor = "make_derive"
-                elif function_text in ["ss::metrics::make_total_operations", "seastar::metrics::make_total_operations"]:
-                    metric_type = "counter"
-                    constructor = "make_total_operations"
-                elif function_text in ["ss::metrics::make_current_bytes", "seastar::metrics::make_current_bytes"]:
-                    metric_type = "gauge"
-                    constructor = "make_current_bytes"
-                
-                if metric_type:
-                    # Found a metrics function, now extract the arguments
-                    call_expr = node.parent
-                    if call_expr and call_expr.type == "call_expression":
-                        args_node = None
-                        for child in call_expr.children:
-                            if child.type == "argument_list":
-                                args_node = child
-                                break
+        for node, _ in captures:
+            call_expr = node
+            function_identifier_node = call_expr.child_by_field_name("function")
+            if not function_identifier_node:
+                continue
+
+            function_text = function_identifier_node.text.decode("utf-8", errors="ignore")
+            
+            metric_type = None
+            constructor = None
+            
+            # Check if this is a metrics function we're interested in
+            for func, m_type in FUNCTION_TO_TYPE.items():
+                if func in function_text:
+                    metric_type = m_type
+                    constructor = func
+                    break
+
+            if metric_type:
+                # Found a metrics function, now extract its details
+                args_node = call_expr.child_by_field_name("arguments")
+                if args_node:
+                    metric_name, description = extract_metric_details(args_node, source_code)
+                    
+                    if metric_name:
+                        # Apply namespace filter if specified
+                        if filter_namespace and not metric_name.startswith(filter_namespace):
+                            continue
                         
-                        if args_node:
-                            metric_name, description = extract_metric_details(args_node, source_code)
-                            
-                            if metric_name:
-                                # Apply namespace filter if specified
-                                if filter_namespace and not metric_name.startswith(filter_namespace):
-                                    continue
-                                
-                                # In parse_cpp_file, update this section:
-                                # Try to find the metrics group name by looking for add_group calls
-                                group_name = extract_metrics_group_name(call_expr, source_code)
-                                if not group_name:
-                                    # Try alternative method
-                                    group_name = find_metrics_group_context(call_expr, source_code, tree.root_node)
+                        # Use robust AST traversal to find the group name
+                        group_name = find_group_name_from_ast(call_expr)
 
-                                if group_name:
-                                    logger.debug(f"Found group_name: {group_name} for metric: {metric_name}")
-                                else:
-                                    logger.warning(f"Could not find group_name for metric '{metric_name}' at line {call_expr.start_point[0] + 1}")
+                        if group_name:
+                            logger.debug(f"Found group_name: {group_name} for metric: {metric_name}")
+                        else:
+                            logger.warning(f"Could not find group_name for metric '{metric_name}' at line {call_expr.start_point[0] + 1}")
 
-                                full_metric_name = construct_full_metric_name(group_name, metric_name)
-                                
-                                # Debug output
-                                logger.debug(f"Processing metric '{metric_name}': group_name='{group_name}', full_name='{full_metric_name}'")
-                                
-                                # Get code context for labels
-                                start_byte = call_expr.start_byte
-                                end_byte = call_expr.end_byte
-                                context_start = max(0, start_byte - 500)
-                                context_end = min(len(source_code), end_byte + 500)
-                                code_context = source_code[context_start:context_end].decode("utf-8", errors="ignore")
-                                
-                                labels = extract_labels_from_code(code_context)
-                                
-                                metrics_bag.add_metric(
-                                    name=metric_name,
-                                    metric_type=metric_type,
-                                    description=description,
-                                    labels=labels,
-                                    file=str(file_path.relative_to(Path.cwd()) if file_path.is_absolute() else file_path),
-                                    constructor=constructor,
-                                    line_number=call_expr.start_point[0] + 1,
-                                    group_name=group_name,
-                                    full_name=full_metric_name
-                                )
-                                
-                                logger.debug(f"Found metric: {metric_name} ({metric_type}) -> {full_metric_name}")
+                        full_metric_name = construct_full_metric_name(group_name, metric_name)
+                        
+                        logger.debug(f"Processing metric '{metric_name}': group_name='{group_name}', full_name='{full_metric_name}'")
+                        
+                        # Get code context for labels
+                        start_byte = call_expr.start_byte
+                        end_byte = call_expr.end_byte
+                        context_start = max(0, start_byte - 500)
+                        context_end = min(len(source_code), end_byte + 500)
+                        code_context = source_code[context_start:context_end].decode("utf-8", errors="ignore")
+                        
+                        labels = extract_labels_from_code(code_context)
+                        
+                        metrics_bag.add_metric(
+                            name=metric_name,
+                            metric_type=metric_type,
+                            description=description,
+                            labels=labels,
+                            file=str(file_path.relative_to(Path.cwd()) if file_path.is_absolute() else file_path),
+                            constructor=constructor,
+                            line_number=call_expr.start_point[0] + 1,
+                            group_name=group_name,
+                            full_name=full_metric_name
+                        )
+                        
+                        logger.debug(f"Found metric: {metric_name} ({metric_type}) -> {full_metric_name}")
     
     except Exception as e:
         logger.warning(f"Query failed on {file_path}: {e}")
@@ -455,10 +283,10 @@ def extract_metric_details(args_node, source_code):
     metric_name = ""
     description = ""
     
-    # Look for string literals in the arguments
     string_literals = []
     
     def collect_strings(node):
+        # Recursively find all string literals within the arguments
         if node.type == "string_literal":
             text = node.text.decode("utf-8", errors="ignore")
             string_literals.append(unquote_string(text))
@@ -467,16 +295,20 @@ def extract_metric_details(args_node, source_code):
     
     collect_strings(args_node)
     
-    # First string literal is usually the metric name
+    # First string literal is the metric name
     if string_literals:
         metric_name = string_literals[0]
     
-    # Look for description in subsequent strings
-    for i, string_val in enumerate(string_literals[1:], 1):
-        if "description" in args_node.text.decode("utf-8", errors="ignore").lower():
-            description = string_val
-            break
-    
+    # The second string literal is usually the description.
+    # This is a simplification; a more complex heuristic could be needed if
+    # the description isn't the second string.
+    if len(string_literals) > 1:
+        # A simple check to see if the argument list contains "description"
+        # to be more certain.
+        args_text = args_node.text.decode("utf-8", errors="ignore")
+        if "description" in args_text:
+             description = string_literals[1]
+
     return metric_name, description
 
 
