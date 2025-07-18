@@ -273,13 +273,14 @@ After installation, verify with:
 
   // Check for C++ standard library headers (critical for tree-sitter compilation)
   let tempDir = null;
+  let compileCmd = null;
   try {
     const testProgram = '#include <functional>\nint main() { return 0; }';
     tempDir = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'cpp-test-'));
     const tempFile = require('path').join(tempDir, 'test.cpp');
     require('fs').writeFileSync(tempFile, testProgram);
 
-    const compileCmd = cppCompiler === 'gcc' ? 'gcc' : 'clang++';
+    compileCmd = cppCompiler === 'gcc' ? 'gcc' : 'clang++';
     execSync(`${compileCmd} -x c++ -fsyntax-only "${tempFile}"`, { stdio: 'ignore' });
     require('fs').rmSync(tempDir, { recursive: true, force: true });
   } catch {
