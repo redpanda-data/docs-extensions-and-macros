@@ -293,22 +293,22 @@ After installation, verify with:
     }
     fail(`C++ standard library headers are missing or incomplete.
 
-This error typically means:
-1. No C++ compiler is installed, OR
-2. Xcode Command Line Tools are missing/incomplete
+1. **Test if the issue exists**:
+   echo '#include <functional>' | ${compileCmd} -x c++ -fsyntax-only -
 
-To fix this on macOS:
-1. Install Xcode Command Line Tools:
-   xcode-select --install
-
-2. If already installed, reset the developer path:
+2. **If the test fails, try these fixes in order**:
+   **Fix 1**: Reset developer path
    sudo xcode-select --reset
 
-3. For Xcode users, ensure correct path:
-   sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+   **Fix 2**: Force reinstall Command Line Tools
+   sudo rm -rf /Library/Developer/CommandLineTools
+   xcode-select --install
 
-4. Verify the fix:
-   echo '#include <functional>' | \${cppCompiler || 'clang++'} -x c++ -fsyntax-only -
+   Complete the GUI installation dialog that appears.
+
+3. **Verify the fix**:
+   echo '#include <functional>' | ${compileCmd} -x c++ -fsyntax-only -
+   If successful, you should see no output and the command should exit with code 0.
 `);
   }
 }
