@@ -1,4 +1,6 @@
 import logging
+import hashlib
+import uuid
 from collections import defaultdict
 
 logger = logging.getLogger("metrics_bag")
@@ -9,6 +11,15 @@ class MetricsBag:
     
     def __init__(self):
         self._metrics = {}
+        self._unique_id_counter = 0
+    
+    def _generate_unique_id(self, name, group_name, file_path, line_number):
+        """Generate a unique ID for a metric based on its properties"""
+        # Create a deterministic unique ID based on the metric's key properties
+        key_string = f"{group_name or 'unknown'}::{name}::{file_path}::{line_number}"
+        # Use SHA256 hash of the key string to create a unique but deterministic ID
+        hash_object = hashlib.sha256(key_string.encode())
+        return hash_object.hexdigest()[:16]  # Use first 16 characters for readability
     
     def add_metric(self, name, metric_type, description="", labels=None, 
                    file="", constructor="", line_number=None, group_name=None, full_name=None, **kwargs):
@@ -16,16 +27,28 @@ class MetricsBag:
         if labels is None:
             labels = []
         
-        # Create unique key for the metric
-        key = name
+        # Generate unique ID for this metric instead of using names as keys
+        unique_id = self._generate_unique_id(name, group_name, file, line_number)
         
         # If metric already exists, merge information
-        if key in self._metrics:
-            existing = self._metrics[key]
+        if unique_id in self._metrics:
+            existing = self._metrics[unique_id]
             
             # Update description if current one is empty
             if not existing.get("description") and description:
                 existing["description"] = description
+            
+            # Update group_name and full_name if new values are provided and are not None
+            # Allow overwriting None values with actual values
+            if group_name is not None:
+                existing["group_name"] = group_name
+            elif "group_name" not in existing:
+                existing["group_name"] = None
+                
+            if full_name is not None:
+                existing["full_name"] = full_name
+            elif "full_name" not in existing:
+                existing["full_name"] = None
             
             # Merge labels
             existing_labels = set(existing.get("labels", []))
@@ -54,9 +77,9 @@ class MetricsBag:
             # Add any additional kwargs
             metric_data.update(kwargs)
             
-            self._metrics[key] = metric_data
+            self._metrics[unique_id] = metric_data
         
-        logger.debug(f"Added/updated metric: {name}")
+        logger.debug(f"Added/updated metric: {name} with ID: {unique_id}, group_name: {group_name}, full_name: {full_name}")
     
     def get_metric(self, name):
         """Get a specific metric by name"""
@@ -93,7 +116,9 @@ class MetricsBag:
                 labels=metric.get("labels", []),
                 file=metric.get("files", [{}])[0].get("file", ""),
                 constructor=metric.get("constructor", ""),
-                line_number=metric.get("files", [{}])[0].get("line")
+                line_number=metric.get("files", [{}])[0].get("line"),
+                group_name=metric.get("group_name"),  # Add this
+                full_name=metric.get("full_name")     # Add this
             )
     
     def filter_by_prefix(self, prefix):
@@ -131,8 +156,9 @@ class MetricsBag:
     
     def to_dict(self):
         """Convert the metrics bag to a dictionary for JSON serialization"""
+        # Use the unique IDs directly as JSON keys to prevent any conflicts
         return {
-            "metrics": self._metrics,
+            "metrics": self._metrics,  # Use unique IDs as keys directly
             "statistics": self.get_statistics()
         }
     
