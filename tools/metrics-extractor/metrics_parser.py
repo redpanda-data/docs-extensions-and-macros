@@ -188,7 +188,8 @@ def construct_full_metric_name(group_name, metric_name):
 
 def parse_cpp_file(file_path, treesitter_parser, cpp_language, filter_namespace=None):
     """Parse a single C++ file for metrics definitions"""
-    logger.debug(f"Parsing file: {file_path}")
+    # Only show debug info in verbose mode
+    # logger.debug(f"Parsing file: {file_path}")
     
     source_code = get_file_contents(file_path)
     if not source_code:
@@ -240,14 +241,16 @@ def parse_cpp_file(file_path, treesitter_parser, cpp_language, filter_namespace=
                         # Use robust AST traversal to find the group name
                         group_name = find_group_name_from_ast(call_expr)
 
-                        if group_name:
-                            logger.debug(f"Found group_name: {group_name} for metric: {metric_name}")
-                        else:
-                            logger.warning(f"Could not find group_name for metric '{metric_name}' at line {call_expr.start_point[0] + 1}")
+                        # Only show warnings for missing groups in verbose mode
+                        # if group_name:
+                        #     logger.debug(f"Found group_name: {group_name} for metric: {metric_name}")
+                        # else:
+                        #     logger.warning(f"Could not find group_name for metric '{metric_name}' at line {call_expr.start_point[0] + 1}")
 
                         full_metric_name = construct_full_metric_name(group_name, metric_name)
                         
-                        logger.debug(f"Processing metric '{metric_name}': group_name='{group_name}', full_name='{full_metric_name}'")
+                        # Commented out to reduce debug noise
+                        # logger.debug(f"Processing metric '{metric_name}': group_name='{group_name}', full_name='{full_metric_name}'")
                         
                         # Get code context for labels
                         start_byte = call_expr.start_byte
@@ -270,7 +273,8 @@ def parse_cpp_file(file_path, treesitter_parser, cpp_language, filter_namespace=
                             full_name=full_metric_name
                         )
                         
-                        logger.debug(f"Found metric: {metric_name} ({metric_type}) -> {full_metric_name}")
+                        # Commented out to reduce noise
+                        # logger.debug(f"Found metric: {metric_name} ({metric_type}) -> {full_metric_name}")
     
     except Exception as e:
         logger.warning(f"Query failed on {file_path}: {e}")

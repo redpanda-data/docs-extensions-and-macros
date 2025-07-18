@@ -5,10 +5,14 @@ import os
 import json
 import re
 import argparse
+import warnings
 from pathlib import Path
 from tree_sitter import Language, Parser
 from metrics_parser import build_treesitter_cpp_library, extract_metrics_from_files
 from metrics_bag import MetricsBag
+
+# Suppress tree-sitter deprecation warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 
 logger = logging.getLogger("metrics_extractor")
 
@@ -131,14 +135,16 @@ def generate_asciidoc(metrics_bag, output_file):
 def main():
     args = parse_args()
     
+    # Set logging level - only show warnings and errors unless verbose is requested
     if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG, format='%(levelname)s: %(message)s')
     else:
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
     
     validate_paths(args)
     
-    logger.info("Initializing tree-sitter C++ parser...")
+    if args.verbose:
+        logger.info("Initializing tree-sitter C++ parser...")
     
     # Use the same pattern as property-extractor
     treesitter_dir = os.path.join(os.getcwd(), "tree-sitter/tree-sitter-cpp")
@@ -153,28 +159,50 @@ def main():
         treesitter_dir, destination_path
     )
     
-    logger.info("Finding C++ source files...")
+    if args.verbose:
+        logger.info("Finding C++ source files...")
     cpp_files = get_cpp_files(args)
-    logger.info(f"Found {len(cpp_files)} C++ files")
+    if args.verbose:
+        logger.info(f"Found {len(cpp_files)} C++ files")
     
-    logger.info("Extracting metrics from source files...")
+    if args.verbose:
+        logger.info("Extracting metrics from source files...")
     metrics_bag = extract_metrics_from_files(
         cpp_files, treesitter_parser, cpp_language, args.filter_namespace
     )
     
-    logger.info(f"Extracted {len(metrics_bag.get_all_metrics())} metrics")
+    # Show clean summary
+    total_metrics = len(metrics_bag.get_all_metrics())
+    print(f"✅ Successfully extracted {total_metrics} metrics from {len(cpp_files)} C++ files")
     
     # Output JSON
-    logger.info(f"Writing JSON output to {args.output}")
+    if args.verbose:
+        logger.info(f"Writing JSON output to {args.output}")
     with open(args.output, 'w') as f:
         json.dump(metrics_bag.to_dict(), f, indent=2)
     
     # Output AsciiDoc if requested
     if args.asciidoc:
-        logger.info(f"Writing AsciiDoc output to {args.asciidoc}")
+        if args.verbose:
+            logger.info(f"Writing AsciiDoc output to {args.asciidoc}")
         generate_asciidoc(metrics_bag, args.asciidoc)
     
-    logger.info("Metrics extraction completed successfully!")
+    print(f"📄 Output written to: {args.output}")
+    if args.asciidoc:
+        print(f"📄 AsciiDoc written to: {args.asciidoc}")
+    
+    # Show breakdown by type
+    metrics_by_type = {}
+    for metric_data in metrics_bag.get_all_metrics().values():
+        metric_type = metric_data.get('type', 'unknown')
+        metrics_by_type[metric_type] = metrics_by_type.get(metric_type, 0) + 1
+    
+    if metrics_by_type:
+        print(f"📊 Metrics by type:")
+        for metric_type, count in sorted(metrics_by_type.items()):
+            print(f"   • {metric_type}: {count}")
+    
+    print("🎉 Metrics extraction completed successfully!")
 
 
 if __name__ == "__main__":
