@@ -1,0 +1,287 @@
+{
+  "metrics": {
+    "puts": {
+      "name": "puts",
+      "type": "counter",
+      "description": "Total number of files put into cache.",
+      "labels": [],
+      "constructor": "make_counter",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 27
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "gets": {
+      "name": "gets",
+      "type": "counter",
+      "description": "Total number of cache get requests.",
+      "labels": [],
+      "constructor": "make_counter",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 31
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "cached_gets": {
+      "name": "cached_gets",
+      "type": "counter",
+      "description": "Total number of get requests that are already in cache.",
+      "labels": [],
+      "constructor": "make_counter",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 35
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "size_bytes": {
+      "name": "size_bytes",
+      "type": "gauge",
+      "description": "Current cache size in bytes.",
+      "labels": [],
+      "constructor": "make_gauge",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 40
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "files": {
+      "name": "files",
+      "type": "gauge",
+      "description": "Current number of files in cache.",
+      "labels": [],
+      "constructor": "make_gauge",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 44
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "in_progress_files": {
+      "name": "in_progress_files",
+      "type": "gauge",
+      "description": "Current number of files that are being put to cache.",
+      "labels": [],
+      "constructor": "make_gauge",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 48
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "hwm_size_bytes": {
+      "name": "hwm_size_bytes",
+      "type": "gauge",
+      "description": "High watermark of sum of size of cached objects.",
+      "labels": [],
+      "constructor": "make_gauge",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 69
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "hwm_files": {
+      "name": "hwm_files",
+      "type": "gauge",
+      "description": "High watermark of number of objects in cache.",
+      "labels": [],
+      "constructor": "make_gauge",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 80
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "tracker_syncs": {
+      "name": "tracker_syncs",
+      "type": "counter",
+      "description": "Number of times the access tracker was updated ",
+      "labels": [],
+      "constructor": "make_counter",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 86
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "tracker_size": {
+      "name": "tracker_size",
+      "type": "gauge",
+      "description": "Number of entries in cache access tracker",
+      "labels": [],
+      "constructor": "make_gauge",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 93
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "fast_trims": {
+      "name": "fast_trims",
+      "type": "counter",
+      "description": "Number of times we have trimmed the cache ",
+      "labels": [],
+      "constructor": "make_counter",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 103
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "exhaustive_trims": {
+      "name": "exhaustive_trims",
+      "type": "counter",
+      "description": "Number of times we couldn't free enough space with a fast ",
+      "labels": [],
+      "constructor": "make_counter",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 109
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "carryover_trims": {
+      "name": "carryover_trims",
+      "type": "counter",
+      "description": "Number of times we invoked carryover trim.",
+      "labels": [],
+      "constructor": "make_counter",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 116
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "failed_trims": {
+      "name": "failed_trims",
+      "type": "counter",
+      "description": "Number of times could not free the expected amount of ",
+      "labels": [],
+      "constructor": "make_counter",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 121
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "in_mem_trims": {
+      "name": "in_mem_trims",
+      "type": "counter",
+      "description": "Number of times we trimmed the cache using ",
+      "labels": [],
+      "constructor": "make_counter",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 128
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "put": {
+      "name": "put",
+      "type": "counter",
+      "description": "Number of objects written into cache.",
+      "labels": [],
+      "constructor": "make_counter",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 141
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "hit": {
+      "name": "hit",
+      "type": "counter",
+      "description": "Number of get requests for objects that are ",
+      "labels": [],
+      "constructor": "make_counter",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 146
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    },
+    "miss": {
+      "name": "miss",
+      "type": "counter",
+      "description": "Number of failed get requests because of ",
+      "labels": [],
+      "constructor": "make_counter",
+      "files": [
+        {
+          "file": "tmp/redpanda-dev/src/v/cloud_storage/cache_probe.cc",
+          "line": 152
+        }
+      ],
+      "group_name": null,
+      "full_name": null
+    }
+  },
+  "statistics": {
+    "total_metrics": 18,
+    "by_type": {
+      "counter": 12,
+      "gauge": 6
+    },
+    "by_constructor": {
+      "make_counter": 12,
+      "make_gauge": 6
+    },
+    "with_description": 18,
+    "with_labels": 0
+  }
+}
