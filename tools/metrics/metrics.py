@@ -120,6 +120,27 @@ def parse_metrics(metrics_text):
     logging.info(f"Extracted {len(metrics)} metrics.")
     return metrics
 
+def filter_metrics_for_docs(metrics):
+    """Filter metrics for documentation - remove duplicates and histogram suffixes."""
+    filtered = {}
+    seen_names = set()  # Track metric names to detect duplicates
+    
+    for name, data in metrics.items():
+        # Skip histogram/summary suffixes
+        if name.endswith(('_bucket', '_count', '_sum')):
+            continue
+            
+        # Check for duplicate metric names
+        if name in seen_names:
+            logging.warning(f"Duplicate metric name found: {name}")
+            continue
+            
+        filtered[name] = data
+        seen_names.add(name)
+    
+    logging.info(f"Filtered from {len(metrics)} to {len(filtered)} metrics for documentation.")
+    return filtered
+
 def output_asciidoc(metrics, adoc_file):
     """Output metrics as AsciiDoc."""
     with open(adoc_file, "w") as f:
@@ -183,7 +204,11 @@ if __name__ == "__main__":
         logging.error("No internal metrics retrieved.")
         internal_metrics = {}
 
-    # Merge public and internal metrics.
+    # Filter metrics for documentation
+    public_metrics_filtered = filter_metrics_for_docs(public_metrics)
+    internal_metrics_filtered = filter_metrics_for_docs(internal_metrics)
+
+    # Merge public and internal metrics (unfiltered for JSON)
     merged_metrics = {
         "public": public_metrics,
         "internal": internal_metrics
@@ -195,5 +220,5 @@ if __name__ == "__main__":
     INTERNAL_ASCIIDOC_OUTPUT_FILE = os.path.join(output_dir, "internal-metrics.adoc")
 
     output_json(merged_metrics, JSON_OUTPUT_FILE)
-    output_asciidoc(public_metrics, ASCIIDOC_OUTPUT_FILE)
-    output_asciidoc(internal_metrics, INTERNAL_ASCIIDOC_OUTPUT_FILE)
+    output_asciidoc(public_metrics_filtered, ASCIIDOC_OUTPUT_FILE)
+    output_asciidoc(internal_metrics_filtered, INTERNAL_ASCIIDOC_OUTPUT_FILE)
