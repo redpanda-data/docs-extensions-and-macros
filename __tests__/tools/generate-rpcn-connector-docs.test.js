@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const handlebars = require('handlebars');
 const yaml = require('yaml');
-const helpers = require('../tools/redpanda-connect/helpers/index.js');
+const helpers = require('../../tools/redpanda-connect/helpers/index.js');
 
 // Register every helper under handlebars so `{{> fields}}`, `{{> examples}}`, etc. work
 Object.entries(helpers).forEach(([name, fn]) => {
@@ -29,7 +29,7 @@ if (typeof global !== 'undefined') {
 const {
   generateRpcnConnectorDocs,
   mergeOverrides
-} = require('../tools/redpanda-connect/generate-rpcn-connector-docs');
+} = require('../../tools/redpanda-connect/generate-rpcn-connector-docs');
 
 describe('Utility Helpers', () => {
   test('uppercase: should convert string to uppercase', () => {
@@ -177,7 +177,7 @@ describe('Utility Helpers', () => {
       expect(result).toContain("*Default*: `foo`");
     });
 
-    it('renders examples for array of strings using literal block syntax if multi-line', () => {
+    it('renders examples for array of strings using standard YAML format for multi-line', () => {
       const exampleField = [
         {
           name: 'notes',
@@ -196,8 +196,8 @@ describe('Utility Helpers', () => {
       expect(result).toMatch(/notes:[\s\S]*- single line note/);
       expect(result).toMatch(/notes:[\s\S]*- another single note/);
 
-      // 2) Check that a literal-block marker "|-" appears somewhere after "notes:"
-      expect(result).toMatch(/notes:[\s\S]*\|-/);
+      // 2) Check that multi-line strings are rendered correctly (without |- block syntax for arrays)
+      expect(result).toMatch(/notes:[\s\S]*- multi\s+line\s+note/);
     });
 
     it('renders a list of example configs in renderConnectExamples', () => {
