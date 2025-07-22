@@ -18,7 +18,7 @@ logger = logging.getLogger("metrics_extractor")
 
 
 def validate_paths(options):
-    path = options.path
+    path = options.redpanda_repo
 
     if not os.path.exists(path):
         logger.error(f'Path does not exist: "{path}".')
@@ -27,7 +27,7 @@ def validate_paths(options):
 
 def get_cpp_files(options):
     """Get all C++ source files from the path"""
-    path = Path(options.path)
+    path = Path(options.redpanda_repo)
     
     # If the path is a file, return it directly
     if path.is_file() and path.suffix in ['.cc', '.cpp', '.cxx', '.h', '.hpp']:
@@ -63,18 +63,19 @@ def parse_args():
         description="Extract Redpanda metrics from C++ source code using tree-sitter"
     )
     parser.add_argument(
-        "path",
+        "--redpanda-repo",
+        "-r",
+        required=True,
         help="Path to the Redpanda source code directory"
     )
     parser.add_argument(
         "--recursive", 
-        "-r", 
         action="store_true", 
-        help="Search for C++ files recursively"
+        default=True,
+        help="Search for C++ files recursively (default: True)"
     )
     parser.add_argument(
-        "--output", 
-        "-o", 
+        "--json-output", 
         default="metrics.json", 
         help="Output JSON file (default: metrics.json)"
     )
@@ -421,7 +422,7 @@ def main():
     print(f"Internal metrics: {internal_count}")
     print(f"External metrics: {external_count}")
     
-    with open(args.output, 'w') as f:
+    with open(args.json_output, 'w') as f:
         json.dump(metrics_bag.to_dict(), f, indent=2)
     
     # Output AsciiDoc if requested
@@ -436,7 +437,7 @@ def main():
         generate_asciidoc_by_type(metrics_bag, args.asciidoc, None)
     
     # Only show summary messages, not duplicate file outputs
-    print(f"📄 JSON output: {args.output}")
+    print(f"📄 JSON output: {args.json_output}")
     if args.internal_asciidoc:
         print(f"📄 Internal metrics: {args.internal_asciidoc}")
     if args.external_asciidoc:

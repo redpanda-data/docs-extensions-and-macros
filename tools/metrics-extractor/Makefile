@@ -47,9 +47,23 @@ clone-redpanda:
 	@mkdir -p tmp
 	@if [ -d "$(REDPANDA_DIR)" ]; then \
 		echo "Repository already exists, updating..."; \
-		cd $(REDPANDA_DIR) && git fetch --all && git checkout $(TAG) && git pull origin $(TAG); \
+		cd $(REDPANDA_DIR) && git fetch --all --tags && git checkout $(TAG); \
+		if git show-ref --verify --quiet refs/heads/$(TAG); then \
+			git pull origin $(TAG); \
+		fi; \
 	else \
-		git clone --depth 1 --branch $(TAG) $(REDPANDA_REPO) $(REDPANDA_DIR); \
+		echo "Checking if $(TAG) is a branch or tag..."; \
+		if git ls-remote --heads $(REDPANDA_REPO) $(TAG) | grep -q $(TAG); then \
+			echo "$(TAG) is a branch, cloning..."; \
+			git clone --depth 1 --branch $(TAG) $(REDPANDA_REPO) $(REDPANDA_DIR); \
+		elif git ls-remote --tags $(REDPANDA_REPO) $(TAG) | grep -q $(TAG); then \
+			echo "$(TAG) is a tag, cloning and checking out..."; \
+			git clone $(REDPANDA_REPO) $(REDPANDA_DIR); \
+			cd $(REDPANDA_DIR) && git checkout $(TAG); \
+		else \
+			echo "Error: $(TAG) not found as branch or tag in $(REDPANDA_REPO)"; \
+			exit 1; \
+		fi; \
 	fi
 
 treesitter:

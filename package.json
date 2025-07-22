@@ -21,7 +21,9 @@
     "get-console-version": "doc-tools get-console-version",
     "build": "antora --to-dir docs --fetch local-antora-playbook.yml",
     "serve": "wds --node-resolve --open preview/test/ --watch --root-dir docs",
-    "test": "jest"
+    "test": "jest",
+    "metrics:extract": "doc-tools metrics-docs",
+    "metrics:legacy": "doc-tools metrics-docs-legacy"
   },
   "contributors": [
     {
