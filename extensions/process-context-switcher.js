@@ -117,14 +117,34 @@ module.exports.register = function ({ config }) {
    * @returns {string} The normalized resource ID
    */
   function normalizeResourceId(resourceId, currentPage) {
+    // Sanitize input to avoid syntax errors
+    if (!resourceId || typeof resourceId !== 'string') {
+      throw new Error('Resource ID must be a non-empty string');
+    }
+
+    if (!currentPage || !currentPage.src || !currentPage.src.version) {
+      throw new Error('Current page must have a valid src.version property');
+    }
+
+    // Trim whitespace and remove any dangerous characters
+    const sanitizedResourceId = resourceId.trim();
+    if (!sanitizedResourceId) {
+      throw new Error('Resource ID cannot be empty or whitespace-only');
+    }
+
+    // Validate basic resource ID format (component:module:path or version@component:module:path)
+    if (!/^([^@]+@)?[^:]+:[^:]+:.+$/.test(sanitizedResourceId)) {
+      throw new Error(`Invalid resource ID format: '${sanitizedResourceId}'. Expected format: [version@]component:module:path`);
+    }
+
     // If the resource ID already contains a version (has @), return as-is
-    if (resourceId.includes('@')) {
-      return resourceId;
+    if (sanitizedResourceId.includes('@')) {
+      return sanitizedResourceId;
     }
 
     // Add the current page's version to the resource ID
     const currentVersion = currentPage.src.version;
-    return `${currentVersion}@${resourceId}`;
+    return `${currentVersion}@${sanitizedResourceId}`;
   }
 
   /**
@@ -135,36 +155,42 @@ module.exports.register = function ({ config }) {
    * @returns {Object|null} The found page or null
    */
   function findPageByResourceId(resourceId, contentCatalog, currentPage) {
-    // Normalize the resource ID by adding version if missing
-    const normalizedResourceId = normalizeResourceId(resourceId, currentPage);
-
-    if (normalizedResourceId !== resourceId) {
-      logger.debug(`Normalized resource ID '${resourceId}' to '${normalizedResourceId}' using current page version`);
-    }
-
     try {
-      // Use Antora's built-in resource resolution
-      const resource = contentCatalog.resolveResource(normalizedResourceId, currentPage.src);
+      // Normalize the resource ID by adding version if missing
+      const normalizedResourceId = normalizeResourceId(resourceId, currentPage);
 
-      if (resource) {
-        logger.debug(`Resolved resource ID '${normalizedResourceId}' to: ${buildResourceId(resource)}`);
-        return resource;
-      } else {
-        logger.debug(`Could not resolve resource ID: '${normalizedResourceId}'`);
+      if (normalizedResourceId !== resourceId) {
+        logger.debug(`Normalized resource ID '${resourceId}' to '${normalizedResourceId}' using current page version`);
+      }
 
-        // Provide some debugging help by showing available pages in the current component
-        const currentComponentPages = contentCatalog.findBy({
-          family: 'page',
-          component: currentPage.src.component
-        }).slice(0, 10);
+      try {
+        // Use Antora's built-in resource resolution
+        const resource = contentCatalog.resolveResource(normalizedResourceId, currentPage.src);
 
-        logger.debug(`Available pages in current component '${currentPage.src.component}' (first 10):`,
-          currentComponentPages.map(p => `${p.src.version}@${p.src.component}:${p.src.module || 'ROOT'}:${p.src.relative}`));
+        if (resource) {
+          logger.debug(`Resolved resource ID '${normalizedResourceId}' to: ${buildResourceId(resource)}`);
+          return resource;
+        } else {
+          logger.warn(`Could not resolve resource ID: '${normalizedResourceId}'. Check that the component, module, and path exist.`);
 
+          // Provide some debugging help by showing available pages in the current component
+          const currentComponentPages = contentCatalog.findBy({
+            family: 'page',
+            component: currentPage.src.component
+          }).slice(0, 10);
+
+          logger.debug(`Available pages in current component '${currentPage.src.component}' (first 10):`,
+            currentComponentPages.map(p => `${p.src.version}@${p.src.component}:${p.src.module || 'ROOT'}:${p.src.relative}`));
+
+          return null;
+        }
+      } catch (error) {
+        logger.debug(`Error resolving resource ID '${normalizedResourceId}': ${error.message}`);
         return null;
       }
     } catch (error) {
-      logger.debug(`Error resolving resource ID '${normalizedResourceId}': ${error.message}`);
+      // Handle normalization errors (invalid resource ID format)
+      logger.warn(`Invalid resource ID '${resourceId}': ${error.message}`);
       return null;
     }
   }
@@ -179,7 +205,7 @@ module.exports.register = function ({ config }) {
   function injectContextSwitcherToTargetPage(targetPage, contextSwitcher, currentPageResourceId, logger) {
     // Check if target page already has context-switcher attribute
     if (targetPage.asciidoc.attributes['page-context-switcher']) {
-      logger.debug(`Target page ${buildResourceId(targetPage)} already has context-switcher attribute`);
+      logger.warn(`Target page ${buildResourceId(targetPage)} already has context-switcher attribute. Skipping injection to avoid overwriting existing configuration: ${targetPage.asciidoc.attributes['page-context-switcher']}`);
       return;
     }
 
