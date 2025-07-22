@@ -120,79 +120,188 @@ def generate_asciidoc_by_type(metrics_bag, internal_output_file, external_output
         else:
             external_metrics[metric_key] = metric_info
     
+    # Group metrics by category/prefix for better organization
+    def group_metrics_by_category(metrics_dict):
+        """Group metrics by their prefix (first part before underscore)"""
+        groups = {}
+        for metric_key, metric_info in metrics_dict.items():
+            # Extract category from full_name or fallback to metric_key
+            full_name = metric_info.get('full_name', metric_key)
+            
+            # Remove redpanda_ or vectorized_ prefix first
+            clean_name = full_name
+            if clean_name.startswith('redpanda_'):
+                clean_name = clean_name[9:]  # Remove 'redpanda_'
+            elif clean_name.startswith('vectorized_'):
+                clean_name = clean_name[11:]  # Remove 'vectorized_'
+            
+            # Get the category (first part before underscore)
+            parts = clean_name.split('_')
+            category = parts[0] if parts else 'other'
+            
+            # Create more meaningful category names
+            category_mapping = {
+                'cluster': 'Cluster metrics',
+                'kafka': 'Kafka metrics', 
+                'raft': 'Raft metrics',
+                'storage': 'Storage metrics',
+                'memory': 'Memory metrics',
+                'io': 'I/O metrics',
+                'rpc': 'RPC metrics',
+                'cloud': 'Cloud storage metrics',
+                'application': 'Application metrics',
+                'reactor': 'Reactor metrics',
+                'scheduler': 'Scheduler metrics',
+                'network': 'Network metrics',
+                'internal': 'Internal RPC metrics',
+                'pandaproxy': 'REST proxy metrics',
+                'rest': 'REST proxy metrics',
+                'schema': 'Schema registry metrics',
+                'transform': 'Data transforms metrics',
+                'wasm': 'Data transforms metrics',
+                'security': 'Security metrics',
+                'authorization': 'Security metrics',
+                'tls': 'TLS metrics',
+                'debug': 'Debug bundle metrics',
+                'alien': 'Cross-shard metrics',
+                'archival': 'Archival metrics',
+                'ntp': 'Partition metrics',
+                'space': 'Space management metrics',
+                'chunk': 'Chunk cache metrics',
+                'tx': 'Transaction metrics',
+                'leader': 'Leader balancer metrics',
+                'node': 'Node status metrics',
+                'stall': 'Stall detector metrics',
+                'httpd': 'HTTP server metrics',
+                'host': 'Host metrics',
+                'uptime': 'Infrastructure metrics',
+                'cpu': 'Infrastructure metrics',
+                'iceberg': 'Iceberg metrics'
+            }
+            
+            category_name = category_mapping.get(category, f'{category.title()} metrics')
+            
+            if category_name not in groups:
+                groups[category_name] = {}
+            groups[category_name][metric_key] = metric_info
+        
+        return groups
+    
     # Generate internal metrics documentation
     if internal_output_file:
         with open(internal_output_file, 'w') as f:
-            f.write("= Redpanda Internal Metrics Reference\n")
-            f.write(":description: Reference documentation for Redpanda internal metrics extracted from source code.\n")
-            f.write(":page-categories: Management, Monitoring\n")
+            f.write("= Internal Metrics\n")
+            f.write(":description: Redpanda internal metrics for detailed analysis, debugging, and troubleshooting.\n")
+            f.write(":page-aliases: reference:internal-metrics.adoc\n")
             f.write("\n")
-            f.write("This document lists all internal metrics found in the Redpanda source code.\n")
-            f.write("These metrics are primarily for debugging and operational use and may have high cardinality.\n")
+            f.write("This section provides reference descriptions about the internal metrics exported from Redpanda's `/metrics` endpoint.\n")
+            f.write("\n")
+            f.write("include::shared:partial$metrics-usage-tip.adoc[]\n")
+            f.write("\n")
+            f.write("[IMPORTANT]\n")
+            f.write("====\n")
+            f.write("In a live system, Redpanda metrics are exported only for features that are in use. For example, a metric for consumer groups is not exported when no groups are registered.\n")
+            f.write("\n")
+            f.write("To see the available internal metrics in your system, query the `/metrics` endpoint:\n")
+            f.write("\n")
+            f.write("[,bash]\n")
+            f.write("----\n")
+            f.write("curl http://<node-addr>:9644/metrics | grep \"[HELP|TYPE]\"\n")
+            f.write("----\n")
+            f.write("====\n")
+            f.write("\n")
+            f.write("Internal metrics (`/metrics`) can generate thousands of metric series in production environments. Use them judiciously in monitoring systems to avoid performance issues. For alerting and dashboards, prefer public metrics (`/public_metrics`) which are optimized for lower cardinality.\n")
+            f.write("\n")
+            f.write("The xref:reference:properties/cluster-properties.adoc#aggregate_metrics[aggregate_metrics] cluster property controls internal metrics cardinality. When you enable this property, internal metrics combine labels (like shard) to reduce the number of series. Public metrics always combine labels, regardless of this setting.\n")
             f.write("\n")
             
-            # Sort internal metrics by key
-            sorted_internal = sorted(internal_metrics.items())
+            # Group and sort internal metrics
+            internal_groups = group_metrics_by_category(internal_metrics)
             
-            for metric_key, metric_info in sorted_internal:
-                # Use full_name as section header, fallback to metric_key if full_name is not available
-                section_name = metric_info.get('full_name', metric_key)
-                f.write(f"=== {section_name}\n\n")
+            for group_name in sorted(internal_groups.keys()):
+                f.write(f"== {group_name}\n\n")
                 
-                if metric_info.get('description'):
-                    f.write(f"{metric_info['description']}\n\n")
-                else:
-                    f.write("No description available.\n\n")
+                # Sort metrics within each group
+                sorted_group_metrics = sorted(internal_groups[group_name].items())
                 
-                f.write(f"*Type*: {metric_info.get('type', 'unknown')}\n\n")
-                
-                if metric_info.get('labels'):
-                    f.write("*Labels*:\n\n")
-                    for label in sorted(metric_info['labels']):
-                        f.write(f"- `{label}`\n")
-                    f.write("\n")
-                
-                if metric_info.get('files') and metric_info['files']:
-                    f.write(f"*Source*: `{metric_info['files'][0].get('file', '')}`\n\n")
-                
-                f.write("---\n\n")
+                for metric_key, metric_info in sorted_group_metrics:
+                    # Use full_name as section header, fallback to metric_key if full_name is not available
+                    section_name = metric_info.get('full_name', metric_key)
+                    f.write(f"=== {section_name}\n\n")
+                    
+                    if metric_info.get('description'):
+                        f.write(f"{metric_info['description']}\n\n")
+                    else:
+                        f.write("No description available.\n\n")
+                    
+                    f.write(f"*Type*: {metric_info.get('type', 'unknown')}\n\n")
+                    
+                    if metric_info.get('labels'):
+                        f.write("*Labels*:\n\n")
+                        for label in sorted(metric_info['labels']):
+                            f.write(f"- `{label}`\n")
+                        f.write("\n")
+                    
+                    f.write("---\n\n")
     
     # Generate external metrics documentation
     if external_output_file:
         with open(external_output_file, 'w') as f:
-            f.write("= Redpanda Public Metrics Reference\n")
-            f.write(":description: Reference documentation for Redpanda public metrics extracted from source code.\n")
-            f.write(":page-categories: Management, Monitoring\n")
+            f.write("= Public Metrics\n")
+            f.write(":description: Public metrics to create your system dashboard.\n")
+            f.write("// tag::single-source[]\n")
             f.write("\n")
-            f.write("This document lists all public metrics found in the Redpanda source code.\n")
-            f.write("These metrics are designed for customer consumption and have low cardinality.\n")
+            f.write("This section provides reference descriptions for the public metrics exported from Redpanda's `/public_metrics` endpoint.\n")
+            f.write("\n")
+            f.write("// Cloud does not expose the internal metrics.\n")
+            f.write("ifndef::env-cloud[]\n")
+            f.write("include::shared:partial$metrics-usage-tip.adoc[]\n")
+            f.write("endif::[]\n")
+            f.write("\n")
+            f.write("[IMPORTANT]\n")
+            f.write("====\n")
+            f.write("In a live system, Redpanda metrics are exported only for features that are in use. For example, Redpanda does not export metrics for consumer groups if no groups are registered.\n")
+            f.write("\n")
+            f.write("To see the available public metrics in your system, query the `/public_metrics` endpoint:\n")
+            f.write("\n")
+            f.write("[,bash]\n")
+            f.write("----\n")
+            f.write("curl http://<node-addr>:9644/public_metrics | grep \"[HELP|TYPE]\"\n")
+            f.write("----\n")
+            f.write("\n")
+            f.write("====\n")
             f.write("\n")
             
-            # Sort external metrics by key
-            sorted_external = sorted(external_metrics.items())
+            # Group and sort external metrics
+            external_groups = group_metrics_by_category(external_metrics)
             
-            for metric_key, metric_info in sorted_external:
-                # Use full_name as section header, fallback to metric_key if full_name is not available
-                section_name = metric_info.get('full_name', metric_key)
-                f.write(f"=== {section_name}\n\n")
+            for group_name in sorted(external_groups.keys()):
+                f.write(f"== {group_name}\n\n")
                 
-                if metric_info.get('description'):
-                    f.write(f"{metric_info['description']}\n\n")
-                else:
-                    f.write("No description available.\n\n")
+                # Sort metrics within each group
+                sorted_group_metrics = sorted(external_groups[group_name].items())
                 
-                f.write(f"*Type*: {metric_info.get('type', 'unknown')}\n\n")
-                
-                if metric_info.get('labels'):
-                    f.write("*Labels*:\n\n")
-                    for label in sorted(metric_info['labels']):
-                        f.write(f"- `{label}`\n")
-                    f.write("\n")
-                
-                if metric_info.get('files') and metric_info['files']:
-                    f.write(f"*Source*: `{metric_info['files'][0].get('file', '')}`\n\n")
-                
-                f.write("---\n\n")
+                for metric_key, metric_info in sorted_group_metrics:
+                    # Use full_name as section header, fallback to metric_key if full_name is not available
+                    section_name = metric_info.get('full_name', metric_key)
+                    f.write(f"=== {section_name}\n\n")
+                    
+                    if metric_info.get('description'):
+                        f.write(f"{metric_info['description']}\n\n")
+                    else:
+                        f.write("No description available.\n\n")
+                    
+                    f.write(f"*Type*: {metric_info.get('type', 'unknown')}\n\n")
+                    
+                    if metric_info.get('labels'):
+                        f.write("*Labels*:\n\n")
+                        for label in sorted(metric_info['labels']):
+                            f.write(f"- `{label}`\n")
+                        f.write("\n")
+                    
+                    f.write("---\n\n")
+            
+            f.write("// end::single-source[]\n")
 
 
 def main():
