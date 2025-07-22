@@ -406,6 +406,11 @@ def extract_metric_details(args_node, source_code):
             # Final fallback: just use the second string literal
             description = string_literals[1]['text']
 
+    # Filter out descriptions with unresolved format placeholders
+    if description and '{}' in description:
+        logger.debug(f"Filtering out description with unresolved placeholders: '{description}'")
+        description = ""
+
     return metric_name, description
 
 

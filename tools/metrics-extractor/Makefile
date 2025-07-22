@@ -80,12 +80,11 @@ extract-metrics:
 	@echo "Extracting metrics from Redpanda source code..."
 	@mkdir -p $(OUTPUT_DIR)
 	$(PYTHON) metrics_extractor.py \
-		--recursive \
-		--output $(OUTPUT_DIR)/metrics.json \
+		--redpanda-repo $(REDPANDA_DIR) \
+		--json-output $(OUTPUT_DIR)/metrics.json \
 		--internal-asciidoc $(OUTPUT_DIR)/internal_metrics_reference.adoc \
 		--external-asciidoc $(OUTPUT_DIR)/public_metrics_reference.adoc \
-		--verbose \
-		$(REDPANDA_DIR)/src
+		--verbose
 
 generate-comparison:
 	@echo "Generating metrics comparison..."
