@@ -321,31 +321,84 @@ def extract_metric_details(args_node, source_code):
     metric_name = ""
     description = ""
     
+    # Find all string literals and their positions
     string_literals = []
     
-    def collect_strings(node):
-        # Recursively find all string literals within the arguments
+    def collect_string_info(node):
+        """Recursively find all string literals with their positions"""
         if node.type == "string_literal":
             text = node.text.decode("utf-8", errors="ignore")
-            string_literals.append(unquote_string(text))
+            unquoted = unquote_string(text)
+            start_pos = node.start_point
+            end_pos = node.end_point
+            string_literals.append({
+                'text': unquoted,
+                'start': start_pos,
+                'end': end_pos,
+                'raw': text
+            })
         for child in node.children:
-            collect_strings(child)
+            collect_string_info(child)
     
-    collect_strings(args_node)
+    collect_string_info(args_node)
+    
+    # Sort string literals by their position in the source
+    string_literals.sort(key=lambda x: (x['start'][0], x['start'][1]))
     
     # First string literal is the metric name
     if string_literals:
-        metric_name = string_literals[0]
+        metric_name = string_literals[0]['text']
     
-    # The second string literal is usually the description.
-    # This is a simplification; a more complex heuristic could be needed if
-    # the description isn't the second string.
-    if len(string_literals) > 1:
-        # A simple check to see if the argument list contains "description"
-        # to be more certain.
-        args_text = args_node.text.decode("utf-8", errors="ignore")
-        if "description" in args_text:
-             description = string_literals[1]
+    # Look for description by finding sm::description() calls or consecutive string literals
+    args_text = args_node.text.decode("utf-8", errors="ignore")
+    
+    if "description" in args_text:
+        # Find the description call and extract concatenated strings
+        description_strings = []
+        in_description = False
+        
+        for i, str_info in enumerate(string_literals):
+            # Skip the first string which is the metric name
+            if i == 0:
+                continue
+                
+            # Check if this string is likely part of a description
+            # by looking at the surrounding code context
+            start_byte = str_info['start'][0] * 100 + str_info['start'][1]  # rough byte estimate
+            
+            # Get some context around this string
+            node_start = args_node.start_byte
+            node_end = args_node.end_byte
+            
+            # Extract context to see if this is in a description call
+            context_start = max(node_start, start_byte - 100)
+            context_end = min(node_end, start_byte + len(str_info['raw']) + 100)
+            context = source_code[context_start:context_end].decode("utf-8", errors="ignore")
+            
+            # If we find "description" before this string, start collecting
+            if "description" in context and not in_description:
+                in_description = True
+                description_strings.append(str_info['text'])
+            elif in_description:
+                # Check if this string is adjacent to the previous one (likely concatenated)
+                if i > 1:
+                    prev_str = string_literals[i-1]
+                    # If strings are on consecutive lines or close together, they're likely concatenated
+                    line_diff = str_info['start'][0] - prev_str['end'][0]
+                    if line_diff <= 1:  # Same line or next line
+                        description_strings.append(str_info['text'])
+                    else:
+                        break  # No longer part of the same description
+                else:
+                    description_strings.append(str_info['text'])
+        
+        # Concatenate all description strings
+        if description_strings:
+            description = ''.join(description_strings)
+        elif len(string_literals) > 1:
+            # Fallback: if we found "description" but couldn't parse it properly,
+            # just use the second string literal
+            description = string_literals[1]['text']
 
     return metric_name, description
 
