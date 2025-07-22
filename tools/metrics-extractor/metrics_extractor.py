@@ -79,9 +79,17 @@ def parse_args():
         help="Output JSON file (default: metrics.json)"
     )
     parser.add_argument(
+        "--internal-asciidoc", 
+        help="Generate AsciiDoc output file for internal metrics"
+    )
+    parser.add_argument(
+        "--external-asciidoc", 
+        help="Generate AsciiDoc output file for external metrics"
+    )
+    parser.add_argument(
         "--asciidoc", 
         "-a", 
-        help="Generate AsciiDoc output file"
+        help="Generate AsciiDoc output file (deprecated: use --internal-asciidoc and --external-asciidoc)"
     )
     parser.add_argument(
         "--verbose", 
@@ -97,41 +105,94 @@ def parse_args():
     return parser.parse_args()
 
 
-def generate_asciidoc(metrics_bag, output_file):
-    """Generate AsciiDoc documentation from metrics"""
-    with open(output_file, 'w') as f:
-        f.write("= Redpanda Metrics Reference\n")
-        f.write(":description: Reference documentation for Redpanda metrics extracted from source code.\n")
-        f.write(":page-categories: Management, Monitoring\n")
-        f.write("\n")
-        f.write("This document lists all metrics found in the Redpanda source code.\n")
-        f.write("\n")
-        
-        # Sort metrics by the key (which is now full_name or fallback to unique_id)
-        sorted_metrics = sorted(metrics_bag.get_all_metrics().items())
-        
-        for metric_key, metric_info in sorted_metrics:
-            # Use full_name as section header, fallback to metric_key if full_name is not available
-            section_name = metric_info.get('full_name', metric_key)
-            f.write(f"=== {section_name}\n\n")
+def generate_asciidoc_by_type(metrics_bag, internal_output_file, external_output_file):
+    """Generate separate AsciiDoc documentation for internal and external metrics"""
+    all_metrics = metrics_bag.get_all_metrics()
+    
+    # Separate metrics by type
+    internal_metrics = {}
+    external_metrics = {}
+    
+    for metric_key, metric_info in all_metrics.items():
+        metric_type = metric_info.get('metric_type', 'external')  # Default to external if not specified
+        if metric_type == 'internal':
+            internal_metrics[metric_key] = metric_info
+        else:
+            external_metrics[metric_key] = metric_info
+    
+    # Generate internal metrics documentation
+    if internal_output_file:
+        with open(internal_output_file, 'w') as f:
+            f.write("= Redpanda Internal Metrics Reference\n")
+            f.write(":description: Reference documentation for Redpanda internal metrics extracted from source code.\n")
+            f.write(":page-categories: Management, Monitoring\n")
+            f.write("\n")
+            f.write("This document lists all internal metrics found in the Redpanda source code.\n")
+            f.write("These metrics are primarily for debugging and operational use and may have high cardinality.\n")
+            f.write("\n")
             
-            if metric_info.get('description'):
-                f.write(f"{metric_info['description']}\n\n")
-            else:
-                f.write("No description available.\n\n")
+            # Sort internal metrics by key
+            sorted_internal = sorted(internal_metrics.items())
             
-            f.write(f"*Type*: {metric_info.get('type', 'unknown')}\n\n")
+            for metric_key, metric_info in sorted_internal:
+                # Use full_name as section header, fallback to metric_key if full_name is not available
+                section_name = metric_info.get('full_name', metric_key)
+                f.write(f"=== {section_name}\n\n")
+                
+                if metric_info.get('description'):
+                    f.write(f"{metric_info['description']}\n\n")
+                else:
+                    f.write("No description available.\n\n")
+                
+                f.write(f"*Type*: {metric_info.get('type', 'unknown')}\n\n")
+                
+                if metric_info.get('labels'):
+                    f.write("*Labels*:\n\n")
+                    for label in sorted(metric_info['labels']):
+                        f.write(f"- `{label}`\n")
+                    f.write("\n")
+                
+                if metric_info.get('files') and metric_info['files']:
+                    f.write(f"*Source*: `{metric_info['files'][0].get('file', '')}`\n\n")
+                
+                f.write("---\n\n")
+    
+    # Generate external metrics documentation
+    if external_output_file:
+        with open(external_output_file, 'w') as f:
+            f.write("= Redpanda Public Metrics Reference\n")
+            f.write(":description: Reference documentation for Redpanda public metrics extracted from source code.\n")
+            f.write(":page-categories: Management, Monitoring\n")
+            f.write("\n")
+            f.write("This document lists all public metrics found in the Redpanda source code.\n")
+            f.write("These metrics are designed for customer consumption and have low cardinality.\n")
+            f.write("\n")
             
-            if metric_info.get('labels'):
-                f.write("*Labels*:\n\n")
-                for label in sorted(metric_info['labels']):
-                    f.write(f"- `{label}`\n")
-                f.write("\n")
+            # Sort external metrics by key
+            sorted_external = sorted(external_metrics.items())
             
-            if metric_info.get('files') and metric_info['files']:
-                f.write(f"*Source*: `{metric_info['files'][0].get('file', '')}`\n\n")
-            
-            f.write("---\n\n")
+            for metric_key, metric_info in sorted_external:
+                # Use full_name as section header, fallback to metric_key if full_name is not available
+                section_name = metric_info.get('full_name', metric_key)
+                f.write(f"=== {section_name}\n\n")
+                
+                if metric_info.get('description'):
+                    f.write(f"{metric_info['description']}\n\n")
+                else:
+                    f.write("No description available.\n\n")
+                
+                f.write(f"*Type*: {metric_info.get('type', 'unknown')}\n\n")
+                
+                if metric_info.get('labels'):
+                    f.write("*Labels*:\n\n")
+                    for label in sorted(metric_info['labels']):
+                        f.write(f"- `{label}`\n")
+                    f.write("\n")
+                
+                if metric_info.get('files') and metric_info['files']:
+                    f.write(f"*Source*: `{metric_info['files'][0].get('file', '')}`\n\n")
+                
+                f.write("---\n\n")
 
 
 def main():
@@ -173,9 +234,17 @@ def main():
         cpp_files, treesitter_parser, cpp_language, args.filter_namespace
     )
     
-    # Show clean summary
-    total_metrics = len(metrics_bag.get_all_metrics())
+    # Show clean summary with internal/external breakdown
+    all_metrics = metrics_bag.get_all_metrics()
+    total_metrics = len(all_metrics)
+    
+    # Count internal vs external metrics
+    internal_count = sum(1 for metric in all_metrics.values() if metric.get('metric_type') == 'internal')
+    external_count = sum(1 for metric in all_metrics.values() if metric.get('metric_type') == 'external')
+    
     print(f"✅ Successfully extracted {total_metrics} metrics from {len(cpp_files)} C++ files")
+    print(f"Internal metrics: {internal_count}")
+    print(f"External metrics: {external_count}")
     
     # Output JSON
     if args.verbose:
@@ -184,14 +253,28 @@ def main():
         json.dump(metrics_bag.to_dict(), f, indent=2)
     
     # Output AsciiDoc if requested
+    if args.internal_asciidoc or args.external_asciidoc:
+        if args.verbose:
+            if args.internal_asciidoc:
+                logger.info(f"Writing internal metrics AsciiDoc output to {args.internal_asciidoc}")
+            if args.external_asciidoc:
+                logger.info(f"Writing external metrics AsciiDoc output to {args.external_asciidoc}")
+        generate_asciidoc_by_type(metrics_bag, args.internal_asciidoc, args.external_asciidoc)
+    
+    # Handle legacy --asciidoc argument (generate both files)
     if args.asciidoc:
         if args.verbose:
-            logger.info(f"Writing AsciiDoc output to {args.asciidoc}")
-        generate_asciidoc(metrics_bag, args.asciidoc)
+            logger.info(f"Writing legacy AsciiDoc output to {args.asciidoc}")
+        # For backward compatibility, generate both internal and external in one file
+        generate_asciidoc_by_type(metrics_bag, args.asciidoc, None)
     
     print(f"📄 Output written to: {args.output}")
+    if args.internal_asciidoc:
+        print(f"📄 Internal metrics AsciiDoc written to: {args.internal_asciidoc}")
+    if args.external_asciidoc:
+        print(f"📄 External metrics AsciiDoc written to: {args.external_asciidoc}")
     if args.asciidoc:
-        print(f"📄 AsciiDoc written to: {args.asciidoc}")
+        print(f"📄 Legacy AsciiDoc written to: {args.asciidoc}")
     
     # Show breakdown by type
     metrics_by_type = {}

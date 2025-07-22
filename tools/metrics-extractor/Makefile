@@ -68,7 +68,8 @@ extract-metrics:
 	$(PYTHON) metrics_extractor.py \
 		--recursive \
 		--output $(OUTPUT_DIR)/metrics.json \
-		--asciidoc $(OUTPUT_DIR)/metrics.adoc \
+		--internal-asciidoc $(OUTPUT_DIR)/internal_metrics_reference.adoc \
+		--external-asciidoc $(OUTPUT_DIR)/public_metrics_reference.adoc \
 		--verbose \
 		$(REDPANDA_DIR)/src
 
@@ -133,7 +134,8 @@ extract-local:
 	$(PYTHON) metrics_extractor.py \
 		--recursive \
 		--output $(OUTPUT_DIR)/metrics.json \
-		--asciidoc $(OUTPUT_DIR)/metrics.adoc \
+		--internal-asciidoc $(OUTPUT_DIR)/internal_metrics_reference.adoc \
+		--external-asciidoc $(OUTPUT_DIR)/public_metrics_reference.adoc \
 		--filter-namespace redpanda \
 		--verbose \
 		$(REDPANDA_PATH)/src

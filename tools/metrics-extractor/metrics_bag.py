@@ -94,8 +94,6 @@ class MetricsBag:
             metric_data.update(kwargs)
             
             self._metrics[key] = metric_data
-        
-        logger.debug(f"Added/updated metric: {name} with key: {key} (unique_id: {unique_id}), group_name: {group_name}, full_name: {full_name}, metric_type: {internal_external_type}")
     
     def get_metric(self, name):
         """Get a specific metric by name"""
