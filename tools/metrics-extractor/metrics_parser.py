@@ -128,17 +128,29 @@ def extract_labels_from_code(code_context):
     return sorted(list(labels))
 
 
-def find_group_name_from_ast(metric_call_expr_node):
+def find_group_name_and_type_from_ast(metric_call_expr_node):
     """
     Traverse up the AST from a metric definition to find the enclosing 
-    add_group call and extract its name. This is more reliable than regex.
+    add_group call and extract its name and metric type (internal/external).
+    Returns tuple: (group_name, metric_type)
     """
     current_node = metric_call_expr_node
     while current_node:
-        # We are looking for a call expression, e.g., _metrics.add_group(...)
+        # We are looking for a call expression, e.g., _metrics.add_group(...) or _public_metrics.add_group(...)
         if current_node.type == 'call_expression':
             function_node = current_node.child_by_field_name('function')
             if function_node and function_node.text.decode('utf-8').endswith('.add_group'):
+                function_text = function_node.text.decode('utf-8')
+                
+                # Determine metric type based on the object being called
+                metric_type = "external"  # default
+                if '_metrics.add_group' in function_text and 'public' not in function_text:
+                    # This is likely internal_metric_groups or just _metrics (internal)
+                    metric_type = "internal"
+                elif '_public_metrics.add_group' in function_text or 'public_metric_groups' in function_text:
+                    # This is public_metric_groups (external)
+                    metric_type = "external"
+                
                 # This is an add_group call. Now, get its arguments.
                 args_node = current_node.child_by_field_name('arguments')
                 if not args_node or args_node.named_child_count == 0:
@@ -157,30 +169,51 @@ def find_group_name_from_ast(metric_call_expr_node):
                         if inner_args and inner_args.named_child_count > 0:
                             group_name_node = inner_args.named_children[0]
                             if group_name_node.type == 'string_literal':
-                                return unquote_string(group_name_node.text.decode('utf-8'))
+                                group_name = unquote_string(group_name_node.text.decode('utf-8'))
+                                return group_name, metric_type
                 # Handle simple string literal as group name
                 elif first_arg_node.type == 'string_literal':
-                    return unquote_string(first_arg_node.text.decode('utf-8'))
+                    group_name = unquote_string(first_arg_node.text.decode('utf-8'))
+                    return group_name, metric_type
 
         current_node = current_node.parent
-    return None
+    return None, "external"  # Default to external if not found
 
 
-def construct_full_metric_name(group_name, metric_name):
+def find_group_name_from_ast(metric_call_expr_node):
+    """
+    Traverse up the AST from a metric definition to find the enclosing 
+    add_group call and extract its name. This is more reliable than regex.
+    """
+    group_name, _ = find_group_name_and_type_from_ast(metric_call_expr_node)
+    return group_name
+
+
+def construct_full_metric_name(group_name, metric_name, metric_type="external"):
     """Construct the full Prometheus metric name from group and metric name"""
     if not group_name or group_name == "unknown":
-        # Fallback if group name is not found
-        return f"redpanda_{metric_name}"
+        # Fallback based on metric type
+        if metric_type == "internal":
+            return f"vectorized_{metric_name}"
+        else:
+            return f"redpanda_{metric_name}"
     
     # Sanitize the group name: replace special characters with underscores.
     sanitized_group = group_name.replace(':', '_').replace('-', '_')
     
-    # Ensure the 'redpanda' prefix is present. The group name from prometheus_sanitize
-    # might or might not have it.
-    if not sanitized_group.startswith('redpanda_'):
-        full_group_name = f"redpanda_{sanitized_group}"
+    # Ensure the correct prefix is present based on metric type
+    if metric_type == "internal":
+        # Internal metrics should have vectorized_ prefix
+        if not sanitized_group.startswith('vectorized_'):
+            full_group_name = f"vectorized_{sanitized_group}"
+        else:
+            full_group_name = sanitized_group
     else:
-        full_group_name = sanitized_group
+        # External metrics should have redpanda_ prefix
+        if not sanitized_group.startswith('redpanda_'):
+            full_group_name = f"redpanda_{sanitized_group}"
+        else:
+            full_group_name = sanitized_group
     
     # The full metric name is: <full_group_name>_<metric_name>
     return f"{full_group_name}_{metric_name}"
@@ -238,8 +271,8 @@ def parse_cpp_file(file_path, treesitter_parser, cpp_language, filter_namespace=
                         if filter_namespace and not metric_name.startswith(filter_namespace):
                             continue
                         
-                        # Use robust AST traversal to find the group name
-                        group_name = find_group_name_from_ast(call_expr)
+                        # Use robust AST traversal to find the group name and metric type
+                        group_name, internal_external_type = find_group_name_and_type_from_ast(call_expr)
 
                         # Only show warnings for missing groups in verbose mode
                         # if group_name:
@@ -247,10 +280,10 @@ def parse_cpp_file(file_path, treesitter_parser, cpp_language, filter_namespace=
                         # else:
                         #     logger.warning(f"Could not find group_name for metric '{metric_name}' at line {call_expr.start_point[0] + 1}")
 
-                        full_metric_name = construct_full_metric_name(group_name, metric_name)
+                        full_metric_name = construct_full_metric_name(group_name, metric_name, internal_external_type)
                         
                         # Commented out to reduce debug noise
-                        # logger.debug(f"Processing metric '{metric_name}': group_name='{group_name}', full_name='{full_metric_name}'")
+                        # logger.debug(f"Processing metric '{metric_name}': group_name='{group_name}', metric_type='{internal_external_type}', full_name='{full_metric_name}'")
                         
                         # Get code context for labels
                         start_byte = call_expr.start_byte
@@ -270,7 +303,8 @@ def parse_cpp_file(file_path, treesitter_parser, cpp_language, filter_namespace=
                             constructor=constructor,
                             line_number=call_expr.start_point[0] + 1,
                             group_name=group_name,
-                            full_name=full_metric_name
+                            full_name=full_metric_name,
+                            internal_external_type=internal_external_type  # Add the new field
                         )
                         
                         # Commented out to reduce noise

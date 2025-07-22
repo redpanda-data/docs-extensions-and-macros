@@ -22,7 +22,8 @@ class MetricsBag:
         return hash_object.hexdigest()[:16]  # Use first 16 characters for readability
     
     def add_metric(self, name, metric_type, description="", labels=None, 
-                   file="", constructor="", line_number=None, group_name=None, full_name=None, **kwargs):
+                   file="", constructor="", line_number=None, group_name=None, full_name=None, 
+                   internal_external_type="external", **kwargs):
         """Add a metric to the bag"""
         if labels is None:
             labels = []
@@ -57,6 +58,12 @@ class MetricsBag:
             elif "full_name" not in existing:
                 existing["full_name"] = None
             
+            # Update internal_external_type
+            if internal_external_type is not None:
+                existing["metric_type"] = internal_external_type
+            elif "metric_type" not in existing:
+                existing["metric_type"] = "external"  # default
+            
             # Merge labels
             existing_labels = set(existing.get("labels", []))
             new_labels = set(labels)
@@ -79,7 +86,8 @@ class MetricsBag:
                 "constructor": constructor,
                 "files": [{"file": file, "line": line_number}],
                 "group_name": group_name,
-                "full_name": full_name
+                "full_name": full_name,
+                "metric_type": internal_external_type  # Add the internal/external classification
             }
             
             # Add any additional kwargs
@@ -87,7 +95,7 @@ class MetricsBag:
             
             self._metrics[key] = metric_data
         
-        logger.debug(f"Added/updated metric: {name} with key: {key} (unique_id: {unique_id}), group_name: {group_name}, full_name: {full_name}")
+        logger.debug(f"Added/updated metric: {name} with key: {key} (unique_id: {unique_id}), group_name: {group_name}, full_name: {full_name}, metric_type: {internal_external_type}")
     
     def get_metric(self, name):
         """Get a specific metric by name"""
@@ -126,7 +134,8 @@ class MetricsBag:
                 constructor=metric.get("constructor", ""),
                 line_number=metric.get("files", [{}])[0].get("line"),
                 group_name=metric.get("group_name"),
-                full_name=metric.get("full_name")
+                full_name=metric.get("full_name"),
+                internal_external_type=metric.get("metric_type", "external")
             )
     
     def filter_by_prefix(self, prefix):
