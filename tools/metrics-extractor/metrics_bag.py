@@ -27,16 +27,23 @@ class MetricsBag:
         if labels is None:
             labels = []
         
-        # Generate unique ID for this metric instead of using names as keys
+        # Generate unique ID for this metric but now use full_name as the key
         unique_id = self._generate_unique_id(name, group_name, file, line_number)
         
+        # Use full_name as the key, fallback to unique_id if full_name is not available
+        key = full_name if full_name else unique_id
+        
         # If metric already exists, merge information
-        if unique_id in self._metrics:
-            existing = self._metrics[unique_id]
+        if key in self._metrics:
+            existing = self._metrics[key]
             
             # Update description if current one is empty
             if not existing.get("description") and description:
                 existing["description"] = description
+            
+            # Update unique_id if not present (for backward compatibility)
+            if "unique_id" not in existing:
+                existing["unique_id"] = unique_id
             
             # Update group_name and full_name if new values are provided and are not None
             # Allow overwriting None values with actual values
@@ -64,6 +71,7 @@ class MetricsBag:
         else:
             # Create new metric entry
             metric_data = {
+                "unique_id": unique_id,  # Add unique_id as a field
                 "name": name,
                 "type": metric_type,
                 "description": description,
@@ -77,9 +85,9 @@ class MetricsBag:
             # Add any additional kwargs
             metric_data.update(kwargs)
             
-            self._metrics[unique_id] = metric_data
+            self._metrics[key] = metric_data
         
-        logger.debug(f"Added/updated metric: {name} with ID: {unique_id}, group_name: {group_name}, full_name: {full_name}")
+        logger.debug(f"Added/updated metric: {name} with key: {key} (unique_id: {unique_id}), group_name: {group_name}, full_name: {full_name}")
     
     def get_metric(self, name):
         """Get a specific metric by name"""
@@ -117,8 +125,8 @@ class MetricsBag:
                 file=metric.get("files", [{}])[0].get("file", ""),
                 constructor=metric.get("constructor", ""),
                 line_number=metric.get("files", [{}])[0].get("line"),
-                group_name=metric.get("group_name"),  # Add this
-                full_name=metric.get("full_name")     # Add this
+                group_name=metric.get("group_name"),
+                full_name=metric.get("full_name")
             )
     
     def filter_by_prefix(self, prefix):
@@ -156,9 +164,9 @@ class MetricsBag:
     
     def to_dict(self):
         """Convert the metrics bag to a dictionary for JSON serialization"""
-        # Use the unique IDs directly as JSON keys to prevent any conflicts
+        # Use the full names (or unique IDs as fallback) as JSON keys
         return {
-            "metrics": self._metrics,  # Use unique IDs as keys directly
+            "metrics": self._metrics,  # Use full names as keys directly
             "statistics": self.get_statistics()
         }
     

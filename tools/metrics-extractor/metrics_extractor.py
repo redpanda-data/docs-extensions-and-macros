@@ -107,11 +107,13 @@ def generate_asciidoc(metrics_bag, output_file):
         f.write("This document lists all metrics found in the Redpanda source code.\n")
         f.write("\n")
         
-        # Sort metrics by name
+        # Sort metrics by the key (which is now full_name or fallback to unique_id)
         sorted_metrics = sorted(metrics_bag.get_all_metrics().items())
         
-        for metric_name, metric_info in sorted_metrics:
-            f.write(f"=== {metric_name}\n\n")
+        for metric_key, metric_info in sorted_metrics:
+            # Use full_name as section header, fallback to metric_key if full_name is not available
+            section_name = metric_info.get('full_name', metric_key)
+            f.write(f"=== {section_name}\n\n")
             
             if metric_info.get('description'):
                 f.write(f"{metric_info['description']}\n\n")
@@ -126,8 +128,8 @@ def generate_asciidoc(metrics_bag, output_file):
                     f.write(f"- `{label}`\n")
                 f.write("\n")
             
-            if metric_info.get('file'):
-                f.write(f"*Source*: `{metric_info['file']}`\n\n")
+            if metric_info.get('files') and metric_info['files']:
+                f.write(f"*Source*: `{metric_info['files'][0].get('file', '')}`\n\n")
             
             f.write("---\n\n")
 
