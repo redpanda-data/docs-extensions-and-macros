@@ -353,75 +353,58 @@ def extract_metric_details(args_node, source_code):
     args_text = args_node.text.decode("utf-8", errors="ignore")
     
     if "description" in args_text:
-        # Use a more robust approach to find description strings
-        # Look for the pattern: sm::description(...) and extract all strings within it
-        description_pattern = r'sm::description\s*\(\s*([^)]*)\)'
-        desc_match = re.search(description_pattern, args_text, re.DOTALL)
+        # Improved AST-based approach to find all strings in description
+        description_strings = []
+        found_description = False
         
-        if desc_match:
-            desc_content = desc_match.group(1)
-            # Extract all string literals from the description content
-            # Handle both quoted strings and raw strings
-            desc_strings = []
+        for i, str_info in enumerate(string_literals):
+            # Skip the first string which is the metric name
+            if i == 0:
+                continue
             
-            # Find all string literals in the description content
-            string_pattern = r'(?:R"[^(]*\(([^)]*)\)[^"]*"|"([^"\\]*(\\.[^"\\]*)*)")'
-            for match in re.finditer(string_pattern, desc_content, re.DOTALL):
-                if match.group(1):  # Raw string
-                    desc_strings.append(match.group(1))
-                elif match.group(2):  # Regular string
-                    # Handle escape sequences
-                    content = match.group(2)
-                    content = content.replace('\\"', '"')
-                    content = content.replace('\\\\', '\\')
-                    content = content.replace('\\n', '\n')
-                    content = content.replace('\\t', '\t')
-                    desc_strings.append(content)
-            
-            if desc_strings:
-                description = ''.join(desc_strings)
-        
-        # Fallback: if regex approach didn't work, try the AST approach
-        if not description:
-            # Find strings that come after we see "description" in the context
-            description_strings = []
-            found_description = False
-            
-            for i, str_info in enumerate(string_literals):
-                # Skip the first string which is the metric name
-                if i == 0:
-                    continue
+            # Get the full args context and find position of this string
+            str_pos = args_text.find(str_info['raw'])
+            if str_pos != -1:
+                context_before = args_text[:str_pos]
                 
-                # Get the full args context and find position of this string
-                str_pos = args_text.find(str_info['raw'])
-                if str_pos != -1:
-                    context_before = args_text[:str_pos]
-                    if "description" in context_before and not found_description:
-                        found_description = True
-                        description_strings.append(str_info['text'])
-                    elif found_description:
-                        # Check if this string is adjacent (C++ string concatenation)
-                        # Look at the raw text between this and previous string
-                        if i > 1:
-                            prev_str = string_literals[i-1]
-                            prev_pos = args_text.find(prev_str['raw'])
-                            if prev_pos != -1:
-                                between_text = args_text[prev_pos + len(prev_str['raw']):str_pos].strip()
-                                # If there's only whitespace/newlines between strings, they're concatenated
-                                if not between_text or all(c in ' \t\n\r' for c in between_text):
-                                    description_strings.append(str_info['text'])
-                                else:
-                                    break  # Found something else, stop collecting
+                # Check if this string comes after "description" in the context
+                if "description" in context_before and not found_description:
+                    found_description = True
+                    description_strings.append(str_info['text'])
+                    
+                    # Look ahead to collect all consecutive string literals
+                    # that are part of the same description (C++ auto-concatenation)
+                    for j in range(i + 1, len(string_literals)):
+                        next_str = string_literals[j]
+                        next_pos = args_text.find(next_str['raw'])
+                        
+                        if next_pos != -1:
+                            # Check if there's only whitespace/comments between strings
+                            between_text = args_text[str_pos + len(str_info['raw']):next_pos]
+                            
+                            # Clean up the between text - remove comments and normalize whitespace
+                            between_clean = re.sub(r'//.*?$', '', between_text, flags=re.MULTILINE)
+                            between_clean = re.sub(r'/\*.*?\*/', '', between_clean, flags=re.DOTALL)
+                            between_clean = between_clean.strip()
+                            
+                            # If only whitespace/punctuation between strings, they're concatenated
+                            if not between_clean or all(c in ' \t\n\r,)' for c in between_clean):
+                                description_strings.append(next_str['text'])
+                                str_info = next_str  # Update position for next iteration
+                                str_pos = next_pos
                             else:
+                                # Found something else, stop collecting
                                 break
                         else:
-                            description_strings.append(str_info['text'])
-            
-            if description_strings:
-                description = ''.join(description_strings)
-            elif len(string_literals) > 1:
-                # Final fallback: just use the second string literal
-                description = string_literals[1]['text']
+                            break
+                    break
+        
+        # Join all collected description strings
+        if description_strings:
+            description = ''.join(description_strings)
+        elif len(string_literals) > 1:
+            # Final fallback: just use the second string literal
+            description = string_literals[1]['text']
 
     return metric_name, description
 

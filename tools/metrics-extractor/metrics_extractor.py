@@ -105,6 +105,55 @@ def parse_args():
     return parser.parse_args()
 
 
+def clean_description(description):
+    """Ensure description ends with appropriate punctuation"""
+    if not description:
+        return description
+    
+    description = description.strip()
+    if description and not description.endswith(('.', '!', '?')):
+        description += '.'
+    
+    return description
+
+
+def clean_labels(labels):
+    """Clean up labels by removing whitespace and deduplicating"""
+    if not labels:
+        return []
+    
+    cleaned_labels = set()
+    simple_labels = set()  # Track simple labels to avoid adding redundant braced versions
+    
+    for label in labels:
+        # Remove extra whitespace and newlines
+        clean_label = ' '.join(label.split())
+        
+        # Skip empty labels
+        if not clean_label:
+            continue
+            
+        # Handle cases like "{shard}" vs "shard" - prefer the simpler form
+        if clean_label.startswith('{') and clean_label.endswith('}'):
+            # Extract the content inside braces
+            inner_content = clean_label[1:-1].strip()
+            # If it's a simple label (no comma), prefer the unbrace version
+            if ',' not in inner_content and inner_content:
+                simple_label = inner_content.strip()
+                simple_labels.add(simple_label)
+                cleaned_labels.add(simple_label)  # Add the simple version
+            else:
+                # Complex label with commas, keep the braced version
+                cleaned_labels.add(clean_label)
+        else:
+            # Simple label
+            simple_labels.add(clean_label)
+            cleaned_labels.add(clean_label)
+    
+    # Convert back to sorted list
+    return sorted(list(cleaned_labels))
+
+
 def generate_asciidoc_by_type(metrics_bag, internal_output_file, external_output_file):
     """Generate separate AsciiDoc documentation for internal and external metrics"""
     all_metrics = metrics_bag.get_all_metrics()
@@ -242,16 +291,18 @@ def generate_asciidoc_by_type(metrics_bag, internal_output_file, external_output
                     section_name = metric_info.get('full_name', metric_key)
                     f.write(f"=== {section_name}\n\n")
                     
-                    if metric_info.get('description'):
-                        f.write(f"{metric_info['description']}\n\n")
+                    description = clean_description(metric_info.get('description'))
+                    if description:
+                        f.write(f"{description}\n\n")
                     else:
                         f.write("No description available.\n\n")
                     
                     f.write(f"*Type*: {metric_info.get('type', 'unknown')}\n\n")
                     
-                    if metric_info.get('labels'):
+                    cleaned_labels = clean_labels(metric_info.get('labels', []))
+                    if cleaned_labels:
                         f.write("*Labels*:\n\n")
-                        for label in sorted(metric_info['labels']):
+                        for label in cleaned_labels:
                             f.write(f"- `{label}`\n")
                         f.write("\n")
                     
@@ -299,16 +350,18 @@ def generate_asciidoc_by_type(metrics_bag, internal_output_file, external_output
                     section_name = metric_info.get('full_name', metric_key)
                     f.write(f"=== {section_name}\n\n")
                     
-                    if metric_info.get('description'):
-                        f.write(f"{metric_info['description']}\n\n")
+                    description = clean_description(metric_info.get('description'))
+                    if description:
+                        f.write(f"{description}\n\n")
                     else:
                         f.write("No description available.\n\n")
                     
                     f.write(f"*Type*: {metric_info.get('type', 'unknown')}\n\n")
                     
-                    if metric_info.get('labels'):
+                    cleaned_labels = clean_labels(metric_info.get('labels', []))
+                    if cleaned_labels:
                         f.write("*Labels*:\n\n")
-                        for label in sorted(metric_info['labels']):
+                        for label in cleaned_labels:
                             f.write(f"- `{label}`\n")
                         f.write("\n")
                     
