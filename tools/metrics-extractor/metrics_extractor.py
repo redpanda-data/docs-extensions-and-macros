@@ -145,15 +145,15 @@ def generate_asciidoc_by_type(metrics_bag, internal_output_file, external_output
                 'kafka': 'Kafka metrics', 
                 'raft': 'Raft metrics',
                 'storage': 'Storage metrics',
-                'memory': 'Memory metrics',
-                'io': 'I/O metrics',
+                'memory': 'Infrastructure metrics',
+                'io': 'Infrastructure metrics',
                 'rpc': 'RPC metrics',
                 'cloud': 'Cloud storage metrics',
                 'application': 'Application metrics',
-                'reactor': 'Reactor metrics',
-                'scheduler': 'Scheduler metrics',
-                'network': 'Network metrics',
-                'internal': 'Internal RPC metrics',
+                'reactor': 'Infrastructure metrics',
+                'scheduler': 'Infrastructure metrics',
+                'network': 'Infrastructure metrics',
+                'internal': 'RPC metrics',
                 'pandaproxy': 'REST proxy metrics',
                 'rest': 'REST proxy metrics',
                 'schema': 'Schema registry metrics',
@@ -161,25 +161,38 @@ def generate_asciidoc_by_type(metrics_bag, internal_output_file, external_output
                 'wasm': 'Data transforms metrics',
                 'security': 'Security metrics',
                 'authorization': 'Security metrics',
-                'tls': 'TLS metrics',
+                'tls': 'Security metrics',
                 'debug': 'Debug bundle metrics',
-                'alien': 'Cross-shard metrics',
-                'archival': 'Archival metrics',
+                'alien': 'Infrastructure metrics',
+                'archival': 'Cloud storage metrics',
                 'ntp': 'Partition metrics',
-                'space': 'Space management metrics',
-                'chunk': 'Chunk cache metrics',
+                'space': 'Storage metrics',
+                'chunk': 'Storage metrics',
                 'tx': 'Transaction metrics',
-                'leader': 'Leader balancer metrics',
-                'node': 'Node status metrics',
-                'stall': 'Stall detector metrics',
-                'httpd': 'HTTP server metrics',
-                'host': 'Host metrics',
+                'leader': 'Raft metrics',
+                'node': 'Raft metrics',
+                'stall': 'Infrastructure metrics',
+                'httpd': 'Infrastructure metrics',
+                'host': 'Infrastructure metrics',
                 'uptime': 'Infrastructure metrics',
                 'cpu': 'Infrastructure metrics',
                 'iceberg': 'Iceberg metrics'
             }
             
-            category_name = category_mapping.get(category, f'{category.title()} metrics')
+            # Use the mapping, but fallback to a few broad categories instead of creating many
+            category_name = category_mapping.get(category)
+            if not category_name:
+                # Group unmapped categories into broader buckets
+                if category in ['active', 'adjacent', 'anomalies', 'available', 'backlog', 'batch', 'batches', 'brokers', 'buffer', 'bytes', 'cached', 'certificate', 'chunked', 'cleanly', 'client', 'closed', 'committed', 'compacted', 'compaction', 'complete', 'connection', 'connections', 'connects', 'consumed', 'corrupted']:
+                    category_name = 'Application metrics'
+                elif category in ['data', 'datalake', 'decompressed', 'dirty', 'disk', 'dispatch', 'dlq', 'end', 'error', 'errors', 'events', 'failed', 'failures', 'fetch', 'files', 'high', 'housekeeping']:
+                    category_name = 'Application metrics'
+                elif category in ['in', 'inflight', 'invalid', 'lag', 'last', 'latest', 'loaded', 'local', 'log', 'logs', 'max', 'method', 'non', 'num', 'offsets', 'out', 'parquet', 'partition', 'partitions']:
+                    category_name = 'Application metrics'
+                elif category in ['queued', 'raw', 'read', 'received', 'reclaim', 'records', 'request', 'requests', 'result', 'retention', 'segments', 'sent', 'server', 'service', 'shares', 'start', 'state', 'successful', 'target', 'throttle', 'tombstones', 'topics', 'total', 'traffic', 'translations', 'trust', 'truststore', 'unavailable', 'under', 'urgent', 'write', 'written']:
+                    category_name = 'Application metrics'
+                else:
+                    category_name = 'Other metrics'
             
             if category_name not in groups:
                 groups[category_name] = {}
@@ -351,23 +364,15 @@ def main():
     internal_count = sum(1 for metric in all_metrics.values() if metric.get('metric_type') == 'internal')
     external_count = sum(1 for metric in all_metrics.values() if metric.get('metric_type') == 'external')
     
-    print(f"✅ Successfully extracted {total_metrics} metrics from {len(cpp_files)} C++ files")
+    print(f"✅ Successfully extracted {total_metrics} metrics from {len(cpp_files)} C++ files.")
     print(f"Internal metrics: {internal_count}")
     print(f"External metrics: {external_count}")
     
-    # Output JSON
-    if args.verbose:
-        logger.info(f"Writing JSON output to {args.output}")
     with open(args.output, 'w') as f:
         json.dump(metrics_bag.to_dict(), f, indent=2)
     
     # Output AsciiDoc if requested
     if args.internal_asciidoc or args.external_asciidoc:
-        if args.verbose:
-            if args.internal_asciidoc:
-                logger.info(f"Writing internal metrics AsciiDoc output to {args.internal_asciidoc}")
-            if args.external_asciidoc:
-                logger.info(f"Writing external metrics AsciiDoc output to {args.external_asciidoc}")
         generate_asciidoc_by_type(metrics_bag, args.internal_asciidoc, args.external_asciidoc)
     
     # Handle legacy --asciidoc argument (generate both files)
@@ -377,13 +382,14 @@ def main():
         # For backward compatibility, generate both internal and external in one file
         generate_asciidoc_by_type(metrics_bag, args.asciidoc, None)
     
-    print(f"📄 Output written to: {args.output}")
+    # Only show summary messages, not duplicate file outputs
+    print(f"📄 JSON output: {args.output}")
     if args.internal_asciidoc:
-        print(f"📄 Internal metrics AsciiDoc written to: {args.internal_asciidoc}")
+        print(f"📄 Internal metrics: {args.internal_asciidoc}")
     if args.external_asciidoc:
-        print(f"📄 External metrics AsciiDoc written to: {args.external_asciidoc}")
+        print(f"📄 External metrics: {args.external_asciidoc}")
     if args.asciidoc:
-        print(f"📄 Legacy AsciiDoc written to: {args.asciidoc}")
+        print(f"📄 Legacy AsciiDoc: {args.asciidoc}")
     
     # Show breakdown by type
     metrics_by_type = {}

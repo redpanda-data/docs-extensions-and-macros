@@ -353,52 +353,75 @@ def extract_metric_details(args_node, source_code):
     args_text = args_node.text.decode("utf-8", errors="ignore")
     
     if "description" in args_text:
-        # Find the description call and extract concatenated strings
-        description_strings = []
-        in_description = False
+        # Use a more robust approach to find description strings
+        # Look for the pattern: sm::description(...) and extract all strings within it
+        description_pattern = r'sm::description\s*\(\s*([^)]*)\)'
+        desc_match = re.search(description_pattern, args_text, re.DOTALL)
         
-        for i, str_info in enumerate(string_literals):
-            # Skip the first string which is the metric name
-            if i == 0:
-                continue
+        if desc_match:
+            desc_content = desc_match.group(1)
+            # Extract all string literals from the description content
+            # Handle both quoted strings and raw strings
+            desc_strings = []
+            
+            # Find all string literals in the description content
+            string_pattern = r'(?:R"[^(]*\(([^)]*)\)[^"]*"|"([^"\\]*(\\.[^"\\]*)*)")'
+            for match in re.finditer(string_pattern, desc_content, re.DOTALL):
+                if match.group(1):  # Raw string
+                    desc_strings.append(match.group(1))
+                elif match.group(2):  # Regular string
+                    # Handle escape sequences
+                    content = match.group(2)
+                    content = content.replace('\\"', '"')
+                    content = content.replace('\\\\', '\\')
+                    content = content.replace('\\n', '\n')
+                    content = content.replace('\\t', '\t')
+                    desc_strings.append(content)
+            
+            if desc_strings:
+                description = ''.join(desc_strings)
+        
+        # Fallback: if regex approach didn't work, try the AST approach
+        if not description:
+            # Find strings that come after we see "description" in the context
+            description_strings = []
+            found_description = False
+            
+            for i, str_info in enumerate(string_literals):
+                # Skip the first string which is the metric name
+                if i == 0:
+                    continue
                 
-            # Check if this string is likely part of a description
-            # by looking at the surrounding code context
-            start_byte = str_info['start'][0] * 100 + str_info['start'][1]  # rough byte estimate
-            
-            # Get some context around this string
-            node_start = args_node.start_byte
-            node_end = args_node.end_byte
-            
-            # Extract context to see if this is in a description call
-            context_start = max(node_start, start_byte - 100)
-            context_end = min(node_end, start_byte + len(str_info['raw']) + 100)
-            context = source_code[context_start:context_end].decode("utf-8", errors="ignore")
-            
-            # If we find "description" before this string, start collecting
-            if "description" in context and not in_description:
-                in_description = True
-                description_strings.append(str_info['text'])
-            elif in_description:
-                # Check if this string is adjacent to the previous one (likely concatenated)
-                if i > 1:
-                    prev_str = string_literals[i-1]
-                    # If strings are on consecutive lines or close together, they're likely concatenated
-                    line_diff = str_info['start'][0] - prev_str['end'][0]
-                    if line_diff <= 1:  # Same line or next line
+                # Get the full args context and find position of this string
+                str_pos = args_text.find(str_info['raw'])
+                if str_pos != -1:
+                    context_before = args_text[:str_pos]
+                    if "description" in context_before and not found_description:
+                        found_description = True
                         description_strings.append(str_info['text'])
-                    else:
-                        break  # No longer part of the same description
-                else:
-                    description_strings.append(str_info['text'])
-        
-        # Concatenate all description strings
-        if description_strings:
-            description = ''.join(description_strings)
-        elif len(string_literals) > 1:
-            # Fallback: if we found "description" but couldn't parse it properly,
-            # just use the second string literal
-            description = string_literals[1]['text']
+                    elif found_description:
+                        # Check if this string is adjacent (C++ string concatenation)
+                        # Look at the raw text between this and previous string
+                        if i > 1:
+                            prev_str = string_literals[i-1]
+                            prev_pos = args_text.find(prev_str['raw'])
+                            if prev_pos != -1:
+                                between_text = args_text[prev_pos + len(prev_str['raw']):str_pos].strip()
+                                # If there's only whitespace/newlines between strings, they're concatenated
+                                if not between_text or all(c in ' \t\n\r' for c in between_text):
+                                    description_strings.append(str_info['text'])
+                                else:
+                                    break  # Found something else, stop collecting
+                            else:
+                                break
+                        else:
+                            description_strings.append(str_info['text'])
+            
+            if description_strings:
+                description = ''.join(description_strings)
+            elif len(string_literals) > 1:
+                # Final fallback: just use the second string literal
+                description = string_literals[1]['text']
 
     return metric_name, description
 
