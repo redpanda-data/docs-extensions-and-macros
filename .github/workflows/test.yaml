@@ -1,0 +1,252 @@
+---
+name: Test Extensions and Macros
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run all tests weekly on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      extensions: ${{ steps.changes.outputs.extensions }}
+      macros: ${{ steps.changes.outputs.macros }}
+      asciidoc_extensions: ${{ steps.changes.outputs.asciidoc_extensions }}
+      tools: ${{ steps.changes.outputs.tools }}
+      package_json: ${{ steps.changes.outputs.package_json }}
+      all_tests: ${{ steps.changes.outputs.all_tests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            extensions:
+              - 'extensions/**'
+              - '__tests__/extensions/**'
+              - '__tests__/**/*extension*.test.js'
+            macros:
+              - 'macros/**'
+              - '__tests__/macros/**'
+              - '__tests__/**/*macro*.test.js'
+            asciidoc_extensions:
+              - 'asciidoc-extensions/**'
+              - '__tests__/asciidoc-extensions/**'
+              - '__tests__/**/*asciidoc*.test.js'
+            tools:
+              - 'tools/**'
+              - 'cli-utils/**'
+              - 'bin/**'
+              - '__tests__/tools/**'
+              - '__tests__/**/*tool*.test.js'
+            package_json:
+              - 'package.json'
+              - 'package-lock.json'
+            all_tests:
+              - '__tests__/**'
+              - 'jest.config.js'
+              - '.github/workflows/**'
+
+  test-extensions:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.extensions == 'true' || needs.detect-changes.outputs.all_tests == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get changed extension files
+        id: changed-extensions
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} | grep -E '^extensions/.*\.js$' || true)
+          else
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep -E '^extensions/.*\.js$' || true)
+          fi
+
+          if [[ -n "$CHANGED_FILES" ]]; then
+            # Try directory-based approach first, then fall back to pattern matching
+            TEST_PATTERNS="__tests__/extensions/"
+            for file in $CHANGED_FILES; do
+              extension_name=$(basename "$file" .js)
+              TEST_PATTERNS="$TEST_PATTERNS __tests__/**/*${extension_name}*.test.js"
+            done
+            echo "test-patterns=$TEST_PATTERNS" >> $GITHUB_OUTPUT
+            echo "Changed extensions: $CHANGED_FILES"
+            echo "Test patterns: $TEST_PATTERNS"
+          else
+            # Run all extension tests if no specific files changed
+            echo "test-patterns=__tests__/extensions/ __tests__/**/*extension*.test.js" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run extension tests
+        run: |
+          if [[ -n "${{ steps.changed-extensions.outputs.test-patterns }}" ]]; then
+            npm test -- ${{ steps.changed-extensions.outputs.test-patterns }} --passWithNoTests
+          else
+            echo "No extension tests to run"
+          fi
+
+  test-macros:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.macros == 'true' || needs.detect-changes.outputs.all_tests == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get changed macro files
+        id: changed-macros
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} | grep -E '^macros/.*\.js$' || true)
+          else
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep -E '^macros/.*\.js$' || true)
+          fi
+
+          if [[ -n "$CHANGED_FILES" ]]; then
+            # Try directory-based approach first, then fall back to pattern matching
+            TEST_PATTERNS="__tests__/macros/"
+            for file in $CHANGED_FILES; do
+              macro_name=$(basename "$file" .js)
+              TEST_PATTERNS="$TEST_PATTERNS __tests__/**/*${macro_name}*.test.js"
+            done
+            echo "test-patterns=$TEST_PATTERNS" >> $GITHUB_OUTPUT
+            echo "Changed macros: $CHANGED_FILES"
+            echo "Test patterns: $TEST_PATTERNS"
+          else
+            # Run all macro tests if no specific files changed
+            echo "test-patterns=__tests__/macros/ __tests__/**/*macro*.test.js" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run macro tests
+        run: |
+          if [[ -n "${{ steps.changed-macros.outputs.test-patterns }}" ]]; then
+            npm test -- ${{ steps.changed-macros.outputs.test-patterns }} --passWithNoTests
+          else
+            echo "No macro tests to run"
+          fi
+
+  test-asciidoc-extensions:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.asciidoc_extensions == 'true' || needs.detect-changes.outputs.all_tests == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run AsciiDoc extension tests
+        run: npm test -- __tests__/asciidoc-extensions/ __tests__/**/*asciidoc*.test.js --passWithNoTests
+
+  test-tools:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.tools == 'true' || needs.detect-changes.outputs.all_tests == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tools tests
+        run: npm test -- __tests__/tools/ __tests__/**/*tool*.test.js --passWithNoTests
+
+  # Run all tests if core files changed or on schedule
+  test-all:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.package_json == 'true' || needs.detect-changes.outputs.all_tests == 'true' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run all tests
+        run: npm test
+
+      - name: Generate coverage report
+        if: matrix.node-version == '18'
+        run: npm test -- --coverage --coverageReporters=lcov
+
+      - name: Upload coverage to Codecov
+        if: matrix.node-version == '18'
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+
+  # Summary job that all other jobs depend on
+  test-summary:
+    if: always()
+    needs: [detect-changes, test-extensions, test-macros, test-asciidoc-extensions, test-tools, test-all]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check test results
+        run: |
+          # Check if any required job failed
+          if [[ "${{ needs.test-extensions.result }}" == "failure" || "${{ needs.test-macros.result }}" == "failure" || "${{ needs.test-asciidoc-extensions.result }}" == "failure" || "${{ needs.test-tools.result }}" == "failure" || "${{ needs.test-all.result }}" == "failure" ]]; then
+            echo "❌ Some tests failed"
+            exit 1
+          else
+            echo "✅ All tests passed"
+          fi

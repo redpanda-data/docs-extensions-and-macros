@@ -739,6 +739,74 @@ antora:
     unlistedPagesHeading: 'Additional Resources'
 ```
 
+=== Process context switcher
+
+This extension processes the `page-context-switcher` attribute to enable cross-version navigation widgets in documentation pages. It automatically replaces "current" references with full resource IDs and injects the context switcher configuration to all referenced target pages, ensuring bidirectional navigation works correctly.
+
+The extension finds pages with the `page-context-switcher` attribute, parses the JSON configuration, and:
+
+1. Replaces any "current" values with the full resource ID of the current page
+2. Finds all target pages referenced in the switcher configuration  
+3. Injects the same context switcher attribute to target pages (with appropriate resource ID mappings)
+4. Builds resource IDs in the format: `version@component:module:relative-path`
+
+This enables UI components to render version switchers that work across different versions of the same content.
+
+==== Environment variables
+
+This extension does not require any environment variables.
+
+==== Configuration options  
+
+This extension does not require any configuration options.
+
+==== Registration
+
+```yaml
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/process-context-switcher'
+```
+
+==== Usage
+
+Add the `page-context-switcher` attribute to any page where you want cross-version navigation:
+
+```asciidoc
+:page-context-switcher: [{"name": "Version 2.x", "to": "24.3@ROOT:console:config/security/authentication.adoc" },{"name": "Version 3.x", "to": "current" }]
+```
+
+==== Processed output
+
+After processing, the "current" reference is replaced with the full resource ID:
+
+```json
+[
+  {"name": "Version 2.x", "to": "24.3@ROOT:console:config/security/authentication.adoc"},
+  {"name": "Version 3.x", "to": "current@ROOT:console:config/security/authentication.adoc"}
+]
+```
+
+The target page (`24.3@ROOT:console:config/security/authentication.adoc`) will also receive the same context switcher configuration with appropriate resource ID mappings.
+
+==== UI integration
+
+The processed attribute can be used in Handlebars templates:
+
+```html
+<div class="context-switcher">
+  {{#each (obj page.attributes.page-context-switcher)}}
+    <a
+      id="{{{this.name}}}"
+      href="{{{relativize (resolve-resource this.to)}}}"
+      class="context-link {{#if (eq @root.page.url (resolve-resource this.to))}}active{{/if}}"
+    >
+      <button type="button">{{{this.name}}}</button>
+    </a>
+  {{/each}}
+</div>
+```
+
 == Asciidoc Extensions
 
 This section documents the Asciidoc extensions that are provided by this library and how to configure them.
