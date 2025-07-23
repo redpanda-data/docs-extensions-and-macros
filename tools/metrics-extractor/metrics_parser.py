@@ -795,40 +795,44 @@ def parse_seastar_replicated_metrics(tree_root, source_code, file_path):
     """Parse seastar replicated metrics from seastar::metrics::replicate_metric_families calls"""
     metrics_bag = MetricsBag()
     
-    # Look for seastar::metrics::replicate_metric_families calls
+    # Look ONLY for seastar::metrics::replicate_metric_families calls
     def find_replicate_calls(node):
         if node.type == 'call_expression':
             function_node = node.child_by_field_name('function')
-            if function_node and 'replicate_metric_families' in function_node.text.decode('utf-8'):
-                logger.debug(f"Found replicate_metric_families call in {file_path}")
-                args_node = node.child_by_field_name('arguments')
-                if args_node:
-                    # Look for the array of metric names
-                    for child in args_node.children:
-                        if child.type == 'initializer_list':
-                            # This is the array of {"metric_name", handle} pairs
-                            for item in child.children:
-                                if item.type == 'initializer_list':
-                                    # Each item is {"metric_name", handle}
-                                    metric_items = [c for c in item.children if c.type == 'string_literal']
-                                    if metric_items:
-                                        metric_name = unquote_string(metric_items[0].text.decode('utf-8'))
-                                        if metric_name:
-                                            logger.debug(f"Found replicated seastar metric: {metric_name}")
-                                            # Seastar metrics are typically in the "application" group
-                                            full_metric_name = f"redpanda_{metric_name}"
-                                            
-                                            metrics_bag.add_metric(
-                                                name=metric_name,
-                                                metric_type="gauge",  # Most seastar metrics are gauges
-                                                description=f"Seastar metric: {metric_name}",
-                                                labels=[],
-                                                file=str(file_path),
-                                                constructor="seastar_replicated",
-                                                group_name="application",
-                                                full_name=full_metric_name,
-                                                internal_external_type="public"
-                                            )
+            if function_node:
+                function_text = function_node.text.decode('utf-8')
+                # Be very specific - must be exactly replicate_metric_families
+                if 'replicate_metric_families' in function_text and 'seastar::metrics::' in function_text:
+                    logger.debug(f"Found seastar replicate_metric_families call in {file_path}")
+                    args_node = node.child_by_field_name('arguments')
+                    if args_node:
+                        # Look for the array of metric names
+                        for child in args_node.children:
+                            if child.type == 'initializer_list':
+                                # This is the array of {"metric_name", handle} pairs
+                                for item in child.children:
+                                    if item.type == 'initializer_list':
+                                        # Each item is {"metric_name", handle}
+                                        metric_items = [c for c in item.children if c.type == 'string_literal']
+                                        if metric_items:
+                                            metric_name = unquote_string(metric_items[0].text.decode('utf-8'))
+                                            if metric_name:
+                                                logger.debug(f"Found replicated seastar metric: {metric_name}")
+                                                # Seastar metrics are typically in the "application" group
+                                                full_metric_name = f"redpanda_{metric_name}"
+                                                
+                                                metrics_bag.add_metric(
+                                                    name=metric_name,
+                                                    metric_type="gauge",  # Most seastar metrics are gauges
+                                                    description=f"Seastar replicated metric: {metric_name}",
+                                                    labels=[],
+                                                    file=str(file_path),
+                                                    constructor="seastar_replicated",
+                                                    group_name="application",
+                                                    full_name=full_metric_name,
+                                                    internal_external_type="public",
+                                                    line_number=node.start_point[0] + 1
+                                                )
         
         # Search children recursively
         for child in node.children:
@@ -839,26 +843,58 @@ def parse_seastar_replicated_metrics(tree_root, source_code, file_path):
 
 
 def parse_direct_seastar_metrics(tree_root, source_code, file_path):
-    """Parse direct ss::metrics calls like sm::make_gauge"""
+    """Parse direct ss::metrics calls like sm::make_gauge ONLY in specific contexts"""
     metrics_bag = MetricsBag()
     
-    # Look for ss::metrics or sm:: calls
+    # Look for ss::metrics or sm:: calls but ONLY in the application.cc context
+    # This is a very specific pattern that should not interfere with regular metrics
+    if 'application.cc' not in str(file_path):
+        return metrics_bag  # Only process application.cc for direct seastar metrics
+    
     def find_direct_seastar_calls(node):
         if node.type == 'call_expression':
             function_node = node.child_by_field_name('function')
             if function_node:
                 function_text = function_node.text.decode('utf-8')
                 
-                # Check for sm::make_* or ss::metrics::make_* patterns
+                # Be very specific - must be sm:: prefix AND in the right context
                 seastar_type = None
-                if 'sm::make_gauge' in function_text or 'ss::metrics::make_gauge' in function_text:
+                if function_text == 'sm::make_gauge':
                     seastar_type = 'gauge'
-                elif 'sm::make_counter' in function_text or 'ss::metrics::make_counter' in function_text:
+                elif function_text == 'sm::make_counter':
                     seastar_type = 'counter'
-                elif 'sm::make_histogram' in function_text or 'ss::metrics::make_histogram' in function_text:
+                elif function_text == 'sm::make_histogram':
                     seastar_type = 'histogram'
                 
+                # Also check for direct ss::metrics calls
+                if not seastar_type:
+                    if function_text == 'ss::metrics::make_gauge':
+                        seastar_type = 'gauge'
+                    elif function_text == 'ss::metrics::make_counter':
+                        seastar_type = 'counter'
+                    elif function_text == 'ss::metrics::make_histogram':
+                        seastar_type = 'histogram'
+                
                 if seastar_type:
+                    # Additional check: must be in a specific function context
+                    # Look for setup_public_metrics or similar function
+                    current = node.parent
+                    in_correct_function = False
+                    while current:
+                        if current.type == 'function_definition':
+                            # Check if this is the setup_public_metrics function
+                            for child in current.children:
+                                if child.type == 'function_declarator':
+                                    func_name = child.text.decode('utf-8')
+                                    if 'setup_public_metrics' in func_name:
+                                        in_correct_function = True
+                                        break
+                            break
+                        current = current.parent
+                    
+                    if not in_correct_function:
+                        return  # Skip if not in the right function
+                    
                     args_node = node.child_by_field_name('arguments')
                     if args_node and args_node.named_child_count > 0:
                         # First argument is typically the metric name
@@ -867,7 +903,7 @@ def parse_direct_seastar_metrics(tree_root, source_code, file_path):
                             metric_name = unquote_string(first_arg.text.decode('utf-8'))
                             
                             # Try to find description from subsequent arguments
-                            description = f"Seastar metric: {metric_name}"
+                            description = f"Seastar direct metric: {metric_name}"
                             for i in range(1, args_node.named_child_count):
                                 arg = args_node.named_children[i]
                                 if arg.type == 'call_expression':
@@ -893,7 +929,8 @@ def parse_direct_seastar_metrics(tree_root, source_code, file_path):
                                 constructor=f"seastar_{seastar_type}",
                                 group_name="application",
                                 full_name=full_metric_name,
-                                internal_external_type="public"
+                                internal_external_type="public",
+                                line_number=node.start_point[0] + 1
                             )
         
         # Search children recursively
@@ -920,12 +957,13 @@ def parse_cpp_file(file_path, treesitter_parser, cpp_language, filter_namespace=
 
     metrics_bag = MetricsBag()
     
+    # TODO: Add seastar metrics parsing later - currently disabled to avoid contamination
     # First, parse seastar metrics
-    seastar_replicated = parse_seastar_replicated_metrics(tree.root_node, source_code, file_path)
-    metrics_bag.merge(seastar_replicated)
+    # seastar_replicated = parse_seastar_replicated_metrics(tree.root_node, source_code, file_path)
+    # metrics_bag.merge(seastar_replicated)
     
-    seastar_direct = parse_direct_seastar_metrics(tree.root_node, source_code, file_path)
-    metrics_bag.merge(seastar_direct)
+    # seastar_direct = parse_direct_seastar_metrics(tree.root_node, source_code, file_path)
+    # metrics_bag.merge(seastar_direct)
     
     # Then parse regular prometheus metrics
     # A general query to find all function calls
