@@ -964,12 +964,6 @@ automation
 
 /**
  * Generate Markdown table of cloud regions and tiers from master-data.yaml
- *
- * - Fetches YAML from a remote URL (cloudv2-infra repo by default)
- * - Groups regions by provider
- * - Outputs Markdown with collapsible sections per provider
- * - Uses only js-yaml and Node.js built-ins (no unnecessary deps)
- * - Suitable for CI/CD and GitHub Actions
  */
 automation
   .command('cloud-regions')
