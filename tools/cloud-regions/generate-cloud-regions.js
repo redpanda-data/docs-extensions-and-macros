@@ -1,4 +1,3 @@
-
 // Standalone module to fetch, parse, filter, and render cloud regions/tier data
 // Usage: generateCloudRegions({ sourceUrl, format, token })
 
@@ -46,10 +45,22 @@ const clusterTypeMap = {
   CLUSTER_TYPE_DEDICATED: 'Dedicated',
   CLUSTER_TYPE_FMC: 'Dedicated',
 };
+/**
+ * Returns the display name for a given cluster type, or the original value if unmapped.
+ * @param {string} ct - The internal cluster type identifier.
+ * @return {string} The display name for the cluster type.
+ */
 function displayClusterType(ct) {
   return clusterTypeMap[ct] || ct;
 }
 
+/**
+ * Fetches YAML content from a specified URL using HTTP(S), with optional Bearer token authentication.
+ * @param {string} url - The URL to fetch the YAML content from.
+ * @param {string} [token] - Optional Bearer token for authorization.
+ * @returns {Promise<string>} The fetched YAML content as a string.
+ * @throws {Error} If no fetch implementation is available, a network error occurs, or the HTTP response is not successful.
+ */
 async function fetchYaml(url, token) {
   let fetchImpl = global.fetch;
   if (!fetchImpl) {
@@ -76,6 +87,15 @@ async function fetchYaml(url, token) {
   return await res.text();
 }
 
+/**
+ * Parses YAML text describing cloud regions and products, filters for public products, and organizes regions by provider.
+ *
+ * The function expects YAML content with a top-level `regions` array and an optional `products` array. It groups regions by cloud provider, includes only those with at least one public product tier, and formats tier and cluster type information for each region. Providers and regions without public tiers are excluded from the result.
+ *
+ * @param {string} yamlText - The YAML content to parse and process.
+ * @return {Array<Object>} An array of provider objects, each containing a name and a list of regions with their available public product tiers.
+ * @throws {Error} If the YAML is malformed or missing the required `regions` array.
+ */
 function processCloudRegions(yamlText) {
   let data;
   try {
@@ -158,6 +178,18 @@ function processCloudRegions(yamlText) {
   return providers;
 }
 
+/**
+ * Fetches, processes, and renders cloud region and tier data from a YAML source URL.
+ *
+ * Retrieves YAML data from the specified URL, parses and filters it to include only public cloud regions and tiers, and renders the result in the requested format.
+ *
+ * @param {Object} options - Options for generating cloud regions.
+ * @param {string} options.sourceUrl - The URL of the YAML source to fetch.
+ * @param {string} [options.format='md'] - The output format (e.g., 'md' for Markdown).
+ * @param {string} [options.token] - Optional Bearer token for authentication.
+ * @returns {string} The rendered cloud regions output.
+ * @throws {Error} If fetching, processing, or rendering fails, or if no valid providers or regions are found.
+ */
 async function generateCloudRegions({ sourceUrl, format = 'md', token }) {
   let yamlText;
   try {

@@ -975,7 +975,12 @@ automation
   .option('--dry-run', 'Print output to stdout instead of writing file')
   .action(async (options) => {
     const { generateCloudRegions } = require('../tools/cloud-regions/generate-cloud-regions.js');
-    // Find repo root for output path resolution
+    /**
+     * Searches upward from the specified directory to locate the repository root by finding a `.git` folder or `package.json` file.
+     * @param {string} [start] - The directory to start searching from. Defaults to the current working directory.
+     * @return {string} The absolute path to the repository root directory.
+     * @throws {Error} If the repository root cannot be found.
+     */
     function findRepoRoot(start = process.cwd()) {
       let dir = start;
       const { root } = path.parse(dir);
