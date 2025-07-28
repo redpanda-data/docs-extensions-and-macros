@@ -981,17 +981,6 @@ automation
      * @return {string} The absolute path to the repository root directory.
      * @throws {Error} If the repository root cannot be found.
      */
-    function findRepoRoot(start = process.cwd()) {
-      let dir = start;
-      const { root } = path.parse(dir);
-      while (dir !== root) {
-        if (fs.existsSync(path.join(dir, '.git')) || fs.existsSync(path.join(dir, 'package.json'))) {
-          return dir;
-        }
-        dir = path.dirname(dir);
-      }
-      throw new Error('Could not find git repo root (no .git or package.json in any parent)');
-    }
     try {
       const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
       if (!token) {
