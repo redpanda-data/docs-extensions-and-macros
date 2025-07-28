@@ -1,0 +1,35 @@
+{{!-- Markdown Cloud Regions Table Template --}}
+
+Usage tiers define the sizing of a cluster and provide tested and guaranteed workload configurations for throughput, logical partitions, and connections. Availability depends on the region and the cluster type (BYOC, Dedicated). See [BYOC tiers](https://docs.redpanda.com/redpanda-cloud/reference/tiers/byoc-tiers/) and [Dedicated tiers](https://docs.redpanda.com/redpanda-cloud/reference/tiers/dedicated-tiers/) for further details.
+
+{{!--{{#if lastUpdated}}
+<p><em>Last Updated: {{lastUpdated}}</em></p>
+{{/if}}--}}
+
+{{#each providers}}
+<h3>{{name}}</h3>
+<details><summary>Regions for {{name}}</summary>
+<p class="sr-only">Table of cloud regions and throughput tiers for {{name}}. Use the table headers for more information.</p>
+<table aria-label="Cloud regions and throughput tiers for {{name}}">
+  <tr>
+    <th title="Cloud region name (e.g., us-central1)">Region</th>
+    <th title="Availability zones in the region (comma-separated)">Zones</th>
+    <th title="Available throughput tiers and cluster types in this region">Throughput Tiers</th>
+  </tr>
+  {{#each regions}}
+  <tr>
+    <td>{{name}}</td>
+    <td>{{zones}}</td>
+    <td>
+      <ul>
+        {{#each tiers}}
+        <li>{{this}}</li>
+        {{/each}}
+      </ul>
+    </td>
+  </tr>
+  {{/each}}
+</table>
+
+</details>
+{{/each}}
