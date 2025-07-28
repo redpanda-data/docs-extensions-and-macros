@@ -19,12 +19,18 @@ function renderCloudRegions({ providers, format, lastUpdated }) {
   if (!Array.isArray(providers) || providers.length === 0) {
     throw new Error('No providers/regions found in YAML.');
   }
+  if (!['md', 'adoc'].includes(format)) {
+    throw new Error(`Unsupported format: ${format}. Use 'md' or 'adoc'.`);
+  }
   // Sort regions alphabetically within each provider
   const sortedProviders = providers.map(provider => ({
     ...provider,
     regions: [...provider.regions].sort((a, b) => a.name.localeCompare(b.name))
   }));
-  const templateFile = path.join(__dirname, `table-${format}.hbs`);
+  const templateFile = path.join(__dirname, `cloud-regions-table-${format}.hbs`);
+  if (!fs.existsSync(templateFile)) {
+    throw new Error(`Template file not found: ${templateFile}`);
+  }
   const templateSrc = fs.readFileSync(templateFile, 'utf8');
   const template = handlebars.compile(templateSrc);
   return template({ providers: sortedProviders, lastUpdated });
