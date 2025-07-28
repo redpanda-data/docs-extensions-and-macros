@@ -4,12 +4,16 @@ const handlebars = require('handlebars');
 
 
 /**
- * Render cloud regions data using a Handlebars template.
- * @param {Object} opts
- * @param {Array} opts.providers - Array of provider objects: { name, regions: [{ name, zones, tiers: [str] }] }
- * @param {string} opts.format - 'md' or 'adoc'
- * @param {string} [opts.lastUpdated] - Optional ISO timestamp string for last update
- * @returns {string}
+ * Generates a formatted string representing cloud provider regions using a Handlebars template.
+ *
+ * Sorts regions alphabetically within each provider and renders the data using a template file corresponding to the specified format ('md' or 'adoc'). Optionally includes a last updated timestamp.
+ *
+ * @param {Object} opts - Options for rendering.
+ * @param {Array} opts.providers - List of cloud provider objects, each with a name and an array of regions.
+ * @param {string} opts.format - Output format, either 'md' (Markdown) or 'adoc' (AsciiDoc).
+ * @param {string} [opts.lastUpdated] - Optional ISO timestamp indicating when the data was last updated.
+ * @returns {string} The rendered output string.
+ * @throws {Error} If the providers array is missing or empty.
  */
 function renderCloudRegions({ providers, format, lastUpdated }) {
   if (!Array.isArray(providers) || providers.length === 0) {
