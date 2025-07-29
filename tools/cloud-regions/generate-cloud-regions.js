@@ -129,6 +129,8 @@ function processCloudRegions(yamlText) {
   } else {
     console.warn('[cloud-regions] WARN: No products array found in YAML.');
   }
+  // Collect skipped product/tiers for debug reporting
+  const skipped = [];
   // Prepare providers array for template, only including public products and using name
   const providers = providerOrder
     .filter((prov) => grouped[prov] && grouped[prov].length > 0)
@@ -142,7 +144,7 @@ function processCloudRegions(yamlText) {
           const tierMap = {};
           for (const t of Object.values(region.redpandaProductAvailability)) {
             if (!t.redpandaProductName || !publicProductNames.has(t.redpandaProductName)) {
-              console.debug(`[cloud-regions] DEBUG: Skipping non-public product/tier '${t.redpandaProductName}' in region '${region.name}'.`);
+              skipped.push(`${region.name}:${t.redpandaProductName}`);
               continue;
             }
             const productName = t.redpandaProductName;
@@ -154,8 +156,6 @@ function processCloudRegions(yamlText) {
           tiers = Object.entries(tierMap)
             .map(([productName, cts]) => `${productName}: ${Array.from(cts).sort().join(', ')}`)
             .sort((a, b) => a.localeCompare(b));
-        } else {
-          console.debug(`[cloud-regions] DEBUG: No redpandaProductAvailability for region '${region.name}'.`);
         }
         return {
           name: region.name,
@@ -172,6 +172,9 @@ function processCloudRegions(yamlText) {
       };
     })
     .filter(provider => provider.regions && provider.regions.length > 0);
+  if (skipped.length > 0) {
+    console.debug(`[cloud-regions] DEBUG: Skipped non-public product/tiers: ${skipped.join(', ')}`);
+  }
   if (providers.length === 0) {
     console.warn('[cloud-regions] WARN: No providers/regions found after filtering.');
   }
