@@ -67,7 +67,11 @@ function mergeOverrides(target, overrides) {
     }
 
     // === Handle examples ===
-    if (key === 'examples' && Array.isArray(overrides[key]) && Array.isArray(target[key])) {
+    if (key === 'examples' && Array.isArray(overrides[key])) {
+      // If target[key] is not an array, initialize it
+      if (!Array.isArray(target[key])) {
+        target[key] = [];
+      }
       const overrideMap = new Map(overrides[key].map(o => [o.title, o]));
 
       target[key] = target[key].map(example => {
