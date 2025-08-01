@@ -31,9 +31,18 @@ function renderCloudRegions({ providers, format, lastUpdated }) {
   if (!fs.existsSync(templateFile)) {
     throw new Error(`Template file not found: ${templateFile}`);
   }
-  const templateSrc = fs.readFileSync(templateFile, 'utf8');
-  const template = handlebars.compile(templateSrc);
-  return template({ providers: sortedProviders, lastUpdated });
+  let templateSrc, template;
+  try {
+    templateSrc = fs.readFileSync(templateFile, 'utf8');
+    template = handlebars.compile(templateSrc);
+  } catch (err) {
+    throw new Error(`Failed to compile Handlebars template at ${templateFile}: ${err.message}`);
+  }
+  try {
+    return template({ providers: sortedProviders, lastUpdated });
+  } catch (err) {
+    throw new Error(`Failed to render Handlebars template at ${templateFile}: ${err.message}`);
+  }
 }
 
 module.exports = renderCloudRegions;
