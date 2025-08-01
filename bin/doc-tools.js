@@ -962,6 +962,62 @@ automation
     if (tmpClone) fs.rmSync(tmpClone, { recursive: true, force: true });
   });
 
+/**
+ * Generate Markdown table of cloud regions and tiers from master-data.yaml
+ */
+automation
+  .command('cloud-regions')
+  .description('Generate Markdown table of cloud regions and tiers from master-data.yaml')
+  .option('--output <file>', 'Output file (relative to repo root)', 'cloud-controlplane/x-topics/cloud-regions.md')
+  .option('--format <fmt>', 'Output format: md (Markdown) or adoc (AsciiDoc)', 'md')
+  .option('--source-url <url>', 'YAML source URL', 'https://raw.githubusercontent.com/redpanda-data/cloudv2-infra/integration/apps/master-data-reconciler/manifests/overlays/production/master-data.yaml')
+  .option('--template <path>', 'Path to custom Handlebars template (relative to repo root)')
+  .option('--dry-run', 'Print output to stdout instead of writing file')
+  .action(async (options) => {
+    const { generateCloudRegions } = require('../tools/cloud-regions/generate-cloud-regions.js');
+    /**
+     * Searches upward from the specified directory to locate the repository root by finding a `.git` folder or `package.json` file.
+     * @param {string} [start] - The directory to start searching from. Defaults to the current working directory.
+     * @return {string} The absolute path to the repository root directory.
+     * @throws {Error} If the repository root cannot be found.
+     */
+    try {
+      const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+      if (!token) {
+        throw new Error('GITHUB_TOKEN environment variable is required to fetch from private cloudv2-infra repo.');
+      }
+      const fmt = (options.format || 'md').toLowerCase();
+      let templatePath = undefined;
+      if (options.template) {
+        const repoRoot = findRepoRoot();
+        templatePath = path.resolve(repoRoot, options.template);
+        if (!fs.existsSync(templatePath)) {
+          throw new Error(`Custom template not found: ${templatePath}`);
+        }
+      }
+      const out = await generateCloudRegions({
+        sourceUrl: options.sourceUrl,
+        format: fmt,
+        token,
+        template: templatePath,
+      });
+      if (options.dryRun) {
+        process.stdout.write(out);
+        console.log(`\n✅ (dry-run) ${fmt === 'adoc' ? 'AsciiDoc' : 'Markdown'} output printed to stdout.`);
+      } else {
+        // Always resolve output relative to repo root
+        const repoRoot = findRepoRoot();
+        const absOutput = path.resolve(repoRoot, options.output);
+        fs.mkdirSync(path.dirname(absOutput), { recursive: true });
+        fs.writeFileSync(absOutput, out, 'utf8');
+        console.log(`✅ Wrote ${absOutput}`);
+      }
+    } catch (err) {
+      console.error(`❌ Failed to generate cloud regions: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
 automation
   .command('crd-spec')
   .description('Generate Asciidoc documentation for Kubernetes CRD references')
