@@ -55,36 +55,53 @@ function displayClusterType(ct) {
 }
 
 /**
- * Fetches YAML content from a specified URL using HTTP(S), with optional Bearer token authentication.
- * @param {string} url - The URL to fetch the YAML content from.
- * @param {string} [token] - Optional Bearer token for authorization.
+ * Fetches YAML content from GitHub using the GitHub API.
+ *
+ * Uses the GitHub API to fetch file content, which avoids caching issues that can occur with raw URLs.
+ *
+ * @param {Object} options - Options for fetching the YAML content.
+ * @param {string} options.owner - GitHub repository owner.
+ * @param {string} options.repo - GitHub repository name.
+ * @param {string} options.path - Path to the file within the repository.
+ * @param {string} [options.ref='main'] - Git reference (branch, tag, or commit SHA).
+ * @param {string} [options.token] - Optional GitHub token for authorization.
  * @returns {Promise<string>} The fetched YAML content as a string.
- * @throws {Error} If no fetch implementation is available, a network error occurs, or the HTTP response is not successful.
+ * @throws {Error} If the GitHub API call fails or the file cannot be found.
  */
-async function fetchYaml(url, token) {
-  let fetchImpl = global.fetch;
-  if (!fetchImpl) {
-    try {
-      fetchImpl = (await import('node-fetch')).default;
-    } catch (e) {
-      console.error('[cloud-regions] ERROR: Could not load fetch implementation.');
-      throw new Error('No fetch implementation found. Use Node.js v18+ or install node-fetch.');
-    }
-  }
-  const fetchOpts = {};
-  if (token) fetchOpts.headers = { Authorization: `Bearer ${token}` };
-  let res;
+async function fetchYaml({ owner, repo, path, ref = 'main', token }) {
   try {
-    res = await fetchImpl(url, fetchOpts);
+    const { Octokit } = await import('@octokit/rest');
+    const octokit = new Octokit(token ? { auth: token } : {});
+
+    console.log(`[cloud-regions] INFO: Fetching ${owner}/${repo}/${path}@${ref} via GitHub API`);
+
+    const response = await octokit.repos.getContent({
+      owner,
+      repo,
+      path,
+      ref,
+    });
+
+    if (Array.isArray(response.data)) {
+      throw new Error(`Path ${path} is a directory, not a file`);
+    }
+
+    if (response.data.type !== 'file') {
+      throw new Error(`Path ${path} is not a file`);
+    }
+
+    // Decode base64 content
+    const content = Buffer.from(response.data.content, 'base64').toString('utf8');
+
+    if (!content || content.trim() === '') {
+      throw new Error('Empty YAML content received from GitHub API');
+    }
+
+    return content;
   } catch (err) {
-    console.error(`[cloud-regions] ERROR: Network error while fetching YAML from ${url}`);
-    throw new Error(`Network error while fetching YAML: ${err.message}`);
+    console.error(`[cloud-regions] ERROR: Failed to fetch from GitHub API: ${err.message}`);
+    throw new Error(`GitHub API fetch failed: ${err.message}`);
   }
-  if (!res.ok) {
-    console.error(`[cloud-regions] ERROR: Failed to fetch YAML from ${url} - Status: ${res.status} ${res.statusText}`);
-    throw new Error(`Failed to fetch YAML: ${res.status} ${res.statusText}`);
-  }
-  return await res.text();
 }
 
 /**
@@ -182,21 +199,26 @@ function processCloudRegions(yamlText) {
 }
 
 /**
- * Fetches, processes, and renders cloud region and tier data from a YAML source URL.
+ * Fetches, processes, and renders cloud region and tier data from a GitHub YAML file.
  *
- * Retrieves YAML data from the specified URL, parses and filters it to include only public cloud regions and tiers, and renders the result in the requested format.
+ * Retrieves YAML data from GitHub using the GitHub API (to avoid caching issues),
+ * parses and filters it to include only public cloud regions and tiers, and renders the result in the requested format.
  *
  * @param {Object} options - Options for generating cloud regions.
- * @param {string} options.sourceUrl - The URL of the YAML source to fetch.
+ * @param {string} options.owner - GitHub repository owner.
+ * @param {string} options.repo - GitHub repository name.
+ * @param {string} options.path - Path to the YAML file within the repository.
+ * @param {string} [options.ref='main'] - Git reference (branch, tag, or commit SHA).
  * @param {string} [options.format='md'] - The output format (e.g., 'md' for Markdown).
- * @param {string} [options.token] - Optional Bearer token for authentication.
+ * @param {string} [options.token] - Optional GitHub token for authentication.
+ * @param {string} [options.template] - Optional path to custom Handlebars template.
  * @returns {string} The rendered cloud regions output.
  * @throws {Error} If fetching, processing, or rendering fails, or if no valid providers or regions are found.
  */
-async function generateCloudRegions({ sourceUrl, format = 'md', token }) {
+async function generateCloudRegions({ owner, repo, path, ref = 'main', format = 'md', token, template }) {
   let yamlText;
   try {
-    yamlText = await fetchYaml(sourceUrl, token);
+    yamlText = await fetchYaml({ owner, repo, path, ref, token });
   } catch (err) {
     console.error(`[cloud-regions] ERROR: Failed to fetch YAML: ${err.message}`);
     throw err;
@@ -214,7 +236,7 @@ async function generateCloudRegions({ sourceUrl, format = 'md', token }) {
   }
   const lastUpdated = new Date().toISOString();
   try {
-    return renderCloudRegions({ providers, format, lastUpdated });
+    return renderCloudRegions({ providers, format, lastUpdated, template });
   } catch (err) {
     console.error(`[cloud-regions] ERROR: Failed to render cloud regions: ${err.message}`);
     throw err;

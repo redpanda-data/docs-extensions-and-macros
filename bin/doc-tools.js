@@ -967,20 +967,18 @@ automation
  */
 automation
   .command('cloud-regions')
-  .description('Generate Markdown table of cloud regions and tiers from master-data.yaml')
+  .description('Generate Markdown table of cloud regions and tiers from GitHub YAML file')
   .option('--output <file>', 'Output file (relative to repo root)', 'cloud-controlplane/x-topics/cloud-regions.md')
   .option('--format <fmt>', 'Output format: md (Markdown) or adoc (AsciiDoc)', 'md')
-  .option('--source-url <url>', 'YAML source URL', 'https://raw.githubusercontent.com/redpanda-data/cloudv2-infra/integration/apps/master-data-reconciler/manifests/overlays/production/master-data.yaml')
+  .option('--owner <owner>', 'GitHub repository owner', 'redpanda-data')
+  .option('--repo <repo>', 'GitHub repository name', 'cloudv2-infra')
+  .option('--path <path>', 'Path to YAML file in repository', 'apps/master-data-reconciler/manifests/overlays/production/master-data.yaml')
+  .option('--ref <ref>', 'Git reference (branch, tag, or commit SHA)', 'integration')
   .option('--template <path>', 'Path to custom Handlebars template (relative to repo root)')
   .option('--dry-run', 'Print output to stdout instead of writing file')
   .action(async (options) => {
     const { generateCloudRegions } = require('../tools/cloud-regions/generate-cloud-regions.js');
-    /**
-     * Searches upward from the specified directory to locate the repository root by finding a `.git` folder or `package.json` file.
-     * @param {string} [start] - The directory to start searching from. Defaults to the current working directory.
-     * @return {string} The absolute path to the repository root directory.
-     * @throws {Error} If the repository root cannot be found.
-     */
+
     try {
       const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
       if (!token) {
@@ -996,7 +994,10 @@ automation
         }
       }
       const out = await generateCloudRegions({
-        sourceUrl: options.sourceUrl,
+        owner: options.owner,
+        repo: options.repo,
+        path: options.path,
+        ref: options.ref,
         format: fmt,
         token,
         template: templatePath,
