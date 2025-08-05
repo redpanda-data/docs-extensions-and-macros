@@ -90,6 +90,8 @@ generate-docs:
 	@mkdir -p "$(OUTPUT_DIR)"
 	@cd $(TOOL_ROOT) && \
 	  $(PYTHON) json-to-asciidoc/generate_docs.py --output-dir "$(OUTPUT_DIR)"
+	@echo "📄 Copying properties-output.json to $(OUTPUT_DIR)…"
+	@cp "$(TOOL_ROOT)/gen/properties-output.json" "$(OUTPUT_DIR)/"
 	@echo "✅ Docs generated at $(OUTPUT_DIR)"
 
 # --- Debug helper to print all the key paths/vars ---
