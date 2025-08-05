@@ -10,3 +10,4 @@ gen/
 tree-sitter/
 test/
 modules/
+cloud-controlplane/
