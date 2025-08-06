@@ -261,6 +261,12 @@ def generate_property_doc(key, value):
     if prop_type in ["string", "array", "number", "boolean", "integer"]:
         lines.append(f"*Type:* {prop_type}\n\n")
 
+    # Add aliases if they exist
+    aliases = value.get("aliases")
+    if aliases and len(aliases) > 0:
+        aliases_str = ", ".join(f"`{alias}`" for alias in aliases)
+        lines.append(f"*Aliases:* {aliases_str}\n\n")
+
     if value.get("maximum") is not None and value.get("minimum") is not None:
         lines.append(
             f"*Accepted values:* [`{value.get('minimum')}`, `{value.get('maximum')}`]\n\n"
