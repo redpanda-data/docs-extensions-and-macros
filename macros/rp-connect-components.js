@@ -598,7 +598,7 @@ module.exports.register = function (registry, context) {
         <div class="table-filters">
           <input class="table-search" type="text" id="componentTableSearch" onkeyup="filterComponentTable()" placeholder="Search for components...">
           <div class="filter-group">
-            <label for="typeFilter">Type:</label>
+            <label for="typeFilterToggle">Type:</label>
             <div class="dropdown-checkbox-wrapper">
               <button type="button" class="dropdown-checkbox-toggle" id="typeFilterToggle" onclick="toggleDropdownCheckbox('typeFilter')" aria-expanded="false" aria-haspopup="true" aria-controls="typeFilterMenu">
                 <span class="dropdown-text">All Types Selected</span>
@@ -614,7 +614,7 @@ module.exports.register = function (registry, context) {
       if (!isCloud) {
         tableHtml += `
           <div class="filter-group">
-            <label for="supportFilter" id="labelForSupportFilter">Support:</label>
+            <label for="supportFilterToggle" id="labelForSupportFilter">Support:</label>
             <div class="dropdown-checkbox-wrapper">
               <button type="button" class="dropdown-checkbox-toggle" id="supportFilterToggle" onclick="toggleDropdownCheckbox('supportFilter')" aria-expanded="false" aria-haspopup="true" aria-controls="supportFilterMenu">
                 <span class="dropdown-text">All Support Levels Selected</span>
@@ -631,7 +631,7 @@ module.exports.register = function (registry, context) {
       if (showAllInfo) {
         tableHtml += `
           <div class="filter-group">
-            <label for="cloudSupportFilter">Available in Cloud:</label>
+            <label for="cloudSupportFilterToggle">Available in Cloud:</label>
             <div class="dropdown-checkbox-wrapper">
               <button type="button" class="dropdown-checkbox-toggle" id="cloudSupportFilterToggle" onclick="toggleDropdownCheckbox('cloudSupportFilter')" aria-expanded="false" aria-haspopup="true" aria-controls="cloudSupportFilterMenu">
                 <span class="dropdown-text">All Options Selected</span>
@@ -650,7 +650,7 @@ module.exports.register = function (registry, context) {
             </div>
           </div>
           <div class="filter-group">
-            <label for="enterpriseFilter">Enterprise License:</label>
+            <label for="enterpriseFilterToggle">Enterprise License:</label>
             <div class="dropdown-checkbox-wrapper">
               <button type="button" class="dropdown-checkbox-toggle" id="enterpriseFilterToggle" onclick="toggleDropdownCheckbox('enterpriseFilter')" aria-expanded="false" aria-haspopup="true" aria-controls="enterpriseFilterMenu">
                 <span class="dropdown-text">All Options Selected</span>
