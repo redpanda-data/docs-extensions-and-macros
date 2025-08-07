@@ -748,40 +748,6 @@ module.exports.register = function (registry, context) {
               }
             };
 
-            // Global click outside handler for all dropdowns
-            if (!window.globalDropdownClickHandler) {
-              window.globalDropdownClickHandler = function(event) {
-                if (!event.target.closest('.dropdown-checkbox-wrapper') && !event.target.closest('.dropdown-wrapper')) {
-                  document.querySelectorAll('.dropdown-checkbox-menu.show, .dropdown-menu.show').forEach(menu => {
-                    menu.classList.remove('show');
-                    const toggle = menu.parentNode.querySelector('.dropdown-checkbox-toggle, .dropdown-toggle');
-                    if (toggle) {
-                      toggle.classList.remove('open');
-                      toggle.setAttribute('aria-expanded', 'false');
-                    }
-                  });
-                }
-              };
-              document.addEventListener('click', window.globalDropdownClickHandler);
-            }
-
-            // Global keyboard handler for all dropdowns
-            if (!window.globalDropdownKeyHandler) {
-              window.globalDropdownKeyHandler = function(event) {
-                if (event.key === 'Escape') {
-                  document.querySelectorAll('.dropdown-checkbox-menu.show, .dropdown-menu.show').forEach(menu => {
-                    menu.classList.remove('show');
-                    const toggle = menu.parentNode.querySelector('.dropdown-checkbox-toggle, .dropdown-toggle');
-                    if (toggle) {
-                      toggle.classList.remove('open');
-                      toggle.setAttribute('aria-expanded', 'false');
-                      toggle.focus();
-                    }
-                  });
-                }
-              };
-              document.addEventListener('keydown', window.globalDropdownKeyHandler);
-            }
           };
           
           // Initialize the functions
@@ -840,10 +806,36 @@ module.exports.register = function (registry, context) {
               const checkedBox = menu.querySelector('input[type="checkbox"]:checked');
               if (checkedBox) {
                 const label = checkedBox.nextElementSibling;
-                textElement.textContent = label ? label.textContent : someSelectedText.replace('s Selected', ' Selected');
+                textElement.textContent = label ? label.textContent : getSingularText(someSelectedText);
               }
             } else {
               textElement.textContent = checkedCount + ' ' + someSelectedText;
+            }
+          }
+
+          function getSingularText(pluralText) {
+            // Handle various plural patterns and convert to singular
+            if (pluralText.includes('Types Selected')) {
+              return 'Type Selected';
+            } else if (pluralText.includes('Support Levels Selected')) {
+              return 'Support Level Selected';
+            } else if (pluralText.includes('Options Selected')) {
+              return 'Option Selected';
+            } else if (pluralText.includes('Items Selected')) {
+              return 'Item Selected';
+            } else if (pluralText.includes('Categories Selected')) {
+              return 'Category Selected';
+            } else if (pluralText.includes('Filters Selected')) {
+              return 'Filter Selected';
+            } else if (pluralText.endsWith('s Selected')) {
+              // Generic fallback for words ending in 's Selected'
+              return pluralText.replace(/s Selected$/, ' Selected');
+            } else if (pluralText.endsWith('ies Selected')) {
+              // Handle words ending in 'ies' (e.g., "Categories Selected" -> "Category Selected")
+              return pluralText.replace(/ies Selected$/, 'y Selected');
+            } else {
+              // If no pattern matches, return as-is
+              return pluralText;
             }
           }
 
@@ -1122,41 +1114,6 @@ module.exports.register = function (registry, context) {
                 if (firstOption) firstOption.focus();
               }
             };
-          }
-
-          // Global click outside handler for all dropdowns
-          if (!window.globalDropdownClickHandler) {
-            window.globalDropdownClickHandler = function(event) {
-              if (!event.target.closest('.dropdown-checkbox-wrapper') && !event.target.closest('.dropdown-wrapper')) {
-                document.querySelectorAll('.dropdown-checkbox-menu.show, .dropdown-menu.show').forEach(menu => {
-                  menu.classList.remove('show');
-                  const toggle = menu.parentNode.querySelector('.dropdown-checkbox-toggle, .dropdown-toggle');
-                  if (toggle) {
-                    toggle.classList.remove('open');
-                    toggle.setAttribute('aria-expanded', 'false');
-                  }
-                });
-              }
-            };
-            document.addEventListener('click', window.globalDropdownClickHandler);
-          }
-
-          // Global keyboard handler for all dropdowns
-          if (!window.globalDropdownKeyHandler) {
-            window.globalDropdownKeyHandler = function(event) {
-              if (event.key === 'Escape') {
-                document.querySelectorAll('.dropdown-checkbox-menu.show, .dropdown-menu.show').forEach(menu => {
-                  menu.classList.remove('show');
-                  const toggle = menu.parentNode.querySelector('.dropdown-checkbox-toggle, .dropdown-toggle');
-                  if (toggle) {
-                    toggle.classList.remove('open');
-                    toggle.setAttribute('aria-expanded', 'false');
-                    toggle.focus();
-                  }
-                });
-              }
-            };
-            document.addEventListener('keydown', window.globalDropdownKeyHandler);
           }
         </script>`);
     });
