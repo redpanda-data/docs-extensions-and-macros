@@ -1,5 +1,4 @@
 'use strict';
-
 /**
  * Registers macros for use in Redpanda Connect contexts in the Redpanda documentation.
   * @param {Registry} registry - The Antora registry where this block macro is registered.
@@ -7,23 +6,31 @@
 */
 module.exports.register = function (registry, context) {
   function filterComponentTable() {
-    const nameInput = document.getElementById('componentTableSearch').value.trim().toLowerCase();
-    const typeFilter = Array.from(document.querySelector('#typeFilter').selectedOptions).map(option => option.value);
-    const cloudSupportInput= document.getElementById('cloudSupportFilter')?.value;
-
+    const nameInputElement = document.getElementById('componentTableSearch');
+    const nameInput = nameInputElement ? nameInputElement.value.trim().toLowerCase() : '';
+    const typeFilter = Array.from(document.querySelectorAll('#typeFilterMenu input[type="checkbox"]:checked')).map(checkbox => checkbox.value);
     // Check for the existence of support and enterprise license filters (optional)
-    const supportFilterElement = document.querySelector('#supportFilter');
+    const supportFilterElement = document.querySelector('#supportFilterMenu');
     const supportFilter = supportFilterElement
-      ? Array.from(supportFilterElement.selectedOptions).map(option => option.value)
+      ? Array.from(supportFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(checkbox => checkbox.value)
       : [];
-
+    // Check for cloud support filter (optional)
+    const cloudSupportFilterElement = document.querySelector('#cloudSupportFilterMenu');
+    const cloudSupportFilter = cloudSupportFilterElement
+      ? Array.from(cloudSupportFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(checkbox => checkbox.value)
+      : [];
+    // Check for enterprise license filter (optional)
+    const enterpriseFilterElement = document.querySelector('#enterpriseFilterMenu');
+    const enterpriseFilter = enterpriseFilterElement
+      ? Array.from(enterpriseFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(checkbox => checkbox.value)
+      : [];
     const params = getQueryParams();
     const enterpriseSupportFilter = params.support === 'enterprise';  // Check if 'support=enterprise' is in the URL
-    const cloudSupportFilter = params.support === 'cloud';  // Check if 'support=cloud' is in the URL
-
+    const cloudSupportFilterFromUrl = params.support === 'cloud';  // Check if 'support=cloud' is in the URL
     const table = document.getElementById('componentTable');
+    if (!table) return; // Exit early if table doesn't exist
     const trs = table.getElementsByTagName('tr');
-
+    if (!trs || trs.length === 0) return; // Exit early if no rows found
     for (let i = 1; i < trs.length; i++) {
       const row = trs[i];
       const nameTd = row.querySelector('td[id^="componentName-"]');
@@ -31,32 +38,96 @@ module.exports.register = function (registry, context) {
       const supportTd = row.querySelector('td[id^="componentSupport-"]'); // Support column, if present
       const enterpriseSupportTd = row.querySelector('td[id^="componentLicense-"]'); // Enterprise License column, if present
       const cloudSupportTd = row.querySelector('td[id^="componentCloud-"]'); // Cloud support column, if present
-
       if (typeTd) {  // Ensure that at least the Type column is present
         const nameText = nameTd ? nameTd.textContent.trim().toLowerCase() : '';
         const typeText = typeTd.textContent.trim().toLowerCase().split(', ').map(item => item.trim());
         const supportText = supportTd ? supportTd.textContent.trim().toLowerCase() : '';
         const enterpriseSupportText = enterpriseSupportTd ? enterpriseSupportTd.textContent.trim().toLowerCase() : '';  // Yes or No
         const cloudSupportText = cloudSupportTd ? cloudSupportTd.textContent.trim().toLowerCase() : '';  // Yes or No
-
+        // Check cloud support filter
+        let cloudSupportMatch = true;
+        if (cloudSupportFilter.length > 0 && !cloudSupportFilter.includes('')) {
+          // If specific options are selected (not "All")
+          cloudSupportMatch = cloudSupportFilter.some(value => {
+            if (value === 'yes') return cloudSupportText === 'yes' || cloudSupportText.includes('yes');
+            if (value === 'no') return cloudSupportText === 'no' || !cloudSupportText.includes('yes');
+            return true;
+          });
+        }
+        // Check enterprise license filter
+        let enterpriseLicenseMatch = true;
+        if (enterpriseFilter.length > 0 && !enterpriseFilter.includes('')) {
+          // If specific options are selected (not "All")
+          enterpriseLicenseMatch = enterpriseFilter.some(value => {
+            if (value === 'yes') return enterpriseSupportText === 'yes' || enterpriseSupportText.includes('yes');
+            if (value === 'no') return enterpriseSupportText === 'no' || !enterpriseSupportText.includes('yes');
+            return true;
+          });
+        }
         // Determine if the row should be shown
         const showRow =
           ((!nameInput || nameText.includes(nameInput)) &&  // Filter by name if present
            (typeFilter.length === 0 || typeFilter.some(value => typeText.includes(value))) &&  // Filter by type
            (!supportTd || supportFilter.length === 0 || supportFilter.some(value => supportText.includes(value))) &&  // Filter by support if present
-           (!enterpriseSupportFilter || !enterpriseSupportTd || supportText.includes('enterprise') || enterpriseSupportText === 'yes') // Filter by enterprise support if 'support=enterprise' is in the URL
-           &&
-           (!cloudSupportFilter || !cloudSupportTd || supportText.includes('cloud') || cloudSupportText === 'yes') &&  // Filter by cloud support if 'support=cloud' is in the URL
-           (!cloudSupportInput || cloudSupportText === cloudSupportInput)
+           (!enterpriseSupportFilter || !enterpriseSupportTd || supportText.includes('enterprise') || enterpriseSupportText === 'yes') && // Filter by enterprise support if 'support=enterprise' is in the URL
+           (!cloudSupportFilterFromUrl || !cloudSupportTd || supportText.includes('cloud') || cloudSupportText === 'yes') &&  // Filter by cloud support if 'support=cloud' is in the URL
+           cloudSupportMatch &&  // Filter by cloud support dropdown
+           enterpriseLicenseMatch  // Filter by enterprise license dropdown
           );
-
         row.style.display = showRow ? '' : 'none';
       } else {
         row.style.display = 'none'; // Hide row if the Type column is missing
       }
     }
+    // Update dropdown text based on selections
+    updateDropdownText('typeFilter', 'All Types Selected', 'Types Selected');
+    const supportMenu = document.getElementById('supportFilterMenu');
+    if (supportMenu) {
+      updateDropdownText('supportFilter', 'All Support Levels Selected', 'Support Levels Selected');
+    }
+    const cloudSupportMenu = document.getElementById('cloudSupportFilterMenu');
+    if (cloudSupportMenu) {
+      updateDropdownText('cloudSupportFilter', 'All Options Selected', 'Options Selected');
+    }
+    const enterpriseMenu = document.getElementById('enterpriseFilterMenu');
+    if (enterpriseMenu) {
+      updateDropdownText('enterpriseFilter', 'All Options Selected', 'Options Selected');
+    }
+    // Update URL parameters based on current filter selections
+    updateURLParameters();
   }
-
+  function updateURLParameters() {
+    const params = new URLSearchParams();
+    // Get current filter values
+    const nameInputElement = document.getElementById('componentTableSearch');
+    const nameInput = nameInputElement ? nameInputElement.value.trim() : '';
+    const typeFilter = Array.from(document.querySelectorAll('#typeFilterMenu input[type="checkbox"]:checked')).map(checkbox => checkbox.value);
+    const supportFilterElement = document.querySelector('#supportFilterMenu');
+    const supportFilter = supportFilterElement
+      ? Array.from(supportFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(checkbox => checkbox.value)
+      : [];
+    const cloudSupportFilterElement = document.querySelector('#cloudSupportFilterMenu');
+    const cloudSupportFilter = cloudSupportFilterElement
+      ? Array.from(cloudSupportFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(checkbox => checkbox.value)
+      : [];
+    const enterpriseFilterElement = document.querySelector('#enterpriseFilterMenu');
+    const enterpriseFilter = enterpriseFilterElement
+      ? Array.from(enterpriseFilterElement.querySelectorAll('input[type="checkbox"]:checked')).map(checkbox => checkbox.value)
+      : [];
+    // Add parameters to URL if they have values
+    if (nameInput) params.set('search', nameInput);
+    if (typeFilter.length > 0) params.set('type', typeFilter.join(','));
+    if (supportFilter.length > 0) params.set('support', supportFilter.join(','));
+    if (cloudSupportFilter.length > 0 && !cloudSupportFilter.includes('')) {
+      params.set('cloud', cloudSupportFilter.join(','));
+    }
+    if (enterpriseFilter.length > 0 && !enterpriseFilter.includes('')) {
+      params.set('enterprise', enterpriseFilter.join(','));
+    }
+    // Update the URL without refreshing the page
+    const newURL = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+    window.history.replaceState({}, '', newURL);
+  }
   /**
    * Gets the first URL (either Redpanda Connect or Redpanda Cloud) for a given connector from the typesArray.
    * If the cloud option is enabled (`isCloud = true`), it prefers the Redpanda Cloud URL; otherwise, it returns the Redpanda Connect URL.
@@ -76,12 +147,10 @@ module.exports.register = function (registry, context) {
         if (isCloud && redpandaCloudUrl) {
           return redpandaCloudUrl;
         }
-
         // Return Connect URL if isCloud is false or no Cloud URL exists
         if (!isCloud && redpandaConnectUrl) {
           return redpandaConnectUrl;
         }
-
         // If Cloud URL exists but isCloud is false, fallback to Cloud URL if no Connect URL exists
         if (!isCloud && redpandaCloudUrl) {
           return redpandaCloudUrl;
@@ -90,7 +159,6 @@ module.exports.register = function (registry, context) {
     }
     return ''; // Return an empty string if no URL is found
   }
-
   const capitalize = s => s && s[0].toUpperCase() + s.slice(1);
 
   /**
@@ -285,7 +353,6 @@ module.exports.register = function (registry, context) {
   function generateConnectorsHTMLTable(connectors, sqlDrivers, isCloud, showAllInfo) {
     return Object.entries(connectors)
       .filter(([_, details]) => {
-
         // If isCloud is true, filter out rows that do not support cloud
         return !isCloud || details.isCloudConnectorSupported;
       })
@@ -518,41 +585,94 @@ module.exports.register = function (registry, context) {
         if (row.support_level) uniqueSupportLevel.add(row.support_level);
       });
 
-      const createOptions = (values) =>
+      const createDropdownCheckboxOptions = (values, id) =>
         Array.from(values)
-          .map(value => `<option selected value="${value}">${capitalize(value).replace("_", " ")}</option>`)
+          .map(value => `
+            <label class="dropdown-checkbox-option">
+              <input type="checkbox" value="${value}" checked onchange="filterComponentTable()">
+              <span>${capitalize(value).replace("_", " ")}</span>
+            </label>`)
           .join('');
 
       let tableHtml = `
         <div class="table-filters">
           <input class="table-search" type="text" id="componentTableSearch" onkeyup="filterComponentTable()" placeholder="Search for components...">
-          <label for="typeFilter">Type:</label>
-          <select multiple class="type-dropdown" id="typeFilter" onchange="filterComponentTable()">
-            ${createOptions(types)}
-          </select>
+          <div class="filter-group">
+            <label for="typeFilter">Type:</label>
+            <div class="dropdown-checkbox-wrapper">
+              <button type="button" class="dropdown-checkbox-toggle" id="typeFilterToggle" onclick="toggleDropdownCheckbox('typeFilter')" aria-expanded="false" aria-haspopup="true" aria-controls="typeFilterMenu">
+                <span class="dropdown-text">All Types Selected</span>
+                <span class="dropdown-arrow">▼</span>
+              </button>
+              <div class="dropdown-checkbox-menu" id="typeFilterMenu" role="menu" aria-labelledby="typeFilterToggle">
+                ${createDropdownCheckboxOptions(types, 'typeFilter')}
+              </div>
+            </div>
+          </div>
       `;
 
       if (!isCloud) {
         tableHtml += `
-          <br><label for="supportFilter" id="labelForSupportFilter">Support:</label>
-          <select multiple class="type-dropdown" id="supportFilter" onchange="filterComponentTable()">
-            ${createOptions(uniqueSupportLevel)}
-          </select>
+          <div class="filter-group">
+            <label for="supportFilter" id="labelForSupportFilter">Support:</label>
+            <div class="dropdown-checkbox-wrapper">
+              <button type="button" class="dropdown-checkbox-toggle" id="supportFilterToggle" onclick="toggleDropdownCheckbox('supportFilter')" aria-expanded="false" aria-haspopup="true" aria-controls="supportFilterMenu">
+                <span class="dropdown-text">All Support Levels Selected</span>
+                <span class="dropdown-arrow">▼</span>
+              </button>
+              <div class="dropdown-checkbox-menu" id="supportFilterMenu" role="menu" aria-labelledby="supportFilterToggle">
+                ${createDropdownCheckboxOptions(uniqueSupportLevel, 'supportFilter')}
+              </div>
+            </div>
+          </div>
         `;
       }
 
       if (showAllInfo) {
         tableHtml += `
-          <br><label for="cloudSupportFilter">Available in Cloud:</label>
-          <select class="type-dropdown" id="cloudSupportFilter" onchange="filterComponentTable()">
-            <option value="">All</option>
-            <option value="yes">Yes</option>
-            <option value="no">No</option>
-          </select>
+          <div class="filter-group">
+            <label for="cloudSupportFilter">Available in Cloud:</label>
+            <div class="dropdown-checkbox-wrapper">
+              <button type="button" class="dropdown-checkbox-toggle" id="cloudSupportFilterToggle" onclick="toggleDropdownCheckbox('cloudSupportFilter')" aria-expanded="false" aria-haspopup="true" aria-controls="cloudSupportFilterMenu">
+                <span class="dropdown-text">All Options Selected</span>
+                <span class="dropdown-arrow">▼</span>
+              </button>
+              <div class="dropdown-checkbox-menu" id="cloudSupportFilterMenu" role="menu" aria-labelledby="cloudSupportFilterToggle">
+                <label class="dropdown-checkbox-option">
+                  <input type="checkbox" value="yes" checked onchange="filterComponentTable()">
+                  <span>Yes</span>
+                </label>
+                <label class="dropdown-checkbox-option">
+                  <input type="checkbox" value="no" checked onchange="filterComponentTable()">
+                  <span>No</span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="filter-group">
+            <label for="enterpriseFilter">Enterprise License:</label>
+            <div class="dropdown-checkbox-wrapper">
+              <button type="button" class="dropdown-checkbox-toggle" id="enterpriseFilterToggle" onclick="toggleDropdownCheckbox('enterpriseFilter')" aria-expanded="false" aria-haspopup="true" aria-controls="enterpriseFilterMenu">
+                <span class="dropdown-text">All Options Selected</span>
+                <span class="dropdown-arrow">▼</span>
+              </button>
+              <div class="dropdown-checkbox-menu" id="enterpriseFilterMenu" role="menu" aria-labelledby="enterpriseFilterToggle">
+                <label class="dropdown-checkbox-option">
+                  <input type="checkbox" value="yes" checked onchange="filterComponentTable()">
+                  <span>Yes</span>
+                </label>
+                <label class="dropdown-checkbox-option">
+                  <input type="checkbox" value="no" checked onchange="filterComponentTable()">
+                  <span>No</span>
+                </label>
+              </div>
+            </div>
+          </div>
           `;
       }
 
       tableHtml += `</div>
+        <!-- CSS styles are defined in the external redpanda-connect-filters.css stylesheet -->
         <table class="tableblock frame-all grid-all stripes-even no-clip stretch component-table sortable" id="componentTable">
           <colgroup>
             ${showAllInfo
@@ -580,6 +700,7 @@ module.exports.register = function (registry, context) {
         </table>
         <script>
           ${filterComponentTable.toString()}
+          ${updateURLParameters.toString()}
           function getQueryParams() {
             const params = {};
             const searchParams = new URLSearchParams(window.location.search);
@@ -589,30 +710,231 @@ module.exports.register = function (registry, context) {
             return params;
           }
 
-          // Initialize Choices.js for type dropdowns
+          // Define global dropdown functions (shared between macros)
+          window.initializeDropdownFunctions = window.initializeDropdownFunctions || function() {
+            // Component type dropdown toggle function
+            window.toggleComponentTypeDropdown = function() {
+              const toggle = document.getElementById('componentTypeDropdownToggle');
+              const menu = document.getElementById('componentTypeDropdownMenu');
+              
+              if (!toggle || !menu) return;
+              
+              const isOpen = menu.classList.contains('show');
+              
+              // Close all other dropdowns first (including filter dropdowns)
+              document.querySelectorAll('.dropdown-checkbox-menu.show, .dropdown-menu.show').forEach(dropdown => {
+                if (dropdown !== menu) {
+                  dropdown.classList.remove('show');
+                  const otherToggle = dropdown.parentNode.querySelector('.dropdown-checkbox-toggle, .dropdown-toggle');
+                  if (otherToggle) {
+                    otherToggle.classList.remove('open');
+                    otherToggle.setAttribute('aria-expanded', 'false');
+                  }
+                }
+              });
+              
+              // Toggle current dropdown
+              if (isOpen) {
+                menu.classList.remove('show');
+                toggle.classList.remove('open');
+                toggle.setAttribute('aria-expanded', 'false');
+              } else {
+                menu.classList.add('show');
+                toggle.classList.add('open');
+                toggle.setAttribute('aria-expanded', 'true');
+                // Focus first option
+                const firstOption = menu.querySelector('.dropdown-option');
+                if (firstOption) firstOption.focus();
+              }
+            };
+
+            // Global click outside handler for all dropdowns
+            if (!window.globalDropdownClickHandler) {
+              window.globalDropdownClickHandler = function(event) {
+                if (!event.target.closest('.dropdown-checkbox-wrapper') && !event.target.closest('.dropdown-wrapper')) {
+                  document.querySelectorAll('.dropdown-checkbox-menu.show, .dropdown-menu.show').forEach(menu => {
+                    menu.classList.remove('show');
+                    const toggle = menu.parentNode.querySelector('.dropdown-checkbox-toggle, .dropdown-toggle');
+                    if (toggle) {
+                      toggle.classList.remove('open');
+                      toggle.setAttribute('aria-expanded', 'false');
+                    }
+                  });
+                }
+              };
+              document.addEventListener('click', window.globalDropdownClickHandler);
+            }
+
+            // Global keyboard handler for all dropdowns
+            if (!window.globalDropdownKeyHandler) {
+              window.globalDropdownKeyHandler = function(event) {
+                if (event.key === 'Escape') {
+                  document.querySelectorAll('.dropdown-checkbox-menu.show, .dropdown-menu.show').forEach(menu => {
+                    menu.classList.remove('show');
+                    const toggle = menu.parentNode.querySelector('.dropdown-checkbox-toggle, .dropdown-toggle');
+                    if (toggle) {
+                      toggle.classList.remove('open');
+                      toggle.setAttribute('aria-expanded', 'false');
+                      toggle.focus();
+                    }
+                  });
+                }
+              };
+              document.addEventListener('keydown', window.globalDropdownKeyHandler);
+            }
+          };
+          
+          // Initialize the functions
+          window.initializeDropdownFunctions();
+
+          function toggleDropdownCheckbox(filterId) {
+            const toggle = document.getElementById(filterId + 'Toggle');
+            const menu = document.getElementById(filterId + 'Menu');
+            
+            if (!toggle || !menu) return;
+            
+            const isOpen = menu.classList.contains('show');
+            
+            // Close all other dropdowns first
+            document.querySelectorAll('.dropdown-checkbox-menu.show').forEach(dropdown => {
+              if (dropdown !== menu) {
+                dropdown.classList.remove('show');
+                const otherToggle = dropdown.parentNode.querySelector('.dropdown-checkbox-toggle');
+                if (otherToggle) {
+                  otherToggle.classList.remove('open');
+                  otherToggle.setAttribute('aria-expanded', 'false');
+                }
+              }
+            });
+            
+            // Toggle current dropdown
+            if (isOpen) {
+              menu.classList.remove('show');
+              toggle.classList.remove('open');
+              toggle.setAttribute('aria-expanded', 'false');
+            } else {
+              menu.classList.add('show');
+              toggle.classList.add('open');
+              toggle.setAttribute('aria-expanded', 'true');
+            }
+          }
+
+          function updateDropdownText(filterId, allSelectedText, someSelectedText) {
+            const menu = document.getElementById(filterId + 'Menu');
+            const toggle = document.getElementById(filterId + 'Toggle');
+            
+            if (!menu || !toggle) return;
+            
+            const checkboxes = menu.querySelectorAll('input[type="checkbox"]');
+            const checkedCount = menu.querySelectorAll('input[type="checkbox"]:checked').length;
+            const totalCount = checkboxes.length;
+            const textElement = toggle.querySelector('.dropdown-text');
+            
+            if (!textElement) return;
+            
+            if (checkedCount === 0) {
+              textElement.textContent = 'None Selected';
+            } else if (checkedCount === totalCount) {
+              textElement.textContent = allSelectedText;
+            } else if (checkedCount === 1) {
+              const checkedBox = menu.querySelector('input[type="checkbox"]:checked');
+              if (checkedBox) {
+                const label = checkedBox.nextElementSibling;
+                textElement.textContent = label ? label.textContent : someSelectedText.replace('s Selected', ' Selected');
+              }
+            } else {
+              textElement.textContent = checkedCount + ' ' + someSelectedText;
+            }
+          }
+
+          // Close dropdown when clicking outside (local handler for filter dropdowns only)
+          document.addEventListener('click', function(event) {
+            if (!event.target.closest('.dropdown-checkbox-wrapper')) {
+              document.querySelectorAll('.dropdown-checkbox-menu.show').forEach(menu => {
+                menu.classList.remove('show');
+                const toggle = menu.parentNode.querySelector('.dropdown-checkbox-toggle');
+                if (toggle) {
+                  toggle.classList.remove('open');
+                  toggle.setAttribute('aria-expanded', 'false');
+                }
+              });
+            }
+          });
+
+          // Add keyboard navigation support (local handler for filter dropdowns only)
+          document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+              // Close all open filter dropdowns on Escape
+              document.querySelectorAll('.dropdown-checkbox-menu.show').forEach(menu => {
+                menu.classList.remove('show');
+                const toggle = menu.parentNode.querySelector('.dropdown-checkbox-toggle');
+                if (toggle) {
+                  toggle.classList.remove('open');
+                  toggle.setAttribute('aria-expanded', 'false');
+                  toggle.focus(); // Return focus to toggle button
+                }
+              });
+            }
+          });
+
+          // Initialize filters from URL parameters
           document.addEventListener('DOMContentLoaded', function() {
             const params = getQueryParams();
             const search = document.getElementById('componentTableSearch');
-            const typeFilter = document.getElementById('typeFilter');
-            const supportFilter = document.getElementById('supportFilter');
+            const typeFilterMenu = document.getElementById('typeFilterMenu');
+            const supportFilterMenu = document.getElementById('supportFilterMenu');
+            const cloudSupportFilterMenu = document.getElementById('cloudSupportFilterMenu');
+            const enterpriseFilterMenu = document.getElementById('enterpriseFilterMenu');
+            
             if (params.search && search) {
               search.value = params.search;
             }
-            if (params.type && typeFilter) {
-              typeFilter.value = params.type;
-            }
-            if (params.support && supportFilter) {
-              supportFilter.value = params.support;
-            }
-            filterComponentTable();
-            const typeDropdowns = document.querySelectorAll('.type-dropdown');
-            typeDropdowns.forEach(dropdown => {
-              new Choices(dropdown, {
-                searchEnabled: false,
-                allowHTML: true,
-                removeItemButton: true
+            
+            if (params.type && typeFilterMenu) {
+              const types = params.type.split(',');
+              // First uncheck all checkboxes
+              typeFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+              // Then check only the ones in the URL
+              types.forEach(type => {
+                const checkbox = typeFilterMenu.querySelector(\`input[value="\${type}"]\`);
+                if (checkbox) checkbox.checked = true;
               });
-            });
+            }
+            
+            if (params.support && supportFilterMenu) {
+              const supports = params.support.split(',');
+              // First uncheck all checkboxes
+              supportFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+              // Then check only the ones in the URL
+              supports.forEach(support => {
+                const checkbox = supportFilterMenu.querySelector(\`input[value="\${support}"]\`);
+                if (checkbox) checkbox.checked = true;
+              });
+            }
+            
+            if (params.cloud && cloudSupportFilterMenu) {
+              const cloudOptions = params.cloud.split(',');
+              // First uncheck all checkboxes
+              cloudSupportFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+              // Then check only the ones in the URL
+              cloudOptions.forEach(option => {
+                const checkbox = cloudSupportFilterMenu.querySelector(\`input[value="\${option}"]\`);
+                if (checkbox) checkbox.checked = true;
+              });
+            }
+            
+            if (params.enterprise && enterpriseFilterMenu) {
+              const enterpriseOptions = params.enterprise.split(',');
+              // First uncheck all checkboxes
+              enterpriseFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+              // Then check only the ones in the URL
+              enterpriseOptions.forEach(option => {
+                const checkbox = enterpriseFilterMenu.querySelector(\`input[value="\${option}"]\`);
+                if (checkbox) checkbox.checked = true;
+              });
+            }
+            
+            filterComponentTable();
           });
         </script>
       `;
@@ -737,35 +1059,106 @@ module.exports.register = function (registry, context) {
       // Build the dropdown for types with links depending on the current component
       let typeDropdown = '';
       if (sortedTypes.length > 1) {
-        const dropdownLinks = sortedTypes.map(typeObj => {
+        const dropdownOptions = sortedTypes.map(typeObj => {
           const link = (component === 'Cloud' && typeObj.redpandaCloudUrl) || typeObj.redpandaConnectUrl;
-          return `<option value="${link}" data-support="${typeObj.support}">${capitalize(typeObj.type)}</option>`;
+          return `<a href="${link}" class="dropdown-option" role="menuitem" tabindex="-1">${capitalize(typeObj.type)}</a>`;
         }).join('');
         typeDropdown = `
-          <p style="display: flex;align-items: center;gap: 6px;"><strong>Type:</strong>
-            <select class="type-dropdown" onchange="window.location.href=this.value">
-              ${dropdownLinks}
-            </select>
-          </p>
-          <script>
-          // Initialize Choices.js for type dropdowns
-          document.addEventListener('DOMContentLoaded', function() {
-            const typeDropdowns = document.querySelectorAll('.type-dropdown');
-            typeDropdowns.forEach(dropdown => {
-              new Choices(dropdown, { searchEnabled: false, allowHTML: true, shouldSort: false, itemSelectText: '' });
-            });
-          });
-          </script>`;
+          <div class="dropdown-wrapper">
+            <p class="type-dropdown-container"><strong>Type:</strong>
+              <button type="button" class="dropdown-toggle" id="componentTypeDropdownToggle" onclick="toggleComponentTypeDropdown()" aria-expanded="false" aria-haspopup="true" aria-controls="componentTypeDropdownMenu">
+                <span class="dropdown-text">${capitalize(sortedTypes[0].type)}</span>
+                <span class="dropdown-arrow">▼</span>
+              </button>
+              <div class="dropdown-menu" id="componentTypeDropdownMenu" role="menu" aria-labelledby="componentTypeDropdownToggle">
+                ${dropdownOptions}
+              </div>
+            </p>
+          </div>`;
       }
       // Return the metadata block with consistent layout
       return self.createBlock(parent, 'pass', `
         <div class="metadata-block">
-          <div style="padding:10px;display: flex;flex-direction: column;gap: 6px;">
+          <div class="metadata-content">
           ${typeDropdown}
           ${availableInInfo}
           ${enterpriseLicenseInfo}
           </div>
-        </div>`);
+        </div>
+        <script>
+          // Define global dropdown functions directly (shared between macros)
+          if (!window.toggleComponentTypeDropdown) {
+            window.toggleComponentTypeDropdown = function() {
+              const toggle = document.getElementById('componentTypeDropdownToggle');
+              const menu = document.getElementById('componentTypeDropdownMenu');
+              
+              if (!toggle || !menu) return;
+              
+              const isOpen = menu.classList.contains('show');
+              
+              // Close all other dropdowns first (including filter dropdowns)
+              document.querySelectorAll('.dropdown-checkbox-menu.show, .dropdown-menu.show').forEach(dropdown => {
+                if (dropdown !== menu) {
+                  dropdown.classList.remove('show');
+                  const otherToggle = dropdown.parentNode.querySelector('.dropdown-checkbox-toggle, .dropdown-toggle');
+                  if (otherToggle) {
+                    otherToggle.classList.remove('open');
+                    otherToggle.setAttribute('aria-expanded', 'false');
+                  }
+                }
+              });
+              
+              // Toggle current dropdown
+              if (isOpen) {
+                menu.classList.remove('show');
+                toggle.classList.remove('open');
+                toggle.setAttribute('aria-expanded', 'false');
+              } else {
+                menu.classList.add('show');
+                toggle.classList.add('open');
+                toggle.setAttribute('aria-expanded', 'true');
+                // Focus first option
+                const firstOption = menu.querySelector('.dropdown-option');
+                if (firstOption) firstOption.focus();
+              }
+            };
+          }
+
+          // Global click outside handler for all dropdowns
+          if (!window.globalDropdownClickHandler) {
+            window.globalDropdownClickHandler = function(event) {
+              if (!event.target.closest('.dropdown-checkbox-wrapper') && !event.target.closest('.dropdown-wrapper')) {
+                document.querySelectorAll('.dropdown-checkbox-menu.show, .dropdown-menu.show').forEach(menu => {
+                  menu.classList.remove('show');
+                  const toggle = menu.parentNode.querySelector('.dropdown-checkbox-toggle, .dropdown-toggle');
+                  if (toggle) {
+                    toggle.classList.remove('open');
+                    toggle.setAttribute('aria-expanded', 'false');
+                  }
+                });
+              }
+            };
+            document.addEventListener('click', window.globalDropdownClickHandler);
+          }
+
+          // Global keyboard handler for all dropdowns
+          if (!window.globalDropdownKeyHandler) {
+            window.globalDropdownKeyHandler = function(event) {
+              if (event.key === 'Escape') {
+                document.querySelectorAll('.dropdown-checkbox-menu.show, .dropdown-menu.show').forEach(menu => {
+                  menu.classList.remove('show');
+                  const toggle = menu.parentNode.querySelector('.dropdown-checkbox-toggle, .dropdown-toggle');
+                  if (toggle) {
+                    toggle.classList.remove('open');
+                    toggle.setAttribute('aria-expanded', 'false');
+                    toggle.focus();
+                  }
+                });
+              }
+            };
+            document.addEventListener('keydown', window.globalDropdownKeyHandler);
+          }
+        </script>`);
     });
   });
 
