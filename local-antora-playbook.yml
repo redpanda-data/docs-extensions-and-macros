@@ -22,7 +22,7 @@ content:
     branches: main
 ui:
   bundle:
-    url: https://github.com/redpanda-data/docs-ui/releases/download/v2.9.0-beta1/ui-bundle.zip
+    url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip
     snapshot: true
 asciidoc:
   attributes:
