@@ -28,7 +28,8 @@ if (typeof global !== 'undefined') {
 
 const {
   generateRpcnConnectorDocs,
-  mergeOverrides
+  mergeOverrides,
+  resolveReferences
 } = require('../../tools/redpanda-connect/generate-rpcn-connector-docs');
 
 describe('Utility Helpers', () => {
@@ -127,6 +128,267 @@ describe('Utility Helpers', () => {
       const merged = mergeOverrides(base, overrides);
       expect(merged.parent.child.description).toBe('overridden');
       expect(merged.parent.other).toBe('unchanged');
+    });
+  });
+
+  describe('resolveReferences', () => {
+    it('resolves basic $ref references', () => {
+      const data = {
+        definitions: {
+          client_certs: {
+            description: 'A list of client certificates to use for mTLS authentication.'
+          }
+        },
+        inputs: [
+          {
+            name: 'kafka',
+            config: {
+              children: [
+                {
+                  name: 'client_certs',
+                  '$ref': '#/definitions/client_certs'
+                }
+              ]
+            }
+          }
+        ]
+      };
+
+      const resolved = resolveReferences(data, data);
+      expect(resolved.inputs[0].config.children[0].name).toBe('client_certs');
+      expect(resolved.inputs[0].config.children[0].description).toBe('A list of client certificates to use for mTLS authentication.');
+      expect(resolved.inputs[0].config.children[0]['$ref']).toBeUndefined();
+    });
+
+    it('resolves multiple references to the same definition', () => {
+      const data = {
+        definitions: {
+          timeout: {
+            description: 'Maximum time to wait for response.',
+            type: 'string'
+          }
+        },
+        inputs: [
+          {
+            name: 'http',
+            config: {
+              children: [
+                {
+                  name: 'timeout',
+                  '$ref': '#/definitions/timeout'
+                }
+              ]
+            }
+          }
+        ],
+        outputs: [
+          {
+            name: 'http',
+            config: {
+              children: [
+                {
+                  name: 'timeout',
+                  '$ref': '#/definitions/timeout'
+                }
+              ]
+            }
+          }
+        ]
+      };
+
+      const resolved = resolveReferences(data, data);
+      expect(resolved.inputs[0].config.children[0].description).toBe('Maximum time to wait for response.');
+      expect(resolved.outputs[0].config.children[0].description).toBe('Maximum time to wait for response.');
+      expect(resolved.inputs[0].config.children[0].type).toBe('string');
+      expect(resolved.outputs[0].config.children[0].type).toBe('string');
+    });
+
+    it('preserves existing properties when resolving references', () => {
+      const data = {
+        definitions: {
+          base_config: {
+            description: 'Base configuration options.',
+            type: 'object'
+          }
+        },
+        inputs: [
+          {
+            name: 'test',
+            config: {
+              children: [
+                {
+                  name: 'config',
+                  '$ref': '#/definitions/base_config',
+                  required: true,
+                  default: {}
+                }
+              ]
+            }
+          }
+        ]
+      };
+
+      const resolved = resolveReferences(data, data);
+      const field = resolved.inputs[0].config.children[0];
+      expect(field.name).toBe('config');
+      expect(field.description).toBe('Base configuration options.');
+      expect(field.type).toBe('object');
+      expect(field.required).toBe(true);
+      expect(field.default).toEqual({});
+    });
+
+    it('handles nested references in arrays', () => {
+      const data = {
+        definitions: {
+          auth_config: {
+            description: 'Authentication configuration',
+            children: [
+              {
+                name: 'username',
+                description: 'Username for authentication'
+              }
+            ]
+          }
+        },
+        inputs: [
+          {
+            name: 'service1',
+            '$ref': '#/definitions/auth_config'
+          },
+          {
+            name: 'service2', 
+            '$ref': '#/definitions/auth_config'
+          }
+        ]
+      };
+
+      const resolved = resolveReferences(data, data);
+      expect(resolved.inputs[0].description).toBe('Authentication configuration');
+      expect(resolved.inputs[1].description).toBe('Authentication configuration');
+      expect(resolved.inputs[0].children[0].name).toBe('username');
+      expect(resolved.inputs[1].children[0].name).toBe('username');
+    });
+
+    it('throws error for non-existent reference path', () => {
+      const data = {
+        definitions: {},
+        inputs: [
+          {
+            name: 'test',
+            '$ref': '#/definitions/nonexistent'
+          }
+        ]
+      };
+
+      expect(() => {
+        resolveReferences(data, data);
+      }).toThrow('Failed to resolve reference "#/definitions/nonexistent"');
+    });
+
+    it('throws error for invalid reference format', () => {
+      const data = {
+        inputs: [
+          {
+            name: 'test',
+            '$ref': 'invalid-ref-format'
+          }
+        ]
+      };
+
+      expect(() => {
+        resolveReferences(data, data);
+      }).toThrow('Unsupported reference format: invalid-ref-format');
+    });
+
+    it('handles deeply nested reference paths', () => {
+      const data = {
+        definitions: {
+          nested: {
+            level1: {
+              level2: {
+                description: 'Deep nested description'
+              }
+            }
+          }
+        },
+        inputs: [
+          {
+            name: 'test',
+            '$ref': '#/definitions/nested/level1/level2'
+          }
+        ]
+      };
+
+      const resolved = resolveReferences(data, data);
+      expect(resolved.inputs[0].description).toBe('Deep nested description');
+    });
+
+    it('resolves references in real overrides.json structure', () => {
+      // Create a test structure similar to the actual overrides.json but with $ref
+      const data = {
+        definitions: {
+          client_certs: {
+            description: 'A list of client certificates to use. For each certificate, specify values for either the `cert` and `key` fields, or the `cert_file` and `key_file` fields.'
+          }
+        },
+        outputs: [
+          {
+            name: 'amqp_0_9',
+            config: {
+              children: [
+                {
+                  name: 'tls',
+                  children: [
+                    {
+                      name: 'client_certs',
+                      '$ref': '#/definitions/client_certs'
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            name: 'elasticsearch',
+            config: {
+              children: [
+                {
+                  name: 'tls',
+                  children: [
+                    {
+                      name: 'client_certs',
+                      '$ref': '#/definitions/client_certs'
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      };
+
+      const resolved = resolveReferences(data, data);
+      const amqpClientCerts = resolved.outputs[0].config.children[0].children[0];
+      const esClientCerts = resolved.outputs[1].config.children[0].children[0];
+      
+      expect(amqpClientCerts.name).toBe('client_certs');
+      expect(amqpClientCerts.description).toBe('A list of client certificates to use. For each certificate, specify values for either the `cert` and `key` fields, or the `cert_file` and `key_file` fields.');
+      expect(esClientCerts.name).toBe('client_certs');
+      expect(esClientCerts.description).toBe('A list of client certificates to use. For each certificate, specify values for either the `cert` and `key` fields, or the `cert_file` and `key_file` fields.');
+    });
+
+    it('returns primitive values unchanged', () => {
+      expect(resolveReferences(null, {})).toBeNull();
+      expect(resolveReferences(undefined, {})).toBeUndefined();
+      expect(resolveReferences('string', {})).toBe('string');
+      expect(resolveReferences(42, {})).toBe(42);
+      expect(resolveReferences(true, {})).toBe(true);
+    });
+
+    it('handles empty objects and arrays', () => {
+      const root = { definitions: {} };
+      expect(resolveReferences({}, root)).toEqual({});
+      expect(resolveReferences([], root)).toEqual([]);
     });
   });
 

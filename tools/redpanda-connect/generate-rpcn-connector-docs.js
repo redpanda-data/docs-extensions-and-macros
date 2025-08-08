@@ -136,13 +136,66 @@ function mergeOverrides(target, overrides) {
 }
 
 /**
+ * Resolves $ref references in an object by replacing them with their definitions.
+ * Supports JSON Pointer style references like "#/definitions/client_certs".
+ * 
+ * @param {Object} obj - The object to resolve references in
+ * @param {Object} root - The root object containing definitions
+ * @returns {Object} The object with references resolved
+ */
+function resolveReferences(obj, root) {
+  if (!obj || typeof obj !== 'object') {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => resolveReferences(item, root));
+  }
+
+  const result = {};
+  
+  for (const [key, value] of Object.entries(obj)) {
+    if (key === '$ref' && typeof value === 'string') {
+      // Handle JSON Pointer style references
+      if (value.startsWith('#/')) {
+        const path = value.substring(2).split('/');
+        let resolved = root;
+        
+        try {
+          for (const segment of path) {
+            resolved = resolved[segment];
+          }
+          
+          if (resolved === undefined) {
+            throw new Error(`Reference path not found: ${value}`);
+          }
+          
+          // Merge the resolved object, but don't process $ref in the resolved object
+          // to avoid infinite recursion
+          Object.assign(result, resolved);
+        } catch (err) {
+          throw new Error(`Failed to resolve reference "${value}": ${err.message}`);
+        }
+      } else {
+        throw new Error(`Unsupported reference format: ${value}. Only JSON Pointer references starting with '#/' are supported.`);
+      }
+    } else {
+      // Recursively resolve references in nested objects
+      result[key] = resolveReferences(value, root);
+    }
+  }
+  
+  return result;
+}
+
+/**
  * Generates documentation files for RPCN connectors using Handlebars templates.
  *
- * Depending on the {@link writeFullDrafts} flag, generates either partial documentation files for connector fields and examples, or full draft documentation for each connector component. Supports merging override data and skips draft generation for components marked as deprecated.
+ * Depending on the {@link writeFullDrafts} flag, generates either partial documentation files for connector fields and examples, or full draft documentation for each connector component. Supports merging override data with $ref references and skips draft generation for components marked as deprecated.
  *
  * @param {Object} options - Configuration options for documentation generation.
  * @param {string} options.data - Path to the connector data file (JSON or YAML).
- * @param {string} [options.overrides] - Optional path to a JSON file with override data.
+ * @param {string} [options.overrides] - Optional path to a JSON file with override data. Supports $ref references in JSON Pointer format (e.g., "#/definitions/client_certs").
  * @param {string} options.template - Path to the main Handlebars template.
  * @param {string} [options.templateIntro] - Path to the intro partial template (used in full draft mode).
  * @param {string} [options.templateFields] - Path to the fields partial template.
@@ -150,7 +203,7 @@ function mergeOverrides(target, overrides) {
  * @param {boolean} options.writeFullDrafts - If true, generates full draft documentation; otherwise, generates partials.
  * @returns {Promise<Object>} An object summarizing the number and paths of generated partials and drafts.
  *
- * @throws {Error} If reading or parsing input files fails, or if template rendering fails for a component.
+ * @throws {Error} If reading or parsing input files fails, if template rendering fails for a component, or if $ref references cannot be resolved.
  *
  * @remark
  * When generating full drafts, components with a `status` of `'deprecated'` are skipped.
@@ -175,7 +228,11 @@ async function generateRpcnConnectorDocs(options) {
   if (overrides) {
     const ovRaw = fs.readFileSync(overrides, 'utf8');
     const ovObj = JSON.parse(ovRaw);
-    mergeOverrides(dataObj, ovObj);
+    
+    // Resolve any $ref references in the overrides
+    const resolvedOverrides = resolveReferences(ovObj, ovObj);
+    
+    mergeOverrides(dataObj, resolvedOverrides);
   }
 
   // Compile the “main” template (used when writeFullDrafts = true)
@@ -285,5 +342,6 @@ async function generateRpcnConnectorDocs(options) {
 
 module.exports = {
   generateRpcnConnectorDocs,
-  mergeOverrides
+  mergeOverrides,
+  resolveReferences
 };
