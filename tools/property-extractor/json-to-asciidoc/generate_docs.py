@@ -14,6 +14,7 @@ ERROR_FOLDER_NAME = "error"
 OUTPUT_FILE_BROKER = "broker-properties.adoc"
 OUTPUT_FILE_CLUSTER = "cluster-properties.adoc"
 OUTPUT_FILE_CLOUD = "object-storage-properties.adoc"
+OUTPUT_FILE_TOPIC = "topic-properties.adoc"
 OUTPUT_FILE_DEPRECATED = os.path.join("deprecated", "partials", "deprecated-properties.adoc")
 ALL_PROPERTIES_FILE = "all_properties.txt"
 
@@ -66,6 +67,20 @@ CLUSTER_CONFIG_INTRO = (
 )
 CLUSTER_CONFIG_TITLE = "== Cluster configuration\n\n"
 
+TOPIC_PAGE_TITLE = (
+    "= Topic Configuration Properties\n"
+    ":page-aliases: reference:topic-properties.adoc\n"
+    ":description: Reference of topic configuration properties.\n\n"
+)
+
+TOPIC_INTRO = (
+    "A topic-level property sets a Redpanda or Kafka configuration for a particular topic.\n\n"
+    "Many topic-level properties have corresponding xref:manage:cluster-maintenance/cluster-property-configuration.adoc[cluster properties] that set a default value for all topics of a cluster. To customize the value for a topic, you can set a topic-level property that overrides the value of the corresponding cluster property.\n\n"
+    "NOTE: All topic properties take effect immediately after being set.\n\n"
+)
+
+TOPIC_CONFIG_TITLE = "== Topic configuration\n\n"
+
 CLOUD_PAGE_TITLE = (
     "= Object Storage Properties\n"
     ":description: Reference of object storage properties.\n\n"
@@ -92,7 +107,8 @@ DEFINED_IN_MAPPING = {
     "src/v/pandaproxy/schema_registry/configuration.cc": "schema reg",
     "src/v/pandaproxy/rest/configuration.cc": "http proxy",
     "src/v/kafka/client/configuration.cc": "http client",
-    "src/v/config/configuration.cc": "cluster"
+    "src/v/config/configuration.cc": "cluster",
+    "src/v/kafka/server/handlers/topics/types.cc": "topic"
 }
 
 SUFFIX_TO_UNIT = {
@@ -339,6 +355,7 @@ def main():
     kafka_client_content = []
     cluster_config_content = []
     cloud_config_content = []
+    topic_config_content = []
     deprecated_broker_content = []
     deprecated_cluster_content = []
     all_properties = []
@@ -388,6 +405,7 @@ def main():
             "http client": kafka_client_content,
             "cluster": cluster_config_content,
             "cloud": cloud_config_content,
+            "topic": topic_config_content,
         }
         if group in group_mapping:
             group_mapping[group].append(property_doc)
@@ -423,6 +441,12 @@ def main():
         + CLOUD_CONFIG_TITLE
         + "".join(cloud_config_content)
     )
+    topic_page = (
+        TOPIC_PAGE_TITLE
+        + TOPIC_INTRO
+        + TOPIC_CONFIG_TITLE
+        + "".join(topic_config_content)
+    )
     deprecated_page = (
         DEPRECATED_PROPERTIES_TITLE
         + DEPRECATED_PROPERTIES_INTRO
@@ -436,6 +460,7 @@ def main():
     write_data_to_file(page_folder, OUTPUT_FILE_BROKER, broker_page)
     write_data_to_file(page_folder, OUTPUT_FILE_CLUSTER, cluster_page)
     write_data_to_file(page_folder, OUTPUT_FILE_CLOUD, cloud_page)
+    write_data_to_file(page_folder, OUTPUT_FILE_TOPIC, topic_page)
     write_data_to_file(page_folder, OUTPUT_FILE_DEPRECATED, deprecated_page)
     write_data_to_file(output_dir, ALL_PROPERTIES_FILE, "\n".join(all_properties))
 
