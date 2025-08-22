@@ -420,7 +420,9 @@ A topic-level property sets a Redpanda or Kafka configuration for a particular t
 
 Many topic-level properties have corresponding xref:manage:cluster-maintenance/cluster-property-configuration.adoc[cluster properties] that set a default value for all topics of a cluster. To customize the value for a topic, you can set a topic-level property that overrides the value of the corresponding cluster property.
 
-NOTE: All topic properties take effect immediately after being set.
+For information on how to configure topic properties, see xref:manage:cluster-maintenance/topic-property-configuration.adoc[].
+
+NOTE: All topic properties take effect immediately after being set. 
 
 == Topic property mappings
 
@@ -438,66 +440,6 @@ NOTE: All topic properties take effect immediately after being set.
                 adoc_content += f"| xref:./cluster-properties.adoc#{cluster_prop}[`{cluster_prop}`]\n\n"
                 
         adoc_content += """|===
-
-== Examples
-
-The following examples show how to configure topic-level properties. Set a topic-level property for a topic to override the value of corresponding cluster property.
-
-=== Create topic with topic properties
-
-To set topic properties when creating a topic, use the xref:reference:rpk/rpk-topic/rpk-topic-create.adoc[rpk topic create] command with the `-c` option.
-
-For example, to create a topic with the `cleanup.policy` property set to `compact`:
-
-[tabs]
-====
-Local::
-+
---
-
-```bash
-rpk topic create -c cleanup.policy=compact <topic-name>
-```
-
---
-Kubernetes::
-+
---
-
-```bash
-kubectl exec <pod-name> -- rpk topic create -c cleanup.policy=compact <topic-name>
-```
-
---
-====
-
-=== Modify topic properties
-
-To modify topic properties of an existing topic, use the xref:reference:rpk/rpk-topic/rpk-topic-alter-config.adoc[rpk topic alter-config] command.
-
-For example, to modify a topic's `retention.ms` property:
-
-[tabs]
-====
-Local::
-+
---
-
-```bash
-rpk topic alter-config <topic-name> --set retention.ms=<retention-time>
-```
-
---
-Kubernetes::
-+
---
-
-```bash
-kubectl exec <pod-name> -- rpk topic alter-config <topic-name> --set retention.ms=<retention-time>
-```
-
---
-====
 
 == Topic properties
 
