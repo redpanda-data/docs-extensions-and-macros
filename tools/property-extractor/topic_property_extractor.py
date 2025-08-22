@@ -4,7 +4,8 @@ import re
 import json
 import argparse
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Set
+import sys
+from typing import Dict, List, Optional
 
 
 class TopicPropertyExtractor:
@@ -104,8 +105,7 @@ class TopicPropertyExtractor:
                         "corresponding_cluster_property": None
                     }
         except Exception as e:
-            # Skip files that can't be read
-            pass
+            print(f"Debug: Skipping {file_path}: {e}", file=sys.stderr)
             
     def _discover_enum_values(self):
         """Discover enum definitions that correspond to topic property acceptable values"""
@@ -180,8 +180,7 @@ class TopicPropertyExtractor:
                                 "values": values
                             }
         except Exception as e:
-            # Skip files that can't be read
-            pass
+            print(f"Debug: Error scanning enums in {file_path}: {e}", file=sys.stderr)
             
     def _determine_property_type(self, property_name: str) -> str:
         """Determine the type of a property based on its name and usage patterns"""
@@ -278,6 +277,7 @@ class TopicPropertyExtractor:
             return mappings
             
         except Exception as e:
+            print(f"Debug: Error finding mappings in {file_path}: {e}", file=sys.stderr)
             return {}
             
     def _looks_like_cluster_property(self, prop_name: str) -> bool:
@@ -312,10 +312,6 @@ class TopicPropertyExtractor:
         if cluster_prop in correlations:
             return correlations[cluster_prop]
             
-        # Pattern-based correlation for properties we haven't hardcoded
-        # Convert cluster property naming to topic property naming
-        topic_candidates = []
-        
         # Remove common prefixes/suffixes
         cleaned = cluster_prop
         if cleaned.startswith("log_"):
