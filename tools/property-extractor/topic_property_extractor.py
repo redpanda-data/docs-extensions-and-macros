@@ -175,10 +175,10 @@ class TopicPropertyExtractor:
                 if enum_name not in self.enum_values:
                     values = self._extract_enum_values(enum_body)
                     if values:
-                            self.enum_values[enum_name] = {
-                                "source_file": str(file_path.relative_to(self.source_path)),
-                                "values": values
-                            }
+                        self.enum_values[enum_name] = {
+                            "source_file": str(file_path.relative_to(self.source_path)),
+                            "values": values
+                        }
         except Exception as e:
             print(f"Debug: Error scanning enums in {file_path}: {e}", file=sys.stderr)
             
