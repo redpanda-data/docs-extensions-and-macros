@@ -105,7 +105,7 @@ check:
 	@echo "OUTPUT_DIR:    $(OUTPUT_DIR)"
 
 # --- Extract topic properties ---
-topic-properties:
+topic-properties: venv redpanda-git treesitter
 	@echo "🔧 Extracting topic properties with Redpanda tag: $(TAG)"
 	@mkdir -p $(TOOL_ROOT)/gen
 	@cd $(TOOL_ROOT) && \
