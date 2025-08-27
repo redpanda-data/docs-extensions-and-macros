@@ -175,7 +175,16 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       .replace(/\s+/g, ' ')
       .trim();
 
-    var tag = `${component.title} ${version ? 'v' + version : ''}`.trim();
+    let tag;
+    if (component.title === 'home') {
+      // Collect all unique component titles except 'home'
+      const allComponentTitles = Object.values(contentCatalog.components || contentCatalog._components || {})
+        .map(c => c.title)
+        .filter(title => title && title !== 'home');
+      tag = Array.from(new Set(allComponentTitles));
+    } else {
+      tag = `${component.title} ${version ? 'v' + version : ''}`.trim();
+    }
     var indexItem;
     const deployment = page.asciidoc?.attributes['env-kubernetes'] ? 'Kubernetes' : page.asciidoc?.attributes['env-linux'] ? 'Linux' : page.asciidoc?.attributes['env-docker'] ? 'Docker' : page.asciidoc?.attributes['page-cloud'] ? 'Redpanda Cloud' : ''
 
@@ -198,12 +207,12 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       indexItem.product = component.title;
       indexItem.breadcrumbs = breadcrumbs;
       indexItem.type = 'Doc';
-      indexItem._tags = [tag];
+      indexItem._tags = Array.isArray(tag) ? tag : [tag];
     } else {
       indexItem.deployment = deployment;
       indexItem.type = 'Lab';
       indexItem.interactive = false;
-      indexItem._tags = [tag];
+      indexItem._tags = Array.isArray(tag) ? tag : [tag];
     }
     algolia[cname][version].push(indexItem)
     algoliaCount++
