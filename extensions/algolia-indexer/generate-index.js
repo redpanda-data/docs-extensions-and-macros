@@ -176,14 +176,20 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       .trim();
 
     let tag;
-    if (component.title === 'home') {
-      // Collect all unique component titles except 'home'
-      const allComponentTitles = Object.values(contentCatalog.components || contentCatalog._components || {})
-        .map(c => c.title)
-        .filter(title => title && title !== 'home');
-      tag = Array.from(new Set(allComponentTitles));
+    const title = (component.title || '').trim();
+    if (title.toLowerCase() === 'home') {
+      // Collect all unique component titles except 'home' using public API when available
+      const componentsList = typeof contentCatalog.getComponents === 'function'
+        ? contentCatalog.getComponents()
+        : Array.isArray(contentCatalog.components)
+          ? contentCatalog.components
+          : Object.values(contentCatalog.components || contentCatalog._components || {});
+      const allComponentTitles = componentsList
+        .map(c => (c.title || '').trim())
+        .filter(t => t && t.toLowerCase() !== 'home');
+      tag = [...new Set(allComponentTitles)];
     } else {
-      tag = `${component.title} ${version ? 'v' + version : ''}`.trim();
+      tag = `${title}${version ? ' v' + version : ''}`;
     }
     var indexItem;
     const deployment = page.asciidoc?.attributes['env-kubernetes'] ? 'Kubernetes' : page.asciidoc?.attributes['env-linux'] ? 'Linux' : page.asciidoc?.attributes['env-docker'] ? 'Docker' : page.asciidoc?.attributes['page-cloud'] ? 'Redpanda Cloud' : ''
