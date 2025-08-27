@@ -108,6 +108,7 @@ check:
 topic-properties: venv redpanda-git treesitter
 	@echo "🔧 Extracting topic properties with Redpanda tag: $(TAG)"
 	@mkdir -p $(TOOL_ROOT)/gen
+	@mkdir -p "$(OUTPUT_DIR)"
 	@cd $(TOOL_ROOT) && \
 	  $(PYTHON) topic_property_extractor.py \
 	    --source-path $(REDPANDA_SRC) \
