@@ -187,6 +187,9 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       const allComponentTitles = componentsList
         .map(c => (c.title || '').trim())
         .filter(t => t && t.toLowerCase() !== 'home');
+      if (!allComponentTitles.length) {
+        throw new Error('No component titles found for "home" page. Indexing aborted.');
+      }
       tag = [...new Set(allComponentTitles)];
     } else {
       tag = `${title}${version ? ' v' + version : ''}`;
