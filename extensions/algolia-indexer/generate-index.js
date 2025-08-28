@@ -178,19 +178,30 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     let tag;
     const title = (component.title || '').trim();
     if (title.toLowerCase() === 'home') {
-      // Collect all unique component titles except 'home' using public API when available
+      // Collect all unique component titles except 'home', 'shared', 'search' using public API when available
       const componentsList = typeof contentCatalog.getComponents === 'function'
         ? contentCatalog.getComponents()
         : Array.isArray(contentCatalog.components)
           ? contentCatalog.components
           : Object.values(contentCatalog.components || contentCatalog._components || {});
+      // Find the latest version for Self-Managed (component title: 'Self-Managed')
+      let latestVersion = undefined;
+      const selfManaged = componentsList.find(c => (c.title || '').trim().toLowerCase() === 'self-managed');
+      if (selfManaged && selfManaged.latest && selfManaged.latest.version) {
+        latestVersion = selfManaged.latest.version;
+        if (latestVersion && !/^v/.test(latestVersion)) latestVersion = 'v' + latestVersion;
+      }
       const allComponentTitles = componentsList
         .map(c => (c.title || '').trim())
-        .filter(t => t && t.toLowerCase() !== 'home');
+        .filter(t => t && !['home', 'shared', 'search'].includes(t.toLowerCase()));
       if (!allComponentTitles.length) {
         throw new Error('No component titles found for "home" page. Indexing aborted.');
       }
       tag = [...new Set(allComponentTitles)];
+      // For Self-Managed, append v<latest-version> to the tag
+      if (latestVersion) {
+        tag = tag.map(t => t.toLowerCase() === 'self-managed' ? `${t} ${latestVersion}` : t);
+      }
     } else {
       tag = `${title}${version ? ' v' + version : ''}`;
     }
