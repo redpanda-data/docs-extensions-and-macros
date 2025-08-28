@@ -175,7 +175,25 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       .replace(/\s+/g, ' ')
       .trim();
 
-    var tag = `${component.title} ${version ? 'v' + version : ''}`.trim();
+    let tag;
+    const title = (component.title || '').trim();
+    if (title.toLowerCase() === 'home') {
+      // Collect all unique component titles except 'home' using public API when available
+      const componentsList = typeof contentCatalog.getComponents === 'function'
+        ? contentCatalog.getComponents()
+        : Array.isArray(contentCatalog.components)
+          ? contentCatalog.components
+          : Object.values(contentCatalog.components || contentCatalog._components || {});
+      const allComponentTitles = componentsList
+        .map(c => (c.title || '').trim())
+        .filter(t => t && t.toLowerCase() !== 'home');
+      if (!allComponentTitles.length) {
+        throw new Error('No component titles found for "home" page. Indexing aborted.');
+      }
+      tag = [...new Set(allComponentTitles)];
+    } else {
+      tag = `${title}${version ? ' v' + version : ''}`;
+    }
     var indexItem;
     const deployment = page.asciidoc?.attributes['env-kubernetes'] ? 'Kubernetes' : page.asciidoc?.attributes['env-linux'] ? 'Linux' : page.asciidoc?.attributes['env-docker'] ? 'Docker' : page.asciidoc?.attributes['page-cloud'] ? 'Redpanda Cloud' : ''
 
@@ -198,12 +216,12 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       indexItem.product = component.title;
       indexItem.breadcrumbs = breadcrumbs;
       indexItem.type = 'Doc';
-      indexItem._tags = [tag];
+      indexItem._tags = Array.isArray(tag) ? tag : [tag];
     } else {
       indexItem.deployment = deployment;
       indexItem.type = 'Lab';
       indexItem.interactive = false;
-      indexItem._tags = [tag];
+      indexItem._tags = Array.isArray(tag) ? tag : [tag];
     }
     algolia[cname][version].push(indexItem)
     algoliaCount++
