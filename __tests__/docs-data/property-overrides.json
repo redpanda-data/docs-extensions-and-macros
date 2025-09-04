@@ -1,0 +1,12 @@
+{
+  "properties": {
+    "log_segment_size": {
+      "description": "Overrides the log segment size property description for testing.",
+      "example": "134217728"
+    },
+    "auto_create_topics_enabled": {
+      "description": "Allow automatic topic creation if true.",
+      "default": true
+    }
+  }
+}

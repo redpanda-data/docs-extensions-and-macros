@@ -6,11 +6,11 @@ TAG       ?= dev
 # Derive a “major.minor” or rc identifier from TAG for folder naming
 VERSION := $(shell \
   if echo "$(TAG)" | grep -qE '^v?[0-9]+\.[0-9]+'; then \
-    echo "$(TAG)" \
-      | sed -E 's/^v?([0-9]+\.[0-9]+)(\.[0-9]+)?(-rc[0-9]+)?.*/\1\3/' \
-      | sed 's/-rc/rc/'; \
+	echo "$(TAG)" \
+	  | sed -E 's/^v?([0-9]+\.[0-9]+)(\.[0-9]+)?(-rc[0-9]+)?.*/\1\3/' \
+	  | sed 's/-rc/rc/'; \
   else \
-    echo "$(TAG)"; \
+	echo "$(TAG)"; \
   fi)
 
 # Paths
@@ -31,9 +31,10 @@ build: venv redpanda-git treesitter
 	@mkdir -p $(TOOL_ROOT)/gen
 	@cd $(TOOL_ROOT) && \
 	  $(PYTHON) -W ignore::FutureWarning property_extractor.py \
-	    --recursive \
-	    --path $(REDPANDA_SRC) \
-	    --output gen/properties-output.json
+		--recursive \
+		--path $(REDPANDA_SRC) \
+		--output gen/properties-output.json \
+		$(if $(OVERRIDES),--overrides $(OVERRIDES),)
 	@echo "✅ JSON generated at $(TOOL_ROOT)/gen/properties-output.json"
 	@$(MAKE) generate-docs
 

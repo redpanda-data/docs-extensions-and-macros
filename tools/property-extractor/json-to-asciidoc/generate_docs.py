@@ -228,6 +228,19 @@ def process_defaults(input_string, suffix):
 def generate_property_doc(key, value):
     """
     Generate documentation string for a single property.
+    
+    This function handles all property types including the special case of
+    one_or_many_property types that are represented as arrays in the JSON schema.
+    
+    For array properties (like admin, admin_api_tls):
+    - Type is displayed as "array" 
+    - Default values are properly formatted as JSON arrays
+    - Supports both single object defaults [{ }] and empty array defaults []
+    
+    For object properties (like rpc_server_tls):
+    - Type is displayed as "object"
+    - Default values are formatted as JSON objects { }
+    
     Returns None if required fields are missing.
     """
     description = value.get("description", "").strip()
@@ -258,7 +271,10 @@ def generate_property_doc(key, value):
     visibility = value.get("visibility") or "user"
     lines.append(f"*Visibility:* `{visibility}`\n\n")
 
-    if prop_type in ["string", "array", "number", "boolean", "integer"]:
+    # Display the type for standard JSON schema types
+    # This includes "array" for one_or_many_property types that were detected
+    # by the IsArrayTransformer and properly converted during type resolution
+    if prop_type in ["string", "array", "number", "boolean", "integer", "object"]:
         lines.append(f"*Type:* {prop_type}\n\n")
 
     # Add aliases if they exist
@@ -277,6 +293,51 @@ def generate_property_doc(key, value):
         default_str = "null"
     elif isinstance(default, bool):
         default_str = "true" if default else "false"
+    elif isinstance(default, dict):
+        # Format object defaults with proper JSON-style syntax
+        # This handles single object defaults for object-type properties
+        def format_value(val):
+            if isinstance(val, str):
+                return f'"{val}"'
+            elif isinstance(val, bool):
+                return "true" if val else "false"
+            elif val is None:
+                return "null"
+            else:
+                return str(val)
+        
+        pairs = []
+        for k, v in default.items():
+            pairs.append(f"{k}: {format_value(v)}")
+        default_str = "{" + ", ".join(pairs) + "}"
+    elif isinstance(default, list):
+        # Handle array defaults for one_or_many_property types
+        # This formats defaults like [{address: "127.0.0.1", port: 9644}] or []
+        if not default:
+            default_str = "[]"
+        else:
+            # Format each array element
+            formatted_elements = []
+            for item in default:
+                if isinstance(item, dict):
+                    # Format object within array
+                    def format_value(val):
+                        if isinstance(val, str):
+                            return f'"{val}"'
+                        elif isinstance(val, bool):
+                            return "true" if val else "false"
+                        elif val is None:
+                            return "null"
+                        else:
+                            return str(val)
+                    
+                    pairs = []
+                    for k, v in item.items():
+                        pairs.append(f"{k}: {format_value(v)}")
+                    formatted_elements.append("{" + ", ".join(pairs) + "}")
+                else:
+                    formatted_elements.append(str(item))
+            default_str = "[" + ", ".join(formatted_elements) + "]"
     else:
         default_str = str(default).replace("'", "").lower()
         default_str = process_defaults(default_str, property_suffix)
@@ -351,9 +412,22 @@ def main():
     for key, value in properties.items():
         all_properties.append(key)
         group = None
+
+        # Determine which documentation group this property belongs to
+        # This determines which AsciiDoc file the property will be written to.
+        # The config_scope field (added during property extraction) takes precedence
+        # over the legacy file-based mapping for more accurate categorization.
+        
+        # Use config_scope if present to determine group
+        config_scope = value.get("config_scope")
         if key.startswith("cloud_"):
             group = "cloud"
+        elif config_scope == "broker":
+            group = "broker"
+        elif config_scope == "cluster":
+            group = "cluster"
         else:
+            # Fallback to legacy file-based mapping
             group = DEFINED_IN_MAPPING.get(value.get("defined_in"))
 
         # Handle deprecated properties.

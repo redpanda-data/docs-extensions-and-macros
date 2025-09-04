@@ -36,13 +36,46 @@ class IsNullableTransformer:
 
 
 class IsArrayTransformer:
+    """
+    Detects properties that should be treated as arrays based on their C++ type declarations.
+    
+    This transformer identifies two types of array properties:
+    1. std::vector<T> - Standard C++ vectors
+    2. one_or_many_property<T> - Redpanda's custom type that accepts either a single value or an array
+    
+    The one_or_many_property type is used in Redpanda configuration for properties like 'admin' 
+    and 'admin_api_tls' where users can specify either:
+    - A single object: admin: {address: "127.0.0.1", port: 9644}
+    - An array of objects: admin: [{address: "127.0.0.1", port: 9644}, {address: "0.0.0.0", port: 9645}]
+    
+    When detected, these properties are marked with:
+    - type: "array"
+    - items: {type: <inner_type>} where <inner_type> is extracted from T
+    """
     def __init__(self, type_transformer):
         self.type_transformer = type_transformer
 
     def accepts(self, info, file_pair):
-        return "std::vector" in info["declaration"]
+        """
+        Check if this property declaration represents an array type.
+        
+        Returns True for:
+        - std::vector<T> declarations (standard C++ vectors)
+        - one_or_many_property<T> declarations (Redpanda's flexible array type)
+        """
+        return "std::vector" in info["declaration"] or "one_or_many_property" in info["declaration"]
 
     def parse(self, property, info, file_pair):
+        """
+        Transform the property to indicate it's an array type.
+        
+        Sets:
+        - property["type"] = "array"
+        - property["items"]["type"] = <extracted_inner_type>
+        
+        The inner type is extracted by the type_transformer, which handles
+        removing the wrapper (std::vector<> or one_or_many_property<>) to get T.
+        """
         property["type"] = "array"
         property["items"] = PropertyBag()
         property["items"]["type"] = self.type_transformer.get_type_from_declaration(
@@ -98,6 +131,24 @@ class TypeTransformer:
         return True
 
     def get_cpp_type_from_declaration(self, declaration):
+        """
+        Extract the inner type from C++ property declarations.
+        
+        This method handles various C++ template types and extracts the core type T from:
+        - property<T> -> T
+        - std::optional<T> -> T
+        - std::vector<T> -> T  
+        - one_or_many_property<T> -> T (Redpanda's flexible array type)
+        
+        For one_or_many_property, this is crucial because it allows the same property
+        to accept either a single value or an array of values in the configuration.
+        Examples:
+        - one_or_many_property<model::broker_endpoint> -> model::broker_endpoint
+        - one_or_many_property<endpoint_tls_config> -> endpoint_tls_config
+        
+        The extracted type is then used to determine the JSON schema type and
+        for resolving default values from the definitions.
+        """
         one_line_declaration = declaration.replace("\n", "").strip()
         raw_type = (
             re.sub(r"^.*property<(.+)>.*", "\\1", one_line_declaration)
@@ -110,6 +161,13 @@ class TypeTransformer:
 
         if "std::vector" in raw_type:
             raw_type = re.sub(".*std::vector<(.+)>.*", "\\1", raw_type)
+        
+        # Handle one_or_many_property<T> - extract the inner type T
+        # This is essential for Redpanda's flexible configuration properties
+        # that can accept either single values or arrays
+        if "one_or_many_property" in one_line_declaration:
+            raw_type = re.sub(".*one_or_many_property<(.+)>.*", "\\1", one_line_declaration)
+            raw_type = raw_type.split()[0].replace(",", "")
 
         return raw_type
 
