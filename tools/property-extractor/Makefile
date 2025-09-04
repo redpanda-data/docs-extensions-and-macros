@@ -29,12 +29,17 @@ TREE_SITTER   := npx tree-sitter
 build: venv redpanda-git treesitter
 	@echo "🔧 Building with Redpanda tag: $(TAG)"
 	@mkdir -p $(TOOL_ROOT)/gen
+	@if [ -n "$(OVERRIDES)" ] && [ ! -f "$(OVERRIDES)" ]; then \
+	  echo "❌ Error: Overrides file '$(OVERRIDES)' does not exist."; \
+	  echo "   Please check the path or omit the OVERRIDES variable to continue without overrides."; \
+	  exit 1; \
+	fi
 	@cd $(TOOL_ROOT) && \
 	  $(PYTHON) -W ignore::FutureWarning property_extractor.py \
 		--recursive \
 		--path $(REDPANDA_SRC) \
 		--output gen/properties-output.json \
-		$(if $(OVERRIDES),--overrides $(OVERRIDES),)
+		$(if $(OVERRIDES),$(if $(shell [ -f "$(OVERRIDES)" ] && echo exists),--overrides $(OVERRIDES),),)
 	@echo "✅ JSON generated at $(TOOL_ROOT)/gen/properties-output.json"
 	@$(MAKE) generate-docs
 

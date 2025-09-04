@@ -342,6 +342,14 @@ def generate_property_doc(key, value):
         default_str = str(default).replace("'", "").lower()
         default_str = process_defaults(default_str, property_suffix)
     lines.append(f"*Default:* `{default_str}`\n\n")
+    
+    # Add example section if provided in overrides
+    # This allows including detailed AsciiDoc examples with YAML configuration
+    # and explanatory text for complex properties that benefit from usage examples
+    example = value.get("example")
+    if example:
+        lines.append(f"{example}\n\n")
+    
     lines.append("---\n\n")
     return "".join(lines)
 

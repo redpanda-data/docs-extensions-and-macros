@@ -52,6 +52,11 @@ class IsArrayTransformer:
     - type: "array"
     - items: {type: <inner_type>} where <inner_type> is extracted from T
     """
+    
+    # Class-level constants for array type patterns
+    ARRAY_PATTERN_STD_VECTOR = "std::vector"
+    ARRAY_PATTERN_ONE_OR_MANY = "one_or_many_property"
+    
     def __init__(self, type_transformer):
         self.type_transformer = type_transformer
 
@@ -63,7 +68,8 @@ class IsArrayTransformer:
         - std::vector<T> declarations (standard C++ vectors)
         - one_or_many_property<T> declarations (Redpanda's flexible array type)
         """
-        return "std::vector" in info["declaration"] or "one_or_many_property" in info["declaration"]
+        return (self.ARRAY_PATTERN_STD_VECTOR in info["declaration"] or 
+                self.ARRAY_PATTERN_ONE_OR_MANY in info["declaration"])
 
     def parse(self, property, info, file_pair):
         """
@@ -127,6 +133,13 @@ class VisibilityTransformer:
 
 
 class TypeTransformer:
+    
+    # Class-level constants for type pattern matching
+    # Shared with IsArrayTransformer for consistency
+    ARRAY_PATTERN_STD_VECTOR = "std::vector"
+    ARRAY_PATTERN_ONE_OR_MANY = "one_or_many_property"
+    OPTIONAL_PATTERN = "std::optional"
+    
     def accepts(self, info, file_pair):
         return True
 
@@ -156,17 +169,18 @@ class TypeTransformer:
             .replace(",", "")
         )
 
-        if "std::optional" in raw_type:
+        if self.OPTIONAL_PATTERN in raw_type:
             raw_type = re.sub(".*std::optional<(.+)>.*", "\\1", raw_type)
 
-        if "std::vector" in raw_type:
+        if self.ARRAY_PATTERN_STD_VECTOR in raw_type:
             raw_type = re.sub(".*std::vector<(.+)>.*", "\\1", raw_type)
         
         # Handle one_or_many_property<T> - extract the inner type T
         # This is essential for Redpanda's flexible configuration properties
         # that can accept either single values or arrays
-        if "one_or_many_property" in one_line_declaration:
-            raw_type = re.sub(".*one_or_many_property<(.+)>.*", "\\1", one_line_declaration)
+        # Check and extract from raw_type for consistency with other type extractors
+        if self.ARRAY_PATTERN_ONE_OR_MANY in raw_type:
+            raw_type = re.sub(".*one_or_many_property<(.+)>.*", "\\1", raw_type)
             raw_type = raw_type.split()[0].replace(",", "")
 
         return raw_type
@@ -340,6 +354,10 @@ class FriendlyDefaultTransformer:
       - std::chrono::milliseconds(10)
       - std::nullopt
     """
+    
+    # Class-level constants for pattern matching in default values
+    ARRAY_PATTERN_STD_VECTOR = "std::vector"
+    
     def accepts(self, info, file_pair):
         return info.get("params") and len(info["params"]) > 3
 
@@ -366,7 +384,7 @@ class FriendlyDefaultTransformer:
                 return property
 
         # Transform std::vector defaults.
-        if "std::vector" in default:
+        if self.ARRAY_PATTERN_STD_VECTOR in default:
             m = re.search(r'\{([^}]+)\}', default)
             if m:
                 contents = m.group(1).strip()

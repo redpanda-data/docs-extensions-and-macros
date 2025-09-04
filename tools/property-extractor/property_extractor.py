@@ -58,6 +58,7 @@ import sys
 import os
 import json
 import re
+import yaml
 
 from pathlib import Path
 from file_pair import FilePair
@@ -186,16 +187,169 @@ def merge_properties_and_definitions(properties, definitions):
     return dict(properties=properties, definitions=definitions)
 
 
-def apply_description_overrides(properties, overrides):
+def apply_property_overrides(properties, overrides, overrides_file_path=None):
     """
-    Apply description overrides from the overrides dict to the properties dict.
-    The overrides dict should have the structure: {"properties": {prop_name: {"description": ...}}}
+    Apply property overrides from the overrides JSON file to enhance property documentation.
+    
+    This function allows customizing property documentation by providing overrides for:
+    
+    1. description: Override the auto-extracted property description with custom text
+    2. example: Add AsciiDoc example sections with flexible input formats (see below)
+    3. default: Override the auto-extracted default value
+    
+    Multiple example input formats are supported for user convenience:
+    
+    1. Direct AsciiDoc string:
+       "example": ".Example\n[,yaml]\n----\nredpanda:\n  property_name: value\n----"
+    
+    2. Multi-line array (each element becomes a line):
+       "example": [
+         ".Example",
+         "[,yaml]",
+         "----",
+         "redpanda:",
+         "  property_name: value",
+         "----"
+       ]
+    
+    3. External file reference:
+       "example_file": "examples/property_name.adoc"
+    
+    4. Auto-formatted YAML with title and description:
+       "example_yaml": {
+         "title": "Example Configuration",
+         "description": "This shows how to configure the property.",
+         "config": {
+           "redpanda": {
+             "property_name": "value"
+           }
+         }
+       }
+    
+    Args:
+        properties: Dictionary of extracted properties from C++ source
+        overrides: Dictionary loaded from overrides JSON file
+        overrides_file_path: Path to the overrides file (for resolving relative example_file paths)
+    
+    Returns:
+        Updated properties dictionary with overrides applied
     """
     if overrides and "properties" in overrides:
         for prop, override in overrides["properties"].items():
-            if prop in properties and "description" in override:
-                properties[prop]["description"] = override["description"]
+            if prop in properties:
+                # Apply description override
+                if "description" in override:
+                    properties[prop]["description"] = override["description"]
+                
+                # Apply example override with multiple input format support
+                example_content = _process_example_override(override, overrides_file_path)
+                if example_content:
+                    properties[prop]["example"] = example_content
+                
+                # Apply default override
+                if "default" in override:
+                    properties[prop]["default"] = override["default"]
     return properties
+
+
+def _process_example_override(override, overrides_file_path=None):
+    """
+    Process example overrides in various user-friendly formats.
+    
+    Supports multiple input formats for examples:
+    1. Direct string: "example": "content"
+    2. Multi-line array: "example": ["line1", "line2", ...]
+    3. External file: "example_file": "path/to/file"
+    4. Auto-formatted YAML: "example_yaml": {...}
+    
+    Args:
+        override: Dictionary containing override data for a property
+        overrides_file_path: Path to the overrides file (for resolving relative paths)
+    
+    Returns:
+        Processed AsciiDoc example content as string, or None if no example found
+    """
+    # Format 1: Direct AsciiDoc string
+    if "example" in override:
+        example = override["example"]
+        if isinstance(example, str):
+            return example
+        elif isinstance(example, list):
+            # Format 2: Multi-line array - join with newlines
+            return "\n".join(example)
+    
+    # Format 3: External file reference
+    if "example_file" in override:
+        file_path = override["example_file"]
+        
+        # Support both absolute and relative paths
+        if not os.path.isabs(file_path):
+            # Build search paths starting with the overrides file directory
+            search_paths = []
+            
+            # If we have the overrides file path, try relative to its directory first
+            if overrides_file_path:
+                overrides_dir = os.path.dirname(overrides_file_path)
+                search_paths.append(os.path.join(overrides_dir, file_path))
+            
+            # Then try common locations relative to current working directory
+            search_paths.extend([
+                file_path,
+                os.path.join("examples", file_path),
+                os.path.join("docs-data", file_path),
+                os.path.join("__tests__", "docs-data", file_path)
+            ])
+            
+            found_path = None
+            for search_path in search_paths:
+                if os.path.exists(search_path):
+                    found_path = search_path
+                    break
+            
+            if found_path:
+                file_path = found_path
+            else:
+                print(f"Warning: Example file not found: {override['example_file']}")
+                print(f"Searched in: {', '.join(search_paths)}")
+                return None
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return f.read().strip()
+        except Exception as e:
+            print(f"Error reading example file {file_path}: {e}")
+            return None
+    
+    # Format 4: Auto-formatted YAML configuration
+    if "example_yaml" in override:
+        yaml_data = override["example_yaml"]
+        title = yaml_data.get("title", "Example")
+        description = yaml_data.get("description", "")
+        config = yaml_data.get("config", {})
+        
+        # Build AsciiDoc content
+        lines = [f".{title}"]
+        if description:
+            lines.append(f"{description}\n")
+        
+        lines.extend([
+            "[,yaml]",
+            "----"
+        ])
+        
+        # Convert config to YAML and add to lines
+        try:
+            yaml_content = yaml.dump(config, default_flow_style=False, indent=2)
+            lines.append(yaml_content.rstrip())
+        except Exception as e:
+            print(f"Error formatting YAML config: {e}")
+            return None
+        
+        lines.append("----")
+        
+        return "\n".join(lines)
+    
+    return None
 
 
 def add_config_scope(properties):
@@ -584,7 +738,7 @@ def main():
     # This is where the magic happens for one_or_many_property types:
     
     # 1. Apply any description overrides from external override files
-    properties = apply_description_overrides(properties, overrides)
+    properties = apply_property_overrides(properties, overrides, options.overrides)
     
     # 2. Add config_scope field based on which source file defines the property
     properties = add_config_scope(properties)
