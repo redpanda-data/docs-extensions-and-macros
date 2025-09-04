@@ -1,12 +1,47 @@
 {
   "properties": {
-    "log_segment_size": {
-      "description": "Overrides the log segment size property description for testing.",
-      "example": "134217728"
+    "admin": {
+      "description": "Network addresses for Admin API servers. This property accepts an array of broker endpoints, allowing multiple Admin API listeners on different addresses and ports.",
+      "example_file": "examples/admin-example.adoc"
     },
-    "auto_create_topics_enabled": {
-      "description": "Allow automatic topic creation if true.",
-      "default": true
+    "admin_api_tls": {
+      "description": "TLS configuration for the Admin API endpoints. This property accepts an array of TLS configurations, allowing multiple Admin API listeners with different TLS settings.",
+      "example_yaml": {
+        "title": "Example TLS Configuration",
+        "description": "This example shows how to configure TLS for the Admin API with client authentication.",
+        "config": {
+          "redpanda": {
+            "admin_api_tls": [
+              {
+                "name": "internal-admin",
+                "enabled": true,
+                "cert_file": "/etc/redpanda/certs/admin.crt",
+                "key_file": "/etc/redpanda/certs/admin.key",
+                "truststore_file": "/etc/redpanda/certs/ca.crt",
+                "require_client_auth": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "abort_index_segment_size": {
+      "description": "Segment size for transaction abort index. Controls how large each abort index segment can grow.",
+      "example": [
+        ".Example: Setting abort index segment size",
+        "[,yaml]",
+        "----",
+        "redpanda:",
+        "  abort_index_segment_size: 134217728  # 128MB",
+        "----",
+        "",
+        "This setting controls the maximum size of abort index segments.",
+        "Smaller segments may improve memory usage but increase overhead."
+      ]
+    },
+    "append_chunk_size": {
+      "description": "Size of data chunks for append operations.",
+      "example": "67108864"
     }
   }
 }

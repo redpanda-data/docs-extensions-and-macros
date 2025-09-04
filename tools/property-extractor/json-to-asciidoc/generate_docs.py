@@ -118,6 +118,12 @@ def parse_arguments():
         required=True,
         help="Directory to save the generated documentation",
     )
+    parser.add_argument(
+        "--input-file",
+        type=str,
+        required=False,
+        help="Path to the input JSON file (relative to current directory). If not provided, uses the default 'gen/properties-output.json'",
+    )
     return parser.parse_args()
 
 def ensure_directory_exists(directory):
@@ -253,7 +259,14 @@ def generate_property_doc(key, value):
     if not description.endswith('.'):
         description += '.'
 
-    lines = [f"=== {value.get('name')}\n\n", f"{description}\n\n"]
+    lines = [f"=== {value.get('name')}\n\n"]
+    
+    # Add version information if present (introduced in version)
+    version = value.get("version")
+    if version:
+        lines.append(f"*Introduced in {version}*\n\n")
+    
+    lines.append(f"{description}\n\n")
 
     property_suffix = value.get("name").split('_')[-1]
     if property_suffix in SUFFIX_TO_UNIT:
@@ -397,7 +410,16 @@ def main():
     page_folder = os.path.join(output_dir, PAGE_FOLDER_NAME)
     error_folder = os.path.join(output_dir, ERROR_FOLDER_NAME)
 
-    data = load_json(INPUT_JSON_PATH, INPUT_JSON_FILE)
+    # Determine input file path
+    if args.input_file:
+        input_file_path = args.input_file
+        input_path = os.path.dirname(input_file_path) if os.path.dirname(input_file_path) else "."
+        input_file = os.path.basename(input_file_path)
+    else:
+        input_path = INPUT_JSON_PATH
+        input_file = INPUT_JSON_FILE
+
+    data = load_json(input_path, input_file)
     properties = data.get("properties", {})
     total_properties = len(properties)
 

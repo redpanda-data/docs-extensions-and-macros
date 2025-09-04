@@ -39,8 +39,10 @@ build: venv redpanda-git treesitter
 		--recursive \
 		--path $(REDPANDA_SRC) \
 		--output gen/properties-output.json \
+		--enhanced-output gen/$(TAG)-properties.json \
 		$(if $(OVERRIDES),$(if $(shell [ -f "$(OVERRIDES)" ] && echo exists),--overrides $(OVERRIDES),),)
 	@echo "✅ JSON generated at $(TOOL_ROOT)/gen/properties-output.json"
+	@echo "✅ Enhanced JSON (with overrides) generated at $(TOOL_ROOT)/gen/$(TAG)-properties.json"
 	@$(MAKE) generate-docs
 
 # --- Ensure Python venv & dependencies ---
@@ -94,10 +96,18 @@ treesitter:
 generate-docs:
 	@echo "📝 Generating AsciiDoc pages in $(OUTPUT_DIR)…"
 	@mkdir -p "$(OUTPUT_DIR)"
-	@cd $(TOOL_ROOT) && \
-	  $(PYTHON) json-to-asciidoc/generate_docs.py --output-dir "$(OUTPUT_DIR)"
-	@echo "📄 Copying properties-output.json to $(OUTPUT_DIR)…"
+	@if [ -f "$(TOOL_ROOT)/gen/$(TAG)-properties.json" ]; then \
+	  cd $(TOOL_ROOT) && \
+	    $(PYTHON) json-to-asciidoc/generate_docs.py --output-dir "$(OUTPUT_DIR)" --input-file "gen/$(TAG)-properties.json"; \
+	else \
+	  cd $(TOOL_ROOT) && \
+	    $(PYTHON) json-to-asciidoc/generate_docs.py --output-dir "$(OUTPUT_DIR)"; \
+	fi
+	@echo "📄 Copying properties JSON files to $(OUTPUT_DIR)…"
 	@cp "$(TOOL_ROOT)/gen/properties-output.json" "$(OUTPUT_DIR)/"
+	@if [ -f "$(TOOL_ROOT)/gen/$(TAG)-properties.json" ]; then \
+	  cp "$(TOOL_ROOT)/gen/$(TAG)-properties.json" "$(OUTPUT_DIR)/"; \
+	fi
 	@echo "✅ Docs generated at $(OUTPUT_DIR)"
 
 # --- Debug helper to print all the key paths/vars ---

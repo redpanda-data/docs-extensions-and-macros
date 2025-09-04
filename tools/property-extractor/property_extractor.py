@@ -194,8 +194,9 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
     This function allows customizing property documentation by providing overrides for:
     
     1. description: Override the auto-extracted property description with custom text
-    2. example: Add AsciiDoc example sections with flexible input formats (see below)
-    3. default: Override the auto-extracted default value
+    2. version: Add version information showing when the property was introduced
+    3. example: Add AsciiDoc example sections with flexible input formats (see below)
+    4. default: Override the auto-extracted default value
     
     Multiple example input formats are supported for user convenience:
     
@@ -240,6 +241,10 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
                 # Apply description override
                 if "description" in override:
                     properties[prop]["description"] = override["description"]
+                
+                # Apply version override (introduced in version)
+                if "version" in override:
+                    properties[prop]["version"] = override["version"]
                 
                 # Apply example override with multiple input format support
                 example_content = _process_example_override(override, overrides_file_path)
@@ -663,6 +668,13 @@ def main():
         )
 
         arg_parser.add_argument(
+            "--enhanced-output",
+            type=str,
+            required=False,
+            help="File to store the enhanced JSON output with overrides applied (e.g., 'dev-properties.json')",
+        )
+
+        arg_parser.add_argument(
             "--definitions",
             type=str,
             required=False,
@@ -734,37 +746,60 @@ def main():
     )
     properties = transform_files_with_properties(files_with_properties)
 
-    # Apply post-processing transformations to resolve types and expand defaults
-    # This is where the magic happens for one_or_many_property types:
+    # First, create the original properties without overrides for the base JSON output
+    # 1. Add config_scope field based on which source file defines the property
+    original_properties = add_config_scope(properties.copy())
     
+    # 2. Resolve type references and expand default values for original properties
+    original_properties = resolve_type_and_default(original_properties, definitions)
+    
+    # Generate original properties JSON (without overrides)
+    original_properties_and_definitions = merge_properties_and_definitions(
+        original_properties, definitions
+    )
+    original_json_output = json.dumps(original_properties_and_definitions, indent=4, sort_keys=True)
+
+    # Now create enhanced properties with overrides applied
     # 1. Apply any description overrides from external override files
-    properties = apply_property_overrides(properties, overrides, options.overrides)
+    enhanced_properties = apply_property_overrides(properties, overrides, options.overrides)
     
     # 2. Add config_scope field based on which source file defines the property
-    properties = add_config_scope(properties)
+    enhanced_properties = add_config_scope(enhanced_properties)
     
     # 3. Resolve type references and expand default values
     # This step converts:
     # - C++ type names (model::broker_endpoint) to JSON schema types (object)  
     # - C++ constructor defaults to structured JSON objects
     # - Single object defaults to arrays for one_or_many_property types
-    properties = resolve_type_and_default(properties, definitions)
+    enhanced_properties = resolve_type_and_default(enhanced_properties, definitions)
 
-    properties_and_definitions = merge_properties_and_definitions(
-        properties, definitions
+    # Generate enhanced properties JSON (with overrides)
+    enhanced_properties_and_definitions = merge_properties_and_definitions(
+        enhanced_properties, definitions
     )
+    enhanced_json_output = json.dumps(enhanced_properties_and_definitions, indent=4, sort_keys=True)
 
-    json_output = json.dumps(properties_and_definitions, indent=4, sort_keys=True)
-
+    # Write original properties file (for backward compatibility)
     if options.output:
         try:
             with open(options.output, "w+") as json_file:
-                json_file.write(json_output)
+                json_file.write(original_json_output)
+            print(f"✅ Original properties JSON generated at {options.output}")
         except IOError as e:
-            logging.error(f"Failed to write output file: {e}")
+            logging.error(f"Failed to write original output file: {e}")
             sys.exit(1)
     else:
-        print(json_output)
+        print(original_json_output)
+
+    # Write enhanced properties file (with overrides applied)
+    if options.enhanced_output:
+        try:
+            with open(options.enhanced_output, "w+") as json_file:
+                json_file.write(enhanced_json_output)
+            print(f"✅ Enhanced properties JSON (with overrides) generated at {options.enhanced_output}")
+        except IOError as e:
+            logging.error(f"Failed to write enhanced output file: {e}")
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()
