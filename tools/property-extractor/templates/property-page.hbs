@@ -1,0 +1,22 @@
+= {{pageTitle}}
+{{#if pageAliases}}
+:page-aliases: {{join pageAliases ", "}}
+{{/if}}
+:description: {{description}}
+
+{{{intro}}}
+
+{{#if sectionTitle}}
+== {{sectionTitle}}
+{{/if}}
+
+{{#if sectionIntro}}
+{{{sectionIntro}}}
+{{/if}}
+
+{{#each groups}}
+{{#each this.properties}}
+{{> property}}
+
+{{/each}}
+{{/each}}

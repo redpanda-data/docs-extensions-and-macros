@@ -445,6 +445,78 @@ def resolve_type_and_default(properties, definitions):
             args.append(current.strip())
         return type_name, args
 
+    def process_cpp_patterns(arg_str):
+        """
+        Process specific C++ patterns to user-friendly values.
+        
+        Handles:
+        - net::unresolved_address("127.0.0.1", 9092) -> expands based on type definition
+        - std::nullopt -> null
+        - fips_mode_flag::disabled -> "disabled"
+        """
+        arg_str = arg_str.strip()
+        
+        # Handle std::nullopt -> null
+        if arg_str == "std::nullopt":
+            return "null"
+        
+        # Handle enum-like patterns (such as fips_mode_flag::disabled -> "disabled")
+        enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)', arg_str)
+        if enum_match:
+            enum_value = enum_match.group(1)
+            return f'"{enum_value}"'
+        
+        # Handle default constructors and their default values
+        # This handles cases where C++ default constructors are used but should map to specific values
+        
+        # Pattern 1: Full constructor syntax like config::leaders_preference{}
+        constructor_patterns = {
+            r'config::leaders_preference\{\}': '"none"',  # Based on C++ code analysis
+            r'std::chrono::seconds\{0\}': '0',
+            r'std::chrono::milliseconds\{0\}': '0',
+            r'model::timeout_clock::duration\{\}': '0',
+            r'config::data_directory_path\{\}': '""',
+            r'std::optional<[^>]+>\{\}': 'null',  # Empty optional
+        }
+        
+        for pattern, replacement in constructor_patterns.items():
+            if re.match(pattern, arg_str):
+                return replacement
+        
+        # Pattern 2: Truncated type names that likely came from default constructors
+        # These are cases where tree-sitter parsing truncated "config::type{}" to just "type"
+        truncated_patterns = {
+            'leaders_preference': '"none"',  # config::leaders_preference{} -> none
+            'data_directory_path': '""',     # config::data_directory_path{} -> empty string
+            'timeout_clock_duration': '0',   # model::timeout_clock::duration{} -> 0
+            'log_level': '"info"',           # Default log level
+            'compression_type': '"none"',    # Default compression
+        }
+        
+        # Check if arg_str is exactly one of these truncated patterns
+        if arg_str in truncated_patterns:
+            return truncated_patterns[arg_str]
+        
+        # Pattern 3: Handle remaining default constructor syntax generically
+        generic_constructor_match = re.match(r'[a-zA-Z0-9_:]+\{\}', arg_str)
+        if generic_constructor_match:
+            # For unknown constructors, try to infer a reasonable default
+            type_name = arg_str[:-2]  # Remove the {}
+            if 'duration' in type_name.lower() or 'time' in type_name.lower():
+                return '0'
+            elif 'path' in type_name.lower() or 'directory' in type_name.lower():
+                return '""'
+            elif 'optional' in type_name.lower():
+                return 'null'
+            else:
+                return '""'  # Conservative default to empty string
+        
+        # Handle string concatenation with + operator (such as "128_kib + 1")
+        if " + " in arg_str:
+            return f'"{arg_str}"'
+        
+        return arg_str
+
     def expand_default(type_name, default_str):
         """
         Expand C++ default values into structured JSON objects.
@@ -457,6 +529,18 @@ def resolve_type_and_default(properties, definitions):
         # Handle non-string defaults
         if not isinstance(default_str, str):
             return default_str
+        
+        # Apply C++ pattern processing for simple cases (not complex constructor calls)
+        if not ("(" in default_str and "::" in default_str):
+            processed = process_cpp_patterns(default_str)
+            if processed != default_str:
+                # Pattern was processed, return the result
+                if processed == "null":
+                    return None
+                elif processed.startswith('"') and processed.endswith('"'):
+                    return ast.literal_eval(processed)
+                else:
+                    return processed
             
         type_def = resolve_definition_type(definitions.get(type_name, {}))
         if "enum" in type_def:
@@ -466,52 +550,112 @@ def resolve_type_and_default(properties, definitions):
             tname, args = parse_constructor(default_str)
             if tname is None:
                 return default_str
+            
             props = list(type_def["properties"].keys())
             result = {}
+            
+            # For each constructor argument, try to expand it and map to the correct property
             for i, prop in enumerate(props):
                 prop_def = type_def["properties"][prop]
                 if "$ref" in prop_def:
                     sub_type = prop_def["$ref"].split("/")[-1]
                 else:
                     sub_type = prop_def.get("type")
+                    
                 if i < len(args):
                     arg = args[i]
                     # Check if this argument is a nested constructor call
                     if "(" in arg and "::" in arg:
-                        # Extract the actual constructor type name
+                        # Parse the nested constructor
                         nested_tname, nested_args = parse_constructor(arg)
-                        if nested_tname:
-                            # This is a nested constructor, recursively expand it using its actual type
-                            expanded_arg = expand_default(nested_tname, arg)
-                            if isinstance(expanded_arg, dict):
-                                # If the expanded argument is an object, and we're at the first argument,
-                                # it might be that this constructor takes the expanded fields as separate arguments
+                        if nested_tname and nested_tname in definitions:
+                            # Get the definition for the nested type
+                            nested_type_def = resolve_definition_type(definitions.get(nested_tname, {}))
+                            nested_props = list(nested_type_def.get("properties", {}).keys())
+                            
+                            # Expand the nested constructor by mapping its arguments to its properties
+                            nested_result = {}
+                            for j, nested_prop in enumerate(nested_props):
+                                nested_prop_def = nested_type_def["properties"][nested_prop]
+                                if j < len(nested_args):
+                                    nested_arg = nested_args[j]
+                                    # Apply simple C++ pattern processing to the argument
+                                    processed_nested_arg = process_cpp_patterns(nested_arg)
+                                    
+                                    # Convert the processed argument based on the property type
+                                    if nested_prop_def.get("type") == "string":
+                                        if processed_nested_arg.startswith('"') and processed_nested_arg.endswith('"'):
+                                            nested_result[nested_prop] = ast.literal_eval(processed_nested_arg)
+                                        else:
+                                            nested_result[nested_prop] = processed_nested_arg
+                                    elif nested_prop_def.get("type") == "integer":
+                                        try:
+                                            nested_result[nested_prop] = int(processed_nested_arg)
+                                        except ValueError:
+                                            nested_result[nested_prop] = processed_nested_arg
+                                    elif nested_prop_def.get("type") == "boolean":
+                                        nested_result[nested_prop] = processed_nested_arg.lower() == "true"
+                                    else:
+                                        nested_result[nested_prop] = processed_nested_arg
+                                else:
+                                    nested_result[nested_prop] = None
+                            
+                            # Now we have the expanded nested object, we need to map it to the parent object's properties
+                            # This is where the type-aware mapping happens
+                            
+                            # Special case: if the nested type is net::unresolved_address and parent is broker_endpoint
+                            if nested_tname == "net::unresolved_address" and type_name == "model::broker_endpoint":
+                                # Map net::unresolved_address properties to broker_endpoint
+                                result["address"] = nested_result.get("address")
+                                result["port"] = nested_result.get("port")
+                                # Generate the name field from address:port
+                                if result["address"] and result["port"]:
+                                    result["name"] = f"{result['address']}:{result['port']}"
+                                else:
+                                    result["name"] = None
+                                # Fill any remaining properties with None
+                                for remaining_prop in props:
+                                    if remaining_prop not in result:
+                                        result[remaining_prop] = None
+                                break
+                            else:
+                                # General case: if we have a single nested constructor argument,
+                                # try to merge its properties into the parent
                                 if i == 0 and len(args) == 1:
-                                    # Single nested constructor - merge its fields into the result
-                                    result.update(expanded_arg)
-                                    # For remaining properties, set to None unless they have values from expanded_arg
+                                    result.update(nested_result)
+                                    # Set remaining properties to None
                                     for remaining_prop in props[i+1:]:
                                         if remaining_prop not in result:
                                             result[remaining_prop] = None
                                     break
                                 else:
-                                    result[prop] = expanded_arg
-                            else:
-                                result[prop] = expanded_arg
+                                    # Map the nested object to the current property
+                                    result[prop] = nested_result
                         else:
-                            # Fallback to original logic
+                            # Fallback: recursively expand with the expected property type
                             expanded_arg = expand_default(sub_type, arg)
                             result[prop] = expanded_arg
                     else:
                         # Simple value, parse based on the property type
+                        # First apply C++ pattern processing
+                        processed_arg = process_cpp_patterns(arg)
+                        
                         if sub_type == "string":
-                            result[prop] = ast.literal_eval(arg) if arg.startswith('"') else arg
+                            # If processed_arg is already quoted, use ast.literal_eval, otherwise keep as is
+                            if processed_arg.startswith('"') and processed_arg.endswith('"'):
+                                result[prop] = ast.literal_eval(processed_arg)
+                            else:
+                                result[prop] = processed_arg
                         elif sub_type == "integer":
-                            result[prop] = int(arg)
+                            try:
+                                result[prop] = int(processed_arg)
+                            except ValueError:
+                                # If conversion fails, keep as string (might be processed C++ pattern)
+                                result[prop] = processed_arg
                         elif sub_type == "boolean":
-                            result[prop] = arg.lower() == "true"
+                            result[prop] = processed_arg.lower() == "true"
                         else:
-                            result[prop] = arg
+                            result[prop] = processed_arg
                 else:
                     result[prop] = None
             return result
@@ -522,7 +666,7 @@ def resolve_type_and_default(properties, definitions):
             #
             # Example transformation:
             # C++: {model::broker_endpoint(net::unresolved_address("127.0.0.1", 9644))}
-            # JSON: [{"address": "127.0.0.1", "port": 9644}]
+            # JSON: [{"address": "127.0.0.1", "port": 9644, "name": "127.0.0.1:9644"}]
             if isinstance(default_str, str) and default_str.strip().startswith("{") and default_str.strip().endswith("}"):
                 # This is an initializer list, parse the elements
                 initializer_content = default_str.strip()[1:-1].strip()  # Remove outer braces
@@ -638,6 +782,147 @@ def resolve_type_and_default(properties, definitions):
                         prop["items"]["type"] = resolved_item_type
                     else:
                         prop["items"]["type"] = "object"  # fallback for complex types
+    
+    # Final pass: apply C++ pattern processing to any remaining unprocessed defaults
+    for prop in properties.values():
+        if "default" in prop:
+            default_value = prop["default"]
+            
+            if isinstance(default_value, str):
+                # Process string defaults
+                processed = process_cpp_patterns(default_value)
+                if processed != default_value:
+                    if processed == "null":
+                        prop["default"] = None
+                    elif isinstance(processed, str) and processed.startswith('"') and processed.endswith('"'):
+                        prop["default"] = ast.literal_eval(processed)
+                    else:
+                        prop["default"] = processed
+            
+            elif isinstance(default_value, list):
+                # Process array defaults - apply C++ pattern processing to each element
+                processed_array = []
+                for item in default_value:
+                    if isinstance(item, dict):
+                        # Process each field in the object
+                        processed_item = {}
+                        for field_name, field_value in item.items():
+                            if isinstance(field_value, str) and "::" in field_value and "(" in field_value:
+                                # This field contains a C++ constructor pattern - try to expand it using type definitions
+                                tname, args = parse_constructor(field_value)
+                                if tname and tname in definitions:
+                                    # Get the definition for the nested type and expand the constructor
+                                    nested_type_def = resolve_definition_type(definitions.get(tname, {}))
+                                    if nested_type_def.get("properties"):
+                                        nested_props = list(nested_type_def["properties"].keys())
+                                        nested_result = {}
+                                        
+                                        # Map constructor arguments to type properties
+                                        for j, nested_prop in enumerate(nested_props):
+                                            nested_prop_def = nested_type_def["properties"][nested_prop]
+                                            if j < len(args):
+                                                nested_arg = args[j]
+                                                processed_nested_arg = process_cpp_patterns(nested_arg)
+                                                
+                                                # Convert based on property type
+                                                if nested_prop_def.get("type") == "string":
+                                                    if processed_nested_arg.startswith('"') and processed_nested_arg.endswith('"'):
+                                                        nested_result[nested_prop] = ast.literal_eval(processed_nested_arg)
+                                                    else:
+                                                        nested_result[nested_prop] = processed_nested_arg
+                                                elif nested_prop_def.get("type") == "integer":
+                                                    try:
+                                                        nested_result[nested_prop] = int(processed_nested_arg)
+                                                    except ValueError:
+                                                        nested_result[nested_prop] = processed_nested_arg
+                                                elif nested_prop_def.get("type") == "boolean":
+                                                    nested_result[nested_prop] = processed_nested_arg.lower() == "true"
+                                                else:
+                                                    nested_result[nested_prop] = processed_nested_arg
+                                            else:
+                                                nested_result[nested_prop] = None
+                                        
+                                        # For special case of net::unresolved_address inside broker_authn_endpoint
+                                        if tname == "net::unresolved_address":
+                                            # Replace the entire object with expanded net::unresolved_address values
+                                            # Only include the fields that are actually defined in the type
+                                            processed_item.update(nested_result)
+                                            break  # Don't process other fields since we replaced the whole object
+                                        else:
+                                            processed_item[field_name] = nested_result
+                                    else:
+                                        # Fallback to simple pattern processing
+                                        processed_field = process_cpp_patterns(field_value)
+                                        if processed_field == "null":
+                                            processed_item[field_name] = None
+                                        elif isinstance(processed_field, str) and processed_field.startswith('"') and processed_field.endswith('"'):
+                                            processed_item[field_name] = ast.literal_eval(processed_field)
+                                        else:
+                                            processed_item[field_name] = processed_field
+                                else:
+                                    # Fallback to simple pattern processing
+                                    processed_field = process_cpp_patterns(field_value)
+                                    if processed_field == "null":
+                                        processed_item[field_name] = None
+                                    elif isinstance(processed_field, str) and processed_field.startswith('"') and processed_field.endswith('"'):
+                                        processed_item[field_name] = ast.literal_eval(processed_field)
+                                    else:
+                                        processed_item[field_name] = processed_field
+                            elif isinstance(field_value, str):
+                                # Simple string field - apply C++ pattern processing
+                                processed_field = process_cpp_patterns(field_value)
+                                if processed_field == "null":
+                                    processed_item[field_name] = None
+                                elif isinstance(processed_field, str) and processed_field.startswith('"') and processed_field.endswith('"'):
+                                    processed_item[field_name] = ast.literal_eval(processed_field)
+                                else:
+                                    processed_item[field_name] = processed_field
+                            else:
+                                processed_item[field_name] = field_value
+                        processed_array.append(processed_item)
+                    else:
+                        # Non-object array item
+                        if isinstance(item, str):
+                            processed_item = process_cpp_patterns(item)
+                            if processed_item == "null":
+                                processed_array.append(None)
+                            elif isinstance(processed_item, str) and processed_item.startswith('"') and processed_item.endswith('"'):
+                                processed_array.append(ast.literal_eval(processed_item))
+                            else:
+                                processed_array.append(processed_item)
+                        else:
+                            processed_array.append(item)
+                prop["default"] = processed_array
+            
+            elif isinstance(default_value, dict):
+                # Process object defaults - apply C++ pattern processing to each field
+                processed_object = {}
+                for field_name, field_value in default_value.items():
+                    if isinstance(field_value, str):
+                        processed_field = process_cpp_patterns(field_value)
+                        if processed_field == "null":
+                            processed_object[field_name] = None
+                        elif isinstance(processed_field, str) and processed_field.startswith('"') and processed_field.endswith('"'):
+                            processed_object[field_name] = ast.literal_eval(processed_field)
+                        else:
+                            processed_object[field_name] = processed_field
+                    else:
+                        processed_object[field_name] = field_value
+                prop["default"] = processed_object
+        
+        # Handle unresolved C++ types
+        prop_type = prop.get("type")
+        if isinstance(prop_type, str):
+            # Check if it's an unresolved C++ type (contains :: or ends with >)
+            if ("::" in prop_type or prop_type.endswith(">") or 
+                prop_type.endswith("_t") or prop_type.startswith("std::")):
+                # Default unresolved C++ types to string, unless they look like numbers
+                if any(word in prop_type.lower() for word in ["int", "long", "short", "double", "float", "number"]):
+                    prop["type"] = "integer"
+                elif any(word in prop_type.lower() for word in ["bool"]):
+                    prop["type"] = "boolean"
+                else:
+                    prop["type"] = "string"
                         
     return properties
 
@@ -671,7 +956,7 @@ def main():
             "--enhanced-output",
             type=str,
             required=False,
-            help="File to store the enhanced JSON output with overrides applied (e.g., 'dev-properties.json')",
+            help="File to store the enhanced JSON output with overrides applied (such as 'dev-properties.json')",
         )
 
         arg_parser.add_argument(

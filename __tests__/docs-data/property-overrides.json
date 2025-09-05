@@ -1,11 +1,13 @@
 {
   "properties": {
     "admin": {
-      "description": "Network addresses for Admin API servers. This property accepts an array of broker endpoints, allowing multiple Admin API listeners on different addresses and ports.",
+      "description": "Network addresses for Admin API servers with version info.",
+      "version": "v23.1.0",
       "example_file": "examples/admin-example.adoc"
     },
     "admin_api_tls": {
-      "description": "TLS configuration for the Admin API endpoints. This property accepts an array of TLS configurations, allowing multiple Admin API listeners with different TLS settings.",
+      "description": "TLS configuration for the Admin API endpoints.",
+      "version": "v23.2.0",
       "example_yaml": {
         "title": "Example TLS Configuration",
         "description": "This example shows how to configure TLS for the Admin API with client authentication.",
@@ -41,6 +43,7 @@
     },
     "append_chunk_size": {
       "description": "Size of data chunks for append operations.",
+      "version": "v24.1.0",
       "example": "67108864"
     }
   }

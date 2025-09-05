@@ -92,16 +92,22 @@ treesitter:
 	@echo "🔧 Generating parser in $(TREESITTER_DIR)…"
 	@cd "$(TREESITTER_DIR)" && npm install --silent && $(TREE_SITTER) generate
 
+# --- Install Node.js dependencies for Handlebars ---
+node-deps:
+	@echo "📦 Installing Node.js dependencies…"
+	@cd $(TOOL_ROOT) && npm install --silent
+
 # --- Turn the JSON into AsciiDoc pages under autogen/<version>/properties ---
-generate-docs:
+generate-docs: node-deps
 	@echo "📝 Generating AsciiDoc pages in $(OUTPUT_DIR)…"
 	@mkdir -p "$(OUTPUT_DIR)"
+	@# Use the enhanced properties file (with overrides) for documentation generation if it exists
 	@if [ -f "$(TOOL_ROOT)/gen/$(TAG)-properties.json" ]; then \
 	  cd $(TOOL_ROOT) && \
-	    $(PYTHON) json-to-asciidoc/generate_docs.py --output-dir "$(OUTPUT_DIR)" --input-file "gen/$(TAG)-properties.json"; \
+	    node generate-handlebars-docs.js "gen/$(TAG)-properties.json" "$(OUTPUT_DIR)"; \
 	else \
 	  cd $(TOOL_ROOT) && \
-	    $(PYTHON) json-to-asciidoc/generate_docs.py --output-dir "$(OUTPUT_DIR)"; \
+	    node generate-handlebars-docs.js "gen/properties-output.json" "$(OUTPUT_DIR)"; \
 	fi
 	@echo "📄 Copying properties JSON files to $(OUTPUT_DIR)…"
 	@cp "$(TOOL_ROOT)/gen/properties-output.json" "$(OUTPUT_DIR)/"
