@@ -71,6 +71,128 @@ from transformers import *
 logger = logging.getLogger("viewer")
 
 
+def resolve_cpp_function_call(function_name):
+    """
+    Dynamically resolve C++ function calls to their return values by searching the source code.
+    
+    Args:
+        function_name: The C++ function name (e.g., "model::kafka_audit_logging_topic")
+    
+    Returns:
+        The resolved string value or None if not found
+    """
+    # Map function names to likely search patterns and file locations
+    search_patterns = {
+        'model::kafka_audit_logging_topic': {
+            'patterns': [
+                r'inline\s+const\s+model::topic\s+kafka_audit_logging_topic\s*\(\s*"([^"]+)"\s*\)',
+                r'const\s+model::topic\s+kafka_audit_logging_topic\s*\(\s*"([^"]+)"\s*\)',
+                r'model::topic\s+kafka_audit_logging_topic\s*\(\s*"([^"]+)"\s*\)',
+                r'std::string_view\s+kafka_audit_logging_topic\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"',
+                r'inline\s+std::string_view\s+kafka_audit_logging_topic\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"'
+            ],
+            'files': ['src/v/model/namespace.h', 'src/v/model/namespace.cc', 'src/v/model/kafka_namespace.h']
+        },
+        'model::kafka_consumer_offsets_topic': {
+            'patterns': [
+                r'inline\s+const\s+model::topic\s+kafka_consumer_offsets_topic\s*\(\s*"([^"]+)"\s*\)',
+                r'const\s+model::topic\s+kafka_consumer_offsets_topic\s*\(\s*"([^"]+)"\s*\)',
+                r'model::topic\s+kafka_consumer_offsets_topic\s*\(\s*"([^"]+)"\s*\)',
+                r'std::string_view\s+kafka_consumer_offsets_topic\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"',
+                r'inline\s+std::string_view\s+kafka_consumer_offsets_topic\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"'
+            ],
+            'files': ['src/v/model/namespace.h', 'src/v/model/namespace.cc', 'src/v/model/kafka_namespace.h']
+        },
+        'model::kafka_internal_namespace': {
+            'patterns': [
+                r'inline\s+const\s+model::ns\s+kafka_internal_namespace\s*\(\s*"([^"]+)"\s*\)',
+                r'const\s+model::ns\s+kafka_internal_namespace\s*\(\s*"([^"]+)"\s*\)',
+                r'model::ns\s+kafka_internal_namespace\s*\(\s*"([^"]+)"\s*\)',
+                r'std::string_view\s+kafka_internal_namespace\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"',
+                r'inline\s+std::string_view\s+kafka_internal_namespace\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"'
+            ],
+            'files': ['src/v/model/namespace.h', 'src/v/model/namespace.cc', 'src/v/model/kafka_namespace.h']
+        }
+    }
+    
+    # Check if we have search patterns for this function
+    if function_name not in search_patterns:
+        logger.debug(f"No search patterns defined for function: {function_name}")
+        return None
+    
+    config = search_patterns[function_name]
+    
+    # Try to find the Redpanda source directory
+    # Look for it in the standard locations used by the property extractor
+    redpanda_source_paths = [
+        'tmp/redpanda',  # Current directory
+        '../tmp/redpanda',  # Parent directory  
+        'tools/property-extractor/tmp/redpanda',  # From project root
+        os.path.join(os.getcwd(), 'tools', 'property-extractor', 'tmp', 'redpanda')
+    ]
+    
+    redpanda_source = None
+    for path in redpanda_source_paths:
+        if os.path.exists(path):
+            redpanda_source = path
+            break
+    
+    if not redpanda_source:
+        logger.warning(f"Could not find Redpanda source directory to resolve function: {function_name}")
+        return None
+    
+    # Search in the specified files
+    for file_path in config['files']:
+        full_path = os.path.join(redpanda_source, file_path)
+        if not os.path.exists(full_path):
+            continue
+            
+        try:
+            with open(full_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            # Try each pattern
+            for pattern in config['patterns']:
+                match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+                if match:
+                    resolved_value = match.group(1)
+                    logger.debug(f"Resolved {function_name}() -> '{resolved_value}' from {file_path}")
+                    return resolved_value
+                    
+        except Exception as e:
+            logger.debug(f"Error reading {full_path}: {e}")
+            continue
+    
+    # If not found in specific files, do a broader search
+    logger.debug(f"Function {function_name} not found in expected files, doing broader search...")
+    
+    # Search more broadly in the model directory
+    model_dir = os.path.join(redpanda_source, 'src', 'v', 'model')
+    if os.path.exists(model_dir):
+        for root, dirs, files in os.walk(model_dir):
+            for file in files:
+                if file.endswith('.h') or file.endswith('.cc'):
+                    file_path = os.path.join(root, file)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        
+                        # Try patterns for this file
+                        for pattern in config['patterns']:
+                            match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+                            if match:
+                                resolved_value = match.group(1)
+                                logger.debug(f"Resolved {function_name}() -> '{resolved_value}' from {file_path}")
+                                return resolved_value
+                                
+                    except Exception as e:
+                        logger.debug(f"Error reading {file_path}: {e}")
+                        continue
+    
+    logger.warning(f"Could not resolve function call: {function_name}()")
+    return None
+
+
 def validate_paths(options):
     path = options.path
 
@@ -347,7 +469,9 @@ def _process_example_override(override, overrides_file_path=None):
             yaml_content = yaml.dump(config, default_flow_style=False, indent=2)
             lines.append(yaml_content.rstrip())
         except Exception as e:
-            print(f"Error formatting YAML config: {e}")
+            import traceback
+            logger.error(f"Error formatting YAML config: {e}")
+            logger.debug(f"Full traceback:\n{traceback.format_exc()}")
             return None
         
         lines.append("----")
@@ -453,12 +577,22 @@ def resolve_type_and_default(properties, definitions):
         - net::unresolved_address("127.0.0.1", 9092) -> expands based on type definition
         - std::nullopt -> null
         - fips_mode_flag::disabled -> "disabled"
+        - model::kafka_audit_logging_topic() -> dynamically looked up from source
         """
         arg_str = arg_str.strip()
         
         # Handle std::nullopt -> null
         if arg_str == "std::nullopt":
             return "null"
+        
+        # Handle C++ function calls that return constant values
+        # Dynamically look up function return values from the source code
+        function_call_match = re.match(r'([a-zA-Z0-9_:]+)\(\)', arg_str)
+        if function_call_match:
+            function_name = function_call_match.group(1)
+            resolved_value = resolve_cpp_function_call(function_name)
+            if resolved_value is not None:
+                return f'"{resolved_value}"'
         
         # Handle enum-like patterns (such as fips_mode_flag::disabled -> "disabled")
         enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)', arg_str)
@@ -671,18 +805,67 @@ def resolve_type_and_default(properties, definitions):
                 # This is an initializer list, parse the elements
                 initializer_content = default_str.strip()[1:-1].strip()  # Remove outer braces
                 if initializer_content:
-                    # For now, assume single element. Could be extended for multiple elements separated by commas
-                    element_str = initializer_content
+                    # Parse multiple comma-separated elements
+                    elements = []
+                    current_element = ""
+                    paren_depth = 0
+                    in_quotes = False
+                    
+                    # Parse elements while respecting nested parentheses and quoted strings
+                    for char in initializer_content:
+                        if char == '"' and (not current_element or current_element[-1] != '\\'):
+                            in_quotes = not in_quotes
+                        
+                        if not in_quotes:
+                            if char == '(':
+                                paren_depth += 1
+                            elif char == ')':
+                                paren_depth -= 1
+                            elif char == ',' and paren_depth == 0:
+                                # Found a top-level comma, this is a separator
+                                if current_element.strip():
+                                    elements.append(current_element.strip())
+                                current_element = ""
+                                continue
+                        
+                        current_element += char
+                    
+                    # Add the last element
+                    if current_element.strip():
+                        elements.append(current_element.strip())
+                    
                     # Try to determine the item type from the type_def
                     items_def = type_def.get("items", {})
                     if "$ref" in items_def:
                         item_type_name = items_def["$ref"].split("/")[-1]
                     else:
-                        item_type_name = items_def.get("type", "object")
+                        item_type_name = items_def.get("type", "string")  # Default to string for arrays
                     
-                    # Parse the element as if it were a single constructor
-                    expanded_element = expand_default(item_type_name, element_str)
-                    return [expanded_element]
+                    # Process each element
+                    result_array = []
+                    for element_str in elements:
+                        # Check if this element is a function call that needs resolution
+                        if "::" in element_str and element_str.endswith("()"):
+                            # This is a function call, resolve it
+                            resolved_value = process_cpp_patterns(element_str)
+                            if resolved_value.startswith('"') and resolved_value.endswith('"'):
+                                # Remove quotes from resolved string values
+                                result_array.append(ast.literal_eval(resolved_value))
+                            else:
+                                result_array.append(resolved_value)
+                        elif element_str.startswith('"') and element_str.endswith('"'):
+                            # This is a quoted string, parse it
+                            result_array.append(ast.literal_eval(element_str))
+                        elif item_type_name == "string":
+                            # For string items, expand using the item type (might be constructor)
+                            expanded_element = expand_default(item_type_name, element_str)
+                            result_array.append(expanded_element)
+                        else:
+                            # For other types, expand using the item type
+                            expanded_element = expand_default(item_type_name, element_str)
+                            result_array.append(expanded_element)
+                    
+                    return result_array
                 else:
                     return []
             else:
@@ -744,11 +927,67 @@ def resolve_type_and_default(properties, definitions):
         elif prop.get("type") == "array" and isinstance(prop.get("default"), str):
             default_str = prop["default"]
             if default_str.strip().startswith("{") and default_str.strip().endswith("}"):
-                # This is an initializer list for an array, expand it
-                items_type = prop.get("items", {}).get("type")
-                if items_type and items_type in definitions:
-                    expanded = expand_default(items_type, default_str)
-                    prop["default"] = expanded
+                # This is an initializer list for an array, expand it using the same logic as expand_default
+                initializer_content = default_str.strip()[1:-1].strip()  # Remove outer braces
+                if initializer_content:
+                    # Parse multiple comma-separated elements
+                    elements = []
+                    current_element = ""
+                    paren_depth = 0
+                    in_quotes = False
+                    
+                    # Parse elements while respecting nested parentheses and quoted strings
+                    for char in initializer_content:
+                        if char == '"' and (not current_element or current_element[-1] != '\\'):
+                            in_quotes = not in_quotes
+                        
+                        if not in_quotes:
+                            if char == '(':
+                                paren_depth += 1
+                            elif char == ')':
+                                paren_depth -= 1
+                            elif char == ',' and paren_depth == 0:
+                                # Found a top-level comma, this is a separator
+                                if current_element.strip():
+                                    elements.append(current_element.strip())
+                                current_element = ""
+                                continue
+                        
+                        current_element += char
+                    
+                    # Add the last element
+                    if current_element.strip():
+                        elements.append(current_element.strip())
+                    
+                    # Get the item type from the property definition
+                    items_type = prop.get("items", {}).get("type", "string")
+                    
+                    # Process each element
+                    result_array = []
+                    for element_str in elements:
+                        # Check if this element is a function call that needs resolution
+                        if "::" in element_str and element_str.endswith("()"):
+                            # This is a function call, resolve it
+                            resolved_value = process_cpp_patterns(element_str)
+                            if resolved_value.startswith('"') and resolved_value.endswith('"'):
+                                # Remove quotes from resolved string values
+                                result_array.append(ast.literal_eval(resolved_value))
+                            else:
+                                result_array.append(resolved_value)
+                        elif element_str.startswith('"') and element_str.endswith('"'):
+                            # This is a quoted string, parse it
+                            result_array.append(ast.literal_eval(element_str))
+                        elif items_type in definitions:
+                            # For complex types, expand using the item type
+                            expanded_element = expand_default(items_type, element_str)
+                            result_array.append(expanded_element)
+                        else:
+                            # For simple types, just use the element as-is (likely a string)
+                            result_array.append(element_str)
+                    
+                    prop["default"] = result_array
+                else:
+                    prop["default"] = []
         
         # Handle array properties where the default is a single object but should be an array
         # This is crucial for one_or_many_property types that are detected as arrays

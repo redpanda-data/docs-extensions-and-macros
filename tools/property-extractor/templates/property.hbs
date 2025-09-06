@@ -20,7 +20,7 @@ No description available.
 {{/if}}
 {{/if}}
 {{#if (ne defined_in "src/v/config/node_config.cc")}}
-{{#if needs_restart}}
+{{#if (ne needs_restart undefined)}}
 *Requires restart:* {{#if needs_restart}}Yes{{else}}No{{/if}}
 
 {{/if}}
@@ -50,10 +50,8 @@ No description available.
 *Default:* `{{formatPropertyValue default type}}`
 
 {{/if}}
-{{#if nullable}}
 *Nullable:* {{#if nullable}}Yes{{else}}No{{/if}}
 
-{{/if}}
 {{#if example}}
 {{{renderPropertyExample this}}}
 {{/if}}

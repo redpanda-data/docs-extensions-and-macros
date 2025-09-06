@@ -8,5 +8,11 @@ module.exports = function join(array, separator) {
   if (!Array.isArray(array)) {
     return '';
   }
+  
+  // Detect and ignore Handlebars options object
+  if (separator && typeof separator === 'object' && (separator.hash !== undefined || separator.data !== undefined)) {
+    separator = undefined;
+  }
+  
   return array.join(separator || ', ');
 };
