@@ -1,4 +1,4 @@
-// Test for property-docs description override functionality using Jest
+// Integration test for property-docs description override functionality using Jest
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
@@ -13,29 +13,48 @@ describe('property-docs description override', () => {
 
   beforeAll(() => {
     tempOutdir = fs.mkdtempSync(path.join(os.tmpdir(), 'property-docs-test-'));
-    // Mock the output file and directory structure
-    const outDir = path.join(tempOutdir, 'properties', 'pages');
-    fs.mkdirSync(outDir, { recursive: true });
-    const overrides = JSON.parse(fs.readFileSync(overridesFile, 'utf8'));
-    const prop = 'cloud_storage_access_key';
-    const expectedDesc = overrides[prop]?.description || 'Overridden description.';
-    // Minimal AsciiDoc content with the override
-    const content = `=== cloud_storage_access_key\n\n${expectedDesc}\n\n*Visibility:* \`user\``;
-    fs.writeFileSync(path.join(outDir, 'object-storage-properties.adoc'), content);
   });
 
   afterAll(() => {
     fs.rmSync(tempOutdir, { recursive: true, force: true });
   });
 
-  it('applies the override description for cloud_storage_access_key', () => {
-    const outFile = path.join(tempOutdir, 'properties', 'pages', 'object-storage-properties.adoc');
+  it('applies the override description for admin property', () => {
+    const command = `node "${docTools}" generate property-docs --tag v25.2.3 --overrides "${overridesFile}" --output-dir "${tempOutdir}"`;
+    
+    try {
+      execSync(command, { 
+        cwd: repoRoot,
+        stdio: 'pipe', // Capture output instead of inheriting
+        timeout: 60000 // 60 second timeout
+      });
+    } catch (error) {
+      console.error('Command failed:', error.message);
+      if (error.stdout) console.error('STDOUT:', error.stdout.toString());
+      if (error.stderr) console.error('STDERR:', error.stderr.toString());
+      throw error;
+    }
+
+    // Check that the generated file exists
+    const outFile = path.join(tempOutdir, 'pages', 'broker-properties.adoc');
     expect(fs.existsSync(outFile)).toBe(true);
+    
+    // Read the generated content
     const content = fs.readFileSync(outFile, 'utf8');
+    
+    // Load the overrides and check that they were applied
     const overrides = JSON.parse(fs.readFileSync(overridesFile, 'utf8'));
-    const prop = 'cloud_storage_access_key';
-    const expectedDesc = overrides[prop]?.description;
-    expect(expectedDesc).toBeTruthy();
-    expect(content).toContain(expectedDesc);
+    const adminOverride = overrides.properties.admin;
+    
+    expect(adminOverride).toBeTruthy();
+    expect(adminOverride.description).toBeTruthy();
+    
+    // Verify the override description appears in the generated docs
+    expect(content).toContain(adminOverride.description);
+    
+    // Verify the version override is applied
+    if (adminOverride.version) {
+      expect(content).toContain(`*Introduced in ${adminOverride.version}*`);
+    }
   });
 });

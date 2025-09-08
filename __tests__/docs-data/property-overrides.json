@@ -45,6 +45,9 @@
       "description": "Size of data chunks for append operations.",
       "version": "v24.1.0",
       "example": "67108864"
+    },
+    "cloud_storage_access_key": {
+      "description": "Access key for cloud storage authentication. Used to authenticate with S3-compatible object storage services."
     }
   }
 }
