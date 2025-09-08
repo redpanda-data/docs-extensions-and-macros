@@ -10,6 +10,10 @@ function formatValue(val) {
     return val ? 'true' : 'false';
   } else if (val === null || val === undefined) {
     return 'null';
+  } else if (Array.isArray(val)) {
+    return "[" + val.map(v => formatValue(v)).join(", ") + "]";
+  } else if (typeof val === 'object' && val !== null) {
+    return JSON.stringify(val);
   } else {
     return String(val);
   }
@@ -107,8 +111,15 @@ module.exports = function formatPropertyValue(value, type) {
     }
   }
 
-  // For other types, convert to string and apply Python-style processing
-  let result = String(value).replace(/'/g, '').toLowerCase();
+  // For other types, handle strings vs non-strings differently
+  let result;
+  if (typeof value === 'string') {
+    // Keep strings as-is (preserve original characters and casing)
+    result = value;
+  } else {
+    // Convert non-string values to String without altering case/quotes
+    result = String(value);
+  }
   
   // Apply C++ processing
   result = processDefaults(result, null);
