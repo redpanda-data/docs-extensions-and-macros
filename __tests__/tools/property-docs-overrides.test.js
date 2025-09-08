@@ -29,10 +29,19 @@ describe('property-docs description override', () => {
         timeout: 60000 // 60 second timeout
       });
     } catch (error) {
-      console.error('Command failed:', error.message);
-      if (error.stdout) console.error('STDOUT:', error.stdout.toString());
-      if (error.stderr) console.error('STDERR:', error.stderr.toString());
-      throw error;
+      // Create a clean error object without circular references for Jest
+      const cleanError = new Error(`Command failed: ${error.message}`);
+      cleanError.code = error.code;
+      cleanError.signal = error.signal;
+      
+      if (error.stdout) {
+        cleanError.stdout = error.stdout.toString();
+      }
+      if (error.stderr) {
+        cleanError.stderr = error.stderr.toString();
+      }
+      
+      throw cleanError;
     }
 
     // Check that the generated file exists
