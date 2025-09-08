@@ -740,17 +740,9 @@ def resolve_type_and_default(properties, definitions):
                             # Special case: if the nested type is net::unresolved_address and parent is broker_endpoint
                             if nested_tname == "net::unresolved_address" and type_name == "model::broker_endpoint":
                                 # Map net::unresolved_address properties to broker_endpoint
+                                # Only map the fields that actually exist in the net::unresolved_address
                                 result["address"] = nested_result.get("address")
                                 result["port"] = nested_result.get("port")
-                                # Generate the name field from address:port
-                                if result["address"] and result["port"]:
-                                    result["name"] = f"{result['address']}:{result['port']}"
-                                else:
-                                    result["name"] = None
-                                # Fill any remaining properties with None
-                                for remaining_prop in props:
-                                    if remaining_prop not in result:
-                                        result[remaining_prop] = None
                                 break
                             else:
                                 # General case: if we have a single nested constructor argument,
