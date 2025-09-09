@@ -1,15 +1,6 @@
 {
-  "name": "redpanda-property-extractor",
-  "version": "1.0.0",
-  "description": "Extract and document Redpanda configuration properties",
-  "main": "property_extractor.py",
-  "scripts": {
-    "docs": "node generate-handlebars-docs.js"
-  },
+  "private": true,
   "dependencies": {
     "handlebars": "^4.7.8"
-  },
-  "devDependencies": {},
-  "keywords": ["redpanda", "configuration", "documentation"],
-  "author": "Redpanda Data"
+  }
 }

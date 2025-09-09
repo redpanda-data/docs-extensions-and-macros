@@ -59,6 +59,7 @@ import os
 import json
 import re
 import yaml
+from copy import deepcopy
 
 from pathlib import Path
 from file_pair import FilePair
@@ -1264,7 +1265,7 @@ def main():
 
     # First, create the original properties without overrides for the base JSON output
     # 1. Add config_scope field based on which source file defines the property
-    original_properties = add_config_scope(properties.copy())
+    original_properties = add_config_scope(deepcopy(properties))
     
     # 2. Resolve type references and expand default values for original properties
     original_properties = resolve_type_and_default(original_properties, definitions)
@@ -1277,7 +1278,7 @@ def main():
 
     # Now create enhanced properties with overrides applied
     # 1. Apply any description overrides from external override files
-    enhanced_properties = apply_property_overrides(properties, overrides, options.overrides)
+    enhanced_properties = apply_property_overrides(deepcopy(properties), overrides, options.overrides)
     
     # 2. Add config_scope field based on which source file defines the property
     enhanced_properties = add_config_scope(enhanced_properties)

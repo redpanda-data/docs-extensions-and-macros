@@ -126,7 +126,7 @@ function generatePropertyDocs(properties, config, outputDir) {
   const groups = config.groups.map(group => {
     const filteredProperties = Object.values(properties)
       .filter(prop => group.filter(prop))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 
     return {
       title: group.title,
@@ -164,11 +164,11 @@ function generateDeprecatedDocs(properties, outputDir) {
   
   const brokerProperties = deprecatedProperties
     .filter(prop => prop.config_scope === 'broker')
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
     
   const clusterProperties = deprecatedProperties
     .filter(prop => prop.config_scope === 'cluster')
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 
   const data = {
     deprecated: deprecatedProperties.length > 0,
