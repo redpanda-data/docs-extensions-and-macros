@@ -14,6 +14,7 @@ class TopicPropertyExtractor:
         self.topic_properties = {}
         self.cluster_mappings = {}
         self.enum_values = {}
+        self.noop_properties = set()
         
     def extract_topic_properties(self) -> Dict:
         """Extract topic property constants from source files"""
@@ -24,39 +25,58 @@ class TopicPropertyExtractor:
         # Step 2: Find enum definitions for acceptable values
         self._discover_enum_values()
         
-        # Step 3: Discover cluster property mappings from source code
+        # Step 3: Discover no-op properties
+        self._discover_noop_properties()
+        
+        # Step 4: Discover cluster property mappings from source code
         self._discover_cluster_mappings()
         
-        # Step 4: Match properties with their validators and mappings
+        # Step 5: Match properties with their validators and mappings
         self._correlate_properties_with_data()
         
         return {
             "topic_properties": self.topic_properties,
             "cluster_mappings": self.cluster_mappings,
-            "enum_values": self.enum_values
+            "enum_values": self.enum_values,
+            "noop_properties": list(self.noop_properties)
         }
         
     def _discover_topic_properties(self):
         """Dynamically discover all topic property constants from source files"""
         
-        # Search for all header files that might contain topic property constants
-        topic_property_files = [
+        # Priority files - parse these first with the most comprehensive patterns
+        priority_files = [
             "src/v/kafka/server/handlers/topics/types.h",
-            "src/v/kafka/protocol/topic_properties.h",
+            "src/v/kafka/protocol/topic_properties.h", 
             "src/v/cluster/topic_properties.h",
         ]
         
-        for file_pattern in topic_property_files:
+        for file_pattern in priority_files:
             file_path = self.source_path / file_pattern
             if file_path.exists():
                 self._parse_topic_properties_from_file(file_path)
                 
-        # Also search for any other files that might contain topic_property_ constants
-        for header_file in self.source_path.glob("src/**/*.h"):
-            if any(pattern in str(header_file) for pattern in ["topic", "kafka"]):
-                self._scan_file_for_topic_properties(header_file)
-                
-        print(f"Discovered {len(self.topic_properties)} topic properties")
+        # Comprehensive search - scan all header files that might contain properties
+        search_patterns = [
+            "src/**/*topic*.h",
+            "src/**/*kafka*.h", 
+            "src/**/*handler*.h",
+            "src/**/*config*.h",
+            "src/**/*property*.h",
+        ]
+        
+        scanned_files = set()
+        for pattern in search_patterns:
+            for header_file in self.source_path.glob(pattern):
+                if header_file not in scanned_files:
+                    scanned_files.add(header_file)
+                    self._scan_file_for_topic_properties(header_file)
+                    
+        # Also scan the specific types.h file that we know contains many properties
+        types_files = list(self.source_path.glob("src/**/types.h"))
+        for types_file in types_files:
+            if types_file not in scanned_files:
+                self._scan_file_for_topic_properties(types_file)
         
     def _parse_topic_properties_from_file(self, file_path: Path):
         """Parse topic property constants from a specific file"""
@@ -64,46 +84,85 @@ class TopicPropertyExtractor:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
                 
-            # Pattern to match: inline constexpr std::string_view topic_property_xxx = "yyy";
-            pattern = r'inline\s+constexpr\s+std::string_view\s+topic_property_(\w+)\s*=\s*"([^"]+)";'
-            matches = re.findall(pattern, content)
+            # Multiple patterns to catch all possible property definitions
+            patterns = [
+                # Pattern 1: inline constexpr std::string_view topic_property_xxx = "yyy";
+                r'inline\s+constexpr\s+std::string_view\s+topic_property_(\w+)\s*=\s*"([^"]+)"\s*;',
+                # Pattern 2: constexpr std::string_view topic_property_xxx = "yyy";
+                r'constexpr\s+std::string_view\s+topic_property_(\w+)\s*=\s*"([^"]+)"\s*;',
+                # Pattern 3: const std::string topic_property_xxx = "yyy";
+                r'const\s+std::string\s+topic_property_(\w+)\s*=\s*"([^"]+)"\s*;',
+                # Pattern 4: static const char* topic_property_xxx = "yyy";
+                r'static\s+const\s+char\*\s+topic_property_(\w+)\s*=\s*"([^"]+)"\s*;',
+            ]
             
-            for var_name, property_name in matches:
-                self.topic_properties[property_name] = {
-                    "variable_name": f"topic_property_{var_name}",
-                    "property_name": property_name,
-                    "source_file": str(file_path.relative_to(self.source_path)),
-                    "description": "",
-                    "type": self._determine_property_type(property_name),
-                    "acceptable_values": None,
-                    "corresponding_cluster_property": None
-                }
+            total_matches = 0
+            for pattern in patterns:
+                matches = re.findall(pattern, content)
+                total_matches += len(matches)
                 
-            print(f"Found {len(matches)} topic properties in {file_path}")
+                for var_name, property_name in matches:
+                    # Only add if not already found (prefer inline constexpr definitions)
+                    if property_name not in self.topic_properties:
+                        self.topic_properties[property_name] = {
+                            "variable_name": f"topic_property_{var_name}",
+                            "property_name": property_name,
+                            "source_file": str(file_path.relative_to(self.source_path)),
+                            "description": "",
+                            "type": self._determine_property_type(property_name),
+                            "acceptable_values": None,
+                            "corresponding_cluster_property": None,
+                            "is_noop": False  # Will be updated later in _correlate_properties_with_data
+                        }
+            print(f"Found {total_matches} topic properties in {file_path}")
         except Exception as e:
             print(f"Error reading {file_path}: {e}")
             
     def _scan_file_for_topic_properties(self, file_path: Path):
         """Scan any file for topic_property_ constants"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
                 
-            # Look for any topic_property_ declarations
-            pattern = r'topic_property_(\w+)\s*=\s*"([^"]+)"'
-            matches = re.findall(pattern, content)
+            # Enhanced patterns to catch all property definitions
+            patterns = [
+                # Pattern 1: inline constexpr std::string_view topic_property_xxx = "yyy";
+                r'inline\s+constexpr\s+std::string_view\s+topic_property_(\w+)\s*=\s*"([^"]+)"\s*;',
+                # Pattern 2: constexpr std::string_view topic_property_xxx = "yyy";
+                r'constexpr\s+std::string_view\s+topic_property_(\w+)\s*=\s*"([^"]+)"\s*;',
+                # Pattern 3: topic_property_xxx = "yyy" (simple assignment)
+                r'topic_property_(\w+)\s*=\s*"([^"]+)"',
+                # Pattern 4: const std::string topic_property_xxx = "yyy";
+                r'const\s+std::string\s+topic_property_(\w+)\s*=\s*"([^"]+)"\s*;',
+                # Pattern 5: Look for string literals that look like topic properties
+                r'"((?:redpanda\.|cleanup\.|compression\.|segment\.|flush\.|delete\.|replication\.|write\.|min\.|max\.|confluent\.)[^"]+)"'
+            ]
             
-            for var_name, property_name in matches:
-                if property_name not in self.topic_properties:
-                    self.topic_properties[property_name] = {
-                        "variable_name": f"topic_property_{var_name}",
-                        "property_name": property_name,
-                        "source_file": str(file_path.relative_to(self.source_path)),
-                        "description": "",
-                        "type": self._determine_property_type(property_name),
-                        "acceptable_values": None,
-                        "corresponding_cluster_property": None
-                    }
+            for pattern in patterns:
+                matches = re.findall(pattern, content)
+                
+                for match in matches:
+                    if len(match) == 2:
+                        # Regular patterns with var_name and property_name
+                        var_name, property_name = match
+                    else:
+                        # String literal pattern - generate var_name from property_name
+                        property_name = match
+                        var_name = re.sub(r'[^a-zA-Z0-9_]', '_', property_name)
+                        var_name = re.sub(r'_+', '_', var_name).strip('_')
+                    
+                    # Validate this looks like a real topic property
+                    if self._is_valid_topic_property(property_name) and property_name not in self.topic_properties:
+                        self.topic_properties[property_name] = {
+                            "variable_name": f"topic_property_{var_name}",
+                            "property_name": property_name,
+                            "source_file": str(file_path.relative_to(self.source_path)),
+                            "description": "",
+                            "type": self._determine_property_type(property_name),
+                            "acceptable_values": None,
+                            "corresponding_cluster_property": None,
+                            "is_noop": False  # Will be updated later in _correlate_properties_with_data
+                        }
         except Exception as e:
             print(f"Debug: Skipping {file_path}: {e}", file=sys.stderr)
             
@@ -125,8 +184,38 @@ class TopicPropertyExtractor:
         # Also search other model files for enums
         for header_file in self.source_path.glob("src/v/model/**/*.h"):
             self._scan_file_for_enums(header_file)
+        
+    def _discover_noop_properties(self):
+        """Discover no-op properties from the allowlist_topic_noop_confs array"""
+        
+        # Look for the allowlist in types.h file
+        types_file = self.source_path / "src/v/kafka/server/handlers/topics/types.h"
+        if not types_file.exists():
+            print("Warning: types.h file not found for no-op property detection")
+            return
             
-        print(f"Discovered {len(self.enum_values)} enum types")
+        try:
+            with open(types_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            # Pattern to match the allowlist_topic_noop_confs array
+            # Looks for the array declaration and captures all string literals within it
+            pattern = r'allowlist_topic_noop_confs\s*=\s*\{([^}]+)\}'
+            match = re.search(pattern, content, re.DOTALL)
+            
+            if match:
+                array_content = match.group(1)
+                # Extract all quoted strings from the array
+                string_pattern = r'"([^"]+)"'
+                noop_properties = re.findall(string_pattern, array_content)
+                
+                self.noop_properties = set(noop_properties)
+                print(f"Found {len(self.noop_properties)} no-op properties")
+            else:
+                print("Warning: allowlist_topic_noop_confs array not found in types.h")
+                
+        except Exception as e:
+            print(f"Error reading no-op properties from {types_file}: {e}")
         
     def _parse_enums_from_file(self, file_path: Path):
         """Parse enum definitions from a file"""
@@ -181,6 +270,37 @@ class TopicPropertyExtractor:
                         }
         except Exception as e:
             print(f"Debug: Error scanning enums in {file_path}: {e}", file=sys.stderr)
+            
+    def _is_valid_topic_property(self, prop_name: str) -> bool:
+        """Validate that a string looks like a real topic property"""
+        
+        # Must be non-empty and reasonable length
+        if not prop_name or len(prop_name) < 3 or len(prop_name) > 100:
+            return False
+            
+        # Must contain only valid characters for topic properties
+        if not re.match(r'^[a-zA-Z][a-zA-Z0-9._-]*$', prop_name):
+            return False
+            
+        # Known topic property prefixes/patterns
+        valid_patterns = [
+            r'^redpanda\.',
+            r'^cleanup\.policy$',
+            r'^compression\.type$',
+            r'^segment\.',
+            r'^flush\.',
+            r'^delete\.',
+            r'^replication\.factor$',
+            r'^write\.caching$',
+            r'^min\.',
+            r'^max\.',
+            r'^confluent\.',
+            r'.*\.ms$',
+            r'.*\.bytes$',
+            r'.*\.ratio$',
+        ]
+        
+        return any(re.match(pattern, prop_name, re.IGNORECASE) for pattern in valid_patterns)
             
     def _determine_property_type(self, property_name: str) -> str:
         """Determine the type of a property based on its name and usage patterns"""
@@ -245,8 +365,6 @@ class TopicPropertyExtractor:
                     
         # Process mapping candidates to find correlations
         self._process_mapping_candidates(mapping_candidates)
-        
-        print(f"Discovered {len(self.cluster_mappings)} cluster property mappings")
         
     def _find_mappings_in_file(self, file_path: Path) -> Dict[str, str]:
         """Find potential topic-to-cluster property mappings in a file"""
@@ -356,6 +474,9 @@ class TopicPropertyExtractor:
             if prop_name in self.cluster_mappings:
                 prop_data["corresponding_cluster_property"] = self.cluster_mappings[prop_name]
                 
+            # Mark as no-op if found in the allowlist
+            prop_data["is_noop"] = prop_name in self.noop_properties
+                
             # Update acceptable values based on property type
             prop_data["acceptable_values"] = self._determine_acceptable_values(prop_name, prop_data)
             
@@ -427,10 +548,11 @@ NOTE: All topic properties take effect immediately after being set.
 
 """
         
-        # Add table rows ONLY for properties with cluster mappings
+        # Add table rows ONLY for properties with cluster mappings and exclude no-ops
         for prop_name, prop_data in sorted(self.topic_properties.items()):
             cluster_prop = prop_data.get("corresponding_cluster_property")
-            if cluster_prop:  # Only include if there's a cluster mapping
+            is_noop = prop_data.get("is_noop", False)
+            if cluster_prop and not is_noop:  # Only include if there's a cluster mapping and not a no-op
                 anchor = prop_name.replace(".", "").replace("-", "").lower()
                 adoc_content += f"| <<{anchor},`{prop_name}`>>\n"
                 adoc_content += f"| xref:./cluster-properties.adoc#{cluster_prop}[`{cluster_prop}`]\n\n"
@@ -441,12 +563,13 @@ NOTE: All topic properties take effect immediately after being set.
 
 """
 
-        # Add individual property documentation - ONLY include properties with cluster mappings
+        # Add individual property documentation - ONLY include properties with cluster mappings and exclude no-ops
         for prop_name, prop_data in sorted(self.topic_properties.items()):
             cluster_prop = prop_data.get("corresponding_cluster_property")
+            is_noop = prop_data.get("is_noop", False)
             
-            # Skip properties without cluster mappings (as requested by user)
-            if not cluster_prop:
+            # Skip properties without cluster mappings or no-op properties
+            if not cluster_prop or is_noop:
                 continue
                 
             anchor = prop_name.replace(".", "").replace("-", "").lower()
@@ -488,9 +611,11 @@ def main():
     extractor = TopicPropertyExtractor(args.source_path)
     result = extractor.extract_topic_properties()
     
-    print(f"Total topic properties found: {len(result['topic_properties'])}")
-    print(f"Topic properties with cluster mappings: {len(result['cluster_mappings'])}")
-    print(f"Enum types discovered: {len(result['enum_values'])}")
+    # Calculate properties that will be included in documentation (non-no-op with cluster mappings)
+    documented_props = [prop for prop, data in result['topic_properties'].items() 
+                       if data.get('corresponding_cluster_property') and not data.get('is_noop', False)]
+    
+    print(f"Found {len(result['topic_properties'])} total properties ({len(documented_props)} documented, {len(result['noop_properties'])} no-op)")
     
     if args.output_json:
         with open(args.output_json, 'w', encoding='utf-8') as f:
