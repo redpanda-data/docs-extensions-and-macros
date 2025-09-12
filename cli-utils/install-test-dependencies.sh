@@ -13,7 +13,7 @@ install_node() {
     eval "$(fnm env)" || { echo "Failed to load fnm environment"; exit 1; }
     fnm install --lts || { echo "Failed to install Node.js"; exit 1; }
     fnm use --lts || { echo "Failed to use Node.js"; exit 1; }
-    echo "Node.js version: $(node -v)"
+    echo "Node.js version: $(node -v)" 
   fi
 }
 

@@ -51,13 +51,15 @@ services:
       - 19092:19092
       - 19644:9644
     healthcheck:
-      test: ["CMD", "rpk", "cluster", "info", "-X", "user=superuser", "-X", "pass=secretpassword"]
+      test: ["CMD", "rpk", "version"]
       interval: 10s
       timeout: 15s
       retries: 10
     depends_on:
       minio:
         condition: service_healthy
+      mc:
+        condition: service_completed_successfully
   redpanda-1:
     command:
       - redpanda
@@ -88,8 +90,12 @@ services:
       - 29092:29092
       - 29644:9644
     depends_on:
-      - redpanda-0
-      - minio
+      redpanda-0:
+        condition: service_started
+      minio:
+        condition: service_healthy
+      mc:
+        condition: service_completed_successfully
   redpanda-2:
     command:
       - redpanda
@@ -120,8 +126,12 @@ services:
       - 39092:39092
       - 39644:9644
     depends_on:
-      - redpanda-0
-      - minio
+      redpanda-0:
+        condition: service_started
+      minio:
+        condition: service_healthy
+      mc:
+        condition: service_completed_successfully
   ####################
   # Redpanda Console #
   ####################
@@ -132,8 +142,6 @@ services:
       - redpanda_network
     entrypoint: /bin/sh
     command: -c 'echo "$$CONSOLE_CONFIG_FILE" > /tmp/config.yml && /app/console'
-    volumes:
-      - ./config:/tmp/config/
     environment:
       CONFIG_FILEPATH: ${CONFIG_FILEPATH:-/tmp/config.yml}
       CONSOLE_CONFIG_FILE: |
@@ -391,10 +399,11 @@ services:
       - AWS_REGION=local
     entrypoint: >
       /bin/sh -c "
-      until (/usr/bin/mc config host add minio http://minio:9000 minio redpandaTieredStorage7) do echo '...waiting...' && sleep 1; done;
+      until (/usr/bin/mc alias set minio http://minio:9000 minio redpandaTieredStorage7) do echo '...waiting...' && sleep 1; done;
       /usr/bin/mc mb minio/redpanda;
       /usr/bin/mc policy set public minio/redpanda;
-      tail -f /dev/null
+      echo 'MinIO bucket initialization complete';
+      exit 0
       "
   catalog:
     image: tabulario/iceberg-rest
