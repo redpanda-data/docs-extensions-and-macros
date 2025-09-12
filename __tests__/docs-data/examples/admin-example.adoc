@@ -1,0 +1,15 @@
+.Example Configuration for Admin API
+This example shows how to configure the admin API endpoint with custom addressing.
+
+[,yaml]
+----
+redpanda:
+  admin:
+    - address: "0.0.0.0"
+      port: 9644
+    - address: "127.0.0.1"
+      port: 9645
+----
+
+You can specify multiple admin endpoints to provide redundancy and load balancing.
+The admin API is used for cluster management operations.

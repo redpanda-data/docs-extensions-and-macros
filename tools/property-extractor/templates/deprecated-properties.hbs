@@ -1,0 +1,25 @@
+{{#if deprecated}}
+= Deprecated Configuration Properties
+:description: This is an exhaustive list of all the deprecated properties.
+
+This is an exhaustive list of all the deprecated properties.
+
+{{#if brokerProperties}}
+== Broker properties
+
+{{#each brokerProperties}}
+{{> deprecated-property}}
+
+{{/each}}
+{{/if}}
+
+{{#if clusterProperties}}
+== Cluster properties
+
+{{#each clusterProperties}}
+{{> deprecated-property}}
+
+{{/each}}
+{{/if}}
+
+{{/if}}

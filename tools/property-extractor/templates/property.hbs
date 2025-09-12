@@ -1,0 +1,70 @@
+=== {{name}}
+
+{{#if version}}
+*Introduced in {{version}}*
+
+{{/if}}
+{{#if description}}
+{{{description}}}
+{{else}}
+No description available.
+{{/if}}
+
+{{#if units}}
+*Unit:* {{units}}
+
+{{else}}
+{{#if (formatUnits name)}}
+*Unit:* {{formatUnits name}}
+
+{{/if}}
+{{/if}}
+{{#if (ne defined_in "src/v/config/node_config.cc")}}
+{{#if (ne needs_restart undefined)}}
+*Requires restart:* {{#if needs_restart}}Yes{{else}}No{{/if}}
+
+{{/if}}
+{{/if}}
+{{#if visibility}}
+*Visibility:* `{{visibility}}`
+
+{{/if}}
+{{#if type}}
+*Type:* {{type}}
+
+{{/if}}
+{{#if (and minimum maximum)}}
+*Accepted values:* [`{{minimum}}`, `{{maximum}}`]
+
+{{else}}
+{{#if minimum}}
+*Minimum value:* `{{minimum}}`
+
+{{/if}}
+{{#if maximum}}
+*Maximum value:* `{{maximum}}`
+
+{{/if}}
+{{/if}}
+{{#if (ne default undefined)}}
+*Default:* `{{formatPropertyValue default type}}`
+
+{{/if}}
+*Nullable:* {{#if nullable}}Yes{{else}}No{{/if}}
+
+{{#if example}}
+{{{renderPropertyExample this}}}
+{{/if}}
+
+{{#if aliases}}
+*Aliases:* {{join aliases ", "}}
+
+{{/if}}
+{{#if is_deprecated}}
+[WARNING]
+====
+This property is deprecated.
+====
+
+{{/if}}
+---

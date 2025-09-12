@@ -1,0 +1,81 @@
+{
+  "properties": {
+    "admin": {
+      "description": "Network addresses for Admin API servers with version info.",
+      "version": "v23.1.0",
+      "example_file": "examples/admin-example.adoc"
+    },
+    "admin_api_tls": {
+      "description": "TLS configuration for the Admin API endpoints.",
+      "version": "v23.2.0",
+      "example_yaml": {
+        "title": "Example TLS Configuration",
+        "description": "This example shows how to configure TLS for the Admin API with client authentication.",
+        "config": {
+          "redpanda": {
+            "admin_api_tls": [
+              {
+                "name": "internal-admin",
+                "enabled": true,
+                "cert_file": "/etc/redpanda/certs/admin.crt",
+                "key_file": "/etc/redpanda/certs/admin.key",
+                "truststore_file": "/etc/redpanda/certs/ca.crt",
+                "require_client_auth": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "abort_index_segment_size": {
+      "description": "Segment size for transaction abort index. Controls how large each abort index segment can grow.",
+      "example": [
+        ".Example: Setting abort index segment size",
+        "[,yaml]",
+        "----",
+        "redpanda:",
+        "  abort_index_segment_size: 134217728  # 128MB",
+        "----",
+        "",
+        "This setting controls the maximum size of abort index segments.",
+        "Smaller segments may improve memory usage but increase overhead."
+      ]
+    },
+    "append_chunk_size": {
+      "description": "Size of data chunks for append operations.",
+      "version": "v24.1.0",
+      "example": "67108864"
+    },
+    "cloud_storage_access_key": {
+      "description": "Access key for cloud storage authentication. Used to authenticate with S3-compatible object storage services."
+    },
+        "cleanup.policy": {
+      "description": "Determines how log segments are cleaned. **delete** removes old segments based on time or size. **compact** retains only the latest value for each key. **compact,delete** enables both strategies.",
+      "version": "v23.1.0",
+      "example": [
+        ".Example: Setting cleanup policy",
+        "[,bash]",
+        "----",
+        "rpk topic alter-config my-topic --set cleanup.policy=compact",
+        "----",
+        "",
+        "For topics that require both compaction and deletion:",
+        "",
+        "[,bash]",
+        "----",
+        "rpk topic alter-config my-topic --set cleanup.policy=compact,delete",
+        "----"
+      ]
+    },
+    "compression.type": {
+      "description": "Compression algorithm used for compressing message batches. Options include **none** (no compression), **gzip**, **snappy**, **lz4**, and **zstd**.",
+      "example": [
+        ".Example: Setting compression type",
+        "[,bash]",
+        "----",
+        "rpk topic alter-config my-topic --set compression.type=zstd",
+        "----"
+      ]
+    }
+  }
+}

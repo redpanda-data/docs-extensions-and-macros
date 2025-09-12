@@ -222,19 +222,6 @@ jobs:
       - name: Run all tests
         run: npm test
 
-      - name: Generate coverage report
-        if: matrix.node-version == '18'
-        run: npm test -- --coverage --coverageReporters=lcov
-
-      - name: Upload coverage to Codecov
-        if: matrix.node-version == '18'
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          file: ./coverage/lcov.info
-          flags: unittests
-          name: codecov-umbrella
-
   # Summary job that all other jobs depend on
   test-summary:
     if: always()
