@@ -74,8 +74,18 @@ NOTE: Some object storage properties require that you restart the cluster for an
       }
     ],
     filename: 'object-storage-properties.adoc'
+  },
+  topic: {
+    pageTitle: 'Topic Configuration Properties',
+    pageAliases: ['reference:topic-properties.adoc'],
+    description: 'Reference of topic configuration properties.',
+    intro: `A topic-level property sets a Redpanda or Kafka configuration for a particular topic.\n\nMany topic-level properties have corresponding xref:manage:cluster-maintenance/cluster-property-configuration.adoc[cluster properties] that set a default value for all topics of a cluster. To customize the value for a topic, you can set a topic-level property that overrides the value of the corresponding cluster property.\n\n"
+    "NOTE: All topic properties take effect immediately after being set.\n\n`,
+    sectionTitle: 'Topic configuration'
   }
 };
+
+// "src/v/kafka/server/handlers/topics/types.cc": "topic"
 
 /**
  * Gets template path, checking environment variables for custom paths first
