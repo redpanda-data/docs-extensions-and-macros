@@ -30,7 +30,7 @@ PROCESSING PIPELINE:
    - Expands C++ constructor defaults to structured JSON objects
    - Ensures array-type properties have array defaults (wraps single objects in arrays)
 
-3. **Documentation Generation** (generate_docs.py):
+3. **Documentation Generation** (generate-handlebars-docs.js):
    - Properly formats array defaults as [{ }] instead of { }
    - Displays correct types in documentation (array vs object)
 
