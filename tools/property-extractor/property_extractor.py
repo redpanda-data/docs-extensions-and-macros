@@ -69,6 +69,13 @@ from parser import build_treesitter_cpp_library, extract_properties_from_file_pa
 from property_bag import PropertyBag
 from transformers import *
 
+# Import topic property extractor
+try:
+    from topic_property_extractor import TopicPropertyExtractor
+except ImportError:
+    # TopicPropertyExtractor not available, will skip topic property extraction
+    TopicPropertyExtractor = None
+
 logger = logging.getLogger("viewer")
 
 
@@ -484,18 +491,23 @@ def _process_example_override(override, overrides_file_path=None):
 
 def add_config_scope(properties):
     """
-    Add a config_scope field to each property based on its defined_in value.
+    Add a config_scope field to each property based on its defined_in value or property type.
     'cluster' if defined_in == src/v/config/configuration.cc
     'broker' if defined_in == src/v/config/node_config.cc
+    'topic' if is_topic_property == True
     """
     for prop in properties.values():
-        defined_in = prop.get("defined_in", "")
-        if defined_in == "src/v/config/configuration.cc":
-            prop["config_scope"] = "cluster"
-        elif defined_in == "src/v/config/node_config.cc":
-            prop["config_scope"] = "broker"
+        # Check if this is a topic property first
+        if prop.get("is_topic_property", False):
+            prop["config_scope"] = "topic"
         else:
-            prop["config_scope"] = None
+            defined_in = prop.get("defined_in", "")
+            if defined_in == "src/v/config/configuration.cc":
+                prop["config_scope"] = "cluster"
+            elif defined_in == "src/v/config/node_config.cc":
+                prop["config_scope"] = "broker"
+            else:
+                prop["config_scope"] = None
     return properties
 
 
@@ -1159,6 +1171,52 @@ def resolve_type_and_default(properties, definitions):
     return properties
 
 
+def extract_topic_properties(source_path):
+    """
+    Extract topic properties and convert them to the standard properties format.
+    
+    Args:
+        source_path: Path to the Redpanda source code
+        
+    Returns:
+        Dictionary of topic properties in the standard format with config_scope: "topic"
+    """
+    if TopicPropertyExtractor is None:
+        logging.warning("TopicPropertyExtractor not available, skipping topic property extraction")
+        return {}
+    
+    try:
+        extractor = TopicPropertyExtractor(source_path)
+        topic_data = extractor.extract_topic_properties()
+        topic_properties = topic_data.get("topic_properties", {})
+        
+        # Convert topic properties to the standard properties format
+        converted_properties = {}
+        for prop_name, prop_data in topic_properties.items():
+            # Skip no-op properties
+            if prop_data.get("is_noop", False):
+                continue
+                
+            converted_properties[prop_name] = {
+                "name": prop_name,
+                "description": prop_data.get("description", ""),
+                "type": prop_data.get("type", "string"),
+                "config_scope": "topic",
+                "source_file": prop_data.get("source_file", ""),
+                "corresponding_cluster_property": prop_data.get("corresponding_cluster_property", ""),
+                "acceptable_values": prop_data.get("acceptable_values", ""),
+                "is_deprecated": False,
+                "is_topic_property": True
+            }
+            
+        logging.info(f"Extracted {len(converted_properties)} topic properties (excluding {len([p for p in topic_properties.values() if p.get('is_noop', False)])} no-op properties)")
+        return converted_properties
+        
+    except Exception as e:
+        logging.error(f"Failed to extract topic properties: {e}")
+        return {}
+
+
 def main():
     import argparse
 
@@ -1262,6 +1320,12 @@ def main():
         file_pairs, treesitter_parser, cpp_language
     )
     properties = transform_files_with_properties(files_with_properties)
+
+    # Extract topic properties and add them to the main properties dictionary
+    topic_properties = extract_topic_properties(options.path)
+    if topic_properties:
+        properties.update(topic_properties)
+        logging.info(f"Added {len(topic_properties)} topic properties to the main properties collection")
 
     # First, create the original properties without overrides for the base JSON output
     # 1. Add config_scope field based on which source file defines the property

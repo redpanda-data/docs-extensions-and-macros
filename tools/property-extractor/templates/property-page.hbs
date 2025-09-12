@@ -16,7 +16,7 @@
 
 {{#each groups}}
 {{#each this.properties}}
-{{> property}}
+{{> (lookup ../this "template")}}
 
 {{/each}}
 {{/each}}

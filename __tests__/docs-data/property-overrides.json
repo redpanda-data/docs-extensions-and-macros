@@ -48,6 +48,34 @@
     },
     "cloud_storage_access_key": {
       "description": "Access key for cloud storage authentication. Used to authenticate with S3-compatible object storage services."
+    },
+        "cleanup.policy": {
+      "description": "Determines how log segments are cleaned. **delete** removes old segments based on time or size. **compact** retains only the latest value for each key. **compact,delete** enables both strategies.",
+      "version": "v23.1.0",
+      "example": [
+        ".Example: Setting cleanup policy",
+        "[,bash]",
+        "----",
+        "rpk topic alter-config my-topic --set cleanup.policy=compact",
+        "----",
+        "",
+        "For topics that require both compaction and deletion:",
+        "",
+        "[,bash]",
+        "----",
+        "rpk topic alter-config my-topic --set cleanup.policy=compact,delete",
+        "----"
+      ]
+    },
+    "compression.type": {
+      "description": "Compression algorithm used for compressing message batches. Options include **none** (no compression), **gzip**, **snappy**, **lz4**, and **zstd**.",
+      "example": [
+        ".Example: Setting compression type",
+        "[,bash]",
+        "----",
+        "rpk topic alter-config my-topic --set compression.type=zstd",
+        "----"
+      ]
     }
   }
 }

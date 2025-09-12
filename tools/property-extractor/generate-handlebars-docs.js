@@ -79,9 +79,19 @@ NOTE: Some object storage properties require that you restart the cluster for an
     pageTitle: 'Topic Configuration Properties',
     pageAliases: ['reference:topic-properties.adoc'],
     description: 'Reference of topic configuration properties.',
-    intro: `A topic-level property sets a Redpanda or Kafka configuration for a particular topic.\n\nMany topic-level properties have corresponding xref:manage:cluster-maintenance/cluster-property-configuration.adoc[cluster properties] that set a default value for all topics of a cluster. To customize the value for a topic, you can set a topic-level property that overrides the value of the corresponding cluster property.\n\n"
-    "NOTE: All topic properties take effect immediately after being set.\n\n`,
-    sectionTitle: 'Topic configuration'
+    intro: `A topic-level property sets a Redpanda or Kafka configuration for a particular topic.
+
+Many topic-level properties have corresponding xref:manage:cluster-maintenance/cluster-property-configuration.adoc[cluster properties] that set a default value for all topics of a cluster. To customize the value for a topic, you can set a topic-level property that overrides the value of the corresponding cluster property.
+
+NOTE: All topic properties take effect immediately after being set.`,
+    sectionTitle: 'Topic configuration',
+    groups: [
+      {
+        filter: (prop) => prop.config_scope === 'topic' && !prop.is_deprecated,
+        template: 'topic-property'
+      }
+    ],
+    filename: 'topic-properties.adoc'
   }
 };
 
@@ -113,6 +123,14 @@ function registerPartials() {
   const propertyTemplate = fs.readFileSync(propertyTemplatePath, 'utf8');
   handlebars.registerPartial('property', propertyTemplate);
   
+  // Register topic property partial
+  const topicPropertyTemplatePath = getTemplatePath(
+    path.join(templatesDir, 'topic-property.hbs'),
+    'TEMPLATE_TOPIC_PROPERTY'
+  );
+  const topicPropertyTemplate = fs.readFileSync(topicPropertyTemplatePath, 'utf8');
+  handlebars.registerPartial('topic-property', topicPropertyTemplate);
+  
   // Register deprecated property partial
   const deprecatedPropertyTemplatePath = getTemplatePath(
     path.join(templatesDir, 'deprecated-property.hbs'),
@@ -141,7 +159,8 @@ function generatePropertyDocs(properties, config, outputDir) {
     return {
       title: group.title,
       intro: group.intro,
-      properties: filteredProperties
+      properties: filteredProperties,
+      template: group.template || 'property' // Default to 'property' template
     };
   }).filter(group => group.properties.length > 0);
 
@@ -211,6 +230,7 @@ function generateAllDocs(inputFile, outputDir) {
   let totalBrokerProperties = 0;
   let totalClusterProperties = 0;
   let totalObjectStorageProperties = 0;
+  let totalTopicProperties = 0;
 
   // Generate each type of documentation
   for (const [type, config] of Object.entries(PROPERTY_CONFIG)) {
@@ -220,6 +240,7 @@ function generateAllDocs(inputFile, outputDir) {
     if (type === 'broker') totalBrokerProperties = count;
     else if (type === 'cluster') totalClusterProperties = count;
     else if (type === 'object-storage') totalObjectStorageProperties = count;
+    else if (type === 'topic') totalTopicProperties = count;
   }
 
   // Generate deprecated properties documentation
@@ -237,6 +258,7 @@ function generateAllDocs(inputFile, outputDir) {
   console.log(`   Total Broker properties: ${totalBrokerProperties}`);
   console.log(`   Total Cluster properties: ${totalClusterProperties}`);
   console.log(`   Total Object Storage properties: ${totalObjectStorageProperties}`);
+  console.log(`   Total Topic properties: ${totalTopicProperties}`);
   console.log(`   Total Deprecated properties: ${deprecatedCount}`);
 
   return {
@@ -244,6 +266,7 @@ function generateAllDocs(inputFile, outputDir) {
     brokerProperties: totalBrokerProperties,
     clusterProperties: totalClusterProperties,
     objectStorageProperties: totalObjectStorageProperties,
+    topicProperties: totalTopicProperties,
     deprecatedProperties: deprecatedCount
   };
 }
