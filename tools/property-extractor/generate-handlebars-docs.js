@@ -219,7 +219,7 @@ function generateAllDocs(inputFile, outputDir) {
   const allPropertiesContent = Object.keys(properties).sort().join('\n');
   fs.writeFileSync(path.join(outputDir, 'all_properties.txt'), allPropertiesContent, 'utf8');
 
-  // Generate error reports (like the original Python script)
+  // Generate error reports
   generateErrorReports(properties, outputDir);
 
   console.log(`📊 Generation Summary:`);
