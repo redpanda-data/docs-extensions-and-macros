@@ -56,7 +56,8 @@ build: venv redpanda-git treesitter
 		--path $(REDPANDA_SRC) \
 		--output gen/properties-output.json \
 		--enhanced-output gen/$(TAG)-properties.json \
-		$(if $(OVERRIDES),$(if $(shell [ -f "$(OVERRIDES)" ] && echo exists),--overrides $(OVERRIDES),),)
+		$(if $(OVERRIDES),$(if $(shell [ -f "$(OVERRIDES)" ] && echo exists),--overrides $(OVERRIDES),),) \
+		$(if $(CLOUD_SUPPORT),--cloud-support,)
 	@echo "✅ JSON generated at $(TOOL_ROOT)/gen/properties-output.json"
 	@echo "✅ Enhanced JSON (with overrides) generated at $(TOOL_ROOT)/gen/$(TAG)-properties.json"
 	@$(MAKE) generate-docs

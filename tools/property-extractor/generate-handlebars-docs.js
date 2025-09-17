@@ -112,32 +112,63 @@ function getTemplatePath(defaultPath, envVar) {
 /**
  * Registers Handlebars partials from template files
  */
-function registerPartials() {
+function registerPartials(hasCloudSupport = false) {
   const templatesDir = path.join(__dirname, 'templates');
   
-  // Register property partial
-  const propertyTemplatePath = getTemplatePath(
-    path.join(templatesDir, 'property.hbs'),
-    'TEMPLATE_PROPERTY'
-  );
-  const propertyTemplate = fs.readFileSync(propertyTemplatePath, 'utf8');
-  handlebars.registerPartial('property', propertyTemplate);
-  
-  // Register topic property partial
-  const topicPropertyTemplatePath = getTemplatePath(
-    path.join(templatesDir, 'topic-property.hbs'),
-    'TEMPLATE_TOPIC_PROPERTY'
-  );
-  const topicPropertyTemplate = fs.readFileSync(topicPropertyTemplatePath, 'utf8');
-  handlebars.registerPartial('topic-property', topicPropertyTemplate);
-  
-  // Register deprecated property partial
-  const deprecatedPropertyTemplatePath = getTemplatePath(
-    path.join(templatesDir, 'deprecated-property.hbs'),
-    'TEMPLATE_DEPRECATED_PROPERTY'
-  );
-  const deprecatedPropertyTemplate = fs.readFileSync(deprecatedPropertyTemplatePath, 'utf8');
-  handlebars.registerPartial('deprecated-property', deprecatedPropertyTemplate);
+  try {
+    console.log(`📝 Registering Handlebars templates (cloud support: ${hasCloudSupport ? 'enabled' : 'disabled'})`);
+    
+    // Register property partial (choose cloud or regular version)
+    const propertyTemplateFile = hasCloudSupport ? 'property-cloud.hbs' : 'property.hbs';
+    const propertyTemplatePath = getTemplatePath(
+      path.join(templatesDir, propertyTemplateFile),
+      'TEMPLATE_PROPERTY'
+    );
+    
+    if (!fs.existsSync(propertyTemplatePath)) {
+      throw new Error(`Property template not found: ${propertyTemplatePath}`);
+    }
+    
+    const propertyTemplate = fs.readFileSync(propertyTemplatePath, 'utf8');
+    handlebars.registerPartial('property', propertyTemplate);
+    console.log(`✅ Registered property template: ${propertyTemplateFile}`);
+    
+    // Register topic property partial (choose cloud or regular version)
+    const topicPropertyTemplateFile = hasCloudSupport ? 'topic-property-cloud.hbs' : 'topic-property.hbs';
+    const topicPropertyTemplatePath = getTemplatePath(
+      path.join(templatesDir, topicPropertyTemplateFile),
+      'TEMPLATE_TOPIC_PROPERTY'
+    );
+    
+    if (!fs.existsSync(topicPropertyTemplatePath)) {
+      throw new Error(`Topic property template not found: ${topicPropertyTemplatePath}`);
+    }
+    
+    const topicPropertyTemplate = fs.readFileSync(topicPropertyTemplatePath, 'utf8');
+    handlebars.registerPartial('topic-property', topicPropertyTemplate);
+    console.log(`✅ Registered topic property template: ${topicPropertyTemplateFile}`);
+    
+    // Register deprecated property partial
+    const deprecatedPropertyTemplatePath = getTemplatePath(
+      path.join(templatesDir, 'deprecated-property.hbs'),
+      'TEMPLATE_DEPRECATED_PROPERTY'
+    );
+    
+    if (!fs.existsSync(deprecatedPropertyTemplatePath)) {
+      throw new Error(`Deprecated property template not found: ${deprecatedPropertyTemplatePath}`);
+    }
+    
+    const deprecatedPropertyTemplate = fs.readFileSync(deprecatedPropertyTemplatePath, 'utf8');
+    handlebars.registerPartial('deprecated-property', deprecatedPropertyTemplate);
+    console.log(`✅ Registered deprecated property template`);
+    
+  } catch (error) {
+    console.error('❌ Failed to register Handlebars templates:');
+    console.error(`   Error: ${error.message}`);
+    console.error('   This indicates missing or corrupted template files.');
+    console.error('   Check that all .hbs files exist in tools/property-extractor/templates/');
+    throw error;
+  }
 }
 
 /**
@@ -216,15 +247,30 @@ function generateDeprecatedDocs(properties, outputDir) {
 }
 
 /**
+ * Checks if any properties have cloud support metadata
+ */
+function hasCloudSupportMetadata(properties) {
+  return Object.values(properties).some(prop => 
+    prop.hasOwnProperty('cloud_supported')
+  );
+}
+
+/**
  * Main function to generate all property documentation
  */
 function generateAllDocs(inputFile, outputDir) {
-  // Register partials
-  registerPartials();
-
   // Read input JSON
   const data = JSON.parse(fs.readFileSync(inputFile, 'utf8'));
   const properties = data.properties || {};
+
+  // Check if cloud support is enabled
+  const hasCloudSupport = hasCloudSupportMetadata(properties);
+  if (hasCloudSupport) {
+    console.log('🌤️ Cloud support metadata detected, using cloud-aware templates');
+  }
+
+  // Register partials with cloud support detection
+  registerPartials(hasCloudSupport);
 
   let totalProperties = 0;
   let totalBrokerProperties = 0;

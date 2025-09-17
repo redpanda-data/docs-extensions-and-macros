@@ -76,6 +76,14 @@ except ImportError:
     # TopicPropertyExtractor not available, will skip topic property extraction
     TopicPropertyExtractor = None
 
+# Import cloud configuration support
+try:
+    from cloud_config import fetch_cloud_config, add_cloud_support_metadata
+except ImportError:
+    logging.warning("Cloud configuration support not available")
+    fetch_cloud_config = None
+    add_cloud_support_metadata = None
+
 logger = logging.getLogger("viewer")
 
 
@@ -1264,6 +1272,17 @@ def main():
             help='Optional JSON file with property description overrides',
         )
 
+        arg_parser.add_argument(
+            "--cloud-support",
+            action="store_true",
+            help=(
+                'Enable cloud support metadata by fetching configuration from cloudv2 repository. '
+                'Requires GITHUB_TOKEN environment variable with repo access to redpanda-data/cloudv2. '
+                'Adds cloud/self-managed tagging to generated documentation. '
+                'Dependencies: pip install pyyaml requests'
+            ),
+        )
+
         arg_parser.add_argument("-v", "--verbose", action="store_true")
 
         return arg_parser
@@ -1331,7 +1350,21 @@ def main():
     # 1. Add config_scope field based on which source file defines the property
     original_properties = add_config_scope(deepcopy(properties))
     
-    # 2. Resolve type references and expand default values for original properties
+    # 2. Fetch cloud configuration and add cloud support metadata if requested
+    cloud_config = None
+    if options.cloud_support:
+        if fetch_cloud_config and add_cloud_support_metadata:
+            logging.info("Cloud support enabled, fetching cloud configuration...")
+            cloud_config = fetch_cloud_config()  # This will raise an exception if it fails
+            original_properties = add_cloud_support_metadata(original_properties, cloud_config)
+            logging.info(f"✅ Cloud support metadata applied successfully using configuration version {cloud_config.version}")
+        else:
+            logging.error("❌ Cloud support requested but cloud_config module not available")
+            logging.error("This indicates a missing dependency or import error")
+            logging.error("Try: pip install pyyaml requests")
+            sys.exit(1)
+    
+    # 3. Resolve type references and expand default values for original properties
     original_properties = resolve_type_and_default(original_properties, definitions)
     
     # Generate original properties JSON (without overrides)
@@ -1347,7 +1380,12 @@ def main():
     # 2. Add config_scope field based on which source file defines the property
     enhanced_properties = add_config_scope(enhanced_properties)
     
-    # 3. Resolve type references and expand default values
+    # 3. Add cloud support metadata if requested
+    if cloud_config:
+        enhanced_properties = add_cloud_support_metadata(enhanced_properties, cloud_config)
+        logging.info("✅ Cloud support metadata applied to enhanced properties")
+    
+    # 4. Resolve type references and expand default values
     # This step converts:
     # - C++ type names (model::broker_endpoint) to JSON schema types (object)  
     # - C++ constructor defaults to structured JSON objects
