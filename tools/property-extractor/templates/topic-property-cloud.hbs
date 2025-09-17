@@ -12,6 +12,13 @@
 No description available.
 {{/if}}
 
+{{#if is_enterprise}}
+ifndef::env-cloud[]
+*Enterprise license required*: `{{enterprise_value}}` (for license details, see xref:get-started:licensing/index.adoc[Redpanda Licensing])
+endif::[]
+
+{{/if}}
+
 {{#if cloud_byoc_only}}
 NOTE: This property is only available in Redpanda Cloud BYOC deployments.
 

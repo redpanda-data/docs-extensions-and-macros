@@ -2,6 +2,18 @@ import re
 from property_bag import PropertyBag
 from parser import normalize_string
 
+# Import the process_enterprise_value function from property_extractor
+# Note: We import at function level to avoid circular imports since property_extractor
+# imports transformers.py. This pattern allows the EnterpriseTransformer to access
+# the centralized enterprise value processing logic without creating import cycles.
+def get_process_enterprise_value():
+    try:
+        from property_extractor import process_enterprise_value
+        return process_enterprise_value
+    except ImportError as e:
+        print(f"ERROR: Cannot import process_enterprise_value: {e}")
+        return None
+
 
 class BasicInfoTransformer:
     def accepts(self, info, file_pair):
@@ -427,13 +439,35 @@ class AliasTransformer:
 
 
 class EnterpriseTransformer:
+    """
+    Transforms enterprise property values from C++ expressions to user-friendly JSON.
+
+    This transformer processes enterprise values by delegating to the
+    centralized process_enterprise_value function which handles the full range of
+    C++ expression types found in enterprise property definitions.
+    """
     def accepts(self, info, file_pair):
         return bool(info.get('type') and 'enterprise' in info['type'])
 
     def parse(self, property, info, file_pair):
         if info['params'] is not None:
             enterpriseValue = info['params'][0]['value']
-            property['enterprise_value'] = enterpriseValue
+            
+            # Get the processing function
+            process_enterprise_value = get_process_enterprise_value()
+            if process_enterprise_value is None:
+                property["enterprise_value"] = enterpriseValue
+                property['is_enterprise'] = True
+                del info['params'][0]
+                return property
+            
+            try:
+                processed_value = process_enterprise_value(enterpriseValue)
+                property["enterprise_value"] = processed_value
+            except Exception as e:
+                # Fallback to raw value if processing fails
+                property["enterprise_value"] = enterpriseValue
+
             property['is_enterprise'] = True
             del info['params'][0]
             return property

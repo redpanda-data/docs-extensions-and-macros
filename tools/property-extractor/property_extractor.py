@@ -59,6 +59,7 @@ import os
 import json
 import re
 import yaml
+import ast
 from copy import deepcopy
 
 from pathlib import Path
@@ -79,6 +80,9 @@ except ImportError:
 # Import cloud configuration support
 try:
     from cloud_config import fetch_cloud_config, add_cloud_support_metadata
+    # Configure cloud_config logger to suppress INFO logs by default
+    import logging
+    logging.getLogger('cloud_config').setLevel(logging.WARNING)
 except ImportError as e:
     # Cloud configuration support not available due to missing dependencies
     logging.warning(f"Cloud configuration support not available: {e}")
@@ -86,6 +90,103 @@ except ImportError as e:
     add_cloud_support_metadata = None
 
 logger = logging.getLogger("viewer")
+
+
+def process_enterprise_value(enterprise_str):
+    """
+    Process C++ enterprise values into user-friendly JSON values.
+    
+    This function converts C++ expressions used in enterprise property definitions
+    into appropriate JSON values for documentation and API consumption.
+    
+    PROCESSING ORDER (CRITICAL):
+    The order of these checks matters because some patterns could match multiple handlers.
+    For example, a vector like std::vector<model::some_enum::value>{...} contains both
+    vector syntax AND enum patterns, so vector processing must come first.
+    
+    Handles:
+    1. Vector initialization: std::vector<ss::sstring>{"GSSAPI", "OAUTHBEARER"} -> ["GSSAPI", "OAUTHBEARER"]
+    2. Enum values: model::partition_autobalancing_mode::continuous -> "continuous"  
+    3. Lambda expressions: [](const config::foo& f) { return f.bar(); } -> "Enterprise feature enabled"
+    4. Simple values: "true", "false", "OIDC" -> unchanged
+    
+    Args:
+        enterprise_str: Raw C++ expression string from tree-sitter parsing
+        
+    Returns:
+        Processed value suitable for JSON serialization (string, boolean, array, etc.)
+    """
+    enterprise_str = enterprise_str.strip()
+    
+    # FIRST: Handle std::vector initialization patterns (highest priority)
+    # This must come before enum processing because vectors can contain enums
+    vector_match = re.match(r'std::vector<[^>]+>\{([^}]*)\}', enterprise_str)
+    if vector_match:
+        content = vector_match.group(1).strip()
+        if not content:
+            return []
+        
+        # Parse the content as a list of values
+        values = []
+        current_value = ""
+        in_quotes = False
+        
+        for char in content:
+            if char == '"' and (not current_value or current_value[-1] != '\\'):
+                in_quotes = not in_quotes
+                current_value += char
+            elif char == ',' and not in_quotes:
+                if current_value.strip():
+                    # Clean up the value
+                    value = current_value.strip()
+                    if value.startswith('"') and value.endswith('"'):
+                        values.append(ast.literal_eval(value))
+                    else:
+                        # Handle enum values in the vector
+                        enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)', value)
+                        if enum_match:
+                            values.append(enum_match.group(1))
+                        else:
+                            values.append(value)
+                current_value = ""
+            else:
+                current_value += char
+        
+        # Add the last value
+        if current_value.strip():
+            value = current_value.strip()
+            if value.startswith('"') and value.endswith('"'):
+                values.append(ast.literal_eval(value))
+            else:
+                # Handle enum values in the vector
+                enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)', value)
+                if enum_match:
+                    values.append(enum_match.group(1))
+                else:
+                    values.append(value)
+        
+        return values
+    
+    # SECOND: Handle enum-like patterns (extract the last part after ::)
+    enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)', enterprise_str)
+    if enum_match:
+        enum_value = enum_match.group(1)
+        return enum_value
+    
+    # THIRD: Handle C++ lambda expressions - these usually indicate "any non-default value"
+    if enterprise_str.startswith("[](") and enterprise_str.endswith("}"):
+        # For lambda expressions, try to extract meaningful info from the logic
+        if "leaders_preference" in enterprise_str:
+            return "Any rack preference (not `none`)"
+        else:
+            return "Enterprise feature enabled"
+    
+    # FOURTH: If it's already a simple value (string, boolean, etc.), return as-is
+    if enterprise_str in ("true", "false", "OIDC") or enterprise_str.startswith('"'):
+        return enterprise_str
+    
+    # Fallback: return the original value
+    return enterprise_str
 
 
 def resolve_cpp_function_call(function_name):
@@ -1176,6 +1277,14 @@ def resolve_type_and_default(properties, definitions):
                     prop["type"] = "boolean"
                 else:
                     prop["type"] = "string"
+    
+    # Final pass: process enterprise values
+    for prop in properties.values():
+        if "enterprise_value" in prop:
+            enterprise_value = prop["enterprise_value"]
+            if isinstance(enterprise_value, str):
+                processed_enterprise = process_enterprise_value(enterprise_value)
+                prop["enterprise_value"] = processed_enterprise
                         
     return properties
 
@@ -1284,7 +1393,7 @@ def main():
             ),
         )
 
-        arg_parser.add_argument("-v", "--verbose", action="store_true")
+        arg_parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output (DEBUG level logging)")
 
         return arg_parser
 
@@ -1293,8 +1402,10 @@ def main():
 
     if options.verbose:
         logging.basicConfig(level="DEBUG")
+        # Also enable INFO logging for cloud_config in verbose mode
+        logging.getLogger('cloud_config').setLevel(logging.INFO)
     else:
-        logging.basicConfig(level="INFO")
+        logging.basicConfig(level="WARNING")  # Suppress INFO logs by default
 
     validate_paths(options)
 

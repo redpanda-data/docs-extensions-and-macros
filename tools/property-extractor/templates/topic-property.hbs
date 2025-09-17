@@ -10,6 +10,15 @@
 No description available.
 {{/if}}
 
+{{#if is_enterprise}}
+ifndef::env-cloud[]
+*Enterprise license required*: `{{enterprise_value}}`
++
+For license details, see xref:get-started:licensing/index.adoc[Redpanda Licensing].
+endif::[]
+
+{{/if}}
+
 {{#if type}}
 *Type:* {{type}}
 

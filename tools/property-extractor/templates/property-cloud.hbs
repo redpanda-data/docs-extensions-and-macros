@@ -12,46 +12,48 @@
 No description available.
 {{/if}}
 
+{{#if is_enterprise}}
+ifndef::env-cloud[]
+*Enterprise license required*: `{{enterprise_value}}` (for license details, see xref:get-started:licensing/index.adoc[Redpanda Licensing])
+endif::[]
+{{/if}}
+
 {{#if cloud_byoc_only}}
 NOTE: This property is available only in Redpanda Cloud BYOC deployments.
-
 {{/if}}
+
 {{#if units}}
 *Unit:* {{units}}
-
 {{else}}
 {{#if (formatUnits name)}}
 *Unit:* {{formatUnits name}}
+{{/if}}
+{{/if}}
 
-{{/if}}
-{{/if}}
 {{#if (ne defined_in "src/v/config/node_config.cc")}}
 {{#if (ne needs_restart undefined)}}
 *Requires restart:* {{#if needs_restart}}Yes{{else}}No{{/if}}
+{{/if}}
+{{/if}}
 
-{{/if}}
-{{/if}}
 {{#if visibility}}
 // tag::self-managed-only[]
 *Visibility:* `{{visibility}}`
 // end::self-managed-only[]
-
 {{/if}}
+
 {{#if type}}
 *Type:* {{type}}
-
 {{/if}}
+
 {{#if (and minimum maximum)}}
 *Accepted values:* [`{{minimum}}`, `{{maximum}}`]
-
 {{else}}
 {{#if minimum}}
 *Minimum value:* `{{minimum}}`
-
 {{/if}}
 {{#if maximum}}
 *Maximum value:* `{{maximum}}`
-
 {{/if}}
 {{/if}}
 {{#if (ne default undefined)}}
@@ -75,14 +77,13 @@ endif::[]
 // tag::self-managed-only[]
 *Aliases:* {{join aliases ", "}}
 // end::self-managed-only[]
-
 {{/if}}
+
 {{#if is_deprecated}}
 [WARNING]
 ====
 This property is deprecated.
 ====
-
 {{/if}}
 ---
 {{#if cloud_supported}}
