@@ -79,8 +79,9 @@ except ImportError:
 # Import cloud configuration support
 try:
     from cloud_config import fetch_cloud_config, add_cloud_support_metadata
-except ImportError:
-    logging.warning("Cloud configuration support not available")
+except ImportError as e:
+    # Cloud configuration support not available due to missing dependencies
+    logging.warning(f"Cloud configuration support not available: {e}")
     fetch_cloud_config = None
     add_cloud_support_metadata = None
 
@@ -1360,8 +1361,9 @@ def main():
             logging.info(f"✅ Cloud support metadata applied successfully using configuration version {cloud_config.version}")
         else:
             logging.error("❌ Cloud support requested but cloud_config module not available")
-            logging.error("This indicates a missing dependency or import error")
-            logging.error("Try: pip install pyyaml requests")
+            logging.error("This indicates missing Python dependencies for cloud configuration")
+            logging.error("Install required packages: pip install pyyaml requests")
+            logging.error("Or if using a virtual environment, activate it first")
             sys.exit(1)
     
     # 3. Resolve type references and expand default values for original properties

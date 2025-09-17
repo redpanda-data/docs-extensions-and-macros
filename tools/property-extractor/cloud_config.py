@@ -25,7 +25,6 @@ Error Handling:
 """
 
 import os
-import sys
 import json
 import logging
 from dataclasses import dataclass
@@ -35,16 +34,12 @@ from typing import Dict, Set, Optional, List
 try:
     import requests
 except ImportError:
-    print("ERROR: Missing required dependency 'requests'")
-    print("Install with: pip install requests")
-    sys.exit(1)
+    raise ImportError("Missing required dependency 'requests': install with pip install requests")
 
 try:
     import yaml
 except ImportError:
-    print("ERROR: Missing required dependency 'PyYAML'")
-    print("Install with: pip install pyyaml")
-    sys.exit(1)
+    raise ImportError("Missing required dependency 'PyYAML': install with pip install pyyaml")
 
 # Set up logging with production-ready configuration
 logger = logging.getLogger(__name__)
@@ -240,21 +235,38 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
             logger.error(error_msg)
             raise CloudConfigParsingError(error_msg)
         
-        # Sort by version and get the latest
-        def version_key(version_tuple):
-            """Convert version string to tuple of integers for sorting."""
-            version_str = version_tuple[0]
+        # Parse and filter valid version entries before sorting
+        valid_versions = []
+        for version_str, download_url in version_files:
             try:
-                return tuple(int(part) for part in version_str.split('.'))
-            except ValueError:
-                logger.warning(f"Invalid version format: {version_str}, using 0.0")
-                return (0, 0)
+                # Parse version string into tuple of integers
+                version_tuple = tuple(int(part) for part in version_str.split('.'))
+                valid_versions.append((version_tuple, version_str, download_url))
+                logger.debug(f"Valid version parsed: {version_str} -> {version_tuple}")
+            except ValueError as e:
+                logger.warning(f"Skipping invalid version format: {version_str} (error: {e})")
+                continue
         
-        version_files.sort(key=version_key)
-        latest_version, download_url = version_files[-1]
+        # Check if we have any valid versions
+        if not valid_versions:
+            error_msg = (
+                "No valid version files found in cloudv2/install-pack directory.\n"
+                f"Found {len(version_files)} files but none had valid version formats.\n"
+                f"Available files: {[v[0] for v in version_files]}\n"
+                "Expected version format: 'X.Y' or 'X.Y.Z' (e.g., '25.1', '25.2.1')\n"
+                "Contact cloud team to verify configuration file naming convention."
+            )
+            logger.error(error_msg)
+            raise CloudConfigParsingError(error_msg)
         
-        logger.info(f"Found {len(version_files)} version files, using latest: {latest_version}")
-        logger.info(f"Available versions: {[v[0] for v in version_files]}")
+        # Sort by parsed version tuple and get the latest
+        valid_versions.sort(key=lambda x: x[0])  # Sort by version tuple
+        latest_version_tuple, latest_version, download_url = valid_versions[-1]
+        
+        logger.info(f"Found {len(valid_versions)} valid version files, using latest: {latest_version}")
+        logger.info(f"Valid versions: {[v[1] for v in valid_versions]}")
+        if len(version_files) > len(valid_versions):
+            logger.info(f"Skipped {len(version_files) - len(valid_versions)} invalid version files")
         
         # Download the latest version file
         logger.info(f"Downloading configuration file for version {latest_version}...")

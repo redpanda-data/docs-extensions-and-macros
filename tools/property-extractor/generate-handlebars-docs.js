@@ -251,7 +251,7 @@ function generateDeprecatedDocs(properties, outputDir) {
  */
 function hasCloudSupportMetadata(properties) {
   return Object.values(properties).some(prop => 
-    prop.hasOwnProperty('cloud_supported')
+    Object.prototype.hasOwnProperty.call(prop, 'cloud_supported')
   );
 }
 
