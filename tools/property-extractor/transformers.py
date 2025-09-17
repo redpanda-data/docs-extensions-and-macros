@@ -7,6 +7,14 @@ from parser import normalize_string
 # imports transformers.py. This pattern allows the EnterpriseTransformer to access
 # the centralized enterprise value processing logic without creating import cycles.
 def get_process_enterprise_value():
+    """
+    Lazily import and return the centralized `process_enterprise_value` function from `property_extractor`.
+    
+    Attempts to import `process_enterprise_value` and return it to avoid circular-import issues. If the import fails an error message is printed and None is returned.
+    
+    Returns:
+        Callable or None: The `process_enterprise_value` callable when available, otherwise `None`.
+    """
     try:
         from property_extractor import process_enterprise_value
         return process_enterprise_value
@@ -17,6 +25,16 @@ def get_process_enterprise_value():
 
 class BasicInfoTransformer:
     def accepts(self, info, file_pair):
+        """
+        Always accepts the provided info and file_pair.
+        
+        Parameters:
+        	info (dict): Parsed metadata for a property (annotation/params/declaration).
+        	file_pair (object): Pair of source/implementation file metadata used by transformers.
+        
+        Returns:
+        	bool: Always returns True, indicating this transformer should be applied.
+        """
         return True
 
     def parse(self, property, info, file_pair):
@@ -447,9 +465,39 @@ class EnterpriseTransformer:
     C++ expression types found in enterprise property definitions.
     """
     def accepts(self, info, file_pair):
+        """
+        Return True if the provided info indicates an enterprise-only property.
+        
+        Parameters:
+            info (dict): The metadata dictionary for a property. This function checks for a 'type' key whose string contains 'enterprise'.
+            file_pair: Unused; present for transformer interface compatibility.
+        
+        Returns:
+            bool: True when info contains a 'type' that includes 'enterprise', otherwise False.
+        """
         return bool(info.get('type') and 'enterprise' in info['type'])
 
     def parse(self, property, info, file_pair):
+        """
+        Mark a property as enterprise-only and attach its enterprise value.
+        
+        If an enterprise value is present in info['params'][0]['value'], this method attempts to process it using the shared
+        process_enterprise_value helper (loaded via get_process_enterprise_value()). If the processor is unavailable or raises
+        an exception, the raw enterprise value is used.
+        
+        Side effects:
+        - Sets property["enterprise_value"] to the processed or raw value.
+        - Sets property["is_enterprise"] = True.
+        - Removes the first element from info['params'].
+        
+        Parameters:
+            property (dict): Property bag to modify and return.
+            info (dict): Parsed metadata; must have a non-None 'params' list for processing.
+            file_pair: Unused here but accepted for transformer API compatibility.
+        
+        Returns:
+            dict: The updated property bag.
+        """
         if info['params'] is not None:
             enterpriseValue = info['params'][0]['value']
             

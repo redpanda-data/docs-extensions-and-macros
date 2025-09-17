@@ -15,7 +15,16 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * Deep comparison of two values, handling arrays and objects
+ * Recursively compares two values for structural deep equality.
+ *
+ * - Returns true if values are strictly equal (`===`).
+ * - Returns false if types differ or either is `null`/`undefined` while the other is not.
+ * - Arrays: ensures same length and recursively compares each element.
+ * - Objects: compares own enumerable keys (order-insensitive) and recursively compares corresponding values.
+ *
+ * @param {*} a - First value to compare.
+ * @param {*} b - Second value to compare.
+ * @returns {boolean} True if the two values are deeply equal.
  */
 function deepEqual(a, b) {
   if (a === b) return true;
@@ -38,7 +47,21 @@ function deepEqual(a, b) {
 }
 
 /**
- * Format a value for display in the comparison report
+ * Format a value for concise human-readable display in comparison reports.
+ *
+ * Converts various JavaScript values into short string representations used
+ * in the report output:
+ * - null/undefined → `'null'`
+ * - Array:
+ *   - empty → `'[]'`
+ *   - single item → `[<formatted item>]` (recursively formatted)
+ *   - multiple items → `'[<n> items]'`
+ * - Object → JSON string via `JSON.stringify`
+ * - String → quoted; truncated with `...` if longer than 50 characters
+ * - Other primitives → `String(value)`
+ *
+ * @param {*} value - The value to format for display.
+ * @return {string} A concise string suitable for report output.
  */
 function formatValue(value) {
   if (value === null || value === undefined) {
@@ -59,7 +82,15 @@ function formatValue(value) {
 }
 
 /**
- * Extract all properties from a JSON structure, handling the actual structure
+ * Extracts a flat map of property definitions from a parsed JSON schema or similar object.
+ *
+ * If the input contains a top-level `properties` object, that object is returned directly.
+ * Otherwise, the function scans the root keys (excluding `definitions`) and returns any
+ * entries that look like property definitions (an object with at least one of `type`,
+ * `description`, or `default`).
+ *
+ * @param {Object} data - Parsed JSON data to scan for property definitions.
+ * @returns {Object} A map of property definitions (key → property object). Returns an empty object if none found.
  */
 function extractProperties(data) {
   // Properties are nested under a 'properties' key in the JSON structure
@@ -82,7 +113,20 @@ function extractProperties(data) {
 }
 
 /**
- * Compare two property sets and generate a detailed report
+ * Compare two property JSON structures and produce a detailed change report.
+ *
+ * Compares properties extracted from oldData and newData and classifies differences
+ * into newProperties, changedDefaults, changedDescriptions, changedTypes,
+ * deprecatedProperties (newly deprecated in newData), and removedProperties.
+ * Description fields in the report are truncated for brevity; default equality
+ * is determined by a deep structural comparison.
+ *
+ * @param {Object} oldData - Parsed JSON of the older property file.
+ * @param {Object} newData - Parsed JSON of the newer property file.
+ * @param {string} oldVersion - Version string corresponding to oldData.
+ * @param {string} newVersion - Version string corresponding to newData.
+ * @return {Object} Report object with arrays: newProperties, changedDefaults,
+ *   changedDescriptions, changedTypes, deprecatedProperties, removedProperties.
  */
 function compareProperties(oldData, newData, oldVersion, newVersion) {
   const oldProps = extractProperties(oldData);
@@ -168,7 +212,14 @@ function compareProperties(oldData, newData, oldVersion, newVersion) {
 }
 
 /**
- * Generate a formatted report for console output
+ * Print a human-readable console report summarizing property differences between two versions.
+ *
+ * The report includes sections for new properties, properties with changed defaults,
+ * changed types, updated descriptions, newly deprecated properties (with reason), and removed properties.
+ *
+ * @param {Object} report - Comparison report object returned by compareProperties().
+ * @param {string} oldVersion - Label for the old version (displayed as the "from" version).
+ * @param {string} newVersion - Label for the new version (displayed as the "to" version).
  */
 function generateConsoleReport(report, oldVersion, newVersion) {
   console.log('\n' + '='.repeat(60));
@@ -227,7 +278,15 @@ function generateConsoleReport(report, oldVersion, newVersion) {
 }
 
 /**
- * Generate a JSON report for programmatic use
+ * Write a structured JSON comparison report to disk.
+ *
+ * Produces a JSON file containing a comparison header (old/new versions and timestamp),
+ * a summary with counts for each change category, and the full details object passed as `report`.
+ *
+ * @param {Object} report - Comparison details object produced by compareProperties; expected to contain arrays: `newProperties`, `changedDefaults`, `changedDescriptions`, `changedTypes`, `deprecatedProperties`, and `removedProperties`.
+ * @param {string} oldVersion - The previous version identifier included in the comparison header.
+ * @param {string} newVersion - The new version identifier included in the comparison header.
+ * @param {string} outputPath - Filesystem path where the JSON report will be written.
  */
 function generateJsonReport(report, oldVersion, newVersion, outputPath) {
   const jsonReport = {
@@ -252,7 +311,25 @@ function generateJsonReport(report, oldVersion, newVersion, outputPath) {
 }
 
 /**
- * Main comparison function
+ * Compare two property JSON files and produce a change report.
+ *
+ * Reads and parses the two JSON files at oldFilePath and newFilePath, compares their properties
+ * using compareProperties, prints a human-readable console report, and optionally writes a
+ * structured JSON report to outputDir/filename.
+ *
+ * Side effects:
+ * - Synchronously reads the two input files.
+ * - Writes a JSON report file when outputDir is provided (creates the directory if needed).
+ * - Logs progress and results to the console.
+ * - On error, logs the error and exits the process with code 1.
+ *
+ * @param {string} oldFilePath - Path to the old property JSON file.
+ * @param {string} newFilePath - Path to the new property JSON file.
+ * @param {string} oldVersion - Version label for the old file (used in reports).
+ * @param {string} newVersion - Version label for the new file (used in reports).
+ * @param {string|undefined} outputDir - Optional directory to write the JSON report; if falsy, no file is written.
+ * @param {string} [filename='property-changes.json'] - Name of the JSON report file to write inside outputDir.
+ * @returns {Object} The comparison report object produced by compareProperties.
  */
 function comparePropertyFiles(oldFilePath, newFilePath, oldVersion, newVersion, outputDir, filename = 'property-changes.json') {
   try {
