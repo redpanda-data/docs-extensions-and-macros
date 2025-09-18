@@ -123,7 +123,16 @@ function getTemplatePath(defaultPath, envVar) {
 }
 
 /**
- * Registers Handlebars partials from template files
+ * Register Handlebars partials used to render property documentation.
+ *
+ * Loads templates from the local templates directory (overridable via environment
+ * variables handled by getTemplatePath) and registers three partials:
+ *  - "property" (uses cloud-aware `property-cloud.hbs` when enabled)
+ *  - "topic-property" (uses cloud-aware `topic-property-cloud.hbs` when enabled)
+ *  - "deprecated-property"
+ *
+ * @param {boolean} [hasCloudSupport=false] - If true, select cloud-aware templates for the `property` and `topic-property` partials.
+ * @throws {Error} If any required template file is missing or cannot be read; errors are rethrown after logging.
  */
 function registerPartials(hasCloudSupport = false) {
   const templatesDir = path.join(__dirname, 'templates');
@@ -224,7 +233,17 @@ function generatePropertyDocs(properties, config, outputDir) {
 }
 
 /**
- * Generates deprecated properties documentation
+ * Generate an AsciiDoc fragment listing deprecated properties and write it to disk.
+ *
+ * Scans the provided properties map for entries with `is_deprecated === true`, groups
+ * them by `config_scope` ("broker" and "cluster"), sorts each group by property name,
+ * renders the `deprecated-properties` Handlebars template, and writes the output to
+ * `<outputDir>/deprecated/partials/deprecated-properties.adoc`.
+ *
+ * @param {Object.<string, Object>} properties - Map of property objects keyed by property name.
+ *   Each property object may contain `is_deprecated`, `config_scope`, and `name` fields.
+ * @param {string} outputDir - Destination directory where the deprecated fragment will be written.
+ * @returns {number} The total number of deprecated properties found and written.
  */
 function generateDeprecatedDocs(properties, outputDir) {
   const templatePath = getTemplatePath(
@@ -260,7 +279,13 @@ function generateDeprecatedDocs(properties, outputDir) {
 }
 
 /**
- * Checks if any properties have cloud support metadata
+ * Determine whether any property includes cloud support metadata.
+ *
+ * Checks the provided map of properties and returns true if at least one
+ * property object has a `cloud_supported` own property (regardless of its value).
+ *
+ * @param {Object<string, Object>} properties - Map from property name to its metadata object.
+ * @return {boolean} True if any property has a `cloud_supported` attribute; otherwise false.
  */
 function hasCloudSupportMetadata(properties) {
   return Object.values(properties).some(prop => 
@@ -269,7 +294,21 @@ function hasCloudSupportMetadata(properties) {
 }
 
 /**
- * Main function to generate all property documentation
+ * Generate all property documentation and write output files to disk.
+ *
+ * Reads properties from the provided JSON file, detects whether any property
+ * includes cloud support metadata to select cloud-aware templates, registers
+ * Handlebars partials accordingly, renders per-type property pages and a
+ * deprecated-properties partial, writes a flat list of all property names, and
+ * produces error reports.
+ *
+ * Generated artifacts are written under the given output directory (e.g.:
+ * pages/<type>/*.adoc, pages/deprecated/partials/deprecated-properties.adoc,
+ * all_properties.txt, and files under outputDir/error).
+ *
+ * @param {string} inputFile - Filesystem path to the input JSON containing a top-level `properties` object.
+ * @param {string} outputDir - Destination directory where generated pages and reports will be written.
+ * @returns {{totalProperties: number, brokerProperties: number, clusterProperties: number, objectStorageProperties: number, topicProperties: number, deprecatedProperties: number}} Summary counts for all properties and per-type totals.
  */
 function generateAllDocs(inputFile, outputDir) {
   // Read input JSON

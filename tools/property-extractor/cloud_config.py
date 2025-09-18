@@ -76,11 +76,24 @@ class CloudConfig:
         return set(self.readonly_cluster_config)
     
     def get_all_cloud_properties(self) -> Set[str]:
-        """Get all properties available in cloud (editable + readonly)."""
+        """
+        Return the set of all property names present in the cloud configuration (union of editable and readonly).
+        
+        Returns:
+            Set[str]: Property names that are either customer-editable or readonly in cloud deployments.
+        """
         return self.get_editable_properties() | self.get_readonly_properties()
     
     def is_byoc_only(self, property_name: str) -> bool:
-        """Check if a property is only available for BYOC clusters."""
+        """
+        Return True if the given property is defined in customer_managed_configs and its `cluster_types` list is exactly ['byoc'].
+        
+        Parameters:
+            property_name (str): Name of the property to check.
+        
+        Returns:
+            bool: True when a matching config entry exists and its `cluster_types` equals ['byoc']; False otherwise.
+        """
         for config in self.customer_managed_configs:
             if config.get('name') == property_name:
                 cluster_types = config.get('cluster_types', [])
@@ -90,19 +103,21 @@ class CloudConfig:
 
 def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
     """
-    Fetch the latest cloud configuration from the cloudv2 repository.
+    Fetch the latest cloud configuration from the redpanda-data/cloudv2 repository and return it as a CloudConfig.
     
-    Args:
-        github_token: GitHub token for accessing private repositories
-        
+    This function uses a GitHub personal access token for authentication. If `github_token` is not provided, it will read GITHUB_TOKEN or REDPANDA_GITHUB_TOKEN from the environment. It downloads the most recent versioned YAML from the repository's install-pack directory, validates expected sections (`customer_managed_configs` and `readonly_cluster_config`), and constructs a CloudConfig instance.
+    
+    Parameters:
+        github_token (Optional[str]): Personal access token for GitHub API. If omitted, the function will try environment variables GITHUB_TOKEN or REDPANDA_GITHUB_TOKEN.
+    
     Returns:
-        CloudConfig object with the latest configuration
+        CloudConfig: Parsed cloud configuration for the latest available version.
     
     Raises:
-        GitHubAuthError: If authentication fails
-        NetworkError: If network request fails
-        CloudConfigParsingError: If YAML parsing fails
-        CloudConfigError: If no GitHub token provided or other configuration errors
+        GitHubAuthError: Authentication or access problems with the GitHub API (including 401/403 responses).
+        NetworkError: Network connectivity or timeout failures when contacting the GitHub API.
+        CloudConfigParsingError: Failure to parse or validate the repository YAML files or their expected structure.
+        CloudConfigError: Generic configuration error (e.g., missing token) or unexpected internal failures.
     """
     if not github_token:
         github_token = os.environ.get('GITHUB_TOKEN') or os.environ.get('REDPANDA_GITHUB_TOKEN')
@@ -421,17 +436,19 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
 
 def add_cloud_support_metadata(properties: Dict, cloud_config: CloudConfig) -> Dict:
     """
-    Add cloud support metadata to properties with comprehensive validation.
+    Annotate property definitions with cloud-support metadata derived from a CloudConfig.
     
-    Args:
-        properties: Dictionary of property definitions
-        cloud_config: Cloud configuration data (required)
-        
+    Mutates the provided properties dictionary in place by adding the boolean fields
+    'cloud_editable', 'cloud_readonly', 'cloud_supported', and 'cloud_byoc_only' for
+    each property. Only entries whose value is a dict and whose 'config_scope' is
+    one of 'cluster', 'broker', or 'topic' are processed; other entries are skipped.
+    
     Returns:
-        Updated properties dictionary with cloud support metadata
-        
+        The same properties dictionary, updated with cloud metadata.
+    
     Raises:
-        CloudConfigError: If critical validation errors occur
+        CloudConfigError: If `properties` is not a dict or if required data cannot be
+            extracted from the provided CloudConfig.
     """
     if not isinstance(properties, dict):
         error_msg = f"Properties argument must be a dictionary, got {type(properties)}"

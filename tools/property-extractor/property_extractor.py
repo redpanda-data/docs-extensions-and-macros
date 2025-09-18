@@ -94,27 +94,26 @@ logger = logging.getLogger("viewer")
 
 def process_enterprise_value(enterprise_str):
     """
-    Process C++ enterprise values into user-friendly JSON values.
+    Convert a raw C++ "enterprise" expression into a JSON-friendly value.
     
-    This function converts C++ expressions used in enterprise property definitions
-    into appropriate JSON values for documentation and API consumption.
+    Accepts a string extracted from C++ sources and returns a value suitable for JSON
+    serialization: a Python list for initializer-lists, a simple string for enum-like
+    tokens, a boolean-like or quoted string unchanged, or a human-readable hint for
+    lambda-based expressions.
     
-    PROCESSING ORDER (CRITICAL):
-    The order of these checks matters because some patterns could match multiple handlers.
-    For example, a vector like std::vector<model::some_enum::value>{...} contains both
-    vector syntax AND enum patterns, so vector processing must come first.
+    The function applies pattern matching in the following order (order is significant):
+    1. std::vector<...>{...} initializer lists → Python list (quoted strings are unescaped,
+       unqualified enum tokens are reduced to their final identifier).
+    2. C++ scoped enum-like tokens (foo::bar::BAZ) → "BAZ".
+    3. Lambda expressions (strings starting with "[](" and ending with "}") → a short
+       human-readable hint such as "Enterprise feature enabled" or context-specific text.
+    4. Simple literal values (e.g., "true", "false", "OIDC", or quoted strings) → returned as-is.
     
-    Handles:
-    1. Vector initialization: std::vector<ss::sstring>{"GSSAPI", "OAUTHBEARER"} -> ["GSSAPI", "OAUTHBEARER"]
-    2. Enum values: model::partition_autobalancing_mode::continuous -> "continuous"  
-    3. Lambda expressions: [](const config::foo& f) { return f.bar(); } -> "Enterprise feature enabled"
-    4. Simple values: "true", "false", "OIDC" -> unchanged
+    Parameters:
+        enterprise_str (str): Raw C++ expression text to be converted.
     
-    Args:
-        enterprise_str: Raw C++ expression string from tree-sitter parsing
-        
     Returns:
-        Processed value suitable for JSON serialization (string, boolean, array, etc.)
+        Union[str, bool, list]: A JSON-serializable representation of the input.
     """
     enterprise_str = enterprise_str.strip()
     
@@ -197,13 +196,19 @@ def process_enterprise_value(enterprise_str):
 
 def resolve_cpp_function_call(function_name):
     """
-    Dynamically resolve C++ function calls to their return values by searching the source code.
+    Resolve certain small, known C++ zero-argument functions to their literal return values by searching Redpanda source files.
     
-    Args:
-        function_name: The C++ function name (e.g., "model::kafka_audit_logging_topic")
+    This function looks up predefined search patterns for well-known functions (currently a small set under `model::*`), locates a local Redpanda source tree from several commonly used paths, and scans the listed files (and, if needed, the broader model directory) for a regex match that captures the string returned by the function. If a match is found the captured string is returned; if the source tree cannot be found or no match is located the function returns None.
+    
+    Parameters:
+        function_name (str): Fully-qualified C++ function name to resolve (e.g., "model::kafka_audit_logging_topic").
     
     Returns:
-        The resolved string value or None if not found
+        str or None: The resolved literal string returned by the C++ function, or None when unresolved (source not found or no matching pattern).
+    
+    Notes:
+        - The function performs filesystem I/O and regex-based source searching; it does not raise on read errors but logs and continues.
+        - Only a small, hard-coded set of function names/patterns is supported; unknown names immediately return None.
     """
     # Map function names to likely search patterns and file locations
     search_patterns = {
@@ -708,26 +713,21 @@ def add_config_scope(properties):
 
 def resolve_type_and_default(properties, definitions):
     """
-    Resolve type references and expand default values for all properties.
+    Resolve JSON Schema types and expand C++-style default values for all properties.
     
-    This function performs several critical transformations:
+    This function:
+    - Resolves type references found in `properties` against `definitions` (supports "$ref" and direct type names) and normalizes property "type" to a JSON Schema primitive ("object", "string", "integer", "boolean", "array", "number") with sensible fallbacks.
+    - Expands C++ constructor/initializer syntax and common C++ patterns appearing in default values into JSON-compatible Python values (e.g., nested constructor calls -> dicts, initializer lists -> lists, `std::nullopt` -> None, enum-like tokens -> strings).
+    - Ensures array-typed properties (including one_or_many_property cases) have array defaults: single-object defaults are wrapped into a one-element list and "{}" string defaults become [].
+    - Updates array item type information when item types reference definitions.
+    - Applies a final pass to convert any remaining C++-patterned defaults and to transform any `enterprise_value` strings via process_enterprise_value.
     
-    1. **Type Resolution**: Converts C++ type names to JSON schema types
-       - model::broker_endpoint -> "object"
-       - std::string -> "string"
-       - Handles both direct type names and JSON pointer references (#/definitions/...)
+    Parameters:
+        properties (dict): Mapping of property names to property metadata dictionaries. Each property may include keys like "type", "default", "items", and "enterprise_value".
+        definitions (dict): Mapping of type names to JSON Schema definition dictionaries used to resolve $ref targets and to infer property shapes when expanding constructors.
     
-    2. **Default Value Expansion**: Transforms C++ constructor syntax to JSON objects
-       - model::broker_endpoint(net::unresolved_address("127.0.0.1", 9644)) 
-         -> {address: "127.0.0.1", port: 9644}
-    
-    3. **Array Default Handling**: Ensures one_or_many_property defaults are arrays
-       - For properties with type="array", wraps single object defaults in arrays
-       - Converts empty object strings "{}" to empty arrays []
-       
-    This is essential for one_or_many_property types like 'admin' which should show:
-    - Type: array
-    - Default: [{address: "127.0.0.1", port: 9644}] (not just {address: ...})
+    Returns:
+        dict: The same `properties` mapping after in-place normalization and expansion of types and defaults.
     """
     import ast
     import re
@@ -1421,9 +1421,42 @@ def extract_topic_properties(source_path):
 
 
 def main():
+    """
+    CLI entry point that extracts Redpanda configuration properties from C++ sources and emits JSON outputs.
+    
+    Runs a full extraction and transformation pipeline:
+    - Parses command-line options (required: --path). Optional flags include --recursive, --output, --enhanced-output, --definitions, --overrides, --cloud-support, and --verbose.
+    - Validates input paths and collects header/.cc file pairs.
+    - Initializes Tree-sitter C++ parser and extracts configuration properties from source files (optionally augmented with topic properties).
+    - Produces two outputs:
+      - Original properties JSON: resolved types, expanded C++ defaults, added config_scope, and optional cloud metadata.
+      - Enhanced properties JSON: same as original but with overrides applied before final resolution.
+    - If --cloud-support is requested, attempts to fetch cloud configuration and add cloud metadata; this requires the cloud_config integration and network access (also requires GITHUB_TOKEN for private access). If cloud support is requested but dependencies are missing, the process will exit with an error.
+    - Writes JSON to files when --output and/or --enhanced-output are provided; otherwise prints the original JSON to stdout.
+    - Exits with non-zero status on fatal errors (missing files, parse errors, missing Tree-sitter parser, I/O failures, or missing cloud dependencies when requested).
+    
+    Side effects:
+    - Reads and writes files, may call external cloud config fetchers, logs to the configured logger, and may call sys.exit() on fatal conditions.
+    """
     import argparse
 
     def generate_options():
+        """
+        Create and return an argparse.ArgumentParser preconfigured for the property extractor CLI.
+        
+        The parser understands the following options:
+        - --path (required): path to the Redpanda source directory to scan.
+        - --recursive: scan the path recursively.
+        - --output: file path to write the JSON output (stdout if omitted).
+        - --enhanced-output: file path to write the enhanced JSON output with overrides applied.
+        - --definitions: JSON file containing type definitions (defaults to a definitions.json co-located with this module).
+        - --overrides: optional JSON file with property description/metadata overrides.
+        - --cloud-support: enable fetching cloud metadata from the cloudv2 repository (requires GITHUB_TOKEN and external dependencies such as pyyaml and requests).
+        - -v / --verbose: enable verbose (DEBUG-level) logging.
+        
+        Returns:
+            argparse.ArgumentParser: Parser configured with the above options.
+        """
         arg_parser = argparse.ArgumentParser(
             description="Internal property extraction tool - use doc-tools.js for user interface"
         )
