@@ -444,12 +444,17 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
     3. example: Add AsciiDoc example sections with flexible input formats (see below)
     4. default: Override the auto-extracted default value
     5. related_topics: Add an array of related topic links for cross-referencing
-    
+    6. config_scope: Specify the scope for new properties ("topic", "cluster", "broker")
+    7. type: Specify the type for new properties
+
+    Properties that don't exist in the extracted source can be created from overrides.
+    This is useful for topic properties or other configurations that aren't auto-detected.
+
     Multiple example input formats are supported for user convenience:
-    
+
     1. Direct AsciiDoc string:
        "example": ".Example\n[,yaml]\n----\nredpanda:\n  property_name: value\n----"
-    
+
     2. Multi-line array (each element becomes a line):
        "example": [
          ".Example",
@@ -459,10 +464,10 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
          "  property_name: value",
          "----"
        ]
-    
+
     3. External file reference:
        "example_file": "examples/property_name.adoc"
-    
+
     4. Auto-formatted YAML with title and description:
        "example_yaml": {
          "title": "Example Configuration",
@@ -473,42 +478,101 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
            }
          }
        }
-    
+
     Args:
         properties: Dictionary of extracted properties from C++ source
         overrides: Dictionary loaded from overrides JSON file
         overrides_file_path: Path to the overrides file (for resolving relative example_file paths)
-    
+
     Returns:
-        Updated properties dictionary with overrides applied
+        Updated properties dictionary with overrides applied and new properties created
     """
     if overrides and "properties" in overrides:
         for prop, override in overrides["properties"].items():
             if prop in properties:
-                # Apply description override
-                if "description" in override:
-                    properties[prop]["description"] = override["description"]
-                
-                # Apply version override (introduced in version)
-                if "version" in override:
-                    properties[prop]["version"] = override["version"]
-                
-                # Apply example override with multiple input format support
-                example_content = _process_example_override(override, overrides_file_path)
-                if example_content:
-                    properties[prop]["example"] = example_content
-                
-                # Apply default override
-                if "default" in override:
-                    properties[prop]["default"] = override["default"]
-                
-                # Apply related_topics override
-                if "related_topics" in override:
-                    if isinstance(override["related_topics"], list):
-                        properties[prop]["related_topics"] = override["related_topics"]
-                    else:
-                        logger.warning(f"related_topics for property '{prop}' must be an array")
+                # Apply overrides to existing properties
+                _apply_override_to_existing_property(properties[prop], override, overrides_file_path)
+            else:
+                # Create new property from override
+                logger.info(f"Creating new property from override: {prop}")
+                properties[prop] = _create_property_from_override(prop, override, overrides_file_path)
     return properties
+
+
+def _apply_override_to_existing_property(property_dict, override, overrides_file_path):
+    """Apply overrides to an existing property."""
+    # Apply description override
+    if "description" in override:
+        property_dict["description"] = override["description"]
+    
+    # Apply version override (introduced in version)
+    if "version" in override:
+        property_dict["version"] = override["version"]
+    
+    # Apply example override with multiple input format support
+    example_content = _process_example_override(override, overrides_file_path)
+    if example_content:
+        property_dict["example"] = example_content
+    
+    # Apply default override
+    if "default" in override:
+        property_dict["default"] = override["default"]
+    
+    # Apply type override
+    if "type" in override:
+        property_dict["type"] = override["type"]
+    
+    # Apply config_scope override
+    if "config_scope" in override:
+        property_dict["config_scope"] = override["config_scope"]
+    
+    # Apply related_topics override
+    if "related_topics" in override:
+        if isinstance(override["related_topics"], list):
+            property_dict["related_topics"] = override["related_topics"]
+        else:
+            logger.warning(f"related_topics for property must be an array")
+
+
+def _create_property_from_override(prop_name, override, overrides_file_path):
+    """Create a new property from override specification."""
+    # Create base property structure
+    new_property = {
+        "name": prop_name,
+        "description": override.get("description", f"Configuration property: {prop_name}"),
+        "type": override.get("type", "string"),
+        "default": override.get("default", None),
+        "defined_in": "override",  # Mark as override-created
+        "config_scope": override.get("config_scope", "topic"),  # Default to topic for new properties
+        "is_topic_property": override.get("config_scope", "topic") == "topic",
+        "is_deprecated": override.get("is_deprecated", False),
+        "visibility": override.get("visibility", "user")
+    }
+    
+    # Add version if specified
+    if "version" in override:
+        new_property["version"] = override["version"]
+    
+    # Add example if specified
+    example_content = _process_example_override(override, overrides_file_path)
+    if example_content:
+        new_property["example"] = example_content
+    
+    # Add related_topics if specified
+    if "related_topics" in override:
+        if isinstance(override["related_topics"], list):
+            new_property["related_topics"] = override["related_topics"]
+        else:
+            logger.warning(f"related_topics for property '{prop_name}' must be an array")
+    
+    # Add any other custom fields from override
+    for key, value in override.items():
+        if key not in ["description", "type", "default", "config_scope", "version", 
+                       "example", "example_file", "example_yaml", "related_topics", 
+                       "is_deprecated", "visibility"]:
+            new_property[key] = value
+    
+    return new_property
 
 
 def _process_example_override(override, overrides_file_path=None):
@@ -619,19 +683,26 @@ def add_config_scope(properties):
     'cluster' if defined_in == src/v/config/configuration.cc
     'broker' if defined_in == src/v/config/node_config.cc
     'topic' if is_topic_property == True
+    
+    For override-created properties, preserve existing config_scope if already set.
     """
     for prop in properties.values():
         # Check if this is a topic property first
         if prop.get("is_topic_property", False):
             prop["config_scope"] = "topic"
         else:
-            defined_in = prop.get("defined_in", "")
-            if defined_in == "src/v/config/configuration.cc":
-                prop["config_scope"] = "cluster"
-            elif defined_in == "src/v/config/node_config.cc":
-                prop["config_scope"] = "broker"
+            # For override-created properties, preserve existing config_scope if set
+            if prop.get("defined_in") == "override" and prop.get("config_scope") is not None:
+                # Keep the existing config_scope from override
+                pass
             else:
-                prop["config_scope"] = None
+                defined_in = prop.get("defined_in", "")
+                if defined_in == "src/v/config/configuration.cc":
+                    prop["config_scope"] = "cluster"
+                elif defined_in == "src/v/config/node_config.cc":
+                    prop["config_scope"] = "broker"
+                else:
+                    prop["config_scope"] = None
     return properties
 
 
