@@ -3,83 +3,97 @@
 {{/if}}
 === {{name}}
 {{#if version}}
-*Introduced in {{version}}*
 
+*Introduced in {{version}}*
 {{/if}}
 {{#if description}}
+
 {{{description}}}
 {{else}}
+
 No description available.
 {{/if}}
-
 {{#if is_enterprise}}
+
 ifndef::env-cloud[]
 *Enterprise license required*: `{{enterprise_value}}` (for license details, see xref:get-started:licensing/index.adoc[Redpanda Licensing])
 endif::[]
 {{/if}}
-
 {{#if cloud_byoc_only}}
+
 NOTE: This property is available only in Redpanda Cloud BYOC deployments.
 {{/if}}
-
 {{#if units}}
+
 *Unit:* {{units}}
 {{else}}
 {{#if (formatUnits name)}}
+
 *Unit:* {{formatUnits name}}
 {{/if}}
 {{/if}}
-
 {{#if (ne defined_in "src/v/config/node_config.cc")}}
 {{#if (ne needs_restart undefined)}}
+
 *Requires restart:* {{#if needs_restart}}Yes{{else}}No{{/if}}
 {{/if}}
 {{/if}}
-
 {{#if visibility}}
+
 // tag::self-managed-only[]
 *Visibility:* `{{visibility}}`
 // end::self-managed-only[]
 {{/if}}
-
 {{#if type}}
+
 *Type:* {{type}}
 {{/if}}
-
 {{#if (and minimum maximum)}}
+
 *Accepted values:* [`{{minimum}}`, `{{maximum}}`]
 {{else}}
 {{#if minimum}}
+
 *Minimum value:* `{{minimum}}`
 {{/if}}
 {{#if maximum}}
+
 *Maximum value:* `{{maximum}}`
 {{/if}}
 {{/if}}
 {{#if (ne default undefined)}}
+
 ifdef::env-cloud[]
 *Default:* Available in the Redpanda Cloud Console
 endif::[]
 ifndef::env-cloud[]
 *Default:* `{{formatPropertyValue default type}}`
 endif::[]
-
 {{/if}}
+
 // tag::self-managed-only[]
 *Nullable:* {{#if nullable}}Yes{{else}}No{{/if}}
 // end::self-managed-only[]
-
 {{#if example}}
+
 {{{renderPropertyExample this}}}
 {{/if}}
+{{#if related_topics}}
 
+*Related topics:*
+
+{{#each related_topics}}
+* {{{this}}}
+{{/each}}
+{{/if}}
 {{#if aliases}}
+
 // tag::self-managed-only[]
 *Aliases:* {{join aliases ", "}}
 // end::self-managed-only[]
 {{/if}}
-
 {{#if is_deprecated}}
+
 [WARNING]
 ====
 This property is deprecated.

@@ -120,7 +120,8 @@ def process_enterprise_value(enterprise_str):
     
     # FIRST: Handle std::vector initialization patterns (highest priority)
     # This must come before enum processing because vectors can contain enums
-    vector_match = re.match(r'std::vector<[^>]+>\{([^}]*)\}', enterprise_str)
+    # Tolerate optional whitespace around braces
+    vector_match = re.match(r'std::vector<[^>]+>\s*\{\s*([^}]*)\s*\}', enterprise_str)
     if vector_match:
         content = vector_match.group(1).strip()
         if not content:
@@ -181,8 +182,13 @@ def process_enterprise_value(enterprise_str):
         else:
             return "Enterprise feature enabled"
     
-    # FOURTH: If it's already a simple value (string, boolean, etc.), return as-is
-    if enterprise_str in ("true", "false", "OIDC") or enterprise_str.startswith('"'):
+    # FOURTH: Handle simple values with proper JSON types
+    # Convert boolean literals to actual boolean values for JSON compatibility
+    if enterprise_str == "true":
+        return True
+    elif enterprise_str == "false":
+        return False
+    elif enterprise_str == "OIDC" or enterprise_str.startswith('"'):
         return enterprise_str
     
     # Fallback: return the original value
@@ -437,6 +443,7 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
     2. version: Add version information showing when the property was introduced
     3. example: Add AsciiDoc example sections with flexible input formats (see below)
     4. default: Override the auto-extracted default value
+    5. related_topics: Add an array of related topic links for cross-referencing
     
     Multiple example input formats are supported for user convenience:
     
@@ -494,6 +501,13 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
                 # Apply default override
                 if "default" in override:
                     properties[prop]["default"] = override["default"]
+                
+                # Apply related_topics override
+                if "related_topics" in override:
+                    if isinstance(override["related_topics"], list):
+                        properties[prop]["related_topics"] = override["related_topics"]
+                    else:
+                        logger.warning(f"related_topics for property '{prop}' must be an array")
     return properties
 
 
@@ -554,15 +568,15 @@ def _process_example_override(override, overrides_file_path=None):
             if found_path:
                 file_path = found_path
             else:
-                print(f"Warning: Example file not found: {override['example_file']}")
-                print(f"Searched in: {', '.join(search_paths)}")
+                logger.warning(f"Example file not found: {override['example_file']}")
+                logger.warning(f"Searched in: {', '.join(search_paths)}")
                 return None
         
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 return f.read().strip()
         except Exception as e:
-            print(f"Error reading example file {file_path}: {e}")
+            logger.error(f"Error reading example file {file_path}: {e}")
             return None
     
     # Format 4: Auto-formatted YAML configuration
@@ -1340,60 +1354,25 @@ def main():
 
     def generate_options():
         arg_parser = argparse.ArgumentParser(
-            description="Extract all properties from the Redpanda's source code and generate a JSON output with their definitions"
+            description="Internal property extraction tool - use doc-tools.js for user interface"
         )
-        arg_parser.add_argument(
-            "--path",
-            type=str,
-            required=True,
-            help="Path to the Redpanda's source dir to extract the properties",
-        )
-
-        arg_parser.add_argument(
-            "--recursive", action="store_true", help="Scan the path recursively"
-        )
-
-        arg_parser.add_argument(
-            "--output",
-            type=str,
-            required=False,
-            help="File to store the JSON output. If no file is provided, the JSON will be printed to the standard output",
-        )
-
-        arg_parser.add_argument(
-            "--enhanced-output",
-            type=str,
-            required=False,
-            help="File to store the enhanced JSON output with overrides applied (such as 'dev-properties.json')",
-        )
-
-        arg_parser.add_argument(
-            "--definitions",
-            type=str,
-            required=False,
-            default=os.path.dirname(os.path.realpath(__file__)) + "/definitions.json",
-            help='JSON file with the type definitions. This file will be merged in the output under the "definitions" field',
-        )
-
-        arg_parser.add_argument(
-            "--overrides",
-            type=str,
-            required=False,
-            help='Optional JSON file with property description overrides',
-        )
-
-        arg_parser.add_argument(
-            "--cloud-support",
-            action="store_true",
-            help=(
-                'Enable cloud support metadata by fetching configuration from cloudv2 repository. '
-                'Requires GITHUB_TOKEN environment variable with repo access to redpanda-data/cloudv2. '
-                'Adds cloud/self-managed tagging to generated documentation. '
-                'Dependencies: pip install pyyaml requests'
-            ),
-        )
-
-        arg_parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output (DEBUG level logging)")
+        # Core required parameters
+        arg_parser.add_argument("--path", type=str, required=True, help="Path to Redpanda source directory")
+        arg_parser.add_argument("--recursive", action="store_true", help="Scan path recursively")
+        
+        # Output options
+        arg_parser.add_argument("--output", type=str, help="JSON output file path")
+        arg_parser.add_argument("--enhanced-output", type=str, help="Enhanced JSON output file path")
+        
+        # Data sources
+        arg_parser.add_argument("--definitions", type=str, 
+                              default=os.path.dirname(os.path.realpath(__file__)) + "/definitions.json",
+                              help="Type definitions JSON file")
+        arg_parser.add_argument("--overrides", type=str, help="Property overrides JSON file")
+        
+        # Feature flags (set by Makefile from environment variables)
+        arg_parser.add_argument("--cloud-support", action="store_true", help="Enable cloud metadata")
+        arg_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
 
         return arg_parser
 
@@ -1463,8 +1442,10 @@ def main():
     original_properties = add_config_scope(deepcopy(properties))
     
     # 2. Fetch cloud configuration and add cloud support metadata if requested
+    # Check both CLI flag and environment variable (CLOUD_SUPPORT=1 from Makefile)
+    cloud_support_enabled = options.cloud_support or os.environ.get('CLOUD_SUPPORT') == '1'
     cloud_config = None
-    if options.cloud_support:
+    if cloud_support_enabled:
         if fetch_cloud_config and add_cloud_support_metadata:
             logging.info("Cloud support enabled, fetching cloud configuration...")
             cloud_config = fetch_cloud_config()  # This will raise an exception if it fails

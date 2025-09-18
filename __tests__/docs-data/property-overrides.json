@@ -47,7 +47,12 @@
       "example": "67108864"
     },
     "cloud_storage_access_key": {
-      "description": "Access key for cloud storage authentication. Used to authenticate with S3-compatible object storage services."
+      "description": "Access key for cloud storage authentication. Used to authenticate with S3-compatible object storage services.",
+      "related_topics": [
+        "xref:manage:tiered-storage.adoc[Tiered Storage]",
+        "xref:reference:object-storage-credentials.adoc[Object Storage Credentials]",
+        "xref:deploy:deployment-option/self-hosted/manual/tiered-storage.adoc[Configure Tiered Storage]"
+      ]
     },
         "cleanup.policy": {
       "description": "Determines how log segments are cleaned. **delete** removes old segments based on time or size. **compact** retains only the latest value for each key. **compact,delete** enables both strategies.",

@@ -1,68 +1,73 @@
 === {{name}}
-
 {{#if version}}
-*Introduced in {{version}}*
 
+*Introduced in {{version}}*
 {{/if}}
 {{#if description}}
+
 {{{description}}}
 {{else}}
+
 No description available.
 {{/if}}
-
 {{#if is_enterprise}}
+
 ifndef::env-cloud[]
-*Enterprise license required*: `{{enterprise_value}}`
-+
-For license details, see xref:get-started:licensing/index.adoc[Redpanda Licensing].
+*Enterprise license required*: `{{enterprise_value}}` (for license details, see xref:get-started:licensing/index.adoc[Redpanda Licensing])
 endif::[]
-
 {{/if}}
-
 {{#if type}}
-*Type:* {{type}}
 
+*Type:* {{type}}
 {{/if}}
 {{#if acceptable_values}}
-*Accepted values:* {{{acceptable_values}}}
 
+*Accepted values:* {{{acceptable_values}}}
 {{/if}}
 {{#if corresponding_cluster_property}}
-*Related cluster property:* xref:reference:cluster-properties.adoc#{{corresponding_cluster_property}}[{{corresponding_cluster_property}}]
 
+*Related cluster property:* xref:reference:cluster-properties.adoc#{{corresponding_cluster_property}}[{{corresponding_cluster_property}}]
 {{/if}}
 {{#if (and minimum maximum)}}
-*Accepted values:* [`{{minimum}}`, `{{maximum}}`]
 
+*Accepted values:* [`{{minimum}}`, `{{maximum}}`]
 {{else}}
 {{#if minimum}}
-*Minimum value:* `{{minimum}}`
 
+*Minimum value:* `{{minimum}}`
 {{/if}}
 {{#if maximum}}
-*Maximum value:* `{{maximum}}`
 
+*Maximum value:* `{{maximum}}`
 {{/if}}
 {{/if}}
 {{#if (ne default undefined)}}
+
 *Default:* `{{formatPropertyValue default type}}`
-
 {{/if}}
-*Nullable:* {{#if nullable}}Yes{{else}}No{{/if}}
 
+*Nullable:* {{#if nullable}}Yes{{else}}No{{/if}}
 {{#if example}}
+
 {{{renderPropertyExample this}}}
 {{/if}}
+{{#if related_topics}}
 
+*Related topics:*
+
+{{#each related_topics}}
+* {{{this}}}
+{{/each}}
+{{/if}}
 {{#if aliases}}
-*Aliases:* {{join aliases ", "}}
 
+*Aliases:* {{join aliases ", "}}
 {{/if}}
 {{#if is_deprecated}}
+
 [WARNING]
 ====
 This property is deprecated.
 ====
-
 {{/if}}
 ---

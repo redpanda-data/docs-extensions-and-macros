@@ -5,6 +5,19 @@ const path = require('path');
 const handlebars = require('handlebars');
 const helpers = require('./helpers');
 
+/**
+ * Handlebars documentation generator for Redpanda configuration properties.
+ * 
+ * Supports custom template overrides using environment variables:
+ * - TEMPLATE_PROPERTY_PAGE: Main property page template
+ * - TEMPLATE_PROPERTY: Individual property section template  
+ * - TEMPLATE_TOPIC_PROPERTY: Individual topic property section template
+ * - TEMPLATE_DEPRECATED_PROPERTY: Individual deprecated property section template
+ * - TEMPLATE_DEPRECATED: Deprecated properties page template
+ * 
+ * CLI Usage: node generate-handlebars-docs.js <input-file> <output-dir>
+ */
+
 // Register all helpers
 Object.entries(helpers).forEach(([name, fn]) => {
   if (typeof fn !== 'function') {
@@ -337,13 +350,15 @@ function generateErrorReports(properties, outputDir) {
   });
 
   // Write error reports
+  const totalProperties = Object.keys(properties).length;
+  
   if (emptyDescriptions.length > 0) {
     fs.writeFileSync(
       path.join(errorDir, 'empty_description.txt'),
       emptyDescriptions.join('\n'),
       'utf8'
     );
-    const percentage = ((emptyDescriptions.length / Object.keys(properties).length) * 100).toFixed(2);
+    const percentage = totalProperties > 0 ? ((emptyDescriptions.length / totalProperties) * 100).toFixed(2) : '0.00';
     console.log(`You have ${emptyDescriptions.length} properties with empty description. Percentage of errors: ${percentage}%. Data written in 'empty_description.txt'.`);
   }
 
@@ -353,7 +368,7 @@ function generateErrorReports(properties, outputDir) {
       deprecatedProperties.join('\n'),
       'utf8'
     );
-    const percentage = ((deprecatedProperties.length / Object.keys(properties).length) * 100).toFixed(2);
+    const percentage = totalProperties > 0 ? ((deprecatedProperties.length / totalProperties) * 100).toFixed(2) : '0.00';
     console.log(`You have ${deprecatedProperties.length} deprecated properties. Percentage of errors: ${percentage}%. Data written in 'deprecated_properties.txt'.`);
   }
 }

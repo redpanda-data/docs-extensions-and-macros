@@ -1,6 +1,10 @@
 import re
+import logging
 from property_bag import PropertyBag
 from parser import normalize_string
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 # Import the process_enterprise_value function from property_extractor
 # Note: We import at function level to avoid circular imports since property_extractor
@@ -11,7 +15,7 @@ def get_process_enterprise_value():
         from property_extractor import process_enterprise_value
         return process_enterprise_value
     except ImportError as e:
-        print(f"ERROR: Cannot import process_enterprise_value: {e}")
+        logger.error("Cannot import process_enterprise_value from property_extractor: %s", e)
         return None
 
 
@@ -20,6 +24,9 @@ class BasicInfoTransformer:
         return True
 
     def parse(self, property, info, file_pair):
+        if not info.get("params") or len(info["params"]) == 0:
+            return property
+            
         property["name"] = info["params"][0]["value"]
         property["defined_in"] = re.sub(
             r"^.*src/", "src/", str(file_pair.implementation)
@@ -450,7 +457,7 @@ class EnterpriseTransformer:
         return bool(info.get('type') and 'enterprise' in info['type'])
 
     def parse(self, property, info, file_pair):
-        if info['params'] is not None:
+        if info['params'] is not None and len(info['params']) > 0:
             enterpriseValue = info['params'][0]['value']
             
             # Get the processing function
@@ -464,7 +471,7 @@ class EnterpriseTransformer:
             try:
                 processed_value = process_enterprise_value(enterpriseValue)
                 property["enterprise_value"] = processed_value
-            except Exception as e:
+            except Exception:
                 # Fallback to raw value if processing fails
                 property["enterprise_value"] = enterpriseValue
 
@@ -496,7 +503,14 @@ class MetaParamTransformer:
         iterable_params = info['params']
         for param in iterable_params:
             if isinstance(param['value'], str) and param['value'].startswith("meta{"):
-                meta_content = param['value'].strip("meta{ }").strip()
+                # Extract content between meta{ and } using explicit slicing
+                param_value = param['value']
+                if param_value.endswith('}'):
+                    meta_content = param_value[5:-1].strip()  # Remove "meta{" and "}"
+                else:
+                    # Handle malformed meta{ without closing }
+                    meta_content = param_value[5:].strip()  # Remove "meta{" only
+                
                 meta_dict = {}
                 for item in meta_content.split(','):
                     item = item.strip()

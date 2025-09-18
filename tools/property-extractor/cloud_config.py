@@ -33,13 +33,13 @@ from typing import Dict, Set, Optional, List
 # Check for required dependencies early
 try:
     import requests
-except ImportError:
-    raise ImportError("Missing required dependency 'requests': install with pip install requests")
+except ImportError as e:
+    raise ImportError("Missing required dependency 'requests': install with pip install requests") from e
 
 try:
     import yaml
-except ImportError:
-    raise ImportError("Missing required dependency 'PyYAML': install with pip install pyyaml")
+except ImportError as e:
+    raise ImportError("Missing required dependency 'PyYAML': install with pip install pyyaml") from e
 
 # Set up logging with production-ready configuration
 logger = logging.getLogger(__name__)
@@ -133,53 +133,67 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
         
         response = requests.get(url, headers=headers, timeout=30)
         
-        if response.status_code == 401:
-            error_msg = (
-                "GitHub authentication failed (HTTP 401).\n"
-                "Possible causes:\n"
-                "1. Invalid or expired GitHub token\n"
-                "2. Token lacks 'repo' scope for private repositories\n"
-                "3. Token user doesn't have access to redpanda-data/cloudv2\n"
-                "\nTo fix:\n"
-                "1. Verify token at: https://github.com/settings/tokens\n"
-                "2. Ensure 'repo' scope is enabled\n"
-                "3. Contact team lead if access is needed to cloudv2 repository"
-            )
-            logger.error(error_msg)
-            raise GitHubAuthError(error_msg)
+        # Handle common HTTP error responses with detailed guidance
+        if response.status_code in [401, 403, 404]:
+            status_messages = {
+                401: {
+                    "title": "GitHub authentication failed (HTTP 401)",
+                    "causes": [
+                        "Invalid or expired GitHub token",
+                        "Token lacks 'repo' scope for private repositories", 
+                        "Token user doesn't have access to redpanda-data/cloudv2"
+                    ],
+                    "fixes": [
+                        "Verify token at: https://github.com/settings/tokens",
+                        "Ensure 'repo' scope is enabled",
+                        "Contact team lead if access is needed to cloudv2 repository"
+                    ],
+                    "exception": GitHubAuthError
+                },
+                403: {
+                    "title": f"GitHub API access denied (HTTP 403)",
+                    "causes": [
+                        "API rate limit exceeded (5000 requests/hour for authenticated users)",
+                        "Repository access denied"
+                    ],
+                    "fixes": [
+                        "Wait for rate limit reset if exceeded",
+                        "Verify repository access permissions", 
+                        "Contact team lead if repository access is needed"
+                    ],
+                    "extra": f"Rate limit remaining: {response.headers.get('X-RateLimit-Remaining', 'unknown')}\n"
+                             f"Rate limit resets at: {response.headers.get('X-RateLimit-Reset', 'unknown')}",
+                    "exception": GitHubAuthError
+                },
+                404: {
+                    "title": "Install-pack directory not found (HTTP 404)",
+                    "causes": [
+                        "Directory 'install-pack' doesn't exist in cloudv2 repository",
+                        "Repository 'redpanda-data/cloudv2' not accessible",
+                        "Directory path has changed"
+                    ],
+                    "fixes": [
+                        "Verify directory exists in repository",
+                        "Check if directory path has changed", 
+                        "Contact cloud team for current configuration location"
+                    ],
+                    "exception": NetworkError
+                }
+            }
             
-        elif response.status_code == 403:
-            rate_limit_remaining = response.headers.get('X-RateLimit-Remaining', 'unknown')
-            rate_limit_reset = response.headers.get('X-RateLimit-Reset', 'unknown')
-            error_msg = (
-                "GitHub API access denied (HTTP 403).\n"
-                "Possible causes:\n"
-                "1. API rate limit exceeded (5000 requests/hour for authenticated users)\n"
-                "2. Repository access denied\n"
-                f"Rate limit remaining: {rate_limit_remaining}\n"
-                f"Rate limit resets at: {rate_limit_reset}\n"
-                "\nTo fix:\n"
-                "1. Wait for rate limit reset if exceeded\n"
-                "2. Verify repository access permissions\n"
-                "3. Contact team lead if repository access is needed"
-            )
+            msg_config = status_messages[response.status_code]
+            error_msg = f"{msg_config['title']}.\n"
+            error_msg += f"Possible causes:\n"
+            for i, cause in enumerate(msg_config['causes'], 1):
+                error_msg += f"{i}. {cause}\n"
+            if 'extra' in msg_config:
+                error_msg += f"{msg_config['extra']}\n"
+            error_msg += f"\nTo fix:\n"
+            for i, fix in enumerate(msg_config['fixes'], 1):
+                error_msg += f"{i}. {fix}\n"
+                
             logger.error(error_msg)
-            raise GitHubAuthError(error_msg)
-            
-        elif response.status_code == 404:
-            error_msg = (
-                "Install-pack directory not found (HTTP 404).\n"
-                "Possible causes:\n"
-                "1. Directory 'install-pack' doesn't exist in cloudv2 repository\n"
-                "2. Repository 'redpanda-data/cloudv2' not accessible\n"
-                "3. Directory path has changed\n"
-                "\nTo fix:\n"
-                "1. Verify directory exists in repository\n"
-                "2. Check if directory path has changed\n"
-                "3. Contact cloud team for current configuration location"
-            )
-            logger.error(error_msg)
-            raise NetworkError(error_msg)
+            raise msg_config['exception'](error_msg)
         
         response.raise_for_status()
         
@@ -187,12 +201,12 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
             files = response.json()
         except ValueError as e:
             error_msg = (
-                f"Invalid JSON response from GitHub API: {e}\n"
+                f"Invalid JSON response from GitHub API.\n"
                 "This indicates an API format change or server error.\n"
                 "Contact development team to update integration."
             )
-            logger.error(error_msg)
-            raise CloudConfigParsingError(error_msg)
+            logger.exception(error_msg)
+            raise CloudConfigParsingError(error_msg) from e
         
         if not isinstance(files, list):
             error_msg = (
@@ -362,7 +376,7 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
         
     except requests.exceptions.ConnectionError as e:
         error_msg = (
-            f"Network connection failed: {e}\n"
+            "Network connection failed.\n"
             "Possible causes:\n"
             "1. No internet connection\n"
             "2. Corporate firewall blocking GitHub\n"
@@ -372,20 +386,20 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
             "2. Try: curl -I https://api.github.com\n"
             "3. Contact IT if behind corporate firewall"
         )
-        logger.error(error_msg)
-        raise NetworkError(error_msg)
+        logger.exception(error_msg)
+        raise NetworkError(error_msg) from e
         
     except requests.exceptions.Timeout as e:
         error_msg = (
-            f"Request timeout after 30 seconds: {e}\n"
+            "Request timeout after 30 seconds.\n"
             "GitHub API may be experiencing issues.\n"
             "To fix:\n"
             "1. Check GitHub status: https://status.github.com/\n"
             "2. Try again in a few minutes\n"
             "3. Check network connectivity"
         )
-        logger.error(error_msg)
-        raise NetworkError(error_msg)
+        logger.exception(error_msg)
+        raise NetworkError(error_msg) from e
         
     except (GitHubAuthError, NetworkError, CloudConfigParsingError):
         # Re-raise our custom exceptions
@@ -393,7 +407,7 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
         
     except Exception as e:
         error_msg = (
-            f"Unexpected error fetching cloud configuration: {e}\n"
+            "Unexpected error fetching cloud configuration.\n"
             "This is likely a bug in the cloud configuration integration.\n"
             "Please report this error to the development team with:\n"
             "1. Full error message above\n"
@@ -401,8 +415,8 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
             "3. Environment details (OS, Python version)\n"
             "4. GitHub token permissions (without revealing the token)"
         )
-        logger.error(error_msg)
-        raise CloudConfigError(error_msg)
+        logger.exception(error_msg)
+        raise CloudConfigError(error_msg) from e
 
 
 def add_cloud_support_metadata(properties: Dict, cloud_config: CloudConfig) -> Dict:
@@ -426,12 +440,11 @@ def add_cloud_support_metadata(properties: Dict, cloud_config: CloudConfig) -> D
     
     try:
         editable_props = cloud_config.get_editable_properties()
-        readonly_props = cloud_config.get_readonly_properties() 
-        all_cloud_props = cloud_config.get_all_cloud_properties()
-    except Exception as e:
+        readonly_props = cloud_config.get_readonly_properties()
+    except (AttributeError, KeyError) as e:
         error_msg = f"Failed to extract property sets from cloud configuration: {e}"
         logger.error(error_msg)
-        raise CloudConfigError(error_msg)
+        raise CloudConfigError(error_msg) from e
     
     logger.info(f"Applying cloud metadata using configuration version {cloud_config.version}")
     logger.info(f"Cloud properties: {len(editable_props)} editable, {len(readonly_props)} readonly")

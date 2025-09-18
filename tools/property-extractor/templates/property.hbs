@@ -2,8 +2,8 @@
 
 {{#if version}}
 *Introduced in {{version}}*
-
 {{/if}}
+
 {{#if description}}
 {{{description}}}
 {{else}}
@@ -61,6 +61,14 @@ endif::[]
 
 {{#if example}}
 {{{renderPropertyExample this}}}
+{{/if}}
+
+{{#if related_topics}}
+*Related topics:*
+
+{{#each related_topics}}
+* {{{this}}}
+{{/each}}
 {{/if}}
 
 {{#if aliases}}
