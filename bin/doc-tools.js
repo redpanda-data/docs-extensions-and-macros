@@ -554,6 +554,7 @@ automation
   .option('--template-fields <path>', 'Fields section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/fields-partials.hbs'))
   .option('--template-examples <path>', 'Examples section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/examples-partials.hbs'))
   .option('--overrides <path>', 'Optional JSON file with overrides')
+  .option('--include-bloblang', 'Include Bloblang functions and methods in generation')
   .action(async (options) => {
     requireTool('rpk', {
       versionFlag: '--version',
@@ -614,7 +615,8 @@ automation
         templateIntro: options.templateIntro,
         templateFields: options.templateFields,
         templateExamples: options.templateExamples,
-        writeFullDrafts: false
+        writeFullDrafts: false,
+        includeBloblang: !!options.includeBloblang
       });
       partialsWritten = result.partialsWritten;
       partialFiles    = result.partialFiles;

@@ -209,6 +209,25 @@ function resolveReferences(obj, root) {
  * When generating full drafts, components with a `status` of `'deprecated'` are skipped.
  */
 async function generateRpcnConnectorDocs(options) {
+  // Recursively mark is_beta on any field/component with description starting with BETA:
+  function markBeta(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    if (Array.isArray(obj)) {
+      obj.forEach(markBeta);
+      return;
+    }
+    if (typeof obj.description === 'string' && obj.description.trim().startsWith('BETA:')) {
+      obj.is_beta = true;
+    }
+    // Recurse into children/config/fields
+    if (Array.isArray(obj.children)) obj.children.forEach(markBeta);
+    if (obj.config && Array.isArray(obj.config.children)) obj.config.children.forEach(markBeta);
+    // For connector/component arrays
+    for (const key of Object.keys(obj)) {
+      if (Array.isArray(obj[key])) obj[key].forEach(markBeta);
+    }
+  }
+
   const {
     data,
     overrides,
@@ -223,16 +242,38 @@ async function generateRpcnConnectorDocs(options) {
   const raw = fs.readFileSync(data, 'utf8');
   const ext = path.extname(data).toLowerCase();
   const dataObj = ext === '.json' ? JSON.parse(raw) : yaml.parse(raw);
+  // Mark beta fields/components before overrides
+  markBeta(dataObj);
 
   // Apply overrides if provided
   if (overrides) {
     const ovRaw = fs.readFileSync(overrides, 'utf8');
     const ovObj = JSON.parse(ovRaw);
-    
     // Resolve any $ref references in the overrides
     const resolvedOverrides = resolveReferences(ovObj, ovObj);
-    
     mergeOverrides(dataObj, resolvedOverrides);
+
+    // Special: merge bloblang_methods and bloblang_functions from overrides into main data
+    for (const [overrideKey, mainKey] of [
+      ['bloblang_methods', 'bloblang-methods'],
+      ['bloblang_functions', 'bloblang-functions']
+    ]) {
+      if (Array.isArray(resolvedOverrides[overrideKey])) {
+        if (!Array.isArray(dataObj[mainKey])) dataObj[mainKey] = [];
+        // Merge by name
+        const mainArr = dataObj[mainKey];
+        const overrideArr = resolvedOverrides[overrideKey];
+        for (const overrideItem of overrideArr) {
+          if (!overrideItem.name) continue;
+          const idx = mainArr.findIndex(i => i.name === overrideItem.name);
+          if (idx !== -1) {
+            mainArr[idx] = { ...mainArr[idx], ...overrideItem };
+          } else {
+            mainArr.push(overrideItem);
+          }
+        }
+      }
+    }
   }
 
   // Compile the “main” template (used when writeFullDrafts = true)
@@ -260,6 +301,7 @@ async function generateRpcnConnectorDocs(options) {
   const fieldsOutRoot   = path.join(outputRoot, 'fields');
   const examplesOutRoot = path.join(outputRoot, 'examples');
   const draftsRoot      = path.join(outputRoot, 'drafts');
+  const configExamplesRoot = path.resolve(process.cwd(), 'modules/components/examples');
 
   if (!writeFullDrafts) {
     fs.mkdirSync(fieldsOutRoot,   { recursive: true });
@@ -329,6 +371,118 @@ async function generateRpcnConnectorDocs(options) {
         draftsWritten++;
         draftFiles.push(path.relative(process.cwd(), destFile));
       }
+    }
+  }
+
+  // Bloblang function/method partials (only if includeBloblang is true)
+  if (options.includeBloblang) {
+    const bloblangTypes = [
+      { key: 'bloblang-functions', folder: 'bloblang/functions' },
+      { key: 'bloblang-methods', folder: 'bloblang/methods' }
+    ];
+    for (const { key, folder } of bloblangTypes) {
+      const items = dataObj[key];
+      if (!Array.isArray(items)) continue;
+      const outRoot = path.join(outputRoot, folder);
+      fs.mkdirSync(outRoot, { recursive: true });
+      for (const fn of items) {
+        if (!fn.name) continue;
+        // Compose AsciiDoc content for the function/method
+        let adoc = `= ${fn.name}\n\n`;
+        if (fn.signature) adoc += `*Signature*: \`${fn.signature}\`\n\n`;
+        if (fn.description) adoc += `${fn.description}\n\n`;
+        if (Array.isArray(fn.parameters) && fn.parameters.length) {
+          adoc += `== Parameters\n\n`;
+          for (const param of fn.parameters) {
+            adoc += `* \`${param.name}\`: ${param.description || ''}\n`;
+          }
+          adoc += `\n`;
+        }
+        if (Array.isArray(fn.examples) && fn.examples.length) {
+          adoc += `== Examples\n\n`;
+          for (const ex of fn.examples) {
+            // If the example is an object with a mapping, summary, and results, format as requested
+            if (typeof ex === 'object' && ex !== null && ex.mapping) {
+              let codeBlock = '';
+              // Summary as comment
+              if (ex.summary && ex.summary.trim()) {
+                codeBlock += `# ${ex.summary.trim().replace(/\n/g, '\n# ')}\n`;
+              }
+              // Mapping code
+              if (typeof ex.mapping === 'string') {
+                codeBlock += ex.mapping.trim() + '\n';
+              }
+              // Results as # In/Out pairs
+              if (Array.isArray(ex.results)) {
+                for (const pair of ex.results) {
+                  if (Array.isArray(pair) && pair.length === 2) {
+                    codeBlock += `\n# In:  ${pair[0]}\n# Out: ${pair[1]}\n`;
+                  }
+                }
+              }
+              adoc += `[,coffeescript]\n----\n${codeBlock.trim()}\n----\n`;
+            } else {
+              // fallback: previous logic
+              let exStr = '';
+              if (typeof ex === 'string') {
+                exStr = ex;
+              } else if (typeof ex === 'object' && ex !== null) {
+                if (ex.code) {
+                  exStr = ex.code;
+                } else if (ex.example) {
+                  exStr = ex.example;
+                } else {
+                  try {
+                    exStr = require('yaml').stringify(ex).trim();
+                  } catch {
+                    exStr = JSON.stringify(ex, null, 2);
+                  }
+                }
+              } else {
+                exStr = String(ex);
+              }
+              adoc += `[source,bloblang]\n----\n${exStr}\n----\n`;
+            }
+          }
+          adoc += `\n`;
+        }
+        if (Array.isArray(fn.related) && fn.related.length) {
+          adoc += `== Related\n\n`;
+          for (const rel of fn.related) {
+            adoc += `* ${rel}\n`;
+          }
+          adoc += `\n`;
+        }
+        // Write the partial
+        const outPath = path.join(outRoot, `${fn.name}.adoc`);
+        fs.writeFileSync(outPath, adoc, 'utf8');
+        partialsWritten++;
+        partialFiles.push(path.relative(process.cwd(), outPath));
+      }
+    }
+  }
+
+  // Common/Advanced config snippet YAMLs in modules/components/examples
+  const commonConfig = helpers.commonConfig;
+  const advancedConfig = helpers.advancedConfig;
+  for (const [type, items] of Object.entries(dataObj)) {
+    if (!Array.isArray(items)) continue;
+    for (const item of items) {
+      if (!item.name || !item.config || !Array.isArray(item.config.children)) continue;
+      // Common config
+      const commonYaml = commonConfig(item.type, item.name, item.config.children);
+      const commonPath = path.join(configExamplesRoot, 'common', type, `${item.name}.yaml`);
+      fs.mkdirSync(path.dirname(commonPath), { recursive: true });
+      fs.writeFileSync(commonPath, commonYaml.toString(), 'utf8');
+      partialsWritten++;
+      partialFiles.push(path.relative(process.cwd(), commonPath));
+      // Advanced config
+      const advYaml = advancedConfig(item.type, item.name, item.config.children);
+      const advPath = path.join(configExamplesRoot, 'advanced', type, `${item.name}.yaml`);
+      fs.mkdirSync(path.dirname(advPath), { recursive: true });
+      fs.writeFileSync(advPath, advYaml.toString(), 'utf8');
+      partialsWritten++;
+      partialFiles.push(path.relative(process.cwd(), advPath));
     }
   }
 
