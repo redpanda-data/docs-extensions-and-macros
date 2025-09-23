@@ -1,17 +1,5 @@
 .PHONY: build venv clean redpanda-git treesitter generate-docs check
 
-# --- Main build: venv, fetch code, build parser, extract & docgen ---
-build: venv redpanda-git treesitter
-	@echo "🔧 Building with Redpanda tag: $(TAG)"
-	@mkdir -p $(TOOL_ROOT)/gen
-	@cd $(TOOL_ROOT) && \
-	  $(PYTHON) -W ignore::FutureWarning property_extractor.py \
-	    --recursive \
-	    --path $(REDPANDA_SRC) \
-	    --output gen/properties-output.json
-	@echo "✅ Cluster properties JSON generated at $(TOOL_ROOT)/gen/properties-output.json"
-	@$(MAKE) generate-docs
-
 # Default tag (can be overridden via `make TAG=v25.1.1`)
 TAG       ?= dev
 
@@ -51,7 +39,7 @@ build: venv redpanda-git treesitter
 	  exit 1; \
 	fi
 	@cd $(TOOL_ROOT) && \
-	  $(PYTHON) -W ignore::FutureWarning property_extractor.py \
+	  $(PYTHON) -W ignore property_extractor.py \
 		--recursive \
 		--path $(REDPANDA_SRC) \
 		--output gen/properties-output.json \
@@ -67,11 +55,12 @@ venv: $(TOOL_ROOT)/requirements.txt
 	@if [ ! -d "$(VENV)" ]; then \
 	  echo "🐍 Creating virtual environment in $(VENV)..."; \
 	  python3 -m venv $(VENV); \
-	  $(VENV)/bin/pip install --upgrade pip --quiet; \
-	  $(VENV)/bin/pip install --no-cache-dir -r $<; \
 	else \
 	  echo "🐍 Virtual environment already exists at $(VENV)"; \
-	fi
+	fi; \
+	echo "🔄 Upgrading pip and installing requirements..."; \
+	$(VENV)/bin/pip install --upgrade pip --quiet; \
+	$(VENV)/bin/pip install --no-cache-dir -r $<;
 
 # --- Clean out all generated state ---
 clean:
@@ -107,7 +96,7 @@ treesitter:
 	  git fetch --tags -q && \
 	  git checkout -q v0.20.5
 	@echo "🔧 Generating parser in $(TREESITTER_DIR)…"
-	@cd "$(TREESITTER_DIR)" && npm install --silent && $(TREE_SITTER) generate
+	@cd "$(TREESITTER_DIR)" && export CFLAGS="-Wno-unused-but-set-variable" && npm install --silent && export CFLAGS="-Wno-unused-but-set-variable" && $(TREE_SITTER) generate
 
 # --- Install Node.js dependencies for Handlebars ---
 node-deps:
