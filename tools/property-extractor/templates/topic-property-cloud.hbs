@@ -1,3 +1,6 @@
+{{#if cloud_supported}}
+// tag::redpanda-cloud[]
+{{/if}}
 === {{name}}
 {{#if version}}
 
@@ -15,6 +18,10 @@ No description available.
 ifndef::env-cloud[]
 *Enterprise license required*: `{{enterprise_value}}` (for license details, see xref:get-started:licensing/index.adoc[Redpanda Licensing])
 endif::[]
+{{/if}}
+{{#if cloud_byoc_only}}
+
+NOTE: This property is only available in Redpanda Cloud BYOC deployments.
 {{/if}}
 {{#if type}}
 
@@ -42,11 +49,23 @@ endif::[]
 {{/if}}
 {{/if}}
 {{#if (ne default undefined)}}
+{{#if cloud_supported}}
+
+ifdef::env-cloud[]
+*Default:* Available in the Redpanda Cloud Console
+endif::[]
+ifndef::env-cloud[]
+*Default:* `{{formatPropertyValue default type}}`
+endif::[]
+{{else}}
 
 *Default:* `{{formatPropertyValue default type}}`
 {{/if}}
+{{/if}}
 
+// tag::self-managed-only[]
 *Nullable:* {{#if nullable}}Yes{{else}}No{{/if}}
+// end::self-managed-only[]
 {{#if example}}
 
 {{{renderPropertyExample this}}}
@@ -61,7 +80,9 @@ endif::[]
 {{/if}}
 {{#if aliases}}
 
+// tag::self-managed-only[]
 *Aliases:* {{join aliases ", "}}
+// end::self-managed-only[]
 {{/if}}
 {{#if is_deprecated}}
 
@@ -71,3 +92,6 @@ This property is deprecated.
 ====
 {{/if}}
 ---
+{{#if cloud_supported}}
+// end::redpanda-cloud[]
+{{/if}}

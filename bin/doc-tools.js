@@ -459,18 +459,120 @@ const commonOptions = {
   consoleDockerRepo: 'console',
 };
 
+/**
+ * Run the cluster documentation generator script for a specific release/tag.
+ *
+ * Invokes the external `generate-cluster-docs.sh` script with the provided mode, tag,
+ * and Docker-related options. The script's stdout/stderr are forwarded to the current
+ * process; if the script exits with a non-zero status, this function will terminate
+ * the Node.js process with that status code.
+ *
+ * @param {string} mode - Operation mode passed to the script (e.g., "generate" or "clean").
+ * @param {string} tag - Release tag or version to generate docs for.
+ * @param {Object} options - Runtime options.
+ * @param {string} options.dockerRepo - Docker repository used by the script.
+ * @param {string} options.consoleTag - Console image tag passed to the script.
+ * @param {string} options.consoleDockerRepo - Console Docker repository used by the script.
+ */
 function runClusterDocs(mode, tag, options) {
   const script = path.join(__dirname, '../cli-utils/generate-cluster-docs.sh');
   const args = [mode, tag, options.dockerRepo, options.consoleTag, options.consoleDockerRepo];
   console.log(`⏳ Running ${script} with arguments: ${args.join(' ')}`);
-  const r = spawnSync('bash', [script, ...args], { stdio: 'inherit', shell: true });
+  const r = spawnSync('bash', [script, ...args], { stdio: 'inherit' });
   if (r.status !== 0) process.exit(r.status);
 }
 
-// helper to diff two temporary directories
+/**
+ * Generate a detailed JSON report describing property changes between two releases.
+ *
+ * Looks for `<oldTag>-properties.json` and `<newTag>-properties.json` in
+ * `modules/reference/examples`. If both files exist, invokes the external
+ * property comparison tool to produce `property-changes-<oldTag>-to-<newTag>.json`
+ * in the provided output directory.
+ *
+ * If either input JSON is missing the function logs a message and returns without
+ * error. Any errors from the comparison tool are logged; the function does not
+ * throw.
+ *
+ * @param {string} oldTag - Release tag or identifier for the "old" properties set.
+ * @param {string} newTag - Release tag or identifier for the "new" properties set.
+ * @param {string} outputDir - Directory where the comparison report will be written.
+ */
+function generatePropertyComparisonReport(oldTag, newTag, outputDir) {
+  try {
+    console.log(`\n📊 Generating detailed property comparison report...`);
+    
+    // Look for the property JSON files in modules/reference/examples
+    const repoRoot = findRepoRoot();
+    const examplesDir = path.join(repoRoot, 'modules', 'reference', 'examples');
+    const oldJsonPath = path.join(examplesDir, `${oldTag}-properties.json`);
+    const newJsonPath = path.join(examplesDir, `${newTag}-properties.json`);
+    
+    // Check if JSON files exist
+    if (!fs.existsSync(oldJsonPath)) {
+      console.log(`⚠️  Old properties JSON not found at: ${oldJsonPath}`);
+      console.log(`   Skipping detailed property comparison.`);
+      return;
+    }
+    
+    if (!fs.existsSync(newJsonPath)) {
+      console.log(`⚠️  New properties JSON not found at: ${newJsonPath}`);
+      console.log(`   Skipping detailed property comparison.`);
+      return;
+    }
+    
+    // Ensure output directory exists (use absolute path)
+    const absoluteOutputDir = path.resolve(outputDir);
+    fs.mkdirSync(absoluteOutputDir, { recursive: true });
+    
+    // Run the property comparison tool with descriptive filename
+    const propertyExtractorDir = path.resolve(__dirname, '../tools/property-extractor');
+    const compareScript = path.join(propertyExtractorDir, 'compare-properties.js');
+    const reportFilename = `property-changes-${oldTag}-to-${newTag}.json`;
+    const reportPath = path.join(absoluteOutputDir, reportFilename);
+    const args = [compareScript, oldJsonPath, newJsonPath, oldTag, newTag, absoluteOutputDir, reportFilename];
+    
+    const result = spawnSync('node', args, { 
+      stdio: 'inherit',
+      cwd: propertyExtractorDir 
+    });
+    
+    if (result.error) {
+      console.error(`❌ Property comparison failed: ${result.error.message}`);
+    } else if (result.status !== 0) {
+      console.error(`❌ Property comparison exited with code: ${result.status}`);
+    } else {
+      console.log(`✅ Property comparison report saved to: ${reportPath}`);
+    }
+  } catch (error) {
+    console.error(`❌ Error generating property comparison: ${error.message}`);
+  }
+}
+
+/**
+ * Create a unified diff patch between two temporary directories and clean them up.
+ *
+ * Ensures both source directories exist, writes a recursive unified diff
+ * (changes.patch) to tmp/diffs/<kind>/<oldTag>_to_<newTag>/, and removes the
+ * provided temporary directories. On missing inputs or if the diff subprocess
+ * fails to spawn, the process exits with a non-zero status.
+ *
+ * @param {string} kind - Logical category for the diff (e.g., "metrics" or "rpk"); used in the output path.
+ * @param {string} oldTag - Identifier for the "old" version (used in the output path).
+ * @param {string} newTag - Identifier for the "new" version (used in the output path).
+ * @param {string} oldTempDir - Path to the existing temporary directory containing the old output; must exist.
+ * @param {string} newTempDir - Path to the existing temporary directory containing the new output; must exist.
+ */
 function diffDirs(kind, oldTag, newTag, oldTempDir, newTempDir) {
+  // Backwards compatibility: if temp directories not provided, use autogenerated paths
+  if (!oldTempDir) {
+    oldTempDir = path.join('autogenerated', oldTag, kind);
+  }
+  if (!newTempDir) {
+    newTempDir = path.join('autogenerated', newTag, kind);
+  }
+
   const diffDir = path.join('tmp', 'diffs', kind, `${oldTag}_to_${newTag}`);
-  const patch = path.join(diffDir, 'changes.patch');
 
   if (!fs.existsSync(oldTempDir)) {
     console.error(`❌ Cannot diff: missing ${oldTempDir}`);
@@ -483,6 +585,8 @@ function diffDirs(kind, oldTag, newTag, oldTempDir, newTempDir) {
 
   fs.mkdirSync(diffDir, { recursive: true });
 
+  // Generate traditional patch for metrics and rpk
+  const patch = path.join(diffDir, 'changes.patch');
   const cmd = `diff -ru "${oldTempDir}" "${newTempDir}" > "${patch}" || true`;
   const res = spawnSync(cmd, { stdio: 'inherit', shell: true });
 
@@ -492,9 +596,35 @@ function diffDirs(kind, oldTag, newTag, oldTempDir, newTempDir) {
   }
   console.log(`✅ Wrote patch: ${patch}`);
   
-  // Clean up temporary directories
-  fs.rmSync(oldTempDir, { recursive: true, force: true });
-  fs.rmSync(newTempDir, { recursive: true, force: true });
+  // Safety guard: only clean up directories that are explicitly passed as temp directories
+  // For backwards compatibility with autogenerated paths, don't clean up automatically
+  const tmpRoot = path.resolve('tmp') + path.sep;
+  const workspaceRoot = path.resolve('.') + path.sep;
+  
+  // Only clean up if directories were explicitly provided as temp directories
+  // (indicated by having all 5 parameters) and they're in the tmp/ directory
+  const explicitTempDirs = arguments.length >= 5;
+  
+  if (explicitTempDirs) {
+    [oldTempDir, newTempDir].forEach(dirPath => {
+      const resolvedPath = path.resolve(dirPath) + path.sep;
+      const isInTmp = resolvedPath.startsWith(tmpRoot);
+      const isInWorkspace = resolvedPath.startsWith(workspaceRoot);
+      
+      if (isInWorkspace && isInTmp) {
+        try {
+          fs.rmSync(dirPath, { recursive: true, force: true });
+          console.log(`🧹 Cleaned up temporary directory: ${dirPath}`);
+        } catch (err) {
+          console.warn(`⚠️  Warning: Could not clean up directory ${dirPath}: ${err.message}`);
+        }
+      } else {
+        console.log(`ℹ️  Skipping cleanup of directory outside tmp/: ${dirPath}`);
+      }
+    });
+  } else {
+    console.log(`ℹ️  Using autogenerated directories - skipping cleanup for safety`);
+  }
 }
 
 automation
@@ -755,12 +885,39 @@ automation
   .option('--diff <oldTag>', 'Also diff autogenerated properties from <oldTag> → <tag>')
   .option('--overrides <path>', 'Optional JSON file with property description overrides')
   .option('--output-dir <dir>', 'Where to write all generated files', 'modules/reference')
+  .option('--cloud-support', 'Enable cloud support metadata by fetching configuration from the cloudv2 repository (requires GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN)')
   .option('--template-property-page <path>', 'Custom Handlebars template for property page layout')
   .option('--template-property <path>', 'Custom Handlebars template for individual property sections')
+  .option('--template-topic-property <path>', 'Custom Handlebars template for individual topic property sections')
   .option('--template-deprecated <path>', 'Custom Handlebars template for deprecated properties page')
   .option('--template-deprecated-property <path>', 'Custom Handlebars template for individual deprecated property sections')
   .action((options) => {
     verifyPropertyDependencies();
+
+    // Validate cloud support dependencies if requested
+    if (options.cloudSupport) {
+      console.log('🔍 Validating cloud support dependencies...');
+      
+      // Check for GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN
+      const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || process.env.REDPANDA_GITHUB_TOKEN;
+      if (!token) {
+        console.error('❌ Cloud support requires GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN environment variable');
+        console.error('   Set up GitHub token:');
+        console.error('   1. Go to https://github.com/settings/tokens');
+        console.error('   2. Generate token with "repo" scope');
+        console.error('   3. Set: export GITHUB_TOKEN=your_token_here');
+        console.error('   Or: export GH_TOKEN=your_token_here');
+        console.error('   Or: export REDPANDA_GITHUB_TOKEN=your_token_here');
+        process.exit(1);
+      }
+      
+      console.log('📦 Cloud support enabled - Python dependencies will be validated during execution');
+      if (process.env.VIRTUAL_ENV) {
+        console.log(`   Using virtual environment: ${process.env.VIRTUAL_ENV}`);
+      }
+      console.log('   Required packages: pyyaml, requests');
+      console.log('✅ GitHub token validated');
+    }
 
     const newTag = options.tag;
     const oldTag = options.diff;
@@ -768,7 +925,7 @@ automation
     const outputDir = options.outputDir;
     const cwd = path.resolve(__dirname, '../tools/property-extractor');
     
-    const make = (tag, overrides, templates = {}, outputDir = 'modules/reference/', tempDir = null) => {
+    const make = (tag, overrides, templates = {}, outputDir = 'modules/reference/', tempDir = null, cloudSupport = false) => {
       console.log(`⏳ Building property docs for ${tag}${tempDir ? ' (for diff)' : ''}…`);
       const args = ['build', `TAG=${tag}`];
       
@@ -777,11 +934,17 @@ automation
       if (overrides) {
         env.OVERRIDES = path.resolve(overrides);
       }
+      if (cloudSupport) {
+        env.CLOUD_SUPPORT = '1';
+      }
       if (templates.propertyPage) {
         env.TEMPLATE_PROPERTY_PAGE = path.resolve(templates.propertyPage);
       }
       if (templates.property) {
         env.TEMPLATE_PROPERTY = path.resolve(templates.property);
+      }
+      if (templates.topicProperty) {
+        env.TEMPLATE_TOPIC_PROPERTY = path.resolve(templates.topicProperty);
       }
       if (templates.deprecated) {
         env.TEMPLATE_DEPRECATED = path.resolve(templates.deprecated);
@@ -791,13 +954,9 @@ automation
       }
       
       if (tempDir) {
-        // For diff purposes, generate to temporary directory
-        env.OUTPUT_ASCIIDOC_DIR = path.resolve(tempDir);
         env.OUTPUT_JSON_DIR = path.resolve(tempDir, 'examples');
         env.OUTPUT_AUTOGENERATED_DIR = path.resolve(tempDir);
       } else {
-        // Normal generation - go directly to final destination
-        // Let Makefile calculate OUTPUT_ASCIIDOC_DIR as OUTPUT_AUTOGENERATED_DIR/pages
         env.OUTPUT_JSON_DIR = path.resolve(outputDir, 'examples');
         env.OUTPUT_AUTOGENERATED_DIR = path.resolve(outputDir);
       }
@@ -814,34 +973,22 @@ automation
     const templates = {
       propertyPage: options.templatePropertyPage,
       property: options.templateProperty,
+      topicProperty: options.templateTopicProperty,
       deprecated: options.templateDeprecated,
       deprecatedProperty: options.templateDeprecatedProperty
     };
 
-    let oldTempDir = null;
-    let newTempDir = null;
-
     if (oldTag) {
-      // Generate old version to temporary directory for diff
-      oldTempDir = path.join('tmp', 'diff', `${oldTag}-properties`);
-      fs.mkdirSync(oldTempDir, { recursive: true });
-      make(oldTag, overridesPath, templates, outputDir, oldTempDir);
+      // Generate old version directly to final destination so its JSON is available for comparison
+      make(oldTag, overridesPath, templates, outputDir, null, options.cloudSupport);
     }
 
+    // Generate new version to final destination
+    make(newTag, overridesPath, templates, outputDir, null, options.cloudSupport);
+
     if (oldTag) {
-      // Generate new version to temporary directory for diff
-      newTempDir = path.join('tmp', 'diff', `${newTag}-properties`);
-      fs.mkdirSync(newTempDir, { recursive: true });
-      make(newTag, overridesPath, templates, outputDir, newTempDir);
-      
-      // Then generate new version to final destination
-      make(newTag, overridesPath, templates, outputDir);
-      
-      // Compare the temporary directories
-      diffDirs('properties', oldTag, newTag, oldTempDir, newTempDir);
-    } else {
-      // No diff requested, just generate to final destination
-      make(newTag, overridesPath, templates, outputDir);
+      // Generate property comparison report using the JSON files now in modules/reference/examples
+      generatePropertyComparisonReport(oldTag, newTag, 'modules/reference');
     }
 
     process.exit(0);
@@ -1050,9 +1197,9 @@ automation
     const { generateCloudRegions } = require('../tools/cloud-regions/generate-cloud-regions.js');
 
     try {
-      const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+      const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || process.env.REDPANDA_GITHUB_TOKEN;
       if (!token) {
-        throw new Error('GITHUB_TOKEN environment variable is required to fetch from private cloudv2-infra repo.');
+        throw new Error('GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN environment variable is required to fetch from private cloudv2-infra repo.');
       }
       const fmt = (options.format || 'md').toLowerCase();
       let templatePath = undefined;

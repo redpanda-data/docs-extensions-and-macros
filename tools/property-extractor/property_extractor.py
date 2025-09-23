@@ -59,6 +59,7 @@ import os
 import json
 import re
 import yaml
+import ast
 from copy import deepcopy
 
 from pathlib import Path
@@ -76,18 +77,138 @@ except ImportError:
     # TopicPropertyExtractor not available, will skip topic property extraction
     TopicPropertyExtractor = None
 
+# Import cloud configuration support
+try:
+    from cloud_config import fetch_cloud_config, add_cloud_support_metadata
+    # Configure cloud_config logger to suppress INFO logs by default
+    import logging
+    logging.getLogger('cloud_config').setLevel(logging.WARNING)
+except ImportError as e:
+    # Cloud configuration support not available due to missing dependencies
+    logging.warning(f"Cloud configuration support not available: {e}")
+    fetch_cloud_config = None
+    add_cloud_support_metadata = None
+
 logger = logging.getLogger("viewer")
+
+
+def process_enterprise_value(enterprise_str):
+    """
+    Convert a raw C++ "enterprise" expression into a JSON-friendly value.
+    
+    Accepts a string extracted from C++ sources and returns a value suitable for JSON
+    serialization: a Python list for initializer-lists, a simple string for enum-like
+    tokens, a boolean-like or quoted string unchanged, or a human-readable hint for
+    lambda-based expressions.
+    
+    The function applies pattern matching in the following order (order is significant):
+    1. std::vector<...>{...} initializer lists → Python list (quoted strings are unescaped,
+       unqualified enum tokens are reduced to their final identifier).
+    2. C++ scoped enum-like tokens (foo::bar::BAZ) → "BAZ".
+    3. Lambda expressions (strings starting with "[](" and ending with "}") → a short
+       human-readable hint such as "Enterprise feature enabled" or context-specific text.
+    4. Simple literal values (e.g., "true", "false", "OIDC", or quoted strings) → returned as-is.
+    
+    Parameters:
+        enterprise_str (str): Raw C++ expression text to be converted.
+    
+    Returns:
+        Union[str, bool, list]: A JSON-serializable representation of the input.
+    """
+    enterprise_str = enterprise_str.strip()
+    
+    # FIRST: Handle std::vector initialization patterns (highest priority)
+    # This must come before enum processing because vectors can contain enums
+    # Tolerate optional whitespace around braces
+    vector_match = re.match(r'std::vector<[^>]+>\s*\{\s*([^}]*)\s*\}', enterprise_str)
+    if vector_match:
+        content = vector_match.group(1).strip()
+        if not content:
+            return []
+        
+        # Parse the content as a list of values
+        values = []
+        current_value = ""
+        in_quotes = False
+        
+        for char in content:
+            if char == '"' and (not current_value or current_value[-1] != '\\'):
+                in_quotes = not in_quotes
+                current_value += char
+            elif char == ',' and not in_quotes:
+                if current_value.strip():
+                    # Clean up the value
+                    value = current_value.strip()
+                    if value.startswith('"') and value.endswith('"'):
+                        values.append(ast.literal_eval(value))
+                    else:
+                        # Handle enum values in the vector
+                        enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)', value)
+                        if enum_match:
+                            values.append(enum_match.group(1))
+                        else:
+                            values.append(value)
+                current_value = ""
+            else:
+                current_value += char
+        
+        # Add the last value
+        if current_value.strip():
+            value = current_value.strip()
+            if value.startswith('"') and value.endswith('"'):
+                values.append(ast.literal_eval(value))
+            else:
+                # Handle enum values in the vector
+                enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)', value)
+                if enum_match:
+                    values.append(enum_match.group(1))
+                else:
+                    values.append(value)
+        
+        return values
+    
+    # SECOND: Handle enum-like patterns (extract the last part after ::)
+    enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)', enterprise_str)
+    if enum_match:
+        enum_value = enum_match.group(1)
+        return enum_value
+    
+    # THIRD: Handle C++ lambda expressions - these usually indicate "any non-default value"
+    if enterprise_str.startswith("[](") and enterprise_str.endswith("}"):
+        # For lambda expressions, try to extract meaningful info from the logic
+        if "leaders_preference" in enterprise_str:
+            return "Any rack preference (not `none`)"
+        else:
+            return "Enterprise feature enabled"
+    
+    # FOURTH: Handle simple values with proper JSON types
+    # Convert boolean literals to actual boolean values for JSON compatibility
+    if enterprise_str == "true":
+        return True
+    elif enterprise_str == "false":
+        return False
+    elif enterprise_str == "OIDC" or enterprise_str.startswith('"'):
+        return enterprise_str
+    
+    # Fallback: return the original value
+    return enterprise_str
 
 
 def resolve_cpp_function_call(function_name):
     """
-    Dynamically resolve C++ function calls to their return values by searching the source code.
+    Resolve certain small, known C++ zero-argument functions to their literal return values by searching Redpanda source files.
     
-    Args:
-        function_name: The C++ function name (e.g., "model::kafka_audit_logging_topic")
+    This function looks up predefined search patterns for well-known functions (currently a small set under `model::*`), locates a local Redpanda source tree from several commonly used paths, and scans the listed files (and, if needed, the broader model directory) for a regex match that captures the string returned by the function. If a match is found the captured string is returned; if the source tree cannot be found or no match is located the function returns None.
+    
+    Parameters:
+        function_name (str): Fully-qualified C++ function name to resolve (e.g., "model::kafka_audit_logging_topic").
     
     Returns:
-        The resolved string value or None if not found
+        str or None: The resolved literal string returned by the C++ function, or None when unresolved (source not found or no matching pattern).
+    
+    Notes:
+        - The function performs filesystem I/O and regex-based source searching; it does not raise on read errors but logs and continues.
+        - Only a small, hard-coded set of function names/patterns is supported; unknown names immediately return None.
     """
     # Map function names to likely search patterns and file locations
     search_patterns = {
@@ -327,12 +448,18 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
     2. version: Add version information showing when the property was introduced
     3. example: Add AsciiDoc example sections with flexible input formats (see below)
     4. default: Override the auto-extracted default value
-    
+    5. related_topics: Add an array of related topic links for cross-referencing
+    6. config_scope: Specify the scope for new properties ("topic", "cluster", "broker")
+    7. type: Specify the type for new properties
+
+    Properties that don't exist in the extracted source can be created from overrides.
+    This is useful for topic properties or other configurations that aren't auto-detected.
+
     Multiple example input formats are supported for user convenience:
-    
+
     1. Direct AsciiDoc string:
        "example": ".Example\n[,yaml]\n----\nredpanda:\n  property_name: value\n----"
-    
+
     2. Multi-line array (each element becomes a line):
        "example": [
          ".Example",
@@ -342,10 +469,10 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
          "  property_name: value",
          "----"
        ]
-    
+
     3. External file reference:
        "example_file": "examples/property_name.adoc"
-    
+
     4. Auto-formatted YAML with title and description:
        "example_yaml": {
          "title": "Example Configuration",
@@ -356,35 +483,101 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
            }
          }
        }
-    
+
     Args:
         properties: Dictionary of extracted properties from C++ source
         overrides: Dictionary loaded from overrides JSON file
         overrides_file_path: Path to the overrides file (for resolving relative example_file paths)
-    
+
     Returns:
-        Updated properties dictionary with overrides applied
+        Updated properties dictionary with overrides applied and new properties created
     """
     if overrides and "properties" in overrides:
         for prop, override in overrides["properties"].items():
             if prop in properties:
-                # Apply description override
-                if "description" in override:
-                    properties[prop]["description"] = override["description"]
-                
-                # Apply version override (introduced in version)
-                if "version" in override:
-                    properties[prop]["version"] = override["version"]
-                
-                # Apply example override with multiple input format support
-                example_content = _process_example_override(override, overrides_file_path)
-                if example_content:
-                    properties[prop]["example"] = example_content
-                
-                # Apply default override
-                if "default" in override:
-                    properties[prop]["default"] = override["default"]
+                # Apply overrides to existing properties
+                _apply_override_to_existing_property(properties[prop], override, overrides_file_path)
+            else:
+                # Create new property from override
+                logger.info(f"Creating new property from override: {prop}")
+                properties[prop] = _create_property_from_override(prop, override, overrides_file_path)
     return properties
+
+
+def _apply_override_to_existing_property(property_dict, override, overrides_file_path):
+    """Apply overrides to an existing property."""
+    # Apply description override
+    if "description" in override:
+        property_dict["description"] = override["description"]
+    
+    # Apply version override (introduced in version)
+    if "version" in override:
+        property_dict["version"] = override["version"]
+    
+    # Apply example override with multiple input format support
+    example_content = _process_example_override(override, overrides_file_path)
+    if example_content:
+        property_dict["example"] = example_content
+    
+    # Apply default override
+    if "default" in override:
+        property_dict["default"] = override["default"]
+    
+    # Apply type override
+    if "type" in override:
+        property_dict["type"] = override["type"]
+    
+    # Apply config_scope override
+    if "config_scope" in override:
+        property_dict["config_scope"] = override["config_scope"]
+    
+    # Apply related_topics override
+    if "related_topics" in override:
+        if isinstance(override["related_topics"], list):
+            property_dict["related_topics"] = override["related_topics"]
+        else:
+            logger.warning(f"related_topics for property must be an array")
+
+
+def _create_property_from_override(prop_name, override, overrides_file_path):
+    """Create a new property from override specification."""
+    # Create base property structure
+    new_property = {
+        "name": prop_name,
+        "description": override.get("description", f"Configuration property: {prop_name}"),
+        "type": override.get("type", "string"),
+        "default": override.get("default", None),
+        "defined_in": "override",  # Mark as override-created
+        "config_scope": override.get("config_scope", "topic"),  # Default to topic for new properties
+        "is_topic_property": override.get("config_scope", "topic") == "topic",
+        "is_deprecated": override.get("is_deprecated", False),
+        "visibility": override.get("visibility", "user")
+    }
+    
+    # Add version if specified
+    if "version" in override:
+        new_property["version"] = override["version"]
+    
+    # Add example if specified
+    example_content = _process_example_override(override, overrides_file_path)
+    if example_content:
+        new_property["example"] = example_content
+    
+    # Add related_topics if specified
+    if "related_topics" in override:
+        if isinstance(override["related_topics"], list):
+            new_property["related_topics"] = override["related_topics"]
+        else:
+            logger.warning(f"related_topics for property '{prop_name}' must be an array")
+    
+    # Add any other custom fields from override
+    for key, value in override.items():
+        if key not in ["description", "type", "default", "config_scope", "version", 
+                       "example", "example_file", "example_yaml", "related_topics", 
+                       "is_deprecated", "visibility"]:
+            new_property[key] = value
+    
+    return new_property
 
 
 def _process_example_override(override, overrides_file_path=None):
@@ -444,15 +637,15 @@ def _process_example_override(override, overrides_file_path=None):
             if found_path:
                 file_path = found_path
             else:
-                print(f"Warning: Example file not found: {override['example_file']}")
-                print(f"Searched in: {', '.join(search_paths)}")
+                logger.warning(f"Example file not found: {override['example_file']}")
+                logger.warning(f"Searched in: {', '.join(search_paths)}")
                 return None
         
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 return f.read().strip()
         except Exception as e:
-            print(f"Error reading example file {file_path}: {e}")
+            logger.error(f"Error reading example file {file_path}: {e}")
             return None
     
     # Format 4: Auto-formatted YAML configuration
@@ -495,44 +688,46 @@ def add_config_scope(properties):
     'cluster' if defined_in == src/v/config/configuration.cc
     'broker' if defined_in == src/v/config/node_config.cc
     'topic' if is_topic_property == True
+    
+    For override-created properties, preserve existing config_scope if already set.
     """
     for prop in properties.values():
         # Check if this is a topic property first
         if prop.get("is_topic_property", False):
             prop["config_scope"] = "topic"
         else:
-            defined_in = prop.get("defined_in", "")
-            if defined_in == "src/v/config/configuration.cc":
-                prop["config_scope"] = "cluster"
-            elif defined_in == "src/v/config/node_config.cc":
-                prop["config_scope"] = "broker"
+            # For override-created properties, preserve existing config_scope if set
+            if prop.get("defined_in") == "override" and prop.get("config_scope") is not None:
+                # Keep the existing config_scope from override
+                pass
             else:
-                prop["config_scope"] = None
+                defined_in = prop.get("defined_in", "")
+                if defined_in == "src/v/config/configuration.cc":
+                    prop["config_scope"] = "cluster"
+                elif defined_in == "src/v/config/node_config.cc":
+                    prop["config_scope"] = "broker"
+                else:
+                    prop["config_scope"] = None
     return properties
 
 
 def resolve_type_and_default(properties, definitions):
     """
-    Resolve type references and expand default values for all properties.
+    Resolve JSON Schema types and expand C++-style default values for all properties.
     
-    This function performs several critical transformations:
+    This function:
+    - Resolves type references found in `properties` against `definitions` (supports "$ref" and direct type names) and normalizes property "type" to a JSON Schema primitive ("object", "string", "integer", "boolean", "array", "number") with sensible fallbacks.
+    - Expands C++ constructor/initializer syntax and common C++ patterns appearing in default values into JSON-compatible Python values (e.g., nested constructor calls -> dicts, initializer lists -> lists, `std::nullopt` -> None, enum-like tokens -> strings).
+    - Ensures array-typed properties (including one_or_many_property cases) have array defaults: single-object defaults are wrapped into a one-element list and "{}" string defaults become [].
+    - Updates array item type information when item types reference definitions.
+    - Applies a final pass to convert any remaining C++-patterned defaults and to transform any `enterprise_value` strings via process_enterprise_value.
     
-    1. **Type Resolution**: Converts C++ type names to JSON schema types
-       - model::broker_endpoint -> "object"
-       - std::string -> "string"
-       - Handles both direct type names and JSON pointer references (#/definitions/...)
+    Parameters:
+        properties (dict): Mapping of property names to property metadata dictionaries. Each property may include keys like "type", "default", "items", and "enterprise_value".
+        definitions (dict): Mapping of type names to JSON Schema definition dictionaries used to resolve $ref targets and to infer property shapes when expanding constructors.
     
-    2. **Default Value Expansion**: Transforms C++ constructor syntax to JSON objects
-       - model::broker_endpoint(net::unresolved_address("127.0.0.1", 9644)) 
-         -> {address: "127.0.0.1", port: 9644}
-    
-    3. **Array Default Handling**: Ensures one_or_many_property defaults are arrays
-       - For properties with type="array", wraps single object defaults in arrays
-       - Converts empty object strings "{}" to empty arrays []
-       
-    This is essential for one_or_many_property types like 'admin' which should show:
-    - Type: array
-    - Default: [{address: "127.0.0.1", port: 9644}] (not just {address: ...})
+    Returns:
+        dict: The same `properties` mapping after in-place normalization and expansion of types and defaults.
     """
     import ast
     import re
@@ -1167,6 +1362,14 @@ def resolve_type_and_default(properties, definitions):
                     prop["type"] = "boolean"
                 else:
                     prop["type"] = "string"
+    
+    # Final pass: process enterprise values
+    for prop in properties.values():
+        if "enterprise_value" in prop:
+            enterprise_value = prop["enterprise_value"]
+            if isinstance(enterprise_value, str):
+                processed_enterprise = process_enterprise_value(enterprise_value)
+                prop["enterprise_value"] = processed_enterprise
                         
     return properties
 
@@ -1218,53 +1421,62 @@ def extract_topic_properties(source_path):
 
 
 def main():
+    """
+    CLI entry point that extracts Redpanda configuration properties from C++ sources and emits JSON outputs.
+    
+    Runs a full extraction and transformation pipeline:
+    - Parses command-line options (required: --path). Optional flags include --recursive, --output, --enhanced-output, --definitions, --overrides, --cloud-support, and --verbose.
+    - Validates input paths and collects header/.cc file pairs.
+    - Initializes Tree-sitter C++ parser and extracts configuration properties from source files (optionally augmented with topic properties).
+    - Produces two outputs:
+      - Original properties JSON: resolved types, expanded C++ defaults, added config_scope, and optional cloud metadata.
+      - Enhanced properties JSON: same as original but with overrides applied before final resolution.
+    - If --cloud-support is requested, attempts to fetch cloud configuration and add cloud metadata; this requires the cloud_config integration and network access (also requires GITHUB_TOKEN for private access). If cloud support is requested but dependencies are missing, the process will exit with an error.
+    - Writes JSON to files when --output and/or --enhanced-output are provided; otherwise prints the original JSON to stdout.
+    - Exits with non-zero status on fatal errors (missing files, parse errors, missing Tree-sitter parser, I/O failures, or missing cloud dependencies when requested).
+    
+    Side effects:
+    - Reads and writes files, may call external cloud config fetchers, logs to the configured logger, and may call sys.exit() on fatal conditions.
+    """
     import argparse
 
     def generate_options():
+        """
+        Create and return an argparse.ArgumentParser preconfigured for the property extractor CLI.
+        
+        The parser understands the following options:
+        - --path (required): path to the Redpanda source directory to scan.
+        - --recursive: scan the path recursively.
+        - --output: file path to write the JSON output (stdout if omitted).
+        - --enhanced-output: file path to write the enhanced JSON output with overrides applied.
+        - --definitions: JSON file containing type definitions (defaults to a definitions.json co-located with this module).
+        - --overrides: optional JSON file with property description/metadata overrides.
+        - --cloud-support: enable fetching cloud metadata from the cloudv2 repository (requires GITHUB_TOKEN and external dependencies such as pyyaml and requests).
+        - -v / --verbose: enable verbose (DEBUG-level) logging.
+        
+        Returns:
+            argparse.ArgumentParser: Parser configured with the above options.
+        """
         arg_parser = argparse.ArgumentParser(
-            description="Extract all properties from the Redpanda's source code and generate a JSON output with their definitions"
+            description="Internal property extraction tool - use doc-tools.js for user interface"
         )
-        arg_parser.add_argument(
-            "--path",
-            type=str,
-            required=True,
-            help="Path to the Redpanda's source dir to extract the properties",
-        )
-
-        arg_parser.add_argument(
-            "--recursive", action="store_true", help="Scan the path recursively"
-        )
-
-        arg_parser.add_argument(
-            "--output",
-            type=str,
-            required=False,
-            help="File to store the JSON output. If no file is provided, the JSON will be printed to the standard output",
-        )
-
-        arg_parser.add_argument(
-            "--enhanced-output",
-            type=str,
-            required=False,
-            help="File to store the enhanced JSON output with overrides applied (such as 'dev-properties.json')",
-        )
-
-        arg_parser.add_argument(
-            "--definitions",
-            type=str,
-            required=False,
-            default=os.path.dirname(os.path.realpath(__file__)) + "/definitions.json",
-            help='JSON file with the type definitions. This file will be merged in the output under the "definitions" field',
-        )
-
-        arg_parser.add_argument(
-            "--overrides",
-            type=str,
-            required=False,
-            help='Optional JSON file with property description overrides',
-        )
-
-        arg_parser.add_argument("-v", "--verbose", action="store_true")
+        # Core required parameters
+        arg_parser.add_argument("--path", type=str, required=True, help="Path to Redpanda source directory")
+        arg_parser.add_argument("--recursive", action="store_true", help="Scan path recursively")
+        
+        # Output options
+        arg_parser.add_argument("--output", type=str, help="JSON output file path")
+        arg_parser.add_argument("--enhanced-output", type=str, help="Enhanced JSON output file path")
+        
+        # Data sources
+        arg_parser.add_argument("--definitions", type=str, 
+                              default=os.path.dirname(os.path.realpath(__file__)) + "/definitions.json",
+                              help="Type definitions JSON file")
+        arg_parser.add_argument("--overrides", type=str, help="Property overrides JSON file")
+        
+        # Feature flags (set by Makefile from environment variables)
+        arg_parser.add_argument("--cloud-support", action="store_true", help="Enable cloud metadata")
+        arg_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
 
         return arg_parser
 
@@ -1273,8 +1485,10 @@ def main():
 
     if options.verbose:
         logging.basicConfig(level="DEBUG")
+        # Also enable INFO logging for cloud_config in verbose mode
+        logging.getLogger('cloud_config').setLevel(logging.INFO)
     else:
-        logging.basicConfig(level="INFO")
+        logging.basicConfig(level="WARNING")  # Suppress INFO logs by default
 
     validate_paths(options)
 
@@ -1331,7 +1545,24 @@ def main():
     # 1. Add config_scope field based on which source file defines the property
     original_properties = add_config_scope(deepcopy(properties))
     
-    # 2. Resolve type references and expand default values for original properties
+    # 2. Fetch cloud configuration and add cloud support metadata if requested
+    # Check both CLI flag and environment variable (CLOUD_SUPPORT=1 from Makefile)
+    cloud_support_enabled = options.cloud_support or os.environ.get('CLOUD_SUPPORT') == '1'
+    cloud_config = None
+    if cloud_support_enabled:
+        if fetch_cloud_config and add_cloud_support_metadata:
+            logging.info("Cloud support enabled, fetching cloud configuration...")
+            cloud_config = fetch_cloud_config()  # This will raise an exception if it fails
+            original_properties = add_cloud_support_metadata(original_properties, cloud_config)
+            logging.info(f"✅ Cloud support metadata applied successfully using configuration version {cloud_config.version}")
+        else:
+            logging.error("❌ Cloud support requested but cloud_config module not available")
+            logging.error("This indicates missing Python dependencies for cloud configuration")
+            logging.error("Install required packages: pip install pyyaml requests")
+            logging.error("Or if using a virtual environment, activate it first")
+            sys.exit(1)
+    
+    # 3. Resolve type references and expand default values for original properties
     original_properties = resolve_type_and_default(original_properties, definitions)
     
     # Generate original properties JSON (without overrides)
@@ -1347,7 +1578,12 @@ def main():
     # 2. Add config_scope field based on which source file defines the property
     enhanced_properties = add_config_scope(enhanced_properties)
     
-    # 3. Resolve type references and expand default values
+    # 3. Add cloud support metadata if requested
+    if cloud_config:
+        enhanced_properties = add_cloud_support_metadata(enhanced_properties, cloud_config)
+        logging.info("✅ Cloud support metadata applied to enhanced properties")
+    
+    # 4. Resolve type references and expand default values
     # This step converts:
     # - C++ type names (model::broker_endpoint) to JSON schema types (object)  
     # - C++ constructor defaults to structured JSON objects

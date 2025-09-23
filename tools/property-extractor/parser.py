@@ -14,11 +14,37 @@ HEADER_QUERY = """
 ) @declaration
 """
 
+# Tree-sitter query for extracting C++ property constructor arguments and enterprise values
+#
+# - Enhanced to capture all expression types including:
+#   * call_expression: Handles function calls like model::kafka_audit_logging_topic()
+#   * template_instantiation: Handles template syntax like std::vector<ss::sstring>{...}
+#   * concatenated_string: Handles C++ string concatenation with +
+#   * qualified_identifier: Handles namespaced identifiers like model::partition_autobalancing_mode::continuous
+#   * (_) @argument: Fallback to capture any other expression types
+#
+# This ensures enterprise values are captured in their complete form for proper
+# processing by the process_enterprise_value function.
 SOURCE_QUERY = """
 (field_initializer_list
     (field_initializer
         (field_identifier) @field
-        (argument_list (_) @argument)? @arguments
+        (argument_list 
+            [
+                (call_expression) @argument
+                (initializer_list) @argument
+                (template_instantiation) @argument
+                (concatenated_string) @argument
+                (string_literal) @argument
+                (raw_string_literal) @argument
+                (identifier) @argument
+                (qualified_identifier) @argument
+                (number_literal) @argument
+                (true) @argument
+                (false) @argument
+                (_) @argument
+            ]
+        )? @arguments
     ) @field
 )
 """

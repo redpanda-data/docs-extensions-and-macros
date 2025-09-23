@@ -2,12 +2,19 @@
 
 {{#if version}}
 *Introduced in {{version}}*
-
 {{/if}}
+
 {{#if description}}
 {{{description}}}
 {{else}}
 No description available.
+{{/if}}
+
+{{#if is_enterprise}}
+ifndef::env-cloud[]
+*Enterprise license required*: `{{enterprise_value}}` (for license details, see xref:get-started:licensing/index.adoc[Redpanda Licensing])
+endif::[]
+
 {{/if}}
 
 {{#if units}}
@@ -54,6 +61,14 @@ No description available.
 
 {{#if example}}
 {{{renderPropertyExample this}}}
+{{/if}}
+
+{{#if related_topics}}
+*Related topics:*
+
+{{#each related_topics}}
+* {{{this}}}
+{{/each}}
 {{/if}}
 
 {{#if aliases}}
