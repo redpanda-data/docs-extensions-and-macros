@@ -5,6 +5,19 @@ const path = require('path');
 const handlebars = require('handlebars');
 const helpers = require('./helpers');
 
+/**
+ * Handlebars documentation generator for Redpanda configuration properties.
+ * 
+ * Supports custom template overrides using environment variables:
+ * - TEMPLATE_PROPERTY_PAGE: Main property page template
+ * - TEMPLATE_PROPERTY: Individual property section template  
+ * - TEMPLATE_TOPIC_PROPERTY: Individual topic property section template
+ * - TEMPLATE_DEPRECATED_PROPERTY: Individual deprecated property section template
+ * - TEMPLATE_DEPRECATED: Deprecated properties page template
+ * 
+ * CLI Usage: node generate-handlebars-docs.js <input-file> <output-dir>
+ */
+
 // Register all helpers
 Object.entries(helpers).forEach(([name, fn]) => {
   if (typeof fn !== 'function') {
@@ -110,34 +123,74 @@ function getTemplatePath(defaultPath, envVar) {
 }
 
 /**
- * Registers Handlebars partials from template files
+ * Register Handlebars partials used to render property documentation.
+ *
+ * Loads templates from the local templates directory (overridable via environment
+ * variables handled by getTemplatePath) and registers three partials:
+ *  - "property" (uses cloud-aware `property-cloud.hbs` when enabled)
+ *  - "topic-property" (uses cloud-aware `topic-property-cloud.hbs` when enabled)
+ *  - "deprecated-property"
+ *
+ * @param {boolean} [hasCloudSupport=false] - If true, select cloud-aware templates for the `property` and `topic-property` partials.
+ * @throws {Error} If any required template file is missing or cannot be read; errors are rethrown after logging.
  */
-function registerPartials() {
+function registerPartials(hasCloudSupport = false) {
   const templatesDir = path.join(__dirname, 'templates');
   
-  // Register property partial
-  const propertyTemplatePath = getTemplatePath(
-    path.join(templatesDir, 'property.hbs'),
-    'TEMPLATE_PROPERTY'
-  );
-  const propertyTemplate = fs.readFileSync(propertyTemplatePath, 'utf8');
-  handlebars.registerPartial('property', propertyTemplate);
-  
-  // Register topic property partial
-  const topicPropertyTemplatePath = getTemplatePath(
-    path.join(templatesDir, 'topic-property.hbs'),
-    'TEMPLATE_TOPIC_PROPERTY'
-  );
-  const topicPropertyTemplate = fs.readFileSync(topicPropertyTemplatePath, 'utf8');
-  handlebars.registerPartial('topic-property', topicPropertyTemplate);
-  
-  // Register deprecated property partial
-  const deprecatedPropertyTemplatePath = getTemplatePath(
-    path.join(templatesDir, 'deprecated-property.hbs'),
-    'TEMPLATE_DEPRECATED_PROPERTY'
-  );
-  const deprecatedPropertyTemplate = fs.readFileSync(deprecatedPropertyTemplatePath, 'utf8');
-  handlebars.registerPartial('deprecated-property', deprecatedPropertyTemplate);
+  try {
+    console.log(`📝 Registering Handlebars templates (cloud support: ${hasCloudSupport ? 'enabled' : 'disabled'})`);
+    
+    // Register property partial (choose cloud or regular version)
+    const propertyTemplateFile = hasCloudSupport ? 'property-cloud.hbs' : 'property.hbs';
+    const propertyTemplatePath = getTemplatePath(
+      path.join(templatesDir, propertyTemplateFile),
+      'TEMPLATE_PROPERTY'
+    );
+    
+    if (!fs.existsSync(propertyTemplatePath)) {
+      throw new Error(`Property template not found: ${propertyTemplatePath}`);
+    }
+    
+    const propertyTemplate = fs.readFileSync(propertyTemplatePath, 'utf8');
+    handlebars.registerPartial('property', propertyTemplate);
+    console.log(`✅ Registered property template: ${propertyTemplateFile}`);
+    
+    // Register topic property partial (choose cloud or regular version)
+    const topicPropertyTemplateFile = hasCloudSupport ? 'topic-property-cloud.hbs' : 'topic-property.hbs';
+    const topicPropertyTemplatePath = getTemplatePath(
+      path.join(templatesDir, topicPropertyTemplateFile),
+      'TEMPLATE_TOPIC_PROPERTY'
+    );
+    
+    if (!fs.existsSync(topicPropertyTemplatePath)) {
+      throw new Error(`Topic property template not found: ${topicPropertyTemplatePath}`);
+    }
+    
+    const topicPropertyTemplate = fs.readFileSync(topicPropertyTemplatePath, 'utf8');
+    handlebars.registerPartial('topic-property', topicPropertyTemplate);
+    console.log(`✅ Registered topic property template: ${topicPropertyTemplateFile}`);
+    
+    // Register deprecated property partial
+    const deprecatedPropertyTemplatePath = getTemplatePath(
+      path.join(templatesDir, 'deprecated-property.hbs'),
+      'TEMPLATE_DEPRECATED_PROPERTY'
+    );
+    
+    if (!fs.existsSync(deprecatedPropertyTemplatePath)) {
+      throw new Error(`Deprecated property template not found: ${deprecatedPropertyTemplatePath}`);
+    }
+    
+    const deprecatedPropertyTemplate = fs.readFileSync(deprecatedPropertyTemplatePath, 'utf8');
+    handlebars.registerPartial('deprecated-property', deprecatedPropertyTemplate);
+    console.log(`✅ Registered deprecated property template`);
+    
+  } catch (error) {
+    console.error('❌ Failed to register Handlebars templates:');
+    console.error(`   Error: ${error.message}`);
+    console.error('   This indicates missing or corrupted template files.');
+    console.error('   Check that all .hbs files exist in tools/property-extractor/templates/');
+    throw error;
+  }
 }
 
 /**
@@ -180,7 +233,17 @@ function generatePropertyDocs(properties, config, outputDir) {
 }
 
 /**
- * Generates deprecated properties documentation
+ * Generate an AsciiDoc fragment listing deprecated properties and write it to disk.
+ *
+ * Scans the provided properties map for entries with `is_deprecated === true`, groups
+ * them by `config_scope` ("broker" and "cluster"), sorts each group by property name,
+ * renders the `deprecated-properties` Handlebars template, and writes the output to
+ * `<outputDir>/deprecated/partials/deprecated-properties.adoc`.
+ *
+ * @param {Object.<string, Object>} properties - Map of property objects keyed by property name.
+ *   Each property object may contain `is_deprecated`, `config_scope`, and `name` fields.
+ * @param {string} outputDir - Destination directory where the deprecated fragment will be written.
+ * @returns {number} The total number of deprecated properties found and written.
  */
 function generateDeprecatedDocs(properties, outputDir) {
   const templatePath = getTemplatePath(
@@ -216,15 +279,50 @@ function generateDeprecatedDocs(properties, outputDir) {
 }
 
 /**
- * Main function to generate all property documentation
+ * Determine whether any property includes cloud support metadata.
+ *
+ * Checks the provided map of properties and returns true if at least one
+ * property object has a `cloud_supported` own property (regardless of its value).
+ *
+ * @param {Object<string, Object>} properties - Map from property name to its metadata object.
+ * @return {boolean} True if any property has a `cloud_supported` attribute; otherwise false.
+ */
+function hasCloudSupportMetadata(properties) {
+  return Object.values(properties).some(prop => 
+    Object.prototype.hasOwnProperty.call(prop, 'cloud_supported')
+  );
+}
+
+/**
+ * Generate all property documentation and write output files to disk.
+ *
+ * Reads properties from the provided JSON file, detects whether any property
+ * includes cloud support metadata to select cloud-aware templates, registers
+ * Handlebars partials accordingly, renders per-type property pages and a
+ * deprecated-properties partial, writes a flat list of all property names, and
+ * produces error reports.
+ *
+ * Generated artifacts are written under the given output directory (e.g.:
+ * pages/<type>/*.adoc, pages/deprecated/partials/deprecated-properties.adoc,
+ * all_properties.txt, and files under outputDir/error).
+ *
+ * @param {string} inputFile - Filesystem path to the input JSON containing a top-level `properties` object.
+ * @param {string} outputDir - Destination directory where generated pages and reports will be written.
+ * @returns {{totalProperties: number, brokerProperties: number, clusterProperties: number, objectStorageProperties: number, topicProperties: number, deprecatedProperties: number}} Summary counts for all properties and per-type totals.
  */
 function generateAllDocs(inputFile, outputDir) {
-  // Register partials
-  registerPartials();
-
   // Read input JSON
   const data = JSON.parse(fs.readFileSync(inputFile, 'utf8'));
   const properties = data.properties || {};
+
+  // Check if cloud support is enabled
+  const hasCloudSupport = hasCloudSupportMetadata(properties);
+  if (hasCloudSupport) {
+    console.log('🌤️ Cloud support metadata detected, using cloud-aware templates');
+  }
+
+  // Register partials with cloud support detection
+  registerPartials(hasCloudSupport);
 
   let totalProperties = 0;
   let totalBrokerProperties = 0;
@@ -291,13 +389,15 @@ function generateErrorReports(properties, outputDir) {
   });
 
   // Write error reports
+  const totalProperties = Object.keys(properties).length;
+  
   if (emptyDescriptions.length > 0) {
     fs.writeFileSync(
       path.join(errorDir, 'empty_description.txt'),
       emptyDescriptions.join('\n'),
       'utf8'
     );
-    const percentage = ((emptyDescriptions.length / Object.keys(properties).length) * 100).toFixed(2);
+    const percentage = totalProperties > 0 ? ((emptyDescriptions.length / totalProperties) * 100).toFixed(2) : '0.00';
     console.log(`You have ${emptyDescriptions.length} properties with empty description. Percentage of errors: ${percentage}%. Data written in 'empty_description.txt'.`);
   }
 
@@ -307,7 +407,7 @@ function generateErrorReports(properties, outputDir) {
       deprecatedProperties.join('\n'),
       'utf8'
     );
-    const percentage = ((deprecatedProperties.length / Object.keys(properties).length) * 100).toFixed(2);
+    const percentage = totalProperties > 0 ? ((deprecatedProperties.length / totalProperties) * 100).toFixed(2) : '0.00';
     console.log(`You have ${deprecatedProperties.length} deprecated properties. Percentage of errors: ${percentage}%. Data written in 'deprecated_properties.txt'.`);
   }
 }

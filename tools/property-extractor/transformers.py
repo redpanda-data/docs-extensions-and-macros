@@ -1,13 +1,50 @@
 import re
+import logging
 from property_bag import PropertyBag
 from parser import normalize_string
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
+
+# Import the process_enterprise_value function from property_extractor
+# Note: We import at function level to avoid circular imports since property_extractor
+# imports transformers.py. This pattern allows the EnterpriseTransformer to access
+# the centralized enterprise value processing logic without creating import cycles.
+def get_process_enterprise_value():
+    """
+    Lazily import and return the centralized `process_enterprise_value` function from `property_extractor`.
+    
+    Attempts to import `process_enterprise_value` and return it to avoid circular-import issues. If the import fails an error message is printed and None is returned.
+    
+    Returns:
+        Callable or None: The `process_enterprise_value` callable when available, otherwise `None`.
+    """
+    try:
+        from property_extractor import process_enterprise_value
+        return process_enterprise_value
+    except ImportError as e:
+        logger.error("Cannot import process_enterprise_value from property_extractor: %s", e)
+        return None
 
 
 class BasicInfoTransformer:
     def accepts(self, info, file_pair):
+        """
+        Always accepts the provided info and file_pair.
+        
+        Parameters:
+        	info (dict): Parsed metadata for a property (annotation/params/declaration).
+        	file_pair (object): Pair of source/implementation file metadata used by transformers.
+        
+        Returns:
+        	bool: Always returns True, indicating this transformer should be applied.
+        """
         return True
 
     def parse(self, property, info, file_pair):
+        if not info.get("params") or len(info["params"]) == 0:
+            return property
+            
         property["name"] = info["params"][0]["value"]
         property["defined_in"] = re.sub(
             r"^.*src/", "src/", str(file_pair.implementation)
@@ -427,13 +464,65 @@ class AliasTransformer:
 
 
 class EnterpriseTransformer:
+    """
+    Transforms enterprise property values from C++ expressions to user-friendly JSON.
+
+    This transformer processes enterprise values by delegating to the
+    centralized process_enterprise_value function which handles the full range of
+    C++ expression types found in enterprise property definitions.
+    """
     def accepts(self, info, file_pair):
+        """
+        Return True if the provided info indicates an enterprise-only property.
+        
+        Parameters:
+            info (dict): The metadata dictionary for a property. This function checks for a 'type' key whose string contains 'enterprise'.
+            file_pair: Unused; present for transformer interface compatibility.
+        
+        Returns:
+            bool: True when info contains a 'type' that includes 'enterprise', otherwise False.
+        """
         return bool(info.get('type') and 'enterprise' in info['type'])
 
     def parse(self, property, info, file_pair):
+        """
+        Mark a property as enterprise-only and attach its enterprise value.
+        
+        If an enterprise value is present in info['params'][0]['value'], this method attempts to process it using the shared
+        process_enterprise_value helper (loaded via get_process_enterprise_value()). If the processor is unavailable or raises
+        an exception, the raw enterprise value is used.
+        
+        Side effects:
+        - Sets property["enterprise_value"] to the processed or raw value.
+        - Sets property["is_enterprise"] = True.
+        - Removes the first element from info['params'].
+        
+        Parameters:
+            property (dict): Property bag to modify and return.
+            info (dict): Parsed metadata; must have a non-None 'params' list for processing.
+            file_pair: Unused here but accepted for transformer API compatibility.
+        
+        Returns:
+            dict: The updated property bag.
+        """
         if info['params'] is not None:
             enterpriseValue = info['params'][0]['value']
-            property['enterprise_value'] = enterpriseValue
+            
+            # Get the processing function
+            process_enterprise_value = get_process_enterprise_value()
+            if process_enterprise_value is None:
+                property["enterprise_value"] = enterpriseValue
+                property['is_enterprise'] = True
+                del info['params'][0]
+                return property
+            
+            try:
+                processed_value = process_enterprise_value(enterpriseValue)
+                property["enterprise_value"] = processed_value
+            except Exception:
+                # Fallback to raw value if processing fails
+                property["enterprise_value"] = enterpriseValue
+
             property['is_enterprise'] = True
             del info['params'][0]
             return property
@@ -462,7 +551,14 @@ class MetaParamTransformer:
         iterable_params = info['params']
         for param in iterable_params:
             if isinstance(param['value'], str) and param['value'].startswith("meta{"):
-                meta_content = param['value'].strip("meta{ }").strip()
+                # Extract content between meta{ and } using explicit slicing
+                param_value = param['value']
+                if param_value.endswith('}'):
+                    meta_content = param_value[5:-1].strip()  # Remove "meta{" and "}"
+                else:
+                    # Handle malformed meta{ without closing }
+                    meta_content = param_value[5:].strip()  # Remove "meta{" only
+                
                 meta_dict = {}
                 for item in meta_content.split(','):
                     item = item.strip()
