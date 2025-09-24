@@ -28,7 +28,7 @@ module.exports = function renderConnectFields(children, prefix = '') {
 
     // Normalize types
     let displayType;
-    const isArrayTitle = child.name && child.name.includes('[]');
+    const isArrayTitle = typeof child.name === 'string' && child.name.endsWith('[]');
     if (isArrayTitle) {
       displayType = 'array<object>';
     } else if (child.type === 'string' && child.kind === 'array') {
@@ -45,16 +45,21 @@ module.exports = function renderConnectFields(children, prefix = '') {
 
     let block = '';
     const isArray = child.kind === 'array';
+    // Only append [] if kind is array and name does not already end with []
+    const nameWithArray = (typeof child.name === 'string' && isArray && !child.name.endsWith('[]'))
+      ? `${child.name}[]`
+      : child.name;
     const currentPath = prefix
-      ? `${prefix}.${child.name}${isArray ? '[]' : ''}`
-      : `${child.name}${isArray ? '[]' : ''}`;
+      ? `${prefix}.${nameWithArray}`
+      : `${nameWithArray}`;
 
     block += `=== \`${currentPath}\`\n\n`;
 
     // --- Beta badge logic (now uses is_beta) ---
     let desc = child.description || '';
     if (child.is_beta) {
-      desc = 'badge::[label=Beta, size=large, tooltip={page-beta-text}]\n\n' + desc.replace(/^BETA:\s*/, '');
+      // Remove any leading "BETA:" label (case-insensitive, trims leading whitespace)
+      desc = 'badge::[label=Beta, size=large, tooltip={page-beta-text}]\n\n' + desc.replace(/^\s*BETA:\s*/i, '');
     }
 
     // --- Interpolation support notice ---

@@ -221,7 +221,8 @@ async function generateRpcnConnectorDocs(options) {
       obj.forEach(markBeta);
       return;
     }
-    if (typeof obj.description === 'string' && obj.description.trim().startsWith('BETA:')) {
+    // Mark as beta if description starts with 'BETA:' (case-insensitive, trims leading whitespace)
+    if (typeof obj.description === 'string' && /^\s*BETA:\s*/i.test(obj.description)) {
       obj.is_beta = true;
     }
     // Recurse into children/config/fields
@@ -408,20 +409,20 @@ async function generateRpcnConnectorDocs(options) {
     if (!Array.isArray(items)) continue;
     for (const item of items) {
       if (!item.name || !item.config || !Array.isArray(item.config.children)) continue;
-      // Common config
-      const commonYaml = commonConfig(item.type, item.name, item.config.children);
-      const commonPath = path.join(configExamplesRoot, 'common', type, `${item.name}.yaml`);
-      fs.mkdirSync(path.dirname(commonPath), { recursive: true });
-      fs.writeFileSync(commonPath, commonYaml.toString(), 'utf8');
-      partialsWritten++;
-      partialFiles.push(path.relative(process.cwd(), commonPath));
-      // Advanced config
-      const advYaml = advancedConfig(item.type, item.name, item.config.children);
-      const advPath = path.join(configExamplesRoot, 'advanced', type, `${item.name}.yaml`);
-      fs.mkdirSync(path.dirname(advPath), { recursive: true });
-      fs.writeFileSync(advPath, advYaml.toString(), 'utf8');
-      partialsWritten++;
-      partialFiles.push(path.relative(process.cwd(), advPath));
+  // Common config
+  const commonYaml = commonConfig(type, item.name, item.config.children);
+  const commonPath = path.join(configExamplesRoot, 'common', type, `${item.name}.yaml`);
+  fs.mkdirSync(path.dirname(commonPath), { recursive: true });
+  fs.writeFileSync(commonPath, commonYaml.toString(), 'utf8');
+  partialsWritten++;
+  partialFiles.push(path.relative(process.cwd(), commonPath));
+  // Advanced config
+  const advYaml = advancedConfig(type, item.name, item.config.children);
+  const advPath = path.join(configExamplesRoot, 'advanced', type, `${item.name}.yaml`);
+  fs.mkdirSync(path.dirname(advPath), { recursive: true });
+  fs.writeFileSync(advPath, advYaml.toString(), 'utf8');
+  partialsWritten++;
+  partialFiles.push(path.relative(process.cwd(), advPath));
     }
   }
 
