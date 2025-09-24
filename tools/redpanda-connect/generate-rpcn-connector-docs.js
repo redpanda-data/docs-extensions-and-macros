@@ -209,6 +209,11 @@ function resolveReferences(obj, root) {
  * When generating full drafts, components with a `status` of `'deprecated'` are skipped.
  */
 async function generateRpcnConnectorDocs(options) {
+  // Types and output folders for bloblang function/method partials
+  const bloblangTypes = [
+    { key: 'bloblang-functions', folder: 'bloblang-functions' },
+    { key: 'bloblang-methods', folder: 'bloblang-methods' }
+  ];
   // Recursively mark is_beta on any field/component with description starting with BETA:
   function markBeta(obj) {
     if (!obj || typeof obj !== 'object') return;
@@ -235,6 +240,7 @@ async function generateRpcnConnectorDocs(options) {
     templateIntro,
     templateFields,
     templateExamples,
+    templateBloblang,
     writeFullDrafts
   } = options;
 
@@ -376,84 +382,17 @@ async function generateRpcnConnectorDocs(options) {
 
   // Bloblang function/method partials (only if includeBloblang is true)
   if (options.includeBloblang) {
-    const bloblangTypes = [
-      { key: 'bloblang-functions', folder: 'bloblang/functions' },
-      { key: 'bloblang-methods', folder: 'bloblang/methods' }
-    ];
     for (const { key, folder } of bloblangTypes) {
       const items = dataObj[key];
       if (!Array.isArray(items)) continue;
       const outRoot = path.join(outputRoot, folder);
       fs.mkdirSync(outRoot, { recursive: true });
+      // Use custom or default template
+      const bloblangTemplatePath = templateBloblang || path.resolve(__dirname, './templates/bloblang-function.hbs');
+      const bloblangTemplate = handlebars.compile(fs.readFileSync(bloblangTemplatePath, 'utf8'));
       for (const fn of items) {
         if (!fn.name) continue;
-        // Compose AsciiDoc content for the function/method
-        let adoc = `= ${fn.name}\n\n`;
-        if (fn.signature) adoc += `*Signature*: \`${fn.signature}\`\n\n`;
-        if (fn.description) adoc += `${fn.description}\n\n`;
-        if (Array.isArray(fn.parameters) && fn.parameters.length) {
-          adoc += `== Parameters\n\n`;
-          for (const param of fn.parameters) {
-            adoc += `* \`${param.name}\`: ${param.description || ''}\n`;
-          }
-          adoc += `\n`;
-        }
-        if (Array.isArray(fn.examples) && fn.examples.length) {
-          adoc += `== Examples\n\n`;
-          for (const ex of fn.examples) {
-            // If the example is an object with a mapping, summary, and results, format as requested
-            if (typeof ex === 'object' && ex !== null && ex.mapping) {
-              let codeBlock = '';
-              // Summary as comment
-              if (ex.summary && ex.summary.trim()) {
-                codeBlock += `# ${ex.summary.trim().replace(/\n/g, '\n# ')}\n`;
-              }
-              // Mapping code
-              if (typeof ex.mapping === 'string') {
-                codeBlock += ex.mapping.trim() + '\n';
-              }
-              // Results as # In/Out pairs
-              if (Array.isArray(ex.results)) {
-                for (const pair of ex.results) {
-                  if (Array.isArray(pair) && pair.length === 2) {
-                    codeBlock += `\n# In:  ${pair[0]}\n# Out: ${pair[1]}\n`;
-                  }
-                }
-              }
-              adoc += `[,coffeescript]\n----\n${codeBlock.trim()}\n----\n`;
-            } else {
-              // fallback: previous logic
-              let exStr = '';
-              if (typeof ex === 'string') {
-                exStr = ex;
-              } else if (typeof ex === 'object' && ex !== null) {
-                if (ex.code) {
-                  exStr = ex.code;
-                } else if (ex.example) {
-                  exStr = ex.example;
-                } else {
-                  try {
-                    exStr = require('yaml').stringify(ex).trim();
-                  } catch {
-                    exStr = JSON.stringify(ex, null, 2);
-                  }
-                }
-              } else {
-                exStr = String(ex);
-              }
-              adoc += `[source,bloblang]\n----\n${exStr}\n----\n`;
-            }
-          }
-          adoc += `\n`;
-        }
-        if (Array.isArray(fn.related) && fn.related.length) {
-          adoc += `== Related\n\n`;
-          for (const rel of fn.related) {
-            adoc += `* ${rel}\n`;
-          }
-          adoc += `\n`;
-        }
-        // Write the partial
+        const adoc = bloblangTemplate(fn);
         const outPath = path.join(outRoot, `${fn.name}.adoc`);
         fs.writeFileSync(outPath, adoc, 'utf8');
         partialsWritten++;

@@ -676,6 +676,7 @@ automation
   .description('Generate RPCN connector docs and diff changes since the last version')
   .option('-d, --data-dir <path>', 'Directory where versioned connect JSON files live', path.resolve(process.cwd(), 'docs-data'))
   .option('--old-data <path>', 'Optional override for old data file (for diff)')
+  .option('--update-whats-new', 'Update whats-new.adoc with new section from diff JSON')
   .option('-f, --fetch-connectors', 'Fetch latest connector data using rpk')
   .option('-m, --draft-missing', 'Generate full-doc drafts for connectors missing in output')
   .option('--csv <path>', 'Path to connector metadata CSV file', 'internal/plugins/info.csv')
@@ -683,6 +684,7 @@ automation
   .option('--template-intro <path>', 'Intro section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/intro.hbs'))
   .option('--template-fields <path>', 'Fields section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/fields-partials.hbs'))
   .option('--template-examples <path>', 'Examples section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/examples-partials.hbs'))
+  .option('--template-bloblang <path>', 'Custom Handlebars template for bloblang function/method partials')
   .option('--overrides <path>', 'Optional JSON file with overrides')
   .option('--include-bloblang', 'Include Bloblang functions and methods in generation')
   .action(async (options) => {
@@ -745,6 +747,7 @@ automation
         templateIntro: options.templateIntro,
         templateFields: options.templateFields,
         templateExamples: options.templateExamples,
+        templateBloblang: options.templateBloblang,
         writeFullDrafts: false,
         includeBloblang: !!options.includeBloblang
       });
@@ -828,10 +831,13 @@ automation
     }
 
     let oldIndex = {};
+    let oldVersion = null;
     if (options.oldData && fs.existsSync(options.oldData)) {
       oldIndex = JSON.parse(fs.readFileSync(options.oldData, 'utf8'));
+      const m = options.oldData.match(/connect-([\d.]+)\.json$/);
+      if (m) oldVersion = m[1];
     } else {
-      const oldVersion = getAntoraValue('asciidoc.attributes.latest-connect-version');
+      oldVersion = getAntoraValue('asciidoc.attributes.latest-connect-version');
       if (oldVersion) {
         const oldPath = path.join(dataDir, `connect-${oldVersion}.json`);
         if (fs.existsSync(oldPath)) {
@@ -842,6 +848,21 @@ automation
 
     const newIndex = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
     printDeltaReport(oldIndex, newIndex);
+
+    // Generate JSON diff file for whats-new.adoc
+    const { generateConnectorDiffJson } = require('../tools/redpanda-connect/report-delta.js');
+    const diffJson = generateConnectorDiffJson(
+      oldIndex,
+      newIndex,
+      {
+        oldVersion: oldVersion || '',
+        newVersion,
+        timestamp
+      }
+    );
+    const diffPath = path.join(dataDir, `connect-diff-${(oldVersion || 'unknown')}_to_${newVersion}.json`);
+    fs.writeFileSync(diffPath, JSON.stringify(diffJson, null, 2), 'utf8');
+    console.log(`✅ Connector diff JSON written to: ${diffPath}`);
 
     function logCollapsed(label, filesArray, maxToShow = 10) {
       console.log(`  • ${label}: ${filesArray.length} total`);
@@ -872,6 +893,133 @@ automation
     if (options.draftMissing) {
       console.log(`   • Full drafts:   ${draftsWritten}`);
       logCollapsed('Draft files', draftFiles, 5);
+    }
+
+    // Optionally update whats-new.adoc
+    if (options.updateWhatsNew) {
+      try {
+        const whatsNewPath = path.join(findRepoRoot(), 'modules/get-started/pages/whats-new.adoc');
+        if (!fs.existsSync(whatsNewPath)) {
+          console.error(`❌ Unable to update release notes: 'whats-new.adoc' was not found at: ${whatsNewPath}\nPlease ensure this file exists and is tracked in your repository.`);
+          return;
+        }
+        // Find the diff JSON file we just wrote
+        const diffPath = path.join(dataDir, `connect-diff-${(oldVersion || 'unknown')}_to_${newVersion}.json`);
+        if (!fs.existsSync(diffPath)) {
+          console.error(`❌ Unable to update release notes: The connector diff JSON was not found at: ${diffPath}\nPlease ensure the diff was generated successfully before updating release notes.`);
+          return;
+        }
+        let diff;
+        try {
+          diff = JSON.parse(fs.readFileSync(diffPath, 'utf8'));
+        } catch (jsonErr) {
+          console.error(`❌ Unable to parse connector diff JSON at ${diffPath}: ${jsonErr.message}\nPlease check the file for syntax errors or corruption.`);
+          return;
+        }
+        let whatsNewContent;
+        try {
+          whatsNewContent = fs.readFileSync(whatsNewPath, 'utf8');
+        } catch (readErr) {
+          console.error(`❌ Unable to read whats-new.adoc at ${whatsNewPath}: ${readErr.message}\nPlease check file permissions and try again.`);
+          return;
+        }
+  const whatsNew = whatsNewContent;
+        // Regex to find section for this version
+        const versionTitle = `== Version ${diff.comparison.newVersion}`;
+        const versionRe = new RegExp(`^== Version ${diff.comparison.newVersion.replace(/[-.]/g, '\\$&')}(?:\\r?\\n|$)`, 'm');
+        const match = versionRe.exec(whatsNew);
+        let startIdx = match ? match.index : -1;
+        let endIdx = -1;
+        if (startIdx !== -1) {
+          // Find the start of the next version section
+          const rest = whatsNew.slice(startIdx + 1);
+          const nextMatch = /^== Version /m.exec(rest);
+          endIdx = nextMatch ? startIdx + 1 + nextMatch.index : whatsNew.length;
+        }
+        // Compose new section
+        let section = `\n== Version ${diff.comparison.newVersion}\n\n=== Component updates\n\n`;
+        // Add link to full release notes for this connector version
+        if (diff.comparison && diff.comparison.newVersion) {
+          section += `Full release notes: https://github.com/redpanda-data/connect/releases/tag/v${diff.comparison.newVersion}\n\n`;
+        }
+        // New components
+        if (diff.details.newComponents && diff.details.newComponents.length) {
+          section += 'This release adds the following new components:\n\n';
+          // Group by type
+          const byType = {};
+          for (const comp of diff.details.newComponents) {
+            if (!byType[comp.type]) byType[comp.type] = [];
+            byType[comp.type].push(comp);
+          }
+          for (const [type, comps] of Object.entries(byType)) {
+            section += `* ${type.charAt(0).toUpperCase() + type.slice(1)}:\n`;
+            for (const comp of comps) {
+              section += `** xref:components:${type}/${comp.name}.adoc[\`${comp.name}\`]`;
+              if (comp.status) section += ` (${comp.status})`;
+              if (comp.description) section += `: ${comp.description}`;
+              section += '\n';
+            }
+          }
+        }
+
+        // New fields
+        if (diff.details.newFields && diff.details.newFields.length) {
+          section += '\nThis release adds support for the following new fields:\n\n';
+          // Group new fields by component type
+          const fieldsByType = {};
+          for (const field of diff.details.newFields) {
+            // component: "inputs:kafka", field: "timely_nacks_maximum_wait"
+            const [type, compName] = field.component.split(':');
+            if (!fieldsByType[type]) fieldsByType[type] = [];
+            fieldsByType[type].push({
+              compName,
+              field: field.field,
+              description: field.description || '',
+            });
+          }
+          for (const [type, fields] of Object.entries(fieldsByType)) {
+            section += `* ${type.charAt(0).toUpperCase() + type.slice(1)} components\n`;
+            // Group by component name
+            const byComp = {};
+            for (const f of fields) {
+              if (!byComp[f.compName]) byComp[f.compName] = [];
+              byComp[f.compName].push(f);
+            }
+            for (const [comp, compFields] of Object.entries(byComp)) {
+              section += `** xref:components:${type}/${comp}.adoc['${comp}']`;
+              if (compFields.length === 1) {
+                const f = compFields[0];
+                section += `: xref:components:${type}/${comp}.adoc#${f.field}['${f.field}']`;
+                if (f.description) section += ` - ${f.description}`;
+                section += '\n';
+              } else {
+                section += '\n';
+                for (const f of compFields) {
+                  section += `*** xref:components:${type}/${comp}.adoc#${f.field}['${f.field}']`;
+                  if (f.description) section += ` - ${f.description}`;
+                  section += '\n';
+                }
+              }
+            }
+          }
+        }
+        let updated;
+        if (startIdx !== -1) {
+          // Replace the existing section
+          updated = whatsNew.slice(0, startIdx) + section + '\n' + whatsNew.slice(endIdx);
+          console.log(`♻️  whats-new.adoc: replaced section for Version ${diff.comparison.newVersion}`);
+        } else {
+          // Insert above first version heading
+          const versionHeading = /^== Version /m;
+          const firstMatch = versionHeading.exec(whatsNew);
+          let insertIdx = firstMatch ? firstMatch.index : 0;
+          updated = whatsNew.slice(0, insertIdx) + section + '\n' + whatsNew.slice(insertIdx);
+          console.log(`✅ whats-new.adoc updated with Version ${diff.comparison.newVersion}`);
+        }
+        fs.writeFileSync(whatsNewPath, updated, 'utf8');
+      } catch (err) {
+        console.error(`❌ Failed to update whats-new.adoc: ${err.message}`);
+      }
     }
 
     console.log('\n📄 Summary:');
