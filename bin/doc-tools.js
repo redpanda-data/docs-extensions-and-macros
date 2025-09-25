@@ -938,10 +938,12 @@ automation
         }
         // Compose new section
         let section = `\n== Version ${diff.comparison.newVersion}\n\n=== Component updates\n\n`;
-        // Add link to full release notes for this connector version
+        // Add link to full release notes for this connector version after version heading and before component updates
+        let releaseNotesLink = '';
         if (diff.comparison && diff.comparison.newVersion) {
-          section += `Full release notes: https://github.com/redpanda-data/connect/releases/tag/v${diff.comparison.newVersion}\n\n`;
+          releaseNotesLink = `link:https://github.com/redpanda-data/connect/releases/tag/v${diff.comparison.newVersion}[See the full release notes^].\n\n`;
         }
+        section = `\n== Version ${diff.comparison.newVersion}\n\n${releaseNotesLink}=== Component updates\n\n`;
         // New components
         if (diff.details.newComponents && diff.details.newComponents.length) {
           section += 'This release adds the following new components:\n\n';
