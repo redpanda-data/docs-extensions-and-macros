@@ -1109,5 +1109,33 @@
         ]
       }
     }
+  ],
+  "bloblang_methods": [
+    {
+      "name": "map_each",
+      "description": "Override: Applies a function to each element in an array and returns a new array.",
+      "examples": [
+        {
+          "title": "Override: Double each value",
+          "summary": "Doubles every value in the input array.",
+          "mapping": "map_each(this, x -> x * 2)",
+          "in": [1, 2, 3],
+          "out": [2, 4, 6]
+        }
+      ]
+    },
+    {
+      "name": "join",
+      "description": "Override: Joins elements of an array into a string with a separator.",
+      "examples": [
+        {
+          "title": "Override: Join with dash",
+          "summary": "Joins array elements with a dash.",
+          "mapping": "join([\"a\", \"b\", \"c\"], \"-\")",
+          "in": ["a", "b", "c"],
+          "out": "a-b"
+        }
+      ]
+    }
   ]
 }

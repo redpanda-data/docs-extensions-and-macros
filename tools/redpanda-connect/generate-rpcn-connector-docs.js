@@ -209,6 +209,31 @@ function resolveReferences(obj, root) {
  * When generating full drafts, components with a `status` of `'deprecated'` are skipped.
  */
 async function generateRpcnConnectorDocs(options) {
+  // Types and output folders for bloblang function/method partials
+  const bloblangTypes = [
+    { key: 'bloblang-functions', folder: 'bloblang-functions' },
+    { key: 'bloblang-methods', folder: 'bloblang-methods' }
+  ];
+  // Recursively mark is_beta on any field/component with description starting with BETA:
+  function markBeta(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    if (Array.isArray(obj)) {
+      obj.forEach(markBeta);
+      return;
+    }
+    // Mark as beta if description starts with 'BETA:' (case-insensitive, trims leading whitespace)
+    if (typeof obj.description === 'string' && /^\s*BETA:\s*/i.test(obj.description)) {
+      obj.is_beta = true;
+    }
+    // Recurse into children/config/fields
+    if (Array.isArray(obj.children)) obj.children.forEach(markBeta);
+    if (obj.config && Array.isArray(obj.config.children)) obj.config.children.forEach(markBeta);
+    // For connector/component arrays
+    for (const key of Object.keys(obj)) {
+      if (Array.isArray(obj[key])) obj[key].forEach(markBeta);
+    }
+  }
+
   const {
     data,
     overrides,
@@ -216,6 +241,7 @@ async function generateRpcnConnectorDocs(options) {
     templateIntro,
     templateFields,
     templateExamples,
+    templateBloblang,
     writeFullDrafts
   } = options;
 
@@ -223,16 +249,38 @@ async function generateRpcnConnectorDocs(options) {
   const raw = fs.readFileSync(data, 'utf8');
   const ext = path.extname(data).toLowerCase();
   const dataObj = ext === '.json' ? JSON.parse(raw) : yaml.parse(raw);
+  // Mark beta fields/components before overrides
+  markBeta(dataObj);
 
   // Apply overrides if provided
   if (overrides) {
     const ovRaw = fs.readFileSync(overrides, 'utf8');
     const ovObj = JSON.parse(ovRaw);
-    
     // Resolve any $ref references in the overrides
     const resolvedOverrides = resolveReferences(ovObj, ovObj);
-    
     mergeOverrides(dataObj, resolvedOverrides);
+
+    // Special: merge bloblang_methods and bloblang_functions from overrides into main data
+    for (const [overrideKey, mainKey] of [
+      ['bloblang_methods', 'bloblang-methods'],
+      ['bloblang_functions', 'bloblang-functions']
+    ]) {
+      if (Array.isArray(resolvedOverrides[overrideKey])) {
+        if (!Array.isArray(dataObj[mainKey])) dataObj[mainKey] = [];
+        // Merge by name
+        const mainArr = dataObj[mainKey];
+        const overrideArr = resolvedOverrides[overrideKey];
+        for (const overrideItem of overrideArr) {
+          if (!overrideItem.name) continue;
+          const idx = mainArr.findIndex(i => i.name === overrideItem.name);
+          if (idx !== -1) {
+            mainArr[idx] = { ...mainArr[idx], ...overrideItem };
+          } else {
+            mainArr.push(overrideItem);
+          }
+        }
+      }
+    }
   }
 
   // Compile the “main” template (used when writeFullDrafts = true)
@@ -260,6 +308,7 @@ async function generateRpcnConnectorDocs(options) {
   const fieldsOutRoot   = path.join(outputRoot, 'fields');
   const examplesOutRoot = path.join(outputRoot, 'examples');
   const draftsRoot      = path.join(outputRoot, 'drafts');
+  const configExamplesRoot = path.resolve(process.cwd(), 'modules/components/examples');
 
   if (!writeFullDrafts) {
     fs.mkdirSync(fieldsOutRoot,   { recursive: true });
@@ -329,6 +378,51 @@ async function generateRpcnConnectorDocs(options) {
         draftsWritten++;
         draftFiles.push(path.relative(process.cwd(), destFile));
       }
+    }
+  }
+
+  // Bloblang function/method partials (only if includeBloblang is true)
+  if (options.includeBloblang) {
+    for (const { key, folder } of bloblangTypes) {
+      const items = dataObj[key];
+      if (!Array.isArray(items)) continue;
+      const outRoot = path.join(outputRoot, folder);
+      fs.mkdirSync(outRoot, { recursive: true });
+      // Use custom or default template
+      const bloblangTemplatePath = templateBloblang || path.resolve(__dirname, './templates/bloblang-function.hbs');
+      const bloblangTemplate = handlebars.compile(fs.readFileSync(bloblangTemplatePath, 'utf8'));
+      for (const fn of items) {
+        if (!fn.name) continue;
+        const adoc = bloblangTemplate(fn);
+        const outPath = path.join(outRoot, `${fn.name}.adoc`);
+        fs.writeFileSync(outPath, adoc, 'utf8');
+        partialsWritten++;
+        partialFiles.push(path.relative(process.cwd(), outPath));
+      }
+    }
+  }
+
+  // Common/Advanced config snippet YAMLs in modules/components/examples
+  const commonConfig = helpers.commonConfig;
+  const advancedConfig = helpers.advancedConfig;
+  for (const [type, items] of Object.entries(dataObj)) {
+    if (!Array.isArray(items)) continue;
+    for (const item of items) {
+      if (!item.name || !item.config || !Array.isArray(item.config.children)) continue;
+  // Common config
+  const commonYaml = commonConfig(type, item.name, item.config.children);
+  const commonPath = path.join(configExamplesRoot, 'common', type, `${item.name}.yaml`);
+  fs.mkdirSync(path.dirname(commonPath), { recursive: true });
+  fs.writeFileSync(commonPath, commonYaml.toString(), 'utf8');
+  partialsWritten++;
+  partialFiles.push(path.relative(process.cwd(), commonPath));
+  // Advanced config
+  const advYaml = advancedConfig(type, item.name, item.config.children);
+  const advPath = path.join(configExamplesRoot, 'advanced', type, `${item.name}.yaml`);
+  fs.mkdirSync(path.dirname(advPath), { recursive: true });
+  fs.writeFileSync(advPath, advYaml.toString(), 'utf8');
+  partialsWritten++;
+  partialFiles.push(path.relative(process.cwd(), advPath));
     }
   }
 

@@ -1,3 +1,103 @@
+/**
+ * Generate a JSON diff report between two connector index objects.
+ * @param {object} oldIndex - Previous version connector index
+ * @param {object} newIndex - Current version connector index
+ * @param {object} opts - { oldVersion, newVersion, timestamp }
+ * @returns {object} JSON diff report
+ */
+function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
+  const oldMap = buildComponentMap(oldIndex);
+  const newMap = buildComponentMap(newIndex);
+
+  // New components
+  const newComponentKeys = Object.keys(newMap).filter(k => !(k in oldMap));
+  const newComponents = newComponentKeys.map(key => {
+    const [type, name] = key.split(':');
+    const raw = newMap[key].raw;
+    return {
+      name,
+      type,
+      status: raw.status || raw.type || '',
+      version: raw.version || raw.introducedInVersion || '',
+      description: raw.description || ''
+    };
+  });
+
+  // Removed components
+  const removedComponentKeys = Object.keys(oldMap).filter(k => !(k in newMap));
+  const removedComponents = removedComponentKeys.map(key => {
+    const [type, name] = key.split(':');
+    const raw = oldMap[key].raw;
+    return {
+      name,
+      type,
+      status: raw.status || raw.type || '',
+      version: raw.version || raw.introducedInVersion || '',
+      description: raw.description || ''
+    };
+  });
+
+  // New fields under existing components
+  const newFields = [];
+  Object.keys(newMap).forEach(cKey => {
+    if (!(cKey in oldMap)) return;
+    const oldFields = new Set(oldMap[cKey].fields || []);
+    const newFieldsArr = newMap[cKey].fields || [];
+    newFieldsArr.forEach(fName => {
+      if (!oldFields.has(fName)) {
+        const [type, compName] = cKey.split(':');
+        let rawFieldObj = null;
+        if (type === 'config') {
+          rawFieldObj = (newMap[cKey].raw.children || []).find(f => f.name === fName);
+        } else {
+          rawFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
+        }
+        newFields.push({
+          component: cKey,
+          field: fName,
+          introducedIn: rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version),
+          description: rawFieldObj && rawFieldObj.description
+        });
+      }
+    });
+  });
+
+  // Removed fields under existing components
+  const removedFields = [];
+  Object.keys(oldMap).forEach(cKey => {
+    if (!(cKey in newMap)) return;
+    const newFieldsSet = new Set(newMap[cKey].fields || []);
+    const oldFieldsArr = oldMap[cKey].fields || [];
+    oldFieldsArr.forEach(fName => {
+      if (!newFieldsSet.has(fName)) {
+        removedFields.push({
+          component: cKey,
+          field: fName
+        });
+      }
+    });
+  });
+
+  return {
+    comparison: {
+      oldVersion: opts.oldVersion || '',
+      newVersion: opts.newVersion || '',
+      timestamp: opts.timestamp || new Date().toISOString()
+    },
+    summary: {
+      newComponents: newComponents.length,
+      removedComponents: removedComponents.length,
+      newFields: newFields.length,
+      removedFields: removedFields.length
+    },
+    details: {
+      newComponents,
+      removedComponents,
+      newFields,
+      removedFields
+    }
+  };
+}
 // tools/redpanda-connect/report-delta.js
 'use strict';
 
@@ -149,4 +249,5 @@ module.exports = {
   buildComponentMap,
   getRpkConnectVersion,
   printDeltaReport,
+  generateConnectorDiffJson,
 };
