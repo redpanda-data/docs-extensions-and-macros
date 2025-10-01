@@ -1,3 +1,4 @@
 * xref:preview:ROOT:test.adoc[]
 * xref:preview:ROOT:docker-labs.adoc[]
+* xref:preview:ROOT:cloud-limits.adoc[]
 * xref:preview:reference:glossary.adoc[]

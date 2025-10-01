@@ -190,7 +190,6 @@ For more details, see: https://go.dev/doc/install
     'version'
   );
 }
-
 /**
  * Ensures that all required tools for Helm documentation generation are installed.
  *
@@ -1384,6 +1383,104 @@ automation
       }
     } catch (err) {
       console.error(`❌ Failed to generate cloud regions: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+automation
+  .command('cloud-tier-table')
+  .description('Generate a table of Redpanda Cloud tier usage limits/quotas from a YAML source')
+  .option('--input <path|url>', 'Path or URL to the tier YAML file', 'https://api.github.com/repos/redpanda-data/cloudv2/contents/install-pack')
+  .option('--master-data <path|url>', 'Path or URL to the master-data YAML file', 'https://api.github.com/repos/redpanda-data/cloudv2-infra/contents/apps/master-data-reconciler/manifests/overlays/production/master-data.yaml?ref=integration')
+  .option('--output <file>', 'Output file (relative to repo root)', 'modules/reference/examples/cloud-limits-by-tier.html')
+  .option('--format <fmt>', 'Output format: md (Markdown), adoc (AsciiDoc), html, or csv', 'html')
+  .option('--dry-run', 'Print output to stdout instead of writing file')
+  .option('--template <path>', 'Path to custom Handlebars template (relative to repo root)')
+  .action(async (options) => {
+    const { generateCloudTierTable } = require('../tools/cloud-tier-table/generate-cloud-tier-table.js');
+    try {
+      let templatePath = undefined;
+      if (options.template) {
+        const repoRoot = findRepoRoot();
+        templatePath = path.resolve(repoRoot, options.template);
+        if (!fs.existsSync(templatePath)) {
+          throw new Error(`Custom template not found: ${templatePath}`);
+        }
+      }
+      const formatExt = {
+        md: '.md',
+        adoc: '.adoc',
+        html: '.html',
+        csv: '.csv',
+      };
+      let outputFile = options.output;
+      const fmt = (options.format || 'md').toLowerCase();
+      const ext = formatExt[fmt] || '.md';
+      if (!outputFile.endsWith(ext)) {
+        outputFile = outputFile.replace(/\.(md|adoc|html|csv)$/i, '') + ext;
+      }
+      const out = await generateCloudTierTable({
+        input: options.input,
+        masterData: options.masterData,
+        output: outputFile,
+        format: options.format,
+        template: templatePath,
+      });
+      if (options.dryRun) {
+        process.stdout.write(out);
+        console.log(`\n✅ (dry-run) ${fmt} output printed to stdout.`);
+      } else {
+        const repoRoot = findRepoRoot();
+        const absOutput = path.resolve(repoRoot, outputFile);
+        fs.mkdirSync(path.dirname(absOutput), { recursive: true });
+        fs.writeFileSync(absOutput, out, 'utf8');
+        console.log(`✅ Wrote ${absOutput}`);
+      }
+    } catch (err) {
+      console.error(`❌ Failed to generate cloud tier table: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+automation
+  .command('cloud-tier-discrepancy-report')
+  .description('Generate a report analyzing discrepancies between advertised and actual cloud tier limits')
+  .option('--input <path|url>', 'Path or URL to the tier YAML file', 'https://api.github.com/repos/redpanda-data/cloudv2/contents/install-pack')
+  .option('--master-data <path|url>', 'Path or URL to the master-data YAML file', 'https://api.github.com/repos/redpanda-data/cloudv2-infra/contents/apps/master-data-reconciler/manifests/overlays/production/master-data.yaml?ref=integration')
+  .option('--output <file>', 'Output file (relative to repo root)', 'cloud-tier-discrepancy-report.md')
+  .option('--format <fmt>', 'Output format: md (Markdown) or json', 'md')
+  .option('--dry-run', 'Print output to stdout instead of writing file')
+  .action(async (options) => {
+    const { generateDiscrepancyReport } = require('../tools/cloud-tier-table/generate-discrepancy-report.js');
+    try {
+      const formatExt = {
+        md: '.md',
+        json: '.json',
+      };
+      let outputFile = options.output;
+      const fmt = (options.format || 'md').toLowerCase();
+      const ext = formatExt[fmt] || '.md';
+      if (!outputFile.endsWith(ext)) {
+        outputFile = outputFile.replace(/\.(md|json)$/i, '') + ext;
+      }
+      
+      const report = await generateDiscrepancyReport({
+        input: options.input,
+        masterData: options.masterData,
+        format: options.format === 'json' ? 'json' : 'markdown',
+      });
+      
+      if (options.dryRun) {
+        process.stdout.write(report);
+        console.log(`\n✅ (dry-run) ${fmt} discrepancy report printed to stdout.`);
+      } else {
+        const repoRoot = findRepoRoot();
+        const fullOutputPath = path.resolve(repoRoot, outputFile);
+        fs.writeFileSync(fullOutputPath, report);
+        console.log(`✅ Discrepancy report written to ${outputFile}`);
+      }
+    } catch (err) {
+      console.error(`❌ Failed to generate discrepancy report: ${err.message}`);
       process.exit(1);
     }
   });

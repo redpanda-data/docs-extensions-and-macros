@@ -1,0 +1,490 @@
+<!-- This content is auto-generated. Do not edit manually.
+To regenerate this content, run:
+  npx doc-tools generate cloud-tier-table
+-->
+<style>
+:root{
+    --tbl-bg: var(--body-background);
+    --tbl-text: var(--body-font-color);
+    --tbl-muted: var(--body-faint-font-color);
+    --tbl-border: var(--panel-border-color);
+    --tbl-header-bg: var(--sticky-table-header-background);
+    --tbl-row-alt: var(--panel-background);
+    --tbl-hover: var(--highlight-container-background);
+    --tbl-shadow: rgba(0, 0, 0, .08);
+    --sticky-col-1-left: 16rem;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --tbl-bg: var(--body-background);
+    --tbl-text: var(--body-font-color);
+    --tbl-muted: var(--color-gray-70);
+    --tbl-border: var(--panel-border-color);
+    --tbl-header-bg: var(--sticky-table-header-background);
+    --tbl-row-alt: var(--panel-background);
+    --tbl-hover: var(--highlight-container-background);
+    --tbl-shadow: rgba(0,0,0,.5);
+  }
+}
+
+/* ====== Table wrapper: horizontal scroll container ====== */
+.cloud-tier-table-wrapper{
+  overflow-x:auto;
+  overflow-y:visible;   /* keep sticky headers working */
+  max-width:100%;
+  -webkit-overflow-scrolling:touch;
+  border:1px solid var(--tbl-border);
+  border-radius:10px;
+  box-shadow:0 1px 3px var(--tbl-shadow);
+  background:var(--tbl-bg);
+}
+
+/* ====== Base table ====== */
+.cloud-tier-table{
+  table-layout:auto;       /* allow content-based sizing (no squashing) */
+  width:max-content;       /* can grow wider than viewport */
+  min-width:100%;          /* but never smaller than wrapper */
+  border-collapse:separate;
+  border-spacing:0;
+  color:var(--tbl-text);
+  background:var(--tbl-bg);
+  font-size:14px;
+}
+.cloud-tier-table th,
+.cloud-tier-table td{
+  padding:8px 12px;
+  border-right:1px solid var(--tbl-border);
+  border-bottom:1px solid var(--tbl-border);
+  vertical-align:top;
+  word-break:break-word;
+  background:var(--tbl-bg);
+}
+.cloud-tier-table th:last-child,
+.cloud-tier-table td:last-child{ border-right:0; }
+
+/* ====== Sticky header ====== */
+.cloud-tier-table thead th{
+  position:sticky !important;
+  top:0;
+  z-index:3;
+  background:var(--tbl-header-bg);
+  font-weight:600;
+  text-align:left;
+  cursor:pointer;
+  box-shadow:
+    inset 0 -1px 0 var(--tbl-border),
+    0 2px 6px -2px var(--tbl-shadow);
+}
+.cloud-tier-table thead th[aria-sort="ascending"]::after{ content:" ▲"; }
+.cloud-tier-table thead th[aria-sort="descending"]::after{ content:" ▼"; }
+
+.cloud-tier-table tbody tr:nth-child(odd){ background:var(--tbl-row-alt); }
+.cloud-tier-table tbody tr:hover{ background:var(--tbl-hover); }
+
+.sticky-col{ position:sticky; background:var(--tbl-bg); z-index:2; }
+.sticky-header{ z-index:4; }
+.sticky-col-0{ left:0; }
+.sticky-col-1{ left:var(--sticky-col-1-left); }
+.sticky-col-0,.sticky-col-1{
+  box-shadow:1px 0 0 0 var(--tbl-border),8px 0 8px -6px var(--tbl-shadow);
+}
+
+/* ====== Filters/search ====== */
+.filter-bar{
+  display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:8px 0 12px;
+}
+
+.dropdown-checkbox-wrapper {
+  width:35%!important;
+}
+
+/* ====== Mobile cards ====== */
+#cloudTierCards{ display:none; }
+.tier-card{
+  border:1px solid var(--tbl-border);
+  border-radius:12px;
+  padding:12px;
+  margin:12px 0;
+  background:var(--tbl-bg);
+  box-shadow:0 1px 3px var(--tbl-shadow);
+}
+.tier-card .card-head{
+  display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px;
+}
+.tier-card .card-title{ margin:0; font-size:16px; font-weight:700; color:var(--tbl-text); }
+.tier-card .badge{
+  flex:0 0 auto;
+  display:inline-block; font-size:12px; padding:4px 8px; border-radius:9999px;
+  background:var(--tbl-header-bg); border:1px solid var(--tbl-border); color:var(--tbl-muted);
+}
+.tier-card .limits{ list-style:none; padding:0; margin:0; }
+.tier-card .limit-item{
+  display:grid; grid-template-columns:1fr auto; align-items:start; gap:8px 12px;
+  padding:10px 0; border-top:1px dashed var(--tbl-border);
+}
+.tier-card .limit-item:first-child{ border-top:0; }
+.tier-card .limit-item .k{ font-weight:600; color:var(--tbl-muted); overflow-wrap:anywhere; }
+.tier-card .limit-item .v{ text-align:right; max-width:55vw; overflow-wrap:anywhere; }
+.tier-card:hover{ box-shadow:0 6px 18px -8px var(--tbl-shadow); }
+
+/* Switch to cards on small screens */
+@media (max-width:1200px){
+  .table-search{ min-width:180px; }
+  .cloud-tier-table-wrapper{ display:none; }
+  #cloudTierCards{ display:block; }
+}
+</style>
+
+<div class="filter-bar">
+  <input class="table-search" type="text" id="cloudTierTableSearch" onkeyup="filterCloudTierTable()" placeholder="Search..." />
+  <button type="button" id="resetFiltersBtn" style="padding:8px 16px; border-radius:8px; border:1px solid var(--tbl-border); background:var(--tbl-header-bg); cursor:pointer; font-weight:500;" onclick="resetCloudTierFilters()">Reset filters</button>
+
+  <div class="dropdown-checkbox-wrapper">
+    <button type="button" class="dropdown-checkbox-toggle" id="limitFilterToggle"
+      onclick="toggleDropdownCheckbox('limitFilter')" aria-expanded="false" aria-haspopup="true"
+      aria-controls="limitFilterMenu" role="button" tabindex="0" onkeydown="dropdownToggleKeydown(event,'limitFilter')">
+      <span class="dropdown-text">All Limits Selected</span><span class="dropdown-arrow">▼</span>
+    </button>
+    <div class="dropdown-checkbox-menu" id="limitFilterMenu" role="menu" aria-labelledby="limitFilterToggle">
+      {{#each limitKeys}}
+        <label class="dropdown-checkbox-option">
+          <input type="checkbox" value="{{@index}}" checked onchange="toggleLimitColumn({{@index}})">
+          <span>{{this}}</span>
+        </label>
+      {{/each}}
+    </div>
+  </div>
+
+  <div class="dropdown-checkbox-wrapper">
+    <button type="button" class="dropdown-checkbox-toggle" id="providerFilterToggle"
+      onclick="toggleDropdownCheckbox('providerFilter')" aria-expanded="false" aria-haspopup="true"
+      aria-controls="providerFilterMenu" role="button" tabindex="0" onkeydown="dropdownToggleKeydown(event,'providerFilter')">
+      <span class="dropdown-text">All Providers Selected</span><span class="dropdown-arrow">▼</span>
+    </button>
+    <div class="dropdown-checkbox-menu" id="providerFilterMenu" role="menu" aria-labelledby="providerFilterToggle">
+      {{#each cloudProviders}}
+        <label class="dropdown-checkbox-option">
+          <input type="checkbox" value="{{this}}" checked onchange="filterCloudTierTable()">
+          <span>{{this}}</span>
+        </label>
+      {{/each}}
+    </div>
+  </div>
+
+  <div class="dropdown-checkbox-wrapper">
+    <button type="button" class="dropdown-checkbox-toggle" id="tierFilterToggle"
+      onclick="toggleDropdownCheckbox('tierFilter')" aria-expanded="false" aria-haspopup="true"
+      aria-controls="tierFilterMenu" role="button" tabindex="0" onkeydown="dropdownToggleKeydown(event,'tierFilter')">
+      <span class="dropdown-text">All Tiers Selected</span><span class="dropdown-arrow">▼</span>
+    </button>
+    <div class="dropdown-checkbox-menu" id="tierFilterMenu" role="menu" aria-labelledby="tierFilterToggle">
+      <!-- Tier options will be dynamically generated by JS -->
+    </div>
+  </div>
+</div>
+
+<!-- TABLE VIEW -->
+<div class="cloud-tier-table-wrapper">
+  <table class="cloud-tier-table" id="cloudTierTable">
+    <thead>
+      <tr>
+        <th class="sticky-col sticky-header sticky-col-0" onclick="sortCloudTierTable(0)" scope="col">Tier</th>
+        {{#each headers}}
+          <th class="limit-col limit-col-{{@index}}" onclick="sortCloudTierTable({{index_plus_one}})" scope="col">{{name}}</th>
+        {{/each}}
+      </tr>
+    </thead>
+    <tbody>
+      {{#each rows}}
+      <tr data-tier="{{tier}}" data-provider="{{#if cloud_provider}}{{cloud_provider}}{{else}}unknown{{/if}}">
+        <td class="sticky-col sticky-col-0">{{tier}}</td>
+        {{#each ../limitKeys}}
+          <td class="limit-col limit-col-{{@index}}" data-limit-key="{{this}}">{{lookup .. this}}</td>
+        {{/each}}
+      </tr>
+      {{/each}}
+    </tbody>
+  </table>
+</div>
+
+<!-- MOBILE CARD VIEW -->
+<div id="cloudTierCards" aria-live="polite">
+  {{#each rows}}
+    <div class="tier-card" data-tier="{{tier}}" data-provider="{{#if cloud_provider}}{{cloud_provider}}{{else}}unknown{{/if}}">
+      <div class="card-head">
+        <h4 class="card-title">{{tier}}</h4>
+        <span class="badge">{{#if cloud_provider}}{{cloud_provider}}{{else}}Unknown{{/if}}</span>
+      </div>
+      <ul class="limits">
+        {{#each ../limitKeys}}
+          <li class="limit-item limit-col-{{@index}}" data-limit-key="{{this}}">
+            <span class="k">{{this}}</span>
+            <span class="v">{{lookup .. this}}</span>
+          </li>
+        {{/each}}
+      </ul>
+    </div>
+  {{/each}}
+</div>
+
+<script>
+function resetCloudTierFilters() {
+  // Select all limits
+  document.querySelectorAll('#limitFilterMenu input[type="checkbox"]').forEach(cb => { cb.checked = true; cb.setAttribute('aria-checked', 'true'); });
+  // Select all providers
+  document.querySelectorAll('#providerFilterMenu input[type="checkbox"]').forEach(cb => { cb.checked = true; cb.setAttribute('aria-checked', 'true'); });
+  // Select all tiers (after dropdown is updated)
+  updateTierDropdown();
+  document.querySelectorAll('#tierFilterMenu input[type="checkbox"]').forEach(cb => { cb.checked = true; cb.setAttribute('aria-checked', 'true'); });
+  // Clear search + query params
+  document.getElementById('cloudTierTableSearch').value = '';
+  window.history.replaceState(null, '', window.location.pathname);
+  filterCloudTierTable();
+}
+
+// sort state
+let cloudTierSort = { col: 0, dir: 1 };
+
+// keyboard support for dropdown toggles
+function dropdownToggleKeydown(e,id){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggleDropdownCheckbox(id); } }
+
+// cache rows for tier dropdown
+window.cloudTierTableRows = [
+  {{#each rows}}
+    { tier: "{{tier}}", provider: "{{#if cloud_provider}}{{cloud_provider}}{{else}}unknown{{/if}}" }{{#unless @last}},{{/unless}}
+  {{/each}}
+];
+
+// Add HTML-escaping helper to neutralize any special characters in tier names
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function updateTierDropdown(){
+  const providerMenu = document.getElementById('providerFilterMenu');
+  const selectedProviders = Array.from(
+    providerMenu.querySelectorAll('input[type="checkbox"]:checked')
+  ).map(cb => cb.value);
+  const tierMenu = document.getElementById('tierFilterMenu');
+  const prevChecked = new Set(
+    Array.from(tierMenu.querySelectorAll('input[type="checkbox"]:checked'))
+      .map(cb => cb.value)
+  );
+
+  // Extract tier numbers from tier names (e.g., 'Tier 1', 'Tier 2 - x86' -> '1', '2')
+  let tierNumbers = window.cloudTierTableRows
+    .filter(r => !selectedProviders.length || selectedProviders.includes(r.provider))
+    .map(r => {
+      const match = r.tier.match(/Tier (\d+)/i);
+      return match ? match[1] : null;
+    })
+    .filter(Boolean);
+  const uniqueNumbers = Array.from(new Set(tierNumbers)).sort((a,b)=>Number(a)-Number(b));
+  tierMenu.innerHTML = uniqueNumbers.map(num => {
+    const checked = !prevChecked.size || prevChecked.has(num);
+    return `<label class="dropdown-checkbox-option">
+      <input type="checkbox" value="${num}" ${checked?'checked':''} onchange="filterCloudTierTable()" aria-checked="${checked}">
+      <span>Tier ${num}</span>
+    </label>`;
+  }).join('');
+}
+
+function toggleDropdownCheckbox(filterId){
+  const toggle=document.getElementById(filterId+'Toggle');
+  const menu=document.getElementById(filterId+'Menu');
+  if(!toggle||!menu) return;
+  const isOpen=menu.classList.contains('show');
+  document.querySelectorAll('.dropdown-checkbox-menu.show').forEach(m=>{
+    if(m!==menu){ m.classList.remove('show'); const t=m.parentNode.querySelector('.dropdown-checkbox-toggle'); if(t){ t.classList.remove('open'); t.setAttribute('aria-expanded','false'); } }
+  });
+  if(isOpen){ menu.classList.remove('show'); toggle.classList.remove('open'); toggle.setAttribute('aria-expanded','false'); }
+  else { menu.classList.add('show'); toggle.classList.add('open'); toggle.setAttribute('aria-expanded','true'); }
+}
+
+function updateDropdownText(filterId, allText, someText){
+  const menu=document.getElementById(filterId+'Menu');
+  const toggle=document.getElementById(filterId+'Toggle');
+  if(!menu||!toggle) return;
+  const boxes=menu.querySelectorAll('input[type="checkbox"]');
+  const checked=menu.querySelectorAll('input[type="checkbox"]:checked').length;
+  const textEl=toggle.querySelector('.dropdown-text');
+  if(!textEl) return;
+  if(!boxes.length){ textEl.textContent='None Available'; return; }
+  if(checked===0) textEl.textContent='None Selected';
+  else if(checked===boxes.length) textEl.textContent=allText;
+  else if(checked===1){ const one=menu.querySelector('input[type="checkbox"]:checked'); const label=one&&one.nextElementSibling; textEl.textContent=label?label.textContent:someText; }
+  else textEl.textContent=`${checked} ${someText}`;
+}
+
+function updateAriaSort(colIdx,dir){
+  const ths=document.querySelectorAll('#cloudTierTable thead th');
+  ths.forEach((th,i)=>{ th.removeAttribute('aria-sort'); if(i===colIdx){ th.setAttribute('aria-sort', dir===1?'ascending':'descending'); }});
+}
+
+function sortCloudTierTable(colIdx){
+  const table=document.getElementById('cloudTierTable');
+  const tbody=table.tBodies[0];
+  const rows=Array.from(tbody.rows);
+
+  if(cloudTierSort.col===colIdx) cloudTierSort.dir*=-1; else cloudTierSort={col:colIdx,dir:1};
+
+  const cmp=(a,b)=>{
+    const av=a.cells[colIdx].textContent.trim();
+    const bv=b.cells[colIdx].textContent.trim();
+    const an=Number(av.replace(/[^0-9.\-eE]/g,'')), bn=Number(bv.replace(/[^0-9.\-eE]/g,''));
+    const aNA=av==='N/A', bNA=bv==='N/A';
+    if(aNA&&!bNA) return 1;
+    if(!aNA&&bNA) return -1;
+    const aNum=!isNaN(an)&&av!=='', bNum=!isNaN(bn)&&bv!=='';
+    if(aNum&&bNum) return (an-bn)*cloudTierSort.dir;
+    return av.localeCompare(bv,undefined,{numeric:true,sensitivity:'base'})*cloudTierSort.dir;
+  };
+
+  rows.sort(cmp).forEach(r=>tbody.appendChild(r));
+  updateAriaSort(colIdx, cloudTierSort.dir);
+}
+
+function filterCloudTierTable(){
+  updateTierDropdown();
+
+  const search=document.getElementById('cloudTierTableSearch').value.trim().toLowerCase();
+  const providerMenu=document.getElementById('providerFilterMenu');
+  const tierMenu=document.getElementById('tierFilterMenu');
+  const limitMenu=document.getElementById('limitFilterMenu');
+
+  const selProviders=Array.from(providerMenu.querySelectorAll('input[type="checkbox"]:checked')).map(cb=>cb.value);
+  const selTiers=Array.from(tierMenu.querySelectorAll('input[type="checkbox"]:checked')).map(cb=>cb.value);
+  const selLimits=Array.from(limitMenu.querySelectorAll('input[type="checkbox"]:checked')).map(cb=>cb.value);
+
+  /* --- TABLE ROWS --- */
+  const table=document.getElementById('cloudTierTable');
+  const trs=table.getElementsByTagName('tr');
+  for(let i=1;i<trs.length;i++){
+    const row=trs[i];
+    const tier=row.getAttribute('data-tier');
+    const provider=row.getAttribute('data-provider')||'unknown';
+    let show=true;
+    // Match by tier number
+    if(selTiers.length) {
+      const match = tier.match(/Tier (\d+)/i);
+      const tierNum = match ? match[1] : null;
+      if(!tierNum || !selTiers.includes(tierNum)) show=false;
+    }
+    if(selProviders.length && !selProviders.includes(provider)) show=false;
+    if(search){
+      const tds=row.getElementsByTagName('td');
+      let found=false;
+      for(let j=0;j<tds.length;j++){ if(tds[j].textContent.toLowerCase().includes(search)){ found=true; break; } }
+      if(!found) show=false;
+    }
+    row.style.display=show?'':'none';
+  }
+
+  /* --- CARDS --- */
+  const cards=document.querySelectorAll('#cloudTierCards .tier-card');
+  cards.forEach(card=>{
+    const tier=card.getAttribute('data-tier');
+    const provider=card.getAttribute('data-provider')||'unknown';
+    let show=true;
+    if(selTiers.length) {
+      const match = tier.match(/Tier (\d+)/i);
+      const tierNum = match ? match[1] : null;
+      if(!tierNum || !selTiers.includes(tierNum)) show=false;
+    }
+    if(selProviders.length && !selProviders.includes(provider)) show=false;
+    if(search && !card.textContent.toLowerCase().includes(search)) show=false;
+    card.style.display=show?'':'none';
+  });
+
+  // update dropdown labels
+  ['limitFilter','providerFilter','tierFilter'].forEach(id=>{
+    const t = id==='limitFilter' ? 'Limits' : id==='providerFilter' ? 'Providers' : 'Tiers';
+    updateDropdownText(id, `All ${t} Selected`, `${t} Selected`);
+  });
+
+  // Re-apply limit column visibility after any filter change
+  const limitMenuEl = document.getElementById('limitFilterMenu');
+  if (limitMenuEl) {
+    Array.from(limitMenuEl.querySelectorAll('input[type="checkbox"]')).forEach(cb => {
+      const colIdx = cb.value;
+      const checked = cb.checked;
+      // table cells
+      document.querySelectorAll('.limit-col-' + colIdx).forEach(el => { el.style.display = checked ? '' : 'none'; });
+      // card items
+      document.querySelectorAll('#cloudTierCards .limit-col-' + colIdx).forEach(el => { el.style.display = checked ? '' : 'none'; });
+    });
+  }
+
+  // deep-link current state
+  const params=[];
+  if(selProviders.length) params.push('providers='+encodeURIComponent(selProviders.join(',')));
+  if(selTiers.length) params.push('tiers='+encodeURIComponent(selTiers.join(',')));
+  if(selLimits.length) params.push('limits='+encodeURIComponent(selLimits.join(',')));
+  if(search) params.push('search='+encodeURIComponent(search));
+  const newUrl=window.location.pathname+(params.length?('?'+params.join('&')):'');
+  window.history.replaceState(null,'',newUrl);
+}
+
+function toggleLimitColumn(colIdx){
+  const checked=document.querySelector('#limitFilterMenu input[value="'+colIdx+'"]').checked;
+  // table cells
+  document.querySelectorAll('.limit-col-'+colIdx).forEach(el=>{ el.style.display=checked?'':'none'; });
+  // card items
+  document.querySelectorAll('#cloudTierCards .limit-col-'+colIdx).forEach(el=>{ el.style.display=checked?'':'none'; });
+  updateDropdownText('limitFilter','All Limits Selected','Limits Selected');
+}
+
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('.dropdown-checkbox-wrapper')){
+    document.querySelectorAll('.dropdown-checkbox-menu.show').forEach(menu=>{
+      menu.classList.remove('show');
+      const toggle=menu.parentNode.querySelector('.dropdown-checkbox-toggle');
+      if(toggle){ toggle.classList.remove('open'); toggle.setAttribute('aria-expanded','false'); }
+    });
+  }
+});
+
+const setStickyOffsets=()=>{
+  const table=document.getElementById('cloudTierTable');
+  if(!table) return;
+  const first=table.querySelector('th.sticky-col-0, td.sticky-col-0');
+  const width=first?first.offsetWidth:256;
+  table.style.setProperty('--sticky-col-1-left', width+'px');
+};
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  // apply deep-links
+  const params=new URLSearchParams(window.location.search);
+  const pProviders=(params.get('providers')||'').split(',').filter(Boolean);
+  const pLimits=(params.get('limits')||'').split(',').filter(Boolean);
+  const pTiers=(params.get('tiers')||'').split(',').filter(Boolean);
+  const pSearch=params.get('search')||'';
+
+  if(pProviders.length){
+    document.querySelectorAll('#providerFilterMenu input[type="checkbox"]').forEach(cb=>{
+      cb.checked=pProviders.includes(cb.value); cb.setAttribute('aria-checked', cb.checked);
+    });
+  }
+  if(pLimits.length){
+    document.querySelectorAll('#limitFilterMenu input[type="checkbox"]').forEach(cb=>{
+      cb.checked=pLimits.includes(cb.value); cb.setAttribute('aria-checked', cb.checked);
+    });
+  }
+
+  document.getElementById('cloudTierTableSearch').value=pSearch;
+
+  setStickyOffsets();
+  updateTierDropdown();
+
+  if(pTiers.length){
+    document.querySelectorAll('#tierFilterMenu input[type="checkbox"]').forEach(cb=>{
+      cb.checked=pTiers.includes(cb.value); cb.setAttribute('aria-checked', cb.checked);
+    });
+  }
+
+  filterCloudTierTable();
+});
+window.addEventListener('resize', setStickyOffsets);
+</script>
