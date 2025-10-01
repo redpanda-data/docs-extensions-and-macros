@@ -11,7 +11,7 @@ describe('generateCloudTierTable', () => {
       output: '',
       format: 'md',
       template: undefined,
-      masterDataPath
+      masterData: masterDataPath
     });
     expect(result).toContain('| Tier | Cloud Provider | Machine Type | Number of Nodes');
     expect(result).toContain('Basic Tier');
@@ -27,7 +27,7 @@ describe('generateCloudTierTable', () => {
       output: '',
       format: 'md',
       template: undefined,
-      masterDataPath
+      masterData: masterDataPath
     });
     expect(result).toContain('Basic Tier');
     expect(result).toContain('Advanced Tier');
@@ -42,7 +42,7 @@ describe('generateCloudTierTable', () => {
       output: '',
       format: 'md',
       template: undefined,
-      masterDataPath
+      masterData: masterDataPath
     });
     expect(result).toContain('Basic Tier'); // displayName from master-data
     expect(result).toContain('Advanced Tier'); // displayName from master-data
@@ -58,7 +58,7 @@ describe('generateCloudTierTable', () => {
       output: '',
       format: 'md',
       template: undefined,
-      masterDataPath
+      masterData: masterDataPath
     });
     expect(result).toContain('Max Ingress (bps)');
     expect(result).toContain('Max Egress (bps)');
