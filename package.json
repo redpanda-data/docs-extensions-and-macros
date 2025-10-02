@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "4.9.1",
+  "version": "4.10.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -21,7 +21,10 @@
     "get-console-version": "doc-tools get-console-version",
     "build": "antora --to-dir docs --fetch local-antora-playbook.yml",
     "serve": "wds --node-resolve --open preview/test/ --watch --root-dir docs",
-    "test": "jest"
+    "test": "jest",
+    "bundle:admin": "doc-tools generate bundle-admin-api --surface admin",
+    "bundle:connect": "doc-tools generate bundle-admin-api --surface connect",
+    "bundle:both": "doc-tools generate bundle-admin-api --surface both"
   },
   "contributors": [
     {
@@ -99,7 +102,9 @@
     "sync-request": "^6.1.0",
     "tar": "^7.4.3",
     "tree-sitter": "^0.22.4",
-    "yaml": "^2.7.1"
+    "yaml": "^2.7.1",
+    "yargs": "^17.7.2",
+    "@redocly/cli": "^2.2.0"
   },
   "devDependencies": {
     "@antora/cli": "3.1.4",

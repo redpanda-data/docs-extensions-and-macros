@@ -2,7 +2,7 @@
 
 const { execSync, spawnSync } = require('child_process');
 const os = require('os');
-const { Command } = require('commander');
+const { Command, Option } = require('commander');
 const path = require('path');
 const yaml = require('yaml');
 const fs = require('fs');
@@ -1537,6 +1537,64 @@ automation
     console.log(`✅ CRD docs generated at ${opts.output}`);
     if (inDocs) {
       console.log(`ℹ️ Don't forget to commit your changes on branch '${docsBranch}'.`);
+    }
+  });
+
+automation
+  .command('bundle-admin-api')
+  .description('Bundle Redpanda OpenAPI fragments into complete OpenAPI 3.1 documents')
+  .requiredOption('-t, --tag <tag>', 'Git tag to check out (e.g., v24.3.2 or 24.3.2 or dev)')
+  .option('--repo <url>', 'Repository URL', 'https://github.com/redpanda-data/redpanda.git')
+  .addOption(new Option('-s, --surface <surface>', 'Which API surface(s) to bundle').choices(['admin', 'connect', 'both']).makeOptionMandatory())
+  .option('--out-admin <path>', 'Output path for admin API', 'admin/redpanda-admin-api.yaml')
+  .option('--out-connect <path>', 'Output path for connect API', 'connect/redpanda-connect-api.yaml')
+  .option('--admin-major <string>', 'Admin API major version', 'v2.0.0')
+  .option('--use-admin-major-version', 'Use admin major version for info.version instead of git tag', false)
+  .option('--quiet', 'Suppress logs', false)
+  .action(async (options) => {
+    // Verify dependencies
+    requireCmd('git', 'Install Git: https://git-scm.com/downloads');
+    requireCmd('buf', 'Install buf: https://buf.build/docs/installation');
+    
+    // Check for OpenAPI bundler (swagger-cli or redocly)
+    let bundlerAvailable = false;
+    try {
+      execSync('swagger-cli --version', { stdio: 'ignore' });
+      bundlerAvailable = true;
+    } catch {
+      try {
+        execSync('redocly --version', { stdio: 'ignore' });
+        bundlerAvailable = true;
+      } catch {
+        try {
+          execSync('npx redocly --version', { stdio: 'ignore' });
+          bundlerAvailable = true;
+        } catch {
+          fail('OpenAPI bundler not found. Install one of:\n' +
+            '  npm install -g swagger-cli\n' +
+            '  or\n' +
+            '  npm install -g @redocly/cli\n' +
+            '  or\n' +
+            '  npm install @redocly/cli (local)');
+        }
+      }
+    }
+
+    try {
+      const { bundleOpenAPI } = require('../tools/bundle-openapi.js');
+      await bundleOpenAPI({
+        tag: options.tag,
+        repo: options.repo,
+        surface: options.surface,
+        outAdmin: options.outAdmin,
+        outConnect: options.outConnect,
+        adminMajor: options.adminMajor,
+        useAdminMajorVersion: options.useAdminMajorVersion,
+        quiet: options.quiet
+      });
+    } catch (err) {
+      console.error(`❌ ${err.message}`);
+      process.exit(err.message.includes('Validation failed') ? 2 : 1);
     }
   });
 
