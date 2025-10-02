@@ -311,7 +311,7 @@ function runBundler(bundler, fragmentFiles, outputPath, tempDir, quiet = false) 
         }
       };
       
-      // Manually merge all fragment files with better error handling
+      // Manually merge all fragment files
       for (const filePath of fragmentFiles) {
         try {
           if (!fs.existsSync(filePath)) {
