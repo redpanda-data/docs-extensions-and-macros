@@ -6,9 +6,15 @@ const { execSync, spawnSync } = require('child_process');
 const yaml = require('yaml');
 
 /**
- * Normalize git tag by removing 'v' prefix if present
- * @param {string} tag - Git tag like 'v25.1.1' or '25.1.1'
- * @returns {string} Normalized version like '25.1.1'
+ * Normalize a Git tag into a semantic version string.
+ *
+ * Trims surrounding whitespace, returns 'dev' unchanged, removes a leading 'v' if present,
+ * and validates that the result matches MAJOR.MINOR.PATCH with optional pre-release/build metadata.
+ * Throws if the input is not a non-empty string or does not conform to the expected version format.
+ *
+ * @param {string} tag - Git tag (e.g., 'v25.1.1', '25.1.1', or 'dev').
+ * @returns {string} Normalized version (e.g., '25.1.1' or 'dev').
+ * @throws {Error} If `tag` is not a non-empty string or does not match the semantic version pattern.
  */
 function normalizeTag(tag) {
   if (!tag || typeof tag !== 'string') {
@@ -40,9 +46,13 @@ function normalizeTag(tag) {
 }
 
 /**
- * Extract major.minor version from semantic version
- * @param {string} version - Version like '25.1.1'
- * @returns {string} Major.minor version like '25.1'
+ * Return the major.minor portion of a semantic version string.
+ *
+ * Accepts a semantic version like `25.1.1` and yields `25.1`. The special value
+ * `'dev'` is returned unchanged.
+ * @param {string} version - Semantic version (e.g., `'25.1.1'`) or `'dev'`.
+ * @returns {string} The `major.minor` string (e.g., `'25.1'`) or `'dev'`.
+ * @throws {Error} If `version` is not a non-empty string, lacks major/minor parts, or if major/minor are not numeric.
  */
 function getMajorMinor(version) {
   if (!version || typeof version !== 'string') {
@@ -69,9 +79,10 @@ function getMajorMinor(version) {
 }
 
 /**
- * Sort object keys recursively for deterministic output
- * @param {any} obj - Object to sort
- * @returns {any} Object with sorted keys
+ * Produce a new value with object keys sorted recursively for deterministic output.
+ * Non-objects are returned unchanged; arrays are processed element-wise.
+ * @param {*} obj - Value to normalize; may be an object, array, or any primitive.
+ * @returns {*} A new value where any objects have their keys sorted lexicographically.
  */
 function sortObjectKeys(obj) {
   if (obj === null || typeof obj !== 'object') {
@@ -153,11 +164,14 @@ function detectBundler(quiet = false) {
 }
 
 /**
- * Create an index.yaml file that references all Admin API fragments
- * @param {string} tempDir - Temporary directory path
- * @param {string} surface - API surface ('admin' or 'connect')
- * @param {boolean} quiet - Suppress output
- * @returns {string[]} Array of fragment file paths
+ * Collects file paths of OpenAPI fragment files for the specified API surface.
+ *
+ * @param {string} tempDir - Path to a temporary repository workspace that contains generated OpenAPI fragments (must exist).
+ * @param {'admin'|'connect'} apiSurface - API surface to scan; either `'admin'` or `'connect'`.
+ * @returns {string[]} Array of full paths to discovered fragment files (*.openapi.yaml / *.openapi.yml).
+ * @throws {Error} If tempDir is missing or does not exist.
+ * @throws {Error} If apiSurface is not 'admin' or 'connect'.
+ * @throws {Error} If no OpenAPI fragment files are found.
  */
 function createEntrypoint(tempDir, apiSurface) {
   // Validate input parameters
@@ -243,13 +257,18 @@ function createEntrypoint(tempDir, apiSurface) {
 }
 
 /**
- * Bundle OpenAPI fragments using external bundler
- * @param {string} bundler - 'swagger-cli', 'redocly', 'npx redocly', or 'npx @redocly/cli'
- * @param {string[]|string} fragmentFiles - Array of fragment file paths or single entrypoint
- * @param {string} outputPath - Path for bundled output
- * @param {string} tempDir - Temporary directory for creating merged file
- * @param {boolean} quiet - Suppress output
- * @throws {Error} If bundling fails
+ * Bundle one or more OpenAPI fragment files into a single bundled YAML using a selected external bundler.
+ *
+ * Merges multiple fragment files into a temporary single entrypoint when required, invokes the specified bundler
+ * executable (supported values: 'swagger-cli', 'redocly', 'npx redocly', 'npx @redocly/cli'), and writes the bundled
+ * output to the given outputPath. Ensures the output directory exists and verifies the produced file is non-empty.
+ *
+ * @param {string} bundler - The bundler to invoke: 'swagger-cli', 'redocly', 'npx redocly', or 'npx @redocly/cli'.
+ * @param {string[]|string} fragmentFiles - Array of fragment file paths to merge or a single entrypoint file path.
+ * @param {string} outputPath - Filesystem path where the bundled OpenAPI YAML will be written.
+ * @param {string} tempDir - Existing temporary directory used to create a merged entrypoint when multiple fragments are provided.
+ * @param {boolean} [quiet=false] - If true, suppresses console output from this function and child process stdio.
+ * @throws {Error} If input validation fails, the bundler process times out or exits with an error, or the output file is missing or empty.
  */
 function runBundler(bundler, fragmentFiles, outputPath, tempDir, quiet = false) {
   if (!bundler || typeof bundler !== 'string') {
@@ -422,14 +441,23 @@ function runBundler(bundler, fragmentFiles, outputPath, tempDir, quiet = false) 
 }
 
 /**
- * Post-process the bundled OpenAPI document
- * @param {string} filePath - Path to bundled YAML file
- * @param {Object} options - Processing options
- * @param {string} options.surface - API surface ('admin' or 'connect')
- * @param {string} options.tag - Git tag for versioning
- * @param {string} options.majorMinor - Major.minor version
- * @param {string} [options.adminMajor] - Admin API major version
- * @param {boolean} quiet - Suppress output
+ * Update bundle metadata, enforce a deterministic key order, and rewrite the bundled OpenAPI YAML.
+ *
+ * Reads the bundled YAML at `filePath`, validates and augments its `info` object (titles, descriptions,
+ * version fields and x- metadata) based on `options.surface` and provided version information, sorts
+ * object keys deterministically, and writes the updated YAML back to `filePath`.
+ *
+ * @param {string} filePath - Path to the bundled OpenAPI YAML file to process.
+ * @param {Object} options - Processing options.
+ * @param {'admin'|'connect'} options.surface - API surface to target; affects title and description.
+ * @param {string} [options.tag] - Git tag used for versioning (may be normalized internally).
+ * @param {string} [options.normalizedTag] - Pre-normalized version string to use instead of `tag`.
+ * @param {string} [options.majorMinor] - Major.minor version to set in `info.version`.
+ * @param {string} [options.adminMajor] - Admin API major version to set as `x-admin-api-major`.
+ * @param {boolean} [options.useAdminMajorVersion] - When true and surface is 'admin', prefer `adminMajor` for `info.version`.
+ * @param {boolean} [quiet=false] - Suppress console output when true.
+ * @returns {Object} The processed OpenAPI bundle object with keys sorted deterministically.
+ * @throws {Error} If inputs are missing/invalid, the file is absent or empty, YAML parsing fails, or processing cannot complete.
  */
 function postProcessBundle(filePath, options, quiet = false) {
   if (!filePath || typeof filePath !== 'string') {
@@ -531,16 +559,23 @@ function postProcessBundle(filePath, options, quiet = false) {
 }
 
 /**
- * Main function to bundle OpenAPI documents
- * @param {Object} options - Configuration options
- * @param {string} options.tag - Git tag to checkout (e.g., 'v25.1.1')
- * @param {string} options.surface - API surface ('admin', 'connect', or 'both')
- * @param {string} [options.output] - Output file path (standalone mode)
- * @param {string} [options.outAdmin] - Output path for admin API (doc-tools mode)
- * @param {string} [options.outConnect] - Output path for connect API (doc-tools mode)
- * @param {string} [options.repo] - Repository URL (defaults to redpanda-data/redpanda)
- * @param {string} [options.adminMajor] - Admin API major version
- * @param {boolean} [options.quiet] - Suppress output
+ * Bundle OpenAPI fragments for the specified API surface(s) from a repository tag and write the resulting bundled YAML files to disk.
+ *
+ * @param {Object} options - Configuration options.
+ * @param {string} options.tag - Git tag to checkout (e.g., 'v25.1.1').
+ * @param {'admin'|'connect'|'both'} options.surface - API surface to process.
+ * @param {string} [options.output] - Standalone output file path; when provided, used for the single output file.
+ * @param {string} [options.outAdmin] - Output path for the admin API when integrating with doc-tools mode.
+ * @param {string} [options.outConnect] - Output path for the connect API when integrating with doc-tools mode.
+ * @param {string} [options.repo] - Repository URL to clone (defaults to https://github.com/redpanda-data/redpanda.git).
+ * @param {string} [options.adminMajor] - Admin API major version string used for metadata (e.g., 'v2.0.0').
+ * @param {boolean} [options.useAdminMajorVersion] - When true and processing the admin surface, use `adminMajor` for the bundle info.version.
+ * @param {boolean} [options.quiet=false] - Suppress logging to stdout/stderr when true.
+ * @returns {Object|Object[]} An object (for a single surface) or an array of objects (for both surfaces) with fields:
+ *   - surface: processed surface name ('admin' or 'connect'),
+ *   - outputPath: final written file path,
+ *   - fragmentCount: number of OpenAPI fragment files processed,
+ *   - bundler: name or command of the bundler used.
  */
 async function bundleOpenAPI(options) {
   const { tag, surface, output, outAdmin, outConnect, repo, adminMajor, useAdminMajorVersion, quiet = false } = options;
