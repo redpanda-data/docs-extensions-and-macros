@@ -1541,8 +1541,8 @@ automation
   });
 
 automation
-  .command('bundle-admin-api')
-  .description('Bundle Redpanda OpenAPI fragments into complete OpenAPI 3.1 documents')
+  .command('bundle-openapi')
+  .description('Bundle Redpanda OpenAPI fragments for admin and connect APIs into complete OpenAPI 3.1 documents')
   .requiredOption('-t, --tag <tag>', 'Git tag to check out (e.g., v24.3.2 or 24.3.2 or dev)')
   .option('--repo <url>', 'Repository URL', 'https://github.com/redpanda-data/redpanda.git')
   .addOption(new Option('-s, --surface <surface>', 'Which API surface(s) to bundle').choices(['admin', 'connect', 'both']).makeOptionMandatory())
@@ -1556,28 +1556,12 @@ automation
     requireCmd('git', 'Install Git: https://git-scm.com/downloads');
     requireCmd('buf', 'Install buf: https://buf.build/docs/installation');
     
-    // Check for OpenAPI bundler (swagger-cli or redocly)
-    let bundlerAvailable = false;
+    // Check for OpenAPI bundler using the existing detectBundler function
     try {
-      execSync('swagger-cli --version', { stdio: 'ignore' });
-      bundlerAvailable = true;
-    } catch {
-      try {
-        execSync('redocly --version', { stdio: 'ignore' });
-        bundlerAvailable = true;
-      } catch {
-        try {
-          execSync('npx redocly --version', { stdio: 'ignore' });
-          bundlerAvailable = true;
-        } catch {
-          fail('OpenAPI bundler not found. Install one of:\n' +
-            '  npm install -g swagger-cli\n' +
-            '  or\n' +
-            '  npm install -g @redocly/cli\n' +
-            '  or\n' +
-            '  npm install @redocly/cli (local)');
-        }
-      }
+      const { detectBundler } = require('../tools/bundle-openapi.js');
+      detectBundler(true); // quiet mode to avoid duplicate output
+    } catch (err) {
+      fail(err.message);
     }
 
     try {

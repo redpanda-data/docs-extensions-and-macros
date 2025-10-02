@@ -22,9 +22,9 @@
     "build": "antora --to-dir docs --fetch local-antora-playbook.yml",
     "serve": "wds --node-resolve --open preview/test/ --watch --root-dir docs",
     "test": "jest",
-    "bundle:admin": "doc-tools generate bundle-admin-api --surface admin",
-    "bundle:connect": "doc-tools generate bundle-admin-api --surface connect",
-    "bundle:both": "doc-tools generate bundle-admin-api --surface both"
+    "bundle:admin": "doc-tools generate bundle-openapi --surface admin",
+    "bundle:connect": "doc-tools generate bundle-openapi --surface connect",
+    "bundle:both": "doc-tools generate bundle-openapi --surface both"
   },
   "contributors": [
     {

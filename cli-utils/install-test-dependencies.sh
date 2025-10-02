@@ -146,7 +146,7 @@ install_make() {
         sudo apt-get update && sudo apt-get install build-essential -y || sudo yum groupinstall "Development Tools" -y || { log_error "Failed to install make"; exit 1; }
         ;;
       Darwin)
-        if ! command_exists xcode-select; then
+        if ! xcode-select -p &>/dev/null; then
           xcode-select --install || { log_error "Failed to install Xcode Command Line Tools"; exit 1; }
         fi
         ;;
@@ -405,84 +405,47 @@ ensure_dependencies_installed() {
 # Ensure all dependencies are installed
 log_info "Installing/checking dependencies for doc-tools CLI commands..."
 ensure_dependencies_installed
-# Function to check rpk installation and display its version
-check_rpk_installed() {
+
+# Function to install rpk for rpcn-connector-docs command
+install_rpk() {
     if command_exists rpk; then
         log_info "rpk is already installed. Version information:"
         rpk --version
         return 0
-    else
-        return 1
     fi
-}
-
-# Function to install rpk
-install_rpk() {
-    # Check if rpk is already installed
-    if check_rpk_installed; then
-        return 0
-    fi
-
+    
     log_info "Installing rpk..."
     
-    # Determine OS and architecture
-    OS="$(uname -s)"
-    ARCH="$(uname -m)"
-
-    # Check if running on macOS and use Homebrew to install rpk
-    if [ "${OS}" == "Darwin" ]; then
-        log_info "Detected macOS. Attempting to install rpk using Homebrew..."
-
-        # Check if Homebrew is installed
-        if ! command_exists brew; then
-            log_error "Homebrew not found. Please install Homebrew first: https://brew.sh"
-            exit 1
-        fi
-
-        # Install rpk
-        brew install redpanda-data/tap/redpanda || { log_error "Failed to install rpk via Homebrew"; exit 1; }
-
-        # Verify installation
-        log_info "rpk has been installed. Version information:"
-        rpk --version
-        return 0
-    fi
-
-    # For Linux systems
-    if [ "${OS}" == "Linux" ]; then
-        FILENAME="rpk-linux-amd64.zip"
-        URL_BASE="https://github.com/redpanda-data/redpanda/releases"
-
-        # Download latest version of rpk
-        log_info "Downloading ${FILENAME}..."
-        curl -Lf --retry 3 -O "${URL_BASE}/latest/download/${FILENAME}" \
-            || { log_error "Failed to download rpk"; exit 1; }
-
-        # Ensure the target directory exists
-        mkdir -p $HOME/.local/bin || { log_error "Failed to create directory"; exit 1; }
-
-        # Unzip the rpk binary to the target directory
-        unzip -o "${FILENAME}" -d $HOME/.local/bin || { log_error "Failed to unzip rpk"; exit 1; }
-
-        # Remove the downloaded archive
-        rm "${FILENAME}" || { log_error "Failed to remove downloaded archive"; exit 1; }
-
-        # Add the target directory to PATH for the current session
+    # Try to install rpk using the installation script
+    if curl -LO https://github.com/redpanda-data/redpanda/releases/latest/download/rpk-linux-amd64.zip; then
+        unzip rpk-linux-amd64.zip
+        mkdir -p ~/.local/bin
+        mv rpk ~/.local/bin/
+        rm rpk-linux-amd64.zip
+        
+        # Add to PATH for current session
         export PATH=$HOME/.local/bin:$PATH
-
+        
         # Add the target directory to PATH for future sessions
-        echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
-        source ~/.bashrc
-
+        if ! grep -q 'export PATH=$HOME/.local/bin:$PATH' ~/.bashrc 2>/dev/null; then
+            echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
+        fi
+        
         # Verify installation
-        log_info "rpk has been installed. Version information:"
-        rpk --version
-        return 0
+        if command_exists rpk; then
+            log_info "rpk has been installed successfully. Version information:"
+            rpk --version
+            return 0
+        else
+            log_warn "rpk installation may have failed. Please install manually:"
+            log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
+            return 1
+        fi
+    else
+        log_warn "Failed to download rpk. Please install manually:"
+        log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
+        return 1
     fi
-
-    log_error "Unsupported operating system: ${OS}"
-    log_error "Please install rpk manually: https://docs.redpanda.com/current/get-started/rpk-install/"
-    exit 1
 }
 
 # Install rpk for rpcn-connector-docs command

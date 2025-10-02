@@ -1290,7 +1290,7 @@ info:
   title: Redpanda Admin API
   version: v2.0.0
   x-admin-api-major: v2.0.0
-  x-generated-at: 2025-10-02T09:04:11.998Z
+  x-generated-at: 2025-10-02T09:31:56.030Z
   x-generator: redpanda-docs-openapi-bundler
   x-redpanda-core-version: dev
 openapi: 3.1.0
