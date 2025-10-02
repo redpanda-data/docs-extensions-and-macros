@@ -7,17 +7,19 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Function to log colored output
+# log_info prints a green "[INFO]"-prefixed message to stdout.
 log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+# log_warn prints a warning message prefixed with "[WARN]" in yellow to stdout.
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+# log_error echoes the provided message prefixed with a red `[ERROR]` tag.
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# Function to check if a command exists
+# command_exists checks whether the specified command is available on PATH.
 command_exists() {
     command -v "$1" &>/dev/null
 }
 
-# Function to install Node.js
+# install_node checks for Node.js and enforces a minimum version of 22.20.0; if Node.js is missing or below the required version it logs upgrade/install instructions and returns non-zero.
 install_node() {
   local required_version="22.20.0"
   
@@ -51,7 +53,7 @@ install_node() {
   fi
 }
 
-# Function to install Rust
+# install_rust ensures the Rust toolchain is installed and configures the current shell environment.
 install_rust() {
   if command_exists rustc; then
     log_info "Rust is already installed. Version: $(rustc --version)"
@@ -63,7 +65,7 @@ install_rust() {
   fi
 }
 
-# Function to install Git
+# install_git installs Git if it is not present, using apt/yum on Linux or Homebrew on macOS. It logs the installed version on success and logs an error and exits with a non-zero status if the OS is unsupported or installation fails.
 install_git() {
   if command_exists git; then
     log_info "Git is already installed. Version: $(git --version)"
@@ -90,7 +92,8 @@ install_git() {
   fi
 }
 
-# Function to install buf (Protocol Buffer tool)
+# install_buf installs the buf Protocol Buffer CLI tool when it is not already available.
+# On Linux it places a released buf binary into /usr/local/bin; on macOS it uses Homebrew if present.
 install_buf() {
   if command_exists buf; then
     log_info "buf is already installed. Version: $(buf --version)"
@@ -121,7 +124,7 @@ install_buf() {
   fi
 }
 
-# Function to install Docker
+# install_docker checks whether Docker is installed; logs the installed version and warns if the Docker daemon is not running. If Docker is not found, logs the manual installation URL and notes that Docker is required for the metrics-docs and rpk-docs commands.
 install_docker() {
   if command_exists docker; then
     log_info "Docker is already installed. Version: $(docker --version)"
@@ -135,7 +138,7 @@ install_docker() {
   fi
 }
 
-# Function to install make
+# install_make ensures `make` is available, installing build-essential (or Development Tools) on Linux or the Xcode Command Line Tools on macOS, and exits with an error for unsupported OS or failed installation.
 install_make() {
   if command_exists make; then
     log_info "make is already installed. Version: $(make --version | head -1)"
@@ -159,7 +162,7 @@ install_make() {
   fi
 }
 
-# Function to install Python3
+# install_python ensures Python3 and pip are available. It logs an existing python/python3 version if present; otherwise installs `python3` and `python3-pip` on Linux (apt-get or yum) or via Homebrew on macOS, and exits with an error for unsupported systems or failed installations.
 install_python() {
   if command_exists python3; then
     log_info "Python3 is already installed. Version: $(python3 --version)"
@@ -188,7 +191,7 @@ install_python() {
   fi
 }
 
-# Function to install OpenAPI bundlers
+# install_openapi_bundlers ensures an OpenAPI bundler (Redocly CLI or swagger-cli) is available by installing `@redocly/cli` globally and falling back to `swagger-cli` if needed. It exits with a non-zero status if neither bundler can be installed.
 install_openapi_bundlers() {
   local bundler_found=false
   
@@ -225,7 +228,7 @@ install_openapi_bundlers() {
   fi
 }
 
-# Function to install pandoc (for helm-spec command)
+# install_pandoc ensures pandoc is available on the system, installing it via apt/yum on Linux or Homebrew on macOS, and exits with an error message on failure.
 install_pandoc() {
   if command_exists pandoc; then
     log_info "pandoc is already installed. Version: $(pandoc --version | head -1)"
@@ -252,7 +255,7 @@ install_pandoc() {
   fi
 }
 
-# Function to install helm-docs (for helm-spec command)
+# install_helm_docs checks for helm-docs and, if missing, logs installation instructions and macOS/Homebrew guidance for the helm-spec command.
 install_helm_docs() {
   if command_exists helm-docs; then
     log_info "helm-docs is already installed. Version: $(helm-docs --version)"
@@ -269,7 +272,7 @@ install_helm_docs() {
   fi
 }
 
-# Function to install crd-ref-docs (for crd-spec command)
+# install_crd_ref_docs checks for the `crd-ref-docs` tool and logs whether it is installed or provides a manual install URL required by the `crd-spec` command.
 install_crd_ref_docs() {
   if command_exists crd-ref-docs; then
     log_info "crd-ref-docs is already installed"
@@ -279,7 +282,7 @@ install_crd_ref_docs() {
   fi
 }
 
-# Function to install Go (for crd-spec command)
+# install_go checks whether Go is installed and logs its version; if missing, it logs OS-specific installation guidance and a download URL for use by the crd-spec command.
 install_go() {
   if command_exists go; then
     log_info "Go is already installed. Version: $(go version)"
@@ -299,7 +302,7 @@ install_go() {
   fi
 }
 
-# Function to install curl and tar (for metrics-docs, rpk-docs)
+# install_basic_tools ensures `curl` and `tar` are present; installs them on Linux using `apt-get` or `yum`, and on macOS uses Homebrew for `curl` (noting that `tar` is typically preinstalled). Exits with a non-zero status if an attempted automatic installation fails.
 install_basic_tools() {
   if ! command_exists curl; then
     log_info "Installing curl..."
@@ -332,7 +335,8 @@ install_basic_tools() {
   fi
 }
 
-# Function to check if expect and jq are installed and install them if they're not
+# ensure_dependencies_installed checks for `expect` and `jq`, installs them if missing, and orchestrates verification and installation of core and optional tooling required by the doc-tools CLI.
+# It runs installers for Node.js, Rust, Git, buf, Docker, make, Python, basic tools, OpenAPI bundlers, pandoc, and optional helpers (helm-docs, crd-ref-docs, Go), and will emit a warning if the Node.js version requirement is not met.
 ensure_dependencies_installed() {
     if ! command_exists expect; then
         log_info "Installing expect..."
@@ -406,7 +410,7 @@ ensure_dependencies_installed() {
 log_info "Installing/checking dependencies for doc-tools CLI commands..."
 ensure_dependencies_installed
 
-# Function to install rpk for rpcn-connector-docs command
+# install_rpk installs Redpanda's rpk CLI into ~/.local/bin by downloading the latest Linux amd64 release, adding it to PATH for the current and future sessions, and verifying the installation; returns 0 on success and non-zero on failure.
 install_rpk() {
     if command_exists rpk; then
         log_info "rpk is already installed. Version information:"
