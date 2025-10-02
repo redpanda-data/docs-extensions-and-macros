@@ -606,10 +606,27 @@ async function bundleOpenAPI(options) {
     }
   };
   
-  // Handle graceful shutdown
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
-  process.on('uncaughtException', cleanup);
+  // Create dedicated handlers that clean up and then terminate
+  const cleanupAndExit = (signal) => {
+    return () => {
+      cleanup();
+      process.exit(signal === 'SIGTERM' ? 0 : 1);
+    };
+  };
+  
+  const cleanupAndCrash = (error) => {
+    cleanup();
+    console.error('Fatal error:', error);
+    process.exit(1);
+  };
+  
+  // Handle graceful shutdown and crashes
+  const sigintHandler = cleanupAndExit('SIGINT');
+  const sigtermHandler = cleanupAndExit('SIGTERM');
+  
+  process.on('SIGINT', sigintHandler);
+  process.on('SIGTERM', sigtermHandler);
+  process.on('uncaughtException', cleanupAndCrash);
   
   try {
     // Clone repository (only once for all surfaces)
@@ -742,6 +759,11 @@ async function bundleOpenAPI(options) {
     }
     throw error;
   } finally {
+    // Remove event handlers to restore default behavior
+    process.removeListener('SIGINT', sigintHandler);
+    process.removeListener('SIGTERM', sigtermHandler);
+    process.removeListener('uncaughtException', cleanupAndCrash);
+    
     cleanup();
   }
 }

@@ -410,7 +410,7 @@ ensure_dependencies_installed() {
 log_info "Installing/checking dependencies for doc-tools CLI commands..."
 ensure_dependencies_installed
 
-# install_rpk installs Redpanda's rpk CLI into ~/.local/bin by downloading the latest Linux amd64 release, adding it to PATH for the current and future sessions, and verifying the installation; returns 0 on success and non-zero on failure.
+# install_rpk installs Redpanda's rpk CLI into ~/.local/bin by downloading the appropriate release for the current OS and architecture, adding it to PATH for the current and future sessions, and verifying the installation; returns 0 on success and non-zero on failure.
 install_rpk() {
     if command_exists rpk; then
         log_info "rpk is already installed. Version information:"
@@ -420,33 +420,92 @@ install_rpk() {
     
     log_info "Installing rpk..."
     
-    # Try to install rpk using the installation script
-    if curl -LO https://github.com/redpanda-data/redpanda/releases/latest/download/rpk-linux-amd64.zip; then
-        unzip rpk-linux-amd64.zip
-        mkdir -p ~/.local/bin
-        mv rpk ~/.local/bin/
-        rm rpk-linux-amd64.zip
-        
-        # Add to PATH for current session
-        export PATH=$HOME/.local/bin:$PATH
-        
-        # Add the target directory to PATH for future sessions
-        if ! grep -q 'export PATH=$HOME/.local/bin:$PATH' ~/.bashrc 2>/dev/null; then
-            echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
-        fi
-        
-        # Verify installation
-        if command_exists rpk; then
-            log_info "rpk has been installed successfully. Version information:"
-            rpk --version
-            return 0
+    # Detect OS and architecture
+    local os_name=$(uname -s)
+    local arch_name=$(uname -m)
+    
+    # Map OS name to rpk release format
+    local rpk_os=""
+    case "$os_name" in
+        "Darwin")
+            rpk_os="darwin"
+            ;;
+        "Linux")
+            rpk_os="linux"
+            ;;
+        *)
+            log_warn "Unsupported operating system: $os_name"
+            log_warn "Please install rpk manually:"
+            log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
+            return 1
+            ;;
+    esac
+    
+    # Map architecture to rpk release format
+    local rpk_arch=""
+    case "$arch_name" in
+        "x86_64" | "amd64")
+            rpk_arch="amd64"
+            ;;
+        "arm64" | "aarch64")
+            rpk_arch="arm64"
+            ;;
+        *)
+            log_warn "Unsupported architecture: $arch_name"
+            log_warn "Please install rpk manually:"
+            log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
+            return 1
+            ;;
+    esac
+    
+    # Construct download URL and filename
+    local rpk_filename="rpk-${rpk_os}-${rpk_arch}.zip"
+    local rpk_url="https://github.com/redpanda-data/redpanda/releases/latest/download/${rpk_filename}"
+    
+    log_info "Detected ${os_name} ${arch_name}, downloading ${rpk_filename}..."
+    
+    # Try to download and install rpk
+    if curl -LO "$rpk_url"; then
+        if unzip "$rpk_filename" 2>/dev/null; then
+            mkdir -p ~/.local/bin
+            if mv rpk ~/.local/bin/ 2>/dev/null; then
+                rm "$rpk_filename"
+                
+                # Add to PATH for current session
+                export PATH=$HOME/.local/bin:$PATH
+                
+                # Add the target directory to PATH for future sessions
+                if ! grep -q 'export PATH=$HOME/.local/bin:$PATH' ~/.bashrc 2>/dev/null; then
+                    echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
+                fi
+                
+                # Verify installation
+                if command_exists rpk; then
+                    log_info "rpk has been installed successfully. Version information:"
+                    rpk --version
+                    return 0
+                else
+                    log_warn "rpk installation may have failed. Please install manually:"
+                    log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
+                    return 1
+                fi
+            else
+                log_warn "Failed to move rpk binary to ~/.local/bin/"
+                rm -f "$rpk_filename" rpk 2>/dev/null
+                log_warn "Please install rpk manually:"
+                log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
+                return 1
+            fi
         else
-            log_warn "rpk installation may have failed. Please install manually:"
+            log_warn "Failed to unzip $rpk_filename (may not exist for ${rpk_os}-${rpk_arch})"
+            rm -f "$rpk_filename" 2>/dev/null
+            log_warn "Please install rpk manually:"
             log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
             return 1
         fi
     else
-        log_warn "Failed to download rpk. Please install manually:"
+        log_warn "Failed to download $rpk_url"
+        log_warn "Please install rpk manually:"
         log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
         return 1
     fi
