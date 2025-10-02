@@ -81,8 +81,6 @@ async function fetchPublicTiers(masterDataUrl) {
       }
       masterDataYaml = Buffer.from(data.content, 'base64').toString('utf8');
     } else {
-      // Read from local file
-      const fs = require('fs');
       if (!fs.existsSync(masterDataUrl)) {
         throw new Error(`Local master data file not found: ${masterDataUrl}`);
       }

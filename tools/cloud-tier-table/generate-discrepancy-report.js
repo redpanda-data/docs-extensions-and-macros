@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { generateCloudTierTable, parseYaml, fetchPublicTiers } = require('./generate-cloud-tier-table.js');
+const Papa = require('papaparse');
 
 /**
  * Calculate percentage difference between two values
@@ -68,13 +69,61 @@ function getSeverityEmoji(severity) {
 }
 
 /**
+ * Safely parse an integer from tier data with error handling
+ * @param {Object} tier - Tier data object
+ * @param {string} key - Key to parse from tier data
+ * @param {string} tierName - Tier name for logging
+ * @returns {number} Parsed integer or 0 if invalid
+ */
+function safeParseInt(tier, key, tierName) {
+  const value = tier[key];
+  if (value === undefined || value === null || value === '') {
+    console.warn(`Warning: Missing value for key "${key}" in tier "${tierName}"`);
+    return 0;
+  }
+  
+  const parsed = parseInt(value, 10);
+  if (isNaN(parsed)) {
+    console.warn(`Warning: Invalid numeric value "${value}" for key "${key}" in tier "${tierName}"`);
+    return 0;
+  }
+  
+  return parsed;
+}
+
+/**
+ * Analyze a single metric and create discrepancy entry
+ * @param {string} metricName - Name of the metric
+ * @param {number} advertised - Advertised value
+ * @param {number} actual - Actual configuration value
+ * @param {Function} formatter - Function to format the values for display
+ * @returns {Object} Discrepancy analysis object
+ */
+function analyzeMetric(metricName, advertised, actual, formatter) {
+  const percentageDiff = calculatePercentageDiff(advertised, actual);
+  const severity = getSeverity(percentageDiff);
+  
+  return {
+    metric: metricName,
+    advertised: advertised,
+    advertisedFormatted: formatter(advertised),
+    actual: actual,
+    actualFormatted: formatter(actual),
+    percentageDiff: percentageDiff,
+    severity: severity,
+    emoji: getSeverityEmoji(severity)
+  };
+}
+
+/**
  * Generate discrepancy analysis for a single tier
  * @param {Object} tier - Tier data object
  * @returns {Object} Discrepancy analysis
  */
 function analyzeTierDiscrepancies(tier) {
+  const tierName = tier.Tier || tier.tier_name;
   const analysis = {
-    tierName: tier.Tier || tier.tier_name,
+    tierName: tierName,
     cloudProvider: tier.cloud_provider,
     machineType: tier.machine_type,
     nodeCount: tier.nodes_count,
@@ -82,68 +131,46 @@ function analyzeTierDiscrepancies(tier) {
   };
 
   // Ingress throughput analysis
-  const advertisedIngress = parseInt(tier.advertisedMaxIngress);
-  const configIngress = parseInt(tier.kafka_throughput_limit_node_in_bps);
-  const ingressDiff = calculatePercentageDiff(advertisedIngress, configIngress);
-  
-  analysis.discrepancies.push({
-    metric: 'Ingress Throughput',
-    advertised: advertisedIngress,
-    advertisedFormatted: formatThroughput(advertisedIngress),
-    actual: configIngress,
-    actualFormatted: formatThroughput(configIngress),
-    percentageDiff: ingressDiff,
-    severity: getSeverity(ingressDiff),
-    emoji: getSeverityEmoji(getSeverity(ingressDiff))
-  });
+  const advertisedIngress = safeParseInt(tier, 'advertisedMaxIngress', tierName);
+  const configIngress = safeParseInt(tier, 'kafka_throughput_limit_node_in_bps', tierName);
+  analysis.discrepancies.push(analyzeMetric(
+    'Ingress Throughput',
+    advertisedIngress,
+    configIngress,
+    formatThroughput
+  ));
 
   // Egress throughput analysis
-  const advertisedEgress = parseInt(tier.advertisedMaxEgress);
-  const configEgress = parseInt(tier.kafka_throughput_limit_node_out_bps);
-  const egressDiff = calculatePercentageDiff(advertisedEgress, configEgress);
-  
-  analysis.discrepancies.push({
-    metric: 'Egress Throughput',
-    advertised: advertisedEgress,
-    advertisedFormatted: formatThroughput(advertisedEgress),
-    actual: configEgress,
-    actualFormatted: formatThroughput(configEgress),
-    percentageDiff: egressDiff,
-    severity: getSeverity(egressDiff),
-    emoji: getSeverityEmoji(getSeverity(egressDiff))
-  });
+  const advertisedEgress = safeParseInt(tier, 'advertisedMaxEgress', tierName);
+  const configEgress = safeParseInt(tier, 'kafka_throughput_limit_node_out_bps', tierName);
+  analysis.discrepancies.push(analyzeMetric(
+    'Egress Throughput',
+    advertisedEgress,
+    configEgress,
+    formatThroughput
+  ));
 
   // Partition count analysis
-  const advertisedPartitions = parseInt(tier.advertisedMaxPartitionCount);
-  const configPartitions = parseInt(tier.topic_partitions_per_shard) * parseInt(tier.nodes_count);
-  const partitionDiff = calculatePercentageDiff(advertisedPartitions, configPartitions);
-  
-  analysis.discrepancies.push({
-    metric: 'Max Partitions',
-    advertised: advertisedPartitions,
-    advertisedFormatted: formatNumber(advertisedPartitions),
-    actual: configPartitions,
-    actualFormatted: formatNumber(configPartitions),
-    percentageDiff: partitionDiff,
-    severity: getSeverity(partitionDiff),
-    emoji: getSeverityEmoji(getSeverity(partitionDiff))
-  });
+  const advertisedPartitions = safeParseInt(tier, 'advertisedMaxPartitionCount', tierName);
+  const partitionsPerShard = safeParseInt(tier, 'topic_partitions_per_shard', tierName);
+  const nodeCount = safeParseInt(tier, 'nodes_count', tierName);
+  const configPartitions = partitionsPerShard * nodeCount;
+  analysis.discrepancies.push(analyzeMetric(
+    'Max Partitions',
+    advertisedPartitions,
+    configPartitions,
+    formatNumber
+  ));
 
   // Client connections analysis
-  const advertisedClients = parseInt(tier.advertisedMaxClientCount);
-  const configClients = parseInt(tier.kafka_connections_max);
-  const clientDiff = calculatePercentageDiff(advertisedClients, configClients);
-  
-  analysis.discrepancies.push({
-    metric: 'Max Client Connections',
-    advertised: advertisedClients,
-    advertisedFormatted: formatNumber(advertisedClients),
-    actual: configClients,
-    actualFormatted: formatNumber(configClients),
-    percentageDiff: clientDiff,
-    severity: getSeverity(clientDiff),
-    emoji: getSeverityEmoji(getSeverity(clientDiff))
-  });
+  const advertisedClients = safeParseInt(tier, 'advertisedMaxClientCount', tierName);
+  const configClients = safeParseInt(tier, 'kafka_connections_max', tierName);
+  analysis.discrepancies.push(analyzeMetric(
+    'Max Client Connections',
+    advertisedClients,
+    configClients,
+    formatNumber
+  ));
 
   return analysis;
 }
@@ -169,17 +196,19 @@ async function generateDiscrepancyReport(options = {}) {
       output: null
     });
 
-    // Parse CSV data
-    const lines = tableData.trim().split('\n');
-    const headers = lines[0].split(',').map(h => h.replace(/"/g, ''));
-    const rows = lines.slice(1).map(line => {
-      const values = line.split(',').map(v => v.replace(/"/g, ''));
-      const row = {};
-      headers.forEach((header, index) => {
-        row[header] = values[index];
-      });
-      return row;
+    // Parse CSV data using papaparse for robust handling of quotes, commas, and newlines
+    const parseResult = Papa.parse(tableData.trim(), {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim().replace(/^"|"$/g, ''), // Remove surrounding quotes
+      transform: (value) => value.trim().replace(/^"|"$/g, '') // Remove surrounding quotes from values
     });
+    
+    if (parseResult.errors.length > 0) {
+      throw new Error(`CSV parsing failed: ${parseResult.errors.map(e => e.message).join(', ')}`);
+    }
+    
+    const rows = parseResult.data;
 
     // Analyze each tier
     const analyses = rows.map(analyzeTierDiscrepancies);

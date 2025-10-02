@@ -95,7 +95,24 @@ To regenerate this content, run:
 }
 
 .dropdown-checkbox-wrapper {
-  width:35%!important;
+  min-width: 160px;
+  max-width: 35%;
+  width: 25%;
+}
+
+/* Responsive dropdown behavior */
+@media (max-width: 768px) {
+  .dropdown-checkbox-wrapper {
+    min-width: 140px;
+    max-width: 100%;
+    width: 100%;
+  }
+}
+
+@media (min-width: 1200px) {
+  .dropdown-checkbox-wrapper {
+    max-width: 280px;
+  }
 }
 
 /* ====== Mobile cards ====== */
@@ -366,13 +383,24 @@ function filterCloudTierTable(){
     const tier=row.getAttribute('data-tier');
     const provider=row.getAttribute('data-provider')||'unknown';
     let show=true;
-    // Match by tier number
-    if(selTiers.length) {
+    
+    // If no tiers are selected, hide all rows
+    if(selTiers.length === 0) {
+      show = false;
+    } else {
+      // Match by tier number
       const match = tier.match(/Tier (\d+)/i);
       const tierNum = match ? match[1] : null;
       if(!tierNum || !selTiers.includes(tierNum)) show=false;
     }
-    if(selProviders.length && !selProviders.includes(provider)) show=false;
+    
+    // If no providers are selected, hide all rows
+    if(selProviders.length === 0) {
+      show = false;
+    } else if(show && !selProviders.includes(provider)) {
+      show = false;
+    }
+    
     if(search){
       const tds=row.getElementsByTagName('td');
       let found=false;
@@ -388,12 +416,23 @@ function filterCloudTierTable(){
     const tier=card.getAttribute('data-tier');
     const provider=card.getAttribute('data-provider')||'unknown';
     let show=true;
-    if(selTiers.length) {
+    
+    // If no tiers are selected, hide all cards
+    if(selTiers.length === 0) {
+      show = false;
+    } else {
       const match = tier.match(/Tier (\d+)/i);
       const tierNum = match ? match[1] : null;
       if(!tierNum || !selTiers.includes(tierNum)) show=false;
     }
-    if(selProviders.length && !selProviders.includes(provider)) show=false;
+    
+    // If no providers are selected, hide all cards
+    if(selProviders.length === 0) {
+      show = false;
+    } else if(show && !selProviders.includes(provider)) {
+      show = false;
+    }
+    
     if(search && !card.textContent.toLowerCase().includes(search)) show=false;
     card.style.display=show?'':'none';
   });
