@@ -1,12 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
-let fetch;
-try {
-  fetch = require('node-fetch');
-} catch (e) {
-  fetch = global.fetch;
-}
+const fetch = globalThis.fetch;
 
 // Hardcoded list of keys to extract (top-level and cluster_config)
 const LIMIT_KEYS = [
@@ -391,8 +386,13 @@ function findHighestVersionProfile(configProfiles, targetProfile) {
   }
 }
 
-function buildTableRows(tiers, publicTiers) {
+function buildTableRows(tiers, publicTiers, customLimits) {
   try {
+    // Use custom limits if provided, otherwise use default LIMIT_KEYS
+    const limitKeys = customLimits && Array.isArray(customLimits) && customLimits.length > 0 
+      ? customLimits 
+      : LIMIT_KEYS;
+
     // Validate inputs
     if (!tiers || typeof tiers !== 'object') {
       throw new Error('tiers parameter must be a valid object');
@@ -444,7 +444,7 @@ function buildTableRows(tiers, publicTiers) {
           const configProfile = tiers.config_profiles[publicTier.actualProfileName];
           const row = { tier: publicTier.displayName };
           
-          for (const key of LIMIT_KEYS) {
+          for (const key of limitKeys) {
             try {
               let value;
               
@@ -521,30 +521,30 @@ function buildTableRows(tiers, publicTiers) {
   }
 }
 
-function toMarkdown(rows) {
-  const headers = ['Tier', ...LIMIT_KEYS.map(humanLabel)];
+function toMarkdown(rows, limitKeys = LIMIT_KEYS) {
+  const headers = ['Tier', ...limitKeys.map(humanLabel)];
   const lines = [];
   lines.push('| ' + headers.join(' | ') + ' |');
   lines.push('|' + headers.map(() => '---').join('|') + '|');
   for (const row of rows) {
-    lines.push('| ' + [row.tier, ...LIMIT_KEYS.map(k => row[k])].join(' | ') + ' |');
+    lines.push('| ' + [row.tier, ...limitKeys.map(k => row[k])].join(' | ') + ' |');
   }
   return lines.join('\n');
 }
 
-function toAsciiDoc(rows) {
-  const headers = ['Tier', ...LIMIT_KEYS.map(humanLabel)];
+function toAsciiDoc(rows, limitKeys = LIMIT_KEYS) {
+  const headers = ['Tier', ...limitKeys.map(humanLabel)];
   let out = '[options="header"]\n|===\n';
   out += '| ' + headers.join(' | ') + '\n';
   for (const row of rows) {
-    out += '| ' + [row.tier, ...LIMIT_KEYS.map(k => row[k])].join(' | ') + '\n';
+    out += '| ' + [row.tier, ...limitKeys.map(k => row[k])].join(' | ') + '\n';
   }
   out += '|===\n';
   return out;
 }
 
-function toCSV(rows) {
-  const headers = ['Tier', ...LIMIT_KEYS];
+function toCSV(rows, limitKeys = LIMIT_KEYS) {
+  const headers = ['Tier', ...limitKeys];
   const esc = v => {
     const s = String(v).replace(/"/g, '""');
     return `"${s}"`;
@@ -552,18 +552,18 @@ function toCSV(rows) {
   const lines = [];
   lines.push(headers.join(','));
   for (const row of rows) {
-    lines.push([row.tier, ...LIMIT_KEYS.map(k => row[k])].map(esc).join(','));
+    lines.push([row.tier, ...limitKeys.map(k => row[k])].map(esc).join(','));
   }
   return lines.join('\n');
 }
 
-function toHTML(rows, templatePath) {
+function toHTML(rows, templatePath, limitKeys = LIMIT_KEYS) {
   const fs = require('fs');
   const handlebars = require('handlebars');
   const templateSource = fs.readFileSync(templatePath, 'utf8');
   const compiled = handlebars.compile(templateSource);
   // Pass headers and limitKeys for template rendering
-  const headers = LIMIT_KEYS.map(humanLabel);
+  const headers = limitKeys.map(humanLabel);
   // Precompute index_plus_one for each header for template
   const headersWithIndex = headers.map((h, i) => ({ name: h, index_plus_one: i + 1 }));
   // Extract unique cloud providers and tiers for dropdowns
@@ -575,43 +575,45 @@ function toHTML(rows, templatePath) {
   return compiled({
     rows,
     headers: headersWithIndex,
-    limitKeys: LIMIT_KEYS,
+    limitKeys: limitKeys,
     cloudProviders,
     uniqueTiers
   });
 }
 
 async function generateCloudTierTable({ 
-  input = 'https://api.github.com/repos/redpanda-data/cloudv2/contents/install-pack',
+  input,
   output,
   format = 'html',
   template,
-  masterData = 'https://api.github.com/repos/redpanda-data/cloudv2-infra/contents/apps/master-data-reconciler/manifests/overlays/production/master-data.yaml?ref=integration'
+  masterData,
+  limits
 }) {
   const [tiers, publicTiers] = await Promise.all([
     parseYaml(input),
     fetchPublicTiers(masterData)
   ]);
-  const rows = buildTableRows(tiers, publicTiers);
+  const limitKeys = limits && Array.isArray(limits) && limits.length > 0 ? limits : LIMIT_KEYS;
+  const rows = buildTableRows(tiers, publicTiers, limitKeys);
   const fmt = (format || 'md').toLowerCase();
   if (fmt === 'html') {
     // Use provided template, or default to cloud-tier-table-html.hbs
     const templatePath = template || require('path').resolve(__dirname, 'cloud-tier-table-html.hbs');
-    return toHTML(rows, templatePath);
+    return toHTML(rows, templatePath, limitKeys);
   }
   if (template) {
     const templateSource = fs.readFileSync(template, 'utf8');
     const handlebars = require('handlebars');
     const compiled = handlebars.compile(templateSource);
-    return compiled({ rows });
+    return compiled({ rows, limitKeys: limitKeys });
   }
   switch (fmt) {
     case 'md':
-      return toMarkdown(rows);
+      return toMarkdown(rows, limitKeys);
     case 'adoc':
-      return toAsciiDoc(rows);
+      return toAsciiDoc(rows, limitKeys);
     case 'csv':
-      return toCSV(rows);
+      return toCSV(rows, limitKeys);
     default:
       throw new Error(`Unknown format: ${format}`);
   }

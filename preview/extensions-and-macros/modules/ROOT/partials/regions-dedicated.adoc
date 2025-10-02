@@ -1,0 +1,71 @@
+
+////
+This content is auto-generated. Do not edit manually.
+
+To regenerate this content, run:
+  npx doc-tools generate cloud-regions --help
+
+For source code and documentation:
+- Source: https://github.com/redpanda-data/docs-extensions-and-macros/tree/main/tools/cloud-regions
+- Docs: https://redpandadata.atlassian.net/wiki/spaces/DOC/pages/1185054748/Doc+Tools+CLI
+////
+
+== Dedicated supported regions
+
+[tabs]
+====
+Google Cloud Platform (GCP)::
++
+--
+|===
+| Region
+
+| asia-east1
+| asia-northeast1
+| asia-south1
+| asia-southeast1
+| australia-southeast1
+| europe-west1
+| europe-west2
+| europe-west3
+| northamerica-northeast1
+| southamerica-east1
+| us-central1
+| us-east1
+|===
+--
+Amazon Web Services (AWS)::
++
+--
+|===
+| Region
+
+| ap-northeast-1
+| ap-south-1
+| ap-southeast-1
+| ap-southeast-2
+| ca-central-1
+| eu-central-1
+| eu-west-1
+| eu-west-2
+| eu-west-3
+| us-east-1
+| us-east-2
+| us-west-2
+|===
+--
+Azure::
++
+--
+|===
+| Region
+
+| centralus
+| eastus
+| eastus2
+| norwayeast
+| uksouth
+|===
+--
+====
+

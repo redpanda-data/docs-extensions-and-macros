@@ -18,6 +18,12 @@ const {
   printDeltaReport
 } = require('../tools/redpanda-connect/report-delta');
 
+// Cloud tier table default URLs
+const CLOUD_TIER_DEFAULTS = {
+  INPUT_URL: 'https://api.github.com/repos/redpanda-data/cloudv2/contents/install-pack',
+  MASTER_DATA_URL: 'https://api.github.com/repos/redpanda-data/cloudv2-infra/contents/apps/master-data-reconciler/manifests/overlays/production/master-data.yaml?ref=integration'
+};
+
 /**
  * Searches upward from a starting directory to locate the repository root.
  *
@@ -1334,10 +1340,215 @@ automation
  * Generate Markdown table of cloud regions and tiers from master-data.yaml
  */
 automation
+  .command('cloud-docs')
+  .description('Generate documentation for Redpanda Cloud infrastructure (regions, tiers, reports)')
+  .addCommand(
+    new Command('regions')
+      .description('Generate tables of available cloud regions by provider/cluster type')
+      .option('--output <file>', 'Output file (relative to repo root)', 'cloud-controlplane/x-topics/cloud-regions.md')
+      .option('--format <fmt>', 'Output format: md (Markdown) or adoc (AsciiDoc)', 'md')
+      .option('--tabs', 'Generate simplified region lists organized by cluster type in separate AsciiDoc files with tabs (creates -byoc.adoc and -dedicated.adoc files with region names only)')
+      .option('--owner <owner>', 'GitHub repository owner', 'redpanda-data')
+      .option('--repo <repo>', 'GitHub repository name', 'cloudv2-infra')
+      .option('--path <path>', 'Path to YAML file in repository', 'apps/master-data-reconciler/manifests/overlays/production/master-data.yaml')
+      .option('--ref <ref>', 'Git reference (branch, tag, or commit SHA)', 'integration')
+      .option('--template <path>', 'Path to custom Handlebars template (relative to repo root)')
+      .option('--dry-run', 'Print output to stdout instead of writing file')
+      .action(async (options) => {
+        const { generateCloudRegions } = require('../tools/cloud-regions/generate-cloud-regions.js');
+
+        try {
+          const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || process.env.REDPANDA_GITHUB_TOKEN;
+          if (!token) {
+            throw new Error('GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN environment variable is required to fetch from private cloudv2-infra repo.');
+          }
+          const fmt = (options.format || 'md').toLowerCase();
+          let templatePath = undefined;
+          if (options.template) {
+            const repoRoot = findRepoRoot();
+            templatePath = path.resolve(repoRoot, options.template);
+            if (!fs.existsSync(templatePath)) {
+              throw new Error(`Custom template not found: ${templatePath}`);
+            }
+          }
+          const out = await generateCloudRegions({
+            owner: options.owner,
+            repo: options.repo,
+            path: options.path,
+            ref: options.ref,
+            format: fmt,
+            token,
+            template: templatePath,
+            tabs: options.tabs,
+          });
+          
+          if (options.tabs && typeof out === 'object') {
+            // Handle separate files for BYOC and Dedicated
+            if (options.dryRun) {
+              console.log('\n=== BYOC Regions ===\n');
+              process.stdout.write(out.byoc || 'No BYOC regions found\n');
+              console.log('\n=== Dedicated Regions ===\n');
+              process.stdout.write(out.dedicated || 'No Dedicated regions found\n');
+              console.log(`\n✅ (dry-run) Separate ${fmt === 'adoc' ? 'AsciiDoc' : 'Markdown'} files printed to stdout.`);
+            } else {
+              const repoRoot = findRepoRoot();
+              const outputDir = path.dirname(path.resolve(repoRoot, options.output));
+              const outputExt = path.extname(options.output);
+              const outputBase = path.basename(options.output, outputExt);
+              
+              fs.mkdirSync(outputDir, { recursive: true });
+              
+              const files = [];
+              if (out.byoc) {
+                const byocFile = path.join(outputDir, `${outputBase}-byoc${outputExt}`);
+                fs.writeFileSync(byocFile, out.byoc, 'utf8');
+                files.push(byocFile);
+              }
+              if (out.dedicated) {
+                const dedicatedFile = path.join(outputDir, `${outputBase}-dedicated${outputExt}`);
+                fs.writeFileSync(dedicatedFile, out.dedicated, 'utf8');
+                files.push(dedicatedFile);
+              }
+              
+              console.log(`✅ Wrote ${files.length} files: ${files.join(', ')}`);
+            }
+          } else {
+            if (options.dryRun) {
+              process.stdout.write(out);
+              console.log(`\n✅ (dry-run) ${fmt === 'adoc' ? 'AsciiDoc' : 'Markdown'} output printed to stdout.`);
+            } else {
+              const repoRoot = findRepoRoot();
+              const absOutput = path.resolve(repoRoot, options.output);
+              fs.mkdirSync(path.dirname(absOutput), { recursive: true });
+              fs.writeFileSync(absOutput, out, 'utf8');
+              console.log(`✅ Wrote ${absOutput}`);
+            }
+          }
+        } catch (err) {
+          console.error(`❌ Failed to generate cloud regions: ${err.message}`);
+          process.exit(1);
+        }
+      })
+  )
+  .addCommand(
+    new Command('tiers')
+      .description('Generate detailed tables of cloud tier limits and quotas')
+      .option('--input <path|url>', 'Path or URL to the tier YAML file', CLOUD_TIER_DEFAULTS.INPUT_URL)
+      .option('--master-data <path|url>', 'Path or URL to the master-data YAML file', CLOUD_TIER_DEFAULTS.MASTER_DATA_URL)
+      .option('--output <file>', 'Output file (relative to repo root)', 'modules/reference/examples/cloud-limits-by-tier.html')
+      .option('--format <fmt>', 'Output format: md (Markdown), adoc (AsciiDoc), html, or csv', 'html')
+      .option('--limits <limits>', 'Comma-separated list of limits to include in the table. Available limits include: cloud_provider, machine_type, nodes_count, advertisedMaxIngress, advertisedMaxEgress, advertisedMaxPartitionCount, advertisedMaxClientCount, kafka_connections_max, topic_partitions_per_shard, and more. Example: "cloud_provider,nodes_count,kafka_connections_max"')
+      .option('--dry-run', 'Print output to stdout instead of writing file')
+      .option('--template <path>', 'Path to custom Handlebars template (relative to repo root)')
+      .action(async (options) => {
+        const { generateCloudTierTable } = require('../tools/cloud-tier-table/generate-cloud-tier-table.js');
+        try {
+          let templatePath = undefined;
+          if (options.template) {
+            const repoRoot = findRepoRoot();
+            templatePath = path.resolve(repoRoot, options.template);
+            if (!fs.existsSync(templatePath)) {
+              throw new Error(`Custom template not found: ${templatePath}`);
+            }
+          }
+          
+          // Parse limits if provided
+          let limits = undefined;
+          if (options.limits) {
+            limits = options.limits.split(',').map(limit => limit.trim()).filter(limit => limit.length > 0);
+            if (limits.length === 0) {
+              throw new Error('--limits option cannot be empty. Provide comma-separated limit names.');
+            }
+            console.log(`Using custom limits: ${limits.join(', ')}`);
+          }
+          
+          const formatExt = {
+            md: '.md',
+            adoc: '.adoc',
+            html: '.html',
+            csv: '.csv',
+          };
+          let outputFile = options.output;
+          const fmt = (options.format || 'md').toLowerCase();
+          const ext = formatExt[fmt] || '.md';
+          if (!outputFile.endsWith(ext)) {
+            outputFile = outputFile.replace(/\.(md|adoc|html|csv)$/i, '') + ext;
+          }
+          const out = await generateCloudTierTable({
+            input: options.input,
+            masterData: options.masterData,
+            output: outputFile,
+            format: options.format,
+            template: templatePath,
+            limits: limits,
+          });
+          if (options.dryRun) {
+            process.stdout.write(out);
+            console.log(`\n✅ (dry-run) ${fmt} output printed to stdout.`);
+          } else {
+            const repoRoot = findRepoRoot();
+            const absOutput = path.resolve(repoRoot, outputFile);
+            fs.mkdirSync(path.dirname(absOutput), { recursive: true });
+            fs.writeFileSync(absOutput, out, 'utf8');
+            console.log(`✅ Wrote ${absOutput}`);
+          }
+        } catch (err) {
+          console.error(`❌ Failed to generate cloud tier table: ${err.message}`);
+          process.exit(1);
+        }
+      })
+  )
+  .addCommand(
+    new Command('discrepancy')
+      .description('Generate reports analyzing discrepancies between advertised and actual cloud tier limits')
+      .option('--input <path|url>', 'Path or URL to the tier YAML file', CLOUD_TIER_DEFAULTS.INPUT_URL)
+      .option('--master-data <path|url>', 'Path or URL to the master-data YAML file', CLOUD_TIER_DEFAULTS.MASTER_DATA_URL)
+      .option('--output <file>', 'Output file (relative to repo root)', 'cloud-tier-discrepancy-report.md')
+      .option('--format <fmt>', 'Output format: md (Markdown) or json', 'md')
+      .option('--dry-run', 'Print output to stdout instead of writing file')
+      .action(async (options) => {
+        const { generateDiscrepancyReport } = require('../tools/cloud-tier-table/generate-discrepancy-report.js');
+        try {
+          const formatExt = {
+            md: '.md',
+            json: '.json',
+          };
+          let outputFile = options.output;
+          const fmt = (options.format || 'md').toLowerCase();
+          const ext = formatExt[fmt] || '.md';
+          if (!outputFile.endsWith(ext)) {
+            outputFile = outputFile.replace(/\.(md|json)$/i, '') + ext;
+          }
+          
+          const report = await generateDiscrepancyReport({
+            input: options.input,
+            masterData: options.masterData,
+            format: options.format === 'json' ? 'json' : 'markdown',
+          });
+          
+          if (options.dryRun) {
+            process.stdout.write(report);
+            console.log(`\n✅ (dry-run) ${fmt} discrepancy report printed to stdout.`);
+          } else {
+            const repoRoot = findRepoRoot();
+            const fullOutputPath = path.resolve(repoRoot, outputFile);
+            fs.writeFileSync(fullOutputPath, report);
+            console.log(`✅ Discrepancy report written to ${outputFile}`);
+          }
+        } catch (err) {
+          console.error(`❌ Failed to generate discrepancy report: ${err.message}`);
+          process.exit(1);
+        }
+      })
+  );
+
+// Backward compatibility - keep old commands with deprecation warnings
+automation
   .command('cloud-regions')
-  .description('Generate Markdown table of cloud regions and tiers from GitHub YAML file')
+  .description('⚠️  DEPRECATED: Use "cloud-docs regions" instead. Generate Markdown or AsciiDoc table of cloud regions and tiers from GitHub YAML file')
   .option('--output <file>', 'Output file (relative to repo root)', 'cloud-controlplane/x-topics/cloud-regions.md')
   .option('--format <fmt>', 'Output format: md (Markdown) or adoc (AsciiDoc)', 'md')
+  .option('--tabs', 'Generate simplified region lists organized by cluster type in separate AsciiDoc files with tabs (creates -byoc.adoc and -dedicated.adoc files with region names only)')
   .option('--owner <owner>', 'GitHub repository owner', 'redpanda-data')
   .option('--repo <repo>', 'GitHub repository name', 'cloudv2-infra')
   .option('--path <path>', 'Path to YAML file in repository', 'apps/master-data-reconciler/manifests/overlays/production/master-data.yaml')
@@ -1345,6 +1556,7 @@ automation
   .option('--template <path>', 'Path to custom Handlebars template (relative to repo root)')
   .option('--dry-run', 'Print output to stdout instead of writing file')
   .action(async (options) => {
+    console.warn('⚠️  WARNING: "cloud-regions" command is deprecated. Use "doc-tools generate cloud-docs regions" instead.');
     const { generateCloudRegions } = require('../tools/cloud-regions/generate-cloud-regions.js');
 
     try {
@@ -1369,118 +1581,55 @@ automation
         format: fmt,
         token,
         template: templatePath,
+        tabs: options.tabs,
       });
-      if (options.dryRun) {
-        process.stdout.write(out);
-        console.log(`\n✅ (dry-run) ${fmt === 'adoc' ? 'AsciiDoc' : 'Markdown'} output printed to stdout.`);
+      
+      if (options.tabs && typeof out === 'object') {
+        // Handle separate files for BYOC and Dedicated
+        if (options.dryRun) {
+          console.log('\n=== BYOC Regions ===\n');
+          process.stdout.write(out.byoc || 'No BYOC regions found\n');
+          console.log('\n=== Dedicated Regions ===\n');
+          process.stdout.write(out.dedicated || 'No Dedicated regions found\n');
+          console.log(`\n✅ (dry-run) Separate ${fmt === 'adoc' ? 'AsciiDoc' : 'Markdown'} files printed to stdout.`);
+        } else {
+          const repoRoot = findRepoRoot();
+          const outputDir = path.dirname(path.resolve(repoRoot, options.output));
+          const outputExt = path.extname(options.output);
+          const outputBase = path.basename(options.output, outputExt);
+          
+          fs.mkdirSync(outputDir, { recursive: true });
+          
+          const files = [];
+          if (out.byoc) {
+            const byocFile = path.join(outputDir, `${outputBase}-byoc${outputExt}`);
+            fs.writeFileSync(byocFile, out.byoc, 'utf8');
+            files.push(byocFile);
+          }
+          if (out.dedicated) {
+            const dedicatedFile = path.join(outputDir, `${outputBase}-dedicated${outputExt}`);
+            fs.writeFileSync(dedicatedFile, out.dedicated, 'utf8');
+            files.push(dedicatedFile);
+          }
+          
+          console.log(`✅ Wrote ${files.length} files: ${files.join(', ')}`);
+        }
       } else {
-        // Always resolve output relative to repo root
-        const repoRoot = findRepoRoot();
-        const absOutput = path.resolve(repoRoot, options.output);
-        fs.mkdirSync(path.dirname(absOutput), { recursive: true });
-        fs.writeFileSync(absOutput, out, 'utf8');
-        console.log(`✅ Wrote ${absOutput}`);
+        // Handle single file output
+        if (options.dryRun) {
+          process.stdout.write(out);
+          console.log(`\n✅ (dry-run) ${fmt === 'adoc' ? 'AsciiDoc' : 'Markdown'} output printed to stdout.`);
+        } else {
+          // Always resolve output relative to repo root
+          const repoRoot = findRepoRoot();
+          const absOutput = path.resolve(repoRoot, options.output);
+          fs.mkdirSync(path.dirname(absOutput), { recursive: true });
+          fs.writeFileSync(absOutput, out, 'utf8');
+          console.log(`✅ Wrote ${absOutput}`);
+        }
       }
     } catch (err) {
       console.error(`❌ Failed to generate cloud regions: ${err.message}`);
-      process.exit(1);
-    }
-  });
-
-automation
-  .command('cloud-tier-table')
-  .description('Generate a table of Redpanda Cloud tier usage limits/quotas from a YAML source')
-  .option('--input <path|url>', 'Path or URL to the tier YAML file', 'https://api.github.com/repos/redpanda-data/cloudv2/contents/install-pack')
-  .option('--master-data <path|url>', 'Path or URL to the master-data YAML file', 'https://api.github.com/repos/redpanda-data/cloudv2-infra/contents/apps/master-data-reconciler/manifests/overlays/production/master-data.yaml?ref=integration')
-  .option('--output <file>', 'Output file (relative to repo root)', 'modules/reference/examples/cloud-limits-by-tier.html')
-  .option('--format <fmt>', 'Output format: md (Markdown), adoc (AsciiDoc), html, or csv', 'html')
-  .option('--dry-run', 'Print output to stdout instead of writing file')
-  .option('--template <path>', 'Path to custom Handlebars template (relative to repo root)')
-  .action(async (options) => {
-    const { generateCloudTierTable } = require('../tools/cloud-tier-table/generate-cloud-tier-table.js');
-    try {
-      let templatePath = undefined;
-      if (options.template) {
-        const repoRoot = findRepoRoot();
-        templatePath = path.resolve(repoRoot, options.template);
-        if (!fs.existsSync(templatePath)) {
-          throw new Error(`Custom template not found: ${templatePath}`);
-        }
-      }
-      const formatExt = {
-        md: '.md',
-        adoc: '.adoc',
-        html: '.html',
-        csv: '.csv',
-      };
-      let outputFile = options.output;
-      const fmt = (options.format || 'md').toLowerCase();
-      const ext = formatExt[fmt] || '.md';
-      if (!outputFile.endsWith(ext)) {
-        outputFile = outputFile.replace(/\.(md|adoc|html|csv)$/i, '') + ext;
-      }
-      const out = await generateCloudTierTable({
-        input: options.input,
-        masterData: options.masterData,
-        output: outputFile,
-        format: options.format,
-        template: templatePath,
-      });
-      if (options.dryRun) {
-        process.stdout.write(out);
-        console.log(`\n✅ (dry-run) ${fmt} output printed to stdout.`);
-      } else {
-        const repoRoot = findRepoRoot();
-        const absOutput = path.resolve(repoRoot, outputFile);
-        fs.mkdirSync(path.dirname(absOutput), { recursive: true });
-        fs.writeFileSync(absOutput, out, 'utf8');
-        console.log(`✅ Wrote ${absOutput}`);
-      }
-    } catch (err) {
-      console.error(`❌ Failed to generate cloud tier table: ${err.message}`);
-      process.exit(1);
-    }
-  });
-
-automation
-  .command('cloud-tier-discrepancy-report')
-  .description('Generate a report analyzing discrepancies between advertised and actual cloud tier limits')
-  .option('--input <path|url>', 'Path or URL to the tier YAML file', 'https://api.github.com/repos/redpanda-data/cloudv2/contents/install-pack')
-  .option('--master-data <path|url>', 'Path or URL to the master-data YAML file', 'https://api.github.com/repos/redpanda-data/cloudv2-infra/contents/apps/master-data-reconciler/manifests/overlays/production/master-data.yaml?ref=integration')
-  .option('--output <file>', 'Output file (relative to repo root)', 'cloud-tier-discrepancy-report.md')
-  .option('--format <fmt>', 'Output format: md (Markdown) or json', 'md')
-  .option('--dry-run', 'Print output to stdout instead of writing file')
-  .action(async (options) => {
-    const { generateDiscrepancyReport } = require('../tools/cloud-tier-table/generate-discrepancy-report.js');
-    try {
-      const formatExt = {
-        md: '.md',
-        json: '.json',
-      };
-      let outputFile = options.output;
-      const fmt = (options.format || 'md').toLowerCase();
-      const ext = formatExt[fmt] || '.md';
-      if (!outputFile.endsWith(ext)) {
-        outputFile = outputFile.replace(/\.(md|json)$/i, '') + ext;
-      }
-      
-      const report = await generateDiscrepancyReport({
-        input: options.input,
-        masterData: options.masterData,
-        format: options.format === 'json' ? 'json' : 'markdown',
-      });
-      
-      if (options.dryRun) {
-        process.stdout.write(report);
-        console.log(`\n✅ (dry-run) ${fmt} discrepancy report printed to stdout.`);
-      } else {
-        const repoRoot = findRepoRoot();
-        const fullOutputPath = path.resolve(repoRoot, outputFile);
-        fs.writeFileSync(fullOutputPath, report);
-        console.log(`✅ Discrepancy report written to ${outputFile}`);
-      }
-    } catch (err) {
-      console.error(`❌ Failed to generate discrepancy report: ${err.message}`);
       process.exit(1);
     }
   });

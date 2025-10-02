@@ -193,6 +193,110 @@ function processCloudRegions(yamlText) {
 }
 
 /**
+ * Processes cloud regions data and organizes it by cluster type (BYOC/Dedicated) for tabs output.
+ *
+ * @param {string} yamlText - The YAML content to parse and process.
+ * @return {Object} An object with clusterTypes array, each containing providers organized by cluster type.
+ * @throws {Error} If the YAML is malformed or missing the required `regions` array.
+ */
+function processCloudRegionsForTabs(yamlText) {
+  let data;
+  try {
+    data = jsYaml.load(yamlText);
+  } catch (e) {
+    console.error('[cloud-regions] ERROR: Malformed YAML.');
+    throw new Error('Malformed YAML: ' + e.message);
+  }
+  if (!data || !Array.isArray(data.regions)) {
+    console.error('[cloud-regions] ERROR: YAML missing top-level regions array.');
+    throw new Error('YAML does not contain a top-level regions array.');
+  }
+
+  // Build a set of public product names
+  const publicProductNames = new Set();
+  if (Array.isArray(data.products)) {
+    for (const product of data.products) {
+      if (product.isPublic && product.name) {
+        publicProductNames.add(product.name);
+      }
+    }
+  } else {
+    console.warn('[cloud-regions] WARN: No products array found in YAML.');
+  }
+
+  // Group regions by cluster type, then by provider
+  const clusterTypeData = {
+    'BYOC': { GCP: [], AWS: [], Azure: [] },
+    'Dedicated': { GCP: [], AWS: [], Azure: [] }
+  };
+
+  for (const region of data.regions) {
+    const providerKey = providerMap[region.cloudProvider];
+    if (!providerKey) {
+      console.warn(`[cloud-regions] WARN: Unknown cloudProvider '${region.cloudProvider}' in region '${region.name}'. Skipping.`);
+      continue;
+    }
+
+    // Check which cluster types this region supports
+    const supportedClusterTypes = new Set();
+    if (region.redpandaProductAvailability && typeof region.redpandaProductAvailability === 'object') {
+      for (const t of Object.values(region.redpandaProductAvailability)) {
+        if (!t.redpandaProductName || !publicProductNames.has(t.redpandaProductName)) {
+          continue;
+        }
+        if (Array.isArray(t.clusterTypes)) {
+          for (const ct of t.clusterTypes) {
+            const displayType = displayClusterType(ct);
+            if (displayType === 'BYOC' || displayType === 'Dedicated') {
+              supportedClusterTypes.add(displayType);
+            }
+          }
+        }
+      }
+    }
+
+    // Add region to appropriate cluster type groups
+    for (const clusterType of supportedClusterTypes) {
+      if (clusterTypeData[clusterType] && clusterTypeData[clusterType][providerKey]) {
+        clusterTypeData[clusterType][providerKey].push({
+          name: region.name
+        });
+      }
+    }
+  }
+
+  // Convert to the format expected by the template
+  const clusterTypes = [];
+  
+  for (const [clusterTypeName, providerData] of Object.entries(clusterTypeData)) {
+    const providers = [];
+    
+    for (const providerName of providerOrder) {
+      const regions = providerData[providerName];
+      if (regions && regions.length > 0) {
+        // Sort regions alphabetically
+        regions.sort((a, b) => a.name.localeCompare(b.name));
+        providers.push({
+          name: providerName === 'GCP' ? 'Google Cloud Platform (GCP)' : 
+                providerName === 'AWS' ? 'Amazon Web Services (AWS)' : 
+                providerName,
+          regions: regions
+        });
+      }
+    }
+    
+    if (providers.length > 0) {
+      clusterTypes.push({
+        name: clusterTypeName,
+        providers: providers
+      });
+    }
+  }
+
+  return { clusterTypes };
+}
+
+/**
  * Fetches, processes, and renders cloud region and tier data from a GitHub YAML file.
  *
  * Retrieves YAML data from GitHub using the GitHub API (to avoid caching issues),
@@ -206,10 +310,11 @@ function processCloudRegions(yamlText) {
  * @param {string} [options.format='md'] - The output format (e.g., 'md' for Markdown).
  * @param {string} [options.token] - Optional GitHub token for authentication.
  * @param {string} [options.template] - Optional path to custom Handlebars template.
+ * @param {boolean} [options.tabs=false] - Whether to generate AsciiDoc with tabs organized by cluster type.
  * @returns {string} The rendered cloud regions output.
  * @throws {Error} If fetching, processing, or rendering fails, or if no valid providers or regions are found.
  */
-async function generateCloudRegions({ owner, repo, path, ref = 'main', format = 'md', token, template }) {
+async function generateCloudRegions({ owner, repo, path, ref = 'main', format = 'md', token, template, tabs = false }) {
   let yamlText;
   try {
     yamlText = await fetchYaml({ owner, repo, path, ref, token });
@@ -217,20 +322,43 @@ async function generateCloudRegions({ owner, repo, path, ref = 'main', format = 
     console.error(`[cloud-regions] ERROR: Failed to fetch YAML: ${err.message}`);
     throw err;
   }
-  let providers;
+  
+  let data;
   try {
-    providers = processCloudRegions(yamlText);
+    if (tabs) {
+      data = processCloudRegionsForTabs(yamlText);
+    } else {
+      data = { providers: processCloudRegions(yamlText) };
+    }
   } catch (err) {
     console.error(`[cloud-regions] ERROR: Failed to process cloud regions: ${err.message}`);
     throw err;
   }
-  if (providers.length === 0) {
+  
+  if ((tabs && data.clusterTypes.length === 0) || (!tabs && data.providers.length === 0)) {
     console.error('[cloud-regions] ERROR: No providers/regions found in YAML after filtering.');
     throw new Error('No providers/regions found in YAML after filtering.');
   }
+  
   const lastUpdated = new Date().toISOString();
   try {
-    return renderCloudRegions({ providers, format, lastUpdated, template });
+    if (tabs) {
+      // Generate separate files for each cluster type
+      const results = {};
+      for (const clusterType of data.clusterTypes) {
+        const singleClusterData = {
+          clusterTypes: [clusterType],
+          format,
+          lastUpdated,
+          template,
+          tabs
+        };
+        results[clusterType.name.toLowerCase()] = renderCloudRegions(singleClusterData);
+      }
+      return results;
+    } else {
+      return renderCloudRegions({ ...data, format, lastUpdated, template, tabs });
+    }
   } catch (err) {
     console.error(`[cloud-regions] ERROR: Failed to render cloud regions: ${err.message}`);
     throw err;
