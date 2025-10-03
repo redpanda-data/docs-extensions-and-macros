@@ -4,10 +4,10 @@ const { generateCloudTierTable } = require('./generate-cloud-tier-table.js');
 const Papa = require('papaparse');
 
 /**
- * Calculate percentage difference between two values
- * @param {number} advertised - Advertised value
- * @param {number} actual - Actual config value
- * @returns {number} Percentage difference (positive = actual is higher, negative = actual is lower)
+ * Compute the percentage difference from an advertised value to an actual value.
+ * @param {number} advertised - The reference (advertised) value.
+ * @param {number} actual - The observed or configured value to compare.
+ * @returns {number|null} The percentage difference ((actual - advertised) / advertised * 100); `null` if `advertised` is falsy or zero.
  */
 function calculatePercentageDiff(advertised, actual) {
   if (!advertised || advertised === 0) return null;
@@ -15,9 +15,9 @@ function calculatePercentageDiff(advertised, actual) {
 }
 
 /**
- * Format bytes per second values for display
- * @param {number} bps - Bytes per second
- * @returns {string} Formatted string
+ * Convert a bytes-per-second value into a human-readable Mbps or Kbps string.
+ * @param {number} bps - Bytes per second; falsy values (e.g., 0, null, undefined) produce `'N/A'`.
+ * @returns {string} A formatted throughput string like `"<n.n> Mbps"` or `"<n.n> Kbps"`, or `'N/A'` when input is falsy.
  */
 function formatThroughput(bps) {
   if (!bps) return 'N/A';
@@ -30,9 +30,11 @@ function formatThroughput(bps) {
 }
 
 /**
- * Format numbers with commas
- * @param {number} num - Number to format
- * @returns {string} Formatted number
+ * Format a number with locale-specific thousands separators.
+ *
+ * If `num` is null or undefined the function returns `"N/A"`; a numeric `0` is formatted normally.
+ * @param {number} num - The number to format.
+ * @returns {string} The number formatted with locale-specific separators, or `"N/A"` if input is null or undefined.
  */
 function formatNumber(num) {
   if (!num && num !== 0) return 'N/A';
@@ -40,9 +42,9 @@ function formatNumber(num) {
 }
 
 /**
- * Determine severity of discrepancy
- * @param {number} percentDiff - Percentage difference
- * @returns {string} Severity level
+ * Classifies a percentage difference into a severity level.
+ * @param {number} percentDiff - Percentage difference (positive if actual > advertised, negative if actual < advertised).
+ * @returns {string} `unknown` if `percentDiff` is null or undefined; otherwise `minor` for absolute percentage <= 5, `moderate` for <= 25, `major` for <= 50, and `critical` for > 50.
  */
 function getSeverity(percentDiff) {
   if (percentDiff === null || percentDiff === undefined) return 'unknown';
@@ -92,12 +94,13 @@ function safeParseInt(tier, key, tierName) {
 }
 
 /**
- * Analyze a single metric and create discrepancy entry
- * @param {string} metricName - Name of the metric
- * @param {number} advertised - Advertised value
- * @param {number} actual - Actual configuration value
- * @param {Function} formatter - Function to format the values for display
- * @returns {Object} Discrepancy analysis object
+ * Create a discrepancy analysis entry for a single metric.
+ *
+ * @param {string} metricName - Human-readable metric name.
+ * @param {number} advertised - Advertised/configured value to compare against.
+ * @param {number} actual - Actual observed or configured value.
+ * @param {(value: number) => string} formatter - Formatter that converts numeric values to display strings.
+ * @returns {{metric: string, advertised: number, advertisedFormatted: string, actual: number, actualFormatted: string, percentageDiff: number|null, severity: string, emoji: string}} An object containing the metric name, raw and formatted advertised/actual values, the percentage difference (or `null` if unavailable), severity label, and a severity emoji.
  */
 function analyzeMetric(metricName, advertised, actual, formatter) {
   const percentageDiff = calculatePercentageDiff(advertised, actual);
@@ -116,9 +119,19 @@ function analyzeMetric(metricName, advertised, actual, formatter) {
 }
 
 /**
- * Generate discrepancy analysis for a single tier
- * @param {Object} tier - Tier data object
- * @returns {Object} Discrepancy analysis
+ * Builds a discrepancy analysis object for a cloud tier.
+ *
+ * @param {Object} tier - Tier data object containing configuration and advertised values. Expected keys include:
+ *   `Tier` or `tier_name`, `cloud_provider`, `machine_type`, `nodes_count`,
+ *   `advertisedMaxIngress`, `advertisedMaxEgress`, `advertisedMaxPartitionCount`, `advertisedMaxClientCount`,
+ *   `kafka_throughput_limit_node_in_bps`, `kafka_throughput_limit_node_out_bps`,
+ *   `topic_partitions_per_shard`, `kafka_connections_max`.
+ * @returns {Object} An analysis object with:
+ *   - `tierName` (string): tier identifier,
+ *   - `cloudProvider` (string),
+ *   - `machineType` (string),
+ *   - `nodeCount` (number),
+ *   - `discrepancies` (Array): list of per-metric analysis objects (metric name, advertised value, actual/config value, formatted values, percentageDiff, severity, emoji).
  */
 function analyzeTierDiscrepancies(tier) {
   const tierName = tier.Tier || tier.tier_name;
@@ -176,9 +189,18 @@ function analyzeTierDiscrepancies(tier) {
 }
 
 /**
- * Generate a comprehensive discrepancy report
- * @param {Object} options - Options object
- * @returns {string} Formatted report
+ * Generate a comprehensive discrepancy report for Redpanda Cloud Tier configurations.
+ *
+ * Produces a report that compares advertised tier values against actual configuration values
+ * and classifies discrepancies by severity. The report can be returned as Markdown (default)
+ * or as a JSON string containing the generated date, a summary, and per-tier analyses.
+ *
+ * @param {Object} [options] - Options to control input sources and output format.
+ * @param {string} [options.input] - URL or path to the install-pack source used to derive tier data.
+ * @param {string} [options.masterData] - URL or path to master-data.yaml used to resolve advertised values.
+ * @param {string} [options.format] - Output format: 'markdown' or 'json' (case-insensitive). Defaults to 'markdown'.
+ * @returns {string} The generated report as a formatted string (Markdown or JSON).
+ * @throws {Error} If CSV parsing fails, an unsupported format is requested, or report generation encounters an error.
  */
 async function generateDiscrepancyReport(options = {}) {
   const {
