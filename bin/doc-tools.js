@@ -1554,7 +1554,7 @@ automation
   .action(async (options) => {
     // Verify dependencies
     requireCmd('git', 'Install Git: https://git-scm.com/downloads');
-    requireCmd('buf', 'Install buf: https://buf.build/docs/installation');
+    requireCmd('buf', 'buf should be automatically available after npm install');
     
     // Check for OpenAPI bundler using the existing detectBundler function
     try {

@@ -81,6 +81,7 @@
   },
   "dependencies": {
     "@asciidoctor/tabs": "^1.0.0-beta.6",
+    "@bufbuild/buf": "^1.28.1",
     "@octokit/core": "^6.1.2",
     "@octokit/plugin-retry": "^7.1.1",
     "@octokit/rest": "^21.0.1",
