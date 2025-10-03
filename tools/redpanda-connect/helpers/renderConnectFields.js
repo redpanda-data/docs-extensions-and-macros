@@ -64,7 +64,7 @@ module.exports = function renderConnectFields(children, prefix = '') {
 
     // --- Interpolation support notice ---
     const interpolationNotice = 'This field supports xref:configuration:interpolation.adoc#bloblang-queries[interpolation functions].';
-    if (child.interpolation === true) {
+    if (child.interpolated === true) {
       // Only add if not already present (case-insensitive)
       const descLower = desc.toLowerCase();
       if (!descLower.includes('interpolation functions')) {
