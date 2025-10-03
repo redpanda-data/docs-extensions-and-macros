@@ -473,6 +473,8 @@ function toggleLimitColumn(colIdx){
   // card items
   document.querySelectorAll('#cloudTierCards .limit-col-'+colIdx).forEach(el=>{ el.style.display=checked?'':'none'; });
   updateDropdownText('limitFilter','All Limits Selected','Limits Selected');
+  // Update URL to persist limit selection changes
+  filterCloudTierTable();
 }
 
 document.addEventListener('click', (e)=>{

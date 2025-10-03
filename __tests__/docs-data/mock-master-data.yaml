@@ -3,23 +3,23 @@ products:
     redpandaConfigProfileName: "test-tier-basic"
     isPublic: true
     cloudProvider: "testcloud"
-    advertisedMaxIngress: "1000000"
-    advertisedMaxEgress: "2000000"
+    advertisedMaxIngress: 1000000
+    advertisedMaxEgress: 2000000
     advertisedMaxPartitionCount: 100
     advertisedMaxClientCount: 50
   - displayName: "Advanced Tier"
     redpandaConfigProfileName: "test-tier-advanced"
     isPublic: true
     cloudProvider: "testcloud"
-    advertisedMaxIngress: "5000000"
-    advertisedMaxEgress: "10000000"
+    advertisedMaxIngress: 5000000
+    advertisedMaxEgress: 10000000
     advertisedMaxPartitionCount: 1000
     advertisedMaxClientCount: 500
   - displayName: "Internal Tier"
     redpandaConfigProfileName: "test-tier-internal"
     isPublic: false
     cloudProvider: "testcloud"
-    advertisedMaxIngress: "10000000"
-    advertisedMaxEgress: "20000000"
+    advertisedMaxIngress: 10000000
+    advertisedMaxEgress: 20000000
     advertisedMaxPartitionCount: 2000
     advertisedMaxClientCount: 1000

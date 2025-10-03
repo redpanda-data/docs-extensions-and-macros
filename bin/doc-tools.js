@@ -1532,6 +1532,7 @@ automation
           } else {
             const repoRoot = findRepoRoot();
             const fullOutputPath = path.resolve(repoRoot, outputFile);
+            fs.mkdirSync(path.dirname(fullOutputPath), { recursive: true });
             fs.writeFileSync(fullOutputPath, report);
             console.log(`✅ Discrepancy report written to ${outputFile}`);
           }

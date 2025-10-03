@@ -23,6 +23,10 @@ function renderCloudRegions({ providers, clusterTypes, format, lastUpdated, tabs
     if (!Array.isArray(clusterTypes) || clusterTypes.length === 0) {
       throw new Error('No cluster types/regions found in YAML.');
     }
+    // Only allow tabs mode for adoc format unless custom template is provided
+    if (format !== 'adoc' && !template) {
+      throw new Error(`Tabs mode is only supported for AsciiDoc format. Either use format='adoc' or provide a custom template.`);
+    }
   } else {
     if (!Array.isArray(providers) || providers.length === 0) {
       throw new Error('No providers/regions found in YAML.');
@@ -55,9 +59,11 @@ function renderCloudRegions({ providers, clusterTypes, format, lastUpdated, tabs
   }
 
   try {
-    if (tabs) {
+    if (tabs && (format === 'adoc' || template)) {
+      // Use clusterTypes for tabs format (adoc-tabs template or custom template in tabs mode)
       return compiledTemplate({ clusterTypes, lastUpdated });
     } else {
+      // Use providers for regular md/html templates
       // Sort regions alphabetically within each provider for non-tabs format
       const sortedProviders = providers.map(provider => ({
         ...provider,

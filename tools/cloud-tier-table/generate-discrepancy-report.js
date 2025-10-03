@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { generateCloudTierTable, parseYaml, fetchPublicTiers } = require('./generate-cloud-tier-table.js');
+const { generateCloudTierTable } = require('./generate-cloud-tier-table.js');
 const Papa = require('papaparse');
 
 /**
@@ -213,10 +213,16 @@ async function generateDiscrepancyReport(options = {}) {
     // Analyze each tier
     const analyses = rows.map(analyzeTierDiscrepancies);
 
+    // Normalize format input and validate
+    const mode = (format || 'markdown').toLowerCase();
+    if (!['markdown', 'json'].includes(mode)) {
+      throw new Error(`Unsupported format: ${format}. Supported formats are 'markdown' and 'json'.`);
+    }
+
     // Generate report
     let report = '';
 
-    if (format === 'markdown') {
+    if (mode === 'markdown') {
       report += '# Redpanda Cloud Tier Discrepancy Report\n\n';
       report += `Generated on: ${new Date().toISOString().split('T')[0]}\n\n`;
       report += '## Executive Summary\n\n';
@@ -299,7 +305,7 @@ async function generateDiscrepancyReport(options = {}) {
       report += '4. **📈 Partition Capacity**: Some tiers exceed advertised partition limits in config\n';
       report += '5. **🔄 Regular Audits**: Implement automated checks to prevent future discrepancies\n\n';
 
-    } else if (format === 'json') {
+    } else if (mode === 'json') {
       report = JSON.stringify({
         generatedDate: new Date().toISOString(),
         summary: {
