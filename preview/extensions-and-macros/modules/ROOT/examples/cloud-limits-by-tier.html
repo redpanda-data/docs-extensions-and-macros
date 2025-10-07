@@ -27,6 +27,12 @@ To regenerate this content, run:
   }
 }
 
+/* ====== Table container: fixed positioning context ====== */
+.cloud-tier-table-container {
+  position: relative;
+  width: 100%;
+}
+
 /* ====== Table wrapper: horizontal scroll container ====== */
 .cloud-tier-table-wrapper{
   overflow-x:auto;
@@ -37,6 +43,85 @@ To regenerate this content, run:
   border-radius:10px;
   box-shadow:0 1px 3px var(--tbl-shadow);
   background:var(--tbl-bg);
+  /* Force scrollbar to be visible on desktop when needed */
+  scrollbar-width: thin;
+  /* Ensure minimum height for scrollbar visibility */
+  min-height: 0;
+  /* Add padding bottom to ensure scrollbar is always accessible */
+  padding-bottom: 1px;
+}
+
+/* Force scrollbar visibility on webkit browsers (Chrome/Safari) */
+.cloud-tier-table-wrapper::-webkit-scrollbar {
+  height: 12px;
+  -webkit-appearance: none;
+}
+
+.cloud-tier-table-wrapper::-webkit-scrollbar-track {
+  background: var(--tbl-bg);
+  border-radius: 6px;
+}
+
+.cloud-tier-table-wrapper::-webkit-scrollbar-thumb {
+  background: var(--tbl-border);
+  border-radius: 6px;
+  border: 2px solid var(--tbl-bg);
+}
+
+.cloud-tier-table-wrapper::-webkit-scrollbar-thumb:hover {
+  background: var(--tbl-muted);
+}
+
+/* Desktop-specific improvements for horizontal scrolling */
+@media (min-width: 1201px) {
+  .cloud-tier-table-wrapper {
+    /* Ensure scrollbar area is always present on desktop */
+    padding-bottom: 15px;
+    /* Force scrollbar to always show when content overflows */
+    overflow-x: scroll;
+  }
+}
+
+/* ====== Horizontal scroll indicators ====== */
+.scroll-indicator {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--tbl-header-bg);
+  border: 2px solid var(--tbl-border);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--tbl-text);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 10;
+  box-shadow: 0 2px 8px var(--tbl-shadow);
+  user-select: none;
+}
+
+.scroll-indicator:hover {
+  background: var(--tbl-hover);
+  transform: translateY(-50%) scale(1.1);
+}
+
+.scroll-indicator:focus {
+  outline: 2px solid var(--tbl-text);
+  outline-offset: 2px;
+  background: var(--tbl-hover);
+}
+
+.scroll-indicator-left {
+  left: 10px;
+}
+
+.scroll-indicator-right {
+  right: 10px;
 }
 
 /* ====== Base table ====== */
@@ -148,6 +233,7 @@ To regenerate this content, run:
 @media (max-width:1200px){
   .table-search{ min-width:180px; }
   .cloud-tier-table-wrapper{ display:none; }
+  .scroll-indicator{ display:none; }
   #cloudTierCards{ display:block; }
 }
 </style>
@@ -305,8 +391,9 @@ To regenerate this content, run:
 </div>
 
 <!-- TABLE VIEW -->
-<div class="cloud-tier-table-wrapper">
-  <table class="cloud-tier-table" id="cloudTierTable">
+<div class="cloud-tier-table-container">
+  <div class="cloud-tier-table-wrapper">
+    <table class="cloud-tier-table" id="cloudTierTable">
     <thead>
       <tr>
         <th class="sticky-col sticky-header sticky-col-0" onclick="sortCloudTierTable(0)" scope="col">Tier</th>
@@ -1269,6 +1356,7 @@ To regenerate this content, run:
       </tr>
     </tbody>
   </table>
+  </div>
 </div>
 
 <!-- MOBILE CARD VIEW -->
@@ -5117,6 +5205,8 @@ function toggleLimitColumn(colIdx){
   // card items
   document.querySelectorAll('#cloudTierCards .limit-col-'+colIdx).forEach(el=>{ el.style.display=checked?'':'none'; });
   updateDropdownText('limitFilter','All Limits Selected','Limits Selected');
+  // Update URL to persist limit selection changes
+  filterCloudTierTable();
 }
 
 document.addEventListener('click', (e)=>{
@@ -5168,6 +5258,92 @@ document.addEventListener('DOMContentLoaded', ()=>{
   }
 
   filterCloudTierTable();
+  
+  // Initialize horizontal scroll indicators
+  initHorizontalScrollIndicators();
 });
-window.addEventListener('resize', setStickyOffsets);
+window.addEventListener('resize', ()=>{
+  setStickyOffsets();
+  initHorizontalScrollIndicators();
+});
+
+// Add horizontal scroll indicators for better UX
+function initHorizontalScrollIndicators() {
+  const container = document.querySelector('.cloud-tier-table-container');
+  const wrapper = document.querySelector('.cloud-tier-table-wrapper');
+  if (!container || !wrapper) return;
+  
+  // Remove existing indicators
+  container.querySelectorAll('.scroll-indicator').forEach(el => el.remove());
+  
+  const table = wrapper.querySelector('.cloud-tier-table');
+  if (!table) return;
+  
+  // Check if horizontal scrolling is needed
+  const needsHorizontalScroll = table.scrollWidth > wrapper.clientWidth;
+  
+  if (needsHorizontalScroll) {
+    // Add scroll indicators to container (not wrapper) so they stay fixed
+    const rightIndicator = document.createElement('div');
+    rightIndicator.className = 'scroll-indicator scroll-indicator-right';
+    rightIndicator.innerHTML = '→';
+    rightIndicator.title = 'Scroll right to see more columns';
+    rightIndicator.setAttribute('tabindex', '0');
+    rightIndicator.setAttribute('role', 'button');
+    rightIndicator.setAttribute('aria-label', 'Scroll table right');
+    rightIndicator.addEventListener('click', () => {
+      wrapper.scrollBy({ left: 200, behavior: 'smooth' });
+    });
+    rightIndicator.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        wrapper.scrollBy({ left: 200, behavior: 'smooth' });
+      }
+    });
+    container.appendChild(rightIndicator);
+    
+    const leftIndicator = document.createElement('div');
+    leftIndicator.className = 'scroll-indicator scroll-indicator-left';
+    leftIndicator.innerHTML = '←';
+    leftIndicator.title = 'Scroll left';
+    leftIndicator.setAttribute('tabindex', '0');
+    leftIndicator.setAttribute('role', 'button');
+    leftIndicator.setAttribute('aria-label', 'Scroll table left');
+    leftIndicator.style.opacity = '0'; // Initially hidden
+    leftIndicator.addEventListener('click', () => {
+      wrapper.scrollBy({ left: -200, behavior: 'smooth' });
+    });
+    leftIndicator.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        wrapper.scrollBy({ left: -200, behavior: 'smooth' });
+      }
+    });
+    container.appendChild(leftIndicator);
+    
+    // Update indicators on scroll
+    wrapper.addEventListener('scroll', updateScrollIndicators);
+    updateScrollIndicators.call(wrapper);
+  }
+}
+
+function updateScrollIndicators() {
+  const wrapper = this;
+  const container = wrapper.closest('.cloud-tier-table-container');
+  if (!container) return;
+  
+  const leftIndicator = container.querySelector('.scroll-indicator-left');
+  const rightIndicator = container.querySelector('.scroll-indicator-right');
+  
+  if (!leftIndicator || !rightIndicator) return;
+  
+  const scrollLeft = wrapper.scrollLeft;
+  const maxScrollLeft = wrapper.scrollWidth - wrapper.clientWidth;
+  
+  // Show/hide left indicator
+  leftIndicator.style.opacity = scrollLeft > 10 ? '1' : '0';
+  
+  // Show/hide right indicator  
+  rightIndicator.style.opacity = scrollLeft < maxScrollLeft - 10 ? '1' : '0';
+}
 </script>
