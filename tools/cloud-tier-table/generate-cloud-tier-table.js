@@ -36,7 +36,11 @@ const LIMIT_KEYS = [
   'kafka_topics_max',
 ];
 
-// Map header keys to human readable labels
+/**
+ * Map a header key to a human-readable label.
+ * @param {string} key - The header key to convert.
+ * @returns {string} The human-readable label for `key`, or `key` unchanged if no mapping exists.
+ */
 function humanLabel(key) {
   if (key === 'cloud_provider') return 'Cloud Provider';
   if (key === 'machine_type') return 'Machine Type';
@@ -48,14 +52,24 @@ function humanLabel(key) {
   return key;
 }
 
-// Map provider values to human readable
+/**
+ * Convert a provider identifier into a human-friendly provider name.
+ * @param {*} val - Provider identifier (e.g., 'aws', 'gcp', 'azure'); comparison is case-insensitive. Falsy values produce an empty string.
+ * @returns {string} `'AWS'`, `'GCP'`, or `'Azure'` for known providers; empty string for falsy input; otherwise returns the original value.
+ */
 function humanProvider(val) {
   if (!val) return '';
   const map = { aws: 'AWS', gcp: 'GCP', azure: 'Azure' };
   return map[String(val).toLowerCase()] || val;
 }
 
-// Fetch public tiers from master-data.yaml
+/**
+ * Loads master-data.yaml (from an HTTP URL or local path), validates its products list, and returns a normalized list of public tiers.
+ *
+ * @param {string} masterDataUrl - HTTP URL (GitHub API file response expected) or local filesystem path to the master-data.yaml file.
+ * @returns {Array<Object>} An array of public tier objects with the following fields: `displayName`, `configProfileName`, `cloudProvider`, `advertisedMaxIngress`, `advertisedMaxEgress`, `advertisedMaxPartitionCount`, and `advertisedMaxClientCount`.
+ * @throws {Error} If masterDataUrl is missing or not a string, fetching or file reading fails, YAML parsing fails, the products array is missing/invalid, or no valid public tiers are found.
+ */
 async function fetchPublicTiers(masterDataUrl) {
   try {
     if (!masterDataUrl || typeof masterDataUrl !== 'string') {
@@ -161,6 +175,15 @@ async function fetchPublicTiers(masterDataUrl) {
   }
 }
 
+/**
+ * Load and parse YAML from a local file path, HTTP(S) URL, or the special GitHub install-pack API directory.
+ *
+ * When given the GitHub install-pack API directory URL, selects the latest versioned YAML file (names like `1.2.yml` or `1.2.3.yaml`) and parses it. For HTTP(S) inputs, fetches the URL and parses the response body. For local file paths, reads and parses the file contents. If GITHUB_TOKEN is set, requests include Authorization and User-Agent headers.
+ *
+ * @param {string} input - Local filesystem path, HTTP(S) URL, or the GitHub API directory URL 'https://api.github.com/repos/redpanda-data/cloudv2/contents/install-pack'.
+ * @returns {Object} The parsed YAML content as a JavaScript object.
+ * @throws {Error} If `input` is not a valid string, the network or filesystem access fails, no suitable versioned YAML is found in the install-pack directory, or the YAML content cannot be parsed into an object.
+ */
 async function parseYaml(input) {
   try {
     if (!input || typeof input !== 'string') {
@@ -333,10 +356,11 @@ function extractVersion(profileName) {
 }
 
 /**
- * Find the highest version config profile for a given base name
- * @param {Object} configProfiles - All config profiles
- * @param {string} targetProfile - The target profile name from master data
- * @returns {string} The highest version profile name
+ * Selects the highest-versioned config profile name matching the given target profile.
+ *
+ * @param {Object} configProfiles - Map of profile names to profile definitions.
+ * @param {string} targetProfile - The target profile name to match (from master data).
+ * @returns {string} The matching profile name with the largest numeric `-vN` suffix, or `targetProfile` if no versioned variants are found or on failure.
  */
 function findHighestVersionProfile(configProfiles, targetProfile) {
   try {
@@ -384,6 +408,18 @@ function findHighestVersionProfile(configProfiles, targetProfile) {
   }
 }
 
+/**
+ * Builds table row objects by merging public tier metadata with matching config profiles.
+ *
+ * Each returned row maps the tier display name to the requested limit keys (either `customLimits` or the module's default keys).
+ * Missing values are represented as the string "N/A". Duplicate rows with the same tier name and resolved config profile are removed.
+ *
+ * @param {Object} tiers - Parsed tiers YAML object; must contain a `config_profiles` object mapping profile names to definitions.
+ * @param {Array<Object>} publicTiers - Array of public tier descriptors; each entry must include `displayName` and `configProfileName`.
+ * @param {Array<string>} [customLimits] - Optional list of limit keys to extract; when omitted the module's default LIMIT_KEYS are used.
+ * @returns {Array<Object>} An array of row objects. Each row has a `tier` property (display name) and entries for each requested limit key.
+ * @throws {Error} If inputs are invalid or row construction fails (e.g., missing `config_profiles`, non-array `publicTiers`, or other fatal processing errors).
+ */
 function buildTableRows(tiers, publicTiers, customLimits) {
   try {
     // Use custom limits if provided, otherwise use default LIMIT_KEYS
@@ -519,6 +555,13 @@ function buildTableRows(tiers, publicTiers, customLimits) {
   }
 }
 
+/**
+ * Render an array of tier rows as a Markdown table.
+ *
+ * @param {Array<Object>} rows - Array of row objects where each row has a `tier` property and keys matching entries in `limitKeys`.
+ * @param {Array<string>} [limitKeys=LIMIT_KEYS] - Ordered list of keys to include as columns after the "Tier" column; each key's value is taken from the corresponding property on a row.
+ * @returns {string} A Markdown-formatted table with a header row ("Tier" followed by the provided keys' labels) and one row per entry in `rows`.
+ */
 function toMarkdown(rows, limitKeys = LIMIT_KEYS) {
   const headers = ['Tier', ...limitKeys.map(humanLabel)];
   const lines = [];
@@ -530,6 +573,13 @@ function toMarkdown(rows, limitKeys = LIMIT_KEYS) {
   return lines.join('\n');
 }
 
+/**
+ * Render table rows as an AsciiDoc table.
+ *
+ * @param {Array<Object>} rows - Array of row objects; each object must include a `tier` property and values for the keys listed in `limitKeys`.
+ * @param {Array<string>} [limitKeys=LIMIT_KEYS] - Ordered list of keys to include as columns (excluding the leading "Tier" column).
+ * @returns {string} An AsciiDoc-formatted table containing a header row ("Tier" plus humanized `limitKeys`) and one data row per entry in `rows`.
+ */
 function toAsciiDoc(rows, limitKeys = LIMIT_KEYS) {
   const headers = ['Tier', ...limitKeys.map(humanLabel)];
   let out = '[options="header"]\n|===\n';
@@ -541,6 +591,13 @@ function toAsciiDoc(rows, limitKeys = LIMIT_KEYS) {
   return out;
 }
 
+/**
+ * Render rows as CSV with a "Tier" column followed by the provided limit keys.
+ *
+ * @param {Array<Object>} rows - Array of row objects where each object contains a `tier` property and keys matching `limitKeys`.
+ * @param {Array<string>} [limitKeys=LIMIT_KEYS] - Ordered list of keys to include as CSV columns after the "Tier" column.
+ * @returns {string} CSV-formatted text with a header row and one line per input row; values are quoted and internal quotes doubled.
+ */
 function toCSV(rows, limitKeys = LIMIT_KEYS) {
   const headers = ['Tier', ...limitKeys];
   const esc = v => {
@@ -555,6 +612,18 @@ function toCSV(rows, limitKeys = LIMIT_KEYS) {
   return lines.join('\n');
 }
 
+/**
+ * Render the provided rows into HTML using a Handlebars template.
+ *
+ * The template is compiled from the file at `templatePath` and is invoked with a context
+ * containing: `rows`, `headers` (array of {name, index_plus_one}), `limitKeys`, `cloudProviders`,
+ * and `uniqueTiers`.
+ *
+ * @param {Array<Object>} rows - Table row objects to render; each row is passed through to the template.
+ * @param {string} templatePath - Filesystem path to a Handlebars template.
+ * @param {Array<string>} [limitKeys=LIMIT_KEYS] - Ordered list of limit keys used to build headers and passed to the template.
+ * @returns {string} The rendered HTML string.
+ */
 function toHTML(rows, templatePath, limitKeys = LIMIT_KEYS) {
   const fs = require('fs');
   const handlebars = require('handlebars');
@@ -579,6 +648,18 @@ function toHTML(rows, templatePath, limitKeys = LIMIT_KEYS) {
   });
 }
 
+/**
+ * Generate a cloud tier table from local or remote YAML input and master-data, rendered in the requested format.
+ *
+ * @param {Object} options - Function options.
+ * @param {string} options.input - Path or URL to the input YAML (or the special GitHub install-pack API directory URL) containing tiers/config profiles.
+ * @param {string} [options.output] - Output destination (not used by this function; included for CLI compatibility).
+ * @param {string} [options.format='html'] - Output format: 'html', 'md' (Markdown), 'adoc' (AsciiDoc), or 'csv'.
+ * @param {string} [options.template] - Path to a Handlebars template to use for rendering; for 'html' format a default template is used when this is not provided.
+ * @param {string} [options.masterData] - URL or filesystem path to master-data.yaml used to fetch public tier definitions.
+ * @param {string[]} [options.limits] - Custom ordered list of limit keys to include; when omitted the default LIMIT_KEYS set is used.
+ * @returns {string} Generated table content in the requested format (HTML, Markdown, AsciiDoc, or CSV).
+ */
 async function generateCloudTierTable({ 
   input,
   output,

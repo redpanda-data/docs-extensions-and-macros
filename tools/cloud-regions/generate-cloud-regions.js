@@ -193,11 +193,10 @@ function processCloudRegions(yamlText) {
 }
 
 /**
- * Processes cloud regions data and organizes it by cluster type (BYOC/Dedicated) for tabs output.
- *
- * @param {string} yamlText - The YAML content to parse and process.
- * @return {Object} An object with clusterTypes array, each containing providers organized by cluster type.
- * @throws {Error} If the YAML is malformed or missing the required `regions` array.
+ * Parse cloud-regions YAML and group available regions by cluster type (BYOC or Dedicated) and provider for tabbed output.
+ * @param {string} yamlText - YAML document containing `regions` and optional `products`; regions must include `cloudProvider`, `name`, and `redpandaProductAvailability` entries.
+ * @returns {{clusterTypes: Array<{name: string, providers: Array<{name: string, regions: Array<{name: string}>}>}>}} An object with a `clusterTypes` array; each entry lists a cluster type (`BYOC` or `Dedicated`) and its providers (only providers with at least one region), each containing sorted region names.
+ * @throws {Error} If the YAML is malformed or does not contain a top-level `regions` array.
  */
 function processCloudRegionsForTabs(yamlText) {
   let data;
@@ -297,10 +296,10 @@ function processCloudRegionsForTabs(yamlText) {
 }
 
 /**
- * Fetches, processes, and renders cloud region and tier data from a GitHub YAML file.
+ * Generate rendered cloud region and tier output from a GitHub-hosted YAML file.
  *
- * Retrieves YAML data from GitHub using the GitHub API (to avoid caching issues),
- * parses and filters it to include only public cloud regions and tiers, and renders the result in the requested format.
+ * Fetches the YAML from the specified repository path, parses and filters it to include only public providers/regions/tiers,
+ * and renders the result in the requested format. When `options.tabs` is true, returns separate rendered outputs per cluster type.
  *
  * @param {Object} options - Options for generating cloud regions.
  * @param {string} options.owner - GitHub repository owner.
@@ -309,10 +308,10 @@ function processCloudRegionsForTabs(yamlText) {
  * @param {string} [options.ref='main'] - Git reference (branch, tag, or commit SHA).
  * @param {string} [options.format='md'] - The output format (e.g., 'md' for Markdown).
  * @param {string} [options.token] - Optional GitHub token for authentication.
- * @param {string} [options.template] - Optional path to custom Handlebars template.
- * @param {boolean} [options.tabs=false] - Whether to generate AsciiDoc with tabs organized by cluster type.
- * @returns {string} The rendered cloud regions output.
- * @throws {Error} If fetching, processing, or rendering fails, or if no valid providers or regions are found.
+ * @param {string} [options.template] - Optional path to a custom Handlebars template.
+ * @param {boolean} [options.tabs=false] - When true, produce separate rendered outputs organized by cluster type (keys are cluster type names lowercased).
+ * @returns {string|Object} Rendered output as a string, or when `options.tabs` is true an object mapping lowercase cluster type names to rendered strings.
+ * @throws {Error} If fetching, parsing, processing, or rendering fails, or if no valid providers/regions remain after filtering.
  */
 async function generateCloudRegions({ owner, repo, path, ref = 'main', format = 'md', token, template, tabs = false }) {
   let yamlText;
