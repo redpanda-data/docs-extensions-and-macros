@@ -1,5 +1,5 @@
 products:
-  - displayName: "Basic Tier"
+  - name: "Basic Tier"
     redpandaConfigProfileName: "test-tier-basic"
     isPublic: true
     cloudProvider: "testcloud"
@@ -7,7 +7,7 @@ products:
     advertisedMaxEgress: 2000000
     advertisedMaxPartitionCount: 100
     advertisedMaxClientCount: 50
-  - displayName: "Advanced Tier"
+  - name: "Advanced Tier"
     redpandaConfigProfileName: "test-tier-advanced"
     isPublic: true
     cloudProvider: "testcloud"
@@ -15,7 +15,7 @@ products:
     advertisedMaxEgress: 10000000
     advertisedMaxPartitionCount: 1000
     advertisedMaxClientCount: 500
-  - displayName: "Internal Tier"
+  - name: "Internal Tier"
     redpandaConfigProfileName: "test-tier-internal"
     isPublic: false
     cloudProvider: "testcloud"

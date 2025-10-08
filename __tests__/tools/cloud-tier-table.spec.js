@@ -34,7 +34,7 @@ describe('generateCloudTierTable', () => {
     expect(result).not.toContain('Internal Tier'); // isPublic: false should be excluded
   });
 
-  it('should use display names from master-data instead of config profile names', async () => {
+  it('should use names from master-data instead of config profile names', async () => {
     const input = path.resolve(__dirname, '../docs-data/mock-tier.yml');
     const masterDataPath = path.resolve(__dirname, '../docs-data/mock-master-data.yaml');
     const result = await generateCloudTierTable({
@@ -44,8 +44,8 @@ describe('generateCloudTierTable', () => {
       template: undefined,
       masterData: masterDataPath
     });
-    expect(result).toContain('Basic Tier'); // displayName from master-data
-    expect(result).toContain('Advanced Tier'); // displayName from master-data
+    expect(result).toContain('Basic Tier'); // name from master-data
+    expect(result).toContain('Advanced Tier'); // name from master-data
     expect(result).not.toContain('test-tier-basic'); // config profile name should not appear
     expect(result).not.toContain('test-tier-advanced'); // config profile name should not appear
   });
