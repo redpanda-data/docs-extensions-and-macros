@@ -230,10 +230,10 @@ To regenerate this content, run:
       <span class="dropdown-text">All Limits Selected</span><span class="dropdown-arrow">▼</span>
     </button>
     <div class="dropdown-checkbox-menu" id="limitFilterMenu" role="menu" aria-labelledby="limitFilterToggle">
-      {{#each limitKeys}}
+      {{#each headers}}
         <label class="dropdown-checkbox-option">
           <input type="checkbox" value="{{@index}}" checked onchange="toggleLimitColumn({{@index}})">
-          <span>{{this}}</span>
+          <span>{{name}}</span>
         </label>
       {{/each}}
     </div>
@@ -359,11 +359,11 @@ function updateTierDropdown(){
       .map(cb => cb.value)
   );
 
-  // Extract tier numbers from tier names (e.g., 'Tier 1', 'Tier 2 - x86' -> '1', '2')
+  // Extract tier numbers from tier names (e.g., 'tier-1-aws-v2-arm', 'tier-2-gcp-v2-x86' -> '1', '2')
   let tierNumbers = window.cloudTierTableRows
     .filter(r => !selectedProviders.length || selectedProviders.includes(r.provider))
     .map(r => {
-      const match = r.tier.match(/Tier (\d+)/i);
+      const match = r.tier.match(/tier-(\d+)/i);
       return match ? match[1] : null;
     })
     .filter(Boolean);
@@ -458,7 +458,7 @@ function filterCloudTierTable(){
       show = false;
     } else {
       // Match by tier number
-      const match = tier.match(/Tier (\d+)/i);
+      const match = tier.match(/tier-(\d+)/i);
       const tierNum = match ? match[1] : null;
       if(!tierNum || !selTiers.includes(tierNum)) show=false;
     }
@@ -490,7 +490,7 @@ function filterCloudTierTable(){
     if(selTiers.length === 0) {
       show = false;
     } else {
-      const match = tier.match(/Tier (\d+)/i);
+      const match = tier.match(/tier-(\d+)/i);
       const tierNum = match ? match[1] : null;
       if(!tierNum || !selTiers.includes(tierNum)) show=false;
     }

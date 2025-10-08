@@ -11,28 +11,10 @@ const LIMIT_KEYS = [
   'nodes_count',
   // Master data advertised limits
   'advertisedMaxIngress',
-  'advertisedMaxEgress', 
+  'advertisedMaxEgress',
   'advertisedMaxPartitionCount',
   'advertisedMaxClientCount',
   // cluster_config
-  'topic_partitions_per_shard',
-  'topic_memory_per_partition',
-  'kafka_connections_max',
-  'max_concurrent_producer_ids',
-  'log_segment_size',
-  'log_segment_size_min',
-  'log_segment_size_max',
-  'compacted_log_segment_size',
-  'max_compacted_log_segment_size',
-  'retention_local_target_capacity_percent',
-  'cloud_storage_cache_size_percent',
-  'retention_local_target_ms_default',
-  'cloud_storage_segment_max_upload_interval_sec',
-  'log_segment_ms_min',
-  'kafka_connection_rate_limit',
-  'kafka_throughput_limit_node_in_bps',
-  'kafka_throughput_limit_node_out_bps',
-  'kafka_batch_max_bytes',
   'kafka_topics_max',
 ];
 
@@ -49,6 +31,7 @@ function humanLabel(key) {
   if (key === 'advertisedMaxEgress') return 'Max Egress (bps)';
   if (key === 'advertisedMaxPartitionCount') return 'Max Partitions';
   if (key === 'advertisedMaxClientCount') return 'Max Client Connections';
+  if (key === 'kafka_topics_max') return 'Max Kafka Topics';
   return key;
 }
 
@@ -67,7 +50,7 @@ function humanProvider(val) {
  * Loads master-data.yaml (from an HTTP URL or local path), validates its products list, and returns a normalized list of public tiers.
  *
  * @param {string} masterDataUrl - HTTP URL (GitHub API file response expected) or local filesystem path to the master-data.yaml file.
- * @returns {Array<Object>} An array of public tier objects with the following fields: `displayName`, `configProfileName`, `cloudProvider`, `advertisedMaxIngress`, `advertisedMaxEgress`, `advertisedMaxPartitionCount`, and `advertisedMaxClientCount`.
+ * @returns {Array<Object>} An array of public tier objects with the following fields: `name`, `configProfileName`, `cloudProvider`, `advertisedMaxIngress`, `advertisedMaxEgress`, `advertisedMaxPartitionCount`, and `advertisedMaxClientCount`.
  * @throws {Error} If masterDataUrl is missing or not a string, fetching or file reading fails, YAML parsing fails, the products array is missing/invalid, or no valid public tiers are found.
  */
 async function fetchPublicTiers(masterDataUrl) {
@@ -126,12 +109,12 @@ async function fetchPublicTiers(masterDataUrl) {
             errors.push(`Product at index ${index} is not a valid object`);
             return false;
           }
-          if (!product.displayName) {
-            errors.push(`Product at index ${index} missing displayName`);
+          if (!product.name) {
+            errors.push(`Product at index ${index} missing name`);
             return false;
           }
           if (!product.redpandaConfigProfileName) {
-            errors.push(`Product "${product.displayName}" missing redpandaConfigProfileName`);
+            errors.push(`Product "${product.name}" missing redpandaConfigProfileName`);
             return false;
           }
           if (product.isPublic !== true) {
@@ -146,7 +129,7 @@ async function fetchPublicTiers(masterDataUrl) {
         }
       })
       .map(product => ({
-        displayName: product.displayName,
+        name: product.name,
         configProfileName: product.redpandaConfigProfileName,
         cloudProvider: product.cloudProvider,
         advertisedMaxIngress: product.advertisedMaxIngress,
@@ -415,7 +398,7 @@ function findHighestVersionProfile(configProfiles, targetProfile) {
  * Missing values are represented as the string "N/A". Duplicate rows with the same tier name and resolved config profile are removed.
  *
  * @param {Object} tiers - Parsed tiers YAML object; must contain a `config_profiles` object mapping profile names to definitions.
- * @param {Array<Object>} publicTiers - Array of public tier descriptors; each entry must include `displayName` and `configProfileName`.
+ * @param {Array<Object>} publicTiers - Array of public tier descriptors; each entry must include `name` and `configProfileName`.
  * @param {Array<string>} [customLimits] - Optional list of limit keys to extract; when omitted the module's default LIMIT_KEYS are used.
  * @returns {Array<Object>} An array of row objects. Each row has a `tier` property (display name) and entries for each requested limit key.
  * @throws {Error} If inputs are invalid or row construction fails (e.g., missing `config_profiles`, non-array `publicTiers`, or other fatal processing errors).
@@ -451,8 +434,8 @@ function buildTableRows(tiers, publicTiers, customLimits) {
           if (!publicTier.configProfileName) {
             throw new Error(`Public tier at index ${index} missing configProfileName`);
           }
-          if (!publicTier.displayName) {
-            throw new Error(`Public tier at index ${index} missing displayName`);
+          if (!publicTier.name) {
+            throw new Error(`Public tier at index ${index} missing name`);
           }
 
           // Find the highest version profile for this tier
@@ -469,14 +452,14 @@ function buildTableRows(tiers, publicTiers, customLimits) {
         const exists = tiers.config_profiles[publicTier.actualProfileName];
         if (!exists) {
           errorCount++;
-          errors.push(`Config profile "${publicTier.actualProfileName}" not found for tier "${publicTier.displayName}"`);
+          errors.push(`Config profile "${publicTier.actualProfileName}" not found for tier "${publicTier.name}"`);
         }
         return exists;
       })
       .map(publicTier => {
         try {
           const configProfile = tiers.config_profiles[publicTier.actualProfileName];
-          const row = { tier: publicTier.displayName };
+          const row = { tier: publicTier.name };
           
           for (const key of limitKeys) {
             try {
@@ -499,7 +482,7 @@ function buildTableRows(tiers, publicTiers, customLimits) {
               }
               row[key] = value;
             } catch (error) {
-              console.warn(`Warning: Failed to process key "${key}" for tier "${publicTier.displayName}": ${error.message}`);
+              console.warn(`Warning: Failed to process key "${key}" for tier "${publicTier.name}": ${error.message}`);
               row[key] = 'N/A';
             }
           }
@@ -510,7 +493,7 @@ function buildTableRows(tiers, publicTiers, customLimits) {
           return row;
         } catch (error) {
           errorCount++;
-          errors.push(`Error building row for tier "${publicTier.displayName}": ${error.message}`);
+          errors.push(`Error building row for tier "${publicTier.name}": ${error.message}`);
           return null;
         }
       })
@@ -539,16 +522,60 @@ function buildTableRows(tiers, publicTiers, customLimits) {
         }
       });
 
+    // Group rows with identical data values
+    const groupedRows = [];
+    const processedRows = new Set();
+    
+    for (let i = 0; i < rows.length; i++) {
+      if (processedRows.has(i)) continue;
+      
+      const currentRow = rows[i];
+      const duplicateIndices = [i];
+      
+      // Find all rows with identical data (excluding tier name)
+      for (let j = i + 1; j < rows.length; j++) {
+        if (processedRows.has(j)) continue;
+        
+        const otherRow = rows[j];
+        let isIdentical = true;
+        
+        // Compare all limit values (excluding the tier name)
+        for (const key of limitKeys) {
+          if (currentRow[key] !== otherRow[key]) {
+            isIdentical = false;
+            break;
+          }
+        }
+        
+        if (isIdentical) {
+          duplicateIndices.push(j);
+        }
+      }
+      
+      // Mark all duplicate indices as processed
+      duplicateIndices.forEach(idx => processedRows.add(idx));
+      
+      // Create a new row with combined tier names
+      const combinedRow = { ...currentRow };
+      if (duplicateIndices.length > 1) {
+        // Sort tier names for consistent ordering
+        const tierNames = duplicateIndices.map(idx => rows[idx].tier).sort();
+        combinedRow.tier = tierNames.join(', ');
+      }
+      
+      groupedRows.push(combinedRow);
+    }
+
     // Log processing summary
     if (process.env.DEBUG_TIER_PROCESSING || errors.length > 0) {
-      console.log(`Tier processing summary: ${processedCount} processed, ${errorCount} errors, ${rows.length} final rows`);
+      console.log(`Tier processing summary: ${processedCount} processed, ${errorCount} errors, ${rows.length} individual rows, ${groupedRows.length} final grouped rows`);
       if (errors.length > 0) {
         console.warn('Processing errors:');
         errors.forEach(error => console.warn(`  - ${error}`));
       }
     }
 
-    return rows;
+    return groupedRows;
   } catch (error) {
     console.error(`Fatal error in buildTableRows: ${error.message}`);
     throw new Error(`Failed to build table rows: ${error.message}`);
