@@ -12,12 +12,12 @@ logger = logging.getLogger(__name__)
 # the centralized enterprise value processing logic without creating import cycles.
 def get_process_enterprise_value():
     """
-    Lazily import and return the centralized `process_enterprise_value` function from `property_extractor`.
+    Lazily load the centralized process_enterprise_value function from property_extractor.
     
-    Attempts to import `process_enterprise_value` and return it to avoid circular-import issues. If the import fails an error message is printed and None is returned.
+    Attempts to import and return the `process_enterprise_value` callable; logs an error and returns `None` if the import fails.
     
     Returns:
-        Callable or None: The `process_enterprise_value` callable when available, otherwise `None`.
+        The `process_enterprise_value` callable if available, `None` otherwise.
     """
     try:
         from property_extractor import process_enterprise_value
@@ -199,29 +199,29 @@ class TypeTransformer:
 
     def get_cpp_type_from_declaration(self, declaration):
         """
-        Extract the inner type from C++ property declarations.
+        Extract the inner C++ type from wrapped declarations like `property<T>`, `std::optional<T>`, `std::vector<T>`, or `one_or_many_property<T>`.
         
-        This method handles various C++ template types and extracts the core type T from:
-        - property<T> -> T
-        - std::optional<T> -> T
-        - std::vector<T> -> T  
-        - one_or_many_property<T> -> T (Redpanda's flexible array type)
+        Parses common wrapper templates and returns the unwrapped type name (for example, returns `model::broker_endpoint` from `one_or_many_property<model::broker_endpoint>`). The returned type is intended for downstream mapping to JSON schema types and default value resolution.
         
-        For one_or_many_property, this is crucial because it allows the same property
-        to accept either a single value or an array of values in the configuration.
-        Examples:
-        - one_or_many_property<model::broker_endpoint> -> model::broker_endpoint
-        - one_or_many_property<endpoint_tls_config> -> endpoint_tls_config
-        
-        The extracted type is then used to determine the JSON schema type and
-        for resolving default values from the definitions.
+        Returns:
+            raw_type (str): The extracted inner C++ type as a string, or a best-effort fragment of the declaration if a precise extraction cannot be performed.
         """
         one_line_declaration = declaration.replace("\n", "").strip()
         
         # Extract property template content with proper nesting handling
         # This handles cases like property<std::vector<config::sasl_mechanisms_override>>
         def extract_template_content(text, template_name):
-            """Extract content from a template, handling nested angle brackets correctly."""
+            """
+            Extracts the inner contents of the first occurrence of a template with the given name, correctly handling nested angle brackets.
+            
+            Parameters:
+                text (str): The string to search for the template.
+                template_name (str): The template name (e.g., "std::vector" or "property").
+            
+            Returns:
+                str or None: The substring inside the outermost angle brackets for the matched template (excluding the brackets),
+                or `None` if the template is not found or angle brackets are unbalanced.
+            """
             start_idx = text.find(f'{template_name}<')
             if start_idx == -1:
                 return None
@@ -270,6 +270,15 @@ class TypeTransformer:
         return raw_type
 
     def get_type_from_declaration(self, declaration):
+        """
+        Map a C++ type declaration string to a simplified, user-facing type name.
+        
+        Parameters:
+            declaration (str): C++ type declaration or template expression from which the effective type will be derived.
+        
+        Returns:
+            str: A JSON-schema-friendly type name such as "integer", "number", "string", "string[]", or "boolean". If no mapping matches, returns the normalized/raw extracted C++ type.
+        """
         raw_type = self.get_cpp_type_from_declaration(declaration)
         type_mapping = [  # (regex, type)
             ("^u(nsigned|int)", "integer"),
@@ -299,6 +308,17 @@ class TypeTransformer:
         return raw_type
 
     def parse(self, property, info, file_pair):
+        """
+        Set the property's "type" field to the JSON schema type derived from the C++ declaration.
+        
+        Parameters:
+        	property (dict): Mutable property bag to be updated.
+        	info (dict): Parsed property metadata; its "declaration" field is used to determine the type.
+        	file_pair: Unused here; present for transformer interface compatibility.
+        
+        Returns:
+        	property (dict): The same property bag with "type" set to the derived type string.
+        """
         property["type"] = self.get_type_from_declaration(info["declaration"])
         return property
 
@@ -455,14 +475,33 @@ class FriendlyDefaultTransformer:
     CHRONO_PATTERN = r"std::chrono::(\w+)\(([^)]+)\)"
     
     def __init__(self):
-        """Initialize the transformer with cached resolver function."""
+        """
+        Initialize the transformer and set up a placeholder for a lazily-loaded resolver.
+        
+        Sets self._resolver to None to indicate the resolver has not been loaded yet.
+        """
         self._resolver = None
     
     def accepts(self, info, file_pair):
+        """
+        Determine whether the transformer should run for the given property info by checking for a fourth parameter.
+        
+        Parameters:
+        	info (dict): Parsed property metadata; expects a "params" list when present.
+        	file_pair (tuple): Source/implementation file pair (unused by this check).
+        
+        Returns:
+        	`true` if `info["params"]` exists and contains at least four items, `false` otherwise.
+        """
         return info.get("params") and len(info["params"]) > 3
 
     def _get_resolver(self):
-        """Lazy-load and cache the identifier resolver function."""
+        """
+        Lazily load and cache the constexpr identifier resolver.
+        
+        Returns:
+            callable or None: The resolver function if available, or `None` if it could not be loaded.
+        """
         if self._resolver is None:
             resolver = get_resolve_constexpr_identifier()
             self._resolver = resolver if resolver else False
@@ -470,13 +509,13 @@ class FriendlyDefaultTransformer:
 
     def _resolve_identifier(self, identifier):
         """
-        Resolve a constexpr identifier using dynamic lookup.
+        Resolve a constexpr identifier to its corresponding string value.
         
-        Args:
-            identifier (str): The identifier to resolve (e.g., "scram", "gssapi")
-            
+        Parameters:
+            identifier (str): Identifier to resolve (for example, "scram" or "gssapi").
+        
         Returns:
-            str or None: The resolved value, or None if not resolvable
+            str or None: The resolved string value if successful, `None` when the identifier is invalid or cannot be resolved.
         """
         if not identifier or not isinstance(identifier, str):
             logger.warning(f"Invalid identifier for resolution: {identifier}")
@@ -495,13 +534,15 @@ class FriendlyDefaultTransformer:
     
     def _process_sstring_constructor(self, item):
         """
-        Process ss::sstring{identifier} constructor patterns.
+        Convert an ss::sstring{identifier} constructor string to its resolved value when possible.
         
-        Args:
-            item (str): The item to process
-            
+        If the input matches the ss::sstring{...} pattern, attempts to resolve the enclosed identifier and returns the resolved string. If resolution fails, returns the raw identifier. If the input does not match the pattern or is falsy, returns it unchanged.
+        
+        Parameters:
+            item (str): The constructor expression or string to process.
+        
         Returns:
-            str: The processed item value
+            str: The resolved string when resolution succeeds, the extracted identifier if resolution fails, or the original input if it does not match.
         """
         if not item:
             return item
@@ -523,13 +564,13 @@ class FriendlyDefaultTransformer:
 
     def _parse_vector_contents(self, contents):
         """
-        Parse vector initializer contents into a list of processed items.
+        Parse a comma-separated std::vector initializer string into a list of cleaned, processed items.
         
-        Args:
-            contents (str): The contents of the vector initializer
-            
+        Parameters:
+            contents (str): The inner contents of a vector initializer (e.g. '\"a\", ss::sstring{ID}, \"b\"'); may be empty or None.
+        
         Returns:
-            list: List of processed items
+            list: Ordered list of processed, unquoted items with empty entries omitted.
         """
         if not contents:
             return []
@@ -548,15 +589,15 @@ class FriendlyDefaultTransformer:
 
     def parse(self, property, info, file_pair):
         """
-        Transform C++ default values into user-friendly JSON representations.
+        Convert a C++ default expression into a JSON-friendly value and store it on the property under the "default" key.
         
-        Args:
-            property (dict): Property dictionary to modify
-            info (dict): Parsed property information
-            file_pair: File pair context (unused)
-            
+        Parameters:
+            property (dict): Property dictionary to modify; updated in place with a "default" entry.
+            info (dict): Parsed property information; the default expression is expected at info["params"][3]["value"].
+            file_pair: File pair context (ignored by this function).
+        
         Returns:
-            dict: The modified property dictionary
+            dict: The modified property dictionary with a normalized "default" value.
         """
         default = info["params"][3]["value"]
         
