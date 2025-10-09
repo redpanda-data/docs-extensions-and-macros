@@ -117,6 +117,24 @@ def process_enterprise_value(enterprise_str):
     """
     enterprise_str = enterprise_str.strip()
     
+    # Handle special SASL mechanism function names 
+    if enterprise_str == "is_enterprise_sasl_mechanism":
+        # Dynamically look up enterprise SASL mechanisms from source
+        enterprise_mechanisms = get_enterprise_sasl_mechanisms()
+        if enterprise_mechanisms:
+            return enterprise_mechanisms
+        else:
+            # Fallback to known values if lookup fails
+            return ["GSSAPI", "OAUTHBEARER"]
+    elif enterprise_str == "is_enterprise_sasl_mechanisms_override":
+        # Get the enterprise mechanisms dynamically for a more accurate description
+        enterprise_mechanisms = get_enterprise_sasl_mechanisms()
+        if enterprise_mechanisms:
+            mechanism_list = ", ".join(enterprise_mechanisms)
+            return f"Any override containing enterprise mechanisms ({mechanism_list})."
+        else:
+            return "Any override containing enterprise mechanisms."
+    
     # FIRST: Handle std::vector initialization patterns (highest priority)
     # This must come before enum processing because vectors can contain enums
     # Tolerate optional whitespace around braces
@@ -320,6 +338,163 @@ def resolve_cpp_function_call(function_name):
     
     logger.warning(f"Could not resolve function call: {function_name}()")
     return None
+
+
+def resolve_constexpr_identifier(identifier):
+    """
+    Resolve a constexpr identifier from Redpanda source code to its literal value.
+    
+    This function searches recursively through header and source files for constexpr
+    variable definitions. It's specifically useful for resolving identifiers like 'scram'
+    which are defined as constexpr string_view variables.
+    
+    Parameters:
+        identifier (str): The identifier name to resolve (e.g., "scram").
+    
+    Returns:
+        str or None: The resolved literal string value, or None if not found.
+    """
+    # Try to find the Redpanda source directory
+    redpanda_source_paths = [
+        'tmp/redpanda',  # Current directory
+        '../tmp/redpanda',  # Parent directory  
+        'tools/property-extractor/tmp/redpanda',  # From project root
+        os.path.join(os.getcwd(), 'tools', 'property-extractor', 'tmp', 'redpanda')
+    ]
+    
+    redpanda_source = None
+    for path in redpanda_source_paths:
+        if os.path.exists(path):
+            redpanda_source = path
+            break
+    
+    if not redpanda_source:
+        logger.debug(f"Could not find Redpanda source directory to resolve identifier: {identifier}")
+        return None
+    
+    # Pattern to match constexpr string_view definitions
+    # Matches: inline constexpr std::string_view scram{"SCRAM"};
+    patterns = [
+        rf'inline\s+constexpr\s+std::string_view\s+{re.escape(identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
+        rf'constexpr\s+std::string_view\s+{re.escape(identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
+        rf'inline\s+constexpr\s+auto\s+{re.escape(identifier)}\s*=\s*"([^"]+)"',
+        rf'constexpr\s+auto\s+{re.escape(identifier)}\s*=\s*"([^"]+)"',
+        rf'static\s+constexpr\s+std::string_view\s+{re.escape(identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
+        rf'static\s+inline\s+constexpr\s+std::string_view\s+{re.escape(identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
+    ]
+    
+    # Search recursively through the config directory and other common locations
+    search_dirs = [
+        os.path.join(redpanda_source, 'src', 'v', 'config'),
+        os.path.join(redpanda_source, 'src', 'v', 'kafka'),
+        os.path.join(redpanda_source, 'src', 'v', 'security'),
+        os.path.join(redpanda_source, 'src', 'v', 'pandaproxy'),
+    ]
+    
+    for search_dir in search_dirs:
+        if not os.path.exists(search_dir):
+            continue
+            
+        # Walk through the directory recursively
+        for root, dirs, files in os.walk(search_dir):
+            for file in files:
+                # Check both .h and .cc files since definitions can be in either
+                if file.endswith(('.h', '.cc', '.hpp', '.cpp')):
+                    file_path = os.path.join(root, file)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        
+                        # Try each pattern
+                        for pattern in patterns:
+                            match = re.search(pattern, content, re.MULTILINE)
+                            if match:
+                                resolved_value = match.group(1)
+                                logger.debug(f"Resolved identifier '{identifier}' -> '{resolved_value}' from {file_path}")
+                                return resolved_value
+                                
+                    except Exception as e:
+                        logger.debug(f"Error reading {file_path}: {e}")
+                        continue
+    
+    logger.debug(f"Could not resolve identifier: {identifier}")
+    return None
+
+
+def get_enterprise_sasl_mechanisms():
+    """
+    Dynamically extract the list of enterprise SASL mechanisms from Redpanda source code.
+    
+    This function looks for the enterprise_sasl_mechanisms definition in sasl_mechanisms.h
+    and extracts the list of mechanism identifiers, then resolves each identifier to its
+    actual string value.
+    
+    Returns:
+        list or None: List of enterprise SASL mechanism strings (like ["GSSAPI", "OAUTHBEARER"]),
+                     or None if the lookup fails.
+    """
+    # Try to find the Redpanda source directory
+    redpanda_source_paths = [
+        'tmp/redpanda',  # Current directory
+        '../tmp/redpanda',  # Parent directory  
+        'tools/property-extractor/tmp/redpanda',  # From project root
+        os.path.join(os.getcwd(), 'tools', 'property-extractor', 'tmp', 'redpanda')
+    ]
+    
+    redpanda_source = None
+    for path in redpanda_source_paths:
+        if os.path.exists(path):
+            redpanda_source = path
+            break
+    
+    if not redpanda_source:
+        logger.debug("Could not find Redpanda source directory to resolve enterprise SASL mechanisms")
+        return None
+    
+    # Look for the enterprise_sasl_mechanisms definition in sasl_mechanisms.h
+    sasl_mechanisms_file = os.path.join(redpanda_source, 'src', 'v', 'config', 'sasl_mechanisms.h')
+    
+    if not os.path.exists(sasl_mechanisms_file):
+        logger.debug(f"sasl_mechanisms.h not found at {sasl_mechanisms_file}")
+        return None
+    
+    try:
+        with open(sasl_mechanisms_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Pattern to match the enterprise_sasl_mechanisms array definition
+        # inline constexpr auto enterprise_sasl_mechanisms = std::to_array<std::string_view>({gssapi, oauthbearer});
+        pattern = r'inline\s+constexpr\s+auto\s+enterprise_sasl_mechanisms\s*=\s*std::to_array<[^>]+>\s*\(\s*\{\s*([^}]+)\s*\}\s*\)'
+        
+        match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+        if match:
+            # Extract the identifiers from the array (e.g., "gssapi, oauthbearer")
+            identifiers_str = match.group(1).strip()
+            
+            # Split by comma and clean up whitespace
+            identifiers = [id.strip() for id in identifiers_str.split(',') if id.strip()]
+            
+            # Resolve each identifier to its actual string value
+            mechanisms = []
+            for identifier in identifiers:
+                resolved_value = resolve_constexpr_identifier(identifier)
+                if resolved_value:
+                    mechanisms.append(resolved_value)
+                else:
+                    logger.debug(f"Could not resolve SASL mechanism identifier: {identifier}")
+                    # Fallback: use the identifier name in uppercase
+                    mechanisms.append(identifier.upper())
+            
+            if mechanisms:
+                logger.debug(f"Resolved enterprise SASL mechanisms: {mechanisms}")
+                return mechanisms
+        
+        logger.debug("Could not find enterprise_sasl_mechanisms definition in sasl_mechanisms.h")
+        return None
+        
+    except Exception as e:
+        logger.debug(f"Error reading {sasl_mechanisms_file}: {e}")
+        return None
 
 
 def validate_paths(options):
@@ -744,18 +919,28 @@ def resolve_type_and_default(properties, definitions):
     def parse_constructor(s):
         """Parse C++ constructor syntax into type name and arguments."""
         s = s.strip()
+        original_s = s
         if s.startswith("{") and s.endswith("}"):
             s = s[1:-1].strip()
+        
+        # Try parentheses syntax first: type_name(args)
         match = re.match(r'([a-zA-Z0-9_:]+)\((.*)\)', s)
-        if not match:
-            # Primitive or enum
-            if s.startswith('"') and s.endswith('"'):
-                return None, [ast.literal_eval(s)]
-            try:
-                return None, [int(s)]
-            except Exception:
-                return None, [s]
-        type_name, arg_str = match.groups()
+        if match:
+            type_name, arg_str = match.groups()
+        else:
+            # Try curly brace syntax: type_name{args}
+            match = re.match(r'([a-zA-Z0-9_:]+)\{(.*)\}', s)
+            if match:
+                type_name, arg_str = match.groups()
+            else:
+                # Primitive or enum
+                if s.startswith('"') and s.endswith('"'):
+                    return None, [ast.literal_eval(s)]
+                try:
+                    return None, [int(s)]
+                except Exception:
+                    return None, [s]
+        
         args = []
         depth = 0
         current = ''
@@ -768,9 +953,9 @@ def resolve_type_and_default(properties, definitions):
                     args.append(current.strip())
                 current = ''
             else:
-                if c == '(' and not in_string:
+                if c in '({' and not in_string:
                     depth += 1
-                elif c == ')' and not in_string:
+                elif c in ')}' and not in_string:
                     depth -= 1
                 current += c
         if current.strip():
@@ -807,6 +992,24 @@ def resolve_type_and_default(properties, definitions):
         if enum_match:
             enum_value = enum_match.group(1)
             return f'"{enum_value}"'
+        
+        # Handle constexpr identifier resolution (such as scram -> "SCRAM")
+        # Check if this is a simple identifier that might be a constexpr variable
+        if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', arg_str):
+            resolved_value = resolve_constexpr_identifier(arg_str)
+            if resolved_value is not None:
+                return f'"{resolved_value}"'
+        
+        # Handle string constructor patterns like ss::sstring{identifier}
+        sstring_match = re.match(r'ss::sstring\{([a-zA-Z_][a-zA-Z0-9_]*)\}', arg_str)
+        if sstring_match:
+            identifier = sstring_match.group(1)
+            resolved_value = resolve_constexpr_identifier(identifier)
+            if resolved_value is not None:
+                return f'"{resolved_value}"'
+            else:
+                # Fallback to the identifier itself
+                return f'"{identifier}"'
         
         # Handle default constructors and their default values
         # This handles cases where C++ default constructors are used but should map to specific values
@@ -883,6 +1086,19 @@ def resolve_type_and_default(properties, definitions):
                     return ast.literal_eval(processed)
                 else:
                     return processed
+        
+        # Handle string type with constructor syntax (e.g., ss::sstring{scram})
+        if type_name == "string" and ("{" in default_str or "(" in default_str):
+            tname, args = parse_constructor(default_str)
+            if tname and args:
+                # For string constructors, resolve the first argument and return it as the string value
+                first_arg = args[0] if args else ""
+                # Apply C++ pattern processing to resolve identifiers
+                processed_arg = process_cpp_patterns(first_arg)
+                if processed_arg.startswith('"') and processed_arg.endswith('"'):
+                    return ast.literal_eval(processed_arg)  # Remove quotes
+                else:
+                    return processed_arg
             
         type_def = resolve_definition_type(definitions.get(type_name, {}))
         if "enum" in type_def:

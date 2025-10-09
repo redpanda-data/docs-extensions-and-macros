@@ -27,6 +27,23 @@ def get_process_enterprise_value():
         return None
 
 
+def get_resolve_constexpr_identifier():
+    """
+    Lazily import and return the `resolve_constexpr_identifier` function from `property_extractor`.
+    
+    Attempts to import `resolve_constexpr_identifier` and return it to avoid circular-import issues.
+    
+    Returns:
+        Callable or None: The `resolve_constexpr_identifier` callable when available, otherwise `None`.
+    """
+    try:
+        from property_extractor import resolve_constexpr_identifier
+        return resolve_constexpr_identifier
+    except ImportError as e:
+        logger.error("Cannot import resolve_constexpr_identifier from property_extractor: %s", e)
+        return None
+
+
 class BasicInfoTransformer:
     def accepts(self, info, file_pair):
         """
@@ -200,11 +217,41 @@ class TypeTransformer:
         for resolving default values from the definitions.
         """
         one_line_declaration = declaration.replace("\n", "").strip()
-        raw_type = (
-            re.sub(r"^.*property<(.+)>.*", "\\1", one_line_declaration)
-            .split()[0]
-            .replace(",", "")
-        )
+        
+        # Extract property template content with proper nesting handling
+        # This handles cases like property<std::vector<config::sasl_mechanisms_override>>
+        def extract_template_content(text, template_name):
+            """Extract content from a template, handling nested angle brackets correctly."""
+            start_idx = text.find(f'{template_name}<')
+            if start_idx == -1:
+                return None
+            
+            start_idx += len(f'{template_name}<')
+            bracket_count = 1
+            i = start_idx
+            
+            while i < len(text) and bracket_count > 0:
+                if text[i] == '<':
+                    bracket_count += 1
+                elif text[i] == '>':
+                    bracket_count -= 1
+                i += 1
+            
+            if bracket_count == 0:
+                return text[start_idx:i-1]
+            return None
+        
+        # Extract the content from property<...>
+        property_content = extract_template_content(one_line_declaration, 'property')
+        if property_content:
+            raw_type = property_content.split()[0].replace(",", "")
+        else:
+            # Fallback to original regex for simpler cases
+            raw_type = (
+                re.sub(r"^.*property<(.+)>.*", "\\1", one_line_declaration)
+                .split()[0]
+                .replace(",", "")
+            )
 
         if self.OPTIONAL_PATTERN in raw_type:
             raw_type = re.sub(".*std::optional<(.+)>.*", "\\1", raw_type)
@@ -394,42 +441,148 @@ class FriendlyDefaultTransformer:
     
     # Class-level constants for pattern matching in default values
     ARRAY_PATTERN_STD_VECTOR = "std::vector"
+    SSTRING_CONSTRUCTOR_PATTERN = r'ss::sstring\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
+    VECTOR_INITIALIZER_PATTERN = r'std::vector<[^>]+>\s*\{(.*)\}$'
+    CHRONO_PATTERN = r"std::chrono::(\w+)\(([^)]+)\)"
+    
+    def __init__(self):
+        """Initialize the transformer with cached resolver function."""
+        self._resolver = None
+        self._resolver_checked = False
     
     def accepts(self, info, file_pair):
         return info.get("params") and len(info["params"]) > 3
 
-    def parse(self, property, info, file_pair):
-        default = info["params"][3]["value"]
+    def _get_resolver(self):
+        """Lazy-load and cache the identifier resolver function."""
+        if not self._resolver_checked:
+            self._resolver = get_resolve_constexpr_identifier()
+            self._resolver_checked = True
+        return self._resolver
 
-        # Transform std::nullopt into None.
+    def _resolve_identifier(self, identifier):
+        """
+        Resolve a constexpr identifier using dynamic lookup.
+        
+        Args:
+            identifier (str): The identifier to resolve (e.g., "scram", "gssapi")
+            
+        Returns:
+            str or None: The resolved value, or None if not resolvable
+        """
+        if not identifier or not isinstance(identifier, str):
+            logger.warning(f"Invalid identifier for resolution: {identifier}")
+            return None
+            
+        resolver = self._get_resolver()
+        if resolver:
+            try:
+                return resolver(identifier)
+            except Exception as e:
+                logger.debug(f"Failed to resolve identifier '{identifier}': {e}")
+        
+        return None
+    
+    def _process_sstring_constructor(self, item):
+        """
+        Process ss::sstring{identifier} constructor patterns.
+        
+        Args:
+            item (str): The item to process
+            
+        Returns:
+            str: The processed item value
+        """
+        if not item:
+            return item
+            
+        match = re.match(self.SSTRING_CONSTRUCTOR_PATTERN, item)
+        if not match:
+            return item
+            
+        identifier = match.group(1)
+        resolved = self._resolve_identifier(identifier)
+        
+        if resolved:
+            logger.debug(f"Resolved ss::sstring{{{identifier}}} -> '{resolved}'")
+            return resolved
+        
+        # Log warning but continue with original identifier
+        logger.warning(f"Could not resolve identifier '{identifier}' in ss::sstring constructor")
+        return identifier
+
+    def _parse_vector_contents(self, contents):
+        """
+        Parse vector initializer contents into a list of processed items.
+        
+        Args:
+            contents (str): The contents of the vector initializer
+            
+        Returns:
+            list: List of processed items
+        """
+        if not contents:
+            return []
+            
+        # Split by comma and process each item
+        raw_items = [contents] if ',' not in contents else contents.split(',')
+        
+        processed_items = []
+        for item in raw_items:
+            item = item.strip(' "\'')
+            if item:  # Skip empty items
+                processed_item = self._process_sstring_constructor(item)
+                processed_items.append(processed_item)
+        
+        return processed_items
+
+    def parse(self, property, info, file_pair):
+        """
+        Transform C++ default values into user-friendly JSON representations.
+        
+        Args:
+            property (dict): Property dictionary to modify
+            info (dict): Parsed property information
+            file_pair: File pair context (unused)
+            
+        Returns:
+            dict: The modified property dictionary
+        """
+        default = info["params"][3]["value"]
+        
+        # Handle null/empty defaults
+        if not default:
+            return property
+
+        # Transform std::nullopt into None
         if "std::nullopt" in default:
             property["default"] = None
             return property
 
-        # Transform std::numeric_limits expressions.
+        # Transform std::numeric_limits expressions
         if "std::numeric_limits" in default:
             property["default"] = "Maximum value"
             return property
 
-        # Transform std::chrono durations.
+        # Transform std::chrono durations
         if "std::chrono" in default:
-            m = re.search(r"std::chrono::(\w+)\(([^)]+)\)", default)
-            if m:
-                unit = m.group(1)
-                value = m.group(2).strip()
+            match = re.search(self.CHRONO_PATTERN, default)
+            if match:
+                unit = match.group(1)
+                value = match.group(2).strip()
                 property["default"] = f"{value} {unit}"
                 return property
 
-        # Transform std::vector defaults.
+        # Transform std::vector defaults
         if self.ARRAY_PATTERN_STD_VECTOR in default:
-            m = re.search(r'\{([^}]+)\}', default)
-            if m:
-                contents = m.group(1).strip()
-                items = [item.strip(' "\'') for item in contents.split(',')]
+            vector_match = re.search(self.VECTOR_INITIALIZER_PATTERN, default)
+            if vector_match:
+                contents = vector_match.group(1).strip()
+                items = self._parse_vector_contents(contents)
                 property["default"] = items
                 return property
 
-        # Otherwise, leave the default as-is.
+        # For all other cases, leave the default as-is
         property["default"] = default
         return property
 
