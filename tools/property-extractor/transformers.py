@@ -40,7 +40,7 @@ def get_resolve_constexpr_identifier():
         from property_extractor import resolve_constexpr_identifier
         return resolve_constexpr_identifier
     except ImportError as e:
-        logger.error("Cannot import resolve_constexpr_identifier from property_extractor: %s", e)
+        logger.exception("Cannot import resolve_constexpr_identifier from property_extractor: %s", e)
         return None
 
 
@@ -287,6 +287,15 @@ class TypeTransformer:
             if re.search(m[0], raw_type):
                 return m[1]
 
+        # Handle specific user-unfriendly C++ types with descriptive alternatives
+        # Map complex C++ config types to user-friendly JSON schema types
+        user_friendly_types = {
+            "config::sasl_mechanisms_override": "object",
+        }
+        
+        if raw_type in user_friendly_types:
+            return user_friendly_types[raw_type]
+
         return raw_type
 
     def parse(self, property, info, file_pair):
@@ -448,17 +457,16 @@ class FriendlyDefaultTransformer:
     def __init__(self):
         """Initialize the transformer with cached resolver function."""
         self._resolver = None
-        self._resolver_checked = False
     
     def accepts(self, info, file_pair):
         return info.get("params") and len(info["params"]) > 3
 
     def _get_resolver(self):
         """Lazy-load and cache the identifier resolver function."""
-        if not self._resolver_checked:
-            self._resolver = get_resolve_constexpr_identifier()
-            self._resolver_checked = True
-        return self._resolver
+        if self._resolver is None:
+            resolver = get_resolve_constexpr_identifier()
+            self._resolver = resolver if resolver else False
+        return self._resolver if self._resolver is not False else None
 
     def _resolve_identifier(self, identifier):
         """
@@ -478,8 +486,10 @@ class FriendlyDefaultTransformer:
         if resolver:
             try:
                 return resolver(identifier)
-            except Exception as e:
+            except (AttributeError, TypeError, ValueError) as e:
                 logger.debug(f"Failed to resolve identifier '{identifier}': {e}")
+            except Exception as e:
+                logger.exception(f"Unexpected error resolving identifier '{identifier}': {e}")
         
         return None
     

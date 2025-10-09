@@ -413,7 +413,7 @@ def resolve_constexpr_identifier(identifier):
                                 logger.debug(f"Resolved identifier '{identifier}' -> '{resolved_value}' from {file_path}")
                                 return resolved_value
                                 
-                    except Exception as e:
+                    except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
                         logger.debug(f"Error reading {file_path}: {e}")
                         continue
     
@@ -488,11 +488,11 @@ def get_enterprise_sasl_mechanisms():
             if mechanisms:
                 logger.debug(f"Resolved enterprise SASL mechanisms: {mechanisms}")
                 return mechanisms
+        else:
+            logger.debug("Could not find enterprise_sasl_mechanisms definition in sasl_mechanisms.h")
+            return None
         
-        logger.debug("Could not find enterprise_sasl_mechanisms definition in sasl_mechanisms.h")
-        return None
-        
-    except Exception as e:
+    except (OSError, UnicodeDecodeError, re.error) as e:
         logger.debug(f"Error reading {sasl_mechanisms_file}: {e}")
         return None
 
@@ -938,7 +938,7 @@ def resolve_type_and_default(properties, definitions):
                     return None, [ast.literal_eval(s)]
                 try:
                     return None, [int(s)]
-                except Exception:
+                except ValueError:
                     return None, [s]
         
         args = []
