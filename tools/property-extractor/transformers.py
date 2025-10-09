@@ -12,18 +12,35 @@ logger = logging.getLogger(__name__)
 # the centralized enterprise value processing logic without creating import cycles.
 def get_process_enterprise_value():
     """
-    Lazily import and return the centralized `process_enterprise_value` function from `property_extractor`.
+    Lazily load the centralized process_enterprise_value function from property_extractor.
     
-    Attempts to import `process_enterprise_value` and return it to avoid circular-import issues. If the import fails an error message is printed and None is returned.
+    Attempts to import and return the `process_enterprise_value` callable; logs an error and returns `None` if the import fails.
     
     Returns:
-        Callable or None: The `process_enterprise_value` callable when available, otherwise `None`.
+        The `process_enterprise_value` callable if available, `None` otherwise.
     """
     try:
         from property_extractor import process_enterprise_value
         return process_enterprise_value
     except ImportError as e:
         logger.error("Cannot import process_enterprise_value from property_extractor: %s", e)
+        return None
+
+
+def get_resolve_constexpr_identifier():
+    """
+    Lazily import and return the `resolve_constexpr_identifier` function from `property_extractor`.
+    
+    Attempts to import `resolve_constexpr_identifier` and return it to avoid circular-import issues.
+    
+    Returns:
+        Callable or None: The `resolve_constexpr_identifier` callable when available, otherwise `None`.
+    """
+    try:
+        from property_extractor import resolve_constexpr_identifier
+        return resolve_constexpr_identifier
+    except ImportError as e:
+        logger.exception("Cannot import resolve_constexpr_identifier from property_extractor: %s", e)
         return None
 
 
@@ -182,29 +199,59 @@ class TypeTransformer:
 
     def get_cpp_type_from_declaration(self, declaration):
         """
-        Extract the inner type from C++ property declarations.
+        Extract the inner C++ type from wrapped declarations like `property<T>`, `std::optional<T>`, `std::vector<T>`, or `one_or_many_property<T>`.
         
-        This method handles various C++ template types and extracts the core type T from:
-        - property<T> -> T
-        - std::optional<T> -> T
-        - std::vector<T> -> T  
-        - one_or_many_property<T> -> T (Redpanda's flexible array type)
+        Parses common wrapper templates and returns the unwrapped type name (for example, returns `model::broker_endpoint` from `one_or_many_property<model::broker_endpoint>`). The returned type is intended for downstream mapping to JSON schema types and default value resolution.
         
-        For one_or_many_property, this is crucial because it allows the same property
-        to accept either a single value or an array of values in the configuration.
-        Examples:
-        - one_or_many_property<model::broker_endpoint> -> model::broker_endpoint
-        - one_or_many_property<endpoint_tls_config> -> endpoint_tls_config
-        
-        The extracted type is then used to determine the JSON schema type and
-        for resolving default values from the definitions.
+        Returns:
+            raw_type (str): The extracted inner C++ type as a string, or a best-effort fragment of the declaration if a precise extraction cannot be performed.
         """
         one_line_declaration = declaration.replace("\n", "").strip()
-        raw_type = (
-            re.sub(r"^.*property<(.+)>.*", "\\1", one_line_declaration)
-            .split()[0]
-            .replace(",", "")
-        )
+        
+        # Extract property template content with proper nesting handling
+        # This handles cases like property<std::vector<config::sasl_mechanisms_override>>
+        def extract_template_content(text, template_name):
+            """
+            Extracts the inner contents of the first occurrence of a template with the given name, correctly handling nested angle brackets.
+            
+            Parameters:
+                text (str): The string to search for the template.
+                template_name (str): The template name (e.g., "std::vector" or "property").
+            
+            Returns:
+                str or None: The substring inside the outermost angle brackets for the matched template (excluding the brackets),
+                or `None` if the template is not found or angle brackets are unbalanced.
+            """
+            start_idx = text.find(f'{template_name}<')
+            if start_idx == -1:
+                return None
+            
+            start_idx += len(f'{template_name}<')
+            bracket_count = 1
+            i = start_idx
+            
+            while i < len(text) and bracket_count > 0:
+                if text[i] == '<':
+                    bracket_count += 1
+                elif text[i] == '>':
+                    bracket_count -= 1
+                i += 1
+            
+            if bracket_count == 0:
+                return text[start_idx:i-1]
+            return None
+        
+        # Extract the content from property<...>
+        property_content = extract_template_content(one_line_declaration, 'property')
+        if property_content:
+            raw_type = property_content.split()[0].replace(",", "")
+        else:
+            # Fallback to original regex for simpler cases
+            raw_type = (
+                re.sub(r"^.*property<(.+)>.*", "\\1", one_line_declaration)
+                .split()[0]
+                .replace(",", "")
+            )
 
         if self.OPTIONAL_PATTERN in raw_type:
             raw_type = re.sub(".*std::optional<(.+)>.*", "\\1", raw_type)
@@ -223,6 +270,15 @@ class TypeTransformer:
         return raw_type
 
     def get_type_from_declaration(self, declaration):
+        """
+        Map a C++ type declaration string to a simplified, user-facing type name.
+        
+        Parameters:
+            declaration (str): C++ type declaration or template expression from which the effective type will be derived.
+        
+        Returns:
+            str: A JSON-schema-friendly type name such as "integer", "number", "string", "string[]", or "boolean". If no mapping matches, returns the normalized/raw extracted C++ type.
+        """
         raw_type = self.get_cpp_type_from_declaration(declaration)
         type_mapping = [  # (regex, type)
             ("^u(nsigned|int)", "integer"),
@@ -240,9 +296,29 @@ class TypeTransformer:
             if re.search(m[0], raw_type):
                 return m[1]
 
+        # Handle specific user-unfriendly C++ types with descriptive alternatives
+        # Map complex C++ config types to user-friendly JSON schema types
+        user_friendly_types = {
+            "config::sasl_mechanisms_override": "object",
+        }
+        
+        if raw_type in user_friendly_types:
+            return user_friendly_types[raw_type]
+
         return raw_type
 
     def parse(self, property, info, file_pair):
+        """
+        Set the property's "type" field to the JSON schema type derived from the C++ declaration.
+        
+        Parameters:
+        	property (dict): Mutable property bag to be updated.
+        	info (dict): Parsed property metadata; its "declaration" field is used to determine the type.
+        	file_pair: Unused here; present for transformer interface compatibility.
+        
+        Returns:
+        	property (dict): The same property bag with "type" set to the derived type string.
+        """
         property["type"] = self.get_type_from_declaration(info["declaration"])
         return property
 
@@ -394,42 +470,170 @@ class FriendlyDefaultTransformer:
     
     # Class-level constants for pattern matching in default values
     ARRAY_PATTERN_STD_VECTOR = "std::vector"
+    SSTRING_CONSTRUCTOR_PATTERN = r'ss::sstring\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
+    VECTOR_INITIALIZER_PATTERN = r'std::vector<[^>]+>\s*\{(.*)\}$'
+    CHRONO_PATTERN = r"std::chrono::(\w+)\(([^)]+)\)"
+    
+    def __init__(self):
+        """
+        Initialize the transformer and set up a placeholder for a lazily-loaded resolver.
+        
+        Sets self._resolver to None to indicate the resolver has not been loaded yet.
+        """
+        self._resolver = None
     
     def accepts(self, info, file_pair):
+        """
+        Determine whether the transformer should run for the given property info by checking for a fourth parameter.
+        
+        Parameters:
+        	info (dict): Parsed property metadata; expects a "params" list when present.
+        	file_pair (tuple): Source/implementation file pair (unused by this check).
+        
+        Returns:
+        	`true` if `info["params"]` exists and contains at least four items, `false` otherwise.
+        """
         return info.get("params") and len(info["params"]) > 3
 
-    def parse(self, property, info, file_pair):
-        default = info["params"][3]["value"]
+    def _get_resolver(self):
+        """
+        Lazily load and cache the constexpr identifier resolver.
+        
+        Returns:
+            callable or None: The resolver function if available, or `None` if it could not be loaded.
+        """
+        if self._resolver is None:
+            resolver = get_resolve_constexpr_identifier()
+            self._resolver = resolver if resolver else False
+        return self._resolver if self._resolver is not False else None
 
-        # Transform std::nullopt into None.
+    def _resolve_identifier(self, identifier):
+        """
+        Resolve a constexpr identifier to its corresponding string value.
+        
+        Parameters:
+            identifier (str): Identifier to resolve (for example, "scram" or "gssapi").
+        
+        Returns:
+            str or None: The resolved string value if successful, `None` when the identifier is invalid or cannot be resolved.
+        """
+        if not identifier or not isinstance(identifier, str):
+            logger.warning(f"Invalid identifier for resolution: {identifier}")
+            return None
+            
+        resolver = self._get_resolver()
+        if resolver:
+            try:
+                return resolver(identifier)
+            except (AttributeError, TypeError, ValueError) as e:
+                logger.debug(f"Failed to resolve identifier '{identifier}': {e}")
+            except Exception as e:
+                logger.exception(f"Unexpected error resolving identifier '{identifier}': {e}")
+        
+        return None
+    
+    def _process_sstring_constructor(self, item):
+        """
+        Convert an ss::sstring{identifier} constructor string to its resolved value when possible.
+        
+        If the input matches the ss::sstring{...} pattern, attempts to resolve the enclosed identifier and returns the resolved string. If resolution fails, returns the raw identifier. If the input does not match the pattern or is falsy, returns it unchanged.
+        
+        Parameters:
+            item (str): The constructor expression or string to process.
+        
+        Returns:
+            str: The resolved string when resolution succeeds, the extracted identifier if resolution fails, or the original input if it does not match.
+        """
+        if not item:
+            return item
+            
+        match = re.match(self.SSTRING_CONSTRUCTOR_PATTERN, item)
+        if not match:
+            return item
+            
+        identifier = match.group(1)
+        resolved = self._resolve_identifier(identifier)
+        
+        if resolved:
+            logger.debug(f"Resolved ss::sstring{{{identifier}}} -> '{resolved}'")
+            return resolved
+        
+        # Log warning but continue with original identifier
+        logger.warning(f"Could not resolve identifier '{identifier}' in ss::sstring constructor")
+        return identifier
+
+    def _parse_vector_contents(self, contents):
+        """
+        Parse a comma-separated std::vector initializer string into a list of cleaned, processed items.
+        
+        Parameters:
+            contents (str): The inner contents of a vector initializer (e.g. '\"a\", ss::sstring{ID}, \"b\"'); may be empty or None.
+        
+        Returns:
+            list: Ordered list of processed, unquoted items with empty entries omitted.
+        """
+        if not contents:
+            return []
+            
+        # Split by comma and process each item
+        raw_items = [contents] if ',' not in contents else contents.split(',')
+        
+        processed_items = []
+        for item in raw_items:
+            item = item.strip(' "\'')
+            if item:  # Skip empty items
+                processed_item = self._process_sstring_constructor(item)
+                processed_items.append(processed_item)
+        
+        return processed_items
+
+    def parse(self, property, info, file_pair):
+        """
+        Convert a C++ default expression into a JSON-friendly value and store it on the property under the "default" key.
+        
+        Parameters:
+            property (dict): Property dictionary to modify; updated in place with a "default" entry.
+            info (dict): Parsed property information; the default expression is expected at info["params"][3]["value"].
+            file_pair: File pair context (ignored by this function).
+        
+        Returns:
+            dict: The modified property dictionary with a normalized "default" value.
+        """
+        default = info["params"][3]["value"]
+        
+        # Handle null/empty defaults
+        if not default:
+            return property
+
+        # Transform std::nullopt into None
         if "std::nullopt" in default:
             property["default"] = None
             return property
 
-        # Transform std::numeric_limits expressions.
+        # Transform std::numeric_limits expressions
         if "std::numeric_limits" in default:
             property["default"] = "Maximum value"
             return property
 
-        # Transform std::chrono durations.
+        # Transform std::chrono durations
         if "std::chrono" in default:
-            m = re.search(r"std::chrono::(\w+)\(([^)]+)\)", default)
-            if m:
-                unit = m.group(1)
-                value = m.group(2).strip()
+            match = re.search(self.CHRONO_PATTERN, default)
+            if match:
+                unit = match.group(1)
+                value = match.group(2).strip()
                 property["default"] = f"{value} {unit}"
                 return property
 
-        # Transform std::vector defaults.
+        # Transform std::vector defaults
         if self.ARRAY_PATTERN_STD_VECTOR in default:
-            m = re.search(r'\{([^}]+)\}', default)
-            if m:
-                contents = m.group(1).strip()
-                items = [item.strip(' "\'') for item in contents.split(',')]
+            vector_match = re.search(self.VECTOR_INITIALIZER_PATTERN, default)
+            if vector_match:
+                contents = vector_match.group(1).strip()
+                items = self._parse_vector_contents(contents)
                 property["default"] = items
                 return property
 
-        # Otherwise, leave the default as-is.
+        # For all other cases, leave the default as-is
         property["default"] = default
         return property
 

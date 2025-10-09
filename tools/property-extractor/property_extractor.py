@@ -117,6 +117,24 @@ def process_enterprise_value(enterprise_str):
     """
     enterprise_str = enterprise_str.strip()
     
+    # Handle special SASL mechanism function names 
+    if enterprise_str == "is_enterprise_sasl_mechanism":
+        # Dynamically look up enterprise SASL mechanisms from source
+        enterprise_mechanisms = get_enterprise_sasl_mechanisms()
+        if enterprise_mechanisms:
+            return enterprise_mechanisms
+        else:
+            # Fallback to known values if lookup fails
+            return ["GSSAPI", "OAUTHBEARER"]
+    elif enterprise_str == "is_enterprise_sasl_mechanisms_override":
+        # Get the enterprise mechanisms dynamically for a more accurate description
+        enterprise_mechanisms = get_enterprise_sasl_mechanisms()
+        if enterprise_mechanisms:
+            mechanism_list = ", ".join(enterprise_mechanisms)
+            return f"Any override containing enterprise mechanisms ({mechanism_list})."
+        else:
+            return "Any override containing enterprise mechanisms."
+    
     # FIRST: Handle std::vector initialization patterns (highest priority)
     # This must come before enum processing because vectors can contain enums
     # Tolerate optional whitespace around braces
@@ -196,19 +214,15 @@ def process_enterprise_value(enterprise_str):
 
 def resolve_cpp_function_call(function_name):
     """
-    Resolve certain small, known C++ zero-argument functions to their literal return values by searching Redpanda source files.
+    Resolve a small set of known zero-argument C++ functions to their literal string return values by scanning a local Redpanda source tree.
     
-    This function looks up predefined search patterns for well-known functions (currently a small set under `model::*`), locates a local Redpanda source tree from several commonly used paths, and scans the listed files (and, if needed, the broader model directory) for a regex match that captures the string returned by the function. If a match is found the captured string is returned; if the source tree cannot be found or no match is located the function returns None.
+    Searches predefined files and regex patterns for the specified fully-qualified function name (e.g., "model::kafka_audit_logging_topic") and returns the captured string if found; returns None when no match or when the Redpanda source tree cannot be located.
     
     Parameters:
-        function_name (str): Fully-qualified C++ function name to resolve (e.g., "model::kafka_audit_logging_topic").
+        function_name (str): Fully-qualified C++ function name to resolve.
     
     Returns:
-        str or None: The resolved literal string returned by the C++ function, or None when unresolved (source not found or no matching pattern).
-    
-    Notes:
-        - The function performs filesystem I/O and regex-based source searching; it does not raise on read errors but logs and continues.
-        - Only a small, hard-coded set of function names/patterns is supported; unknown names immediately return None.
+        str or None: The literal string returned by the C++ function when resolved, or `None` if unresolved.
     """
     # Map function names to likely search patterns and file locations
     search_patterns = {
@@ -322,7 +336,174 @@ def resolve_cpp_function_call(function_name):
     return None
 
 
+def resolve_constexpr_identifier(identifier):
+    """
+    Resolve a constexpr identifier from Redpanda source code to its literal string value.
+    
+    Searches common Redpanda source locations for constexpr string or string_view definitions matching the given identifier and returns the literal if found.
+    
+    Parameters:
+        identifier (str): The identifier name to resolve (e.g., "scram").
+    
+    Returns:
+        str or None: The resolved literal string value if found, otherwise `None`.
+    """
+    # Try to find the Redpanda source directory
+    redpanda_source_paths = [
+        'tmp/redpanda',  # Current directory
+        '../tmp/redpanda',  # Parent directory  
+        'tools/property-extractor/tmp/redpanda',  # From project root
+        os.path.join(os.getcwd(), 'tools', 'property-extractor', 'tmp', 'redpanda')
+    ]
+    
+    redpanda_source = None
+    for path in redpanda_source_paths:
+        if os.path.exists(path):
+            redpanda_source = path
+            break
+    
+    if not redpanda_source:
+        logger.debug(f"Could not find Redpanda source directory to resolve identifier: {identifier}")
+        return None
+    
+    # Pattern to match constexpr string_view definitions
+    # Matches: inline constexpr std::string_view scram{"SCRAM"};
+    patterns = [
+        rf'inline\s+constexpr\s+std::string_view\s+{re.escape(identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
+        rf'constexpr\s+std::string_view\s+{re.escape(identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
+        rf'inline\s+constexpr\s+auto\s+{re.escape(identifier)}\s*=\s*"([^"]+)"',
+        rf'constexpr\s+auto\s+{re.escape(identifier)}\s*=\s*"([^"]+)"',
+        rf'static\s+constexpr\s+std::string_view\s+{re.escape(identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
+        rf'static\s+inline\s+constexpr\s+std::string_view\s+{re.escape(identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
+    ]
+    
+    # Search recursively through the config directory and other common locations
+    search_dirs = [
+        os.path.join(redpanda_source, 'src', 'v', 'config'),
+        os.path.join(redpanda_source, 'src', 'v', 'kafka'),
+        os.path.join(redpanda_source, 'src', 'v', 'security'),
+        os.path.join(redpanda_source, 'src', 'v', 'pandaproxy'),
+    ]
+    
+    for search_dir in search_dirs:
+        if not os.path.exists(search_dir):
+            continue
+            
+        # Walk through the directory recursively
+        for root, dirs, files in os.walk(search_dir):
+            for file in files:
+                # Check both .h and .cc files since definitions can be in either
+                if file.endswith(('.h', '.cc', '.hpp', '.cpp')):
+                    file_path = os.path.join(root, file)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        
+                        # Try each pattern
+                        for pattern in patterns:
+                            match = re.search(pattern, content, re.MULTILINE)
+                            if match:
+                                resolved_value = match.group(1)
+                                logger.debug(f"Resolved identifier '{identifier}' -> '{resolved_value}' from {file_path}")
+                                return resolved_value
+                                
+                    except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
+                        logger.debug(f"Error reading {file_path}: {e}")
+                        continue
+    
+    logger.debug(f"Could not resolve identifier: {identifier}")
+    return None
+
+
+def get_enterprise_sasl_mechanisms():
+    """
+    Locate and resolve enterprise SASL mechanisms declared in Redpanda's sasl_mechanisms.h.
+    
+    Searches known Redpanda source locations for an inline constexpr definition of enterprise_sasl_mechanisms,
+    extracts the identifiers, and resolves each identifier to its literal string value where possible; unresolved
+    identifiers are converted to an uppercase fallback.
+    
+    Returns:
+        list or None: List of enterprise SASL mechanism strings (e.g., ["GSSAPI", "OAUTHBEARER"]),
+                      or `None` if the lookup fails.
+    """
+    # Try to find the Redpanda source directory
+    redpanda_source_paths = [
+        'tmp/redpanda',  # Current directory
+        '../tmp/redpanda',  # Parent directory  
+        'tools/property-extractor/tmp/redpanda',  # From project root
+        os.path.join(os.getcwd(), 'tools', 'property-extractor', 'tmp', 'redpanda')
+    ]
+    
+    redpanda_source = None
+    for path in redpanda_source_paths:
+        if os.path.exists(path):
+            redpanda_source = path
+            break
+    
+    if not redpanda_source:
+        logger.debug("Could not find Redpanda source directory to resolve enterprise SASL mechanisms")
+        return None
+    
+    # Look for the enterprise_sasl_mechanisms definition in sasl_mechanisms.h
+    sasl_mechanisms_file = os.path.join(redpanda_source, 'src', 'v', 'config', 'sasl_mechanisms.h')
+    
+    if not os.path.exists(sasl_mechanisms_file):
+        logger.debug(f"sasl_mechanisms.h not found at {sasl_mechanisms_file}")
+        return None
+    
+    try:
+        with open(sasl_mechanisms_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Pattern to match the enterprise_sasl_mechanisms array definition
+        # inline constexpr auto enterprise_sasl_mechanisms = std::to_array<std::string_view>({gssapi, oauthbearer});
+        pattern = r'inline\s+constexpr\s+auto\s+enterprise_sasl_mechanisms\s*=\s*std::to_array<[^>]+>\s*\(\s*\{\s*([^}]+)\s*\}\s*\)'
+        
+        match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+        if match:
+            # Extract the identifiers from the array (e.g., "gssapi, oauthbearer")
+            identifiers_str = match.group(1).strip()
+            
+            # Split by comma and clean up whitespace
+            identifiers = [id.strip() for id in identifiers_str.split(',') if id.strip()]
+            
+            # Resolve each identifier to its actual string value
+            mechanisms = []
+            for identifier in identifiers:
+                resolved_value = resolve_constexpr_identifier(identifier)
+                if resolved_value:
+                    mechanisms.append(resolved_value)
+                else:
+                    logger.debug(f"Could not resolve SASL mechanism identifier: {identifier}")
+                    # Fallback: use the identifier name in uppercase
+                    mechanisms.append(identifier.upper())
+            
+            if mechanisms:
+                logger.debug(f"Resolved enterprise SASL mechanisms: {mechanisms}")
+                return mechanisms
+        else:
+            logger.debug("Could not find enterprise_sasl_mechanisms definition in sasl_mechanisms.h")
+            return None
+        
+    except (OSError, UnicodeDecodeError, re.error) as e:
+        logger.debug(f"Error reading {sasl_mechanisms_file}: {e}")
+        return None
+
+
 def validate_paths(options):
+    """
+    Validate that required file-system paths referenced by `options` exist and exit the process on failure.
+    
+    Checks:
+    - Verifies `options.path` exists; logs an error and exits with status code 1 if it does not.
+    - If `options.definitions` is provided, verifies that file exists; logs an error and exits with status code 1 if it does not.
+    
+    Parameters:
+        options: An object with at least the attributes:
+            - path (str): Path to the input source directory or file.
+            - definitions (Optional[str]): Path to the type definitions file (may be None or empty).
+    """
     path = options.path
 
     if not os.path.exists(path):
@@ -713,21 +894,16 @@ def add_config_scope(properties):
 
 def resolve_type_and_default(properties, definitions):
     """
-    Resolve JSON Schema types and expand C++-style default values for all properties.
+    Normalize property types and expand C++-style default values into JSON-compatible Python structures.
     
-    This function:
-    - Resolves type references found in `properties` against `definitions` (supports "$ref" and direct type names) and normalizes property "type" to a JSON Schema primitive ("object", "string", "integer", "boolean", "array", "number") with sensible fallbacks.
-    - Expands C++ constructor/initializer syntax and common C++ patterns appearing in default values into JSON-compatible Python values (e.g., nested constructor calls -> dicts, initializer lists -> lists, `std::nullopt` -> None, enum-like tokens -> strings).
-    - Ensures array-typed properties (including one_or_many_property cases) have array defaults: single-object defaults are wrapped into a one-element list and "{}" string defaults become [].
-    - Updates array item type information when item types reference definitions.
-    - Applies a final pass to convert any remaining C++-patterned defaults and to transform any `enterprise_value` strings via process_enterprise_value.
+    This function resolves type references in each property against the provided definitions (supports "$ref" and direct type names), normalizes property "type" to a JSON Schema primitive when possible, expands C++ constructor/initializer and common C++ literal patterns found in "default" values into Python primitives/objects/lists, ensures array-typed properties have array defaults (including handling one_or_many_property cases), updates array item type information when item types reference definitions, and converts any `enterprise_value` strings via process_enterprise_value.
     
     Parameters:
-        properties (dict): Mapping of property names to property metadata dictionaries. Each property may include keys like "type", "default", "items", and "enterprise_value".
-        definitions (dict): Mapping of type names to JSON Schema definition dictionaries used to resolve $ref targets and to infer property shapes when expanding constructors.
+        properties (dict): Mapping of property names to metadata dictionaries. Relevant keys that may be modified include "type", "default", "items", and "enterprise_value".
+        definitions (dict): Mapping of definition names to JSON Schema definition dictionaries used to resolve $ref targets and to infer shapes for expanding constructor-style defaults.
     
     Returns:
-        dict: The same `properties` mapping after in-place normalization and expansion of types and defaults.
+        dict: The same `properties` mapping after in-place normalization and expansion of types, defaults, item types, and enterprise values.
     """
     import ast
     import re
@@ -742,20 +918,42 @@ def resolve_type_and_default(properties, definitions):
         return defn
 
     def parse_constructor(s):
-        """Parse C++ constructor syntax into type name and arguments."""
+        """
+        Parse a C++-style constructor or initializer expression into its type name and argument list.
+        
+        Parses input forms such as `Type(arg1, arg2)`, `Type{arg1, arg2}`, or plain literals/enum-like tokens. For string literals the returned argument is a Python string value; for integer literals the returned argument is an int. Nested constructors and nested brace/paren groups are preserved as argument tokens.
+        
+        Parameters:
+            s (str): The C++ expression to parse.
+        
+        Returns:
+            tuple:
+                - type_name (str|None): The parsed type name for constructor forms, or `None` when `s` is a primitive literal or enum-like token.
+                - args (list): A list of argument tokens; tokens are raw strings for complex/nested arguments, Python `str` for quoted string literals, or `int` for integer literals.
+        """
         s = s.strip()
+        original_s = s
         if s.startswith("{") and s.endswith("}"):
             s = s[1:-1].strip()
+        
+        # Try parentheses syntax first: type_name(args)
         match = re.match(r'([a-zA-Z0-9_:]+)\((.*)\)', s)
-        if not match:
-            # Primitive or enum
-            if s.startswith('"') and s.endswith('"'):
-                return None, [ast.literal_eval(s)]
-            try:
-                return None, [int(s)]
-            except Exception:
-                return None, [s]
-        type_name, arg_str = match.groups()
+        if match:
+            type_name, arg_str = match.groups()
+        else:
+            # Try curly brace syntax: type_name{args}
+            match = re.match(r'([a-zA-Z0-9_:]+)\{(.*)\}', s)
+            if match:
+                type_name, arg_str = match.groups()
+            else:
+                # Primitive or enum
+                if s.startswith('"') and s.endswith('"'):
+                    return None, [ast.literal_eval(s)]
+                try:
+                    return None, [int(s)]
+                except ValueError:
+                    return None, [s]
+        
         args = []
         depth = 0
         current = ''
@@ -768,9 +966,9 @@ def resolve_type_and_default(properties, definitions):
                     args.append(current.strip())
                 current = ''
             else:
-                if c == '(' and not in_string:
+                if c in '({' and not in_string:
                     depth += 1
-                elif c == ')' and not in_string:
+                elif c in ')}' and not in_string:
                     depth -= 1
                 current += c
         if current.strip():
@@ -779,13 +977,18 @@ def resolve_type_and_default(properties, definitions):
 
     def process_cpp_patterns(arg_str):
         """
-        Process specific C++ patterns to user-friendly values.
+        Convert a C++-style expression string into a JSON-friendly literal representation.
         
-        Handles:
-        - net::unresolved_address("127.0.0.1", 9092) -> expands based on type definition
+        This function recognises common C++ patterns produced by the extractor and maps them to values suitable for JSON schema defaults and examples. Handled cases include:
         - std::nullopt -> null
-        - fips_mode_flag::disabled -> "disabled"
-        - model::kafka_audit_logging_topic() -> dynamically looked up from source
+        - zero-argument functions (e.g., model::kafka_audit_logging_topic()) resolved from source when possible
+        - enum tokens (e.g., fips_mode_flag::disabled -> "disabled")
+        - constexpr identifiers and simple string constructors resolved to their literal strings when available
+        - known default constructors and truncated type names mapped to sensible defaults (e.g., duration -> 0, path -> "")
+        - simple heuristics for unknown constructors and concatenated expressions
+        
+        Returns:
+            processed (str): A string representing the JSON-ready value (for example: '"value"', 'null', '0', or the original input when no mapping applied).
         """
         arg_str = arg_str.strip()
         
@@ -807,6 +1010,24 @@ def resolve_type_and_default(properties, definitions):
         if enum_match:
             enum_value = enum_match.group(1)
             return f'"{enum_value}"'
+        
+        # Handle constexpr identifier resolution (such as scram -> "SCRAM")
+        # Check if this is a simple identifier that might be a constexpr variable
+        if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', arg_str):
+            resolved_value = resolve_constexpr_identifier(arg_str)
+            if resolved_value is not None:
+                return f'"{resolved_value}"'
+        
+        # Handle string constructor patterns like ss::sstring{identifier}
+        sstring_match = re.match(r'ss::sstring\{([a-zA-Z_][a-zA-Z0-9_]*)\}', arg_str)
+        if sstring_match:
+            identifier = sstring_match.group(1)
+            resolved_value = resolve_constexpr_identifier(identifier)
+            if resolved_value is not None:
+                return f'"{resolved_value}"'
+            else:
+                # Fallback to the identifier itself
+                return f'"{identifier}"'
         
         # Handle default constructors and their default values
         # This handles cases where C++ default constructors are used but should map to specific values
@@ -861,12 +1082,23 @@ def resolve_type_and_default(properties, definitions):
 
     def expand_default(type_name, default_str):
         """
-        Expand C++ default values into structured JSON objects.
+        Convert a C++-style default initializer into a JSON-serializable Python value.
         
-        For array types with initializer list syntax like:
-        {model::broker_endpoint(net::unresolved_address("127.0.0.1", 9644))}
+        This expands C++ constructor and initializer-list syntax into Python primitives, dictionaries, and lists suitable for JSON output. Supported transformations include:
+        - String constructors and quoted literals → Python str.
+        - Integer and boolean literals → Python int and bool.
+        - Object constructors (Type(arg1, arg2) or Type{...}) → dict mapping constructor arguments to the object's properties when a corresponding type definition exists.
+        - Nested constructors → nested dicts with their fields expanded.
+        - Array initializer lists (e.g., {Type(...), Type(...)}) → Python list with each element expanded.
+        - Special-case mappings for known type patterns (for example, an address-type constructor expanded into {"address", "port"} when the target type expects that shape).
+        If a default cannot be resolved or the type is an enum, the original input is returned unchanged; the string "null" is converted to None. If default_str is not a string, it is returned as-is.
         
-        This creates: [{address: "127.0.0.1", port: 9644}]
+        Parameters:
+            type_name (str): The resolved type name for the default value (e.g., "model::broker_endpoint" or a primitive type like "string").
+            default_str (str | any): The C++ default expression to expand, or a non-string value already decoded.
+        
+        Returns:
+            The expanded Python representation of the default: a dict for objects, a list for arrays, a primitive (str/int/bool), None for null, or the original value/string when expansion is not possible.
         """
         # Handle non-string defaults
         if not isinstance(default_str, str):
@@ -883,6 +1115,19 @@ def resolve_type_and_default(properties, definitions):
                     return ast.literal_eval(processed)
                 else:
                     return processed
+        
+        # Handle string type with constructor syntax (e.g., ss::sstring{scram})
+        if type_name == "string" and ("{" in default_str or "(" in default_str):
+            tname, args = parse_constructor(default_str)
+            if tname and args:
+                # For string constructors, resolve the first argument and return it as the string value
+                first_arg = args[0] if args else ""
+                # Apply C++ pattern processing to resolve identifiers
+                processed_arg = process_cpp_patterns(first_arg)
+                if processed_arg.startswith('"') and processed_arg.endswith('"'):
+                    return ast.literal_eval(processed_arg)  # Remove quotes
+                else:
+                    return processed_arg
             
         type_def = resolve_definition_type(definitions.get(type_name, {}))
         if "enum" in type_def:
