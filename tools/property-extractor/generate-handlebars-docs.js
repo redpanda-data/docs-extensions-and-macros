@@ -269,7 +269,7 @@ function generateDeprecatedDocs(properties, outputDir) {
   };
 
   const output = template(data);
-  const outputPath = path.join(outputDir, 'deprecated', 'partials', 'deprecated-properties.adoc');
+  const outputPath = path.join(outputDir, 'partials', 'deprecated', 'deprecated-properties.adoc');
   
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, output, 'utf8');
