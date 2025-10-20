@@ -60,7 +60,17 @@ NOTE: Some cluster properties require that you restart the cluster for any updat
     sectionTitle: 'Cluster configuration',
     groups: [
       {
-        filter: (prop) => prop.config_scope === 'cluster' && !prop.is_deprecated
+        filter: (prop) => prop.config_scope === 'cluster' && !prop.is_deprecated && !(
+          prop.name && (
+            prop.name.includes('cloud_storage') ||
+            prop.name.includes('s3_') ||
+            prop.name.includes('azure_') ||
+            prop.name.includes('gcs_') ||
+            prop.name.includes('archival_') ||
+            prop.name.includes('remote_') ||
+            prop.name.includes('tiered_')
+          )
+        )
       }
     ],
     filename: 'cluster-properties.adoc'
@@ -269,7 +279,8 @@ function generateDeprecatedDocs(properties, outputDir) {
   };
 
   const output = template(data);
-  const outputPath = path.join(outputDir, 'deprecated', 'partials', 'deprecated-properties.adoc');
+  // Navigate back from pages/properties to reference, then into partials/deprecated
+  const outputPath = path.join(path.dirname(path.dirname(outputDir)), 'partials', 'deprecated', 'deprecated-properties.adoc');
   
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, output, 'utf8');
@@ -332,7 +343,7 @@ function generateAllDocs(inputFile, outputDir) {
 
   // Generate each type of documentation
   for (const [type, config] of Object.entries(PROPERTY_CONFIG)) {
-    const count = generatePropertyDocs(properties, config, path.join(outputDir, 'pages'));
+    const count = generatePropertyDocs(properties, config, outputDir);
     totalProperties += count;
     
     if (type === 'broker') totalBrokerProperties = count;
@@ -342,7 +353,7 @@ function generateAllDocs(inputFile, outputDir) {
   }
 
   // Generate deprecated properties documentation
-  const deprecatedCount = generateDeprecatedDocs(properties, path.join(outputDir, 'pages'));
+  const deprecatedCount = generateDeprecatedDocs(properties, outputDir);
 
   // Generate summary file
   const allPropertiesContent = Object.keys(properties).sort().join('\n');
