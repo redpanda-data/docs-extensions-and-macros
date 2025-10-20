@@ -1,0 +1,88 @@
+
+////
+This content is auto-generated. Do not edit manually.
+
+To regenerate this content, run:
+  npx doc-tools generate cloud-regions --help
+
+For source code and documentation:
+- Source: https://github.com/redpanda-data/docs-extensions-and-macros/tree/main/tools/cloud-regions
+- Docs: https://redpandadata.atlassian.net/wiki/spaces/DOC/pages/1185054748/Doc+Tools+CLI
+////
+
+== BYOC supported regions
+
+[tabs]
+====
+Google Cloud Platform (GCP)::
++
+--
+|===
+| Region
+
+| asia-east1
+| asia-northeast1
+| asia-south1
+| asia-southeast1
+| australia-southeast1
+| europe-southwest1
+| europe-west1
+| europe-west2
+| europe-west3
+| europe-west4
+| europe-west9
+| northamerica-northeast1
+| southamerica-east1
+| southamerica-west1
+| us-central1
+| us-east1
+| us-east4
+| us-west1
+| us-west2
+|===
+--
+Amazon Web Services (AWS)::
++
+--
+|===
+| Region
+
+| af-south-1
+| ap-east-1
+| ap-northeast-1
+| ap-south-1
+| ap-southeast-1
+| ap-southeast-2
+| ap-southeast-3
+| ca-central-1
+| eu-central-1
+| eu-north-1
+| eu-south-1
+| eu-west-1
+| eu-west-2
+| eu-west-3
+| me-central-1
+| sa-east-1
+| us-east-1
+| us-east-2
+| us-west-2
+|===
+--
+Azure::
++
+--
+|===
+| Region
+
+| centralus
+| eastus
+| eastus2
+| northeurope
+| norwayeast
+| uksouth
+| westeurope
+| westus2
+|===
+--
+====
+

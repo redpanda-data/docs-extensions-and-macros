@@ -1,0 +1,2360 @@
+<!-- This content is auto-generated. Do not edit manually.
+To regenerate this content, run:
+  npx doc-tools generate cloud-tier-table
+-->
+<style>
+:root{
+    --tbl-bg: var(--body-background);
+    --tbl-text: var(--body-font-color);
+    --tbl-muted: var(--body-faint-font-color);
+    --tbl-border: var(--panel-border-color);
+    --tbl-header-bg: var(--sticky-table-header-background);
+    --tbl-row-alt: var(--panel-background);
+    --tbl-hover: var(--highlight-container-background);
+    --tbl-shadow: rgba(0, 0, 0, .08);
+    --sticky-col-1-left: 16rem;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --tbl-bg: var(--body-background);
+    --tbl-text: var(--body-font-color);
+    --tbl-muted: var(--color-gray-70);
+    --tbl-border: var(--panel-border-color);
+    --tbl-header-bg: var(--sticky-table-header-background);
+    --tbl-row-alt: var(--panel-background);
+    --tbl-hover: var(--highlight-container-background);
+    --tbl-shadow: rgba(0,0,0,.5);
+  }
+}
+
+.cloud-tier-table-container {
+  position: relative;
+  width: 100%;
+}
+
+.cloud-tier-table-wrapper{
+  overflow-x:auto;
+  overflow-y:visible;
+  max-width:100%;
+  -webkit-overflow-scrolling:touch;
+  border:1px solid var(--tbl-border);
+  border-radius:10px;
+  box-shadow:0 1px 3px var(--tbl-shadow);
+  background:var(--tbl-bg);
+  scrollbar-width: thin;
+  min-height: 0;
+  padding-bottom: 1px;
+}
+.cloud-tier-table-wrapper::-webkit-scrollbar {
+  height: 12px;
+  -webkit-appearance: none;
+}
+
+.cloud-tier-table-wrapper::-webkit-scrollbar-track {
+  background: var(--tbl-bg);
+  border-radius: 6px;
+}
+
+.cloud-tier-table-wrapper::-webkit-scrollbar-thumb {
+  background: var(--tbl-border);
+  border-radius: 6px;
+  border: 2px solid var(--tbl-bg);
+}
+
+.cloud-tier-table-wrapper::-webkit-scrollbar-thumb:hover {
+  background: var(--tbl-muted);
+}
+@media (min-width: 1201px) {
+  .cloud-tier-table-wrapper {
+    padding-bottom: 15px;
+    overflow-x: scroll;
+  }
+}
+.scroll-indicator {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--tbl-header-bg);
+  border: 2px solid var(--tbl-border);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--tbl-text);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 10;
+  box-shadow: 0 2px 8px var(--tbl-shadow);
+  user-select: none;
+}
+
+.scroll-indicator:hover {
+  background: var(--tbl-hover);
+  transform: translateY(-50%) scale(1.1);
+}
+
+.scroll-indicator:focus {
+  outline: 2px solid var(--tbl-text);
+  outline-offset: 2px;
+  background: var(--tbl-hover);
+}
+
+.scroll-indicator-left {
+  left: 10px;
+}
+
+.scroll-indicator-right {
+  right: 10px;
+}
+
+/* ====== Base table ====== */
+.cloud-tier-table{
+  table-layout:auto;
+  width:max-content;
+  min-width:100%;
+  border-collapse:separate;
+  border-spacing:0;
+  color:var(--tbl-text);
+  background:var(--tbl-bg);
+  font-size:14px;
+}
+.cloud-tier-table th,
+.cloud-tier-table td{
+  padding:8px 12px;
+  border-right:1px solid var(--tbl-border);
+  border-bottom:1px solid var(--tbl-border);
+  vertical-align:top;
+  word-break:break-word;
+  background:var(--tbl-bg);
+}
+.cloud-tier-table th:last-child,
+.cloud-tier-table td:last-child{ border-right:0; }
+
+.cloud-tier-table thead th{
+  position:sticky !important;
+  top:0;
+  z-index:3;
+  background:var(--tbl-header-bg);
+  font-weight:600;
+  text-align:left;
+  cursor:pointer;
+  box-shadow:
+    inset 0 -1px 0 var(--tbl-border),
+    0 2px 6px -2px var(--tbl-shadow);
+}
+.cloud-tier-table thead th[aria-sort="ascending"]::after{ content:" ▲"; }
+.cloud-tier-table thead th[aria-sort="descending"]::after{ content:" ▼"; }
+
+.cloud-tier-table tbody tr:nth-child(odd){ background:var(--tbl-row-alt); }
+.cloud-tier-table tbody tr:hover{ background:var(--tbl-hover); }
+
+.sticky-col{ position:sticky; background:var(--tbl-bg); z-index:2; }
+.sticky-header{ z-index:4; }
+.sticky-col-0{ left:0; }
+.sticky-col-1{ left:var(--sticky-col-1-left); }
+.sticky-col-0,.sticky-col-1{
+  box-shadow:1px 0 0 0 var(--tbl-border),8px 0 8px -6px var(--tbl-shadow);
+}
+
+.filter-bar{
+  display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:8px 0 12px;
+}
+
+.dropdown-checkbox-wrapper {
+  min-width: 160px;
+  max-width: 35%;
+  width: 25%;
+}
+
+@media (max-width: 768px) {
+  .dropdown-checkbox-wrapper {
+    min-width: 140px;
+    max-width: 100%;
+    width: 100%;
+  }
+}
+@media (min-width: 1200px) {
+  .dropdown-checkbox-wrapper {
+    max-width: 280px;
+  }
+}
+
+#cloudTierCards{ display:none; }
+.tier-card{
+  border:1px solid var(--tbl-border);
+  border-radius:12px;
+  padding:12px;
+  margin:12px 0;
+  background:var(--tbl-bg);
+  box-shadow:0 1px 3px var(--tbl-shadow);
+}
+.tier-card .card-head{
+  display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px;
+}
+.tier-card .card-title{ margin:0; font-size:16px; font-weight:700; color:var(--tbl-text); }
+.tier-card .badge{
+  flex:0 0 auto;
+  display:inline-block; font-size:12px; padding:4px 8px; border-radius:9999px;
+  background:var(--tbl-header-bg); border:1px solid var(--tbl-border); color:var(--tbl-muted);
+}
+.tier-card .limits{ list-style:none; padding:0; margin:0; }
+.tier-card .limit-item{
+  display:grid; grid-template-columns:1fr auto; align-items:start; gap:8px 12px;
+  padding:10px 0; border-top:1px dashed var(--tbl-border);
+}
+.tier-card .limit-item:first-child{ border-top:0; }
+.tier-card .limit-item .k{ font-weight:600; color:var(--tbl-muted); overflow-wrap:anywhere; }
+.tier-card .limit-item .v{ text-align:right; max-width:55vw; overflow-wrap:anywhere; }
+.tier-card:hover{ box-shadow:0 6px 18px -8px var(--tbl-shadow); }
+
+@media (max-width:1200px){
+  .table-search{ min-width:180px; }
+  .cloud-tier-table-wrapper{ display:none; }
+  .scroll-indicator{ display:none; }
+  #cloudTierCards{ display:block; }
+}
+</style>
+
+<div class="filter-bar">
+  <input class="table-search" type="text" id="cloudTierTableSearch" onkeyup="filterCloudTierTable()" placeholder="Search..." />
+  <button type="button" id="resetFiltersBtn" style="padding:8px 16px; border-radius:8px; border:1px solid var(--tbl-border); background:var(--tbl-header-bg); cursor:pointer; font-weight:500;" onclick="resetCloudTierFilters()">Reset filters</button>
+
+  <div class="dropdown-checkbox-wrapper">
+    <button type="button" class="dropdown-checkbox-toggle" id="limitFilterToggle"
+      onclick="toggleDropdownCheckbox('limitFilter')" aria-expanded="false" aria-haspopup="true"
+      aria-controls="limitFilterMenu" role="button" tabindex="0" onkeydown="dropdownToggleKeydown(event,'limitFilter')">
+      <span class="dropdown-text">All Limits Selected</span><span class="dropdown-arrow">▼</span>
+    </button>
+    <div class="dropdown-checkbox-menu" id="limitFilterMenu" role="menu" aria-labelledby="limitFilterToggle">
+        <label class="dropdown-checkbox-option">
+          <input type="checkbox" value="0" checked onchange="toggleLimitColumn(0)">
+          <span>Cloud Provider</span>
+        </label>
+        <label class="dropdown-checkbox-option">
+          <input type="checkbox" value="1" checked onchange="toggleLimitColumn(1)">
+          <span>Machine Type</span>
+        </label>
+        <label class="dropdown-checkbox-option">
+          <input type="checkbox" value="2" checked onchange="toggleLimitColumn(2)">
+          <span>Number of Nodes</span>
+        </label>
+        <label class="dropdown-checkbox-option">
+          <input type="checkbox" value="3" checked onchange="toggleLimitColumn(3)">
+          <span>Max Ingress (bps)</span>
+        </label>
+        <label class="dropdown-checkbox-option">
+          <input type="checkbox" value="4" checked onchange="toggleLimitColumn(4)">
+          <span>Max Egress (bps)</span>
+        </label>
+        <label class="dropdown-checkbox-option">
+          <input type="checkbox" value="5" checked onchange="toggleLimitColumn(5)">
+          <span>Max Partitions</span>
+        </label>
+        <label class="dropdown-checkbox-option">
+          <input type="checkbox" value="6" checked onchange="toggleLimitColumn(6)">
+          <span>Max Client Connections</span>
+        </label>
+        <label class="dropdown-checkbox-option">
+          <input type="checkbox" value="7" checked onchange="toggleLimitColumn(7)">
+          <span>Max Kafka Topics</span>
+        </label>
+    </div>
+  </div>
+
+  <div class="dropdown-checkbox-wrapper">
+    <button type="button" class="dropdown-checkbox-toggle" id="providerFilterToggle"
+      onclick="toggleDropdownCheckbox('providerFilter')" aria-expanded="false" aria-haspopup="true"
+      aria-controls="providerFilterMenu" role="button" tabindex="0" onkeydown="dropdownToggleKeydown(event,'providerFilter')">
+      <span class="dropdown-text">All Providers Selected</span><span class="dropdown-arrow">▼</span>
+    </button>
+    <div class="dropdown-checkbox-menu" id="providerFilterMenu" role="menu" aria-labelledby="providerFilterToggle">
+        <label class="dropdown-checkbox-option">
+          <input type="checkbox" value="AWS" checked onchange="filterCloudTierTable()">
+          <span>AWS</span>
+        </label>
+        <label class="dropdown-checkbox-option">
+          <input type="checkbox" value="GCP" checked onchange="filterCloudTierTable()">
+          <span>GCP</span>
+        </label>
+        <label class="dropdown-checkbox-option">
+          <input type="checkbox" value="Azure" checked onchange="filterCloudTierTable()">
+          <span>Azure</span>
+        </label>
+    </div>
+  </div>
+
+  <div class="dropdown-checkbox-wrapper">
+    <button type="button" class="dropdown-checkbox-toggle" id="tierFilterToggle"
+      onclick="toggleDropdownCheckbox('tierFilter')" aria-expanded="false" aria-haspopup="true"
+      aria-controls="tierFilterMenu" role="button" tabindex="0" onkeydown="dropdownToggleKeydown(event,'tierFilter')">
+      <span class="dropdown-text">All Tiers Selected</span><span class="dropdown-arrow">▼</span>
+    </button>
+    <div class="dropdown-checkbox-menu" id="tierFilterMenu" role="menu" aria-labelledby="tierFilterToggle">
+      <!-- Tier options will be dynamically generated by JS -->
+    </div>
+  </div>
+</div>
+
+<!-- TABLE VIEW -->
+<div class="cloud-tier-table-container">
+  <div class="cloud-tier-table-wrapper">
+    <table class="cloud-tier-table" id="cloudTierTable">
+    <thead>
+      <tr>
+        <th class="sticky-col sticky-header sticky-col-0" onclick="sortCloudTierTable(0)" scope="col">Tier</th>
+          <th class="limit-col limit-col-0" onclick="sortCloudTierTable(1)" scope="col">Cloud Provider</th>
+          <th class="limit-col limit-col-1" onclick="sortCloudTierTable(2)" scope="col">Machine Type</th>
+          <th class="limit-col limit-col-2" onclick="sortCloudTierTable(3)" scope="col">Number of Nodes</th>
+          <th class="limit-col limit-col-3" onclick="sortCloudTierTable(4)" scope="col">Max Ingress (bps)</th>
+          <th class="limit-col limit-col-4" onclick="sortCloudTierTable(5)" scope="col">Max Egress (bps)</th>
+          <th class="limit-col limit-col-5" onclick="sortCloudTierTable(6)" scope="col">Max Partitions</th>
+          <th class="limit-col limit-col-6" onclick="sortCloudTierTable(7)" scope="col">Max Client Connections</th>
+          <th class="limit-col limit-col-7" onclick="sortCloudTierTable(8)" scope="col">Max Kafka Topics</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr data-tier="tier-1-aws-v2-arm, tier-1-aws-v3-arm" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-1-aws-v2-arm, tier-1-aws-v3-arm</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">m7gd.large</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">3</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">20000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">60000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">2000</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">9000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-1-aws-v2-x86" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-1-aws-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">i3en.large</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">3</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">20000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">60000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">2000</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">9000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-2-aws-v2-arm, tier-2-aws-v3-arm" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-2-aws-v2-arm, tier-2-aws-v3-arm</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">m7gd.xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">3</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">50000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">150000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">5600</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">22500</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-2-aws-v2-x86" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-2-aws-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">i3en.xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">3</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">50000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">150000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">5600</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">22500</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-3-aws-v2-arm, tier-3-aws-v3-arm" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-3-aws-v2-arm, tier-3-aws-v3-arm</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">m7gd.xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">6</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">100000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">200000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">11200</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">45000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-3-aws-v2-x86" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-3-aws-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">i3en.xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">6</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">100000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">200000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">11200</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">45000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-4-aws-v2-arm, tier-4-aws-v3-arm" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-4-aws-v2-arm, tier-4-aws-v3-arm</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">m7gd.xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">12</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">200000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">400000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">22600</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">90000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-4-aws-v2-x86" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-4-aws-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">i3en.xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">12</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">200000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">400000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">22600</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">90000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-5-aws-v2-arm, tier-5-aws-v3-arm" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-5-aws-v2-arm, tier-5-aws-v3-arm</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">m7gd.8xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">3</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">400000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">800000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">45600</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">180000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-5-aws-v2-x86" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-5-aws-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">i3en.6xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">3</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">400000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">800000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">45600</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">180000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-6-aws-v2-arm, tier-6-aws-v3-arm" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-6-aws-v2-arm, tier-6-aws-v3-arm</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">m7gd.8xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">6</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">800000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">1600000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">90000</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">180000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-6-aws-v2-x86" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-6-aws-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">i3en.6xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">6</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">800000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">1600000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">90000</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">180000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-7-aws-v2-arm, tier-7-aws-v3-arm" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-7-aws-v2-arm, tier-7-aws-v3-arm</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">m7gd.8xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">9</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">1200000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">2400000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">112500</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">270000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-7-aws-v2-x86" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-7-aws-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">i3en.6xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">9</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">1200000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">2400000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">112500</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">270000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-8-aws-v2-arm, tier-8-aws-v3-arm" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-8-aws-v2-arm, tier-8-aws-v3-arm</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">m7gd.8xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">12</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">1600000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">3200000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">112500</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">360000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-8-aws-v2-x86" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-8-aws-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">i3en.6xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">12</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">1600000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">3200000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">112500</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">360000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-9-aws-v2-arm, tier-9-aws-v3-arm" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-9-aws-v2-arm, tier-9-aws-v3-arm</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">m7gd.8xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">15</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">2000000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">4000000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">112500</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">450000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-9-aws-v2-x86" data-provider="AWS">
+        <td class="sticky-col sticky-col-0">tier-9-aws-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">AWS</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">i3en.6xlarge</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">15</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">2000000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">4000000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">112500</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">450000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-1-gcp-v2-x86" data-provider="GCP">
+        <td class="sticky-col sticky-col-0">tier-1-gcp-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">GCP</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">n2d-standard-2</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">3</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">20000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">60000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">2000</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">9000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-2-gcp-v2-x86" data-provider="GCP">
+        <td class="sticky-col sticky-col-0">tier-2-gcp-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">GCP</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">n2d-standard-4</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">3</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">50000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">150000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">5600</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">22500</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-3-gcp-v2-x86" data-provider="GCP">
+        <td class="sticky-col sticky-col-0">tier-3-gcp-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">GCP</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">n2d-standard-4</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">6</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">100000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">200000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">11200</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">45000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-4-gcp-v2-x86" data-provider="GCP">
+        <td class="sticky-col sticky-col-0">tier-4-gcp-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">GCP</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">n2d-standard-4</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">12</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">200000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">400000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">22600</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">90000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-5-gcp-v2-x86" data-provider="GCP">
+        <td class="sticky-col sticky-col-0">tier-5-gcp-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">GCP</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">n2d-standard-16</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">6</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">400000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">800000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">45600</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">180000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-6-gcp-v2-x86" data-provider="GCP">
+        <td class="sticky-col sticky-col-0">tier-6-gcp-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">GCP</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">n2d-standard-16</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">12</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">800000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">1600000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">90000</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">180000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-7-gcp-v2-x86" data-provider="GCP">
+        <td class="sticky-col sticky-col-0">tier-7-gcp-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">GCP</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">n2d-standard-16</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">18</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">1200000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">2400000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">112500</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">270000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-8-gcp-v2-x86" data-provider="GCP">
+        <td class="sticky-col sticky-col-0">tier-8-gcp-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">GCP</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">n2d-standard-32</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">12</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">1600000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">3200000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">112500</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">360000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-9-gcp-v2-x86" data-provider="GCP">
+        <td class="sticky-col sticky-col-0">tier-9-gcp-v2-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">GCP</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">n2d-standard-32</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">15</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">2000000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">4000000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">112500</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">450000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-1-azure-v3-x86" data-provider="Azure">
+        <td class="sticky-col sticky-col-0">tier-1-azure-v3-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">Azure</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">Standard_D2d_v5</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">3</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">20000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">60000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">1000</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">9000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-2-azure-v3-x86" data-provider="Azure">
+        <td class="sticky-col sticky-col-0">tier-2-azure-v3-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">Azure</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">Standard_D4d_v5</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">3</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">50000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">150000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">2800</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">22500</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-3-azure-v3-x86" data-provider="Azure">
+        <td class="sticky-col sticky-col-0">tier-3-azure-v3-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">Azure</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">Standard_D4d_v5</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">6</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">100000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">200000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">5600</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">45000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-4-azure-v3-x86" data-provider="Azure">
+        <td class="sticky-col sticky-col-0">tier-4-azure-v3-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">Azure</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">Standard_D4d_v5</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">12</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">200000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">400000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">11300</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">90000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+      <tr data-tier="tier-5-azure-v3-x86" data-provider="Azure">
+        <td class="sticky-col sticky-col-0">tier-5-azure-v3-x86</td>
+          <td class="limit-col limit-col-0" data-limit-key="cloud_provider">Azure</td>
+          <td class="limit-col limit-col-1" data-limit-key="machine_type">Standard_D32d_v5</td>
+          <td class="limit-col limit-col-2" data-limit-key="nodes_count">3</td>
+          <td class="limit-col limit-col-3" data-limit-key="advertisedMaxIngress">400000000</td>
+          <td class="limit-col limit-col-4" data-limit-key="advertisedMaxEgress">800000000</td>
+          <td class="limit-col limit-col-5" data-limit-key="advertisedMaxPartitionCount">22800</td>
+          <td class="limit-col limit-col-6" data-limit-key="advertisedMaxClientCount">180000</td>
+          <td class="limit-col limit-col-7" data-limit-key="kafka_topics_max">40000</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<!-- MOBILE CARD VIEW -->
+<div id="cloudTierCards" aria-live="polite">
+    <div class="tier-card" data-tier="tier-1-aws-v2-arm, tier-1-aws-v3-arm" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-1-aws-v2-arm, tier-1-aws-v3-arm</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">m7gd.large</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">3</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">20000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">60000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">2000</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">9000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-1-aws-v2-x86" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-1-aws-v2-x86</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">i3en.large</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">3</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">20000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">60000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">2000</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">9000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-2-aws-v2-arm, tier-2-aws-v3-arm" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-2-aws-v2-arm, tier-2-aws-v3-arm</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">m7gd.xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">3</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">50000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">150000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">5600</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">22500</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-2-aws-v2-x86" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-2-aws-v2-x86</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">i3en.xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">3</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">50000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">150000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">5600</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">22500</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-3-aws-v2-arm, tier-3-aws-v3-arm" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-3-aws-v2-arm, tier-3-aws-v3-arm</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">m7gd.xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">6</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">100000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">200000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">11200</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">45000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-3-aws-v2-x86" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-3-aws-v2-x86</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">i3en.xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">6</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">100000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">200000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">11200</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">45000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-4-aws-v2-arm, tier-4-aws-v3-arm" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-4-aws-v2-arm, tier-4-aws-v3-arm</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">m7gd.xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">12</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">200000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">400000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">22600</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">90000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-4-aws-v2-x86" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-4-aws-v2-x86</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">i3en.xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">12</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">200000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">400000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">22600</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">90000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-5-aws-v2-arm, tier-5-aws-v3-arm" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-5-aws-v2-arm, tier-5-aws-v3-arm</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">m7gd.8xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">3</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">400000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">800000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">45600</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">180000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-5-aws-v2-x86" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-5-aws-v2-x86</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">i3en.6xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">3</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">400000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">800000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">45600</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">180000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-6-aws-v2-arm, tier-6-aws-v3-arm" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-6-aws-v2-arm, tier-6-aws-v3-arm</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">m7gd.8xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">6</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">800000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">1600000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">90000</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">180000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-6-aws-v2-x86" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-6-aws-v2-x86</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">i3en.6xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">6</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">800000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">1600000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">90000</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">180000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-7-aws-v2-arm, tier-7-aws-v3-arm" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-7-aws-v2-arm, tier-7-aws-v3-arm</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">m7gd.8xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">9</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">1200000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">2400000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">112500</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">270000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-7-aws-v2-x86" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-7-aws-v2-x86</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">i3en.6xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">9</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">1200000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">2400000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">112500</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">270000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-8-aws-v2-arm, tier-8-aws-v3-arm" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-8-aws-v2-arm, tier-8-aws-v3-arm</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">m7gd.8xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">12</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">1600000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">3200000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">112500</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">360000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-8-aws-v2-x86" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-8-aws-v2-x86</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">i3en.6xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">12</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">1600000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">3200000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">112500</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">360000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-9-aws-v2-arm, tier-9-aws-v3-arm" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-9-aws-v2-arm, tier-9-aws-v3-arm</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">m7gd.8xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">15</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">2000000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">4000000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">112500</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">450000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-9-aws-v2-x86" data-provider="AWS">
+      <div class="card-head">
+        <h4 class="card-title">tier-9-aws-v2-x86</h4>
+        <span class="badge">AWS</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">AWS</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">i3en.6xlarge</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">15</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">2000000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">4000000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">112500</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">450000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-1-gcp-v2-x86" data-provider="GCP">
+      <div class="card-head">
+        <h4 class="card-title">tier-1-gcp-v2-x86</h4>
+        <span class="badge">GCP</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">GCP</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">n2d-standard-2</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">3</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">20000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">60000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">2000</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">9000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-2-gcp-v2-x86" data-provider="GCP">
+      <div class="card-head">
+        <h4 class="card-title">tier-2-gcp-v2-x86</h4>
+        <span class="badge">GCP</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">GCP</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">n2d-standard-4</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">3</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">50000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">150000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">5600</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">22500</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-3-gcp-v2-x86" data-provider="GCP">
+      <div class="card-head">
+        <h4 class="card-title">tier-3-gcp-v2-x86</h4>
+        <span class="badge">GCP</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">GCP</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">n2d-standard-4</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">6</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">100000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">200000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">11200</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">45000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-4-gcp-v2-x86" data-provider="GCP">
+      <div class="card-head">
+        <h4 class="card-title">tier-4-gcp-v2-x86</h4>
+        <span class="badge">GCP</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">GCP</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">n2d-standard-4</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">12</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">200000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">400000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">22600</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">90000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-5-gcp-v2-x86" data-provider="GCP">
+      <div class="card-head">
+        <h4 class="card-title">tier-5-gcp-v2-x86</h4>
+        <span class="badge">GCP</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">GCP</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">n2d-standard-16</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">6</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">400000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">800000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">45600</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">180000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-6-gcp-v2-x86" data-provider="GCP">
+      <div class="card-head">
+        <h4 class="card-title">tier-6-gcp-v2-x86</h4>
+        <span class="badge">GCP</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">GCP</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">n2d-standard-16</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">12</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">800000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">1600000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">90000</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">180000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-7-gcp-v2-x86" data-provider="GCP">
+      <div class="card-head">
+        <h4 class="card-title">tier-7-gcp-v2-x86</h4>
+        <span class="badge">GCP</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">GCP</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">n2d-standard-16</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">18</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">1200000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">2400000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">112500</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">270000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-8-gcp-v2-x86" data-provider="GCP">
+      <div class="card-head">
+        <h4 class="card-title">tier-8-gcp-v2-x86</h4>
+        <span class="badge">GCP</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">GCP</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">n2d-standard-32</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">12</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">1600000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">3200000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">112500</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">360000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-9-gcp-v2-x86" data-provider="GCP">
+      <div class="card-head">
+        <h4 class="card-title">tier-9-gcp-v2-x86</h4>
+        <span class="badge">GCP</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">GCP</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">n2d-standard-32</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">15</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">2000000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">4000000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">112500</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">450000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-1-azure-v3-x86" data-provider="Azure">
+      <div class="card-head">
+        <h4 class="card-title">tier-1-azure-v3-x86</h4>
+        <span class="badge">Azure</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">Azure</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">Standard_D2d_v5</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">3</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">20000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">60000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">1000</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">9000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-2-azure-v3-x86" data-provider="Azure">
+      <div class="card-head">
+        <h4 class="card-title">tier-2-azure-v3-x86</h4>
+        <span class="badge">Azure</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">Azure</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">Standard_D4d_v5</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">3</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">50000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">150000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">2800</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">22500</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-3-azure-v3-x86" data-provider="Azure">
+      <div class="card-head">
+        <h4 class="card-title">tier-3-azure-v3-x86</h4>
+        <span class="badge">Azure</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">Azure</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">Standard_D4d_v5</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">6</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">100000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">200000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">5600</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">45000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-4-azure-v3-x86" data-provider="Azure">
+      <div class="card-head">
+        <h4 class="card-title">tier-4-azure-v3-x86</h4>
+        <span class="badge">Azure</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">Azure</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">Standard_D4d_v5</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">12</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">200000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">400000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">11300</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">90000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+    <div class="tier-card" data-tier="tier-5-azure-v3-x86" data-provider="Azure">
+      <div class="card-head">
+        <h4 class="card-title">tier-5-azure-v3-x86</h4>
+        <span class="badge">Azure</span>
+      </div>
+      <ul class="limits">
+          <li class="limit-item limit-col-0" data-limit-key="cloud_provider">
+            <span class="k">cloud_provider</span>
+            <span class="v">Azure</span>
+          </li>
+          <li class="limit-item limit-col-1" data-limit-key="machine_type">
+            <span class="k">machine_type</span>
+            <span class="v">Standard_D32d_v5</span>
+          </li>
+          <li class="limit-item limit-col-2" data-limit-key="nodes_count">
+            <span class="k">nodes_count</span>
+            <span class="v">3</span>
+          </li>
+          <li class="limit-item limit-col-3" data-limit-key="advertisedMaxIngress">
+            <span class="k">advertisedMaxIngress</span>
+            <span class="v">400000000</span>
+          </li>
+          <li class="limit-item limit-col-4" data-limit-key="advertisedMaxEgress">
+            <span class="k">advertisedMaxEgress</span>
+            <span class="v">800000000</span>
+          </li>
+          <li class="limit-item limit-col-5" data-limit-key="advertisedMaxPartitionCount">
+            <span class="k">advertisedMaxPartitionCount</span>
+            <span class="v">22800</span>
+          </li>
+          <li class="limit-item limit-col-6" data-limit-key="advertisedMaxClientCount">
+            <span class="k">advertisedMaxClientCount</span>
+            <span class="v">180000</span>
+          </li>
+          <li class="limit-item limit-col-7" data-limit-key="kafka_topics_max">
+            <span class="k">kafka_topics_max</span>
+            <span class="v">40000</span>
+          </li>
+      </ul>
+    </div>
+</div>
+
+<script>
+function resetCloudTierFilters() {
+  // Select all limits
+  document.querySelectorAll('#limitFilterMenu input[type="checkbox"]').forEach(cb => { cb.checked = true; cb.setAttribute('aria-checked', 'true'); });
+  // Select all providers
+  document.querySelectorAll('#providerFilterMenu input[type="checkbox"]').forEach(cb => { cb.checked = true; cb.setAttribute('aria-checked', 'true'); });
+  // Select all tiers (after dropdown is updated)
+  updateTierDropdown();
+  document.querySelectorAll('#tierFilterMenu input[type="checkbox"]').forEach(cb => { cb.checked = true; cb.setAttribute('aria-checked', 'true'); });
+  // Clear search + query params
+  document.getElementById('cloudTierTableSearch').value = '';
+  window.history.replaceState(null, '', window.location.pathname);
+  filterCloudTierTable();
+}
+
+// sort state
+let cloudTierSort = { col: 0, dir: 1 };
+
+// keyboard support for dropdown toggles
+function dropdownToggleKeydown(e,id){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggleDropdownCheckbox(id); } }
+
+// cache rows for tier dropdown
+window.cloudTierTableRows = [
+    { tier: "tier-1-aws-v2-arm, tier-1-aws-v3-arm", provider: "AWS" },
+    { tier: "tier-1-aws-v2-x86", provider: "AWS" },
+    { tier: "tier-2-aws-v2-arm, tier-2-aws-v3-arm", provider: "AWS" },
+    { tier: "tier-2-aws-v2-x86", provider: "AWS" },
+    { tier: "tier-3-aws-v2-arm, tier-3-aws-v3-arm", provider: "AWS" },
+    { tier: "tier-3-aws-v2-x86", provider: "AWS" },
+    { tier: "tier-4-aws-v2-arm, tier-4-aws-v3-arm", provider: "AWS" },
+    { tier: "tier-4-aws-v2-x86", provider: "AWS" },
+    { tier: "tier-5-aws-v2-arm, tier-5-aws-v3-arm", provider: "AWS" },
+    { tier: "tier-5-aws-v2-x86", provider: "AWS" },
+    { tier: "tier-6-aws-v2-arm, tier-6-aws-v3-arm", provider: "AWS" },
+    { tier: "tier-6-aws-v2-x86", provider: "AWS" },
+    { tier: "tier-7-aws-v2-arm, tier-7-aws-v3-arm", provider: "AWS" },
+    { tier: "tier-7-aws-v2-x86", provider: "AWS" },
+    { tier: "tier-8-aws-v2-arm, tier-8-aws-v3-arm", provider: "AWS" },
+    { tier: "tier-8-aws-v2-x86", provider: "AWS" },
+    { tier: "tier-9-aws-v2-arm, tier-9-aws-v3-arm", provider: "AWS" },
+    { tier: "tier-9-aws-v2-x86", provider: "AWS" },
+    { tier: "tier-1-gcp-v2-x86", provider: "GCP" },
+    { tier: "tier-2-gcp-v2-x86", provider: "GCP" },
+    { tier: "tier-3-gcp-v2-x86", provider: "GCP" },
+    { tier: "tier-4-gcp-v2-x86", provider: "GCP" },
+    { tier: "tier-5-gcp-v2-x86", provider: "GCP" },
+    { tier: "tier-6-gcp-v2-x86", provider: "GCP" },
+    { tier: "tier-7-gcp-v2-x86", provider: "GCP" },
+    { tier: "tier-8-gcp-v2-x86", provider: "GCP" },
+    { tier: "tier-9-gcp-v2-x86", provider: "GCP" },
+    { tier: "tier-1-azure-v3-x86", provider: "Azure" },
+    { tier: "tier-2-azure-v3-x86", provider: "Azure" },
+    { tier: "tier-3-azure-v3-x86", provider: "Azure" },
+    { tier: "tier-4-azure-v3-x86", provider: "Azure" },
+    { tier: "tier-5-azure-v3-x86", provider: "Azure" }
+];
+
+// Add HTML-escaping helper to neutralize any special characters in tier names
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function updateTierDropdown(){
+  const providerMenu = document.getElementById('providerFilterMenu');
+  const selectedProviders = Array.from(
+    providerMenu.querySelectorAll('input[type="checkbox"]:checked')
+  ).map(cb => cb.value);
+  const tierMenu = document.getElementById('tierFilterMenu');
+  const prevChecked = new Set(
+    Array.from(tierMenu.querySelectorAll('input[type="checkbox"]:checked'))
+      .map(cb => cb.value)
+  );
+
+  // Extract tier numbers from tier names (e.g., 'tier-1-aws-v2-arm', 'tier-2-gcp-v2-x86' -> '1', '2')
+  let tierNumbers = window.cloudTierTableRows
+    .filter(r => !selectedProviders.length || selectedProviders.includes(r.provider))
+    .map(r => {
+      const match = r.tier.match(/tier-(\d+)/i);
+      return match ? match[1] : null;
+    })
+    .filter(Boolean);
+  const uniqueNumbers = Array.from(new Set(tierNumbers)).sort((a,b)=>Number(a)-Number(b));
+  tierMenu.innerHTML = uniqueNumbers.map(num => {
+    const checked = !prevChecked.size || prevChecked.has(num);
+    return `<label class="dropdown-checkbox-option">
+      <input type="checkbox" value="${num}" ${checked?'checked':''} onchange="filterCloudTierTable()" aria-checked="${checked}">
+      <span>Tier ${num}</span>
+    </label>`;
+  }).join('');
+}
+
+function toggleDropdownCheckbox(filterId){
+  const toggle=document.getElementById(filterId+'Toggle');
+  const menu=document.getElementById(filterId+'Menu');
+  if(!toggle||!menu) return;
+  const isOpen=menu.classList.contains('show');
+  document.querySelectorAll('.dropdown-checkbox-menu.show').forEach(m=>{
+    if(m!==menu){ m.classList.remove('show'); const t=m.parentNode.querySelector('.dropdown-checkbox-toggle'); if(t){ t.classList.remove('open'); t.setAttribute('aria-expanded','false'); } }
+  });
+  if(isOpen){ menu.classList.remove('show'); toggle.classList.remove('open'); toggle.setAttribute('aria-expanded','false'); }
+  else { menu.classList.add('show'); toggle.classList.add('open'); toggle.setAttribute('aria-expanded','true'); }
+}
+
+function updateDropdownText(filterId, allText, someText){
+  const menu=document.getElementById(filterId+'Menu');
+  const toggle=document.getElementById(filterId+'Toggle');
+  if(!menu||!toggle) return;
+  const boxes=menu.querySelectorAll('input[type="checkbox"]');
+  const checked=menu.querySelectorAll('input[type="checkbox"]:checked').length;
+  const textEl=toggle.querySelector('.dropdown-text');
+  if(!textEl) return;
+  if(!boxes.length){ textEl.textContent='None Available'; return; }
+  if(checked===0) textEl.textContent='None Selected';
+  else if(checked===boxes.length) textEl.textContent=allText;
+  else if(checked===1){ const one=menu.querySelector('input[type="checkbox"]:checked'); const label=one&&one.nextElementSibling; textEl.textContent=label?label.textContent:someText; }
+  else textEl.textContent=`${checked} ${someText}`;
+}
+
+function updateAriaSort(colIdx,dir){
+  const ths=document.querySelectorAll('#cloudTierTable thead th');
+  ths.forEach((th,i)=>{ th.removeAttribute('aria-sort'); if(i===colIdx){ th.setAttribute('aria-sort', dir===1?'ascending':'descending'); }});
+}
+
+function sortCloudTierTable(colIdx){
+  const table=document.getElementById('cloudTierTable');
+  const tbody=table.tBodies[0];
+  const rows=Array.from(tbody.rows);
+
+  if(cloudTierSort.col===colIdx) cloudTierSort.dir*=-1; else cloudTierSort={col:colIdx,dir:1};
+
+  const cmp=(a,b)=>{
+    const av=a.cells[colIdx].textContent.trim();
+    const bv=b.cells[colIdx].textContent.trim();
+    const an=Number(av.replace(/[^0-9.\-eE]/g,'')), bn=Number(bv.replace(/[^0-9.\-eE]/g,''));
+    const aNA=av==='N/A', bNA=bv==='N/A';
+    if(aNA&&!bNA) return 1;
+    if(!aNA&&bNA) return -1;
+    const aNum=!isNaN(an)&&av!=='', bNum=!isNaN(bn)&&bv!=='';
+    if(aNum&&bNum) return (an-bn)*cloudTierSort.dir;
+    return av.localeCompare(bv,undefined,{numeric:true,sensitivity:'base'})*cloudTierSort.dir;
+  };
+
+  rows.sort(cmp).forEach(r=>tbody.appendChild(r));
+  updateAriaSort(colIdx, cloudTierSort.dir);
+}
+
+function filterCloudTierTable(){
+  updateTierDropdown();
+
+  const search=document.getElementById('cloudTierTableSearch').value.trim().toLowerCase();
+  const providerMenu=document.getElementById('providerFilterMenu');
+  const tierMenu=document.getElementById('tierFilterMenu');
+  const limitMenu=document.getElementById('limitFilterMenu');
+
+  const selProviders=Array.from(providerMenu.querySelectorAll('input[type="checkbox"]:checked')).map(cb=>cb.value);
+  const selTiers=Array.from(tierMenu.querySelectorAll('input[type="checkbox"]:checked')).map(cb=>cb.value);
+  const selLimits=Array.from(limitMenu.querySelectorAll('input[type="checkbox"]:checked')).map(cb=>cb.value);
+
+  /* --- TABLE ROWS --- */
+  const table=document.getElementById('cloudTierTable');
+  const trs=table.getElementsByTagName('tr');
+  for(let i=1;i<trs.length;i++){
+    const row=trs[i];
+    const tier=row.getAttribute('data-tier');
+    const provider=row.getAttribute('data-provider')||'unknown';
+    let show=true;
+    
+    // If no tiers are selected, hide all rows
+    if(selTiers.length === 0) {
+      show = false;
+    } else {
+      // Match by tier number
+      const match = tier.match(/tier-(\d+)/i);
+      const tierNum = match ? match[1] : null;
+      if(!tierNum || !selTiers.includes(tierNum)) show=false;
+    }
+    
+    // If no providers are selected, hide all rows
+    if(selProviders.length === 0) {
+      show = false;
+    } else if(show && !selProviders.includes(provider)) {
+      show = false;
+    }
+    
+    if(search){
+      const tds=row.getElementsByTagName('td');
+      let found=false;
+      for(let j=0;j<tds.length;j++){ if(tds[j].textContent.toLowerCase().includes(search)){ found=true; break; } }
+      if(!found) show=false;
+    }
+    row.style.display=show?'':'none';
+  }
+
+  /* --- CARDS --- */
+  const cards=document.querySelectorAll('#cloudTierCards .tier-card');
+  cards.forEach(card=>{
+    const tier=card.getAttribute('data-tier');
+    const provider=card.getAttribute('data-provider')||'unknown';
+    let show=true;
+    
+    // If no tiers are selected, hide all cards
+    if(selTiers.length === 0) {
+      show = false;
+    } else {
+      const match = tier.match(/tier-(\d+)/i);
+      const tierNum = match ? match[1] : null;
+      if(!tierNum || !selTiers.includes(tierNum)) show=false;
+    }
+    
+    // If no providers are selected, hide all cards
+    if(selProviders.length === 0) {
+      show = false;
+    } else if(show && !selProviders.includes(provider)) {
+      show = false;
+    }
+    
+    if(search && !card.textContent.toLowerCase().includes(search)) show=false;
+    card.style.display=show?'':'none';
+  });
+
+  // update dropdown labels
+  ['limitFilter','providerFilter','tierFilter'].forEach(id=>{
+    const t = id==='limitFilter' ? 'Limits' : id==='providerFilter' ? 'Providers' : 'Tiers';
+    updateDropdownText(id, `All ${t} Selected`, `${t} Selected`);
+  });
+
+  // Re-apply limit column visibility after any filter change
+  const limitMenuEl = document.getElementById('limitFilterMenu');
+  if (limitMenuEl) {
+    Array.from(limitMenuEl.querySelectorAll('input[type="checkbox"]')).forEach(cb => {
+      const colIdx = cb.value;
+      const checked = cb.checked;
+      // table cells
+      document.querySelectorAll('.limit-col-' + colIdx).forEach(el => { el.style.display = checked ? '' : 'none'; });
+      // card items
+      document.querySelectorAll('#cloudTierCards .limit-col-' + colIdx).forEach(el => { el.style.display = checked ? '' : 'none'; });
+    });
+  }
+
+  // deep-link current state
+  const params=[];
+  if(selProviders.length) params.push('providers='+encodeURIComponent(selProviders.join(',')));
+  if(selTiers.length) params.push('tiers='+encodeURIComponent(selTiers.join(',')));
+  if(selLimits.length) params.push('limits='+encodeURIComponent(selLimits.join(',')));
+  if(search) params.push('search='+encodeURIComponent(search));
+  const newUrl=window.location.pathname+(params.length?('?'+params.join('&')):'');
+  window.history.replaceState(null,'',newUrl);
+}
+
+function toggleLimitColumn(colIdx){
+  const checked=document.querySelector('#limitFilterMenu input[value="'+colIdx+'"]').checked;
+  // table cells
+  document.querySelectorAll('.limit-col-'+colIdx).forEach(el=>{ el.style.display=checked?'':'none'; });
+  // card items
+  document.querySelectorAll('#cloudTierCards .limit-col-'+colIdx).forEach(el=>{ el.style.display=checked?'':'none'; });
+  updateDropdownText('limitFilter','All Limits Selected','Limits Selected');
+  // Update URL to persist limit selection changes
+  filterCloudTierTable();
+}
+
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('.dropdown-checkbox-wrapper')){
+    document.querySelectorAll('.dropdown-checkbox-menu.show').forEach(menu=>{
+      menu.classList.remove('show');
+      const toggle=menu.parentNode.querySelector('.dropdown-checkbox-toggle');
+      if(toggle){ toggle.classList.remove('open'); toggle.setAttribute('aria-expanded','false'); }
+    });
+  }
+});
+
+const setStickyOffsets=()=>{
+  const table=document.getElementById('cloudTierTable');
+  if(!table) return;
+  const first=table.querySelector('th.sticky-col-0, td.sticky-col-0');
+  const width=first?first.offsetWidth:256;
+  table.style.setProperty('--sticky-col-1-left', width+'px');
+};
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  // apply deep-links
+  const params=new URLSearchParams(window.location.search);
+  const pProviders=(params.get('providers')||'').split(',').filter(Boolean);
+  const pLimits=(params.get('limits')||'').split(',').filter(Boolean);
+  const pTiers=(params.get('tiers')||'').split(',').filter(Boolean);
+  const pSearch=params.get('search')||'';
+
+  if(pProviders.length){
+    document.querySelectorAll('#providerFilterMenu input[type="checkbox"]').forEach(cb=>{
+      cb.checked=pProviders.includes(cb.value); cb.setAttribute('aria-checked', cb.checked);
+    });
+  }
+  if(pLimits.length){
+    document.querySelectorAll('#limitFilterMenu input[type="checkbox"]').forEach(cb=>{
+      cb.checked=pLimits.includes(cb.value); cb.setAttribute('aria-checked', cb.checked);
+    });
+  }
+
+  document.getElementById('cloudTierTableSearch').value=pSearch;
+
+  setStickyOffsets();
+  updateTierDropdown();
+
+  if(pTiers.length){
+    document.querySelectorAll('#tierFilterMenu input[type="checkbox"]').forEach(cb=>{
+      cb.checked=pTiers.includes(cb.value); cb.setAttribute('aria-checked', cb.checked);
+    });
+  }
+
+  filterCloudTierTable();
+  
+  // Initialize horizontal scroll indicators
+  initHorizontalScrollIndicators();
+});
+window.addEventListener('resize', ()=>{
+  setStickyOffsets();
+  initHorizontalScrollIndicators();
+});
+
+// Add horizontal scroll indicators for better UX
+function initHorizontalScrollIndicators() {
+  const container = document.querySelector('.cloud-tier-table-container');
+  const wrapper = document.querySelector('.cloud-tier-table-wrapper');
+  if (!container || !wrapper) return;
+  
+  // Remove existing indicators
+  container.querySelectorAll('.scroll-indicator').forEach(el => el.remove());
+  
+  const table = wrapper.querySelector('.cloud-tier-table');
+  if (!table) return;
+  
+  // Check if horizontal scrolling is needed
+  const needsHorizontalScroll = table.scrollWidth > wrapper.clientWidth;
+  
+  if (needsHorizontalScroll) {
+    // Add scroll indicators to container (not wrapper) so they stay fixed
+    const rightIndicator = document.createElement('div');
+    rightIndicator.className = 'scroll-indicator scroll-indicator-right';
+    rightIndicator.innerHTML = '→';
+    rightIndicator.title = 'Scroll right to see more columns';
+    rightIndicator.setAttribute('tabindex', '0');
+    rightIndicator.setAttribute('role', 'button');
+    rightIndicator.setAttribute('aria-label', 'Scroll table right');
+    rightIndicator.addEventListener('click', () => {
+      wrapper.scrollBy({ left: 200, behavior: 'smooth' });
+    });
+    rightIndicator.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        wrapper.scrollBy({ left: 200, behavior: 'smooth' });
+      }
+    });
+    container.appendChild(rightIndicator);
+    
+    const leftIndicator = document.createElement('div');
+    leftIndicator.className = 'scroll-indicator scroll-indicator-left';
+    leftIndicator.innerHTML = '←';
+    leftIndicator.title = 'Scroll left';
+    leftIndicator.setAttribute('tabindex', '0');
+    leftIndicator.setAttribute('role', 'button');
+    leftIndicator.setAttribute('aria-label', 'Scroll table left');
+    leftIndicator.style.opacity = '0'; // Initially hidden
+    leftIndicator.addEventListener('click', () => {
+      wrapper.scrollBy({ left: -200, behavior: 'smooth' });
+    });
+    leftIndicator.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        wrapper.scrollBy({ left: -200, behavior: 'smooth' });
+      }
+    });
+    container.appendChild(leftIndicator);
+    
+    // Update indicators on scroll
+    wrapper.addEventListener('scroll', updateScrollIndicators);
+    updateScrollIndicators.call(wrapper);
+  }
+}
+
+function updateScrollIndicators() {
+  const wrapper = this;
+  const container = wrapper.closest('.cloud-tier-table-container');
+  if (!container) return;
+  
+  const leftIndicator = container.querySelector('.scroll-indicator-left');
+  const rightIndicator = container.querySelector('.scroll-indicator-right');
+  
+  if (!leftIndicator || !rightIndicator) return;
+  
+  const scrollLeft = wrapper.scrollLeft;
+  const maxScrollLeft = wrapper.scrollWidth - wrapper.clientWidth;
+  
+  // Show/hide left indicator
+  leftIndicator.style.opacity = scrollLeft > 10 ? '1' : '0';
+  
+  // Show/hide right indicator  
+  rightIndicator.style.opacity = scrollLeft < maxScrollLeft - 10 ? '1' : '0';
+}
+</script>
