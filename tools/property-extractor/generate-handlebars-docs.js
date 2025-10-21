@@ -28,6 +28,23 @@ Object.entries(helpers).forEach(([name, fn]) => {
 });
 
 /**
+ * Determines if a property is related to object storage.
+ * @param {Object} prop - The property object
+ * @returns {boolean} True if the property is object storage related
+ */
+function isObjectStorageProperty(prop) {
+  return prop.name && (
+    prop.name.includes('cloud_storage') ||
+    prop.name.includes('s3_') ||
+    prop.name.includes('azure_') ||
+    prop.name.includes('gcs_') ||
+    prop.name.includes('archival_') ||
+    prop.name.includes('remote_') ||
+    prop.name.includes('tiered_')
+  );
+}
+
+/**
  * Configuration mapping for different property types
  */
 const PROPERTY_CONFIG = {
@@ -60,17 +77,7 @@ NOTE: Some cluster properties require that you restart the cluster for any updat
     sectionTitle: 'Cluster configuration',
     groups: [
       {
-        filter: (prop) => prop.config_scope === 'cluster' && !prop.is_deprecated && !(
-          prop.name && (
-            prop.name.includes('cloud_storage') ||
-            prop.name.includes('s3_') ||
-            prop.name.includes('azure_') ||
-            prop.name.includes('gcs_') ||
-            prop.name.includes('archival_') ||
-            prop.name.includes('remote_') ||
-            prop.name.includes('tiered_')
-          )
-        )
+        filter: (prop) => prop.config_scope === 'cluster' && !prop.is_deprecated && !isObjectStorageProperty(prop)
       }
     ],
     filename: 'cluster-properties.adoc'
@@ -85,15 +92,7 @@ NOTE: Some object storage properties require that you restart the cluster for an
     sectionIntro: 'Object storage properties should only be set if you enable xref:manage:tiered-storage.adoc[Tiered Storage].',
     groups: [
       {
-        filter: (prop) => prop.name && (
-          prop.name.includes('cloud_storage') ||
-          prop.name.includes('s3_') ||
-          prop.name.includes('azure_') ||
-          prop.name.includes('gcs_') ||
-          prop.name.includes('archival_') ||
-          prop.name.includes('remote_') ||
-          prop.name.includes('tiered_')
-        ) && !prop.is_deprecated
+        filter: (prop) => isObjectStorageProperty(prop) && !prop.is_deprecated
       }
     ],
     filename: 'object-storage-properties.adoc'
@@ -332,15 +331,7 @@ function generatePropertyPartials(properties, partialsDir, hasCloudSupport = fal
       propertyGroups.broker.push(prop);
     } else if (prop.config_scope === 'cluster') {
       // Check if it's an object storage property
-      if (prop.name && (
-        prop.name.includes('cloud_storage') ||
-        prop.name.includes('s3_') ||
-        prop.name.includes('azure_') ||
-        prop.name.includes('gcs_') ||
-        prop.name.includes('archival_') ||
-        prop.name.includes('remote_') ||
-        prop.name.includes('tiered_')
-      )) {
+      if (isObjectStorageProperty(prop)) {
         propertyGroups['object-storage'].push(prop);
       } else {
         propertyGroups.cluster.push(prop);
@@ -416,11 +407,14 @@ function generateDeprecatedDocs(properties, outputDir) {
   
   // Determine the correct path for deprecated properties
   let outputPath;
-  if (outputDir.includes('pages/properties')) {
-    // Navigate back from pages/properties to reference, then into partials/deprecated
+  if (process.env.OUTPUT_PARTIALS_DIR) {
+    // Use the explicitly set partials directory
+    outputPath = path.join(process.env.OUTPUT_PARTIALS_DIR, 'deprecated', 'deprecated-properties.adoc');
+  } else if (outputDir.includes('pages/properties')) {
+    // Fallback: Navigate back from pages/properties to reference, then into partials/deprecated
     outputPath = path.join(path.dirname(path.dirname(outputDir)), 'partials', 'deprecated', 'deprecated-properties.adoc');
   } else {
-    // Direct path when outputDir is the base directory
+    // Fallback: Direct path when outputDir is the base directory
     outputPath = path.join(outputDir, 'partials', 'deprecated', 'deprecated-properties.adoc');
   }
   
@@ -591,10 +585,10 @@ function generateErrorReports(properties, outputDir) {
   console.log(`You have ${emptyDescriptions.length} properties with empty description. Percentage of errors: ${percentageEmpty}%.`);
   console.log(`You have ${deprecatedProperties.length} deprecated properties. Percentage of errors: ${percentageDeprecated}%.`);
 
-  // Return the arrays so they can be added to the JSON output
+  // Return the arrays sorted for deterministic output
   return {
-    empty_descriptions: emptyDescriptions,
-    deprecated_properties: deprecatedProperties
+    empty_descriptions: emptyDescriptions.sort(),
+    deprecated_properties: deprecatedProperties.sort()
   };
 }
 
