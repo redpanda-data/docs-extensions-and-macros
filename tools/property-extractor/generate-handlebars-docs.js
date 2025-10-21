@@ -28,6 +28,23 @@ Object.entries(helpers).forEach(([name, fn]) => {
 });
 
 /**
+ * Determines if a property is related to object storage.
+ * @param {Object} prop - The property object
+ * @returns {boolean} True if the property is object storage related
+ */
+function isObjectStorageProperty(prop) {
+  return prop.name && (
+    prop.name.includes('cloud_storage') ||
+    prop.name.includes('s3_') ||
+    prop.name.includes('azure_') ||
+    prop.name.includes('gcs_') ||
+    prop.name.includes('archival_') ||
+    prop.name.includes('remote_') ||
+    prop.name.includes('tiered_')
+  );
+}
+
+/**
  * Configuration mapping for different property types
  */
 const PROPERTY_CONFIG = {
@@ -60,17 +77,7 @@ NOTE: Some cluster properties require that you restart the cluster for any updat
     sectionTitle: 'Cluster configuration',
     groups: [
       {
-        filter: (prop) => prop.config_scope === 'cluster' && !prop.is_deprecated && !(
-          prop.name && (
-            prop.name.includes('cloud_storage') ||
-            prop.name.includes('s3_') ||
-            prop.name.includes('azure_') ||
-            prop.name.includes('gcs_') ||
-            prop.name.includes('archival_') ||
-            prop.name.includes('remote_') ||
-            prop.name.includes('tiered_')
-          )
-        )
+        filter: (prop) => prop.config_scope === 'cluster' && !prop.is_deprecated && !isObjectStorageProperty(prop)
       }
     ],
     filename: 'cluster-properties.adoc'
@@ -85,15 +92,7 @@ NOTE: Some object storage properties require that you restart the cluster for an
     sectionIntro: 'Object storage properties should only be set if you enable xref:manage:tiered-storage.adoc[Tiered Storage].',
     groups: [
       {
-        filter: (prop) => prop.name && (
-          prop.name.includes('cloud_storage') ||
-          prop.name.includes('s3_') ||
-          prop.name.includes('azure_') ||
-          prop.name.includes('gcs_') ||
-          prop.name.includes('archival_') ||
-          prop.name.includes('remote_') ||
-          prop.name.includes('tiered_')
-        ) && !prop.is_deprecated
+        filter: (prop) => isObjectStorageProperty(prop) && !prop.is_deprecated
       }
     ],
     filename: 'object-storage-properties.adoc'
@@ -207,39 +206,165 @@ function registerPartials(hasCloudSupport = false) {
  * Generates documentation for a specific property type
  */
 function generatePropertyDocs(properties, config, outputDir) {
+  // Check if partials are being generated to determine which template to use
+  const useIncludes = process.env.GENERATE_PARTIALS === '1';
+  
+  let templatePath;
+  if (useIncludes) {
+    // Use the include-based template when partials are also being generated
+    templatePath = getTemplatePath(
+      path.join(__dirname, 'templates', 'property-page-with-includes.hbs'),
+      'TEMPLATE_PROPERTY_PAGE_WITH_INCLUDES'
+    );
+  } else {
+    // Use the standard template for full content
+    templatePath = getTemplatePath(
+      path.join(__dirname, 'templates', 'property-page.hbs'),
+      'TEMPLATE_PROPERTY_PAGE'
+    );
+  }
+  
+  const template = handlebars.compile(fs.readFileSync(templatePath, 'utf8'));
+
+  if (useIncludes) {
+    // For include-based pages, we need minimal data - just page metadata and filename for include
+    const data = {
+      ...config,
+      filename: config.filename.replace('.adoc', '') // Remove .adoc extension for include
+    };
+
+    const output = template(data);
+    const outputPath = path.join(outputDir, config.filename);
+    
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, output, 'utf8');
+    
+    console.log(`✅ Generated include-based page ${outputPath}`);
+    
+    // Count properties for this type
+    const typeCount = Object.values(properties).filter(prop => {
+      return config.groups.some(group => group.filter(prop));
+    }).length;
+    
+    return typeCount;
+  } else {
+    // Filter and group properties according to configuration
+    const groups = config.groups.map(group => {
+      const filteredProperties = Object.values(properties)
+        .filter(prop => group.filter(prop))
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+      return {
+        title: group.title,
+        intro: group.intro,
+        properties: filteredProperties,
+        template: group.template || 'property' // Default to 'property' template
+      };
+    }).filter(group => group.properties.length > 0);
+
+    const data = {
+      ...config,
+      groups
+    };
+
+    const output = template(data);
+    const outputPath = path.join(outputDir, config.filename);
+    
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, output, 'utf8');
+    
+    console.log(`✅ Generated full content page ${outputPath}`);
+    return groups.reduce((total, group) => total + group.properties.length, 0);
+  }
+}
+
+/**
+ * Generate consolidated AsciiDoc partials for properties grouped by type.
+ *
+ * Creates separate .adoc files for each property type (cluster-properties.adoc, 
+ * topic-properties.adoc, object-storage-properties.adoc, broker-properties.adoc) 
+ * containing all properties of that type using the appropriate templates.
+ *
+ * @param {Object} properties - Map of properties (property name → property object).
+ * @param {string} partialsDir - Directory where consolidated property files will be written.
+ * @param {boolean} [hasCloudSupport=false] - If true, use cloud-aware templates.
+ * @returns {number} The total number of properties included in the consolidated partials.
+ */
+function generatePropertyPartials(properties, partialsDir, hasCloudSupport = false) {
+  console.log(`📝 Generating consolidated property partials in ${partialsDir}…`);
+  
+  // Use the appropriate template based on cloud support
+  const templateName = hasCloudSupport ? 'property-cloud' : 'property';
   const templatePath = getTemplatePath(
-    path.join(__dirname, 'templates', 'property-page.hbs'),
-    'TEMPLATE_PROPERTY_PAGE'
+    path.join(__dirname, 'templates', `${templateName}.hbs`),
+    'TEMPLATE_PROPERTY'
   );
   const template = handlebars.compile(fs.readFileSync(templatePath, 'utf8'));
 
-  // Filter and group properties according to configuration
-  const groups = config.groups.map(group => {
-    const filteredProperties = Object.values(properties)
-      .filter(prop => group.filter(prop))
-      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  // Use the topic property template for topic properties
+  const topicTemplateName = hasCloudSupport ? 'topic-property-cloud' : 'topic-property';
+  const topicTemplatePath = getTemplatePath(
+    path.join(__dirname, 'templates', `${topicTemplateName}.hbs`),
+    'TEMPLATE_TOPIC_PROPERTY'
+  );
+  const topicTemplate = handlebars.compile(fs.readFileSync(topicTemplatePath, 'utf8'));
 
-    return {
-      title: group.title,
-      intro: group.intro,
-      properties: filteredProperties,
-      template: group.template || 'property' // Default to 'property' template
-    };
-  }).filter(group => group.properties.length > 0);
-
-  const data = {
-    ...config,
-    groups
+  // Create the main partials directory
+  const propertiesPartialsDir = path.join(partialsDir, 'properties');
+  fs.mkdirSync(propertiesPartialsDir, { recursive: true });
+  
+  // Group properties by type
+  const propertyGroups = {
+    cluster: [],
+    topic: [],
+    broker: [],
+    'object-storage': []
   };
 
-  const output = template(data);
-  const outputPath = path.join(outputDir, config.filename);
+  // Categorize properties
+  Object.values(properties).forEach(prop => {
+    if (!prop.name || !prop.config_scope) return; // Skip properties without names or scope
+    
+    if (prop.config_scope === 'topic') {
+      propertyGroups.topic.push(prop);
+    } else if (prop.config_scope === 'broker') {
+      propertyGroups.broker.push(prop);
+    } else if (prop.config_scope === 'cluster') {
+      // Check if it's an object storage property
+      if (isObjectStorageProperty(prop)) {
+        propertyGroups['object-storage'].push(prop);
+      } else {
+        propertyGroups.cluster.push(prop);
+      }
+    }
+  });
+
+  let totalCount = 0;
   
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, output, 'utf8');
+  // Generate consolidated partials for each property type
+  Object.entries(propertyGroups).forEach(([type, props]) => {
+    if (props.length === 0) return;
+    
+    // Sort properties by name
+    props.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    
+    // Choose the appropriate template based on property type
+    const selectedTemplate = type === 'topic' ? topicTemplate : template;
+    
+    // Generate content for all properties of this type
+    const content = props.map(prop => selectedTemplate(prop)).join('\n');
+    
+    // Write the consolidated file
+    const filename = `${type}-properties.adoc`;
+    const outputPath = path.join(propertiesPartialsDir, filename);
+    fs.writeFileSync(outputPath, content, 'utf8');
+    
+    console.log(`✅ Generated ${outputPath} with ${props.length} properties`);
+    totalCount += props.length;
+  });
   
-  console.log(`✅ Generated ${outputPath}`);
-  return groups.reduce((total, group) => total + group.properties.length, 0);
+  console.log(`✅ Generated consolidated property partials in ${partialsDir} (${totalCount} total properties)`);
+  return totalCount;
 }
 
 /**
@@ -279,8 +404,19 @@ function generateDeprecatedDocs(properties, outputDir) {
   };
 
   const output = template(data);
-  // Navigate back from pages/properties to reference, then into partials/deprecated
-  const outputPath = path.join(path.dirname(path.dirname(outputDir)), 'partials', 'deprecated', 'deprecated-properties.adoc');
+  
+  // Determine the correct path for deprecated properties
+  let outputPath;
+  if (process.env.OUTPUT_PARTIALS_DIR) {
+    // Use the explicitly set partials directory
+    outputPath = path.join(process.env.OUTPUT_PARTIALS_DIR, 'deprecated', 'deprecated-properties.adoc');
+  } else if (outputDir.includes('pages/properties')) {
+    // Fallback: Navigate back from pages/properties to reference, then into partials/deprecated
+    outputPath = path.join(path.dirname(path.dirname(outputDir)), 'partials', 'deprecated', 'deprecated-properties.adoc');
+  } else {
+    // Fallback: Direct path when outputDir is the base directory
+    outputPath = path.join(outputDir, 'partials', 'deprecated', 'deprecated-properties.adoc');
+  }
   
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, output, 'utf8');
@@ -341,26 +477,68 @@ function generateAllDocs(inputFile, outputDir) {
   let totalObjectStorageProperties = 0;
   let totalTopicProperties = 0;
 
-  // Generate each type of documentation
-  for (const [type, config] of Object.entries(PROPERTY_CONFIG)) {
-    const count = generatePropertyDocs(properties, config, outputDir);
-    totalProperties += count;
+  // Generate complete property pages only if requested
+  if (process.env.GENERATE_PAGES === '1') {
+    console.log(`📄 Generating complete property pages...`);
     
-    if (type === 'broker') totalBrokerProperties = count;
-    else if (type === 'cluster') totalClusterProperties = count;
-    else if (type === 'object-storage') totalObjectStorageProperties = count;
-    else if (type === 'topic') totalTopicProperties = count;
+    // Generate each type of documentation
+    for (const [type, config] of Object.entries(PROPERTY_CONFIG)) {
+      const count = generatePropertyDocs(properties, config, outputDir);
+      totalProperties += count;
+      
+      if (type === 'broker') totalBrokerProperties = count;
+      else if (type === 'cluster') totalClusterProperties = count;
+      else if (type === 'object-storage') totalObjectStorageProperties = count;
+      else if (type === 'topic') totalTopicProperties = count;
+    }
+  } else {
+    console.log(`📄 Skipping complete property pages (use --generate-pages to enable)`);
+    
+    // Still count properties for summary
+    Object.values(properties).forEach(prop => {
+      if (prop.config_scope === 'broker' && !prop.is_deprecated) totalBrokerProperties++;
+      else if (prop.config_scope === 'cluster' && !prop.is_deprecated) {
+        if (prop.name && (
+          prop.name.includes('cloud_storage') ||
+          prop.name.includes('s3_') ||
+          prop.name.includes('azure_') ||
+          prop.name.includes('gcs_') ||
+          prop.name.includes('archival_') ||
+          prop.name.includes('remote_') ||
+          prop.name.includes('tiered_')
+        )) {
+          totalObjectStorageProperties++;
+        } else {
+          totalClusterProperties++;
+        }
+      }
+      else if (prop.config_scope === 'topic' && !prop.is_deprecated) totalTopicProperties++;
+    });
+    totalProperties = totalBrokerProperties + totalClusterProperties + totalObjectStorageProperties + totalTopicProperties;
   }
 
-  // Generate deprecated properties documentation
-  const deprecatedCount = generateDeprecatedDocs(properties, outputDir);
+  // Generate individual property partials if requested
+  let partialsCount = 0;
+  let deprecatedCount = 0;
+  if (process.env.GENERATE_PARTIALS === '1' && process.env.OUTPUT_PARTIALS_DIR) {
+    // Generate deprecated properties documentation
+    deprecatedCount = generateDeprecatedDocs(properties, outputDir);
+    
+    partialsCount = generatePropertyPartials(properties, process.env.OUTPUT_PARTIALS_DIR, hasCloudSupport);
+  } else {
+    console.log(`📄 Skipping property partials (use --generate-partials to enable)`);
+    console.log(`📄 Skipping deprecated properties documentation (use --generate-partials to enable)`);
+  }
 
-  // Generate summary file
-  const allPropertiesContent = Object.keys(properties).sort().join('\n');
-  fs.writeFileSync(path.join(outputDir, 'all_properties.txt'), allPropertiesContent, 'utf8');
+  // Generate error reports and add to input JSON output
+  const errorReport = generateErrorReports(properties, outputDir);
 
-  // Generate error reports
-  generateErrorReports(properties, outputDir);
+  // Add error arrays directly to the input file so they're included when copied
+  const inputData = JSON.parse(fs.readFileSync(inputFile, 'utf8'));
+  inputData.empty_descriptions = errorReport.empty_descriptions;
+  inputData.deprecated_properties = errorReport.deprecated_properties;
+  fs.writeFileSync(inputFile, JSON.stringify(inputData, null, 2), 'utf8');
+  console.log(`📝 Added error arrays to ${inputFile}`);
 
   console.log(`📊 Generation Summary:`);
   console.log(`   Total properties read: ${Object.keys(properties).length}`);
@@ -369,6 +547,9 @@ function generateAllDocs(inputFile, outputDir) {
   console.log(`   Total Object Storage properties: ${totalObjectStorageProperties}`);
   console.log(`   Total Topic properties: ${totalTopicProperties}`);
   console.log(`   Total Deprecated properties: ${deprecatedCount}`);
+  if (partialsCount > 0) {
+    console.log(`   Total Property partials: ${partialsCount}`);
+  }
 
   return {
     totalProperties: Object.keys(properties).length,
@@ -376,7 +557,8 @@ function generateAllDocs(inputFile, outputDir) {
     clusterProperties: totalClusterProperties,
     objectStorageProperties: totalObjectStorageProperties,
     topicProperties: totalTopicProperties,
-    deprecatedProperties: deprecatedCount
+    deprecatedProperties: deprecatedCount,
+    propertyPartials: partialsCount
   };
 }
 
@@ -384,9 +566,6 @@ function generateAllDocs(inputFile, outputDir) {
  * Generate error reports for properties with missing or invalid data
  */
 function generateErrorReports(properties, outputDir) {
-  const errorDir = path.join(outputDir, 'error');
-  fs.mkdirSync(errorDir, { recursive: true });
-
   const emptyDescriptions = [];
   const deprecatedProperties = [];
 
@@ -399,34 +578,25 @@ function generateErrorReports(properties, outputDir) {
     }
   });
 
-  // Write error reports
+  // Add these arrays to the properties JSON file
   const totalProperties = Object.keys(properties).length;
-  
-  if (emptyDescriptions.length > 0) {
-    fs.writeFileSync(
-      path.join(errorDir, 'empty_description.txt'),
-      emptyDescriptions.join('\n'),
-      'utf8'
-    );
-    const percentage = totalProperties > 0 ? ((emptyDescriptions.length / totalProperties) * 100).toFixed(2) : '0.00';
-    console.log(`You have ${emptyDescriptions.length} properties with empty description. Percentage of errors: ${percentage}%. Data written in 'empty_description.txt'.`);
-  }
+  const percentageEmpty = totalProperties > 0 ? ((emptyDescriptions.length / totalProperties) * 100).toFixed(2) : '0.00';
+  const percentageDeprecated = totalProperties > 0 ? ((deprecatedProperties.length / totalProperties) * 100).toFixed(2) : '0.00';
+  console.log(`You have ${emptyDescriptions.length} properties with empty description. Percentage of errors: ${percentageEmpty}%.`);
+  console.log(`You have ${deprecatedProperties.length} deprecated properties. Percentage of errors: ${percentageDeprecated}%.`);
 
-  if (deprecatedProperties.length > 0) {
-    fs.writeFileSync(
-      path.join(errorDir, 'deprecated_properties.txt'),
-      deprecatedProperties.join('\n'),
-      'utf8'
-    );
-    const percentage = totalProperties > 0 ? ((deprecatedProperties.length / totalProperties) * 100).toFixed(2) : '0.00';
-    console.log(`You have ${deprecatedProperties.length} deprecated properties. Percentage of errors: ${percentage}%. Data written in 'deprecated_properties.txt'.`);
-  }
+  // Return the arrays sorted for deterministic output
+  return {
+    empty_descriptions: emptyDescriptions.sort(),
+    deprecated_properties: deprecatedProperties.sort()
+  };
 }
 
 module.exports = {
   generateAllDocs,
   generatePropertyDocs,
   generateDeprecatedDocs,
+  generatePropertyPartials,
   PROPERTY_CONFIG
 };
 

@@ -58,28 +58,27 @@ endif::[]
 
 {{/if}}
 *Nullable:* {{#if nullable}}Yes{{else}}No{{/if}}
-
 {{#if example}}
+
 {{{renderPropertyExample this}}}
 {{/if}}
-
 {{#if related_topics}}
+
 *Related topics:*
 
 {{#each related_topics}}
 * {{{this}}}
 {{/each}}
 {{/if}}
-
 {{#if aliases}}
-*Aliases:* {{join aliases ", "}}
 
+*Aliases:* {{join aliases ", "}}
 {{/if}}
 {{#if is_deprecated}}
+
 [WARNING]
 ====
 This property is deprecated.
 ====
-
 {{/if}}
 ---
