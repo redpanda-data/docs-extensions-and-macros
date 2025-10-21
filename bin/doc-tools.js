@@ -1094,6 +1094,7 @@ automation
       }
       if (templates.propertyPage) {
         env.TEMPLATE_PROPERTY_PAGE = path.resolve(templates.propertyPage);
+        env.TEMPLATE_PROPERTY_PAGE_WITH_INCLUDES = env.TEMPLATE_PROPERTY_PAGE;
       }
       if (templates.property) {
         env.TEMPLATE_PROPERTY = path.resolve(templates.property);
@@ -1127,6 +1128,9 @@ automation
       // Set page generation options
       if (options.generatePages) {
         env.GENERATE_PAGES = '1';
+        if (templates.propertyPage) {
+          env.TEMPLATE_PROPERTY_PAGE_WITH_INCLUDES = env.TEMPLATE_PROPERTY_PAGE;
+        }
       }
       
       const r = spawnSync('make', args, { cwd, stdio: 'inherit', env });
