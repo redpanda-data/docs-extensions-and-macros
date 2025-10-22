@@ -1,3 +1,4 @@
+{{#unless is_deprecated}}
 {{#if cloud_supported}}
 // tag::redpanda-cloud[]
 {{/if}}
@@ -91,14 +92,9 @@ endif::[]
 *Aliases:* {{join aliases ", "}}
 // end::self-managed-only[]
 {{/if}}
-{{#if is_deprecated}}
 
-[WARNING]
-====
-This property is deprecated.
-====
-{{/if}}
 ---
 {{#if cloud_supported}}
 // end::redpanda-cloud[]
 {{/if}}
+{{/unless}}

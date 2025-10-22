@@ -877,15 +877,18 @@ def add_config_scope(properties):
         if prop.get("is_topic_property", False):
             prop["config_scope"] = "topic"
         else:
-            # For override-created properties, preserve existing config_scope if set
-            if prop.get("defined_in") == "override" and prop.get("config_scope") is not None:
-                # Keep the existing config_scope from override
+            # Skip config_scope assignment if it's already been set by an override
+            if prop.get("config_scope") is not None:
+                # Keep the existing config_scope from override or previous assignment
                 pass
             else:
                 defined_in = prop.get("defined_in", "")
                 if defined_in == "src/v/config/configuration.cc":
                     prop["config_scope"] = "cluster"
-                elif defined_in == "src/v/config/node_config.cc":
+                elif defined_in in ["src/v/config/node_config.cc", 
+                                    "src/v/pandaproxy/rest/configuration.cc",
+                                    "src/v/kafka/client/configuration.cc", 
+                                    "src/v/pandaproxy/schema_registry/configuration.cc"]:
                     prop["config_scope"] = "broker"
                 else:
                     prop["config_scope"] = None
