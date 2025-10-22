@@ -1,3 +1,4 @@
+{{#unless is_deprecated}}
 === {{name}}
 
 {{#if version}}
@@ -74,11 +75,5 @@ endif::[]
 
 *Aliases:* {{join aliases ", "}}
 {{/if}}
-{{#if is_deprecated}}
-
-[WARNING]
-====
-This property is deprecated.
-====
-{{/if}}
+{{/unless}}
 ---
