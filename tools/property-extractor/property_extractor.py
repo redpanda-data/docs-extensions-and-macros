@@ -719,6 +719,14 @@ def _apply_override_to_existing_property(property_dict, override, overrides_file
         else:
             logger.warning(f"related_topics for property must be an array")
 
+    # Apply exclude_from_docs override
+    if "exclude_from_docs" in override:
+        property_dict["exclude_from_docs"] = override["exclude_from_docs"]
+
+    # Apply category override for topic properties
+    if "category" in override:
+        property_dict["category"] = override["category"]
+
 
 def _create_property_from_override(prop_name, override, overrides_file_path):
     """Create a new property from override specification."""
@@ -757,6 +765,14 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
                        "example", "example_file", "example_yaml", "related_topics", 
                        "is_deprecated", "visibility"]:
             new_property[key] = value
+
+    # Add exclude_from_docs if specified
+    if "exclude_from_docs" in override:
+        new_property["exclude_from_docs"] = override["exclude_from_docs"]
+
+    # Add category if specified
+    if "category" in override:
+        new_property["category"] = override["category"]
     
     return new_property
 
@@ -1647,7 +1663,50 @@ def extract_topic_properties(source_path):
             # Skip no-op properties
             if prop_data.get("is_noop", False):
                 continue
-                
+
+            # Assign category based on property name pattern or mapping
+            def infer_category(name):
+                retention = [
+                    "cleanup.policy", "compaction.strategy", "delete.retention.ms", "max.compaction.lag.ms",
+                    "min.cleanable.dirty.ratio", "min.compaction.lag.ms", "retention.bytes", "retention.ms"
+                ]
+                segment = [
+                    "compression.type", "max.message.bytes", "message.timestamp.type", "segment.bytes", "segment.ms"
+                ]
+                performance = [
+                    "flush.bytes", "flush.ms", "redpanda.leaders.preference", "replication.factor", "write.caching"
+                ]
+                tiered = [
+                    "initial.retention.local.target.bytes", "initial.retention.local.target.ms", "redpanda.remote.delete",
+                    "redpanda.remote.read", "redpanda.remote.recovery", "redpanda.remote.write", "retention.local.target.bytes",
+                    "retention.local.target.ms"
+                ]
+                remote_replica = ["redpanda.remote.readreplica"]
+                iceberg = [
+                    "redpanda.iceberg.delete", "redpanda.iceberg.invalid.record.action", "redpanda.iceberg.mode",
+                    "redpanda.iceberg.partition.spec", "redpanda.iceberg.target.lag.ms"
+                ]
+                schema_registry = [
+                    "redpanda.key.schema.id.validation", "redpanda.key.subject.name.strategy", "redpanda.value.schema.id.validation",
+                    "redpanda.value.subject.name.strategy", "confluent.key.schema.validation", "confluent.key.subject.name.strategy",
+                    "confluent.value.schema.validation", "confluent.value.subject.name.strategy"
+                ]
+                if name in retention:
+                    return "retention-compaction"
+                if name in segment:
+                    return "segment-message"
+                if name in performance:
+                    return "performance-cluster"
+                if name in tiered:
+                    return "tiered-storage"
+                if name in remote_replica:
+                    return "remote-read-replica"
+                if name in iceberg:
+                    return "iceberg-integration"
+                if name in schema_registry:
+                    return "schema-registry"
+                return "other"
+
             converted_properties[prop_name] = {
                 "name": prop_name,
                 "description": prop_data.get("description", ""),
@@ -1657,7 +1716,8 @@ def extract_topic_properties(source_path):
                 "corresponding_cluster_property": prop_data.get("corresponding_cluster_property", ""),
                 "acceptable_values": prop_data.get("acceptable_values", ""),
                 "is_deprecated": False,
-                "is_topic_property": True
+                "is_topic_property": True,
+                "category": infer_category(prop_name)
             }
             
         logging.info(f"Extracted {len(converted_properties)} topic properties (excluding {len([p for p in topic_properties.values() if p.get('is_noop', False)])} no-op properties)")

@@ -1,0 +1,13 @@
+[cols="1a,1a"]
+|===
+| Topic property | Corresponding cluster property
+
+{{#each topicProperties}}
+| <<{{anchorName name}},`{{name}}`>>
+| xref:./cluster-properties.adoc#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`]
+{{/each}}
+|===
+
+{{!-- Helper to generate anchor names --}}
+{{!-- Usage: anchorName propertyName --}}
+{{!-- Example: cleanup.policy -> cleanuppolicy --}}

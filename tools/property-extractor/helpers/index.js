@@ -10,4 +10,5 @@ module.exports = {
   formatPropertyValue: require('./formatPropertyValue.js'),
   renderPropertyExample: require('./renderPropertyExample.js'),
   formatUnits: require('./formatUnits.js'),
+  anchorName: require('./anchorName.js'),
 };
