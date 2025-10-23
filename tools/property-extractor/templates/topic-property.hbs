@@ -29,8 +29,9 @@ ifndef::env-cloud[]
 endif::[]
 {{/if}}
 {{#if cloud_byoc_only}}
-
+ifdef::env-cloud[]
 NOTE: This property is only available in Redpanda Cloud BYOC deployments.
+endif::[]
 {{/if}}
 {{#if type}}
 
@@ -72,9 +73,7 @@ endif::[]
 {{/if}}
 {{/if}}
 
-// tag::self-managed-only[]
 *Nullable:* {{#if nullable}}Yes{{else}}No{{/if}}
-// end::self-managed-only[]
 {{#if example}}
 
 {{{renderPropertyExample this}}}
