@@ -1102,6 +1102,9 @@ automation
         if (templates.topicProperty) {
           env.TEMPLATE_TOPIC_PROPERTY = path.resolve(templates.topicProperty);
         }
+        if (templates.topicPropertyMappings) {
+          env.TEMPLATE_TOPIC_PROPERTY_MAPPINGS = path.resolve(templates.topicPropertyMappings);
+        }
         if (templates.deprecated) {
           env.TEMPLATE_DEPRECATED = path.resolve(templates.deprecated);
         }
