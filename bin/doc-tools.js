@@ -502,11 +502,11 @@ function generatePropertyComparisonReport(oldTag, newTag, outputDir) {
   try {
     console.log(`\n📊 Generating detailed property comparison report...`);
     
-    // Look for the property JSON files in modules/reference/examples
-    const repoRoot = findRepoRoot();
-    const examplesDir = path.join(repoRoot, 'modules', 'reference', 'examples');
-    const oldJsonPath = path.join(examplesDir, `${oldTag}-properties.json`);
-    const newJsonPath = path.join(examplesDir, `${newTag}-properties.json`);
+  // Look for the property JSON files in outputDir/examples
+  const repoRoot = findRepoRoot();
+  const examplesDir = path.join(repoRoot, outputDir, 'examples');
+  const oldJsonPath = path.join(examplesDir, `${oldTag}-properties.json`);
+  const newJsonPath = path.join(examplesDir, `${newTag}-properties.json`);
     
     // Check if JSON files exist
     if (!fs.existsSync(oldJsonPath)) {
@@ -1152,8 +1152,8 @@ automation
       make(newTag, overridesPath, templates, outputDir, null);
 
       if (oldTag) {
-        // Generate property comparison report using the JSON now in modules/reference/examples
-        generatePropertyComparisonReport(oldTag, newTag, 'modules/reference');
+  // Generate property comparison report using the JSON now in outputDir/examples
+  generatePropertyComparisonReport(oldTag, newTag, outputDir);
       }
 
       process.exit(0);
