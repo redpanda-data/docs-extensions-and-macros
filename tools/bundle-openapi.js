@@ -28,21 +28,15 @@ function normalizeTag(tag) {
     throw new Error('Invalid version format: tag cannot be empty');
   }
   
-  // Handle dev branch
-  if (tag === 'dev') {
-    return 'dev';
-  }
-  
   // Remove 'v' prefix if present
   const normalized = tag.startsWith('v') ? tag.slice(1) : tag;
-  
   // Validate semantic version format
   const semverPattern = /^\d+\.\d+\.\d+(-[\w\.-]+)?(\+[\w\.-]+)?$/;
-  if (!semverPattern.test(normalized) && normalized !== 'dev') {
-    throw new Error(`Invalid version format: ${tag}. Expected format like v25.1.1 or 25.1.1`);
+  if (semverPattern.test(normalized)) {
+    return normalized;
   }
-  
-  return normalized;
+  // If not a valid semver, treat as branch name and return as-is
+  return tag;
 }
 
 /**
@@ -59,22 +53,20 @@ function getMajorMinor(version) {
     throw new Error('Version must be a non-empty string');
   }
   
-  if (version === 'dev') {
-    return 'dev';
+  // Only process if valid semver, else return as-is (branch name)
+  const semverPattern = /^\d+\.\d+\.\d+(-[\w\.-]+)?(\+[\w\.-]+)?$/;
+  if (!semverPattern.test(version)) {
+    return version;
   }
-  
   const parts = version.split('.');
   if (parts.length < 2) {
     throw new Error(`Invalid version format: ${version}. Expected X.Y.Z format`);
   }
-  
   const major = parseInt(parts[0], 10);
   const minor = parseInt(parts[1], 10);
-  
   if (isNaN(major) || isNaN(minor)) {
     throw new Error(`Major and minor versions must be numbers: ${version}`);
   }
-  
   return `${major}.${minor}`;
 }
 
