@@ -148,7 +148,7 @@ function compareProperties(oldData, newData, oldVersion, newVersion) {
         name,
         type: prop.type,
         default: prop.default,
-        description: prop.description ? prop.description.substring(0, 100) + '...' : 'No description'
+        description: prop.description || 'No description'
       });
     }
   }
@@ -185,8 +185,8 @@ function compareProperties(oldData, newData, oldVersion, newVersion) {
       if (oldProp.description !== newProp.description) {
         report.changedDescriptions.push({
           name,
-          oldDescription: oldProp.description ? oldProp.description.substring(0, 50) + '...' : 'No description',
-          newDescription: newProp.description ? newProp.description.substring(0, 50) + '...' : 'No description'
+          oldDescription: oldProp.description || 'No description',
+          newDescription: newProp.description || 'No description'
         });
       }
       
@@ -203,7 +203,7 @@ function compareProperties(oldData, newData, oldVersion, newVersion) {
       report.removedProperties.push({
         name,
         type: oldProp.type,
-        description: oldProp.description ? oldProp.description.substring(0, 100) + '...' : 'No description'
+        description: oldProp.description || 'No description'
       });
     }
   }

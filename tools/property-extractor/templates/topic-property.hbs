@@ -1,4 +1,15 @@
-{{#unless is_deprecated}}
+{{#if category}}
+// tag::category-{{category}}[]
+{{/if}}
+{{#if exclude_from_docs}}
+// tag::exclude-from-docs[]
+{{/if}}
+{{#if is_deprecated}}
+// tag::deprecated[]
+{{/if}}
+{{#if cloud_supported}}
+// tag::redpanda-cloud[]
+{{/if}}
 === {{name}}
 {{#if version}}
 
@@ -15,6 +26,11 @@ No description available.
 
 ifndef::env-cloud[]
 *Enterprise license required*: `{{enterprise_value}}` (for license details, see xref:get-started:licensing/index.adoc[Redpanda Licensing])
+endif::[]
+{{/if}}
+{{#if cloud_byoc_only}}
+ifdef::env-cloud[]
+NOTE: This property is only available in Redpanda Cloud BYOC deployments.
 endif::[]
 {{/if}}
 {{#if type}}
@@ -43,8 +59,18 @@ endif::[]
 {{/if}}
 {{/if}}
 {{#if (ne default undefined)}}
+{{#if cloud_supported}}
+
+ifdef::env-cloud[]
+*Default:* Available in the Redpanda Cloud Console
+endif::[]
+ifndef::env-cloud[]
+*Default:* `{{formatPropertyValue default type}}`
+endif::[]
+{{else}}
 
 *Default:* `{{formatPropertyValue default type}}`
+{{/if}}
 {{/if}}
 
 *Nullable:* {{#if nullable}}Yes{{else}}No{{/if}}
@@ -62,8 +88,21 @@ endif::[]
 {{/if}}
 {{#if aliases}}
 
+// tag::self-managed-only[]
 *Aliases:* {{join aliases ", "}}
+// end::self-managed-only[]
 {{/if}}
 
 ---
-{{/unless}}
+{{#if cloud_supported}}
+// end::redpanda-cloud[]
+{{/if}}
+{{#if is_deprecated}}
+// end::deprecated[]
+{{/if}}
+{{#if exclude_from_docs}}
+// end::exclude-from-docs[]
+{{/if}}
+{{#if category}}
+// end::category-{{category}}[]
+{{/if}}

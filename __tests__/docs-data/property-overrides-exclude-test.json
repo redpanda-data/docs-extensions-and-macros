@@ -1,0 +1,13 @@
+{
+  "properties": {
+    "admin": {
+      "description": "Network addresses for Admin API servers (excluded test)",
+      "version": "v25.2.8",
+      "exclude_from_docs": true
+    },
+    "cloud_storage_access_key": {
+      "description": "Access key for cloud storage authentication (included test)",
+      "version": "v25.2.8"
+    }
+  }
+}
