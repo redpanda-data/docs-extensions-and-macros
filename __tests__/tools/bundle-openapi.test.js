@@ -55,9 +55,13 @@ describe('OpenAPI Bundle Tool - Production Test Suite', () => {
         expect(normalizeTag('1.0.0-beta')).toBe('1.0.0-beta');
       });
 
-      test('should handle dev branch', () => {
+      test('should handle arbitrary branch names', () => {
         expect(normalizeTag('dev')).toBe('dev');
         expect(normalizeTag('  dev  ')).toBe('dev');
+        expect(normalizeTag('main')).toBe('main');
+        expect(normalizeTag('feature/foo')).toBe('feature/foo');
+        expect(normalizeTag('release-xyz')).toBe('release-xyz');
+        expect(normalizeTag('hotfix/urgent')).toBe('hotfix/urgent');
       });
 
       test('should validate input parameters', () => {
@@ -67,17 +71,10 @@ describe('OpenAPI Bundle Tool - Production Test Suite', () => {
         expect(() => normalizeTag(123)).toThrow('Tag must be a non-empty string');
       });
 
-      test('should reject invalid version formats', () => {
-        expect(() => normalizeTag('invalid-tag')).toThrow(/Invalid version format.*Expected format like/);
-        expect(() => normalizeTag('v1.x.y')).toThrow(/Invalid version format/);
-        expect(() => normalizeTag('random-string')).toThrow(/Invalid version format/);
-        expect(() => normalizeTag('v')).toThrow(/Invalid version format/);
-      });
-
       test('should handle edge cases', () => {
-        expect(() => normalizeTag('   ')).toThrow(/Invalid version format/);
-        expect(() => normalizeTag('\t')).toThrow(/Invalid version format/);
-        expect(() => normalizeTag('\n')).toThrow(/Invalid version format/);
+        expect(() => normalizeTag('   ')).toThrow(/tag cannot be empty/);
+        expect(() => normalizeTag('\t')).toThrow(/tag cannot be empty/);
+        expect(() => normalizeTag('\n')).toThrow(/tag cannot be empty/);
       });
     });
 
@@ -89,8 +86,12 @@ describe('OpenAPI Bundle Tool - Production Test Suite', () => {
         expect(getMajorMinor('0.1.2')).toBe('0.1');
       });
 
-      test('should handle dev version', () => {
+      test('should return branch names unchanged', () => {
         expect(getMajorMinor('dev')).toBe('dev');
+        expect(getMajorMinor('main')).toBe('main');
+        expect(getMajorMinor('feature/foo')).toBe('feature/foo');
+        expect(getMajorMinor('release-xyz')).toBe('release-xyz');
+        expect(getMajorMinor('hotfix/urgent')).toBe('hotfix/urgent');
       });
 
       test('should validate input parameters', () => {
@@ -98,22 +99,6 @@ describe('OpenAPI Bundle Tool - Production Test Suite', () => {
         expect(() => getMajorMinor(null)).toThrow('Version must be a non-empty string');
         expect(() => getMajorMinor(undefined)).toThrow('Version must be a non-empty string');
         expect(() => getMajorMinor(123)).toThrow('Version must be a non-empty string');
-      });
-
-      test('should reject invalid formats', () => {
-        expect(() => getMajorMinor('24')).toThrow(/Invalid version format.*Expected X\.Y\.Z format/);
-        expect(() => getMajorMinor('invalid')).toThrow(/Expected X\.Y\.Z format/);
-      });
-
-      test('should validate numeric components', () => {
-        expect(() => getMajorMinor('abc.def.ghi')).toThrow(/Major and minor versions must be numbers/);
-        expect(() => getMajorMinor('1.x.2')).toThrow(/Major and minor versions must be numbers/);
-        expect(() => getMajorMinor('v1.2.3')).toThrow(/Major and minor versions must be numbers/);
-      });
-
-      test('should handle versions with extra components', () => {
-        expect(getMajorMinor('24.3.2.1')).toBe('24.3');
-        expect(getMajorMinor('1.0.0-rc1+build123')).toBe('1.0');
       });
     });
   });
@@ -432,15 +417,16 @@ components:
 
     test('should provide helpful error messages', () => {
       const errorTests = [
-        { fn: () => normalizeTag('invalid'), pattern: /Invalid version format.*Expected format like/ },
-        { fn: () => getMajorMinor('1'), pattern: /Expected X\.Y\.Z format/ },
         { fn: () => createEntrypoint('', 'admin'), pattern: /Invalid temporary directory/ },
         { fn: () => createEntrypoint('/tmp', 'invalid'), pattern: /Invalid API surface/ }
       ];
-      
       errorTests.forEach(({ fn, pattern }) => {
         expect(fn).toThrow(pattern);
       });
+      // Branch names should not throw for normalizeTag
+      expect(normalizeTag('invalid')).toBe('invalid');
+      // Non-semver strings should be returned as-is for getMajorMinor
+      expect(getMajorMinor('1')).toBe('1');
     });
   });
 

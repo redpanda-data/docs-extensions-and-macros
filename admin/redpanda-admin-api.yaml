@@ -1,0 +1,2363 @@
+components:
+  schemas:
+    connect-protocol-version:
+      const: 1
+      description: Define the version of the Connect protocol
+      enum:
+        - 1
+      title: Connect-Protocol-Version
+      type: number
+    connect-timeout-header:
+      description: Define the timeout, in ms
+      title: Connect-Timeout-Ms
+      type: number
+    connect.error:
+      additionalProperties: true
+      description: "Error type returned by Connect: https://connectrpc.com/docs/go/errors/#http-representation"
+      properties:
+        code:
+          description: The status code, which should be an enum value of [google.rpc.Code][google.rpc.Code].
+          enum:
+            - canceled
+            - unknown
+            - invalid_argument
+            - deadline_exceeded
+            - not_found
+            - already_exists
+            - permission_denied
+            - resource_exhausted
+            - failed_precondition
+            - aborted
+            - out_of_range
+            - unimplemented
+            - internal
+            - unavailable
+            - data_loss
+            - unauthenticated
+          examples:
+            - not_found
+          type: string
+        details:
+          description: A list of messages that carry the error details. There is no limit on the number of messages.
+          items:
+            $ref: "#/components/schemas/connect.error_details.Any"
+          type: array
+        message:
+          description: A developer-facing error message, which should be in English. Any user-facing error message should be localized and sent in the [google.rpc.Status.details][google.rpc.Status.details] field, or localized by the client.
+          type: string
+      title: Connect Error
+      type: object
+    connect.error_details.Any:
+      additionalProperties: true
+      description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message, with an additional debug field for ConnectRPC error details.
+      properties:
+        debug:
+          description: Deserialized error detail payload. The 'type' field indicates the schema. This field is for easier debugging and should not be relied upon for application logic.
+          discriminator:
+            propertyName: type
+          oneOf:
+            - additionalProperties: true
+              description: Detailed error information.
+              title: Any
+              type: object
+          title: Debug
+        type:
+          description: "A URL that acts as a globally unique identifier for the type of the serialized message. For example: `type.googleapis.com/google.rpc.ErrorInfo`. This is used to determine the schema of the data in the `value` field and is the discriminator for the `debug` field."
+          type: string
+        value:
+          description: The Protobuf message, serialized as bytes and base64-encoded. The specific message type is identified by the `type` field.
+          format: binary
+          type: string
+      type: object
+    google.protobuf.Duration:
+      description: |-
+        A Duration represents a signed, fixed-length span of time represented
+         as a count of seconds and fractions of seconds at nanosecond
+         resolution. It is independent of any calendar and concepts like "day"
+         or "month". It is related to Timestamp in that the difference between
+         two Timestamp values is a Duration and it can be added or subtracted
+         from a Timestamp. Range is approximately +-10,000 years.
+
+         # Examples
+
+         Example 1: Compute Duration from two Timestamps in pseudo code.
+
+             Timestamp start = ...;
+             Timestamp end = ...;
+             Duration duration = ...;
+
+             duration.seconds = end.seconds - start.seconds;
+             duration.nanos = end.nanos - start.nanos;
+
+             if (duration.seconds < 0 && duration.nanos > 0) {
+               duration.seconds += 1;
+               duration.nanos -= 1000000000;
+             } else if (duration.seconds > 0 && duration.nanos < 0) {
+               duration.seconds -= 1;
+               duration.nanos += 1000000000;
+             }
+
+         Example 2: Compute Timestamp from Timestamp + Duration in pseudo code.
+
+             Timestamp start = ...;
+             Duration duration = ...;
+             Timestamp end = ...;
+
+             end.seconds = start.seconds + duration.seconds;
+             end.nanos = start.nanos + duration.nanos;
+
+             if (end.nanos < 0) {
+               end.seconds -= 1;
+               end.nanos += 1000000000;
+             } else if (end.nanos >= 1000000000) {
+               end.seconds += 1;
+               end.nanos -= 1000000000;
+             }
+
+         Example 3: Compute Duration from datetime.timedelta in Python.
+
+             td = datetime.timedelta(days=3, minutes=10)
+             duration = Duration()
+             duration.FromTimedelta(td)
+
+         # JSON Mapping
+
+         In JSON format, the Duration type is encoded as a string rather than an
+         object, where the string ends in the suffix "s" (indicating seconds) and
+         is preceded by the number of seconds, with nanoseconds expressed as
+         fractional seconds. For example, 3 seconds with 0 nanoseconds should be
+         encoded in JSON format as "3s", while 3 seconds and 1 nanosecond should
+         be expressed in JSON format as "3.000000001s", and 3 seconds and 1
+         microsecond should be expressed in JSON format as "3.000001s".
+      format: duration
+      type: string
+    google.protobuf.FieldMask:
+      description: |-
+        `FieldMask` represents a set of symbolic field paths, for example:
+
+             paths: "f.a"
+             paths: "f.b.d"
+
+         Here `f` represents a field in some root message, `a` and `b`
+         fields in the message found in `f`, and `d` a field found in the
+         message in `f.b`.
+
+         Field masks are used to specify a subset of fields that should be
+         returned by a get operation or modified by an update operation.
+         Field masks also have a custom JSON encoding (see below).
+
+         # Field Masks in Projections
+
+         When used in the context of a projection, a response message or
+         sub-message is filtered by the API to only contain those fields as
+         specified in the mask. For example, if the mask in the previous
+         example is applied to a response message as follows:
+
+             f {
+               a : 22
+               b {
+                 d : 1
+                 x : 2
+               }
+               y : 13
+             }
+             z: 8
+
+         The result will not contain specific values for fields x,y and z
+         (their value will be set to the default, and omitted in proto text
+         output):
+
+
+             f {
+               a : 22
+               b {
+                 d : 1
+               }
+             }
+
+         A repeated field is not allowed except at the last position of a
+         paths string.
+
+         If a FieldMask object is not present in a get operation, the
+         operation applies to all fields (as if a FieldMask of all fields
+         had been specified).
+
+         Note that a field mask does not necessarily apply to the
+         top-level response message. In case of a REST get operation, the
+         field mask applies directly to the response, but in case of a REST
+         list operation, the mask instead applies to each individual message
+         in the returned resource list. In case of a REST custom method,
+         other definitions may be used. Where the mask applies will be
+         clearly documented together with its declaration in the API.  In
+         any case, the effect on the returned resource/resources is required
+         behavior for APIs.
+
+         # Field Masks in Update Operations
+
+         A field mask in update operations specifies which fields of the
+         targeted resource are going to be updated. The API is required
+         to only change the values of the fields as specified in the mask
+         and leave the others untouched. If a resource is passed in to
+         describe the updated values, the API ignores the values of all
+         fields not covered by the mask.
+
+         If a repeated field is specified for an update operation, new values will
+         be appended to the existing repeated field in the target resource. Note that
+         a repeated field is only allowed in the last position of a `paths` string.
+
+         If a sub-message is specified in the last position of the field mask for an
+         update operation, then new value will be merged into the existing sub-message
+         in the target resource.
+
+         For example, given the target message:
+
+             f {
+               b {
+                 d: 1
+                 x: 2
+               }
+               c: [1]
+             }
+
+         And an update message:
+
+             f {
+               b {
+                 d: 10
+               }
+               c: [2]
+             }
+
+         then if the field mask is:
+
+          paths: ["f.b", "f.c"]
+
+         then the result will be:
+
+             f {
+               b {
+                 d: 10
+                 x: 2
+               }
+               c: [1, 2]
+             }
+
+         An implementation may provide options to override this default behavior for
+         repeated and message fields.
+
+         In order to reset a field's value to the default, the field must
+         be in the mask and set to the default value in the provided resource.
+         Hence, in order to reset all fields of a resource, provide a default
+         instance of the resource and set all fields in the mask, or do
+         not provide a mask as described below.
+
+         If a field mask is not present on update, the operation applies to
+         all fields (as if a field mask of all fields has been specified).
+         Note that in the presence of schema evolution, this may mean that
+         fields the client does not know and has therefore not filled into
+         the request will be reset to their default. If this is unwanted
+         behavior, a specific service may require a client to always specify
+         a field mask, producing an error if not.
+
+         As with get operations, the location of the resource which
+         describes the updated values in the request message depends on the
+         operation kind. In any case, the effect of the field mask is
+         required to be honored by the API.
+
+         ## Considerations for HTTP REST
+
+         The HTTP kind of an update operation which uses a field mask must
+         be set to PATCH instead of PUT in order to satisfy HTTP semantics
+         (PUT must only be used for full updates).
+
+         # JSON Encoding of Field Masks
+
+         In JSON, a field mask is encoded as a single string where paths are
+         separated by a comma. Fields name in each path are converted
+         to/from lower-camel naming conventions.
+
+         As an example, consider the following message declarations:
+
+             message Profile {
+               User user = 1;
+               Photo photo = 2;
+             }
+             message User {
+               string display_name = 1;
+               string address = 2;
+             }
+
+         In proto a field mask for `Profile` may look as such:
+
+             mask {
+               paths: "user.display_name"
+               paths: "photo"
+             }
+
+         In JSON, the same mask is represented as below:
+
+             {
+               mask: "user.displayName,photo"
+             }
+
+         # Field Masks and Oneof Fields
+
+         Field masks treat fields in oneofs just as regular fields. Consider the
+         following message:
+
+             message SampleMessage {
+               oneof test_oneof {
+                 string name = 4;
+                 SubMessage sub_message = 9;
+               }
+             }
+
+         The field mask can be:
+
+             mask {
+               paths: "name"
+             }
+
+         Or:
+
+             mask {
+               paths: "sub_message"
+             }
+
+         Note that oneof type names ("test_oneof" in this case) cannot be used in
+         paths.
+
+         ## Field Mask Verification
+
+         The implementation of any API method which has a FieldMask type field in the
+         request should verify the included field paths, and return an
+         `INVALID_ARGUMENT` error if any path is unmappable.
+      type: string
+    google.protobuf.Timestamp:
+      description: |-
+        A Timestamp represents a point in time independent of any time zone or local
+         calendar, encoded as a count of seconds and fractions of seconds at
+         nanosecond resolution. The count is relative to an epoch at UTC midnight on
+         January 1, 1970, in the proleptic Gregorian calendar which extends the
+         Gregorian calendar backwards to year one.
+
+         All minutes are 60 seconds long. Leap seconds are "smeared" so that no leap
+         second table is needed for interpretation, using a [24-hour linear
+         smear](https://developers.google.com/time/smear).
+
+         The range is from 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z. By
+         restricting to that range, we ensure that we can convert to and from [RFC
+         3339](https://www.ietf.org/rfc/rfc3339.txt) date strings.
+
+         # Examples
+
+         Example 1: Compute Timestamp from POSIX `time()`.
+
+             Timestamp timestamp;
+             timestamp.set_seconds(time(NULL));
+             timestamp.set_nanos(0);
+
+         Example 2: Compute Timestamp from POSIX `gettimeofday()`.
+
+             struct timeval tv;
+             gettimeofday(&tv, NULL);
+
+             Timestamp timestamp;
+             timestamp.set_seconds(tv.tv_sec);
+             timestamp.set_nanos(tv.tv_usec * 1000);
+
+         Example 3: Compute Timestamp from Win32 `GetSystemTimeAsFileTime()`.
+
+             FILETIME ft;
+             GetSystemTimeAsFileTime(&ft);
+             UINT64 ticks = (((UINT64)ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+
+             // A Windows tick is 100 nanoseconds. Windows epoch 1601-01-01T00:00:00Z
+             // is 11644473600 seconds before Unix epoch 1970-01-01T00:00:00Z.
+             Timestamp timestamp;
+             timestamp.set_seconds((INT64) ((ticks / 10000000) - 11644473600LL));
+             timestamp.set_nanos((INT32) ((ticks % 10000000) * 100));
+
+         Example 4: Compute Timestamp from Java `System.currentTimeMillis()`.
+
+             long millis = System.currentTimeMillis();
+
+             Timestamp timestamp = Timestamp.newBuilder().setSeconds(millis / 1000)
+                 .setNanos((int) ((millis % 1000) * 1000000)).build();
+
+         Example 5: Compute Timestamp from Java `Instant.now()`.
+
+             Instant now = Instant.now();
+
+             Timestamp timestamp =
+                 Timestamp.newBuilder().setSeconds(now.getEpochSecond())
+                     .setNanos(now.getNano()).build();
+
+         Example 6: Compute Timestamp from current time in Python.
+
+             timestamp = Timestamp()
+             timestamp.GetCurrentTime()
+
+         # JSON Mapping
+
+         In JSON format, the Timestamp type is encoded as a string in the
+         [RFC 3339](https://www.ietf.org/rfc/rfc3339.txt) format. That is, the
+         format is "{year}-{month}-{day}T{hour}:{min}:{sec}[.{frac_sec}]Z"
+         where {year} is always expressed using four digits while {month}, {day},
+         {hour}, {min}, and {sec} are zero-padded to two digits each. The fractional
+         seconds, which can go up to 9 digits (i.e. up to 1 nanosecond resolution),
+         are optional. The "Z" suffix indicates the timezone ("UTC"); the timezone
+         is required. A proto3 JSON serializer should always use UTC (as indicated by
+         "Z") when printing the Timestamp type and a proto3 JSON parser should be
+         able to accept both UTC and other timezones (as indicated by an offset).
+
+         For example, "2017-01-15T01:30:15.01Z" encodes 15.01 seconds past
+         01:30 UTC on January 15, 2017.
+
+         In JavaScript, one can convert a Date object to this format using the
+         standard
+         [toISOString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toISOString)
+         method. In Python, a standard `datetime.datetime` object can be converted
+         to this format using
+         [`strftime`](https://docs.python.org/2/library/time.html#time.strftime) with
+         the time format spec '%Y-%m-%dT%H:%M:%S.%fZ'. Likewise, in Java, one can use
+         the Joda Time's [`ISODateTimeFormat.dateTime()`](
+         http://joda-time.sourceforge.net/apidocs/org/joda/time/format/ISODateTimeFormat.html#dateTime()
+         ) to obtain a formatter capable of generating timestamps in this format.
+      examples:
+        - 2023-01-15T01:30:15.01Z
+        - 2024-12-25T12:00:00Z
+      format: date-time
+      type: string
+    redpanda.core.admin.v2.ACLAccessFilter:
+      additionalProperties: false
+      description: Filter an ACL based on its access
+      properties:
+        host:
+          description: |-
+            The host to match.  If not set, will default to match all hosts
+             with the specified `operation` and `permission_type`. Note that
+             the asterisk `*` is literal and matches hosts that are set to `*`
+          title: host
+          type: string
+        operation:
+          $ref: "#/components/schemas/redpanda.core.common.ACLOperation"
+          description: The ACL operation to match
+          title: operation
+        permissionType:
+          $ref: "#/components/schemas/redpanda.core.common.ACLPermissionType"
+          description: The permission type
+          title: permission_type
+        principal:
+          description: |-
+            The name of the principal, if not set will default to match
+             all principals with the specified `operation` and `permission_type`
+          title: principal
+          type: string
+      title: ACLAccessFilter
+      type: object
+    redpanda.core.admin.v2.ACLFilter:
+      additionalProperties: false
+      description: A filter for ACLs
+      properties:
+        accessFilter:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ACLAccessFilter"
+          description: The access filter
+          title: access_filter
+        resourceFilter:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ACLResourceFilter"
+          description: The resource filter
+          title: resource_filter
+      title: ACLFilter
+      type: object
+    redpanda.core.admin.v2.ACLResourceFilter:
+      additionalProperties: false
+      description: A filter to match ACLs for resources
+      properties:
+        name:
+          description: |-
+            Name, if not given will default to match all items in `resource_type`.
+             Note that asterisk `*` is literal and matches resource ACLs
+             that are named `*`
+          title: name
+          type: string
+        patternType:
+          $ref: "#/components/schemas/redpanda.core.common.ACLPattern"
+          description: The pattern to apply to name
+          title: pattern_type
+        resourceType:
+          $ref: "#/components/schemas/redpanda.core.common.ACLResource"
+          description: The ACL resource type to match
+          title: resource_type
+      title: ACLResourceFilter
+      type: object
+    redpanda.core.admin.v2.AdminServer:
+      additionalProperties: false
+      description: AdminServer has information about the admin server within the broker.
+      properties:
+        routes:
+          description: All of the ConnectRPC routes available on this admin server.
+          items:
+            $ref: "#/components/schemas/redpanda.core.admin.v2.RPCRoute"
+          title: routes
+          type: array
+      title: AdminServer
+      type: object
+    redpanda.core.admin.v2.AuthenticationConfiguration:
+      additionalProperties: false
+      description: |-
+        Authentication config.  Currently only supporting SASL/SCRAM,
+         however made as a oneof for expansion
+      oneOf:
+        - properties:
+            scramConfiguration:
+              $ref: "#/components/schemas/redpanda.core.admin.v2.ScramConfig"
+              description: SASL/SCRAM configuration
+              title: scram_configuration
+          required:
+            - scramConfiguration
+          title: scram_configuration
+      title: AuthenticationConfiguration
+      type: object
+    redpanda.core.admin.v2.AuthenticationInfo:
+      additionalProperties: false
+      description: Other Messages
+      properties:
+        mechanism:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.AuthenticationMechanism"
+          description: Authentication mechanism
+          title: mechanism
+        state:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.AuthenticationState"
+          description: Authentication state
+          title: state
+        userPrincipal:
+          description: Authenticated user principal
+          title: user_principal
+          type: string
+      title: AuthenticationInfo
+      type: object
+    redpanda.core.admin.v2.AuthenticationMechanism:
+      enum:
+        - AUTHENTICATION_MECHANISM_UNSPECIFIED
+        - AUTHENTICATION_MECHANISM_MTLS
+        - AUTHENTICATION_MECHANISM_SASL_SCRAM
+        - AUTHENTICATION_MECHANISM_SASL_OAUTHBEARER
+        - AUTHENTICATION_MECHANISM_SASL_PLAIN
+        - AUTHENTICATION_MECHANISM_SASL_GSSAPI
+      title: AuthenticationMechanism
+      type: string
+    redpanda.core.admin.v2.AuthenticationState:
+      enum:
+        - AUTHENTICATION_STATE_UNSPECIFIED
+        - AUTHENTICATION_STATE_UNAUTHENTICATED
+        - AUTHENTICATION_STATE_SUCCESS
+        - AUTHENTICATION_STATE_FAILURE
+      title: AuthenticationState
+      type: string
+    redpanda.core.admin.v2.Broker:
+      additionalProperties: false
+      description: The resource for an individual broker within the Kafka Cluster.
+      properties:
+        adminServer:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.AdminServer"
+          description: The admin server information.
+          title: admin_server
+        buildInfo:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.BuildInfo"
+          description: The build this broker is running.
+          title: build_info
+        nodeId:
+          description: This broker's node ID.
+          format: int32
+          title: node_id
+          type: integer
+      title: Broker
+      type: object
+    redpanda.core.admin.v2.BuildInfo:
+      additionalProperties: false
+      description: BuildInfo contains information about the Redpanda build.
+      properties:
+        buildSha:
+          description: The git commit SHA of the build.
+          title: build_sha
+          type: string
+        version:
+          description: A version string of Redpanda like "v25.2.1"
+          title: version
+          type: string
+      title: BuildInfo
+      type: object
+    redpanda.core.admin.v2.ConsumerOffsetSyncOptions:
+      additionalProperties: false
+      description: Options for syncing consumer offsets
+      properties:
+        effectiveInterval:
+          $ref: "#/components/schemas/google.protobuf.Duration"
+          description: The effective interval for the task
+          readOnly: true
+          title: effective_interval
+        enabled:
+          description: Whether it's enabled
+          title: enabled
+          type: boolean
+        groupFilters:
+          description: The filters
+          items:
+            $ref: "#/components/schemas/redpanda.core.admin.v2.NameFilter"
+          title: group_filters
+          type: array
+        interval:
+          $ref: "#/components/schemas/google.protobuf.Duration"
+          description: |-
+            Sync interval
+             If 0 provided, defaults to 30 seconds
+          title: interval
+      title: ConsumerOffsetSyncOptions
+      type: object
+    redpanda.core.admin.v2.CreateShadowLinkRequest:
+      additionalProperties: false
+      description: Create a new shadow link
+      properties:
+        shadowLink:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowLink"
+          description: The shadow link to create
+          title: shadow_link
+      title: CreateShadowLinkRequest
+      type: object
+    redpanda.core.admin.v2.CreateShadowLinkResponse:
+      additionalProperties: false
+      description: Response to creating a shadow link
+      properties:
+        shadowLink:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowLink"
+          description: The shadow link that was created
+          title: shadow_link
+      title: CreateShadowLinkResponse
+      type: object
+    redpanda.core.admin.v2.DeleteShadowLinkRequest:
+      additionalProperties: false
+      description: Request to delete a shadow link
+      properties:
+        force:
+          description: |-
+            By default, DeleteShadowLink will fail if there are any active Shadow
+             Topics.  Set this flag to 'true' if you wish to delete the link while
+             there are active shadow topics.
+          title: force
+          type: boolean
+        name:
+          description: The name of the link to delete
+          title: name
+          type: string
+      required:
+        - name
+      title: DeleteShadowLinkRequest
+      type: object
+    redpanda.core.admin.v2.DeleteShadowLinkResponse:
+      additionalProperties: false
+      description: Response to deleting a shadow link
+      title: DeleteShadowLinkResponse
+      type: object
+    redpanda.core.admin.v2.FailOverRequest:
+      additionalProperties: false
+      description: Request to fail over a shadow link or a single shadow topic
+      properties:
+        name:
+          description: The name of the shadow link to fail over
+          title: name
+          type: string
+        shadowTopicName:
+          description: |-
+            (OPTIONAL) The name of the shadow topic to fail over, if not set will fail over
+             the entire shadow link
+          title: shadow_topic_name
+          type: string
+      required:
+        - name
+      title: FailOverRequest
+      type: object
+    redpanda.core.admin.v2.FailOverResponse:
+      additionalProperties: false
+      description: The response to the FailOverRequest
+      properties:
+        shadowLink:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowLink"
+          description: The shadow link that was failed over
+          title: shadow_link
+      title: FailOverResponse
+      type: object
+    redpanda.core.admin.v2.FilterType:
+      description: What type of filter this is, include or exclude
+      enum:
+        - FILTER_TYPE_UNSPECIFIED
+        - FILTER_TYPE_INCLUDE
+        - FILTER_TYPE_EXCLUDE
+      title: FilterType
+      type: string
+    redpanda.core.admin.v2.GetBrokerRequest:
+      additionalProperties: false
+      description: GetBrokerRequest returns information about a single broker in the cluster
+      properties:
+        nodeId:
+          description: |-
+            The node ID for the broker. If set to -1, the broker handling the RPC
+             request returns information about itself.
+          format: int32
+          title: node_id
+          type: integer
+      title: GetBrokerRequest
+      type: object
+    redpanda.core.admin.v2.GetBrokerResponse:
+      additionalProperties: false
+      description: GetBrokerResponse is the response from the GetBroker RPC.
+      properties:
+        broker:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.Broker"
+          description: The specified broker and it's information.
+          title: broker
+      title: GetBrokerResponse
+      type: object
+    redpanda.core.admin.v2.GetShadowLinkRequest:
+      additionalProperties: false
+      description: Request to get the information about a shadow link
+      properties:
+        name:
+          description: The name of the shadow link to get
+          title: name
+          type: string
+      required:
+        - name
+      title: GetShadowLinkRequest
+      type: object
+    redpanda.core.admin.v2.GetShadowLinkResponse:
+      additionalProperties: false
+      description: Response to getting a shadow link
+      properties:
+        shadowLink:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowLink"
+          description: The shadow link that was retrieved
+          title: shadow_link
+      title: GetShadowLinkResponse
+      type: object
+    redpanda.core.admin.v2.GetShadowTopicRequest:
+      additionalProperties: false
+      description: Request to get a shadow topic
+      properties:
+        name:
+          description: The name of the shadow topic to get
+          title: name
+          type: string
+        shadowLinkName:
+          description: The name of the shadow link the topic is contained in
+          title: shadow_link_name
+          type: string
+      required:
+        - shadowLinkName
+        - name
+      title: GetShadowTopicRequest
+      type: object
+    redpanda.core.admin.v2.GetShadowTopicResponse:
+      additionalProperties: false
+      description: Response of to getting a shadow topic
+      properties:
+        shadowTopic:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowTopic"
+          title: shadow_topic
+      title: GetShadowTopicResponse
+      type: object
+    redpanda.core.admin.v2.InFlightRequests:
+      additionalProperties: false
+      properties:
+        hasMoreRequests:
+          description: |-
+            Whether there are more in-flight requests than those in
+             `sampled_in_flight_requests`.
+          title: has_more_requests
+          type: boolean
+        sampledInFlightRequests:
+          description: A sample (e.g., the 5 latest) of the currently in-flight requests
+          items:
+            $ref: "#/components/schemas/redpanda.core.admin.v2.InFlightRequests.Request"
+          title: sampled_in_flight_requests
+          type: array
+      title: InFlightRequests
+      type: object
+    redpanda.core.admin.v2.InFlightRequests.Request:
+      additionalProperties: false
+      properties:
+        apiKey:
+          description: |-
+            API key for the request type (e.g., produce/fetch/metadata/etc)
+             https://kafka.apache.org/0101/protocol.html#protocol_api_keys
+          format: int32
+          title: api_key
+          type: integer
+        inFlightDuration:
+          $ref: "#/components/schemas/google.protobuf.Duration"
+          description: How long the request has been in-flight since it was received
+          title: in_flight_duration
+      title: Request
+      type: object
+    redpanda.core.admin.v2.KafkaConnection:
+      additionalProperties: false
+      description: Kafka connection details for a broker
+      properties:
+        apiVersions:
+          additionalProperties:
+            format: int32
+            title: value
+            type: integer
+          description: |-
+            This map records, for each Kafka API, the highest version number observed
+             in requests on this connection. It can be useful for understanding which
+             protocol versions a client supports or has negotiated with the broker.
+             Only APIs that were actually used (i.e. at least one request was seen)
+             are included.
+
+             Example:
+               { 0: 11, 1: 13 }
+             means that for API key 0 (Produce), version 11 was the highest seen,
+             and for API key 1 (Fetch), version 13 was the highest seen.
+
+             Reference:
+             - https://kafka.apache.org/0101/protocol.html#protocol_api_keys
+             - https://kafka.apache.org/0101/protocol.html#protocol_compatibility
+          title: api_versions
+          type: object
+        authenticationInfo:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.AuthenticationInfo"
+          description: Information about the authentication state of the connection
+          title: authentication_info
+        clientId:
+          description: |-
+            Client identifier included in every request sent by the Kafka client.
+             This is typically a configurable property (client.id) set by the
+             application when creating a producer or consumer, and is often used for
+             metrics, quotas, and debugging.
+          title: client_id
+          type: string
+        clientSoftwareName:
+          description: |-
+            Name of the client library, reported automatically in ApiVersions v3+
+             requests. This is set by the client implementation and is not typically
+             configurable by applications.
+          title: client_software_name
+          type: string
+        clientSoftwareVersion:
+          description: |-
+            Version of the client library, reported automatically in ApiVersions v3+
+             requests. Like client_software_name, this is set by the
+             client and not usually configurable by applications.
+          title: client_software_version
+          type: string
+        closeTime:
+          $ref: "#/components/schemas/google.protobuf.Timestamp"
+          description: |-
+            When the connection was closed. This field is set only when the
+             connection state is "closed".
+          title: close_time
+        groupId:
+          description: |-
+            Most recent group ID seen in requests sent over this connection. This
+             typically refers to a consumer group, but the Kafka group protocol is
+             more general and may also be used by other types of clients that
+             coordinate membership and assignments through the broker.
+          title: group_id
+          type: string
+        groupInstanceId:
+          description: |-
+            Most recent group instance ID seen in requests sent over this connection.
+             This is used when static membership is enabled, allowing a specific
+             client instance to retain its group membership across restarts.
+          title: group_instance_id
+          type: string
+        groupMemberId:
+          description: |-
+            Most recent group member ID seen in requests sent over this connection.
+             This is the unique identifier assigned by the broker to a particular
+             member of the group.
+          title: group_member_id
+          type: string
+        idleDuration:
+          $ref: "#/components/schemas/google.protobuf.Duration"
+          description: How long the connection has been idle (no in-flight requests)
+          title: idle_duration
+        inFlightRequests:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.InFlightRequests"
+          description: Currently in-flight requests
+          title: in_flight_requests
+        listenerName:
+          description: |-
+            Name of the Kafka listener that accepted this connection.
+             A listener is a named broker endpoint (for example, "internal",
+             "external", or "sasl_tls"). Each listener defines its network address and
+             enforces its protocol and authentication policy.
+          title: listener_name
+          type: string
+        nodeId:
+          description: Broker node ID
+          format: int32
+          title: node_id
+          type: integer
+        openTime:
+          $ref: "#/components/schemas/google.protobuf.Timestamp"
+          description: When the broker accepted the connection
+          title: open_time
+        recentRequestStatistics:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.RequestStatistics"
+          description: Statistics for previous last one minute window.
+          title: recent_request_statistics
+        shardId:
+          description: Broker shard that handles the connection
+          title: shard_id
+          type: integer
+        source:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.Source"
+          description: Remote client address of the TCP connection
+          title: source
+        state:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.KafkaConnectionState"
+          description: Lifecycle state of the connection (open/aborting/closed)
+          title: state
+        tlsInfo:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.TLSInfo"
+          description: |-
+            Information about the TLS state of the connection (e.g., whether TLS
+             encryption is used for this connection)
+          title: tls_info
+        totalRequestStatistics:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.RequestStatistics"
+          description: Aggregated statistics for the entire connection's lifetime.
+          title: total_request_statistics
+        transactionalId:
+          description: Most recent transactional ID seen in requests sent over this connection
+          title: transactional_id
+          type: string
+        uid:
+          description: Kafka connection UUID
+          title: uid
+          type: string
+      title: KafkaConnection
+      type: object
+    redpanda.core.admin.v2.KafkaConnection.ApiVersionsEntry:
+      additionalProperties: false
+      properties:
+        key:
+          format: int32
+          title: key
+          type: integer
+        value:
+          format: int32
+          title: value
+          type: integer
+      title: ApiVersionsEntry
+      type: object
+    redpanda.core.admin.v2.KafkaConnectionState:
+      description: Enums
+      enum:
+        - KAFKA_CONNECTION_STATE_UNSPECIFIED
+        - KAFKA_CONNECTION_STATE_OPEN
+        - KAFKA_CONNECTION_STATE_ABORTING
+        - KAFKA_CONNECTION_STATE_CLOSED
+      title: KafkaConnectionState
+      type: string
+    redpanda.core.admin.v2.ListBrokersRequest:
+      additionalProperties: false
+      description: ListBrokersRequest returns information about all the brokers in the cluster
+      title: ListBrokersRequest
+      type: object
+    redpanda.core.admin.v2.ListBrokersResponse:
+      additionalProperties: false
+      description: ListBrokersResponse is the response from the ListBrokers RPC.
+      properties:
+        brokers:
+          description: The brokers in the cluster and their information.
+          items:
+            $ref: "#/components/schemas/redpanda.core.admin.v2.Broker"
+          title: brokers
+          type: array
+      title: ListBrokersResponse
+      type: object
+    redpanda.core.admin.v2.ListKafkaConnectionsRequest:
+      additionalProperties: false
+      description: |-
+        ListKafkaConnectionsRequest return information about the broker's Kafka
+         connections.
+      properties:
+        filter:
+          description: |-
+            Filter expression to apply to the connection list.
+             Uses a subset of AIP-160 filter syntax supporting:
+             - Field comparisons (`=`, `!=`, `<`, `>`, `<=`, `>=`)
+             - Logical AND chaining: condition1 AND condition2
+             - Nested field access: parent.child = value
+             - Escape sequences: field = "string with \"quotes\""
+             - Enum types
+             - RFC3339 timestamps and ISO-like duration
+
+             Limitations (not supported):
+             - Logical OR chaining
+             - Parentheses `(` `)` for grouping
+             - Map and repeated types
+             - HAS (:) operator
+             - Negation (-, NOT)
+             - Bare literal matching
+
+             Example filters:
+             - `state = KAFKA_CONNECTION_STATE_OPEN`
+             - `idle_duration > 30s AND total_request_statistics.request_count > 100`
+             - `authentication_info.user_principal = "my-producer"`
+             - `recent_request_statistics.produce_bytes > 1000 AND
+             client_software_name = "kgo"`
+             - `open_time >= 2025-09-01T10:22:54Z`
+
+             Reference: https://google.aip.dev/160
+          title: filter
+          type: string
+        orderBy:
+          description: |-
+            Field-based ordering specification following AIP-132 syntax.
+             Supports multiple fields with `asc`/`desc` direction indicators.
+             Examples:
+             - `idle_duration desc` - longest idle connections first
+             - `open_time desc, total_request_statistics.request_count desc` - newest
+             connections first, then most active
+             - `recent_request_statistics.produce_bytes desc` - connections with
+             highest current produce throughput first
+
+             Reference: https://google.aip.dev/132#ordering
+          title: order_by
+          type: string
+        pageSize:
+          description: |-
+            The maximum number of connections to return. If unspecified or 0, a
+             default value may be applied. Note that paging is currently not fully
+             supported, and this field only acts as a limit for the first page of data
+             returned. Subsequent pages of data cannot be requested.
+          format: int32
+          title: page_size
+          type: integer
+      title: ListKafkaConnectionsRequest
+      type: object
+    redpanda.core.admin.v2.ListKafkaConnectionsResponse:
+      additionalProperties: false
+      description: |-
+        ListKafkaConnectionsResponse is the response from the ListKafkaConnections
+         RPC.
+      properties:
+        connections:
+          description: |-
+            The list of connections matching the request.
+             Note that in addition to open connections, some recently-closed
+             connections may also be included here. If you don't want to include
+             closed connections, set the filter in the request to `state =
+             KAFKA_CONNECTION_STATE_OPEN`.
+          items:
+            $ref: "#/components/schemas/redpanda.core.admin.v2.KafkaConnection"
+          title: connections
+          type: array
+        totalSize:
+          description: |-
+            Total number of connections matching the request.
+             This may be greater than `len(connections)` if some connections were
+             omitted from the response due to the specified (or default) `page_size`.
+             Example:
+               request.page_size = 10
+               response.connections = [<10 items>]
+               response.total_size = 13
+          format: int64
+          title: total_size
+          type:
+            - integer
+            - string
+      title: ListKafkaConnectionsResponse
+      type: object
+    redpanda.core.admin.v2.ListShadowLinksRequest:
+      additionalProperties: false
+      description: Request to list all shadow links
+      title: ListShadowLinksRequest
+      type: object
+    redpanda.core.admin.v2.ListShadowLinksResponse:
+      additionalProperties: false
+      description: All shadow links on the cluster
+      properties:
+        shadowLinks:
+          description: The shadow links
+          items:
+            $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowLink"
+          title: shadow_links
+          type: array
+      title: ListShadowLinksResponse
+      type: object
+    redpanda.core.admin.v2.ListShadowTopicsRequest:
+      additionalProperties: false
+      description: Request to list all shadow topics in a shadow link
+      properties:
+        shadowLinkName:
+          title: shadow_link_name
+          type: string
+      required:
+        - shadowLinkName
+      title: ListShadowTopicsRequest
+      type: object
+    redpanda.core.admin.v2.ListShadowTopicsResponse:
+      additionalProperties: false
+      description: Response to listing all shadow topics in a shadow link
+      properties:
+        shadowTopics:
+          items:
+            $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowTopic"
+          title: shadow_topics
+          type: array
+      title: ListShadowTopicsResponse
+      type: object
+    redpanda.core.admin.v2.NameFilter:
+      additionalProperties: false
+      description: A filter based on the name of a resource
+      properties:
+        filterType:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.FilterType"
+          description: Include or exclude
+          title: filter_type
+        name:
+          description: |-
+            The resource name, or "*"
+             Note if "*", must be the _only_ character
+             and `pattern_type` must be `PATTERN_TYPE_LITERAL`
+          title: name
+          type: string
+        patternType:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.PatternType"
+          description: Literal or prefix
+          title: pattern_type
+      title: NameFilter
+      type: object
+    redpanda.core.admin.v2.PatternType:
+      description: The matching pattern type
+      enum:
+        - PATTERN_TYPE_UNSPECIFIED
+        - PATTERN_TYPE_LITERAL
+        - PATTERN_TYPE_PREFIX
+      title: PatternType
+      type: string
+    redpanda.core.admin.v2.RPCRoute:
+      additionalProperties: false
+      description: A route in the Admin API RPC server.
+      properties:
+        httpRoute:
+          description: |-
+            The HTTP route for this RPC method.
+
+             For example `/redpanda.core.admin.v2.AdminService/GetVersion`
+          title: http_route
+          type: string
+        name:
+          description: |-
+            The name of the RPC method.
+
+             For example `redpanda.core.admin.v2.AdminService.GetVersion`
+          title: name
+          type: string
+      title: RPCRoute
+      type: object
+    redpanda.core.admin.v2.RequestStatistics:
+      additionalProperties: false
+      properties:
+        fetchBytes:
+          description: Sum of bytes fetched.
+          format: int64
+          title: fetch_bytes
+          type:
+            - integer
+            - string
+        produceBatchCount:
+          description: |-
+            Number of produced batches.
+             Average batch size = produce_bytes / produce_batch_count
+          format: int64
+          title: produce_batch_count
+          type:
+            - integer
+            - string
+        produceBytes:
+          description: Sum of bytes produced.
+          format: int64
+          title: produce_bytes
+          type:
+            - integer
+            - string
+        requestCount:
+          description: Number of requests the client has made.
+          format: int64
+          title: request_count
+          type:
+            - integer
+            - string
+      title: RequestStatistics
+      type: object
+    redpanda.core.admin.v2.SchemaRegistrySyncOptions:
+      additionalProperties: false
+      description: Options for how the Schema Registry is synced.
+      oneOf:
+        - properties:
+            shadowSchemaRegistryTopic:
+              $ref: "#/components/schemas/redpanda.core.admin.v2.SchemaRegistrySyncOptions.ShadowSchemaRegistryTopic"
+              title: shadow_schema_registry_topic
+          required:
+            - shadowSchemaRegistryTopic
+          title: shadow_schema_registry_topic
+      title: SchemaRegistrySyncOptions
+      type: object
+    redpanda.core.admin.v2.SchemaRegistrySyncOptions.ShadowSchemaRegistryTopic:
+      additionalProperties: false
+      description: |-
+        Shadow the entire source cluster's Schema Registry byte-for-byte.
+         If set, the Shadow Link will attempt to add the `_schemas`
+         topic to the list of Shadow Topics as long as:
+         1. The `_schemas` topic exists on the source cluster
+         2. The `_schemas` topic does not exist on the shadow cluster, or it is
+         empty.
+         If either of the above conditions are _not_ met, then the `_schemas`
+         topic will _not_ be shadowed by this cluster. Unsetting this flag will
+         _not_ remove the `_schemas` topic from shadowing if it has already been
+         added.  Once made a shadow topic, the
+         `_schemas` topic will be replicated byte-for-byte.  To stop shadowing the
+         `_schemas` topic, unset this field, then either fail-over the topic or
+         delete it.
+      title: ShadowSchemaRegistryTopic
+      type: object
+    redpanda.core.admin.v2.ScramConfig:
+      additionalProperties: false
+      description: SCRAM settings
+      properties:
+        password:
+          description: Password
+          title: password
+          type: string
+          writeOnly: true
+        passwordSet:
+          description: Indicates that the password has been set
+          readOnly: true
+          title: password_set
+          type: boolean
+        passwordSetAt:
+          $ref: "#/components/schemas/google.protobuf.Timestamp"
+          description: |-
+            Timestamp of when the password was last set - only valid if password_set
+             is true
+          readOnly: true
+          title: password_set_at
+        scramMechanism:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ScramMechanism"
+          description: The SCRAM mechanism to use
+          title: scram_mechanism
+        username:
+          description: SCRAM username
+          title: username
+          type: string
+      title: ScramConfig
+      type: object
+    redpanda.core.admin.v2.ScramMechanism:
+      description: Valid SCRAM mechanisms
+      enum:
+        - SCRAM_MECHANISM_UNSPECIFIED
+        - SCRAM_MECHANISM_SCRAM_SHA_256
+        - SCRAM_MECHANISM_SCRAM_SHA_512
+      title: ScramMechanism
+      type: string
+    redpanda.core.admin.v2.SecuritySettingsSyncOptions:
+      additionalProperties: false
+      description: Options for syncing security settings
+      properties:
+        aclFilters:
+          description: ACL filters
+          items:
+            $ref: "#/components/schemas/redpanda.core.admin.v2.ACLFilter"
+          title: acl_filters
+          type: array
+        effectiveInterval:
+          $ref: "#/components/schemas/google.protobuf.Duration"
+          description: The effective interval for the task
+          readOnly: true
+          title: effective_interval
+        enabled:
+          description: Whether or not it's enabled
+          title: enabled
+          type: boolean
+        interval:
+          $ref: "#/components/schemas/google.protobuf.Duration"
+          description: |-
+            Sync interval
+             If 0 provided, defaults to 30 seconds
+          title: interval
+      title: SecuritySettingsSyncOptions
+      type: object
+    redpanda.core.admin.v2.ShadowLink:
+      additionalProperties: false
+      description: A ShadowLink resource
+      properties:
+        configurations:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowLinkConfigurations"
+          description: Shadow link configuration
+          title: configurations
+        name:
+          description: The name of the shadow link
+          title: name
+          type: string
+        status:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowLinkStatus"
+          description: Status of the shadow link
+          readOnly: true
+          title: status
+        uid:
+          description: The UUID of the shadow link
+          readOnly: true
+          title: uid
+          type: string
+      required:
+        - name
+      title: ShadowLink
+      type: object
+    redpanda.core.admin.v2.ShadowLinkClientOptions:
+      additionalProperties: false
+      description: Options for the client link
+      properties:
+        authenticationConfiguration:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.AuthenticationConfiguration"
+          description: Authentication settings
+          nullable: true
+          title: authentication_configuration
+        bootstrapServers:
+          description: The bootstrap servers to use
+          items:
+            type: string
+          title: bootstrap_servers
+          type: array
+        clientId:
+          description: |-
+            The Client ID for the Kafka RPC requests setn by this cluster to the
+             source cluster
+          readOnly: true
+          title: client_id
+          type: string
+        connectionTimeoutMs:
+          description: |-
+            Connection timeout.
+             If 0 is provided, defaults to 1 second
+          format: int32
+          title: connection_timeout_ms
+          type: integer
+        effectiveConnectionTimeoutMs:
+          description: The effective connection timeout in milliseconds
+          format: int32
+          readOnly: true
+          title: effective_connection_timeout_ms
+          type: integer
+        effectiveFetchMaxBytes:
+          description: The effective fetch max bytes
+          format: int32
+          readOnly: true
+          title: effective_fetch_max_bytes
+          type: integer
+        effectiveFetchMinBytes:
+          description: The effective fetch min bytes
+          format: int32
+          readOnly: true
+          title: effective_fetch_min_bytes
+          type: integer
+        effectiveFetchPartitionMaxBytes:
+          description: The effective fetch partition max bytes
+          format: int32
+          readOnly: true
+          title: effective_fetch_partition_max_bytes
+          type: integer
+        effectiveFetchWaitMaxMs:
+          description: The effective fetch wait max in milliseconds
+          format: int32
+          readOnly: true
+          title: effective_fetch_wait_max_ms
+          type: integer
+        effectiveMetadataMaxAgeMs:
+          description: The effective metadata max age in milliseconds
+          format: int32
+          readOnly: true
+          title: effective_metadata_max_age_ms
+          type: integer
+        effectiveRetryBackoffMs:
+          description: The effective retry backoff in milliseconds
+          format: int32
+          readOnly: true
+          title: effective_retry_backoff_ms
+          type: integer
+        fetchMaxBytes:
+          description: |-
+            Fetch max bytes.
+             If 0 is provided, defaults to 20 MiB
+          format: int32
+          title: fetch_max_bytes
+          type: integer
+        fetchMinBytes:
+          description: |-
+            Fetch min bytes.
+             If 0 is provided, defaults to 5 MiB
+          format: int32
+          title: fetch_min_bytes
+          type: integer
+        fetchPartitionMaxBytes:
+          description: |-
+            Fetch partition max bytes.
+             If 0 is provided, defaults to 1 MiB
+          format: int32
+          title: fetch_partition_max_bytes
+          type: integer
+        fetchWaitMaxMs:
+          description: |-
+            Fetch request timeout.
+             If 0 is provided, defaults to 500ms
+          format: int32
+          title: fetch_wait_max_ms
+          type: integer
+        metadataMaxAgeMs:
+          description: |-
+            Max metadata age.
+             If 0 is provided, defaults to 10 seconds
+          format: int32
+          title: metadata_max_age_ms
+          type: integer
+        retryBackoffMs:
+          description: |-
+            Retry base backoff.
+             If 0 is provided, defaults to 100ms
+          format: int32
+          title: retry_backoff_ms
+          type: integer
+        sourceClusterId:
+          description: |-
+            If provided, this is the expected ID of the source cluster.  If it does
+             not match then the connection will be rejected.  If provided, this value
+             must match the `ClusterId` field returned in the Kafka Metadata response
+             message
+          title: source_cluster_id
+          type: string
+        tlsSettings:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.TLSSettings"
+          description: TLS settings
+          nullable: true
+          title: tls_settings
+      required:
+        - bootstrapServers
+      title: ShadowLinkClientOptions
+      type: object
+    redpanda.core.admin.v2.ShadowLinkConfigurations:
+      additionalProperties: false
+      description: ShadowLink options
+      properties:
+        clientOptions:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowLinkClientOptions"
+          description: Configuration for the internal kafka client
+          title: client_options
+        consumerOffsetSyncOptions:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ConsumerOffsetSyncOptions"
+          description: Consumer offset sync options
+          title: consumer_offset_sync_options
+        schemaRegistrySyncOptions:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.SchemaRegistrySyncOptions"
+          description: Schema Registry sync options
+          title: schema_registry_sync_options
+        securitySyncOptions:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.SecuritySettingsSyncOptions"
+          description: Security settings sync options
+          title: security_sync_options
+        topicMetadataSyncOptions:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.TopicMetadataSyncOptions"
+          description: Topic metadata sync options
+          title: topic_metadata_sync_options
+      title: ShadowLinkConfigurations
+      type: object
+    redpanda.core.admin.v2.ShadowLinkState:
+      description: State of the shadow link
+      enum:
+        - SHADOW_LINK_STATE_UNSPECIFIED
+        - SHADOW_LINK_STATE_ACTIVE
+        - SHADOW_LINK_STATE_PAUSED
+      title: ShadowLinkState
+      type: string
+    redpanda.core.admin.v2.ShadowLinkStatus:
+      additionalProperties: false
+      description: Status of the shadow link
+      properties:
+        shadowTopics:
+          description: Status of shadow topics
+          items:
+            $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowTopic"
+          title: shadow_topics
+          type: array
+        state:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowLinkState"
+          title: state
+        syncedShadowTopicProperties:
+          description: List of topic properties that are being synced
+          items:
+            type: string
+          title: synced_shadow_topic_properties
+          type: array
+        taskStatuses:
+          description: Statuses of the running tasks
+          items:
+            $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowLinkTaskStatus"
+          title: task_statuses
+          type: array
+      title: ShadowLinkStatus
+      type: object
+    redpanda.core.admin.v2.ShadowLinkTaskStatus:
+      additionalProperties: false
+      description: Status of a task
+      properties:
+        brokerId:
+          description: The broker the task is running on
+          format: int32
+          title: broker_id
+          type: integer
+        name:
+          description: Name of the task
+          title: name
+          type: string
+        reason:
+          description: Reason for task being in state
+          title: reason
+          type: string
+        state:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.TaskState"
+          description: State of the task
+          title: state
+      title: ShadowLinkTaskStatus
+      type: object
+    redpanda.core.admin.v2.ShadowTopic:
+      additionalProperties: false
+      description: A ShadowTopic resource contained by the ShadowLink
+      properties:
+        name:
+          description: Name of the shadow topic
+          readOnly: true
+          title: name
+          type: string
+        sourceTopicId:
+          description: The topic ID of the source topic
+          readOnly: true
+          title: source_topic_id
+          type: string
+        sourceTopicName:
+          description: The name of the source topic
+          title: source_topic_name
+          type: string
+        status:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowTopicStatus"
+          description: The status of the shadow topic
+          readOnly: true
+          title: status
+        topicId:
+          description: The topic ID of the shadow topic
+          readOnly: true
+          title: topic_id
+          type: string
+      title: ShadowTopic
+      type: object
+    redpanda.core.admin.v2.ShadowTopicState:
+      description: State of a shadow topic
+      enum:
+        - SHADOW_TOPIC_STATE_UNSPECIFIED
+        - SHADOW_TOPIC_STATE_ACTIVE
+        - SHADOW_TOPIC_STATE_FAULTED
+        - SHADOW_TOPIC_STATE_PAUSED
+        - SHADOW_TOPIC_STATE_FAILING_OVER
+        - SHADOW_TOPIC_STATE_FAILED_OVER
+        - SHADOW_TOPIC_STATE_PROMOTING
+        - SHADOW_TOPIC_STATE_PROMOTED
+      title: ShadowTopicState
+      type: string
+    redpanda.core.admin.v2.ShadowTopicStatus:
+      additionalProperties: false
+      description: Status of a ShadowTopic
+      properties:
+        partitionInformation:
+          description: List of partition information for the shadow topic
+          items:
+            $ref: "#/components/schemas/redpanda.core.admin.v2.TopicPartitionInformation"
+          title: partition_information
+          type: array
+        state:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowTopicState"
+          description: State of the shadow topic
+          title: state
+      title: ShadowTopicStatus
+      type: object
+    redpanda.core.admin.v2.Source:
+      additionalProperties: false
+      properties:
+        ipAddress:
+          title: ip_address
+          type: string
+        port:
+          title: port
+          type: integer
+      title: Source
+      type: object
+    redpanda.core.admin.v2.TLSFileSettings:
+      additionalProperties: false
+      description: TLS file settings
+      properties:
+        caPath:
+          description: Path to the CA
+          title: ca_path
+          type: string
+        certPath:
+          description: Path to the cert
+          title: cert_path
+          type: string
+        keyPath:
+          description: |-
+            Key and Cert are optional but if one is provided, then both must be
+             Path to the key
+          title: key_path
+          type: string
+      title: TLSFileSettings
+      type: object
+    redpanda.core.admin.v2.TLSInfo:
+      additionalProperties: false
+      properties:
+        enabled:
+          description: Whether TLS is in use
+          title: enabled
+          type: boolean
+      title: TLSInfo
+      type: object
+    redpanda.core.admin.v2.TLSPEMSettings:
+      additionalProperties: false
+      description: Used when providing the TLS information in PEM format
+      properties:
+        ca:
+          description: The CA
+          title: ca
+          type: string
+        cert:
+          description: The cert
+          title: cert
+          type: string
+        key:
+          description: |-
+            Key and Cert are optional but if one is provided, then both must be
+             The key
+          title: key
+          type: string
+          writeOnly: true
+        keyFingerprint:
+          description: The SHA-256 of the key, in base64 format
+          readOnly: true
+          title: key_fingerprint
+          type: string
+      title: TLSPEMSettings
+      type: object
+    redpanda.core.admin.v2.TLSSettings:
+      additionalProperties: false
+      allOf:
+        - properties:
+            doNotSetSniHostname:
+              description: If true, the SNI hostname will not be provided when TLS is used
+              title: do_not_set_sni_hostname
+              type: boolean
+            enabled:
+              description: Whether or not TLS is enabled
+              title: enabled
+              type: boolean
+        - oneOf:
+            - properties:
+                tlsFileSettings:
+                  $ref: "#/components/schemas/redpanda.core.admin.v2.TLSFileSettings"
+                  description: Certificates and keys are provided as files
+                  title: tls_file_settings
+              required:
+                - tlsFileSettings
+              title: tls_file_settings
+            - properties:
+                tlsPemSettings:
+                  $ref: "#/components/schemas/redpanda.core.admin.v2.TLSPEMSettings"
+                  description: Certificates and keys are provided in PEM format
+                  title: tls_pem_settings
+              required:
+                - tlsPemSettings
+              title: tls_pem_settings
+      description: TLS settings
+      title: TLSSettings
+      type: object
+    redpanda.core.admin.v2.TaskState:
+      description: Task states
+      enum:
+        - TASK_STATE_UNSPECIFIED
+        - TASK_STATE_ACTIVE
+        - TASK_STATE_PAUSED
+        - TASK_STATE_LINK_UNAVAILABLE
+        - TASK_STATE_NOT_RUNNING
+        - TASK_STATE_FAULTED
+      title: TaskState
+      type: string
+    redpanda.core.admin.v2.TopicMetadataSyncOptions:
+      additionalProperties: false
+      allOf:
+        - properties:
+            autoCreateShadowTopicFilters:
+              description: |-
+                List of filters that indicate which topics should be automatically
+                 created as shadow topics on the shadow cluster.  This only controls
+                 automatic creation of shadow topics and does not effect the state of the
+                 mirror topic once it is created.
+                 Literal filters for __consumer_offsets, _redpanda.audit_log and _schemas
+                 will be rejected as well as prefix filters to match topics prefixed with
+                 _redpanda or __redpanda.
+                 Wildcard `*` is permitted only for literal filters and will _not_ match
+                 any topics that start with _redpanda or __redpanda.  If users wish to
+                 shadow topics that start with _redpanda or __redpanda, they should
+                 provide a literal filter for those topics.
+              items:
+                $ref: "#/components/schemas/redpanda.core.admin.v2.NameFilter"
+              title: auto_create_shadow_topic_filters
+              type: array
+            effectiveInterval:
+              $ref: "#/components/schemas/google.protobuf.Duration"
+              description: The effective interval for the task
+              readOnly: true
+              title: effective_interval
+            excludeDefault:
+              description: |-
+                If false, then the following topic properties will be synced by default:
+                 - `compression.type`
+                 - `retention.bytes`
+                 - `retention.ms`
+                 - `delete.retention.ms`
+                 - Replication Factor
+                 - `min.compaction.lag.ms`
+                 - `max.compaction.lag.ms`
+
+                 If this is true, then only the properties listed in
+                 `synced_shadow_topic_properties` will be synced.
+              title: exclude_default
+              type: boolean
+            interval:
+              $ref: "#/components/schemas/google.protobuf.Duration"
+              description: |-
+                How often to sync metadata
+                 If 0 provided, defaults to 30 seconds
+              title: interval
+            syncedShadowTopicProperties:
+              description: |-
+                List of topic properties that should be synced from the source topic.
+                 The following properties will always be replicated
+                 - Partition count
+                 - `max.message.bytes`
+                 - `cleanup.policy`
+                 - `timestamp.type`
+
+                 The following properties are not allowed to be replicated and adding them
+                 to this list will result in an error:
+                 - `redpanda.remote.readreplica`
+                 - `redpanda.remote.recovery`
+                 - `redpanda.remote.allowgaps`
+                 - `redpanda.virtual.cluster.id`
+                 - `redpanda.leaders.preference`
+                 - `redpanda.cloud_topic.enabled`
+
+                 This list is a list of properties in addition to the default properties
+                 that will be synced.  See `exclude_default`.
+              items:
+                type: string
+              title: synced_shadow_topic_properties
+              type: array
+        - oneOf:
+            - properties:
+                earliest:
+                  $ref: "#/components/schemas/redpanda.core.admin.v2.TopicMetadataSyncOptions.EarliestOffset"
+                  description: |-
+                    Enables data replication from the earliest offset
+                     on the source topic/partition.
+                  title: earliest
+              required:
+                - earliest
+              title: earliest
+            - properties:
+                latest:
+                  $ref: "#/components/schemas/redpanda.core.admin.v2.TopicMetadataSyncOptions.LatestOffset"
+                  description: |-
+                    Enables data replication from the latest offset
+                     on the source topic/partition.
+                  title: latest
+              required:
+                - latest
+              title: latest
+            - properties:
+                timestamp:
+                  $ref: "#/components/schemas/google.protobuf.Timestamp"
+                  description: |-
+                    Enables data replication from the first offset on the
+                     source topic/partition where the record's timestamp is
+                     at or after the specified timestamp.
+                  title: timestamp
+              required:
+                - timestamp
+              title: timestamp
+      description: Options for syncing topic metadata
+      title: TopicMetadataSyncOptions
+      type: object
+    redpanda.core.admin.v2.TopicMetadataSyncOptions.EarliestOffset:
+      additionalProperties: false
+      description: Start at the earliest offset in the partition.
+      title: EarliestOffset
+      type: object
+    redpanda.core.admin.v2.TopicMetadataSyncOptions.LatestOffset:
+      additionalProperties: false
+      description: Start at the latest offset in the partition.
+      title: LatestOffset
+      type: object
+    redpanda.core.admin.v2.TopicPartitionInformation:
+      additionalProperties: false
+      description: Topic partition information
+      properties:
+        highWatermark:
+          description: Shadowed partition's HWM
+          format: int64
+          title: high_watermark
+          type:
+            - integer
+            - string
+        partitionId:
+          description: Partition ID
+          format: int64
+          title: partition_id
+          type:
+            - integer
+            - string
+        sourceHighWatermark:
+          description: Source partition's HWM
+          format: int64
+          title: source_high_watermark
+          type:
+            - integer
+            - string
+        sourceLastStableOffset:
+          description: Source partition's LSO
+          format: int64
+          title: source_last_stable_offset
+          type:
+            - integer
+            - string
+        sourceLastUpdatedTimestamp:
+          $ref: "#/components/schemas/google.protobuf.Timestamp"
+          description: Timestamp of the last time the source partition information was updated
+          title: source_last_updated_timestamp
+      title: TopicPartitionInformation
+      type: object
+    redpanda.core.admin.v2.UpdateShadowLinkRequest:
+      additionalProperties: false
+      description: Updates a shadow link
+      properties:
+        shadowLink:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowLink"
+          description: The shadow link to update
+          title: shadow_link
+        updateMask:
+          $ref: "#/components/schemas/google.protobuf.FieldMask"
+          description: |-
+            The list of fields to update
+             See [AIP-134](https://google.aip.dev/134) for how to use `field_mask`
+          title: update_mask
+      title: UpdateShadowLinkRequest
+      type: object
+    redpanda.core.admin.v2.UpdateShadowLinkResponse:
+      additionalProperties: false
+      description: Response to the update shadow link request
+      properties:
+        shadowLink:
+          $ref: "#/components/schemas/redpanda.core.admin.v2.ShadowLink"
+          description: The shadow link that was updated
+          title: shadow_link
+      title: UpdateShadowLinkResponse
+      type: object
+    redpanda.core.common.ACLOperation:
+      description: / The ACL operation to match
+      enum:
+        - ACL_OPERATION_UNSPECIFIED
+        - ACL_OPERATION_ANY
+        - ACL_OPERATION_READ
+        - ACL_OPERATION_WRITE
+        - ACL_OPERATION_CREATE
+        - ACL_OPERATION_REMOVE
+        - ACL_OPERATION_ALTER
+        - ACL_OPERATION_DESCRIBE
+        - ACL_OPERATION_CLUSTER_ACTION
+        - ACL_OPERATION_DESCRIBE_CONFIGS
+        - ACL_OPERATION_ALTER_CONFIGS
+        - ACL_OPERATION_IDEMPOTENT_WRITE
+      title: ACLOperation
+      type: string
+    redpanda.core.common.ACLPattern:
+      description: / The ACL pattern type
+      enum:
+        - ACL_PATTERN_UNSPECIFIED
+        - ACL_PATTERN_ANY
+        - ACL_PATTERN_LITERAL
+        - ACL_PATTERN_PREFIXED
+        - ACL_PATTERN_MATCH
+      title: ACLPattern
+      type: string
+    redpanda.core.common.ACLPermissionType:
+      description: / ACL permission types
+      enum:
+        - ACL_PERMISSION_TYPE_UNSPECIFIED
+        - ACL_PERMISSION_TYPE_ANY
+        - ACL_PERMISSION_TYPE_ALLOW
+        - ACL_PERMISSION_TYPE_DENY
+      title: ACLPermissionType
+      type: string
+    redpanda.core.common.ACLResource:
+      description: / The ACL resource types
+      enum:
+        - ACL_RESOURCE_UNSPECIFIED
+        - ACL_RESOURCE_ANY
+        - ACL_RESOURCE_CLUSTER
+        - ACL_RESOURCE_GROUP
+        - ACL_RESOURCE_TOPIC
+        - ACL_RESOURCE_TXN_ID
+        - ACL_RESOURCE_SR_SUBJECT
+        - ACL_RESOURCE_SR_REGISTRY
+        - ACL_RESOURCE_SR_ANY
+      title: ACLResource
+      type: string
+    redpanda.core.common.TopicPartition:
+      additionalProperties: false
+      description: A single topic partition within the kafka namespace.
+      properties:
+        partition:
+          description: The topic's partition, must be non-negative.
+          format: int32
+          title: partition
+          type: integer
+        topic:
+          description: The topic's name.
+          title: topic
+          type: string
+      title: TopicPartition
+      type: object
+info:
+  description: Redpanda Admin API specification
+  title: Redpanda Admin API
+  version: v2.0.0
+  x-admin-api-major: v2.0.0
+  x-generated-at: 2025-10-24T16:01:15.694Z
+  x-generator: redpanda-docs-openapi-bundler
+  x-redpanda-core-version: kb/proto/docs/openapi-summaries
+openapi: 3.1.0
+paths:
+  /redpanda.core.admin.v2.BrokerService/GetBroker:
+    post:
+      description: Returns information about a single broker in the cluster.
+      operationId: redpanda.core.admin.v2.BrokerService.GetBroker
+      parameters:
+        - in: header
+          name: Connect-Protocol-Version
+          required: true
+          schema:
+            $ref: "#/components/schemas/connect-protocol-version"
+        - in: header
+          name: Connect-Timeout-Ms
+          schema:
+            $ref: "#/components/schemas/connect-timeout-header"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/redpanda.core.admin.v2.GetBrokerRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/redpanda.core.admin.v2.GetBrokerResponse"
+          description: Success
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/connect.error"
+          description: Error
+      summary: GetBroker
+      tags:
+        - BrokerService
+  /redpanda.core.admin.v2.BrokerService/ListBrokers:
+    post:
+      description: |-
+        ListBrokers 
+         
+         Returns information about all brokers in the cluster.
+      operationId: redpanda.core.admin.v2.BrokerService.ListBrokers
+      parameters:
+        - in: header
+          name: Connect-Protocol-Version
+          required: true
+          schema:
+            $ref: "#/components/schemas/connect-protocol-version"
+        - in: header
+          name: Connect-Timeout-Ms
+          schema:
+            $ref: "#/components/schemas/connect-timeout-header"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/redpanda.core.admin.v2.ListBrokersRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/redpanda.core.admin.v2.ListBrokersResponse"
+          description: Success
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/connect.error"
+          description: Error
+      summary: ListBrokers     Returns information about all brokers in the cluster.
+      tags:
+        - BrokerService
+  /redpanda.core.admin.v2.ClusterService/ListKafkaConnections:
+    post:
+      description: Returns information about the cluster's Kafka connections, collected and ordered across all brokers.
+      operationId: redpanda.core.admin.v2.ClusterService.ListKafkaConnections
+      parameters:
+        - in: header
+          name: Connect-Protocol-Version
+          required: true
+          schema:
+            $ref: "#/components/schemas/connect-protocol-version"
+        - in: header
+          name: Connect-Timeout-Ms
+          schema:
+            $ref: "#/components/schemas/connect-timeout-header"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/redpanda.core.admin.v2.ListKafkaConnectionsRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/redpanda.core.admin.v2.ListKafkaConnectionsResponse"
+          description: Success
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/connect.error"
+          description: Error
+      summary: ListKafkaConnections
+      tags:
+        - ClusterService
+  /redpanda.core.admin.v2.ShadowLinkService/CreateShadowLink:
+    post:
+      description: Creates a new shadow link between clusters.
+      operationId: redpanda.core.admin.v2.ShadowLinkService.CreateShadowLink
+      parameters:
+        - in: header
+          name: Connect-Protocol-Version
+          required: true
+          schema:
+            $ref: "#/components/schemas/connect-protocol-version"
+        - in: header
+          name: Connect-Timeout-Ms
+          schema:
+            $ref: "#/components/schemas/connect-timeout-header"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/redpanda.core.admin.v2.CreateShadowLinkRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/redpanda.core.admin.v2.CreateShadowLinkResponse"
+          description: Success
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/connect.error"
+          description: Error
+      summary: CreateShadowLink
+      tags:
+        - ShadowLinkService
+  /redpanda.core.admin.v2.ShadowLinkService/DeleteShadowLink:
+    post:
+      description: Deletes an existing shadow link.
+      operationId: redpanda.core.admin.v2.ShadowLinkService.DeleteShadowLink
+      parameters:
+        - in: header
+          name: Connect-Protocol-Version
+          required: true
+          schema:
+            $ref: "#/components/schemas/connect-protocol-version"
+        - in: header
+          name: Connect-Timeout-Ms
+          schema:
+            $ref: "#/components/schemas/connect-timeout-header"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/redpanda.core.admin.v2.DeleteShadowLinkRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/redpanda.core.admin.v2.DeleteShadowLinkResponse"
+          description: Success
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/connect.error"
+          description: Error
+      summary: DeleteShadowLink
+      tags:
+        - ShadowLinkService
+  /redpanda.core.admin.v2.ShadowLinkService/FailOver:
+    post:
+      description: Fails over a shadow link or a single shadow topic for disaster recovery.
+      operationId: redpanda.core.admin.v2.ShadowLinkService.FailOver
+      parameters:
+        - in: header
+          name: Connect-Protocol-Version
+          required: true
+          schema:
+            $ref: "#/components/schemas/connect-protocol-version"
+        - in: header
+          name: Connect-Timeout-Ms
+          schema:
+            $ref: "#/components/schemas/connect-timeout-header"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/redpanda.core.admin.v2.FailOverRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/redpanda.core.admin.v2.FailOverResponse"
+          description: Success
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/connect.error"
+          description: Error
+      summary: FailOver
+      tags:
+        - ShadowLinkService
+  /redpanda.core.admin.v2.ShadowLinkService/GetShadowLink:
+    post:
+      description: Gets information about a specific shadow link.
+      operationId: redpanda.core.admin.v2.ShadowLinkService.GetShadowLink
+      parameters:
+        - in: header
+          name: Connect-Protocol-Version
+          required: true
+          schema:
+            $ref: "#/components/schemas/connect-protocol-version"
+        - in: header
+          name: Connect-Timeout-Ms
+          schema:
+            $ref: "#/components/schemas/connect-timeout-header"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/redpanda.core.admin.v2.GetShadowLinkRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/redpanda.core.admin.v2.GetShadowLinkResponse"
+          description: Success
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/connect.error"
+          description: Error
+      summary: GetShadowLink
+      tags:
+        - ShadowLinkService
+  /redpanda.core.admin.v2.ShadowLinkService/GetShadowTopic:
+    post:
+      description: |-
+        Returns information about a shadow topic on a shadow link.
+         A shadow topic is a resource created automatically by a shadow link. The
+         shadow topic 'shadows' a topic on a source cluster, mirroring the data
+         and properties of that topic.
+      operationId: redpanda.core.admin.v2.ShadowLinkService.GetShadowTopic
+      parameters:
+        - in: header
+          name: Connect-Protocol-Version
+          required: true
+          schema:
+            $ref: "#/components/schemas/connect-protocol-version"
+        - in: header
+          name: Connect-Timeout-Ms
+          schema:
+            $ref: "#/components/schemas/connect-timeout-header"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/redpanda.core.admin.v2.GetShadowTopicRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/redpanda.core.admin.v2.GetShadowTopicResponse"
+          description: Success
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/connect.error"
+          description: Error
+      summary: GetShadowTopic
+      tags:
+        - ShadowLinkService
+  /redpanda.core.admin.v2.ShadowLinkService/ListShadowLinks:
+    post:
+      description: Lists all shadow links in the cluster.
+      operationId: redpanda.core.admin.v2.ShadowLinkService.ListShadowLinks
+      parameters:
+        - in: header
+          name: Connect-Protocol-Version
+          required: true
+          schema:
+            $ref: "#/components/schemas/connect-protocol-version"
+        - in: header
+          name: Connect-Timeout-Ms
+          schema:
+            $ref: "#/components/schemas/connect-timeout-header"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/redpanda.core.admin.v2.ListShadowLinksRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/redpanda.core.admin.v2.ListShadowLinksResponse"
+          description: Success
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/connect.error"
+          description: Error
+      summary: ListShadowLinks
+      tags:
+        - ShadowLinkService
+  /redpanda.core.admin.v2.ShadowLinkService/ListShadowTopics:
+    post:
+      description: |-
+        Returns a list of all shadow topics on a shadow link and
+         their status.
+      operationId: redpanda.core.admin.v2.ShadowLinkService.ListShadowTopics
+      parameters:
+        - in: header
+          name: Connect-Protocol-Version
+          required: true
+          schema:
+            $ref: "#/components/schemas/connect-protocol-version"
+        - in: header
+          name: Connect-Timeout-Ms
+          schema:
+            $ref: "#/components/schemas/connect-timeout-header"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/redpanda.core.admin.v2.ListShadowTopicsRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/redpanda.core.admin.v2.ListShadowTopicsResponse"
+          description: Success
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/connect.error"
+          description: Error
+      summary: ListShadowTopics
+      tags:
+        - ShadowLinkService
+  /redpanda.core.admin.v2.ShadowLinkService/UpdateShadowLink:
+    post:
+      description: Updates an existing shadow link configuration.
+      operationId: redpanda.core.admin.v2.ShadowLinkService.UpdateShadowLink
+      parameters:
+        - in: header
+          name: Connect-Protocol-Version
+          required: true
+          schema:
+            $ref: "#/components/schemas/connect-protocol-version"
+        - in: header
+          name: Connect-Timeout-Ms
+          schema:
+            $ref: "#/components/schemas/connect-timeout-header"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/redpanda.core.admin.v2.UpdateShadowLinkRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/redpanda.core.admin.v2.UpdateShadowLinkResponse"
+          description: Success
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/connect.error"
+          description: Error
+      summary: UpdateShadowLink
+      tags:
+        - ShadowLinkService
