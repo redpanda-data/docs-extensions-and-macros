@@ -10,9 +10,17 @@ const yaml = require('js-yaml');
  * @returns {Object|undefined} The parsed YAML as a JavaScript object, or undefined if not found or on error.
  */
 function loadAntoraConfig() {
-  const antoraPath = path.join(process.cwd(), 'antora.yml');
-  if (!fs.existsSync(antoraPath)) {
-    // No antora.yml in project root
+  // Support both antora.yml and antora.yaml
+  const cwd = process.cwd();
+  const ymlPath = path.join(cwd, 'antora.yml');
+  const yamlPath = path.join(cwd, 'antora.yaml');
+  let antoraPath;
+  if (fs.existsSync(ymlPath)) {
+    antoraPath = ymlPath;
+  } else if (fs.existsSync(yamlPath)) {
+    antoraPath = yamlPath;
+  } else {
+    // No antora.yml or antora.yaml in project root
     return undefined;
   }
 
@@ -20,12 +28,12 @@ function loadAntoraConfig() {
     const fileContents = fs.readFileSync(antoraPath, 'utf8');
     const config = yaml.load(fileContents);
     if (typeof config !== 'object' || config === null) {
-      console.error('Warning: antora.yml parsed to a non‐object value.');
+      console.error(`Warning: ${path.basename(antoraPath)} parsed to a non‐object value.`);
       return undefined;
     }
     return config;
   } catch (err) {
-    console.error(`Error reading/parsing antora.yml: ${err.message}`);
+    console.error(`Error reading/parsing ${path.basename(antoraPath)}: ${err.message}`);
     return undefined;
   }
 }
@@ -74,9 +82,17 @@ function getAntoraValue(keyPath) {
  *   True if it succeeded, false otherwise.
  */
 function setAntoraValue(keyPath, newValue) {
-  const antoraPath = path.join(process.cwd(), 'antora.yml');
-  if (!fs.existsSync(antoraPath)) {
-    console.error('Cannot update antora.yml: file not found in project root.');
+  // Support both antora.yml and antora.yaml
+  const cwd = process.cwd();
+  const ymlPath = path.join(cwd, 'antora.yml');
+  const yamlPath = path.join(cwd, 'antora.yaml');
+  let antoraPath;
+  if (fs.existsSync(ymlPath)) {
+    antoraPath = ymlPath;
+  } else if (fs.existsSync(yamlPath)) {
+    antoraPath = yamlPath;
+  } else {
+    console.error('Cannot update antora.yml or antora.yaml: file not found in project root.');
     return false;
   }
 
@@ -88,7 +104,7 @@ function setAntoraValue(keyPath, newValue) {
       config = {};
     }
   } catch (err) {
-    console.error(`Error reading/parsing antora.yml: ${err.message}`);
+    console.error(`Error reading/parsing ${path.basename(antoraPath)}: ${err.message}`);
     return false;
   }
 
@@ -115,7 +131,37 @@ function setAntoraValue(keyPath, newValue) {
     fs.writeFileSync(antoraPath, newYaml, 'utf8');
     return true;
   } catch (err) {
-    console.error(`Error writing antora.yml: ${err.message}`);
+    console.error(`Error writing ${path.basename(antoraPath)}: ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * Look for antora.yml in the current working directory
+ * (the project's root), load it if present, and return
+ * its `prerelease` value (boolean). If missing or on error,
+ * returns false.
+ */
+function getPrereleaseFromAntora() {
+  // Support both antora.yml and antora.yaml
+  const cwd = process.cwd();
+  const ymlPath = path.join(cwd, 'antora.yml');
+  const yamlPath = path.join(cwd, 'antora.yaml');
+  let antoraPath;
+  if (fs.existsSync(ymlPath)) {
+    antoraPath = ymlPath;
+  } else if (fs.existsSync(yamlPath)) {
+    antoraPath = yamlPath;
+  } else {
+    return false;
+  }
+
+  try {
+    const fileContents = fs.readFileSync(antoraPath, 'utf8');
+    const antoraConfig = yaml.load(fileContents);
+    return antoraConfig.prerelease === true;
+  } catch (error) {
+    console.error(`Error reading ${path.basename(antoraPath)}:`, error.message);
     return false;
   }
 }
@@ -124,4 +170,5 @@ module.exports = {
   loadAntoraConfig,
   getAntoraValue,
   setAntoraValue,
+  getPrereleaseFromAntora
 };
