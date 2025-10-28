@@ -1,0 +1,18 @@
+{
+  "properties": {
+    "max_concurrent_producer_ids": {
+      "description": "Maximum number of active producer sessions per shard. Each shard tracks producer IDs using an LRU (Least Recently Used) eviction policy. When the configured limit is exceeded, the least recently used producer IDs are evicted from the cache. IMPORTANT: The default value is unlimited, which can lead to unbounded memory growth and out-of-memory (OOM) crashes in production environments with heavy producer usage, especially when using transactions or idempotent producers. It is strongly recommended to set a reasonable limit in production deployments.",
+      "related_topics": [
+        "xref:develop:transactions.adoc#tune-producer-id-limits[Tune producer ID limits]",
+        "xref:reference:properties/cluster-properties.adoc#transactional_id_expiration_ms[transactional_id_expiration_ms]"
+      ]
+    },
+    "transactional_id_expiration_ms": {
+      "description": "Expiration time of producer IDs. Measured starting from the time of the last write until now for a given ID. Producer IDs are automatically removed from memory when they expire, which helps manage memory usage. However, this natural cleanup may not be sufficient for workloads with high producer churn rates. For applications with long-running transactions, ensure this value accommodates your typical transaction lifetime to avoid premature producer ID expiration.",
+      "related_topics": [
+        "xref:develop:transactions.adoc#tune-producer-id-limits[Tune producer ID limits]",
+        "xref:reference:properties/cluster-properties.adoc#max_concurrent_producer_ids[max_concurrent_producer_ids]"
+      ]
+    }
+  }
+}
