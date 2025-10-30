@@ -22,7 +22,8 @@
         "* `<external-broker-hostname>`: The externally accessible hostname or IP address that clients use to connect to this broker",
         "* `<admin-api-port>`: The port number for the Admin API endpoint"
       ],
-      "description": "Network address for the glossterm:Admin API[] server.",
+      "description": "Network addresses for Admin API servers with version info.",
+      "version": "v23.1.0",
       "config_scope": "broker",
       "category": "redpanda"
     },
