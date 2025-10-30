@@ -145,15 +145,19 @@ class IsArrayTransformer:
 
 class NeedsRestartTransformer:
     def accepts(self, info, file_pair):
-        return True
-    
+        # Only accept when the params blob exists and contains a needs_restart entry
+        return (
+            len(info.get("params", [])) > 2
+            and isinstance(info["params"][2].get("value"), dict)
+            and "needs_restart" in info["params"][2]["value"]
+        )
+
     def parse(self, property, info, file_pair):
-        needs_restart = "yes"
-        if len(info["params"]) > 2 and "needs_restart" in info["params"][2]["value"]:
-            needs_restart = re.sub(
-                r"^.*::", "", info["params"][2]["value"]["needs_restart"]
-            )
-        property["needs_restart"] = needs_restart != "no"  # True by default, unless we find "no"
+        # We only get here if accepts(...) returned True, so the metadata blob is present
+        raw = info["params"][2]["value"]["needs_restart"]
+        flag = re.sub(r"^.*::", "", raw)
+        # Store as boolean; do not set any default when metadata is absent
+        property["needs_restart"] = (flag != "no")
 
 class GetsRestoredTransformer:
     def accepts(self, info, file_pair):

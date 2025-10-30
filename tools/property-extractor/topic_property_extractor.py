@@ -304,11 +304,29 @@ class TopicPropertyExtractor:
             
     def _determine_property_type(self, property_name: str) -> str:
         """Determine the type of a property based on its name and usage patterns"""
-        
-        # Type mapping based on property name patterns
+        # Explicit exceptions / overrides for properties whose name contains
+        # keywords that would otherwise map to boolean but which are actually
+        # string-valued (for example, a bucket name).
+        if property_name == "redpanda.remote.readreplica":
+            # This topic property contains the read-replica bucket identifier
+            # and should be treated as a string (not a boolean).
+            return "string"
+        # Explicit override: iceberg.delete is a boolean (whether to delete
+        # the corresponding Iceberg table when the topic is deleted).
+        if property_name == "redpanda.iceberg.delete":
+            return "boolean"
+
+        # Type mapping based on property name patterns (heuristic)
         if any(keyword in property_name for keyword in ["caching", "recovery", "read", "write", "delete"]):
-            if property_name in ["write.caching", "redpanda.remote.recovery", "redpanda.remote.write", 
-                               "redpanda.remote.read", "redpanda.remote.delete", "redpanda.remote.readreplica"]:
+            # Known boolean topic properties (keep list conservative)
+            boolean_props = [
+                "write.caching",
+                "redpanda.remote.recovery",
+                "redpanda.remote.write",
+                "redpanda.remote.read",
+                "redpanda.remote.delete",
+            ]
+            if property_name in boolean_props:
                 return "boolean"
                 
         elif any(suffix in property_name for suffix in [".bytes", ".ms", ".factor", ".lag.ms"]):
@@ -583,7 +601,8 @@ NOTE: All topic properties take effect immediately after being set.
 *Type:* {prop_type}
 
 """
-            if acceptable_values:
+            # If the property type is boolean, never include an Accepted values section
+            if acceptable_values and str(prop_type).lower() not in ("boolean", "bool"):
                 adoc_content += f"*Accepted values:* {acceptable_values}\n\n"
             
             adoc_content += "*Default:* null\n\n"
