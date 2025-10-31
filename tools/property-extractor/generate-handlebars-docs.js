@@ -107,7 +107,7 @@ function registerPartials() {
 /**
  * Generate consolidated AsciiDoc partials for properties grouped by type.
  */
-function generatePropertyPartials(properties, partialsDir) {
+function generatePropertyPartials(properties, partialsDir, onRender) {
   console.log(`📝 Generating consolidated property partials in ${partialsDir}…`);
 
   const propertyTemplate = handlebars.compile(
@@ -151,7 +151,14 @@ function generatePropertyPartials(properties, partialsDir) {
     if (props.length === 0) return;
     props.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
     const selectedTemplate = type === 'topic' ? topicTemplate : propertyTemplate;
-    const content = props.map(p => selectedTemplate(p)).join('\n');
+    const pieces = [];
+    props.forEach(p => {
+      if (typeof onRender === 'function') {
+        try { onRender(p.name); } catch (err) { /* swallow callback errors */ }
+      }
+      pieces.push(selectedTemplate(p));
+    });
+    const content = pieces.join('\n');
     const filename = `${type}-properties.adoc`;
     fs.writeFileSync(path.join(propertiesPartialsDir, filename), AUTOGEN_NOTICE + content, 'utf8');
     console.log(`✅ Generated ${filename} (${props.length} properties)`);
@@ -276,43 +283,8 @@ function generateAllDocs(inputFile, outputDir) {
     console.log('📄 Generating property partials and deprecated docs...');
     deprecatedCount = generateDeprecatedDocs(properties, outputDir);
 
-    // Wrap generatePropertyPartials to also collect property names
-    const originalWrite = fs.writeFileSync;
-    const propertyTemplate = handlebars.compile(
-      fs.readFileSync(getTemplatePath(path.join(__dirname, 'templates', 'property.hbs'), 'TEMPLATE_PROPERTY'), 'utf8')
-    );
-    const topicTemplate = handlebars.compile(
-      fs.readFileSync(getTemplatePath(path.join(__dirname, 'templates', 'topic-property.hbs'), 'TEMPLATE_TOPIC_PROPERTY'), 'utf8')
-    );
-
-    const propertiesPartialsDir = path.join(process.env.OUTPUT_PARTIALS_DIR, 'properties');
-    fs.mkdirSync(propertiesPartialsDir, { recursive: true });
-
-    const propertyGroups = { cluster: [], topic: [], broker: [], 'object-storage': [] };
-    Object.values(properties).forEach(p => {
-      if (!p.name || !p.config_scope) return;
-      if (p.config_scope === 'topic') propertyGroups.topic.push(p);
-      else if (p.config_scope === 'broker') propertyGroups.broker.push(p);
-      else if (p.config_scope === 'cluster') {
-        if (isObjectStorageProperty(p)) propertyGroups['object-storage'].push(p);
-        else propertyGroups.cluster.push(p);
-      }
-    });
-
-    Object.entries(propertyGroups).forEach(([type, props]) => {
-      if (props.length === 0) return;
-      props.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-      const selectedTemplate = type === 'topic' ? topicTemplate : propertyTemplate;
-      const content = props.map(p => {
-        documentedProps.push(p.name);
-        return selectedTemplate(p);
-      }).join('\n');
-      const filename = `${type}-properties.adoc`;
-      originalWrite(path.join(propertiesPartialsDir, filename), AUTOGEN_NOTICE + content, 'utf8');
-      console.log(`✅ Generated ${filename} (${props.length} properties)`);
-      partialsCount += props.length;
-    });
-
+    // Generate property partials using the shared helper and collect names via callback
+    partialsCount = generatePropertyPartials(properties, process.env.OUTPUT_PARTIALS_DIR, name => documentedProps.push(name));
     try {
       generateTopicPropertyMappings(properties, process.env.OUTPUT_PARTIALS_DIR);
     } catch (err) {
