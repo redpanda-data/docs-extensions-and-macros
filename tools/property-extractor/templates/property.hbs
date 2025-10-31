@@ -53,6 +53,10 @@ endif::[]
 *Requires restart:* {{#if needs_restart}}Yes{{else}}No{{/if}}
 {{/if}}
 {{/if}}
+
+ifndef::env-cloud[]
+*Restored during xref:manage:whole-cluster-restore.adoc[Whole Cluster Restore]:* {{#if (ne gets_restored false)}}Yes{{else}}No{{/if}}
+endif::[]
 {{#if visibility}}
 
 // tag::self-managed-only[]

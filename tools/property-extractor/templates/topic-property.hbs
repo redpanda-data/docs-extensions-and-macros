@@ -74,6 +74,10 @@ endif::[]
 {{/if}}
 
 *Nullable:* {{#if nullable}}Yes{{else}}No{{/if}}
+
+ifndef::env-cloud[]
+*Restored during xref:manage:whole-cluster-restore.adoc[Whole Cluster Restore]:* {{#if (ne gets_restored false)}}Yes{{else}}No{{/if}}
+endif::[]
 {{#if example}}
 
 {{{renderPropertyExample this}}}
