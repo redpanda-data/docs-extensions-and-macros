@@ -22,7 +22,7 @@ const helpers = require('./helpers');
  * CLI Usage: node generate-handlebars-docs.js <input-file> <output-dir>
  */
 
-// Register all helpers
+// Register helpers
 Object.entries(helpers).forEach(([name, fn]) => {
   if (typeof fn !== 'function') {
     console.error(`❌ Helper "${name}" is not a function`);
@@ -62,11 +62,6 @@ function getTemplatePath(defaultPath, envVar) {
 
 /**
  * Register Handlebars partials used to render property documentation.
- *
- * Registers:
- *  - "property"
- *  - "topic-property"
- *  - "deprecated-property"
  */
 function registerPartials() {
   const templatesDir = path.join(__dirname, 'templates');
@@ -112,7 +107,7 @@ function registerPartials() {
 /**
  * Generate consolidated AsciiDoc partials for properties grouped by type.
  */
-function generatePropertyPartials(properties, partialsDir) {
+function generatePropertyPartials(properties, partialsDir, onRender) {
   console.log(`📝 Generating consolidated property partials in ${partialsDir}…`);
 
   const propertyTemplate = handlebars.compile(
@@ -129,11 +124,24 @@ function generatePropertyPartials(properties, partialsDir) {
 
   Object.values(properties).forEach(prop => {
     if (!prop.name || !prop.config_scope) return;
-    if (prop.config_scope === 'topic') propertyGroups.topic.push(prop);
-    else if (prop.config_scope === 'broker') propertyGroups.broker.push(prop);
-    else if (prop.config_scope === 'cluster') {
-      if (isObjectStorageProperty(prop)) propertyGroups['object-storage'].push(prop);
-      else propertyGroups.cluster.push(prop);
+
+    switch (prop.config_scope) {
+      case 'topic':
+        propertyGroups.topic.push(prop);
+        break;
+      case 'broker':
+        propertyGroups.broker.push(prop);
+        break;
+      case 'cluster':
+        if (isObjectStorageProperty(prop)) propertyGroups['object-storage'].push(prop);
+        else propertyGroups.cluster.push(prop);
+        break;
+      case 'object-storage':
+        propertyGroups['object-storage'].push(prop);
+        break;
+      default:
+        console.warn(`⚠️ Unknown config_scope: ${prop.config_scope} for ${prop.name}`);
+        break;
     }
   });
 
@@ -143,9 +151,16 @@ function generatePropertyPartials(properties, partialsDir) {
     if (props.length === 0) return;
     props.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
     const selectedTemplate = type === 'topic' ? topicTemplate : propertyTemplate;
-    const content = props.map(p => selectedTemplate(p)).join('\n');
+    const pieces = [];
+    props.forEach(p => {
+      if (typeof onRender === 'function') {
+        try { onRender(p.name); } catch (err) { /* swallow callback errors */ }
+      }
+      pieces.push(selectedTemplate(p));
+    });
+    const content = pieces.join('\n');
     const filename = `${type}-properties.adoc`;
-  fs.writeFileSync(path.join(propertiesPartialsDir, filename), AUTOGEN_NOTICE + content, 'utf8');
+    fs.writeFileSync(path.join(propertiesPartialsDir, filename), AUTOGEN_NOTICE + content, 'utf8');
     console.log(`✅ Generated ${filename} (${props.length} properties)`);
     totalCount += props.length;
   });
@@ -178,19 +193,18 @@ function generateDeprecatedDocs(properties, outputDir) {
     clusterProperties: clusterProperties.length ? clusterProperties : null
   };
 
-  const output = template(data);
   const outputPath = process.env.OUTPUT_PARTIALS_DIR
     ? path.join(process.env.OUTPUT_PARTIALS_DIR, 'deprecated', 'deprecated-properties.adoc')
     : path.join(outputDir, 'partials', 'deprecated', 'deprecated-properties.adoc');
 
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, AUTOGEN_NOTICE + output, 'utf8');
+  fs.writeFileSync(outputPath, AUTOGEN_NOTICE + template(data), 'utf8');
   console.log(`✅ Generated ${outputPath}`);
   return deprecatedProperties.length;
 }
 
 /**
- * Generate topic-property-mappings.adoc using the mappings template and topic properties.
+ * Generate topic-property-mappings.adoc
  */
 function generateTopicPropertyMappings(properties, partialsDir) {
   const templatesDir = path.join(__dirname, 'templates');
@@ -218,31 +232,42 @@ function generateTopicPropertyMappings(properties, partialsDir) {
 }
 
 /**
- * Generate error reports for missing descriptions and deprecated properties.
+ * Generate error reports for missing descriptions, deprecated, and undocumented properties.
  */
-function generateErrorReports(properties) {
+function generateErrorReports(properties, documentedProperties = []) {
   const emptyDescriptions = [];
   const deprecatedProperties = [];
+  const allKeys = Object.keys(properties);
 
-  Object.values(properties).forEach(p => {
-    if (!p.description || !p.description.trim()) emptyDescriptions.push(p.name);
-    if (p.is_deprecated) deprecatedProperties.push(p.name);
+  // Use documentedProperties array (property names that were rendered into partials)
+  const documentedSet = new Set(documentedProperties);
+  const undocumented = [];
+
+  Object.entries(properties).forEach(([key, p]) => {
+    const name = p.name || key;
+    if (!p.description || !p.description.trim()) emptyDescriptions.push(name);
+    if (p.is_deprecated) deprecatedProperties.push(name);
+    if (!documentedSet.has(name)) undocumented.push(name);
   });
 
-  const total = Object.keys(properties).length;
+  const total = allKeys.length;
   const pctEmpty = total ? ((emptyDescriptions.length / total) * 100).toFixed(2) : '0.00';
   const pctDeprecated = total ? ((deprecatedProperties.length / total) * 100).toFixed(2) : '0.00';
-  console.log(`Empty descriptions: ${emptyDescriptions.length} (${pctEmpty}%)`);
-  console.log(`Deprecated: ${deprecatedProperties.length} (${pctDeprecated}%)`);
+  const pctUndocumented = total ? ((undocumented.length / total) * 100).toFixed(2) : '0.00';
+
+  console.log(`📉 Empty descriptions: ${emptyDescriptions.length} (${pctEmpty}%)`);
+  console.log(`🕸️ Deprecated: ${deprecatedProperties.length} (${pctDeprecated}%)`);
+  console.log(`🚫 Not documented: ${undocumented.length} (${pctUndocumented}%)`);
 
   return {
     empty_descriptions: emptyDescriptions.sort(),
-    deprecated_properties: deprecatedProperties.sort()
+    deprecated_properties: deprecatedProperties.sort(),
+    undocumented_properties: undocumented.sort(),
   };
 }
 
 /**
- * Main generator — only supports partials and deprecated docs.
+ * Main generator
  */
 function generateAllDocs(inputFile, outputDir) {
   const data = JSON.parse(fs.readFileSync(inputFile, 'utf8'));
@@ -252,13 +277,14 @@ function generateAllDocs(inputFile, outputDir) {
 
   let partialsCount = 0;
   let deprecatedCount = 0;
+  const documentedProps = []; // Track which property names were rendered
 
   if (process.env.GENERATE_PARTIALS === '1' && process.env.OUTPUT_PARTIALS_DIR) {
     console.log('📄 Generating property partials and deprecated docs...');
     deprecatedCount = generateDeprecatedDocs(properties, outputDir);
-    partialsCount = generatePropertyPartials(properties, process.env.OUTPUT_PARTIALS_DIR);
 
-    // Generate topic-property-mappings.adoc
+    // Generate property partials using the shared helper and collect names via callback
+    partialsCount = generatePropertyPartials(properties, process.env.OUTPUT_PARTIALS_DIR, name => documentedProps.push(name));
     try {
       generateTopicPropertyMappings(properties, process.env.OUTPUT_PARTIALS_DIR);
     } catch (err) {
@@ -268,23 +294,33 @@ function generateAllDocs(inputFile, outputDir) {
     console.log('📄 Skipping partial generation (set GENERATE_PARTIALS=1 and OUTPUT_PARTIALS_DIR to enable)');
   }
 
-  const errors = generateErrorReports(properties);
-  const inputData = JSON.parse(fs.readFileSync(inputFile, 'utf8'));
-  inputData.empty_descriptions = errors.empty_descriptions;
-  inputData.deprecated_properties = errors.deprecated_properties;
-  fs.writeFileSync(inputFile, JSON.stringify(inputData, null, 2), 'utf8');
+  const errors = generateErrorReports(properties, documentedProps);
 
-  console.log('📊 Summary:');
-  console.log(`   Total properties: ${Object.keys(properties).length}`);
-  console.log(`   Total partials generated: ${partialsCount}`);
-  console.log(`   Deprecated properties: ${deprecatedCount}`);
+  const totalProperties = Object.keys(properties).length;
+  const notRendered = errors.undocumented_properties.length;
+  const pctRendered = totalProperties
+    ? ((partialsCount / totalProperties) * 100).toFixed(2)
+    : '0.00';
+
+  console.log('\n📊 Summary:');
+  console.log(`   Total properties found:      ${totalProperties}`);
+  console.log(`   Property partials generated: ${partialsCount} (${pctRendered}% of total)`);
+  console.log(`   Not documented:              ${notRendered}`);
+  console.log(`   Deprecated properties:       ${deprecatedCount}`);
+
+  if (notRendered > 0) {
+    console.log('⚠️ Undocumented properties:\n   ' + errors.undocumented_properties.join('\n   '));
+  }
 
   return {
-    totalProperties: Object.keys(properties).length,
-    propertyPartials: partialsCount,
-    deprecatedProperties: deprecatedCount
+    totalProperties,
+    generatedPartials: partialsCount,
+    undocumentedProperties: errors.undocumented_properties,
+    deprecatedProperties: deprecatedCount,
+    percentageRendered: pctRendered
   };
 }
+
 
 module.exports = {
   generateAllDocs,

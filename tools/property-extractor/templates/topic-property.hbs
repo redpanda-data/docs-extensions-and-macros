@@ -74,17 +74,57 @@ endif::[]
 {{/if}}
 
 *Nullable:* {{#if nullable}}Yes{{else}}No{{/if}}
+
+ifndef::env-cloud[]
+*Restored during xref:manage:whole-cluster-restore.adoc[Whole Cluster Restore]:* {{#if (ne gets_restored false)}}Yes{{else}}No{{/if}}
+endif::[]
 {{#if example}}
 
 {{{renderPropertyExample this}}}
 {{/if}}
 {{#if related_topics}}
+{{#with (allTopicsConditional related_topics) as |sectionType|}}
 
+{{#if (eq sectionType "cloud")}}
+ifdef::env-cloud[]
 *Related topics:*
 
-{{#each related_topics}}
-* {{{this}}}
+{{#each ../related_topics}}
+{{#with (parseRelatedTopic this)}}
+* {{{value}}}
+{{/with}}
 {{/each}}
+endif::[]
+{{else if (eq sectionType "self-managed")}}
+ifndef::env-cloud[]
+*Related topics:*
+
+{{#each ../related_topics}}
+{{#with (parseRelatedTopic this)}}
+* {{{value}}}
+{{/with}}
+{{/each}}
+endif::[]
+{{else}}
+*Related topics:*
+
+{{#each ../related_topics}}
+{{#with (parseRelatedTopic this)}}
+{{#if (eq type "cloud")}}
+ifdef::env-cloud[]
+* {{{value}}}
+endif::[]
+{{else if (eq type "self-managed")}}
+ifndef::env-cloud[]
+* {{{value}}}
+endif::[]
+{{else}}
+* {{{value}}}
+{{/if}}
+{{/with}}
+{{/each}}
+{{/if}}
+{{/with}}
 {{/if}}
 {{#if aliases}}
 

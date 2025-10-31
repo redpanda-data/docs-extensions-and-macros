@@ -1010,6 +1010,9 @@ def resolve_type_and_default(properties, definitions):
             processed (str): A string representing the JSON-ready value (for example: '"value"', 'null', '0', or the original input when no mapping applied).
         """
         arg_str = arg_str.strip()
+        # Remove C++ digit separators (apostrophes) that may appear in numeric literals
+        # Example: "30'000ms" -> "30000ms". Use conservative replace only between digits.
+        arg_str = re.sub(r"(?<=\d)'(?=\d)", '', arg_str)
         
         # Handle std::nullopt -> null
         if arg_str == "std::nullopt":
@@ -1023,9 +1026,27 @@ def resolve_type_and_default(properties, definitions):
             resolved_value = resolve_cpp_function_call(function_name)
             if resolved_value is not None:
                 return f'"{resolved_value}"'
+
+        # Handle std::chrono literals like std::chrono::minutes{5} -> "5min"
+        chrono_match = re.match(r'std::chrono::([a-zA-Z]+)\s*\{\s*(\d+)\s*\}', arg_str)
+        if chrono_match:
+            unit = chrono_match.group(1)
+            value = chrono_match.group(2)
+            unit_map = {
+                'hours': 'h',
+                'minutes': 'min',
+                'seconds': 's',
+                'milliseconds': 'ms',
+                'microseconds': 'us',
+                'nanoseconds': 'ns'
+            }
+            short = unit_map.get(unit.lower(), unit)
+            return f'"{value} {short}"'
         
-        # Handle enum-like patterns (such as fips_mode_flag::disabled -> "disabled")
-        enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)', arg_str)
+        # Handle enum-like patterns (such as fips_mode_flag::disabled -> "disabled").
+        # Only treat bare 'X::Y' tokens as enums — do not match when the token
+        # is followed by constructor braces/parentheses (e.g. std::chrono::minutes{5}).
+        enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)\s*$', arg_str)
         if enum_match:
             enum_value = enum_match.group(1)
             return f'"{enum_value}"'

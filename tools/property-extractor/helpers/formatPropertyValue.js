@@ -28,6 +28,10 @@ function processDefaults(inputString, suffix) {
     return inputString;
   }
 
+  // Remove C++ digit separators (apostrophes) from numbers/durations
+  // e.g. 30'000ms -> 30000ms, 1'500 -> 1500
+  inputString = inputString.replace(/(?<=\d)'(?=\d)/g, '');
+
   // Test for ip:port in vector: std::vector<net::unresolved_address>({{...}})
   const vectorMatch = inputString.match(/std::vector<net::unresolved_address>\(\{\{("([\d.]+)",\s*(\d+))\}\}\)/);
   if (vectorMatch) {
