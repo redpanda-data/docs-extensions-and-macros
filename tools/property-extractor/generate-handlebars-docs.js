@@ -331,10 +331,10 @@ function generateAllDocs(inputFile, outputDir) {
     : '0.00';
 
   console.log('\n📊 Summary:');
-  console.log(`   🧱 Total properties found:      ${totalProperties}`);
-  console.log(`   🧩 Property partials generated: ${partialsCount} (${pctRendered}% of total)`);
-  console.log(`   🚫 Not documented:              ${notRendered}`);
-  console.log(`   🕸️ Deprecated properties:       ${deprecatedCount}`);
+  console.log(`   Total properties found:      ${totalProperties}`);
+  console.log(`   Property partials generated: ${partialsCount} (${pctRendered}% of total)`);
+  console.log(`   Not documented:              ${notRendered}`);
+  console.log(`   Deprecated properties:       ${deprecatedCount}`);
 
   if (notRendered > 0) {
     console.log('⚠️ Undocumented properties:\n   ' + errors.undocumented_properties.join('\n   '));
