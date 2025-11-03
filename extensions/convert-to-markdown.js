@@ -33,8 +33,7 @@ module.exports.register = function () {
     let pageBase = null
     if (siteUrl && page?.out?.path) {
       try {
-        let pubUrl = page?.pub?.url
-        if (pubUrl && !pubUrl.endsWith('/')) pubUrl += '/'
+        const pubUrl = page?.pub?.url
         const siteBase = siteUrl.endsWith('/') ? siteUrl : siteUrl + '/'
         pageBase = new URL(pubUrl || '', siteBase)
       } catch {
@@ -155,6 +154,50 @@ module.exports.register = function () {
           )
           return `[${text}](${href})`
         }
+      },
+    })
+
+    // Rule: Properly format tables with correct structure
+    td.addRule('tables', {
+      filter: 'table',
+      replacement: function (content, node) {
+        // Extract rows
+        const rows = Array.from(node.querySelectorAll('tr'))
+        if (!rows.length) return content
+
+        const tableRows = []
+
+        rows.forEach((row, index) => {
+          const cells = Array.from(row.querySelectorAll('th, td'))
+          const cellContents = cells.map(cell => {
+            // Get cell content and clean it up
+            const cellText = cell.textContent || ''
+            return cellText.trim().replace(/\s+/g, ' ')
+          })
+
+          if (cellContents.length > 0) {
+            // Format as table row with proper pipes
+            const rowContent = '| ' + cellContents.join(' | ') + ' |'
+            tableRows.push(rowContent)
+
+            // Add separator row after header (first row)
+            if (index === 0) {
+              const separator = '| ' + cellContents.map(() => '---').join(' | ') + ' |'
+              tableRows.push(separator)
+            }
+          }
+        })
+
+        return tableRows.length > 0 ? '\n' + tableRows.join('\n') + '\n' : content
+      },
+    })
+
+    // Rule: Clean up table cell content by trimming whitespace
+    td.addRule('clean-table-cells', {
+      filter: ['th', 'td'],
+      replacement: function (content) {
+        // Trim whitespace and collapse multiple newlines
+        return content.trim().replace(/\n\s*\n/g, '\n')
       },
     })
 
