@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "4.10.8",
+  "version": "4.11.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -43,6 +43,7 @@
     "./extensions/process-context-switcher": "./extensions/process-context-switcher.js",
     "./extensions/archive-attachments": "./extensions/archive-attachments.js",
     "./extensions/add-pages-to-root": "./extensions/add-pages-to-root.js",
+    "./extensions/convert-to-markdown": "./extensions/convert-to-markdown.js",
     "./extensions/collect-bloblang-samples": "./extensions/collect-bloblang-samples.js",
     "./extensions/compute-end-of-life": "./extensions/compute-end-of-life.js",
     "./extensions/generate-rp-connect-categories": "./extensions/generate-rp-connect-categories.js",
@@ -85,8 +86,10 @@
     "@octokit/core": "^6.1.2",
     "@octokit/plugin-retry": "^7.1.1",
     "@octokit/rest": "^21.0.1",
+    "@redocly/cli": "^2.2.0",
     "algoliasearch": "^4.17.0",
     "chalk": "4.1.2",
+    "cheerio": "^1.1.2",
     "commander": "^14.0.0",
     "gulp": "^4.0.2",
     "gulp-connect": "^5.7.0",
@@ -103,9 +106,10 @@
     "sync-request": "^6.1.0",
     "tar": "^7.4.3",
     "tree-sitter": "^0.22.4",
+    "turndown": "^7.2.2",
+    "turndown-plugin-gfm": "^1.0.2",
     "yaml": "^2.7.1",
-    "yargs": "^17.7.2",
-    "@redocly/cli": "^2.2.0"
+    "yargs": "^17.7.2"
   },
   "devDependencies": {
     "@antora/cli": "3.1.4",

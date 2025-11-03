@@ -51,6 +51,7 @@ antora:
   - require: './extensions/collect-bloblang-samples'
   - require: './extensions/add-pages-to-root'
   - require: './extensions/unlisted-pages'
+  - require: './extensions/convert-to-markdown'
   - require: './extensions/replace-attributes-in-attachments'
     data:
       replacements:
