@@ -122,8 +122,22 @@ function generatePropertyPartials(properties, partialsDir, onRender) {
 
   const propertyGroups = { cluster: [], topic: [], broker: [], 'object-storage': [] };
 
-  Object.values(properties).forEach(prop => {
+  // Track processed property keys to detect duplicates by unique key
+  const processedKeys = new Set();
+  
+  Object.entries(properties).forEach(([key, prop]) => {
     if (!prop.name || !prop.config_scope) return;
+
+    // Skip if we've already processed this key
+    if (processedKeys.has(key)) {
+      console.warn(`⚠️ Duplicate key detected: ${key}`);
+      return;
+    }
+    processedKeys.add(key);
+
+    // Ensure the property uses the key as its name for consistency
+    // This fixes issues where key != name field due to bugs in the source code
+    prop.name = key;
 
     switch (prop.config_scope) {
       case 'topic':

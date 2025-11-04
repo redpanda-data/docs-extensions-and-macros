@@ -675,13 +675,26 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
     """
     if overrides and "properties" in overrides:
         for prop, override in overrides["properties"].items():
+            # First check if property exists by key
             if prop in properties:
                 # Apply overrides to existing properties
                 _apply_override_to_existing_property(properties[prop], override, overrides_file_path)
             else:
-                # Create new property from override
-                logger.info(f"Creating new property from override: {prop}")
-                properties[prop] = _create_property_from_override(prop, override, overrides_file_path)
+                # Check if property exists by name field (handles cases where key != name)
+                existing_property_key = None
+                for key, property_data in properties.items():
+                    if hasattr(property_data, 'get') and property_data.get('name') == prop:
+                        existing_property_key = key
+                        break
+                
+                if existing_property_key:
+                    # Found existing property by name, apply overrides to it
+                    logger.info(f"Applying override to existing property '{prop}' (found by name, key='{existing_property_key}')")
+                    _apply_override_to_existing_property(properties[existing_property_key], override, overrides_file_path)
+                else:
+                    # Create new property from override
+                    logger.info(f"Creating new property from override: {prop}")
+                    properties[prop] = _create_property_from_override(prop, override, overrides_file_path)
     return properties
 
 
