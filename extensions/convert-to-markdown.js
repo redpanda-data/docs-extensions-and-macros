@@ -323,6 +323,16 @@ module.exports.register = function () {
             markdown = `<!-- Source: ${canonicalUrl} -->\n${urlHint}\n\n${markdown}`
           }
 
+          // Clean up unnecessary whitespace
+          if (markdown) {
+            // Remove excessive blank lines (more than 2 consecutive newlines)
+            markdown = markdown.replace(/\n{3,}/g, '\n\n')
+            // Remove trailing whitespace from lines
+            markdown = markdown.replace(/[ \t]+$/gm, '')
+            // Remove leading/trailing whitespace from the entire document
+            markdown = markdown.trim()
+          }
+
           if (markdown) {
             page.markdownContents = Buffer.from(markdown, 'utf8')
             convertedCount++
