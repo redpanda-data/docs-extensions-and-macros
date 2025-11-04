@@ -105,7 +105,17 @@ function registerPartials() {
 }
 
 /**
- * Generate consolidated AsciiDoc partials for properties grouped by type.
+ * Generate AsciiDoc partial files grouping input properties by scope (cluster, topic, broker, object-storage).
+ *
+ * Reads property and topic templates, groups provided properties by their config_scope (treating keys as authoritative property names),
+ * renders each property into the appropriate template, writes combined partial files to "<partialsDir>/properties/<type>-properties.adoc",
+ * and invokes the optional onRender callback for every rendered property name. Entries missing a name or config_scope are skipped;
+ * duplicate keys are detected, warned about, and skipped.
+ *
+ * @param {Object<string, Object>} properties - Map of property key → property object; the map key is used as the property's name.
+ * @param {string} partialsDir - Destination directory under which a "properties" subdirectory will be created for output files.
+ * @param {(name: string) => void} [onRender] - Optional callback invoked with each rendered property's name.
+ * @returns {number} The total number of properties rendered and written to partial files.
  */
 function generatePropertyPartials(properties, partialsDir, onRender) {
   console.log(`📝 Generating consolidated property partials in ${partialsDir}…`);
