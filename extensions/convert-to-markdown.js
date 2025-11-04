@@ -1,14 +1,14 @@
 const path = require('path')
 const os = require('os')
-const TurndownService = require('turndown') // https://github.com/mixmark-io/turndown
-const turndownPluginGfm = require('turndown-plugin-gfm') // https://github.com/mixmark-io/turndown-plugin-gfm
+const TurndownService = require('turndown')
+const turndownPluginGfm = require('turndown-plugin-gfm')
 const { gfm } = turndownPluginGfm
 
 module.exports.register = function () {
   const logger = this.getLogger('convert-to-markdown-extension')
-  let playbook // make globally accessible
+  let playbook
 
-  // Shared Turndown configuration (consistent Markdown output)
+  // Shared Turndown configuration
   const baseConfig = {
     headingStyle: 'atx',
     codeBlockStyle: 'fenced',
@@ -16,197 +16,243 @@ module.exports.register = function () {
     linkReferenceStyle: 'full',
   }
 
-  // Factory: create base Turndown instance
+  // Factory: create a configured Turndown instance
   function createTurndownBase() {
     const td = new TurndownService(baseConfig)
-    td.remove('script')
     td.use(gfm)
+
+    // Remove unwanted global elements (footers, modals, feedback, etc.)
+    td.addRule('remove-unwanted', {
+      filter: (node) => {
+        if (!node || !node.getAttribute) return false
+
+        const classAttr = (node.getAttribute('class') || '').toLowerCase()
+        const idAttr = (node.getAttribute('id') || '').toLowerCase()
+        const tag = node.nodeName.toLowerCase()
+
+        // Remove by tag
+        if (['script', 'style', 'footer', 'nav'].includes(tag)) return true
+
+        // Remove tracking or hidden images
+        if (
+          tag === 'img' &&
+          (classAttr.includes('tracking') ||
+            idAttr.includes('scarf') ||
+            node.getAttribute('role') === 'presentation' ||
+            node.style?.display === 'none')
+        ) {
+          return true
+        }
+
+        // Remove by class or id
+        const toRemove = [
+          'thumbs',
+          'back-to-top',
+          'contributors-modal',
+          'feedback-section',
+          'feedback-toast',
+          'pagination',
+          'footer',
+          'nav-expand',
+          'banner-container'
+        ]
+        return toRemove.some(
+          (x) => classAttr.includes(x) || idAttr.includes(x)
+        )
+      },
+      replacement: () => '',
+    })
+
+    // Keep critical content blocks only
+    td.keep(['div.openblock.tabs', 'article.doc'])
     return td
   }
 
-  // Factory: create Turndown for a specific page
-  function createTurndownForPage(page, siteUrl) {
-    const td = createTurndownBase()
-    const innerTurndown = createTurndownBase()
+  // Factory: create page-specific Turndown converter
+  function createTurndownForPage(page) {
+    const outerTurndown = createTurndownBase()
+    const nestedTurndown = createTurndownBase()
 
-    // Compute base URL for relative → absolute links
-    let pageBase = null
-    if (siteUrl && page?.out?.path) {
-      try {
-        const pubUrl = page?.pub?.url
-        const siteBase = siteUrl.endsWith('/') ? siteUrl : siteUrl + '/'
-        pageBase = new URL(pubUrl || '', siteBase)
-      } catch {
-        pageBase = null
+    // Helper to add custom rules
+    function addCustomRules(turndownInstance, isInner = false) {
+      // Determine heading depth for tab conversion
+      function findNearestHeadingLevel(el) {
+        let current = el.previousElementSibling
+        while (current) {
+          if (/^H[1-6]$/i.test(current.nodeName))
+            return parseInt(current.nodeName.substring(1))
+          current = current.previousElementSibling
+        }
+        let parent = el.parentElement
+        while (parent) {
+          const headings = Array.from(
+            parent.querySelectorAll('h1,h2,h3,h4,h5,h6')
+          )
+          if (headings.length > 0) {
+            const last = headings[headings.length - 1]
+            return parseInt(last.nodeName.substring(1))
+          }
+          parent = parent.parentElement
+        }
+        return 2
       }
-    }
 
-    // Rule: Convert Antora admonitions (<table> style) to Markdown
-    td.addRule('admonition', {
-      filter: (node) =>
-        node.nodeName === 'TABLE' &&
-        node.querySelector('td.icon') &&
-        node.querySelector('td.content'),
-      replacement: function (_, node) {
-        const iconCell = node.querySelector('td.icon')
-        const contentCell = node.querySelector('td.content')
-        if (!iconCell || !contentCell) return ''
+      // Asciidoctor tab conversion
+      turndownInstance.addRule('asciidoctor-tabs', {
+        filter: (node) => {
+          if (node.nodeName !== 'DIV') return false
+          const classAttr = node.getAttribute?.('class') || node.className || ''
+          return classAttr.includes('openblock') && classAttr.includes('tabs')
+        },
+        replacement: function (_, node) {
+          function processTabGroup(group, parentHeadingLevel = null) {
+            const contentDiv = group.querySelector('.content') || group
+            const tabList = contentDiv.querySelectorAll('li.tab')
+            if (!tabList.length) return ''
 
-        const iconEl = iconCell.querySelector('i')
-        const classAttr = iconEl?.className || ''
-        const match = classAttr.match(/icon-([a-z]+)/i)
-        const type = match ? match[1].toUpperCase() : 'NOTE'
+            const nearestLevel =
+              parentHeadingLevel != null
+                ? parentHeadingLevel + 1
+                : findNearestHeadingLevel(group) + 1
+            const tabHeadingLevel = Math.min(nearestLevel, 6)
+            const headingPrefix = '#'.repeat(tabHeadingLevel)
 
-        // Title extraction (optional custom title)
-        const titleEl =
-          node.querySelector('.title') ||
-          contentCell.querySelector('.title') ||
-          iconEl?.getAttribute('title')
-        const customTitle =
-          typeof titleEl === 'string'
-            ? titleEl.trim()
-            : titleEl?.textContent?.trim() || ''
+            let markdown = ''
+            tabList.forEach((tab) => {
+              const title =
+                tab.querySelector('p')?.textContent.trim() ||
+                tab.textContent.trim()
 
-        const emojiMap = {
-          CAUTION: '⚠️',
-          WARNING: '⚠️',
-          TIP: '💡',
-          NOTE: '📝',
-          IMPORTANT: '❗',
-        }
-        const emoji = emojiMap[type] || '📘'
+              let panelId = tab.getAttribute('aria-controls')
+              if (!panelId && tab.id) panelId = tab.id + '--panel'
+              const panel = group.querySelector(`#${panelId}`)
+              if (!panel) return
 
-        const innerHtml = contentCell.innerHTML || ''
-        const innerMd = innerTurndown.turndown(innerHtml).trim()
+              const nestedTabs = panel.querySelectorAll('.openblock.tabs')
+              let nestedMdCombined = ''
+              nestedTabs.forEach((nested) => {
+                nestedMdCombined +=
+                  '\n' + processTabGroup(nested, tabHeadingLevel) + '\n'
+                nested.remove()
+              })
 
-        const titleLower = customTitle.toLowerCase()
-        const typeLower = type.toLowerCase()
-        const header =
-          customTitle && titleLower !== typeLower
-            ? `${emoji} **${type}: ${customTitle}**`
-            : `${emoji} **${type}**`
+              const innerHtml = panel.innerHTML || ''
+              let md = ''
+              try {
+                const converter = isInner ? nestedTurndown : turndownInstance
+                md = converter.turndown(innerHtml)
+              } catch (e) {
+                logger.warn(`Turndown failed in nested tab: ${e.message}`)
+              }
 
-        const quoted = innerMd
-          .split('\n')
-          .map((line) => (line.startsWith('>') ? line : `> ${line}`))
-          .join('\n')
+              markdown += `${headingPrefix} ${title}\n\n${md.trim()}\n${nestedMdCombined.trim()}\n\n`
+            })
 
-        return `\n> ${header}\n>\n${quoted}\n`
-      },
-    })
-
-    // Rule: Convert relative links to absolute Markdown equivalents
-    td.addRule('absolute-links', {
-      filter: 'a',
-      replacement: function (content, node) {
-        const href = node.getAttribute('href') || ''
-        const text = content || node.textContent || ''
-        if (!href) return `[${text}]()`
-
-        // Leave anchors and absolute URLs untouched
-        if (href.startsWith('#') || /^(?:[a-z]+:)?\/\//i.test(href))
-          return `[${text}](${href})`
-
-        // Prepend siteUrl to /api/ links
-        if (/^\/api\//i.test(href)) {
-          const base = siteUrl
-            ? siteUrl.endsWith('/')
-              ? siteUrl.slice(0, -1)
-              : siteUrl
-            : ''
-          const fullApiUrl = base + href
-          return `[${text}](${fullApiUrl})`
-        }
-
-        // Skip if we can't resolve the site or page base
-        if (!siteUrl || !pageBase) return `[${text}](${href})`
-
-        try {
-          // Start with resolved absolute URL
-          const urlObj = new URL(href, pageBase)
-          const htmlStyle = playbook?.urls?.htmlExtensionStyle
-          const isIndexify = htmlStyle === 'indexify'
-
-          const pathname = urlObj.pathname
-
-          if (isIndexify) {
-            // Directory-style link: ends with '/' or has no file extension
-            const looksLikeDir =
-              pathname.endsWith('/') ||
-              !path.basename(pathname).includes('.') // no .html, .htm, etc.
-
-            if (looksLikeDir) {
-              // ensure single trailing slash, then add index.md
-              urlObj.pathname = pathname.replace(/\/?$/, '/index.md')
-            } else {
-              urlObj.pathname = pathname.replace(/\.html$/, '.md')
-            }
-          } else {
-            // Non-indexified: only replace .html → .md
-            urlObj.pathname = pathname.replace(/\.html$/, '.md')
+            return markdown.trim()
           }
 
-          const abs = urlObj.toString()
-          return `[${text}](${abs})`
-        } catch (e) {
-          logger.debug(
-            `Link resolution failed: "${href}" on ${page.src?.path}: ${e.message}`
-          )
-          return `[${text}](${href})`
-        }
-      },
-    })
+          return '\n' + processTabGroup(node, null) + '\n'
+        },
+      })
 
-    // Rule: Properly format tables with correct structure
-    td.addRule('tables', {
-      filter: 'table',
-      replacement: function (content, node) {
-        // Extract rows
-        const rows = Array.from(node.querySelectorAll('tr'))
-        if (!rows.length) return content
+      // Admonition block conversion
+      turndownInstance.addRule('admonition', {
+        filter: (node) =>
+          node.nodeName === 'TABLE' &&
+          node.querySelector('td.icon') &&
+          node.querySelector('td.content'),
+        replacement: function (_, node) {
+          const iconCell = node.querySelector('td.icon')
+          const contentCell = node.querySelector('td.content')
+          if (!iconCell || !contentCell) return ''
 
-        const tableRows = []
+          const iconEl = iconCell.querySelector('i')
+          const classAttr = iconEl?.className || ''
+          const match = classAttr.match(/icon-([a-z]+)/i)
+          const type = match ? match[1].toUpperCase() : 'NOTE'
 
-        rows.forEach((row, index) => {
-          const cells = Array.from(row.querySelectorAll('th, td'))
-          const cellContents = cells.map(cell => {
-            // Get cell content and clean it up
-            const cellText = cell.textContent || ''
-            return cellText.trim().replace(/\s+/g, ' ')
-          })
+          const titleEl =
+            node.querySelector('.title') ||
+            contentCell.querySelector('.title') ||
+            iconEl?.getAttribute('title')
+          const customTitle =
+            typeof titleEl === 'string'
+              ? titleEl.trim()
+              : titleEl?.textContent?.trim() || ''
 
-          if (cellContents.length > 0) {
-            // Format as table row with proper pipes
-            const rowContent = '| ' + cellContents.join(' | ') + ' |'
-            tableRows.push(rowContent)
+          const emojiMap = {
+            CAUTION: '⚠️',
+            WARNING: '⚠️',
+            TIP: '💡',
+            NOTE: '📝',
+            IMPORTANT: '❗',
+          }
+          const emoji = emojiMap[type] || '📘'
 
-            // Add separator row after header (first row)
+          const innerHtml = contentCell.innerHTML || ''
+          let innerMd = ''
+          try {
+            const converter = isInner ? nestedTurndown : turndownInstance
+            innerMd = converter.turndown(innerHtml).trim()
+          } catch (e) {
+            logger.warn(`Turndown failed in admonition: ${e.message}`)
+          }
+
+          const titleLower = customTitle.toLowerCase()
+          const typeLower = type.toLowerCase()
+          const header =
+            customTitle && titleLower !== typeLower
+              ? `${emoji} **${type}: ${customTitle}**`
+              : `${emoji} **${type}**`
+
+          const quoted = innerMd
+            .split('\n')
+            .map((line) => (line.startsWith('>') ? line : `> ${line}`))
+            .join('\n')
+
+          return `\n> ${header}\n>\n${quoted}\n`
+        },
+      })
+
+      // Markdown table conversion
+      turndownInstance.addRule('tables', {
+        filter: (node) => {
+          if (node.nodeName !== 'TABLE') return false
+          if (node.querySelector('td.icon') && node.querySelector('td.content'))
+            return false
+          return true
+        },
+        replacement: function (content, node) {
+          const rows = Array.from(node.querySelectorAll('tr'))
+          if (!rows.length) return content
+          const tableRows = []
+          rows.forEach((row, index) => {
+            const cells = Array.from(row.querySelectorAll('th, td'))
+            const cellContents = cells.map((cell) =>
+              (cell.textContent || '').trim().replace(/\s+/g, ' ')
+            )
+            if (!cellContents.length) return
+            const rowLine = '| ' + cellContents.join(' | ') + ' |'
+            tableRows.push(rowLine)
             if (index === 0) {
-              const separator = '| ' + cellContents.map(() => '---').join(' | ') + ' |'
+              const separator =
+                '| ' + cellContents.map(() => '---').join(' | ') + ' |'
               tableRows.push(separator)
             }
-          }
-        })
+          })
+          return '\n' + tableRows.join('\n') + '\n'
+        },
+      })
+    }
 
-        return tableRows.length > 0 ? '\n' + tableRows.join('\n') + '\n' : content
-      },
-    })
-
-    // Rule: Clean up table cell content by trimming whitespace
-    td.addRule('clean-table-cells', {
-      filter: ['th', 'td'],
-      replacement: function (content) {
-        // Trim whitespace and collapse multiple newlines
-        return content.trim().replace(/\n\s*\n/g, '\n')
-      },
-    })
-
-    return td
+    addCustomRules(outerTurndown, false)
+    addCustomRules(nestedTurndown, true)
+    return outerTurndown
   }
 
-  // Convert all documents to Markdown
-  this.on('documentsConverted', async ({ playbook: pb, contentCatalog }) => {
-    playbook = pb // 👈 store globally
+  // Conversion pipeline
+  this.on('pagesComposed', async ({ playbook: pb, contentCatalog }) => {
+    playbook = pb
     const siteUrl = playbook.site?.url || ''
     const pages = contentCatalog.getPages()
     logger.info(
@@ -228,8 +274,55 @@ module.exports.register = function () {
           const html = page.contents.toString().trim()
           if (!html) continue
 
-          const td = createTurndownForPage(page, siteUrl)
-          const markdown = td.turndown(html).trim()
+          // Extract only the <article class="doc"> portion
+          const match = html.match(
+            /<article[^>]*class=["'][^"']*\bdoc\b[^"']*["'][^>]*>([\s\S]*?)<\/article>/i
+          )
+          if (!match || !match[1]) {
+            logger.info(`No <article class="doc"> found for ${page.src?.path}`)
+            continue
+          }
+          const articleHtml = match[1]
+
+          // Convert with Turndown
+          const td = createTurndownForPage(page)
+          let markdown = td.turndown(articleHtml).trim()
+
+          // Canonical source link
+          let canonicalUrl = ''
+          try {
+            if (siteUrl && page.pub?.url) {
+              const htmlStyle = playbook?.urls?.htmlExtensionStyle
+              const isIndexify = htmlStyle === 'indexify'
+              const baseUrl = new URL(page.pub.url, siteUrl)
+              let pathname = baseUrl.pathname
+
+              if (isIndexify) {
+                const looksLikeDir =
+                  pathname.endsWith('/') ||
+                  !path.basename(pathname).includes('.')
+                baseUrl.pathname = looksLikeDir
+                  ? pathname.replace(/\/?$/, '/index.md')
+                  : pathname.replace(/\.html$/, '.md')
+              } else {
+                baseUrl.pathname = pathname.replace(/\.html$/, '.md')
+              }
+
+              canonicalUrl = baseUrl.toString()
+            }
+          } catch (e) {
+            logger.debug(
+              `Failed to build canonical URL for ${page.src?.path}: ${e.message}`
+            )
+          }
+
+          // Prepend Markdown source reference and URL construction hint
+          if (canonicalUrl) {
+            const urlHint = `<!-- Note for AI: Links in this doc are relative to the current page and use indexify format. Add /index.md to directory-style links for the Markdown version. -->`
+            
+            markdown = `<!-- Source: ${canonicalUrl} -->\n${urlHint}\n\n${markdown}`
+          }
+
           if (markdown) {
             page.markdownContents = Buffer.from(markdown, 'utf8')
             convertedCount++
@@ -245,24 +338,21 @@ module.exports.register = function () {
 
     const workers = Array.from({ length: concurrency }, processQueue)
     await Promise.all(workers)
-
-    logger.info(`✅ Converted ${convertedCount} Markdown files.`)
+    logger.info(`Converted ${convertedCount} Markdown files.`)
   })
 
-  // Add .md files to site catalog before publishing
+  // Add Markdown files to site catalog
   this.on('beforePublish', ({ siteCatalog, contentCatalog }) => {
     const pages = contentCatalog.getPages((p) => p.markdownContents)
     if (!pages.length) {
       logger.info('No Markdown files to publish.')
       return
     }
-
     logger.info(`Adding ${pages.length} Markdown files to site catalog...`)
     for (const page of pages) {
       const htmlOut = page.out?.path
       if (!htmlOut) continue
       const mdOutPath = htmlOut.replace(/\.html$/, '.md')
-
       siteCatalog.addFile({
         contents: page.markdownContents,
         out: { path: mdOutPath },
