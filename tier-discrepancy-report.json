@@ -1,0 +1,1977 @@
+{
+  "generatedDate": "2025-10-01T09:22:22.864Z",
+  "summary": {
+    "totalTiers": 41,
+    "totalIssues": 147
+  },
+  "analyses": [
+    {
+      "tierName": "Tier 1",
+      "cloudProvider": "AWS",
+      "machineType": "im4gn.large",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 20000000,
+          "advertisedFormatted": "19.1 Mbps",
+          "actual": 13333334,
+          "actualFormatted": "12.7 Mbps",
+          "percentageDiff": -33.33333,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 60000000,
+          "advertisedFormatted": "57.2 Mbps",
+          "actual": 40000000,
+          "actualFormatted": "38.1 Mbps",
+          "percentageDiff": -33.33333333333333,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 2000,
+          "advertisedFormatted": "2,000",
+          "actual": 6198,
+          "actualFormatted": "6,198",
+          "percentageDiff": 209.90000000000003,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 9000,
+          "advertisedFormatted": "9,000",
+          "actual": 3700,
+          "actualFormatted": "3,700",
+          "percentageDiff": -58.88888888888889,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 1",
+      "cloudProvider": "AWS",
+      "machineType": "m7gd.large",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 20000000,
+          "advertisedFormatted": "19.1 Mbps",
+          "actual": 33333334,
+          "actualFormatted": "31.8 Mbps",
+          "percentageDiff": 66.66667,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 60000000,
+          "advertisedFormatted": "57.2 Mbps",
+          "actual": 100000000,
+          "actualFormatted": "95.4 Mbps",
+          "percentageDiff": 66.66666666666666,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 2000,
+          "advertisedFormatted": "2,000",
+          "actual": 6198,
+          "actualFormatted": "6,198",
+          "percentageDiff": 209.90000000000003,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 9000,
+          "advertisedFormatted": "9,000",
+          "actual": 3700,
+          "actualFormatted": "3,700",
+          "percentageDiff": -58.88888888888889,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 1 - x86",
+      "cloudProvider": "AWS",
+      "machineType": "i3en.large",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 20000000,
+          "advertisedFormatted": "19.1 Mbps",
+          "actual": 13333334,
+          "actualFormatted": "12.7 Mbps",
+          "percentageDiff": -33.33333,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 60000000,
+          "advertisedFormatted": "57.2 Mbps",
+          "actual": 40000000,
+          "actualFormatted": "38.1 Mbps",
+          "percentageDiff": -33.33333333333333,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 2000,
+          "advertisedFormatted": "2,000",
+          "actual": 6198,
+          "actualFormatted": "6,198",
+          "percentageDiff": 209.90000000000003,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 9000,
+          "advertisedFormatted": "9,000",
+          "actual": 3700,
+          "actualFormatted": "3,700",
+          "percentageDiff": -58.88888888888889,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 2",
+      "cloudProvider": "AWS",
+      "machineType": "im4gn.xlarge",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 50000000,
+          "advertisedFormatted": "47.7 Mbps",
+          "actual": 33333334,
+          "actualFormatted": "31.8 Mbps",
+          "percentageDiff": -33.333332,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 150000000,
+          "advertisedFormatted": "143.1 Mbps",
+          "actual": 100000000,
+          "actualFormatted": "95.4 Mbps",
+          "percentageDiff": -33.33333333333333,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 5600,
+          "advertisedFormatted": "5,600",
+          "actual": 5694,
+          "actualFormatted": "5,694",
+          "percentageDiff": 1.6785714285714286,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 22500,
+          "advertisedFormatted": "22,500",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -59.55555555555555,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 2",
+      "cloudProvider": "AWS",
+      "machineType": "m7gd.xlarge",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 50000000,
+          "advertisedFormatted": "47.7 Mbps",
+          "actual": 66666667,
+          "actualFormatted": "63.6 Mbps",
+          "percentageDiff": 33.333334,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 150000000,
+          "advertisedFormatted": "143.1 Mbps",
+          "actual": 200000000,
+          "actualFormatted": "190.7 Mbps",
+          "percentageDiff": 33.33333333333333,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 5600,
+          "advertisedFormatted": "5,600",
+          "actual": 5694,
+          "actualFormatted": "5,694",
+          "percentageDiff": 1.6785714285714286,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 22500,
+          "advertisedFormatted": "22,500",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -59.55555555555555,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 2 - x86",
+      "cloudProvider": "AWS",
+      "machineType": "i3en.xlarge",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 50000000,
+          "advertisedFormatted": "47.7 Mbps",
+          "actual": 33333334,
+          "actualFormatted": "31.8 Mbps",
+          "percentageDiff": -33.333332,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 150000000,
+          "advertisedFormatted": "143.1 Mbps",
+          "actual": 100000000,
+          "actualFormatted": "95.4 Mbps",
+          "percentageDiff": -33.33333333333333,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 5600,
+          "advertisedFormatted": "5,600",
+          "actual": 5694,
+          "actualFormatted": "5,694",
+          "percentageDiff": 1.6785714285714286,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 22500,
+          "advertisedFormatted": "22,500",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -59.55555555555555,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 3",
+      "cloudProvider": "AWS",
+      "machineType": "im4gn.xlarge",
+      "nodeCount": "6",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 100000000,
+          "advertisedFormatted": "95.4 Mbps",
+          "actual": 33333334,
+          "actualFormatted": "31.8 Mbps",
+          "percentageDiff": -66.66666599999999,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 200000000,
+          "advertisedFormatted": "190.7 Mbps",
+          "actual": 66666667,
+          "actualFormatted": "63.6 Mbps",
+          "percentageDiff": -66.6666665,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 11200,
+          "advertisedFormatted": "11,200",
+          "actual": 11340,
+          "actualFormatted": "11,340",
+          "percentageDiff": 1.25,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 45000,
+          "advertisedFormatted": "45,000",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -79.77777777777779,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 3",
+      "cloudProvider": "AWS",
+      "machineType": "m7gd.xlarge",
+      "nodeCount": "6",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 100000000,
+          "advertisedFormatted": "95.4 Mbps",
+          "actual": 66666667,
+          "actualFormatted": "63.6 Mbps",
+          "percentageDiff": -33.333332999999996,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 200000000,
+          "advertisedFormatted": "190.7 Mbps",
+          "actual": 200000000,
+          "actualFormatted": "190.7 Mbps",
+          "percentageDiff": 0,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 11200,
+          "advertisedFormatted": "11,200",
+          "actual": 11340,
+          "actualFormatted": "11,340",
+          "percentageDiff": 1.25,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 45000,
+          "advertisedFormatted": "45,000",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -79.77777777777779,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 3 - x86",
+      "cloudProvider": "AWS",
+      "machineType": "i3en.xlarge",
+      "nodeCount": "6",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 100000000,
+          "advertisedFormatted": "95.4 Mbps",
+          "actual": 33333334,
+          "actualFormatted": "31.8 Mbps",
+          "percentageDiff": -66.66666599999999,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 200000000,
+          "advertisedFormatted": "190.7 Mbps",
+          "actual": 66666667,
+          "actualFormatted": "63.6 Mbps",
+          "percentageDiff": -66.6666665,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 11200,
+          "advertisedFormatted": "11,200",
+          "actual": 11340,
+          "actualFormatted": "11,340",
+          "percentageDiff": 1.25,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 45000,
+          "advertisedFormatted": "45,000",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -79.77777777777779,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 4",
+      "cloudProvider": "AWS",
+      "machineType": "im4gn.xlarge",
+      "nodeCount": "12",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 200000000,
+          "advertisedFormatted": "190.7 Mbps",
+          "actual": 33333334,
+          "actualFormatted": "31.8 Mbps",
+          "percentageDiff": -83.333333,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 400000000,
+          "advertisedFormatted": "381.5 Mbps",
+          "actual": 66666667,
+          "actualFormatted": "63.6 Mbps",
+          "percentageDiff": -83.33333325,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 22600,
+          "advertisedFormatted": "22,600",
+          "actual": 22836,
+          "actualFormatted": "22,836",
+          "percentageDiff": 1.0442477876106195,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 90000,
+          "advertisedFormatted": "90,000",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -89.88888888888889,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 4",
+      "cloudProvider": "AWS",
+      "machineType": "m7gd.xlarge",
+      "nodeCount": "12",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 200000000,
+          "advertisedFormatted": "190.7 Mbps",
+          "actual": 66666667,
+          "actualFormatted": "63.6 Mbps",
+          "percentageDiff": -66.6666665,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 400000000,
+          "advertisedFormatted": "381.5 Mbps",
+          "actual": 200000000,
+          "actualFormatted": "190.7 Mbps",
+          "percentageDiff": -50,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 22600,
+          "advertisedFormatted": "22,600",
+          "actual": 22836,
+          "actualFormatted": "22,836",
+          "percentageDiff": 1.0442477876106195,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 90000,
+          "advertisedFormatted": "90,000",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -89.88888888888889,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 4 - x86",
+      "cloudProvider": "AWS",
+      "machineType": "i3en.xlarge",
+      "nodeCount": "12",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 200000000,
+          "advertisedFormatted": "190.7 Mbps",
+          "actual": 33333334,
+          "actualFormatted": "31.8 Mbps",
+          "percentageDiff": -83.333333,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 400000000,
+          "advertisedFormatted": "381.5 Mbps",
+          "actual": 66666667,
+          "actualFormatted": "63.6 Mbps",
+          "percentageDiff": -83.33333325,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 22600,
+          "advertisedFormatted": "22,600",
+          "actual": 22836,
+          "actualFormatted": "22,836",
+          "percentageDiff": 1.0442477876106195,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 90000,
+          "advertisedFormatted": "90,000",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -89.88888888888889,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 5",
+      "cloudProvider": "AWS",
+      "machineType": "im4gn.8xlarge",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 400000000,
+          "advertisedFormatted": "381.5 Mbps",
+          "actual": 266666667,
+          "actualFormatted": "254.3 Mbps",
+          "percentageDiff": -33.33333325,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 800000000,
+          "advertisedFormatted": "762.9 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -33.33333325,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 45600,
+          "advertisedFormatted": "45,600",
+          "actual": 4455,
+          "actualFormatted": "4,455",
+          "percentageDiff": -90.23026315789474,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 180000,
+          "advertisedFormatted": "180,000",
+          "actual": 72100,
+          "actualFormatted": "72,100",
+          "percentageDiff": -59.94444444444444,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 5",
+      "cloudProvider": "AWS",
+      "machineType": "m7gd.8xlarge",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 400000000,
+          "advertisedFormatted": "381.5 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": 33.3333335,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 800000000,
+          "advertisedFormatted": "762.9 Mbps",
+          "actual": 1600000000,
+          "actualFormatted": "1525.9 Mbps",
+          "percentageDiff": 100,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 45600,
+          "advertisedFormatted": "45,600",
+          "actual": 4602,
+          "actualFormatted": "4,602",
+          "percentageDiff": -89.90789473684211,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 180000,
+          "advertisedFormatted": "180,000",
+          "actual": 72100,
+          "actualFormatted": "72,100",
+          "percentageDiff": -59.94444444444444,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 5 - x86",
+      "cloudProvider": "AWS",
+      "machineType": "i3en.6xlarge",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 400000000,
+          "advertisedFormatted": "381.5 Mbps",
+          "actual": 266666667,
+          "actualFormatted": "254.3 Mbps",
+          "percentageDiff": -33.33333325,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 800000000,
+          "advertisedFormatted": "762.9 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -33.33333325,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 45600,
+          "advertisedFormatted": "45,600",
+          "actual": 5991,
+          "actualFormatted": "5,991",
+          "percentageDiff": -86.86184210526315,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 180000,
+          "advertisedFormatted": "180,000",
+          "actual": 72100,
+          "actualFormatted": "72,100",
+          "percentageDiff": -59.94444444444444,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 6",
+      "cloudProvider": "AWS",
+      "machineType": "im4gn.8xlarge",
+      "nodeCount": "6",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 800000000,
+          "advertisedFormatted": "762.9 Mbps",
+          "actual": 266666667,
+          "actualFormatted": "254.3 Mbps",
+          "percentageDiff": -66.666666625,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 1600000000,
+          "advertisedFormatted": "1525.9 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -66.666666625,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 90000,
+          "advertisedFormatted": "90,000",
+          "actual": 8784,
+          "actualFormatted": "8,784",
+          "percentageDiff": -90.24,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 180000,
+          "advertisedFormatted": "180,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -79.94444444444444,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 6",
+      "cloudProvider": "AWS",
+      "machineType": "m7gd.8xlarge",
+      "nodeCount": "6",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 800000000,
+          "advertisedFormatted": "762.9 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -33.33333325,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 1600000000,
+          "advertisedFormatted": "1525.9 Mbps",
+          "actual": 1600000000,
+          "actualFormatted": "1525.9 Mbps",
+          "percentageDiff": 0,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 90000,
+          "advertisedFormatted": "90,000",
+          "actual": 9072,
+          "actualFormatted": "9,072",
+          "percentageDiff": -89.92,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 180000,
+          "advertisedFormatted": "180,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -79.94444444444444,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 6 - x86",
+      "cloudProvider": "AWS",
+      "machineType": "i3en.6xlarge",
+      "nodeCount": "6",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 800000000,
+          "advertisedFormatted": "762.9 Mbps",
+          "actual": 266666667,
+          "actualFormatted": "254.3 Mbps",
+          "percentageDiff": -66.666666625,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 1600000000,
+          "advertisedFormatted": "1525.9 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -66.666666625,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 90000,
+          "advertisedFormatted": "90,000",
+          "actual": 11814,
+          "actualFormatted": "11,814",
+          "percentageDiff": -86.87333333333333,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 180000,
+          "advertisedFormatted": "180,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -79.94444444444444,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 7",
+      "cloudProvider": "AWS",
+      "machineType": "im4gn.8xlarge",
+      "nodeCount": "9",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 1200000000,
+          "advertisedFormatted": "1144.4 Mbps",
+          "actual": 266666667,
+          "actualFormatted": "254.3 Mbps",
+          "percentageDiff": -77.77777775,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 2400000000,
+          "advertisedFormatted": "2288.8 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -77.77777775,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 112500,
+          "advertisedFormatted": "112,500",
+          "actual": 10989,
+          "actualFormatted": "10,989",
+          "percentageDiff": -90.232,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 270000,
+          "advertisedFormatted": "270,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -86.62962962962963,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 7",
+      "cloudProvider": "AWS",
+      "machineType": "m7gd.8xlarge",
+      "nodeCount": "9",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 1200000000,
+          "advertisedFormatted": "1144.4 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -55.5555555,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 2400000000,
+          "advertisedFormatted": "2288.8 Mbps",
+          "actual": 1600000000,
+          "actualFormatted": "1525.9 Mbps",
+          "percentageDiff": -33.33333333333333,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 112500,
+          "advertisedFormatted": "112,500",
+          "actual": 11358,
+          "actualFormatted": "11,358",
+          "percentageDiff": -89.904,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 270000,
+          "advertisedFormatted": "270,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -86.62962962962963,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 7 - x86",
+      "cloudProvider": "AWS",
+      "machineType": "i3en.6xlarge",
+      "nodeCount": "9",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 1200000000,
+          "advertisedFormatted": "1144.4 Mbps",
+          "actual": 266666667,
+          "actualFormatted": "254.3 Mbps",
+          "percentageDiff": -77.77777775,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 2400000000,
+          "advertisedFormatted": "2288.8 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -77.77777775,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 112500,
+          "advertisedFormatted": "112,500",
+          "actual": 14778,
+          "actualFormatted": "14,778",
+          "percentageDiff": -86.86399999999999,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 270000,
+          "advertisedFormatted": "270,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -86.62962962962963,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 8",
+      "cloudProvider": "AWS",
+      "machineType": "im4gn.8xlarge",
+      "nodeCount": "12",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 1600000000,
+          "advertisedFormatted": "1525.9 Mbps",
+          "actual": 266666667,
+          "actualFormatted": "254.3 Mbps",
+          "percentageDiff": -83.3333333125,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 3200000000,
+          "advertisedFormatted": "3051.8 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -83.3333333125,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 112500,
+          "advertisedFormatted": "112,500",
+          "actual": 11028,
+          "actualFormatted": "11,028",
+          "percentageDiff": -90.19733333333333,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 360000,
+          "advertisedFormatted": "360,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -89.97222222222221,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 8",
+      "cloudProvider": "AWS",
+      "machineType": "m7gd.8xlarge",
+      "nodeCount": "12",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 1600000000,
+          "advertisedFormatted": "1525.9 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -66.666666625,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 3200000000,
+          "advertisedFormatted": "3051.8 Mbps",
+          "actual": 1600000000,
+          "actualFormatted": "1525.9 Mbps",
+          "percentageDiff": -50,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 112500,
+          "advertisedFormatted": "112,500",
+          "actual": 11388,
+          "actualFormatted": "11,388",
+          "percentageDiff": -89.87733333333333,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 360000,
+          "advertisedFormatted": "360,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -89.97222222222221,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 8 - x86",
+      "cloudProvider": "AWS",
+      "machineType": "i3en.6xlarge",
+      "nodeCount": "12",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 1600000000,
+          "advertisedFormatted": "1525.9 Mbps",
+          "actual": 266666667,
+          "actualFormatted": "254.3 Mbps",
+          "percentageDiff": -83.3333333125,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 3200000000,
+          "advertisedFormatted": "3051.8 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -83.3333333125,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 112500,
+          "advertisedFormatted": "112,500",
+          "actual": 14820,
+          "actualFormatted": "14,820",
+          "percentageDiff": -86.82666666666667,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 360000,
+          "advertisedFormatted": "360,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -89.97222222222221,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 9",
+      "cloudProvider": "AWS",
+      "machineType": "im4gn.8xlarge",
+      "nodeCount": "15",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 2000000000,
+          "advertisedFormatted": "1907.3 Mbps",
+          "actual": 266666667,
+          "actualFormatted": "254.3 Mbps",
+          "percentageDiff": -86.66666665,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 4000000000,
+          "advertisedFormatted": "3814.7 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -86.66666665,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 112500,
+          "advertisedFormatted": "112,500",
+          "actual": 11055,
+          "actualFormatted": "11,055",
+          "percentageDiff": -90.17333333333333,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 450000,
+          "advertisedFormatted": "450,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -91.97777777777777,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 9",
+      "cloudProvider": "AWS",
+      "machineType": "m7gd.8xlarge",
+      "nodeCount": "15",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 2000000000,
+          "advertisedFormatted": "1907.3 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -73.3333333,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 4000000000,
+          "advertisedFormatted": "3814.7 Mbps",
+          "actual": 1600000000,
+          "actualFormatted": "1525.9 Mbps",
+          "percentageDiff": -60,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 112500,
+          "advertisedFormatted": "112,500",
+          "actual": 11415,
+          "actualFormatted": "11,415",
+          "percentageDiff": -89.85333333333332,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 450000,
+          "advertisedFormatted": "450,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -91.97777777777777,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 9 - x86",
+      "cloudProvider": "AWS",
+      "machineType": "i3en.6xlarge",
+      "nodeCount": "15",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 2000000000,
+          "advertisedFormatted": "1907.3 Mbps",
+          "actual": 266666667,
+          "actualFormatted": "254.3 Mbps",
+          "percentageDiff": -86.66666665,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 4000000000,
+          "advertisedFormatted": "3814.7 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -86.66666665,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 112500,
+          "advertisedFormatted": "112,500",
+          "actual": 14850,
+          "actualFormatted": "14,850",
+          "percentageDiff": -86.8,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 450000,
+          "advertisedFormatted": "450,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -91.97777777777777,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 1",
+      "cloudProvider": "GCP",
+      "machineType": "n2d-standard-2",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 20000000,
+          "advertisedFormatted": "19.1 Mbps",
+          "actual": 33333334,
+          "actualFormatted": "31.8 Mbps",
+          "percentageDiff": 66.66667,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 60000000,
+          "advertisedFormatted": "57.2 Mbps",
+          "actual": 100000000,
+          "actualFormatted": "95.4 Mbps",
+          "percentageDiff": 66.66666666666666,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 2000,
+          "advertisedFormatted": "2,000",
+          "actual": 6198,
+          "actualFormatted": "6,198",
+          "percentageDiff": 209.90000000000003,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 9000,
+          "advertisedFormatted": "9,000",
+          "actual": 3700,
+          "actualFormatted": "3,700",
+          "percentageDiff": -58.88888888888889,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 2",
+      "cloudProvider": "GCP",
+      "machineType": "n2d-standard-4",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 50000000,
+          "advertisedFormatted": "47.7 Mbps",
+          "actual": 66666667,
+          "actualFormatted": "63.6 Mbps",
+          "percentageDiff": 33.333334,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 150000000,
+          "advertisedFormatted": "143.1 Mbps",
+          "actual": 200000000,
+          "actualFormatted": "190.7 Mbps",
+          "percentageDiff": 33.33333333333333,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 5600,
+          "advertisedFormatted": "5,600",
+          "actual": 5694,
+          "actualFormatted": "5,694",
+          "percentageDiff": 1.6785714285714286,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 22500,
+          "advertisedFormatted": "22,500",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -59.55555555555555,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 3",
+      "cloudProvider": "GCP",
+      "machineType": "n2d-standard-4",
+      "nodeCount": "6",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 100000000,
+          "advertisedFormatted": "95.4 Mbps",
+          "actual": 66666667,
+          "actualFormatted": "63.6 Mbps",
+          "percentageDiff": -33.333332999999996,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 200000000,
+          "advertisedFormatted": "190.7 Mbps",
+          "actual": 200000000,
+          "actualFormatted": "190.7 Mbps",
+          "percentageDiff": 0,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 11200,
+          "advertisedFormatted": "11,200",
+          "actual": 11340,
+          "actualFormatted": "11,340",
+          "percentageDiff": 1.25,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 45000,
+          "advertisedFormatted": "45,000",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -79.77777777777779,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 4",
+      "cloudProvider": "GCP",
+      "machineType": "n2d-standard-4",
+      "nodeCount": "12",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 200000000,
+          "advertisedFormatted": "190.7 Mbps",
+          "actual": 66666667,
+          "actualFormatted": "63.6 Mbps",
+          "percentageDiff": -66.6666665,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 400000000,
+          "advertisedFormatted": "381.5 Mbps",
+          "actual": 200000000,
+          "actualFormatted": "190.7 Mbps",
+          "percentageDiff": -50,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 22600,
+          "advertisedFormatted": "22,600",
+          "actual": 22836,
+          "actualFormatted": "22,836",
+          "percentageDiff": 1.0442477876106195,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 90000,
+          "advertisedFormatted": "90,000",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -89.88888888888889,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 5",
+      "cloudProvider": "GCP",
+      "machineType": "n2d-standard-16",
+      "nodeCount": "6",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 400000000,
+          "advertisedFormatted": "381.5 Mbps",
+          "actual": 266666667,
+          "actualFormatted": "254.3 Mbps",
+          "percentageDiff": -33.33333325,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 800000000,
+          "advertisedFormatted": "762.9 Mbps",
+          "actual": 800000000,
+          "actualFormatted": "762.9 Mbps",
+          "percentageDiff": 0,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 45600,
+          "advertisedFormatted": "45,600",
+          "actual": 9204,
+          "actualFormatted": "9,204",
+          "percentageDiff": -79.8157894736842,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 180000,
+          "advertisedFormatted": "180,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -79.94444444444444,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 6",
+      "cloudProvider": "GCP",
+      "machineType": "n2d-standard-16",
+      "nodeCount": "12",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 800000000,
+          "advertisedFormatted": "762.9 Mbps",
+          "actual": 266666667,
+          "actualFormatted": "254.3 Mbps",
+          "percentageDiff": -66.666666625,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 1600000000,
+          "advertisedFormatted": "1525.9 Mbps",
+          "actual": 800000000,
+          "actualFormatted": "762.9 Mbps",
+          "percentageDiff": -50,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 90000,
+          "advertisedFormatted": "90,000",
+          "actual": 18144,
+          "actualFormatted": "18,144",
+          "percentageDiff": -79.84,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 180000,
+          "advertisedFormatted": "180,000",
+          "actual": 18100,
+          "actualFormatted": "18,100",
+          "percentageDiff": -89.94444444444444,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 7",
+      "cloudProvider": "GCP",
+      "machineType": "n2d-standard-16",
+      "nodeCount": "18",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 1200000000,
+          "advertisedFormatted": "1144.4 Mbps",
+          "actual": 266666667,
+          "actualFormatted": "254.3 Mbps",
+          "percentageDiff": -77.77777775,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 2400000000,
+          "advertisedFormatted": "2288.8 Mbps",
+          "actual": 800000000,
+          "actualFormatted": "762.9 Mbps",
+          "percentageDiff": -66.66666666666666,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 112500,
+          "advertisedFormatted": "112,500",
+          "actual": 22716,
+          "actualFormatted": "22,716",
+          "percentageDiff": -79.808,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 270000,
+          "advertisedFormatted": "270,000",
+          "actual": 18100,
+          "actualFormatted": "18,100",
+          "percentageDiff": -93.2962962962963,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 8",
+      "cloudProvider": "GCP",
+      "machineType": "n2d-standard-32",
+      "nodeCount": "12",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 1600000000,
+          "advertisedFormatted": "1525.9 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -66.666666625,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 3200000000,
+          "advertisedFormatted": "3051.8 Mbps",
+          "actual": 1600000000,
+          "actualFormatted": "1525.9 Mbps",
+          "percentageDiff": -50,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 112500,
+          "advertisedFormatted": "112,500",
+          "actual": 11028,
+          "actualFormatted": "11,028",
+          "percentageDiff": -90.19733333333333,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 360000,
+          "advertisedFormatted": "360,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -89.97222222222221,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 9",
+      "cloudProvider": "GCP",
+      "machineType": "n2d-standard-32",
+      "nodeCount": "15",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 2000000000,
+          "advertisedFormatted": "1907.3 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": -73.3333333,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 4000000000,
+          "advertisedFormatted": "3814.7 Mbps",
+          "actual": 1600000000,
+          "actualFormatted": "1525.9 Mbps",
+          "percentageDiff": -60,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 112500,
+          "advertisedFormatted": "112,500",
+          "actual": 11055,
+          "actualFormatted": "11,055",
+          "percentageDiff": -90.17333333333333,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 450000,
+          "advertisedFormatted": "450,000",
+          "actual": 36100,
+          "actualFormatted": "36,100",
+          "percentageDiff": -91.97777777777777,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 1 (x86 - Ddv5)",
+      "cloudProvider": "Azure",
+      "machineType": "Standard_D2d_v5",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 20000000,
+          "advertisedFormatted": "19.1 Mbps",
+          "actual": 33333334,
+          "actualFormatted": "31.8 Mbps",
+          "percentageDiff": 66.66667,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 60000000,
+          "advertisedFormatted": "57.2 Mbps",
+          "actual": 100000000,
+          "actualFormatted": "95.4 Mbps",
+          "percentageDiff": 66.66666666666666,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 1000,
+          "advertisedFormatted": "1,000",
+          "actual": 6198,
+          "actualFormatted": "6,198",
+          "percentageDiff": 519.8000000000001,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 9000,
+          "advertisedFormatted": "9,000",
+          "actual": 3700,
+          "actualFormatted": "3,700",
+          "percentageDiff": -58.88888888888889,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 2 (x86 - Ddv5)",
+      "cloudProvider": "Azure",
+      "machineType": "Standard_D4d_v5",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 50000000,
+          "advertisedFormatted": "47.7 Mbps",
+          "actual": 66666667,
+          "actualFormatted": "63.6 Mbps",
+          "percentageDiff": 33.333334,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 150000000,
+          "advertisedFormatted": "143.1 Mbps",
+          "actual": 200000000,
+          "actualFormatted": "190.7 Mbps",
+          "percentageDiff": 33.33333333333333,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 2800,
+          "advertisedFormatted": "2,800",
+          "actual": 5694,
+          "actualFormatted": "5,694",
+          "percentageDiff": 103.35714285714286,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 22500,
+          "advertisedFormatted": "22,500",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -59.55555555555555,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 3 (x86 - Ddv5)",
+      "cloudProvider": "Azure",
+      "machineType": "Standard_D4d_v5",
+      "nodeCount": "6",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 100000000,
+          "advertisedFormatted": "95.4 Mbps",
+          "actual": 66666667,
+          "actualFormatted": "63.6 Mbps",
+          "percentageDiff": -33.333332999999996,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 200000000,
+          "advertisedFormatted": "190.7 Mbps",
+          "actual": 200000000,
+          "actualFormatted": "190.7 Mbps",
+          "percentageDiff": 0,
+          "severity": "minor",
+          "emoji": "🟢"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 5600,
+          "advertisedFormatted": "5,600",
+          "actual": 11340,
+          "actualFormatted": "11,340",
+          "percentageDiff": 102.49999999999999,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 45000,
+          "advertisedFormatted": "45,000",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -79.77777777777779,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 4 (x86 - Ddv5)",
+      "cloudProvider": "Azure",
+      "machineType": "Standard_D4d_v5",
+      "nodeCount": "12",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 200000000,
+          "advertisedFormatted": "190.7 Mbps",
+          "actual": 66666667,
+          "actualFormatted": "63.6 Mbps",
+          "percentageDiff": -66.6666665,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 400000000,
+          "advertisedFormatted": "381.5 Mbps",
+          "actual": 200000000,
+          "actualFormatted": "190.7 Mbps",
+          "percentageDiff": -50,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 11300,
+          "advertisedFormatted": "11,300",
+          "actual": 22836,
+          "actualFormatted": "22,836",
+          "percentageDiff": 102.08849557522124,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 90000,
+          "advertisedFormatted": "90,000",
+          "actual": 9100,
+          "actualFormatted": "9,100",
+          "percentageDiff": -89.88888888888889,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    },
+    {
+      "tierName": "Tier 5 (x86 - Ddv5)",
+      "cloudProvider": "Azure",
+      "machineType": "Standard_D32d_v5",
+      "nodeCount": "3",
+      "discrepancies": [
+        {
+          "metric": "Ingress Throughput",
+          "advertised": 400000000,
+          "advertisedFormatted": "381.5 Mbps",
+          "actual": 533333334,
+          "actualFormatted": "508.6 Mbps",
+          "percentageDiff": 33.3333335,
+          "severity": "major",
+          "emoji": "🟠"
+        },
+        {
+          "metric": "Egress Throughput",
+          "advertised": 800000000,
+          "advertisedFormatted": "762.9 Mbps",
+          "actual": 1600000000,
+          "actualFormatted": "1525.9 Mbps",
+          "percentageDiff": 100,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Partitions",
+          "advertised": 22800,
+          "advertisedFormatted": "22,800",
+          "actual": 4602,
+          "actualFormatted": "4,602",
+          "percentageDiff": -79.8157894736842,
+          "severity": "critical",
+          "emoji": "🔴"
+        },
+        {
+          "metric": "Max Client Connections",
+          "advertised": 180000,
+          "advertisedFormatted": "180,000",
+          "actual": 72100,
+          "actualFormatted": "72,100",
+          "percentageDiff": -59.94444444444444,
+          "severity": "critical",
+          "emoji": "🔴"
+        }
+      ]
+    }
+  ]
+}
