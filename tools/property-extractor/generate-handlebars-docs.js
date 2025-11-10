@@ -257,12 +257,19 @@ function generateErrorReports(properties, documentedProperties = []) {
   const documentedSet = new Set(documentedProperties);
   const undocumented = [];
 
-  Object.entries(properties).forEach(([key, p]) => {
+    Object.entries(properties).forEach(([key, p]) => {
     const name = p.name || key;
-    if (!p.description || !p.description.trim()) emptyDescriptions.push(name);
+    const desc = p.description;
+
+    // Ensure description is a non-empty string
+    if (typeof desc !== 'string' || desc.trim().length === 0) {
+      emptyDescriptions.push(name);
+    }
+
     if (p.is_deprecated) deprecatedProperties.push(name);
     if (!documentedSet.has(name)) undocumented.push(name);
   });
+
 
   const total = allKeys.length;
   const pctEmpty = total ? ((emptyDescriptions.length / total) * 100).toFixed(2) : '0.00';
@@ -323,7 +330,7 @@ function generateAllDocs(inputFile, outputDir) {
   console.log(`   Deprecated properties:       ${deprecatedCount}`);
 
   if (notRendered > 0) {
-    console.log('⚠️ Undocumented properties:\n   ' + errors.undocumented_properties.join('\n   '));
+    console.log('Ignored:\n   ' + errors.undocumented_properties.join('\n   '));
   }
 
   return {

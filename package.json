@@ -22,6 +22,8 @@
     "build": "antora --to-dir docs --fetch local-antora-playbook.yml",
     "serve": "wds --node-resolve --open preview/test/ --watch --root-dir docs",
     "test": "jest",
+    "test:python": "./__tests__/tools/property-extractor/setup-and-test.sh",
+    "test:all": "npm run test && npm run test:python",
     "bundle:admin": "doc-tools generate bundle-openapi --surface admin",
     "bundle:connect": "doc-tools generate bundle-openapi --surface connect",
     "bundle:both": "doc-tools generate bundle-openapi --surface both"
