@@ -883,57 +883,22 @@ def merge_properties_and_definitions(properties, definitions):
 
 def apply_property_overrides(properties, overrides, overrides_file_path=None):
     """
-    Apply property overrides from the overrides JSON file to enhance property documentation.
+    Apply overrides from an overrides mapping to the extracted properties, mutating and returning the properties dictionary.
     
-    This function allows customizing property documentation by providing overrides for:
+    Processes entries in overrides["properties"]; for each override key the function:
+    - If the key matches a property dictionary key, applies the override to that property.
+    - Otherwise, searches existing properties for an entry whose `"name"` equals the override key and applies the override if found.
+    - If no matching property is found, creates a new property from the override and adds it under the override key.
     
-    1. description: Override the auto-extracted property description with custom text
-    2. version: Add version information showing when the property was introduced
-    3. example: Add AsciiDoc example sections with flexible input formats (see below)
-    4. default: Override the auto-extracted default value
-    5. related_topics: Add an array of related topic links for cross-referencing
-    6. config_scope: Specify the scope for new properties ("topic", "cluster", "broker")
-    7. type: Specify the type for new properties
-
-    Properties that don't exist in the extracted source can be created from overrides.
-    This is useful for topic properties or other configurations that aren't auto-detected.
-
-    Multiple example input formats are supported for user convenience:
-
-    1. Direct AsciiDoc string:
-       "example": ".Example\n[,yaml]\n----\nredpanda:\n  property_name: value\n----"
-
-    2. Multi-line array (each element becomes a line):
-       "example": [
-         ".Example",
-         "[,yaml]",
-         "----",
-         "redpanda:",
-         "  property_name: value",
-         "----"
-       ]
-
-    3. External file reference:
-       "example_file": "examples/property_name.adoc"
-
-    4. Auto-formatted YAML with title and description:
-       "example_yaml": {
-         "title": "Example Configuration",
-         "description": "This shows how to configure the property.",
-         "config": {
-           "redpanda": {
-             "property_name": "value"
-           }
-         }
-       }
-
-    Args:
-        properties: Dictionary of extracted properties from C++ source
-        overrides: Dictionary loaded from overrides JSON file
-        overrides_file_path: Path to the overrides file (for resolving relative example_file paths)
-
+    The function supports overrides that add or replace description, version, example content, default, type, config_scope, related_topics, and other metadata. When examples reference external files, relative paths are resolved relative to overrides_file_path.
+    
+    Parameters:
+        properties (dict): Mapping of existing property entries (modified in-place).
+        overrides (dict): Loaded overrides structure; only keys under "properties" are processed.
+        overrides_file_path (str|None): Filesystem path of the overrides file used to resolve relative example_file references.
+    
     Returns:
-        Updated properties dictionary with overrides applied and new properties created
+        dict: The same properties mapping with overrides applied and any new properties created.
     """
     if overrides and "properties" in overrides:
         for prop, override in overrides["properties"].items():
