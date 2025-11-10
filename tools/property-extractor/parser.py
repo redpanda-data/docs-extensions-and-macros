@@ -179,7 +179,7 @@ def parse_cpp_header(treesitter_parser, cpp_language, source_code):
         if label == "name":
             property_name = node.text.decode("utf-8")
             
-            # ✅ Validate this is a config property type - skip internal structs
+            # Validate this is a config property type - skip internal structs
             if not _is_config_property_type(current_type):
                 logger.debug(f"Skipping non-property field '{property_name}' with type '{current_type}'")
                 current_type = None

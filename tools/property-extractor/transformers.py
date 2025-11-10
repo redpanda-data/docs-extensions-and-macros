@@ -1940,7 +1940,7 @@ class EnterpriseTransformer:
             property["is_enterprise"] = False
             return property
 
-        # ✅ Record enterprise attributes
+        # Record enterprise attributes
         property["is_enterprise"] = True
         property["enterprise_constructor"] = enterprise_constructor
 
@@ -2005,7 +2005,7 @@ class MetaParamTransformer:
     Converts Redpanda meta initializer strings (meta{...} or {...})
     into structured dictionaries usable by downstream transformers.
 
-    ✅ Handles all Redpanda meta fields:
+    Handles all Redpanda meta fields:
         - .needs_restart
         - .visibility
         - .example
@@ -2014,11 +2014,11 @@ class MetaParamTransformer:
         - .experimental
         - .gets_restored / .restored
 
-    ✅ Works with both explicit and implicit meta wrappers:
+    Works with both explicit and implicit meta wrappers:
         meta{ .visibility = visibility::user }
         {.needs_restart = needs_restart::no, .example = "123"}
 
-    🚫 Skips non-meta initializer lists like {"a", "b"}.
+    Skips non-meta initializer lists like {"a", "b"}.
     """
 
     def accepts(self, info, file_pair):
@@ -2049,7 +2049,7 @@ class MetaParamTransformer:
 
             stripped = val.strip()
 
-            # ✅ Only treat as meta if it matches known meta key patterns
+            # Only treat as meta if it matches known meta key patterns
             if not (
                 stripped.startswith("meta{")
                 or (
