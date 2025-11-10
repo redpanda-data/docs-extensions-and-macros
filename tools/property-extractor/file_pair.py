@@ -15,7 +15,6 @@ def get_files_with_properties(src_dir, cpp_language_lib_path):
     Find matching C++ header/implementation pairs and extract properties from them.
     Returns a list of (FilePair, PropertyBag) tuples.
     """
-    # 🔄 lazy import here to break circular dependency
     from parser import extract_properties_from_file_pair  
 
     cpp_language = Language(cpp_language_lib_path, "cpp")
