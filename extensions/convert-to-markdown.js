@@ -54,7 +54,8 @@ module.exports.register = function () {
           'pagination',
           'footer',
           'nav-expand',
-          'banner-container'
+          'banner-container',
+          'markdown-dropdown',
         ]
         return toRemove.some(
           (x) => classAttr.includes(x) || idAttr.includes(x)
@@ -249,6 +250,21 @@ module.exports.register = function () {
     addCustomRules(nestedTurndown, true)
     return outerTurndown
   }
+
+  // Add marker attribute before UI rendering so templates can detect markdown availability
+  this.on('documentsConverted', ({ contentCatalog }) => {
+    const pages = contentCatalog.findBy({ family: 'page' })
+    logger.info(`Marking ${pages.length} pages as having markdown equivalents...`)
+
+    pages.forEach((page) => {
+      // Ensure attributes object exists
+      if (!page.asciidoc) page.asciidoc = {}
+      if (!page.asciidoc.attributes) page.asciidoc.attributes = {}
+
+      // Add marker that UI templates can check
+      page.asciidoc.attributes['page-has-markdown'] = ''
+    })
+  })
 
   // Conversion pipeline
   this.on('pagesComposed', async ({ playbook: pb, contentCatalog }) => {
