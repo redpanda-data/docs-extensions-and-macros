@@ -51,15 +51,18 @@ endif::[]
 | Property | Value
 
 | Type
-| `{{type}}`{{#if enum}} (enum){{/if}}
+| `{{type}}`{{#if (or enum items.enum)}} (enum){{/if}}
 
 {{#if enum}}
 | Accepted Values
-| {{#each enum}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
+| {{#each enum}}`{{this}}`{{#if (isEnterpriseEnum this ../x-enum-metadata)}} (Enterprise){{/if}}{{#unless @last}}, {{/unless}}{{/each}}
+{{else}}{{#if items.enum}}
+| Accepted Values
+| {{#each items.enum}}`{{this}}`{{#if (isEnterpriseEnum this ../items.x-enum-metadata)}} (Enterprise){{/if}}{{#unless @last}}, {{/unless}}{{/each}}
 {{else}}{{#if acceptable_values}}
 | Accepted values
 | {{{acceptable_values}}}
-{{/if}}{{/if}}
+{{/if}}{{/if}}{{/if}}
 {{#if corresponding_cluster_property}}
 
 | Related cluster property

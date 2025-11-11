@@ -1956,21 +1956,21 @@ class EnterpriseTransformer:
             r = restricted_vals[0]
             s = sanctioned_vals[0]
             property["enterprise_default_description"] = (
-                f"Default: {s} (Community) or {r} (Enterprise)"
+                f"Default: `{s}` (Community) or `{r}` (Enterprise)"
             )
         elif enterprise_constructor == "restricted_only":
             if len(restricted_vals) > 1:
-                vals = ", ".join(restricted_vals)
+                vals = ", ".join(f"`{v}`" for v in restricted_vals)
                 property["enterprise_default_description"] = (
                     f"Available only with Enterprise license: {vals}"
                 )
             else:
                 property["enterprise_default_description"] = (
-                    f"Available only with Enterprise license: {restricted_vals[0]}"
+                    f"Available only with Enterprise license: `{restricted_vals[0]}`"
                 )
         elif enterprise_constructor == "sanctioned_only":
             property["enterprise_default_description"] = (
-                f"Community-only configuration. Sanctioned value: {sanctioned_vals[0]}"
+                f"Community-only configuration. Sanctioned value: `{sanctioned_vals[0]}`"
             )
 
         return property
@@ -2192,6 +2192,231 @@ class ExampleTransformer:
                         property["example"] = example_val
                     break
                     
+        return property
+
+
+@debug_transformer
+class ValidatorEnumExtractor:
+    """
+    ValidatorEnumExtractor - Extracts enum constraints from validator functions for array properties
+
+    RESPONSIBILITY:
+    Analyzes validator functions to extract enum constraints for array-typed properties.
+    For example, if sasl_mechanisms uses validate_sasl_mechanisms, this transformer:
+    1. Finds the validator function in validators.cc
+    2. Identifies the constraint array (e.g., supported_sasl_mechanisms)
+    3. Resolves that array to get the actual enum values
+    4. Adds them to property['items']['enum']
+
+    PROCESSING:
+    1. Detects array properties (type="array") with validator parameters
+    2. Extracts validator function name from params
+    3. Parses validator to find constraint array
+    4. Resolves array to get enum values (e.g., ["SCRAM", "GSSAPI", "OAUTHBEARER", "PLAIN"])
+    5. Sets property['items']['enum'] with the discovered values
+
+    DOWNSTREAM USAGE:
+    - JSON Schema generators use items.enum for validation rules
+    - Documentation shows accepted values for array properties
+    - API clients use enum values for input validation
+
+    EXAMPLE:
+    Input property with validator:
+        sasl_mechanisms(..., validate_sasl_mechanisms)
+
+    Output property with enum:
+        {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "enum": ["SCRAM", "GSSAPI", "OAUTHBEARER", "PLAIN"]
+            }
+        }
+    """
+    def __init__(self, constant_resolver):
+        """
+        Args:
+            constant_resolver: ConstantResolver instance for resolving C++ constants
+        """
+        self.constant_resolver = constant_resolver
+
+    def accepts(self, info, file_pair):
+        """Only process array properties that have validator params."""
+        params = info.get("params", [])
+        if not params:
+            return False
+
+        # Must be an array type
+        base_type = info.get("base_property_type", "")
+        if not base_type or "vector" not in base_type:
+            return False
+
+        # Must have a validator parameter (usually the last param)
+        # Validator is typically after: name, desc, meta, default
+        return len(params) >= 5
+
+    def parse(self, property, info, file_pair):
+        """Extract enum constraint from validator function."""
+        if not self.accepts(info, file_pair):
+            return property
+
+        params = info.get("params", [])
+
+        # Look for validator in the last few parameters
+        # Typically: params[0]=name, [1]=desc, [2]=meta, [3]=default, [4]=validator
+        validator_param = None
+        validator_name = None
+
+        for i in range(min(4, len(params)), len(params)):
+            param = params[i]
+            param_val = param.get("value", "")
+            param_type = param.get("type", "")
+
+            # Skip if it's not a validator-like identifier
+            if param_type not in ("identifier", "qualified_identifier", "call_expression"):
+                continue
+
+            # Check if it looks like a validator function name
+            if isinstance(param_val, str) and ("validate" in param_val or "validator" in param_val):
+                validator_name = param_val.replace("&", "").strip()
+                validator_param = param
+                break
+
+        if not validator_name:
+            return property
+
+        # Use constant_resolver to extract enum constraint from validator
+        from constant_resolver import resolve_validator_enum_constraint
+
+        enum_results = resolve_validator_enum_constraint(validator_name, self.constant_resolver)
+
+        if enum_results:
+            # Add enum to items
+            if "items" not in property:
+                property["items"] = {}
+
+            # Extract just the values for the enum field
+            property["items"]["enum"] = [result["value"] for result in enum_results]
+
+            # Add metadata about which enum values are enterprise-only
+            enum_metadata = {}
+            for result in enum_results:
+                enum_metadata[result["value"]] = {
+                    "is_enterprise": result["is_enterprise"]
+                }
+
+            # Only add x-enum-metadata if there are enterprise values
+            if any(result["is_enterprise"] for result in enum_results):
+                property["items"]["x-enum-metadata"] = enum_metadata
+
+            logger.info(f"✓ Extracted enum constraint for {property.get('name', 'unknown')} from validator {validator_name}: {property['items']['enum']}")
+
+        return property
+
+
+@debug_transformer
+class RuntimeValidationEnumExtractor:
+    """
+    RuntimeValidationEnumExtractor - Extracts enum constraints from runtime validation functions
+
+    RESPONSIBILITY:
+    For string properties without constructor validators, searches for runtime validation
+    functions that compare the property value against constants and extracts those as enum values.
+
+    PROCESSING:
+    1. Detects string properties (not arrays) without validator parameters
+    2. Searches the source file for validation functions that reference the property
+    3. Parses comparison patterns (e.g., property != constant1 && property != constant2)
+    4. Resolves constants to actual string values
+    5. Sets property['enum'] with discovered values
+
+    EXAMPLE:
+    Input property without constructor validator:
+        sasl_mechanism(*this, "sasl_mechanism", "Description...", {}, "")
+
+    Runtime validation function:
+        void validate_sasl_properties(..., std::string_view mechanism, ...) {
+            if (mechanism != security::scram_sha256_authenticator::name
+                && mechanism != security::scram_sha512_authenticator::name
+                && mechanism != security::oidc::sasl_authenticator::name) {
+                throw std::invalid_argument("Invalid mechanism");
+            }
+        }
+
+    Output property with enum:
+        {
+            "type": "string",
+            "enum": ["SCRAM-SHA-256", "SCRAM-SHA-512", "OAUTHBEARER"]
+        }
+    """
+    def __init__(self, constant_resolver):
+        """
+        Args:
+            constant_resolver: ConstantResolver instance for resolving C++ constants
+        """
+        self.constant_resolver = constant_resolver
+
+    def accepts(self, info, file_pair):
+        """Only process string properties without constructor validators."""
+        params = info.get("params", [])
+        if not params:
+            return False
+
+        # Must be a string type (not array)
+        base_type = info.get("base_property_type", "")
+        if not base_type:
+            return False
+        if "vector" in base_type or "array" in base_type:
+            return False
+
+        # Should be ss::sstring or std::string
+        if "sstring" not in base_type and "string" not in base_type:
+            return False
+
+        # Should NOT have a validator parameter (those are handled by ValidatorEnumExtractor)
+        # Check if any param looks like a validator
+        for param in params[4:]:  # Skip name, desc, meta, default
+            param_val = param.get("value", "")
+            if isinstance(param_val, str) and ("validate" in param_val or "validator" in param_val):
+                return False
+
+        return True
+
+    def parse(self, property, info, file_pair):
+        """Extract enum constraint from runtime validation function."""
+        if not self.accepts(info, file_pair):
+            return property
+
+        property_name = property.get("name")
+        defined_in = property.get("defined_in")
+
+        if not property_name or not defined_in:
+            return property
+
+        # Use constant_resolver to extract enum constraint from runtime validation
+        from constant_resolver import resolve_runtime_validation_enum_constraint
+
+        enum_results = resolve_runtime_validation_enum_constraint(
+            property_name, defined_in, self.constant_resolver
+        )
+
+        if enum_results:
+            # Extract just the values for the enum field
+            property["enum"] = [result["value"] for result in enum_results]
+
+            # Add metadata about which enum values are enterprise-only
+            enum_metadata = {}
+            for result in enum_results:
+                enum_metadata[result["value"]] = {
+                    "is_enterprise": result["is_enterprise"]
+                }
+
+            # Only add x-enum-metadata if there are enterprise values
+            if any(result["is_enterprise"] for result in enum_results):
+                property["x-enum-metadata"] = enum_metadata
+
+            logger.info(f"✓ Extracted runtime validation enum for {property_name}: {property['enum']}")
+
         return property
 
 

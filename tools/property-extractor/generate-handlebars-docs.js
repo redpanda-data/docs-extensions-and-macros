@@ -271,22 +271,24 @@ function generateErrorReports(properties, documentedProperties = []) {
     const name = p.name || key;
     const desc = p.description;
 
-    // Ensure description is a non-empty string
-    if (typeof desc !== 'string' || desc.trim().length === 0) {
+    if (p.is_deprecated) deprecatedProperties.push(name);
+
+    // Ensure description is a non-empty string (exclude deprecated properties)
+    if (!p.is_deprecated && (typeof desc !== 'string' || desc.trim().length === 0)) {
       emptyDescriptions.push(name);
     }
 
-    if (p.is_deprecated) deprecatedProperties.push(name);
     if (!documentedSet.has(name)) undocumented.push(name);
   });
 
 
   const total = allKeys.length;
-  const pctEmpty = total ? ((emptyDescriptions.length / total) * 100).toFixed(2) : '0.00';
+  const nonDeprecatedTotal = total - deprecatedProperties.length;
+  const pctEmpty = nonDeprecatedTotal ? ((emptyDescriptions.length / nonDeprecatedTotal) * 100).toFixed(2) : '0.00';
   const pctDeprecated = total ? ((deprecatedProperties.length / total) * 100).toFixed(2) : '0.00';
   const pctUndocumented = total ? ((undocumented.length / total) * 100).toFixed(2) : '0.00';
 
-  console.log(`📉 Empty descriptions: ${emptyDescriptions.length} (${pctEmpty}%)`);
+  console.log(`📉 Empty descriptions: ${emptyDescriptions.length} (${pctEmpty}%) (excludes deprecated)`);
   console.log(`🕸️ Deprecated: ${deprecatedProperties.length} (${pctDeprecated}%)`);
   console.log(`🚫 Not documented: ${undocumented.length} (${pctUndocumented}%)`);
 

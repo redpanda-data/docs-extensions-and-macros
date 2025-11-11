@@ -9,6 +9,7 @@ module.exports = {
   or: require('./or.js'),
   not: require('./not.js'),
   includes: require('./includes.js'),
+  isEnterpriseEnum: require('./isEnterpriseEnum.js'),
   formatPropertyValue: require('./formatPropertyValue.js'),
   renderPropertyExample: require('./renderPropertyExample.js'),
   formatUnits: require('./formatUnits.js'),

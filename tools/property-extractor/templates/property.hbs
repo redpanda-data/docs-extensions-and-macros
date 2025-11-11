@@ -42,8 +42,8 @@ The following values require an Enterprise license: {{#each enterprise_restricte
 {{else if (eq enterprise_constructor "restricted_with_sanctioned")}}
 *License-based defaults:*
 
-* *Community:* {{#each enterprise_sanctioned_value}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
-* *Enterprise:* {{#each enterprise_restricted_value}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}} (additional values)
+* *Community:* {{#each enterprise_sanctioned_value}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}} (if no Enterprise license is present)
+* *Enterprise:* {{#each enterprise_restricted_value}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}} (if an Enterprise license is present)
 {{/if}}
 {{else}}
 Enterprise license required: `{{enterprise_value}}`
@@ -66,12 +66,15 @@ endif::[]
 | Property | Value
 
 | Type
-| `{{type}}`{{#if enum}} (enum){{/if}}
+| `{{type}}`{{#if (or enum items.enum)}} (enum){{/if}}
 
 {{#if enum}}
 | Accepted values
-| {{#each enum}}`{{this}}`{{#if ../is_enterprise}}{{#if (includes ../enterprise_restricted_value this)}} (Enterprise only){{/if}}{{/if}}{{#unless @last}}, {{/unless}}{{/each}}
-{{/if}}
+| {{#each enum}}`{{this}}`{{#if (isEnterpriseEnum this ../x-enum-metadata)}} (Enterprise){{else}}{{#if ../is_enterprise}}{{#if (includes ../enterprise_restricted_value this)}} (Enterprise){{/if}}{{/if}}{{/if}}{{#unless @last}}, {{/unless}}{{/each}}
+{{else}}{{#if items.enum}}
+| Accepted values
+| {{#each items.enum}}`{{this}}`{{#if (isEnterpriseEnum this ../items.x-enum-metadata)}} (Enterprise){{/if}}{{#unless @last}}, {{/unless}}{{/each}}
+{{/if}}{{/if}}
 {{#if (and minimum maximum)}}
 
 | Range

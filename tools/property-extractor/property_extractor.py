@@ -71,6 +71,7 @@ import re
 from parser import build_treesitter_cpp_library, extract_properties_from_file_pair
 from property_bag import PropertyBag
 from transformers import *
+from constant_resolver import ConstantResolver
 
 # Compiled regex patterns for performance optimization
 VECTOR_PATTERN = re.compile(r'std::vector<[^>]+>\s*\{\s*([^}]*)\s*\}')
@@ -695,6 +696,16 @@ def get_files_with_properties(file_pairs, treesitter_parser, cpp_language):
 
 def transform_files_with_properties(files_with_properties):
     type_transformer = TypeTransformer()
+
+    # Initialize ConstantResolver for validator enum extraction
+    redpanda_src = find_redpanda_source()
+    constant_resolver = None
+    if redpanda_src:
+        src_v_path = Path(redpanda_src) / 'src' / 'v'
+        if src_v_path.exists():
+            constant_resolver = ConstantResolver(src_v_path)
+            logger.debug(f"Initialized ConstantResolver with path: {src_v_path}")
+
     transformers = [
         EnterpriseTransformer(), ## this must be the first, as it modifies current data
         ParamNormalizerTransformer(),
@@ -716,6 +727,11 @@ def transform_files_with_properties(files_with_properties):
         ExperimentalTransformer(),
         AliasTransformer(),
     ]
+
+    # Add enum extractors if we have a constant_resolver
+    if constant_resolver:
+        transformers.append(ValidatorEnumExtractor(constant_resolver))
+        transformers.append(RuntimeValidationEnumExtractor(constant_resolver))
 
     all_properties = PropertyBag()
 
