@@ -138,7 +138,26 @@ module.exports = function renderConnectFields(children, prefix = '') {
     if (child.examples && child.examples.length) {
       block += `[source,yaml]\n----\n# Examples:\n`;
       if (child.kind === 'array') {
-        block += renderYamlList(child.name, child.examples);
+        // Render arrays in flow style (with brackets) instead of block style
+        child.examples.forEach(example => {
+          if (Array.isArray(example)) {
+            // Format as flow style: fieldName: [item1, item2, ...]
+            const items = example.map(item => {
+              if (typeof item === 'string') {
+                // Quote strings that need it
+                if (item === '*' || /[:\[\]\{\},&>|%@`]/.test(item)) {
+                  return `"${item}"`;
+                }
+                return item;
+              }
+              return String(item);
+            });
+            block += `${child.name}: [${items.join(', ')}]\n`;
+          } else {
+            // Fallback for non-array examples (shouldn't happen for array fields)
+            block += `${child.name}: ${example}\n`;
+          }
+        });
       } else {
         child.examples.forEach(example => {
           if (typeof example === 'object') {
