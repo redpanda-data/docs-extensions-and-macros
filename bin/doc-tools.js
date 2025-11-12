@@ -719,6 +719,18 @@ automation
         fs.unlinkSync(tmpFile);
         dataFile = finalFile;
         console.log(`✅ Fetched and saved: ${finalFile}`);
+
+        // Keep only 2 most recent versions in docs-data
+        const dataFiles = fs.readdirSync(dataDir)
+          .filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
+          .sort();
+
+        while (dataFiles.length > 2) {
+          const oldestFile = dataFiles.shift();
+          const oldestPath = path.join(dataDir, oldestFile);
+          fs.unlinkSync(oldestPath);
+          console.log(`🧹 Deleted old version from docs-data: ${oldestFile}`);
+        }
       } catch (err) {
         console.error(`❌ Failed to fetch connectors: ${err.message}`);
         process.exit(1);
@@ -845,6 +857,45 @@ automation
     }
 
     const newIndex = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+
+    // Publish merged version with overrides to modules/components/attachments
+    if (options.overrides && fs.existsSync(options.overrides)) {
+      try {
+        const { mergeOverrides, resolveReferences } = require('../tools/redpanda-connect/generate-rpcn-connector-docs.js');
+
+        // Create a copy of newIndex to merge overrides into
+        const mergedData = JSON.parse(JSON.stringify(newIndex));
+
+        // Read and apply overrides
+        const ovRaw = fs.readFileSync(options.overrides, 'utf8');
+        const ovObj = JSON.parse(ovRaw);
+        const resolvedOverrides = resolveReferences(ovObj, ovObj);
+        mergeOverrides(mergedData, resolvedOverrides);
+
+        // Publish to modules/components/attachments
+        const attachmentsRoot = path.resolve(process.cwd(), 'modules/components/attachments');
+        fs.mkdirSync(attachmentsRoot, { recursive: true });
+
+        // Delete older versions from modules/components/attachments
+        const existingFiles = fs.readdirSync(attachmentsRoot)
+          .filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
+          .sort();
+
+        for (const oldFile of existingFiles) {
+          const oldFilePath = path.join(attachmentsRoot, oldFile);
+          fs.unlinkSync(oldFilePath);
+          console.log(`🧹 Deleted old version: ${oldFile}`);
+        }
+
+        // Save merged version to modules/components/attachments
+        const destFile = path.join(attachmentsRoot, `connect-${newVersion}.json`);
+        fs.writeFileSync(destFile, JSON.stringify(mergedData, null, 2), 'utf8');
+        console.log(`✅ Published merged version to: ${path.relative(process.cwd(), destFile)}`);
+      } catch (err) {
+        console.error(`❌ Failed to publish merged version: ${err.message}`);
+      }
+    }
+
     printDeltaReport(oldIndex, newIndex);
 
     // Generate JSON diff file for whats-new.adoc
@@ -895,6 +946,16 @@ automation
 
     // Optionally update whats-new.adoc
     if (options.updateWhatsNew) {
+      // Helper function to cap description to two sentences
+      const capToTwoSentences = (description) => {
+        if (!description) return '';
+        // Match sentences ending with . ! ? followed by space or end of string
+        const sentenceRegex = /[^.!?]+[.!?]+(?:\s|$)/g;
+        const sentences = description.match(sentenceRegex);
+        if (!sentences || sentences.length === 0) return description;
+        return sentences.slice(0, 2).join('').trim();
+      };
+
       try {
         const whatsNewPath = path.join(findRepoRoot(), 'modules/get-started/pages/whats-new.adoc');
         if (!fs.existsSync(whatsNewPath)) {
@@ -956,7 +1017,7 @@ automation
             for (const comp of comps) {
               section += `** xref:components:${type}/${comp.name}.adoc[\`${comp.name}\`]`;
               if (comp.status) section += ` (${comp.status})`;
-              if (comp.description) section += `: ${comp.description}`;
+              if (comp.description) section += `: ${capToTwoSentences(comp.description)}`;
               section += '\n';
             }
           }
@@ -986,23 +1047,81 @@ automation
               byComp[f.compName].push(f);
             }
             for (const [comp, compFields] of Object.entries(byComp)) {
-              section += `** xref:components:${type}/${comp}.adoc['${comp}']`;
+              section += `** xref:components:${type}/${comp}.adoc[\`${comp}\`]`;
               if (compFields.length === 1) {
                 const f = compFields[0];
-                section += `: xref:components:${type}/${comp}.adoc#${f.field}['${f.field}']`;
-                if (f.description) section += ` - ${f.description}`;
+                section += `: xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]`;
+                if (f.description) section += ` - ${capToTwoSentences(f.description)}`;
                 section += '\n';
               } else {
                 section += '\n';
                 for (const f of compFields) {
-                  section += `*** xref:components:${type}/${comp}.adoc#${f.field}['${f.field}']`;
-                  if (f.description) section += ` - ${f.description}`;
+                  section += `*** xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]`;
+                  if (f.description) section += ` - ${capToTwoSentences(f.description)}`;
                   section += '\n';
                 }
               }
             }
           }
         }
+
+        // Deprecated components
+        if (diff.details.deprecatedComponents && diff.details.deprecatedComponents.length) {
+          section += '\n=== Deprecations\n\n';
+          section += 'The following components are now deprecated:\n\n';
+          // Group by type
+          const byType = {};
+          for (const comp of diff.details.deprecatedComponents) {
+            if (!byType[comp.type]) byType[comp.type] = [];
+            byType[comp.type].push(comp);
+          }
+          for (const [type, comps] of Object.entries(byType)) {
+            section += `* ${type.charAt(0).toUpperCase() + type.slice(1)}:\n`;
+            for (const comp of comps) {
+              section += `** xref:components:${type}/${comp.name}.adoc[\`${comp.name}\`]\n`;
+            }
+          }
+        }
+
+        // Deprecated fields
+        if (diff.details.deprecatedFields && diff.details.deprecatedFields.length) {
+          if (!diff.details.deprecatedComponents || diff.details.deprecatedComponents.length === 0) {
+            section += '\n=== Deprecations\n\n';
+          }
+          section += '\nThe following fields are now deprecated:\n\n';
+          // Group deprecated fields by component type
+          const fieldsByType = {};
+          for (const field of diff.details.deprecatedFields) {
+            const [type, compName] = field.component.split(':');
+            if (!fieldsByType[type]) fieldsByType[type] = [];
+            fieldsByType[type].push({
+              compName,
+              field: field.field
+            });
+          }
+          for (const [type, fields] of Object.entries(fieldsByType)) {
+            section += `* ${type.charAt(0).toUpperCase() + type.slice(1)} components\n`;
+            // Group by component name
+            const byComp = {};
+            for (const f of fields) {
+              if (!byComp[f.compName]) byComp[f.compName] = [];
+              byComp[f.compName].push(f);
+            }
+            for (const [comp, compFields] of Object.entries(byComp)) {
+              section += `** xref:components:${type}/${comp}.adoc[\`${comp}\`]`;
+              if (compFields.length === 1) {
+                const f = compFields[0];
+                section += `: xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]\n`;
+              } else {
+                section += '\n';
+                for (const f of compFields) {
+                  section += `*** xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]\n`;
+                }
+              }
+            }
+          }
+        }
+
         let updated;
         if (startIdx !== -1) {
           // Replace the existing section

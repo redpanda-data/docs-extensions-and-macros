@@ -1,3 +1,5 @@
+const { execSync } = require('child_process');
+
 /**
  * Generate a JSON diff report between two connector index objects.
  * @param {object} oldIndex - Previous version connector index
@@ -78,6 +80,66 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     });
   });
 
+  // Newly deprecated components (exist in both versions but became deprecated)
+  const deprecatedComponents = [];
+  Object.keys(newMap).forEach(cKey => {
+    if (!(cKey in oldMap)) return;
+    const oldStatus = (oldMap[cKey].raw.status || '').toLowerCase();
+    const newStatus = (newMap[cKey].raw.status || '').toLowerCase();
+    if (oldStatus !== 'deprecated' && newStatus === 'deprecated') {
+      const [type, name] = cKey.split(':');
+      const raw = newMap[cKey].raw;
+      deprecatedComponents.push({
+        name,
+        type,
+        status: raw.status || raw.type || '',
+        version: raw.version || raw.introducedInVersion || '',
+        description: raw.description || ''
+      });
+    }
+  });
+
+  // Newly deprecated fields (exist in both versions but became deprecated)
+  const deprecatedFields = [];
+  Object.keys(newMap).forEach(cKey => {
+    if (!(cKey in oldMap)) return;
+    const oldFieldsArr = oldMap[cKey].fields || [];
+    const newFieldsArr = newMap[cKey].fields || [];
+
+    // Check fields that exist in both versions
+    const commonFields = oldFieldsArr.filter(f => newFieldsArr.includes(f));
+    commonFields.forEach(fName => {
+      const [type, compName] = cKey.split(':');
+
+      // Get old field object
+      let oldFieldObj = null;
+      if (type === 'config') {
+        oldFieldObj = (oldMap[cKey].raw.children || []).find(f => f.name === fName);
+      } else {
+        oldFieldObj = (oldMap[cKey].raw.config?.children || []).find(f => f.name === fName);
+      }
+
+      // Get new field object
+      let newFieldObj = null;
+      if (type === 'config') {
+        newFieldObj = (newMap[cKey].raw.children || []).find(f => f.name === fName);
+      } else {
+        newFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
+      }
+
+      const oldDeprecated = oldFieldObj && (oldFieldObj.deprecated === true || (oldFieldObj.status || '').toLowerCase() === 'deprecated');
+      const newDeprecated = newFieldObj && (newFieldObj.deprecated === true || (newFieldObj.status || '').toLowerCase() === 'deprecated');
+
+      if (!oldDeprecated && newDeprecated) {
+        deprecatedFields.push({
+          component: cKey,
+          field: fName,
+          description: newFieldObj && newFieldObj.description
+        });
+      }
+    });
+  });
+
   return {
     comparison: {
       oldVersion: opts.oldVersion || '',
@@ -88,23 +150,20 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       newComponents: newComponents.length,
       removedComponents: removedComponents.length,
       newFields: newFields.length,
-      removedFields: removedFields.length
+      removedFields: removedFields.length,
+      deprecatedComponents: deprecatedComponents.length,
+      deprecatedFields: deprecatedFields.length
     },
     details: {
       newComponents,
       removedComponents,
       newFields,
-      removedFields
+      removedFields,
+      deprecatedComponents,
+      deprecatedFields
     }
   };
 }
-// tools/redpanda-connect/report-delta.js
-'use strict';
-
-const fs = require('fs');
-const path = require('path');
-const yaml = require('yaml');
-const { execSync } = require('child_process');
 
 function discoverComponentKeys(obj) {
   return Object.keys(obj).filter(key => Array.isArray(obj[key]));
@@ -209,6 +268,47 @@ function printDeltaReport(oldIndex, newIndex) {
     });
   });
 
+  // Newly deprecated components
+  const deprecatedComponentKeys = [];
+  Object.keys(newMap).forEach(cKey => {
+    if (!(cKey in oldMap)) return;
+    const oldStatus = (oldMap[cKey].raw.status || '').toLowerCase();
+    const newStatus = (newMap[cKey].raw.status || '').toLowerCase();
+    if (oldStatus !== 'deprecated' && newStatus === 'deprecated') {
+      deprecatedComponentKeys.push(cKey);
+    }
+  });
+
+  // Newly deprecated fields
+  const deprecatedFieldsList = [];
+  Object.keys(newMap).forEach(cKey => {
+    if (!(cKey in oldMap)) return;
+    const oldFieldsArr = oldMap[cKey].fields || [];
+    const newFieldsArr = newMap[cKey].fields || [];
+    const commonFields = oldFieldsArr.filter(f => newFieldsArr.includes(f));
+
+    commonFields.forEach(fName => {
+      const [type, compName] = cKey.split(':');
+      let oldFieldObj = null;
+      if (type === 'config') {
+        oldFieldObj = (oldMap[cKey].raw.children || []).find(f => f.name === fName);
+      } else {
+        oldFieldObj = (oldMap[cKey].raw.config?.children || []).find(f => f.name === fName);
+      }
+      let newFieldObj = null;
+      if (type === 'config') {
+        newFieldObj = (newMap[cKey].raw.children || []).find(f => f.name === fName);
+      } else {
+        newFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
+      }
+      const oldDeprecated = oldFieldObj && (oldFieldObj.deprecated === true || (oldFieldObj.status || '').toLowerCase() === 'deprecated');
+      const newDeprecated = newFieldObj && (newFieldObj.deprecated === true || (newFieldObj.status || '').toLowerCase() === 'deprecated');
+      if (!oldDeprecated && newDeprecated) {
+        deprecatedFieldsList.push({ component: cKey, field: fName });
+      }
+    });
+  });
+
   console.log('\n📋 RPCN Connector Delta Report\n');
 
   if (newComponentKeys.length) {
@@ -241,6 +341,29 @@ function printDeltaReport(oldIndex, newIndex) {
     console.log('');
   } else {
     console.log('➤ No newly added fields.\n');
+  }
+
+  if (deprecatedComponentKeys.length) {
+    console.log('➤ Newly deprecated components:');
+    deprecatedComponentKeys.forEach(key => {
+      const [type, name] = key.split(':');
+      const raw = newMap[key].raw;
+      console.log(`   • ${type}/${name}`);
+    });
+    console.log('');
+  } else {
+    console.log('➤ No newly deprecated components.\n');
+  }
+
+  if (deprecatedFieldsList.length) {
+    console.log('➤ Newly deprecated fields:');
+    deprecatedFieldsList.forEach(entry => {
+      const { component, field } = entry;
+      console.log(`   • ${component} → ${field}`);
+    });
+    console.log('');
+  } else {
+    console.log('➤ No newly deprecated fields.\n');
   }
 }
 
