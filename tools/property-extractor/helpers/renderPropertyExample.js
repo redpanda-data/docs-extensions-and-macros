@@ -18,8 +18,8 @@ module.exports = function renderPropertyExample(property) {
     if (property.example.includes('.Example') || property.example.includes('[,yaml]')) {
       exampleContent = property.example;
     } else {
-      // Simple string example - wrap it
-      exampleContent = `.Example\n[,yaml]\n----\n${property.name}: ${property.example}\n----`;
+      // Wrap simple string examples in backticks for inline code formatting
+      exampleContent = `\`${property.example}\``;
     }
   } else if (Array.isArray(property.example)) {
     // Multiline array example
@@ -34,9 +34,10 @@ module.exports = function renderPropertyExample(property) {
       exampleContent += `[,yaml]\n----\n${JSON.stringify(property.example.config, null, 2)}\n----`;
     }
   } else {
-    // Fallback: JSON stringify the example
-    exampleContent = `.Example\n[,yaml]\n----\n${property.name}: ${JSON.stringify(property.example, null, 2)}\n----`;
+    // Fallback: JSON stringify and wrap in backticks for inline code
+    const jsonStr = JSON.stringify(property.example, null, 2);
+    exampleContent = `\`${jsonStr}\``;
   }
 
-  return new handlebars.SafeString('\n' + exampleContent + '\n');
+  return new handlebars.SafeString(exampleContent);
 };

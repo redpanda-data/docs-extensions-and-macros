@@ -105,7 +105,17 @@ function registerPartials() {
 }
 
 /**
- * Generate consolidated AsciiDoc partials for properties grouped by type.
+ * Generate AsciiDoc partial files grouping input properties by scope (cluster, topic, broker, object-storage).
+ *
+ * Reads property and topic templates, groups provided properties by their config_scope (treating keys as authoritative property names),
+ * renders each property into the appropriate template, writes combined partial files to "<partialsDir>/properties/<type>-properties.adoc",
+ * and invokes the optional onRender callback for every rendered property name. Entries missing a name or config_scope are skipped;
+ * duplicate keys are detected, warned about, and skipped.
+ *
+ * @param {Object<string, Object>} properties - Map of property key → property object; the map key is used as the property's name.
+ * @param {string} partialsDir - Destination directory under which a "properties" subdirectory will be created for output files.
+ * @param {(name: string) => void} [onRender] - Optional callback invoked with each rendered property's name.
+ * @returns {number} The total number of properties rendered and written to partial files.
  */
 function generatePropertyPartials(properties, partialsDir, onRender) {
   console.log(`📝 Generating consolidated property partials in ${partialsDir}…`);
@@ -122,8 +132,22 @@ function generatePropertyPartials(properties, partialsDir, onRender) {
 
   const propertyGroups = { cluster: [], topic: [], broker: [], 'object-storage': [] };
 
-  Object.values(properties).forEach(prop => {
+  // Track processed property keys to detect duplicates by unique key
+  const processedKeys = new Set();
+  
+  Object.entries(properties).forEach(([key, prop]) => {
     if (!prop.name || !prop.config_scope) return;
+
+    // Skip if we've already processed this key
+    if (processedKeys.has(key)) {
+      console.warn(`⚠️ Duplicate key detected: ${key}`);
+      return;
+    }
+    processedKeys.add(key);
+
+    // Ensure the property uses the key as its name for consistency
+    // This fixes issues where key != name field due to bugs in the source code
+    prop.name = key;
 
     switch (prop.config_scope) {
       case 'topic':
@@ -243,19 +267,28 @@ function generateErrorReports(properties, documentedProperties = []) {
   const documentedSet = new Set(documentedProperties);
   const undocumented = [];
 
-  Object.entries(properties).forEach(([key, p]) => {
+    Object.entries(properties).forEach(([key, p]) => {
     const name = p.name || key;
-    if (!p.description || !p.description.trim()) emptyDescriptions.push(name);
+    const desc = p.description;
+
     if (p.is_deprecated) deprecatedProperties.push(name);
+
+    // Ensure description is a non-empty string (exclude deprecated properties)
+    if (!p.is_deprecated && (typeof desc !== 'string' || desc.trim().length === 0)) {
+      emptyDescriptions.push(name);
+    }
+
     if (!documentedSet.has(name)) undocumented.push(name);
   });
 
+
   const total = allKeys.length;
-  const pctEmpty = total ? ((emptyDescriptions.length / total) * 100).toFixed(2) : '0.00';
+  const nonDeprecatedTotal = total - deprecatedProperties.length;
+  const pctEmpty = nonDeprecatedTotal ? ((emptyDescriptions.length / nonDeprecatedTotal) * 100).toFixed(2) : '0.00';
   const pctDeprecated = total ? ((deprecatedProperties.length / total) * 100).toFixed(2) : '0.00';
   const pctUndocumented = total ? ((undocumented.length / total) * 100).toFixed(2) : '0.00';
 
-  console.log(`📉 Empty descriptions: ${emptyDescriptions.length} (${pctEmpty}%)`);
+  console.log(`📉 Empty descriptions: ${emptyDescriptions.length} (${pctEmpty}%) (excludes deprecated)`);
   console.log(`🕸️ Deprecated: ${deprecatedProperties.length} (${pctDeprecated}%)`);
   console.log(`🚫 Not documented: ${undocumented.length} (${pctUndocumented}%)`);
 
@@ -309,7 +342,7 @@ function generateAllDocs(inputFile, outputDir) {
   console.log(`   Deprecated properties:       ${deprecatedCount}`);
 
   if (notRendered > 0) {
-    console.log('⚠️ Undocumented properties:\n   ' + errors.undocumented_properties.join('\n   '));
+    console.log('Ignored:\n   ' + errors.undocumented_properties.join('\n   '));
   }
 
   return {

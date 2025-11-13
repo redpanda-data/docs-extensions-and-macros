@@ -65,12 +65,308 @@ from copy import deepcopy
 from pathlib import Path
 from file_pair import FilePair
 from tree_sitter import Language, Parser
+import operator
+import re
 
 from parser import build_treesitter_cpp_library, extract_properties_from_file_pair
 from property_bag import PropertyBag
 from transformers import *
+from constant_resolver import ConstantResolver
+
+# Compiled regex patterns for performance optimization
+VECTOR_PATTERN = re.compile(r'std::vector<[^>]+>\s*\{\s*([^}]*)\s*\}')
+ENUM_PATTERN = re.compile(r'^[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)$')  # Match full qualified identifier, not followed by constructors
+CONSTRUCTOR_PATTERN = re.compile(r'([a-zA-Z0-9_:]+)\((.*)\)')
+BRACED_CONSTRUCTOR_PATTERN = re.compile(r'([a-zA-Z0-9_:]+)\{(.*)\}')
+DIGIT_SEPARATOR_PATTERN = re.compile(r"(?<=\d)'(?=\d)")
+FUNCTION_CALL_PATTERN = re.compile(r'([a-zA-Z0-9_:]+)\(\)')
+CHRONO_PATTERN = re.compile(r'std::chrono::([a-zA-Z]+)\s*\{\s*(\d+)\s*\}')
+CHRONO_PAREN_PATTERN = re.compile(r'(?:std::)?chrono::([a-zA-Z]+)\s*\(\s*([^)]+)\s*\)')
+TIME_UNIT_PATTERN = re.compile(r'(\d+)\s*(min|s|ms|h)')
+ADDRESS_PATTERN = re.compile(r'net::unresolved_address\s*\(\s*"?([^",]+)"?\s*,\s*([^)]+)\)')
+KEYVAL_PATTERN = re.compile(r"'([^']+)':\s*'([^']+)'")
+IDENTIFIER_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+SSTRING_PATTERN = re.compile(r'ss::sstring\{([a-zA-Z_][a-zA-Z0-9_]*)\}')
+UNDERSCORE_PREFIX_PATTERN = re.compile(r"^_")
+
+class ConstexprCache:
+    """
+    Cache for C++ constexpr identifier and function lookups to avoid repeated filesystem walks.
+    
+    This class dramatically improves performance when processing large numbers of properties
+    by building a cache of all constexpr definitions once, then serving lookups from memory.
+    
+    Performance Impact:
+    - Without cache: O(n*m) where n = properties, m = source files (thousands of filesystem operations)
+    - With cache: O(m + n) where cache build is O(m), lookups are O(1) (single filesystem walk)
+    """
+    
+    def __init__(self):
+        self.constexpr_cache = {}  # identifier -> value
+        self.function_cache = {}   # function_name -> value
+        self.is_built = False
+        self.redpanda_source = None
+    
+    def build_cache(self, redpanda_source=None):
+        """
+        Build the cache by walking the Redpanda source tree once and extracting all constexpr definitions.
+        
+        Args:
+            redpanda_source (str, optional): Path to Redpanda source. If None, will be auto-detected.
+        """
+        if self.is_built and self.redpanda_source == redpanda_source:
+            return  # Already built for this source
+        
+        if not redpanda_source:
+            redpanda_source = find_redpanda_source()
+        
+        if not redpanda_source:
+            logger.warning("Could not find Redpanda source directory for constexpr cache")
+            return
+        
+        self.redpanda_source = redpanda_source
+        self.constexpr_cache.clear()
+        self.function_cache.clear()
+        
+        # Constexpr identifier patterns
+        constexpr_patterns = [
+            re.compile(r'inline\s+constexpr\s+std::string_view\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{\s*"([^"]+)"\s*\}'),
+            re.compile(r'constexpr\s+std::string_view\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{\s*"([^"]+)"\s*\}'),
+            re.compile(r'inline\s+constexpr\s+auto\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*"([^"]+)"'),
+            re.compile(r'constexpr\s+auto\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*"([^"]+)"'),
+            re.compile(r'static\s+constexpr\s+std::string_view\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{\s*"([^"]+)"\s*\}'),
+            re.compile(r'static\s+inline\s+constexpr\s+std::string_view\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{\s*"([^"]+)"\s*\}'),
+        ]
+        
+        # General function patterns to extract ALL string-returning functions
+        # These patterns capture: namespace::function_name and the returned string
+        general_function_patterns = [
+            # Pattern: inline constexpr std::string_view name { "value" }
+            re.compile(r'inline\s+constexpr\s+std::string_view\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{\s*"([^"]+)"\s*\}'),
+            # Pattern: constexpr std::string_view name { "value" }
+            re.compile(r'constexpr\s+std::string_view\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{\s*"([^"]+)"\s*\}'),
+            # Pattern: inline std::string_view name() { return "value"; }
+            re.compile(r'inline\s+std::string_view\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"'),
+            # Pattern: std::string_view name() { return "value"; }
+            re.compile(r'std::string_view\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"'),
+            # Pattern: inline const model::topic name("value")
+            re.compile(r'inline\s+const\s+model::topic\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*"([^"]+)"\s*\)'),
+            # Pattern: const model::topic name("value")
+            re.compile(r'const\s+model::topic\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*"([^"]+)"\s*\)'),
+            # Pattern: inline const model::ns name("value")
+            re.compile(r'inline\s+const\s+model::ns\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*"([^"]+)"\s*\)'),
+            # Pattern: const model::ns name("value")
+            re.compile(r'const\s+model::ns\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*"([^"]+)"\s*\)'),
+        ]
+
+        # Legacy specific patterns (kept for compatibility, but general patterns should cover these)
+        function_patterns = {}
+
+        search_dirs = [
+            os.path.join(redpanda_source, 'src', 'v', 'model'),  # For model:: functions
+            os.path.join(redpanda_source, 'src', 'v', 'config'),
+            os.path.join(redpanda_source, 'src', 'v', 'kafka'),
+            os.path.join(redpanda_source, 'src', 'v', 'security'),
+            os.path.join(redpanda_source, 'src', 'v', 'pandaproxy'),
+        ]
+        
+        files_processed = 0
+        for search_dir in search_dirs:
+            if not os.path.exists(search_dir):
+                continue
+                
+            for root, dirs, files in os.walk(search_dir):
+                for file in files:
+                    if file.endswith(('.h', '.cc', '.hpp', '.cpp')):
+                        file_path = os.path.join(root, file)
+                        try:
+                            with open(file_path, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                            
+                            # Extract constexpr identifiers
+                            for pattern in constexpr_patterns:
+                                for match in pattern.finditer(content):
+                                    identifier = match.group(1)
+                                    value = match.group(2)
+                                    self.constexpr_cache[identifier] = value
+
+                            # Extract ALL string-returning functions using general patterns
+                            # This replaces hardcoded function patterns
+                            for pattern in general_function_patterns:
+                                for match in pattern.finditer(content):
+                                    func_name = match.group(1)
+                                    func_value = match.group(2)
+
+                                    # Try to determine namespace for the function
+                                    namespace = self._extract_namespace_for_function(content, match.start())
+
+                                    # Store with both simple name and qualified name
+                                    self.function_cache[func_name] = func_value
+                                    if namespace:
+                                        qualified_name = f"{namespace}::{func_name}"
+                                        self.function_cache[qualified_name] = func_value
+
+                            # Legacy: Extract function definitions from hardcoded patterns (if any)
+                            for func_name, patterns in function_patterns.items():
+                                for pattern in patterns:
+                                    match = pattern.search(content)
+                                    if match:
+                                        self.function_cache[func_name] = match.group(1)
+                                        break
+                            
+                            files_processed += 1
+                                    
+                        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
+                            logger.debug(f"Error reading {file_path} for cache: {e}")
+                            continue
+        
+        self.is_built = True
+        logger.debug(f"Built constexpr cache: {len(self.constexpr_cache)} identifiers, "
+                    f"{len(self.function_cache)} functions from {files_processed} files")
+
+    def _extract_namespace_for_function(self, content, position):
+        """
+        Extract the namespace at a given position in the file.
+
+        Args:
+            content (str): File content
+            position (int): Position in the file
+
+        Returns:
+            str: Namespace (e.g., "model" or "config::tls")
+        """
+        # Look backwards from position to find namespace declaration
+        preceding = content[:position]
+
+        # Find all namespace declarations before this position
+        namespace_pattern = re.compile(r'namespace\s+(\w+)\s*\{')
+        namespaces = []
+
+        for match in namespace_pattern.finditer(preceding):
+            ns_name = match.group(1)
+            # Check if we're still inside this namespace by tracking brace depth
+            # Start with depth=1 (we entered the namespace with its opening brace)
+            after_ns = content[match.end():position]
+            brace_depth = 1
+
+            for char in after_ns:
+                if char == '{':
+                    brace_depth += 1
+                elif char == '}':
+                    brace_depth -= 1
+                    if brace_depth == 0:
+                        # Namespace was closed before reaching current position
+                        break
+
+            if brace_depth > 0:
+                # Still inside this namespace
+                namespaces.append(ns_name)
+
+        return '::'.join(namespaces) if namespaces else ''
+
+    def lookup_constexpr(self, identifier):
+        """
+        Look up a constexpr identifier value from the cache.
+        
+        Args:
+            identifier (str): The identifier to look up
+            
+        Returns:
+            str or None: The resolved value if found, None otherwise
+        """
+        if not self.is_built:
+            self.build_cache()
+        
+        return self.constexpr_cache.get(identifier)
+    
+    def lookup_function(self, function_name):
+        """
+        Look up a function call result from the cache.
+        
+        Args:
+            function_name (str): The function name to look up
+            
+        Returns:
+            str or None: The resolved value if found, None otherwise
+        """
+        if not self.is_built:
+            self.build_cache()
+        
+        return self.function_cache.get(function_name)
+
+# Global cache instance
+_constexpr_cache = ConstexprCache()
+
+# Global storage for type definitions (used by transformers for enum mapping)
+_type_definitions_cache = {}
 
 # Import topic property extractor
+def find_redpanda_source():
+    """
+    Locate the Redpanda source directory by searching standard locations.
+    
+    The property extractor looks for the Redpanda source code in multiple
+    locations to handle different execution contexts (project root, tools directory, etc.).
+    
+    Returns:
+        str or None: Path to the Redpanda source directory if found, None otherwise.
+    """
+    redpanda_source_paths = [
+        'tmp/redpanda',  # Current directory
+        '../tmp/redpanda',  # Parent directory  
+        'tools/property-extractor/tmp/redpanda',  # From project root
+        os.path.join(os.getcwd(), 'tools', 'property-extractor', 'tmp', 'redpanda')
+    ]
+    
+    for path in redpanda_source_paths:
+        if os.path.exists(path):
+            return path
+    
+    return None
+
+def safe_arithmetic_eval(expression):
+    """
+    Safely evaluate simple arithmetic expressions like '60 * 5' without using eval().
+    Only allows basic operators: +, -, *, /, //, %, and **
+    Only works with integers and basic arithmetic.
+    
+    Returns the result if successful, raises ValueError if unsafe or invalid.
+    """
+    # Only allow safe characters: digits, spaces, and basic operators
+    allowed_chars = set('0123456789+-*/%() ')
+    if not all(c in allowed_chars for c in expression):
+        raise ValueError("Expression contains unsafe characters")
+    
+    # Simple operator mapping for basic arithmetic
+    ops = {
+        '+': operator.add,
+        '-': operator.sub,
+        '*': operator.mul,
+        '/': operator.truediv,
+        '//': operator.floordiv,
+        '%': operator.mod,
+    }
+    
+    # For simple cases like "60 * 5", handle directly
+    for op_str, op_func in ops.items():
+        if op_str in expression:
+            parts = expression.split(op_str)
+            if len(parts) == 2:
+                try:
+                    left = int(parts[0].strip())
+                    right = int(parts[1].strip())
+                    return int(op_func(left, right))
+                except (ValueError, ZeroDivisionError):
+                    pass
+    
+    # If it's just a number, return it
+    try:
+        return int(expression.strip())
+    except ValueError:
+        pass
+    
+    raise ValueError("Could not safely evaluate expression")
+
 try:
     from topic_property_extractor import TopicPropertyExtractor
 except ImportError:
@@ -116,29 +412,11 @@ def process_enterprise_value(enterprise_str):
         Union[str, bool, list]: A JSON-serializable representation of the input.
     """
     enterprise_str = enterprise_str.strip()
-    
-    # Handle special SASL mechanism function names 
-    if enterprise_str == "is_enterprise_sasl_mechanism":
-        # Dynamically look up enterprise SASL mechanisms from source
-        enterprise_mechanisms = get_enterprise_sasl_mechanisms()
-        if enterprise_mechanisms:
-            return enterprise_mechanisms
-        else:
-            # Fallback to known values if lookup fails
-            return ["GSSAPI", "OAUTHBEARER"]
-    elif enterprise_str == "is_enterprise_sasl_mechanisms_override":
-        # Get the enterprise mechanisms dynamically for a more accurate description
-        enterprise_mechanisms = get_enterprise_sasl_mechanisms()
-        if enterprise_mechanisms:
-            mechanism_list = ", ".join(enterprise_mechanisms)
-            return f"Any override containing enterprise mechanisms ({mechanism_list})."
-        else:
-            return "Any override containing enterprise mechanisms."
-    
+
     # FIRST: Handle std::vector initialization patterns (highest priority)
     # This must come before enum processing because vectors can contain enums
     # Tolerate optional whitespace around braces
-    vector_match = re.match(r'std::vector<[^>]+>\s*\{\s*([^}]*)\s*\}', enterprise_str)
+    vector_match = VECTOR_PATTERN.match(enterprise_str)
     if vector_match:
         content = vector_match.group(1).strip()
         if not content:
@@ -161,7 +439,7 @@ def process_enterprise_value(enterprise_str):
                         values.append(ast.literal_eval(value))
                     else:
                         # Handle enum values in the vector
-                        enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)', value)
+                        enum_match = ENUM_PATTERN.match(value)
                         if enum_match:
                             values.append(enum_match.group(1))
                         else:
@@ -177,7 +455,7 @@ def process_enterprise_value(enterprise_str):
                 values.append(ast.literal_eval(value))
             else:
                 # Handle enum values in the vector
-                enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)', value)
+                enum_match = ENUM_PATTERN.match(value)
                 if enum_match:
                     values.append(enum_match.group(1))
                 else:
@@ -186,18 +464,16 @@ def process_enterprise_value(enterprise_str):
         return values
     
     # SECOND: Handle enum-like patterns (extract the last part after ::)
-    enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)', enterprise_str)
+    enum_match = ENUM_PATTERN.match(enterprise_str)
     if enum_match:
         enum_value = enum_match.group(1)
         return enum_value
     
     # THIRD: Handle C++ lambda expressions - these usually indicate "any non-default value"
     if enterprise_str.startswith("[](") and enterprise_str.endswith("}"):
-        # For lambda expressions, try to extract meaningful info from the logic
-        if "leaders_preference" in enterprise_str:
-            return "Any rack preference (not `none`)"
-        else:
-            return "Enterprise feature enabled"
+        # For lambda expressions, return a generic message
+        # No hardcoded logic for specific properties
+        return "Enterprise feature enabled"
     
     # FOURTH: Handle simple values with proper JSON types
     # Convert boolean literals to actual boolean values for JSON compatibility
@@ -214,168 +490,79 @@ def process_enterprise_value(enterprise_str):
 
 def resolve_cpp_function_call(function_name):
     """
-    Resolve a small set of known zero-argument C++ functions to their literal string return values by scanning a local Redpanda source tree.
-    
-    Searches predefined files and regex patterns for the specified fully-qualified function name (e.g., "model::kafka_audit_logging_topic") and returns the captured string if found; returns None when no match or when the Redpanda source tree cannot be located.
-    
+    Resolve zero-argument C++ functions to their literal string return values.
+
+    Uses the pre-built ConstexprCache which dynamically extracts ALL string-returning
+    functions from source using general patterns. No hardcoded patterns needed.
+
     Parameters:
-        function_name (str): Fully-qualified C++ function name to resolve.
-    
+        function_name (str): Fully-qualified C++ function name to resolve (e.g., "model::kafka_audit_logging_topic")
+
     Returns:
-        str or None: The literal string returned by the C++ function when resolved, or `None` if unresolved.
+        str or None: The literal string returned by the C++ function, or None if not found in cache
     """
-    # Map function names to likely search patterns and file locations
-    search_patterns = {
-        'model::kafka_audit_logging_topic': {
-            'patterns': [
-                r'inline\s+const\s+model::topic\s+kafka_audit_logging_topic\s*\(\s*"([^"]+)"\s*\)',
-                r'const\s+model::topic\s+kafka_audit_logging_topic\s*\(\s*"([^"]+)"\s*\)',
-                r'model::topic\s+kafka_audit_logging_topic\s*\(\s*"([^"]+)"\s*\)',
-                r'std::string_view\s+kafka_audit_logging_topic\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"',
-                r'inline\s+std::string_view\s+kafka_audit_logging_topic\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"'
-            ],
-            'files': ['src/v/model/namespace.h', 'src/v/model/namespace.cc', 'src/v/model/kafka_namespace.h']
-        },
-        'model::kafka_consumer_offsets_topic': {
-            'patterns': [
-                r'inline\s+const\s+model::topic\s+kafka_consumer_offsets_topic\s*\(\s*"([^"]+)"\s*\)',
-                r'const\s+model::topic\s+kafka_consumer_offsets_topic\s*\(\s*"([^"]+)"\s*\)',
-                r'model::topic\s+kafka_consumer_offsets_topic\s*\(\s*"([^"]+)"\s*\)',
-                r'std::string_view\s+kafka_consumer_offsets_topic\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"',
-                r'inline\s+std::string_view\s+kafka_consumer_offsets_topic\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"'
-            ],
-            'files': ['src/v/model/namespace.h', 'src/v/model/namespace.cc', 'src/v/model/kafka_namespace.h']
-        },
-        'model::kafka_internal_namespace': {
-            'patterns': [
-                r'inline\s+const\s+model::ns\s+kafka_internal_namespace\s*\(\s*"([^"]+)"\s*\)',
-                r'const\s+model::ns\s+kafka_internal_namespace\s*\(\s*"([^"]+)"\s*\)',
-                r'model::ns\s+kafka_internal_namespace\s*\(\s*"([^"]+)"\s*\)',
-                r'std::string_view\s+kafka_internal_namespace\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"',
-                r'inline\s+std::string_view\s+kafka_internal_namespace\s*\(\s*\)\s*\{\s*return\s*"([^"]+)"'
-            ],
-            'files': ['src/v/model/namespace.h', 'src/v/model/namespace.cc', 'src/v/model/kafka_namespace.h']
-        }
-    }
-    
-    # Check if we have search patterns for this function
-    if function_name not in search_patterns:
-        logger.debug(f"No search patterns defined for function: {function_name}")
-        return None
-    
-    config = search_patterns[function_name]
-    
-    # Try to find the Redpanda source directory
-    # Look for it in the standard locations used by the property extractor
-    redpanda_source_paths = [
-        'tmp/redpanda',  # Current directory
-        '../tmp/redpanda',  # Parent directory  
-        'tools/property-extractor/tmp/redpanda',  # From project root
-        os.path.join(os.getcwd(), 'tools', 'property-extractor', 'tmp', 'redpanda')
-    ]
-    
-    redpanda_source = None
-    for path in redpanda_source_paths:
-        if os.path.exists(path):
-            redpanda_source = path
-            break
-    
-    if not redpanda_source:
-        logger.warning(f"Could not find Redpanda source directory to resolve function: {function_name}")
-        return None
-    
-    # Search in the specified files
-    for file_path in config['files']:
-        full_path = os.path.join(redpanda_source, file_path)
-        if not os.path.exists(full_path):
-            continue
-            
-        try:
-            with open(full_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                
-            # Try each pattern
-            for pattern in config['patterns']:
-                match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
-                if match:
-                    resolved_value = match.group(1)
-                    logger.debug(f"Resolved {function_name}() -> '{resolved_value}' from {file_path}")
-                    return resolved_value
-                    
-        except Exception as e:
-            logger.debug(f"Error reading {full_path}: {e}")
-            continue
-    
-    # If not found in specific files, do a broader search
-    logger.debug(f"Function {function_name} not found in expected files, doing broader search...")
-    
-    # Search more broadly in the model directory
-    model_dir = os.path.join(redpanda_source, 'src', 'v', 'model')
-    if os.path.exists(model_dir):
-        for root, dirs, files in os.walk(model_dir):
-            for file in files:
-                if file.endswith('.h') or file.endswith('.cc'):
-                    file_path = os.path.join(root, file)
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                        
-                        # Try patterns for this file
-                        for pattern in config['patterns']:
-                            match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
-                            if match:
-                                resolved_value = match.group(1)
-                                logger.debug(f"Resolved {function_name}() -> '{resolved_value}' from {file_path}")
-                                return resolved_value
-                                
-                    except Exception as e:
-                        logger.debug(f"Error reading {file_path}: {e}")
-                        continue
-    
-    logger.warning(f"Could not resolve function call: {function_name}()")
+    # Look up function in the pre-built cache
+    # The cache was populated by ConstexprCache.build_cache() with general patterns
+    # that automatically discover ALL string-returning functions
+    cached_result = _constexpr_cache.lookup_function(function_name)
+    if cached_result is not None:
+        logger.debug(f"Resolved function '{function_name}' -> '{cached_result}' from cache")
+        return cached_result
+
+    # Also try without namespace qualifier (e.g., "kafka_audit_logging_topic")
+    if '::' in function_name:
+        simple_name = function_name.split('::')[-1]
+        cached_result = _constexpr_cache.lookup_function(simple_name)
+        if cached_result is not None:
+            logger.debug(f"Resolved function '{function_name}' (as '{simple_name}') -> '{cached_result}' from cache")
+            return cached_result
+
+    logger.debug(f"Function '{function_name}' not found in cache")
     return None
 
 
 def resolve_constexpr_identifier(identifier):
     """
     Resolve a constexpr identifier from Redpanda source code to its literal string value.
-    
+
+    Uses a cache to avoid repeated filesystem walks for better performance.
     Searches common Redpanda source locations for constexpr string or string_view definitions matching the given identifier and returns the literal if found.
-    
+
     Parameters:
-        identifier (str): The identifier name to resolve (e.g., "scram").
-    
+        identifier (str): The identifier name to resolve (e.g., "scram" or "net::tls_v1_2_cipher_suites").
+
     Returns:
         str or None: The resolved literal string value if found, otherwise `None`.
     """
-    # Try to find the Redpanda source directory
-    redpanda_source_paths = [
-        'tmp/redpanda',  # Current directory
-        '../tmp/redpanda',  # Parent directory  
-        'tools/property-extractor/tmp/redpanda',  # From project root
-        os.path.join(os.getcwd(), 'tools', 'property-extractor', 'tmp', 'redpanda')
-    ]
-    
-    redpanda_source = None
-    for path in redpanda_source_paths:
-        if os.path.exists(path):
-            redpanda_source = path
-            break
-    
+    # Try cache lookup first (much faster)
+    cached_result = _constexpr_cache.lookup_constexpr(identifier)
+    if cached_result is not None:
+        logger.debug(f"Resolved identifier '{identifier}' -> '{cached_result}' from cache")
+        return cached_result
+
+    # Fallback to original filesystem search for compatibility
+    redpanda_source = find_redpanda_source()
     if not redpanda_source:
         logger.debug(f"Could not find Redpanda source directory to resolve identifier: {identifier}")
         return None
+
+    # Strip namespace qualifier if present (e.g., "net::tls_v1_2_cipher_suites" -> "tls_v1_2_cipher_suites")
+    search_identifier = identifier.split('::')[-1] if '::' in identifier else identifier
     
     # Pattern to match constexpr string_view definitions
     # Matches: inline constexpr std::string_view scram{"SCRAM"};
     patterns = [
-        rf'inline\s+constexpr\s+std::string_view\s+{re.escape(identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
-        rf'constexpr\s+std::string_view\s+{re.escape(identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
-        rf'inline\s+constexpr\s+auto\s+{re.escape(identifier)}\s*=\s*"([^"]+)"',
-        rf'constexpr\s+auto\s+{re.escape(identifier)}\s*=\s*"([^"]+)"',
-        rf'static\s+constexpr\s+std::string_view\s+{re.escape(identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
-        rf'static\s+inline\s+constexpr\s+std::string_view\s+{re.escape(identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
+        rf'inline\s+constexpr\s+std::string_view\s+{re.escape(search_identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
+        rf'constexpr\s+std::string_view\s+{re.escape(search_identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
+        rf'inline\s+constexpr\s+auto\s+{re.escape(search_identifier)}\s*=\s*"([^"]+)"',
+        rf'constexpr\s+auto\s+{re.escape(search_identifier)}\s*=\s*"([^"]+)"',
+        rf'static\s+constexpr\s+std::string_view\s+{re.escape(search_identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
+        rf'static\s+inline\s+constexpr\s+std::string_view\s+{re.escape(search_identifier)}\s*\{{\s*"([^"]+)"\s*\}}',
     ]
+
+    # Pattern for multi-line concatenated string constants (like TLS cipher suites)
+    # Matches: const std::string_view identifier = "line1"\n                                    "line2"\n...;
+    multiline_pattern = rf'(?:const|extern\s+const)\s+std::string_view\s+{re.escape(search_identifier)}\s*=\s*((?:"[^"]*"\s*)+);'
     
     # Search recursively through the config directory and other common locations
     search_dirs = [
@@ -383,6 +570,7 @@ def resolve_constexpr_identifier(identifier):
         os.path.join(redpanda_source, 'src', 'v', 'kafka'),
         os.path.join(redpanda_source, 'src', 'v', 'security'),
         os.path.join(redpanda_source, 'src', 'v', 'pandaproxy'),
+        os.path.join(redpanda_source, 'src', 'v', 'net'),  # For TLS cipher suites and network constants
     ]
     
     for search_dir in search_dirs:
@@ -399,12 +587,23 @@ def resolve_constexpr_identifier(identifier):
                         with open(file_path, 'r', encoding='utf-8') as f:
                             content = f.read()
                         
-                        # Try each pattern
+                        # Try each single-line pattern first
                         for pattern in patterns:
                             match = re.search(pattern, content, re.MULTILINE)
                             if match:
                                 resolved_value = match.group(1)
                                 logger.debug(f"Resolved identifier '{identifier}' -> '{resolved_value}' from {file_path}")
+                                return resolved_value
+
+                        # Try multi-line concatenated string pattern (for TLS cipher suites, etc.)
+                        multiline_match = re.search(multiline_pattern, content, re.MULTILINE | re.DOTALL)
+                        if multiline_match:
+                            # Extract all quoted strings and concatenate them
+                            strings_section = multiline_match.group(1)
+                            string_literals = re.findall(r'"([^"]*)"', strings_section)
+                            if string_literals:
+                                resolved_value = ''.join(string_literals)
+                                logger.debug(f"Resolved multi-line identifier '{identifier}' -> '{resolved_value[:50]}...' from {file_path}")
                                 return resolved_value
                                 
                     except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
@@ -413,82 +612,6 @@ def resolve_constexpr_identifier(identifier):
     
     logger.debug(f"Could not resolve identifier: {identifier}")
     return None
-
-
-def get_enterprise_sasl_mechanisms():
-    """
-    Locate and resolve enterprise SASL mechanisms declared in Redpanda's sasl_mechanisms.h.
-    
-    Searches known Redpanda source locations for an inline constexpr definition of enterprise_sasl_mechanisms,
-    extracts the identifiers, and resolves each identifier to its literal string value where possible; unresolved
-    identifiers are converted to an uppercase fallback.
-    
-    Returns:
-        list or None: List of enterprise SASL mechanism strings (e.g., ["GSSAPI", "OAUTHBEARER"]),
-                      or `None` if the lookup fails.
-    """
-    # Try to find the Redpanda source directory
-    redpanda_source_paths = [
-        'tmp/redpanda',  # Current directory
-        '../tmp/redpanda',  # Parent directory  
-        'tools/property-extractor/tmp/redpanda',  # From project root
-        os.path.join(os.getcwd(), 'tools', 'property-extractor', 'tmp', 'redpanda')
-    ]
-    
-    redpanda_source = None
-    for path in redpanda_source_paths:
-        if os.path.exists(path):
-            redpanda_source = path
-            break
-    
-    if not redpanda_source:
-        logger.debug("Could not find Redpanda source directory to resolve enterprise SASL mechanisms")
-        return None
-    
-    # Look for the enterprise_sasl_mechanisms definition in sasl_mechanisms.h
-    sasl_mechanisms_file = os.path.join(redpanda_source, 'src', 'v', 'config', 'sasl_mechanisms.h')
-    
-    if not os.path.exists(sasl_mechanisms_file):
-        logger.debug(f"sasl_mechanisms.h not found at {sasl_mechanisms_file}")
-        return None
-    
-    try:
-        with open(sasl_mechanisms_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Pattern to match the enterprise_sasl_mechanisms array definition
-        # inline constexpr auto enterprise_sasl_mechanisms = std::to_array<std::string_view>({gssapi, oauthbearer});
-        pattern = r'inline\s+constexpr\s+auto\s+enterprise_sasl_mechanisms\s*=\s*std::to_array<[^>]+>\s*\(\s*\{\s*([^}]+)\s*\}\s*\)'
-        
-        match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
-        if match:
-            # Extract the identifiers from the array (e.g., "gssapi, oauthbearer")
-            identifiers_str = match.group(1).strip()
-            
-            # Split by comma and clean up whitespace
-            identifiers = [id.strip() for id in identifiers_str.split(',') if id.strip()]
-            
-            # Resolve each identifier to its actual string value
-            mechanisms = []
-            for identifier in identifiers:
-                resolved_value = resolve_constexpr_identifier(identifier)
-                if resolved_value:
-                    mechanisms.append(resolved_value)
-                else:
-                    logger.debug(f"Could not resolve SASL mechanism identifier: {identifier}")
-                    # Fallback: use the identifier name in uppercase
-                    mechanisms.append(identifier.upper())
-            
-            if mechanisms:
-                logger.debug(f"Resolved enterprise SASL mechanisms: {mechanisms}")
-                return mechanisms
-        else:
-            logger.debug("Could not find enterprise_sasl_mechanisms definition in sasl_mechanisms.h")
-            return None
-        
-    except (OSError, UnicodeDecodeError, re.error) as e:
-        logger.debug(f"Error reading {sasl_mechanisms_file}: {e}")
-        return None
 
 
 def validate_paths(options):
@@ -520,7 +643,7 @@ def validate_paths(options):
 def get_file_pairs(options):
     path = Path(options.path)
 
-    file_iter = path.rglob("*.h") if options.recursive else path.rglob("*.h")
+    file_iter = path.rglob("*.h") if options.recursive else path.glob("*.h")
 
     file_pairs = []
 
@@ -573,8 +696,19 @@ def get_files_with_properties(file_pairs, treesitter_parser, cpp_language):
 
 def transform_files_with_properties(files_with_properties):
     type_transformer = TypeTransformer()
+
+    # Initialize ConstantResolver for validator enum extraction
+    redpanda_src = find_redpanda_source()
+    constant_resolver = None
+    if redpanda_src:
+        src_v_path = Path(redpanda_src) / 'src' / 'v'
+        if src_v_path.exists():
+            constant_resolver = ConstantResolver(src_v_path)
+            logger.debug(f"Initialized ConstantResolver with path: {src_v_path}")
+
     transformers = [
         EnterpriseTransformer(), ## this must be the first, as it modifies current data
+        ParamNormalizerTransformer(),
         TypeTransformer(),
         MetaParamTransformer(),
         BasicInfoTransformer(),
@@ -585,6 +719,7 @@ def transform_files_with_properties(files_with_properties):
         VisibilityTransformer(),
         DeprecatedTransformer(),
         IsSecretTransformer(),
+        ExampleTransformer(),
         NumericBoundsTransformer(type_transformer),
         DurationBoundsTransformer(type_transformer),
         SimpleDefaultValuesTransformer(),
@@ -593,13 +728,19 @@ def transform_files_with_properties(files_with_properties):
         AliasTransformer(),
     ]
 
+    # Add enum extractors if we have a constant_resolver
+    if constant_resolver:
+        transformers.append(ValidatorEnumExtractor(constant_resolver))
+        transformers.append(RuntimeValidationEnumExtractor(constant_resolver))
+
     all_properties = PropertyBag()
 
     for fp, properties in files_with_properties:
         for name in properties:
             # ignore private properties
-            if re.match(r"^_", name):
+            if UNDERSCORE_PREFIX_PATTERN.match(name):
                 continue
+
 
             property_definition = PropertyBag()
 
@@ -613,6 +754,143 @@ def transform_files_with_properties(files_with_properties):
     return all_properties
 
 
+def apply_transformers_to_topic_properties(topic_properties):
+    """
+    Apply transformers to topic properties that were extracted separately.
+    This ensures topic properties get the same metadata as cluster properties.
+    """
+    if not topic_properties:
+        return topic_properties
+    
+    type_transformer = TypeTransformer()
+    transformers = [
+        # Apply selected transformers that are relevant for topic properties
+        NeedsRestartTransformer(),  # This is the key one we need for needs_restart field
+        VisibilityTransformer(),
+        DeprecatedTransformer(),
+        IsSecretTransformer(),
+        ExperimentalTransformer(),
+        EnterpriseTransformer(),  # Need this to set is_enterprise field
+    ]
+    
+    transformed_properties = PropertyBag()
+    
+    for prop_name, prop_data in topic_properties.items():
+        property_definition = PropertyBag(prop_data)  # Start with existing data
+        
+        # Create a mock file path for topic properties
+        mock_fp = "topic_properties"
+        
+        # Create a mock properties dict that transformers expect
+        mock_properties = {prop_name: property_definition}
+        
+        for transformer in transformers:
+            if transformer.accepts(property_definition, mock_fp):
+                transformer.parse(property_definition, property_definition, mock_fp)
+        
+        transformed_properties[prop_name] = property_definition
+    
+    logging.info(f"Applied transformers to {len(transformed_properties)} topic properties")
+    return transformed_properties
+
+
+def filter_referenced_definitions(properties, definitions):
+    """
+    Filter definitions to only include types that are actually referenced by properties.
+
+    Performs transitive closure: if type A references type B, both are included.
+    This significantly reduces the size of the definitions section.
+
+    Args:
+        properties: Dict of property definitions
+        definitions: Dict of all type definitions
+
+    Returns:
+        dict: Filtered definitions containing only referenced types
+    """
+    referenced = set()
+
+    def collect_references(obj, visited=None):
+        """Recursively collect type references from properties and definitions."""
+        if visited is None:
+            visited = set()
+
+        if isinstance(obj, dict):
+            # Check for $ref
+            if '$ref' in obj:
+                ref = obj['$ref']
+                if ref.startswith('#/definitions/'):
+                    type_name = ref.replace('#/definitions/', '')
+                    if type_name not in visited:
+                        referenced.add(type_name)
+                        visited.add(type_name)
+                        # Recursively collect references from this definition
+                        if type_name in definitions:
+                            collect_references(definitions[type_name], visited)
+
+            # Check for c_type
+            if 'c_type' in obj:
+                type_name = obj['c_type']
+                if type_name and type_name in definitions and type_name not in visited:
+                    referenced.add(type_name)
+                    visited.add(type_name)
+                    collect_references(definitions[type_name], visited)
+
+            # Recurse into nested objects
+            for value in obj.values():
+                collect_references(value, visited)
+
+        elif isinstance(obj, list):
+            for item in obj:
+                collect_references(item, visited)
+
+    # Collect all references from properties
+    collect_references(properties)
+
+    # Filter definitions to only referenced types
+    filtered = {k: v for k, v in definitions.items() if k in referenced}
+
+    logger.info(f"📉 Filtered definitions from {len(definitions)} to {len(filtered)} (only referenced types)")
+
+    return filtered
+
+
+def clean_private_fields_from_definitions(definitions):
+    """
+    Remove private fields (those starting with _) from definition properties.
+    This keeps the JSON output clean by only exposing public API.
+
+    Args:
+        definitions: Dictionary of type definitions
+
+    Returns:
+        Dictionary with private fields filtered out
+    """
+    cleaned = {}
+    total_private_fields = 0
+
+    for def_name, def_data in definitions.items():
+        if 'properties' in def_data and def_data['properties']:
+            # Filter out fields starting with underscore
+            original_props = def_data['properties']
+            cleaned_props = {k: v for k, v in original_props.items() if not k.startswith('_')}
+
+            private_count = len(original_props) - len(cleaned_props)
+            total_private_fields += private_count
+
+            # Only include definitions that have at least one public field
+            if cleaned_props:
+                cleaned[def_name] = {**def_data, 'properties': cleaned_props}
+        else:
+            # Keep definitions without properties (like enums)
+            cleaned[def_name] = def_data
+
+    if total_private_fields > 0:
+        logger.info(f"🧹 Cleaned {total_private_fields} private fields from definitions")
+
+    return cleaned
+
+
 # The definitions.json file contains type definitions that the extractor uses to standardize and centralize type information. After extracting and transforming the properties from the source code, the function merge_properties_and_definitions looks up each property's type in the definitions. If a property's type (or the type of its items, in the case of arrays) matches one of the definitions, the transformer replaces that type with a JSON pointer ( such as #/definitions/<type>) to the corresponding entry in definitions.json. The final JSON output then includes both a properties section (with types now referencing the definitions) and a definitions section, so that consumers of the output can easily resolve the full type information.
 def merge_properties_and_definitions(properties, definitions):
     # Do not overwrite the resolved type/default with a reference. Just return the resolved properties and definitions.
@@ -621,67 +899,45 @@ def merge_properties_and_definitions(properties, definitions):
 
 def apply_property_overrides(properties, overrides, overrides_file_path=None):
     """
-    Apply property overrides from the overrides JSON file to enhance property documentation.
+    Apply overrides from an overrides mapping to the extracted properties, mutating and returning the properties dictionary.
     
-    This function allows customizing property documentation by providing overrides for:
+    Processes entries in overrides["properties"]; for each override key the function:
+    - If the key matches a property dictionary key, applies the override to that property.
+    - Otherwise, searches existing properties for an entry whose `"name"` equals the override key and applies the override if found.
+    - If no matching property is found, creates a new property from the override and adds it under the override key.
     
-    1. description: Override the auto-extracted property description with custom text
-    2. version: Add version information showing when the property was introduced
-    3. example: Add AsciiDoc example sections with flexible input formats (see below)
-    4. default: Override the auto-extracted default value
-    5. related_topics: Add an array of related topic links for cross-referencing
-    6. config_scope: Specify the scope for new properties ("topic", "cluster", "broker")
-    7. type: Specify the type for new properties
-
-    Properties that don't exist in the extracted source can be created from overrides.
-    This is useful for topic properties or other configurations that aren't auto-detected.
-
-    Multiple example input formats are supported for user convenience:
-
-    1. Direct AsciiDoc string:
-       "example": ".Example\n[,yaml]\n----\nredpanda:\n  property_name: value\n----"
-
-    2. Multi-line array (each element becomes a line):
-       "example": [
-         ".Example",
-         "[,yaml]",
-         "----",
-         "redpanda:",
-         "  property_name: value",
-         "----"
-       ]
-
-    3. External file reference:
-       "example_file": "examples/property_name.adoc"
-
-    4. Auto-formatted YAML with title and description:
-       "example_yaml": {
-         "title": "Example Configuration",
-         "description": "This shows how to configure the property.",
-         "config": {
-           "redpanda": {
-             "property_name": "value"
-           }
-         }
-       }
-
-    Args:
-        properties: Dictionary of extracted properties from C++ source
-        overrides: Dictionary loaded from overrides JSON file
-        overrides_file_path: Path to the overrides file (for resolving relative example_file paths)
-
+    The function supports overrides that add or replace description, version, example content, default, type, config_scope, related_topics, and other metadata. When examples reference external files, relative paths are resolved relative to overrides_file_path.
+    
+    Parameters:
+        properties (dict): Mapping of existing property entries (modified in-place).
+        overrides (dict): Loaded overrides structure; only keys under "properties" are processed.
+        overrides_file_path (str|None): Filesystem path of the overrides file used to resolve relative example_file references.
+    
     Returns:
-        Updated properties dictionary with overrides applied and new properties created
+        dict: The same properties mapping with overrides applied and any new properties created.
     """
     if overrides and "properties" in overrides:
         for prop, override in overrides["properties"].items():
+            # First check if property exists by key
             if prop in properties:
                 # Apply overrides to existing properties
                 _apply_override_to_existing_property(properties[prop], override, overrides_file_path)
             else:
-                # Create new property from override
-                logger.info(f"Creating new property from override: {prop}")
-                properties[prop] = _create_property_from_override(prop, override, overrides_file_path)
+                # Check if property exists by name field (handles cases where key != name)
+                existing_property_key = None
+                for key, property_data in properties.items():
+                    if hasattr(property_data, 'get') and property_data.get('name') == prop:
+                        existing_property_key = key
+                        break
+                
+                if existing_property_key:
+                    # Found existing property by name, apply overrides to it
+                    logger.info(f"Applying override to existing property '{prop}' (found by name, key='{existing_property_key}')")
+                    _apply_override_to_existing_property(properties[existing_property_key], override, overrides_file_path)
+                else:
+                    # Create new property from override
+                    logger.info(f"Creating new property from override: {prop}")
+                    properties[prop] = _create_property_from_override(prop, override, overrides_file_path)
     return properties
 
 
@@ -911,25 +1167,426 @@ def add_config_scope(properties):
     return properties
 
 
+def map_enum_defaults(properties):
+    """
+    Map enum default values to their user-facing strings using enum_string_mappings.
+
+    This runs after resolve_type_and_default() when enum constraints have been populated.
+    For properties with enum constraints, if the default value is not in the enum list,
+    check if it matches a raw enum value in the type definitions and map it to the
+    user-facing string representation.
+
+    Args:
+        properties (dict): Properties with resolved types and enum constraints
+
+    Returns:
+        dict: Properties with mapped enum default values
+    """
+    global _type_definitions_cache
+
+    if not _type_definitions_cache:
+        return properties
+
+    for prop_name, prop in properties.items():
+        # Skip if not an enum property or no default
+        if not prop.get("enum") or "default" not in prop:
+            continue
+
+        default = prop.get("default")
+        enum_values = prop.get("enum", [])
+
+        # Skip if default is None or already in the enum list
+        if default is None or default in enum_values:
+            continue
+
+        # Check if default is a raw enum value that needs mapping
+        if not isinstance(default, str):
+            continue
+
+        # Search type definitions for matching enum with string mappings
+        for type_name, type_def in _type_definitions_cache.items():
+            if type_def.get("type") != "enum":
+                continue
+
+            mappings = type_def.get("enum_string_mappings")
+            if not mappings:
+                continue
+
+            # If we find a mapping for this default value, apply it
+            if default in mappings:
+                mapped_value = mappings[default]
+                prop["default"] = mapped_value
+                logger.debug(f"✓ Mapped enum default for {prop_name}: {default} → {mapped_value}")
+                break
+
+    return properties
+
+
+def format_time_human_readable(value, unit):
+    """
+    Convert a numeric time value to a human-readable string.
+
+    Args:
+        value: Numeric value (int)
+        unit: 'ms' for milliseconds, 's' for seconds
+
+    Returns:
+        Human-readable string like "7 days", "1 hour", "30 minutes"
+    """
+    # Convert to milliseconds for uniform handling
+    if unit == 's':
+        ms = value * 1000
+    else:
+        ms = value
+
+    # Time unit thresholds in milliseconds
+    units = [
+        (365 * 24 * 60 * 60 * 1000, 'year', 'years'),
+        (7 * 24 * 60 * 60 * 1000, 'week', 'weeks'),
+        (24 * 60 * 60 * 1000, 'day', 'days'),
+        (60 * 60 * 1000, 'hour', 'hours'),
+        (60 * 1000, 'minute', 'minutes'),
+        (1000, 'second', 'seconds'),
+        (1, 'millisecond', 'milliseconds'),
+    ]
+
+    # Try to find the largest unit that divides evenly
+    for threshold, singular, plural in units:
+        if ms >= threshold and ms % threshold == 0:
+            count = ms // threshold
+            unit_name = singular if count == 1 else plural
+            return f"{int(count)} {unit_name}"
+
+    # If no clean division, return the original with units
+    if unit == 's':
+        return f"{value} seconds"
+    else:
+        return f"{value} milliseconds"
+
+
+def evaluate_chrono_expressions(properties):
+    """
+    Evaluate chrono expressions in default values and convert to numeric values.
+    Also adds human-readable versions for better UX in templates.
+
+    Examples:
+    - "24h * 365" -> 31536000000 (for milliseconds) + "365 days"
+    - "7 * 24h" -> 604800 (for seconds) + "7 days"
+    - "1h" -> 3600000 (for milliseconds) or 3600 (for seconds) + "1 hour"
+
+    Conversion factors:
+    - ms (milliseconds): 1
+    - s (seconds): 1000 ms
+    - min (minutes): 60000 ms
+    - h (hours): 3600000 ms
+    - d (days): 86400000 ms
+    """
+    import re
+
+    # Conversion factors to milliseconds
+    time_units = {
+        'ms': 1,
+        's': 1000,
+        'min': 60 * 1000,
+        'h': 60 * 60 * 1000,
+        'd': 24 * 60 * 60 * 1000,
+    }
+
+    def parse_time_value(expr):
+        """Parse a time expression like '24h' or '365' and return milliseconds."""
+        expr = expr.strip()
+
+        # Try to match number with unit suffix
+        match = re.match(r'^(\d+(?:\.\d+)?)(ms|s|min|h|d)?$', expr)
+        if match:
+            value = float(match.group(1))
+            unit = match.group(2) if match.group(2) else None
+
+            if unit:
+                return value * time_units[unit]
+            else:
+                # Bare number - assume it's already in target units
+                return value
+
+        return None
+
+    def evaluate_expression(expr_str):
+        """Evaluate a simple mathematical expression with time units."""
+        expr_str = expr_str.strip()
+
+        # Handle simple cases first (just a time value)
+        simple_value = parse_time_value(expr_str)
+        if simple_value is not None:
+            return simple_value
+
+        # Handle expressions like "24h * 365" or "7 * 24h"
+        # Replace time values with their millisecond equivalents
+        tokens = re.split(r'(\s*[*/+\-]\s*)', expr_str)
+        evaluated_tokens = []
+
+        for token in tokens:
+            token = token.strip()
+            if not token:
+                continue
+
+            # Check if it's an operator
+            if token in ['*', '/', '+', '-']:
+                evaluated_tokens.append(token)
+            else:
+                # Try to parse as time value
+                value = parse_time_value(token)
+                if value is not None:
+                    evaluated_tokens.append(str(value))
+                else:
+                    # Not a time value, keep as is
+                    evaluated_tokens.append(token)
+
+        # Evaluate the expression
+        try:
+            result = eval(' '.join(evaluated_tokens))
+            return result
+        except:
+            return None
+
+    converted_count = 0
+
+    for prop_name, prop in properties.items():
+        default = prop.get('default')
+        c_type = prop.get('c_type', '')
+
+        # Only process string defaults with chrono types
+        if not isinstance(default, str):
+            continue
+
+        # Check if it's a chrono type or looks like a time expression
+        is_chrono = 'chrono' in c_type or 'duration' in c_type.lower()
+        has_time_expr = any(unit in default for unit in ['ms', 's', 'min', 'h', 'd']) or any(op in default for op in ['*', '+', '-', '/'])
+
+        if not (is_chrono or has_time_expr):
+            continue
+
+        # Try to evaluate the expression
+        result_ms = evaluate_expression(default)
+
+        if result_ms is not None:
+            # Convert to appropriate output unit based on type
+            unit = 'ms'  # Track which unit we're using for human-readable format
+
+            if 'std::chrono::milliseconds' in c_type:
+                result = int(result_ms)
+                unit = 'ms'
+            elif 'std::chrono::seconds' in c_type:
+                result = int(result_ms / 1000)
+                unit = 's'
+            elif 'std::chrono::minutes' in c_type:
+                result = int(result_ms / 60000)
+                unit = 'min'
+            elif 'std::chrono::hours' in c_type:
+                result = int(result_ms / 3600000)
+                unit = 'h'
+            elif 'duration' in c_type.lower():
+                # Assume milliseconds for generic duration types
+                result = int(result_ms)
+                unit = 'ms'
+            else:
+                # Default to milliseconds
+                result = int(result_ms)
+                unit = 'ms'
+
+            prop['default'] = result
+
+            # Add human-readable version for templates
+            human_readable = format_time_human_readable(result, unit)
+            prop['default_human_readable'] = human_readable
+
+            converted_count += 1
+            logger.debug(f"Evaluated chrono expression for {prop_name}: '{default}' -> {result} ({human_readable})")
+
+    if converted_count > 0:
+        logger.info(f"Evaluated {converted_count} chrono expressions in default values")
+
+    return properties
+
+
+def resolve_type_with_namespace(type_name, definitions):
+    """
+    Resolve a type name, trying with namespace prefixes if not found directly.
+
+    Args:
+        type_name: Type name to resolve (may be unqualified)
+        definitions: Dictionary of type definitions
+
+    Returns:
+        The definition dict if found, or {} if not found
+    """
+    # Try the type name as-is first
+    if type_name in definitions:
+        return definitions[type_name]
+
+    # Try common namespace prefixes
+    common_namespaces = ['config', 'model', 'security', 'net', 'kafka', 'pandaproxy']
+    for namespace in common_namespaces:
+        qualified_name = f"{namespace}::{type_name}"
+        if qualified_name in definitions:
+            return definitions[qualified_name]
+
+    # Not found
+    return {}
+
+
 def resolve_type_and_default(properties, definitions):
     """
     Normalize property types and expand C++-style default values into JSON-compatible Python structures.
-    
-    This function resolves type references in each property against the provided definitions (supports "$ref" and direct type names), normalizes property "type" to a JSON Schema primitive when possible, expands C++ constructor/initializer and common C++ literal patterns found in "default" values into Python primitives/objects/lists, ensures array-typed properties have array defaults (including handling one_or_many_property cases), updates array item type information when item types reference definitions, and converts any `enterprise_value` strings via process_enterprise_value.
-    
+
+    ============================================================================
+    TYPE RESOLUTION SYSTEM - How C++ Types Become JSON Schema Types
+    ============================================================================
+
+    This function bridges C++ type system with JSON Schema by:
+    1. Resolving definition references ($ref pointers) to actual type structures
+    2. Expanding C++ constructors into JSON-compatible default values
+    3. Ensuring type consistency between properties and their defaults
+    4. Handling special array/optional type patterns from Redpanda source
+
+    TYPE RESOLUTION FLOW:
+    ┌─────────────────────────────────────────────────────────────────────────
+    │ C++ Source:
+    │   property<model::broker_endpoint> admin(...,
+    │     model::broker_endpoint(net::unresolved_address("127.0.0.1", 9644))
+    │   )
+    │
+    │ ↓ TypeTransformer (transformers.py)
+    │   type: "broker_endpoint"  (extracted from template parameter)
+    │   default: "model::broker_endpoint(net::unresolved_address(\"127.0.0.1\", 9644))"
+    │
+    │ ↓ Definition Lookup (definitions dict)
+    │   definitions["broker_endpoint"] = {
+    │     "type": "object",
+    │     "properties": {"address": {"type": "string"}, "port": {"type": "integer"}}
+    │   }
+    │
+    │ ↓ Constructor Expansion (this function)
+    │   type: "object"  (resolved from definition)
+    │   default: {"address": "127.0.0.1", "port": 9644}  (expanded constructor)
+    │
+    │ ↓ JSON Output:
+    │   "admin": {
+    │     "type": "object",
+    │     "properties": {...},
+    │     "default": {"address": "127.0.0.1", "port": 9644}
+    │   }
+    └─────────────────────────────────────────────────────────────────────────
+
+    DEFINITION SYSTEM - Reusable Type Structures:
+    ┌─────────────────────────────────────────────────────────────────────────
+    │ Purpose: Definitions centralize complex type information to avoid
+    │          repeating structure across multiple properties.
+    │
+    │ Source: definitions.json contains hand-crafted JSON Schema definitions
+    │         for Redpanda's C++ types (endpoints, durations, enums, etc.)
+    │
+    │ Usage in Properties:
+    │   Before resolution:  type: "broker_endpoint"
+    │   After resolution:   type: "object" + properties from definition
+    │
+    │ $ref Pointers:
+    │   Some definitions use JSON Schema $ref to reference other definitions:
+    │   {"$ref": "#/definitions/compression"} → resolve recursively
+    │
+    │ Definition Structure:
+    │   {
+    │     "compression": {
+    │       "type": "string",
+    │       "enum": ["gzip", "snappy", "lz4", "zstd", "none"]
+    │     },
+    │     "broker_endpoint": {
+    │       "type": "object",
+    │       "properties": {
+    │         "address": {"type": "string"},
+    │         "port": {"type": "integer"}
+    │       }
+    │     }
+    │   }
+    └─────────────────────────────────────────────────────────────────────────
+
+    CONSTRUCTOR EXPANSION - C++ to JSON Conversion:
+    ┌─────────────────────────────────────────────────────────────────────────
+    │ SIMPLE PRIMITIVES:
+    │   C++: 9092                    → JSON: 9092
+    │   C++: "localhost"             → JSON: "localhost"
+    │   C++: true                    → JSON: true
+    │
+    │ ENUM VALUES:
+    │   C++: model::compression::gzip  → JSON: "gzip"
+    │   Pattern: namespace::type::value → Extract final value
+    │
+    │ CONSTRUCTORS:
+    │   C++: net::unresolved_address("127.0.0.1", 9644)
+    │   → Parse: type=unresolved_address, args=["127.0.0.1", 9644]
+    │   → Lookup definition for "unresolved_address"
+    │   → Match args to definition properties by position
+    │   → Result: {"address": "127.0.0.1", "port": 9644}
+    │
+    │ ARRAYS:
+    │   C++: std::vector<int>{1, 2, 3}  → JSON: [1, 2, 3]
+    │   C++: {1, 2, 3}                  → JSON: [1, 2, 3]
+    │   Special: one_or_many_property wraps single values in arrays
+    │
+    │ CHRONO DURATIONS:
+    │   C++: std::chrono::seconds{30}   → JSON: 30 (with units in description)
+    │   C++: std::chrono::milliseconds{5000} → JSON: 5000
+    │
+    │ OPTIONAL TYPES:
+    │   C++: std::optional<int>{}       → JSON: null
+    │   C++: std::optional<int>{42}     → JSON: 42
+    └─────────────────────────────────────────────────────────────────────────
+
+    SPECIAL HANDLING:
+    ┌─────────────────────────────────────────────────────────────────────────
+    │ one_or_many_property<T>:
+    │   - Always treated as array type in JSON
+    │   - Single default values are wrapped: {x:1} → [{x:1}]
+    │   - Already-array defaults preserved: [{x:1}] → [{x:1}]
+    │
+    │ Array Items Type Resolution:
+    │   - If items.type references a definition, resolve it:
+    │     items.type: "endpoint_tls_config" → items: {...definition...}
+    │   - Ensures array item validation has full type information
+    │
+    │ Enterprise Values:
+    │   - enterprise_value strings expanded via process_enterprise_value()
+    │   - Converts license restriction patterns to user-friendly strings
+    └─────────────────────────────────────────────────────────────────────────
+
+    HOW TO ADD NEW TYPE DEFINITIONS:
+    1. Identify the C++ type that needs a definition (e.g., new_endpoint_type)
+    2. Analyze the C++ struct/class to determine JSON schema structure
+    3. Add entry to definitions.json with appropriate JSON Schema:
+       {
+         "new_endpoint_type": {
+           "type": "object",
+           "properties": {"field1": {"type": "string"}, "field2": {"type": "integer"}}
+         }
+       }
+    4. TypeTransformer will automatically extract the type name from C++
+    5. This function will look up the definition and expand constructors
+    6. Test with a property using the new type to verify expansion
+
     Parameters:
-        properties (dict): Mapping of property names to metadata dictionaries. Relevant keys that may be modified include "type", "default", "items", and "enterprise_value".
-        definitions (dict): Mapping of definition names to JSON Schema definition dictionaries used to resolve $ref targets and to infer shapes for expanding constructor-style defaults.
-    
+        properties (dict): Property name → metadata dict with keys: "type", "default",
+                          "items", "enterprise_value" that will be modified in-place
+        definitions (dict): Type name → JSON Schema definition used for lookups
+                           and constructor expansion
+
     Returns:
-        dict: The same `properties` mapping after in-place normalization and expansion of types, defaults, item types, and enterprise values.
+        dict: The same `properties` dict after in-place type normalization and
+              default value expansion
     """
     import ast
     import re
 
     def resolve_definition_type(defn):
         """Recursively resolve $ref pointers to get the actual type definition."""
-        # Recursively resolve $ref
         while isinstance(defn, dict) and "$ref" in defn:
             ref = defn["$ref"]
             ref_name = ref.split("/")[-1]
@@ -954,18 +1611,15 @@ def resolve_type_and_default(properties, definitions):
         original_s = s
         if s.startswith("{") and s.endswith("}"):
             s = s[1:-1].strip()
-        
-        # Try parentheses syntax first: type_name(args)
-        match = re.match(r'([a-zA-Z0-9_:]+)\((.*)\)', s)
+
+        match = CONSTRUCTOR_PATTERN.match(s)
         if match:
             type_name, arg_str = match.groups()
         else:
-            # Try curly brace syntax: type_name{args}
-            match = re.match(r'([a-zA-Z0-9_:]+)\{(.*)\}', s)
+            match = BRACED_CONSTRUCTOR_PATTERN.match(s)
             if match:
                 type_name, arg_str = match.groups()
             else:
-                # Primitive or enum
                 if s.startswith('"') and s.endswith('"'):
                     return None, [ast.literal_eval(s)]
                 try:
@@ -997,7 +1651,7 @@ def resolve_type_and_default(properties, definitions):
     def process_cpp_patterns(arg_str):
         """
         Convert a C++-style expression string into a JSON-friendly literal representation.
-        
+
         This function recognises common C++ patterns produced by the extractor and maps them to values suitable for JSON schema defaults and examples. Handled cases include:
         - std::nullopt -> null
         - zero-argument functions (e.g., model::kafka_audit_logging_topic()) resolved from source when possible
@@ -1005,30 +1659,27 @@ def resolve_type_and_default(properties, definitions):
         - constexpr identifiers and simple string constructors resolved to their literal strings when available
         - known default constructors and truncated type names mapped to sensible defaults (e.g., duration -> 0, path -> "")
         - simple heuristics for unknown constructors and concatenated expressions
-        
+
         Returns:
             processed (str): A string representing the JSON-ready value (for example: '"value"', 'null', '0', or the original input when no mapping applied).
         """
         arg_str = arg_str.strip()
         # Remove C++ digit separators (apostrophes) that may appear in numeric literals
-        # Example: "30'000ms" -> "30000ms". Use conservative replace only between digits.
-        arg_str = re.sub(r"(?<=\d)'(?=\d)", '', arg_str)
-        
-        # Handle std::nullopt -> null
-        if arg_str == "std::nullopt":
+        # Example: "30'000ms" -> "30000ms"
+        arg_str = DIGIT_SEPARATOR_PATTERN.sub('', arg_str)
+
+        if arg_str == "std::nullopt" or arg_str == "nullopt":
             return "null"
-        
-        # Handle C++ function calls that return constant values
-        # Dynamically look up function return values from the source code
-        function_call_match = re.match(r'([a-zA-Z0-9_:]+)\(\)', arg_str)
+
+        # Dynamically resolve C++ function calls by looking up their return values in source
+        function_call_match = FUNCTION_CALL_PATTERN.match(arg_str)
         if function_call_match:
             function_name = function_call_match.group(1)
             resolved_value = resolve_cpp_function_call(function_name)
             if resolved_value is not None:
                 return f'"{resolved_value}"'
 
-        # Handle std::chrono literals like std::chrono::minutes{5} -> "5min"
-        chrono_match = re.match(r'std::chrono::([a-zA-Z]+)\s*\{\s*(\d+)\s*\}', arg_str)
+        chrono_match = CHRONO_PATTERN.match(arg_str)
         if chrono_match:
             unit = chrono_match.group(1)
             value = chrono_match.group(2)
@@ -1043,64 +1694,130 @@ def resolve_type_and_default(properties, definitions):
             short = unit_map.get(unit.lower(), unit)
             return f'"{value} {short}"'
         
-        # Handle enum-like patterns (such as fips_mode_flag::disabled -> "disabled").
-        # Only treat bare 'X::Y' tokens as enums — do not match when the token
-        # is followed by constructor braces/parentheses (e.g. std::chrono::minutes{5}).
-        enum_match = re.match(r'[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)\s*$', arg_str)
+        # Handle chrono literals with parentheses like chrono::milliseconds(5min) -> "5 minutes"
+        chrono_paren_match = CHRONO_PAREN_PATTERN.match(arg_str)
+        if chrono_paren_match:
+            unit = chrono_paren_match.group(1)
+            value = chrono_paren_match.group(2).strip()
+            
+            inner_time_match = TIME_UNIT_PATTERN.match(value)
+            if inner_time_match:
+                num, suffix = inner_time_match.groups()
+                inner_unit_map = {
+                    "min": "minute",
+                    "s": "second",
+                    "ms": "millisecond",
+                    "h": "hour",
+                }
+                base = inner_unit_map.get(suffix, suffix)
+                if num != "1" and not base.endswith("s"):
+                    base = base + "s"
+                return f'"{num} {base}"'
+
+            # Evaluate arithmetic in duration constructors (e.g., "60 * 5" -> "300 seconds")
+            if "*" in value:
+                try:
+                    result = safe_arithmetic_eval(value)
+                    unit_map = {
+                        'hours': 'hour',
+                        'minutes': 'minute',
+                        'seconds': 'second',
+                        'milliseconds': 'millisecond',
+                        'microseconds': 'microsecond',
+                        'nanoseconds': 'nanosecond'
+                    }
+                    base = unit_map.get(unit.lower(), unit)
+                    if result != 1 and not base.endswith("s"):
+                        base = base + "s"
+                    return f'"{result} {base}"'
+                except (ValueError, Exception):
+                    pass
+
+            try:
+                num = int(value)
+                unit_map = {
+                    'hours': 'hour',
+                    'minutes': 'minute',
+                    'seconds': 'second',
+                    'milliseconds': 'millisecond',
+                    'microseconds': 'microsecond',
+                    'nanoseconds': 'nanosecond'
+                }
+                base = unit_map.get(unit.lower(), unit)
+                if num != 1 and not base.endswith("s"):
+                    base = base + "s"
+                return f'"{num} {base}"'
+            except ValueError:
+                return f'"{value} {unit}"'
+
+        address_match = ADDRESS_PATTERN.match(arg_str)
+        if address_match:
+            addr = address_match.group(1).strip().strip('"')
+            port = address_match.group(2).strip()
+            try:
+                port_val = int(port)
+                return f'"{addr}:{port_val}"'
+            except ValueError:
+                return f'"{addr}:{port}"'
+
+        keyval_match = KEYVAL_PATTERN.match(arg_str)
+        if keyval_match:
+            key = keyval_match.group(1)
+            value = keyval_match.group(2)
+            processed_value = process_cpp_patterns(value)
+            if processed_value.startswith('"') and processed_value.endswith('"'):
+                processed_value = processed_value[1:-1]
+            return processed_value
+        
+        # Extract enum value from qualified identifiers (fips_mode_flag::disabled -> "disabled")
+        # ENUM_PATTERN uses anchors to avoid matching constructor syntax (config::type{})
+        enum_match = ENUM_PATTERN.match(arg_str)
         if enum_match:
             enum_value = enum_match.group(1)
             return f'"{enum_value}"'
-        
-        # Handle constexpr identifier resolution (such as scram -> "SCRAM")
-        # Check if this is a simple identifier that might be a constexpr variable
-        if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', arg_str):
+
+        # Resolve constexpr identifiers by looking up their values in source files
+        if IDENTIFIER_PATTERN.match(arg_str):
             resolved_value = resolve_constexpr_identifier(arg_str)
             if resolved_value is not None:
                 return f'"{resolved_value}"'
-        
-        # Handle string constructor patterns like ss::sstring{identifier}
-        sstring_match = re.match(r'ss::sstring\{([a-zA-Z_][a-zA-Z0-9_]*)\}', arg_str)
+
+        sstring_match = SSTRING_PATTERN.match(arg_str)
         if sstring_match:
             identifier = sstring_match.group(1)
             resolved_value = resolve_constexpr_identifier(identifier)
             if resolved_value is not None:
                 return f'"{resolved_value}"'
             else:
-                # Fallback to the identifier itself
                 return f'"{identifier}"'
-        
-        # Handle default constructors and their default values
-        # This handles cases where C++ default constructors are used but should map to specific values
-        
-        # Pattern 1: Full constructor syntax like config::leaders_preference{}
+
+        # Map C++ default constructors to their runtime values
+        # These patterns are derived from analyzing the C++ source implementations
         constructor_patterns = {
-            r'config::leaders_preference\{\}': '"none"',  # Based on C++ code analysis
+            r'config::leaders_preference\{\}': '"none"',  # type_t::none is default
             r'std::chrono::seconds\{0\}': '0',
             r'std::chrono::milliseconds\{0\}': '0',
             r'model::timeout_clock::duration\{\}': '0',
             r'config::data_directory_path\{\}': '""',
-            r'std::optional<[^>]+>\{\}': 'null',  # Empty optional
+            r'std::optional<[^>]+>\{\}': 'null',
         }
-        
+
         for pattern, replacement in constructor_patterns.items():
             if re.match(pattern, arg_str):
                 return replacement
-        
-        # Pattern 2: Truncated type names that likely came from default constructors
-        # These are cases where tree-sitter parsing truncated "config::type{}" to just "type"
+
+        # Fallback mappings for truncated type names (tree-sitter may truncate constructors)
         truncated_patterns = {
-            'leaders_preference': '"none"',  # config::leaders_preference{} -> none
-            'data_directory_path': '""',     # config::data_directory_path{} -> empty string
-            'timeout_clock_duration': '0',   # model::timeout_clock::duration{} -> 0
-            'log_level': '"info"',           # Default log level
-            'compression_type': '"none"',    # Default compression
+            'leaders_preference': '"none"',
+            'data_directory_path': '""',
+            'timeout_clock_duration': '0',
+            'log_level': '"info"',
+            'compression_type': '"none"',
         }
-        
-        # Check if arg_str is exactly one of these truncated patterns
+
         if arg_str in truncated_patterns:
             return truncated_patterns[arg_str]
-        
-        # Pattern 3: Handle remaining default constructor syntax generically
+
         generic_constructor_match = re.match(r'[a-zA-Z0-9_:]+\{\}', arg_str)
         if generic_constructor_match:
             # For unknown constructors, try to infer a reasonable default
@@ -1169,8 +1886,12 @@ def resolve_type_and_default(properties, definitions):
                 else:
                     return processed_arg
             
-        type_def = resolve_definition_type(definitions.get(type_name, {}))
+        type_def = resolve_definition_type(resolve_type_with_namespace(type_name, definitions))
         if "enum" in type_def:
+            # Strip C++ namespace qualifiers from enum values
+            # e.g., model::partition_autobalancing_mode::continuous → continuous
+            if isinstance(default_str, str) and '::' in default_str:
+                return default_str.split('::')[-1]
             return default_str
         # If it has properties but no explicit type, it's an object
         if type_def.get("type") == "object" or (type_def.get("properties") and not type_def.get("type")):
@@ -1180,10 +1901,12 @@ def resolve_type_and_default(properties, definitions):
             
             props = list(type_def["properties"].keys())
             result = {}
-            
+
             # For each constructor argument, try to expand it and map to the correct property
             for i, prop in enumerate(props):
                 prop_def = type_def["properties"][prop]
+                # Strip leading underscore from private field names for public API
+                public_prop_name = prop.lstrip('_')
                 if "$ref" in prop_def:
                     sub_type = prop_def["$ref"].split("/")[-1]
                 else:
@@ -1199,33 +1922,35 @@ def resolve_type_and_default(properties, definitions):
                             # Get the definition for the nested type
                             nested_type_def = resolve_definition_type(definitions.get(nested_tname, {}))
                             nested_props = list(nested_type_def.get("properties", {}).keys())
-                            
+
                             # Expand the nested constructor by mapping its arguments to its properties
                             nested_result = {}
                             for j, nested_prop in enumerate(nested_props):
                                 nested_prop_def = nested_type_def["properties"][nested_prop]
+                                # Strip leading underscore from private field names for public API
+                                public_nested_prop_name = nested_prop.lstrip('_')
                                 if j < len(nested_args):
                                     nested_arg = nested_args[j]
                                     # Apply simple C++ pattern processing to the argument
                                     processed_nested_arg = process_cpp_patterns(nested_arg)
-                                    
+
                                     # Convert the processed argument based on the property type
                                     if nested_prop_def.get("type") == "string":
                                         if processed_nested_arg.startswith('"') and processed_nested_arg.endswith('"'):
-                                            nested_result[nested_prop] = ast.literal_eval(processed_nested_arg)
+                                            nested_result[public_nested_prop_name] = ast.literal_eval(processed_nested_arg)
                                         else:
-                                            nested_result[nested_prop] = processed_nested_arg
+                                            nested_result[public_nested_prop_name] = processed_nested_arg
                                     elif nested_prop_def.get("type") == "integer":
                                         try:
-                                            nested_result[nested_prop] = int(processed_nested_arg)
+                                            nested_result[public_nested_prop_name] = int(processed_nested_arg)
                                         except ValueError:
-                                            nested_result[nested_prop] = processed_nested_arg
+                                            nested_result[public_nested_prop_name] = processed_nested_arg
                                     elif nested_prop_def.get("type") == "boolean":
-                                        nested_result[nested_prop] = processed_nested_arg.lower() == "true"
+                                        nested_result[public_nested_prop_name] = processed_nested_arg.lower() == "true"
                                     else:
-                                        nested_result[nested_prop] = processed_nested_arg
+                                        nested_result[public_nested_prop_name] = processed_nested_arg
                                 else:
-                                    nested_result[nested_prop] = None
+                                    nested_result[public_nested_prop_name] = None
                             
                             # Now we have the expanded nested object, we need to map it to the parent object's properties
                             # This is where the type-aware mapping happens
@@ -1244,39 +1969,40 @@ def resolve_type_and_default(properties, definitions):
                                     result.update(nested_result)
                                     # Set remaining properties to None
                                     for remaining_prop in props[i+1:]:
-                                        if remaining_prop not in result:
-                                            result[remaining_prop] = None
+                                        public_remaining_prop = remaining_prop.lstrip('_')
+                                        if public_remaining_prop not in result:
+                                            result[public_remaining_prop] = None
                                     break
                                 else:
                                     # Map the nested object to the current property
-                                    result[prop] = nested_result
+                                    result[public_prop_name] = nested_result
                         else:
                             # Fallback: recursively expand with the expected property type
                             expanded_arg = expand_default(sub_type, arg)
-                            result[prop] = expanded_arg
+                            result[public_prop_name] = expanded_arg
                     else:
                         # Simple value, parse based on the property type
                         # First apply C++ pattern processing
                         processed_arg = process_cpp_patterns(arg)
-                        
+
                         if sub_type == "string":
                             # If processed_arg is already quoted, use ast.literal_eval, otherwise keep as is
                             if processed_arg.startswith('"') and processed_arg.endswith('"'):
-                                result[prop] = ast.literal_eval(processed_arg)
+                                result[public_prop_name] = ast.literal_eval(processed_arg)
                             else:
-                                result[prop] = processed_arg
+                                result[public_prop_name] = processed_arg
                         elif sub_type == "integer":
                             try:
-                                result[prop] = int(processed_arg)
+                                result[public_prop_name] = int(processed_arg)
                             except ValueError:
                                 # If conversion fails, keep as string (might be processed C++ pattern)
-                                result[prop] = processed_arg
+                                result[public_prop_name] = processed_arg
                         elif sub_type == "boolean":
-                            result[prop] = processed_arg.lower() == "true"
+                            result[public_prop_name] = processed_arg.lower() == "true"
                         else:
-                            result[prop] = processed_arg
+                            result[public_prop_name] = processed_arg
                 else:
-                    result[prop] = None
+                    result[public_prop_name] = None
             return result
         elif type_def.get("type") == "array":
             # Handle array defaults with C++ initializer list syntax like {model::broker_endpoint(...)}
@@ -1361,24 +2087,45 @@ def resolve_type_and_default(properties, definitions):
     for prop in properties.values():
         t = prop.get("type")
         ref_name = None
-        
-        # Handle both JSON pointer references and direct type names
+
+
+        # Handle both JSON pointer references and direct type names (including C++ types)
         if isinstance(t, str):
             if t.startswith("#/definitions/"):
                 ref_name = t.split("/")[-1]
-            elif t in definitions:
-                ref_name = t
-        
-        if ref_name and ref_name in definitions:
-            defn = definitions.get(ref_name)
+            else:
+                # Try to resolve the type with namespace prefixes
+                resolved_def = resolve_type_with_namespace(t, definitions)
+                if resolved_def:
+                    # Find the actual key name that matched
+                    if t in definitions:
+                        ref_name = t
+                    else:
+                        # Try namespace-qualified versions
+                        for namespace in ['config', 'model', 'security', 'net', 'kafka', 'pandaproxy']:
+                            qualified = f"{namespace}::{t}"
+                            if qualified in definitions:
+                                ref_name = qualified
+                                break
+
+        if ref_name:
+            defn = resolve_type_with_namespace(ref_name, definitions) if ref_name not in definitions else definitions.get(ref_name)
             if defn:
                 resolved = resolve_definition_type(defn)
                 # Always set type to the resolved type string (object, string, etc.)
                 resolved_type = resolved.get("type")
-                if resolved_type in ("object", "string", "integer", "boolean", "array", "number"):
+
+                # Special handling for enum types
+                if resolved_type == "enum" or "enum" in resolved:
+                    # Enums are represented as strings with an enum constraint in JSON Schema
+                    prop["type"] = "string"
+                    if "enum" in resolved:
+                        prop["enum"] = resolved["enum"]
+                elif resolved_type in ("object", "string", "integer", "boolean", "array", "number"):
                     prop["type"] = resolved_type
                 else:
                     prop["type"] = "object"  # fallback for complex types
+
                 # Expand default if possible
                 if "default" in prop and prop["default"] is not None:
                     expanded = expand_default(ref_name, prop["default"])
@@ -1494,23 +2241,69 @@ def resolve_type_and_default(properties, definitions):
                 # This handles cases like admin_api_tls: "{}" -> []
                 prop["default"] = []
         
-        # Also handle array item types
-        if prop.get("type") == "array" and "items" in prop:
+        # Also handle array item types - resolve C++ type references
+        # Note: Check for 'items' field regardless of type, since some transformers may overwrite
+        # the type from "array" to "object" while leaving the items field behind
+        if "items" in prop:
             items_type = prop["items"].get("type")
-            if isinstance(items_type, str) and items_type in definitions:
-                item_defn = definitions.get(items_type)
-                if item_defn:
-                    resolved_item = resolve_definition_type(item_defn)
-                    resolved_item_type = resolved_item.get("type")
-                    if resolved_item_type in ("object", "string", "integer", "boolean", "array", "number"):
-                        prop["items"]["type"] = resolved_item_type
+            if isinstance(items_type, str):
+                # Check if items_type is a C++ type that needs resolution
+                if items_type in definitions:
+                    item_defn = definitions.get(items_type)
+                    if item_defn:
+                        resolved_item = resolve_definition_type(item_defn)
+                        resolved_item_type = resolved_item.get("type")
+                        if resolved_item_type in ("object", "string", "integer", "boolean", "array", "number"):
+                            prop["items"]["type"] = resolved_item_type
+                        else:
+                            prop["items"]["type"] = "object"  # fallback for complex types
+                # If not in definitions but looks like a C++ type, apply fallback logic
+                elif "::" in items_type or items_type.endswith(">") or items_type.endswith("_t") or items_type.startswith("std::"):
+                    # Apply same heuristics as for unresolved property types
+                    if any(word in items_type.lower() for word in ["int", "long", "short", "double", "float", "number", "_id"]):
+                        prop["items"]["type"] = "integer"
+                    elif any(word in items_type.lower() for word in ["bool"]):
+                        prop["items"]["type"] = "boolean"
+                    elif any(word in items_type.lower() for word in ["string", "str", "path", "url", "name"]):
+                        prop["items"]["type"] = "string"
                     else:
-                        prop["items"]["type"] = "object"  # fallback for complex types
+                        # Default to object for complex types (config::*, model::*, etc.)
+                        prop["items"]["type"] = "object"
+                    logger.debug(f"Resolved C++ type in items: {items_type} -> {prop['items']['type']} (for property '{prop.get('name', 'unknown')}')")
     
     # Final pass: apply C++ pattern processing to any remaining unprocessed defaults
     for prop in properties.values():
         if "default" in prop:
             default_value = prop["default"]
+            
+            # Special handling for arrays containing key-value patterns like "'key': 'value'"
+            if isinstance(default_value, list) and len(default_value) > 0:
+                # Check if this looks like an array of key-value patterns
+                all_keyval_patterns = True
+                for item in default_value:
+                    if not isinstance(item, str) or not re.match(r"'[^']+'\s*:\s*'[^']+'", item):
+                        all_keyval_patterns = False
+                        break
+                
+                if all_keyval_patterns:
+                    # Convert array of key-value strings to a single object
+                    result_object = {}
+                    for item in default_value:
+                        keyval_match = re.match(r"'([^']+)'\s*:\s*'([^']+)'", item)
+                        if keyval_match:
+                            key = keyval_match.group(1)
+                            value = keyval_match.group(2)
+                            # Process the value part
+                            processed_value = process_cpp_patterns(value)
+                            if processed_value.startswith('"') and processed_value.endswith('"'):
+                                processed_value = processed_value[1:-1]  # Remove outer quotes
+                            result_object[key] = processed_value
+                    
+                    # Convert the array type to object since we're now storing an object
+                    prop["default"] = result_object
+                    if prop.get("type") == "array":
+                        prop["type"] = "object"
+                    continue  # Skip further processing for this property
             
             if isinstance(default_value, str):
                 # Process string defaults
@@ -1544,27 +2337,29 @@ def resolve_type_and_default(properties, definitions):
                                         # Map constructor arguments to type properties
                                         for j, nested_prop in enumerate(nested_props):
                                             nested_prop_def = nested_type_def["properties"][nested_prop]
+                                            # Strip leading underscore from private field names for public API
+                                            public_nested_prop_name = nested_prop.lstrip('_')
                                             if j < len(args):
                                                 nested_arg = args[j]
                                                 processed_nested_arg = process_cpp_patterns(nested_arg)
-                                                
+
                                                 # Convert based on property type
                                                 if nested_prop_def.get("type") == "string":
                                                     if processed_nested_arg.startswith('"') and processed_nested_arg.endswith('"'):
-                                                        nested_result[nested_prop] = ast.literal_eval(processed_nested_arg)
+                                                        nested_result[public_nested_prop_name] = ast.literal_eval(processed_nested_arg)
                                                     else:
-                                                        nested_result[nested_prop] = processed_nested_arg
+                                                        nested_result[public_nested_prop_name] = processed_nested_arg
                                                 elif nested_prop_def.get("type") == "integer":
                                                     try:
-                                                        nested_result[nested_prop] = int(processed_nested_arg)
+                                                        nested_result[public_nested_prop_name] = int(processed_nested_arg)
                                                     except ValueError:
-                                                        nested_result[nested_prop] = processed_nested_arg
+                                                        nested_result[public_nested_prop_name] = processed_nested_arg
                                                 elif nested_prop_def.get("type") == "boolean":
-                                                    nested_result[nested_prop] = processed_nested_arg.lower() == "true"
+                                                    nested_result[public_nested_prop_name] = processed_nested_arg.lower() == "true"
                                                 else:
-                                                    nested_result[nested_prop] = processed_nested_arg
+                                                    nested_result[public_nested_prop_name] = processed_nested_arg
                                             else:
-                                                nested_result[nested_prop] = None
+                                                nested_result[public_nested_prop_name] = None
                                         
                                         # For special case of net::unresolved_address inside broker_authn_endpoint
                                         if tname == "net::unresolved_address":
@@ -1655,7 +2450,93 @@ def resolve_type_and_default(properties, definitions):
             if isinstance(enterprise_value, str):
                 processed_enterprise = process_enterprise_value(enterprise_value)
                 prop["enterprise_value"] = processed_enterprise
-                        
+
+    # FINAL COMPREHENSIVE PASS: Ensure NO C++ types remain in the output
+    # This catches any edge cases that earlier passes missed
+    for prop_name, prop in properties.items():
+        # Check property type field
+        if isinstance(prop.get("type"), str) and ("::" in prop["type"] or prop["type"].endswith(">")):
+            logger.warning(f"Found unresolved C++ type in property '{prop_name}': {prop['type']}")
+            # Apply smart fallback resolution
+            cpp_type = prop["type"]
+            if any(word in cpp_type.lower() for word in ["int", "long", "short", "double", "float", "number", "_id"]):
+                prop["type"] = "integer"
+            elif any(word in cpp_type.lower() for word in ["bool"]):
+                prop["type"] = "boolean"
+            elif any(word in cpp_type.lower() for word in ["string", "str", "path", "url", "name"]):
+                prop["type"] = "string"
+            else:
+                # Default to object for complex types (config::*, model::*, etc.)
+                prop["type"] = "object"
+            logger.info(f"  Resolved to: {prop['type']}")
+
+        # Check items.type field for arrays
+        if prop.get("type") == "array" and "items" in prop:
+            items_type = prop["items"].get("type")
+            if isinstance(items_type, str) and ("::" in items_type or items_type.endswith(">")):
+                logger.warning(f"Found unresolved C++ type in property '{prop_name}' items: {items_type}")
+                # Apply smart fallback resolution
+                if any(word in items_type.lower() for word in ["int", "long", "short", "double", "float", "number", "_id"]):
+                    prop["items"]["type"] = "integer"
+                elif any(word in items_type.lower() for word in ["bool"]):
+                    prop["items"]["type"] = "boolean"
+                elif any(word in items_type.lower() for word in ["string", "str", "path", "url", "name"]):
+                    prop["items"]["type"] = "string"
+                else:
+                    # Default to object for complex types (config::*, model::*, etc.)
+                    prop["items"]["type"] = "object"
+                logger.info(f"  Resolved to: {prop['items']['type']}")
+
+            # Check items.$ref field
+            # Only warn if it's NOT a JSON pointer (valid JSON pointers start with #/)
+            items_ref = prop["items"].get("$ref")
+            if isinstance(items_ref, str) and "::" in items_ref:
+                if items_ref.startswith("#/definitions/"):
+                    # This is a valid JSON pointer - extract and resolve the definition name
+                    ref_type = items_ref.split("/")[-1]
+                    if ref_type in definitions:
+                        resolved = resolve_definition_type(definitions[ref_type])
+                        resolved_type = resolved.get("type", "object")
+                        prop["items"]["type"] = resolved_type
+                        del prop["items"]["$ref"]
+                        logger.debug(f"Resolved items.$ref '{items_ref}' to '{resolved_type}' for property '{prop_name}'")
+                    else:
+                        logger.warning(f"Cannot resolve items.$ref '{items_ref}' - definition not found for property '{prop_name}'")
+                else:
+                    # Raw C++ type name (not a JSON pointer) - this is an error
+                    logger.warning(f"Found raw C++ type in property '{prop_name}' items.$ref: {items_ref}")
+                    if items_ref in definitions:
+                        resolved = resolve_definition_type(definitions[items_ref])
+                        resolved_type = resolved.get("type", "object")
+                        prop["items"]["type"] = resolved_type
+                        del prop["items"]["$ref"]
+                        logger.info(f"  Resolved to: {prop['items']['type']}")
+
+        # Check $ref field at property level
+        # Only warn if it's NOT a JSON pointer
+        prop_ref = prop.get("$ref")
+        if isinstance(prop_ref, str) and "::" in prop_ref:
+            if prop_ref.startswith("#/definitions/"):
+                # This is a valid JSON pointer - extract and resolve the definition name
+                ref_type = prop_ref.split("/")[-1]
+                if ref_type in definitions:
+                    resolved = resolve_definition_type(definitions[ref_type])
+                    resolved_type = resolved.get("type", "object")
+                    prop["type"] = resolved_type
+                    del prop["$ref"]
+                    logger.debug(f"Resolved $ref '{prop_ref}' to '{resolved_type}' for property '{prop_name}'")
+                else:
+                    logger.warning(f"Cannot resolve $ref '{prop_ref}' - definition not found for property '{prop_name}'")
+            else:
+                # Raw C++ type name (not a JSON pointer) - this is an error
+                logger.warning(f"Found raw C++ type in property '{prop_name}' $ref: {prop_ref}")
+                if prop_ref in definitions:
+                    resolved = resolve_definition_type(definitions[prop_ref])
+                    resolved_type = resolved.get("type", "object")
+                    prop["type"] = resolved_type
+                    del prop["$ref"]
+                    logger.info(f"  Resolved to: {prop['type']}")
+
     return properties
 
 
@@ -1733,7 +2614,7 @@ def extract_topic_properties(source_path):
                 "description": prop_data.get("description", ""),
                 "type": prop_data.get("type", "string"),
                 "config_scope": "topic",
-                "source_file": prop_data.get("source_file", ""),
+                "defined_in": prop_data.get("defined_in", ""),
                 "corresponding_cluster_property": prop_data.get("corresponding_cluster_property", ""),
                 "acceptable_values": prop_data.get("acceptable_values", ""),
                 "is_deprecated": False,
@@ -1754,7 +2635,8 @@ def main():
     CLI entry point that extracts Redpanda configuration properties from C++ sources and emits JSON outputs.
     
     Runs a full extraction and transformation pipeline:
-    - Parses command-line options (required: --path). Optional flags include --recursive, --output, --enhanced-output, --definitions, --overrides, --cloud-support, and --verbose.
+    - Parses command-line options (required: --path). Optional flags include --recursive, --output, --enhanced-output, --overrides, --cloud-support, and --verbose.
+    - The --overrides file can contain both property overrides (under "properties" key) and definition overrides (under "definitions" key).
     - Validates input paths and collects header/.cc file pairs.
     - Initializes Tree-sitter C++ parser and extracts configuration properties from source files (optionally augmented with topic properties).
     - Produces two outputs:
@@ -1767,7 +2649,9 @@ def main():
     Side effects:
     - Reads and writes files, may call external cloud config fetchers, logs to the configured logger, and may call sys.exit() on fatal conditions.
     """
+    global _type_definitions_cache
     import argparse
+    from pathlib import Path
 
     def generate_options():
         """
@@ -1778,8 +2662,12 @@ def main():
         - --recursive: scan the path recursively.
         - --output: file path to write the JSON output (stdout if omitted).
         - --enhanced-output: file path to write the enhanced JSON output with overrides applied.
-        - --definitions: JSON file containing type definitions (defaults to a definitions.json co-located with this module).
-        - --overrides: optional JSON file with property description/metadata overrides.
+        - --overrides: optional JSON file with property and definition overrides. Structure:
+            {
+              "properties": { "property_name": { "description": "...", ... } },
+              "definitions": { "type_name": { "type": "object", "properties": {...} } }
+            }
+        - --definitions: DEPRECATED - use overrides.json with "definitions" key instead.
         - --cloud-support: enable fetching cloud metadata from the cloudv2 repository (requires GITHUB_TOKEN and external dependencies such as pyyaml and requests).
         - -v / --verbose: enable verbose (DEBUG-level) logging.
         
@@ -1798,10 +2686,16 @@ def main():
         arg_parser.add_argument("--enhanced-output", type=str, help="Enhanced JSON output file path")
         
         # Data sources
-        arg_parser.add_argument("--definitions", type=str, 
-                              default=os.path.dirname(os.path.realpath(__file__)) + "/definitions.json",
-                              help="Type definitions JSON file")
-        arg_parser.add_argument("--overrides", type=str, help="Property overrides JSON file")
+        arg_parser.add_argument(
+            "--definitions",
+            type=str,
+            help="DEPRECATED: Type definitions JSON file (use --overrides with 'definitions' key instead)"
+        )
+        arg_parser.add_argument(
+            "--overrides",
+            type=str,
+            help="JSON file with property and definition overrides. Format: {'properties': {...}, 'definitions': {...}}"
+        )
         
         # Feature flags (set by Makefile from environment variables)
         arg_parser.add_argument("--cloud-support", action="store_true", help="Enable cloud metadata")
@@ -1827,24 +2721,69 @@ def main():
         logging.error("No h/cc file pairs were found")
         sys.exit(-1)
 
-    definitions = None
+    # DYNAMIC TYPE DEFINITION EXTRACTION
+    # Automatically extract type definitions from C++ source code
+    # This replaces the need for manually maintaining definitions.json
+    logger.info("🔍 Extracting type definitions from C++ source code...")
 
-    if options.definitions:
-        try:
-            with open(options.definitions) as json_file:
-                definitions = json.load(json_file)
-        except json.JSONDecodeError as e:
-            logging.error(f"Failed to parse definitions file: {e}")
-            sys.exit(1)
+    from type_definition_extractor import extract_definitions_from_source
 
-    # Load property overrides if provided
+    try:
+        # Extract definitions from the parent 'v' directory to get all subdirectories
+        # (model, config, net, etc.) since types may be defined in different modules
+        source_root = Path(options.path)
+
+        # If path points to repo root, go down to src/v
+        if (source_root / 'src' / 'v').exists():
+            source_root = source_root / 'src' / 'v'
+        # If path points to a specific subdirectory, go up to the parent 'v' directory
+        elif source_root.name in ('config', 'model', 'net', 'kafka', 'pandaproxy', 'security'):
+            source_root = source_root.parent
+
+        logger.debug(f"Extracting type definitions from: {source_root}")
+        definitions = extract_definitions_from_source(str(source_root))
+        logger.info(f"✅ Extracted {len(definitions)} type definitions dynamically")
+
+        # Store definitions in global cache for transformers to access
+        _type_definitions_cache = definitions
+    except Exception as e:
+        logger.warning(f"Failed to extract dynamic definitions: {e}")
+        definitions = {}
+
+    # Load overrides file (contains both property and definition overrides)
     overrides = None
     if options.overrides:
         try:
             with open(options.overrides) as f:
                 overrides = json.load(f)
+
+            # Load definition overrides from the overrides file
+            if overrides and "definitions" in overrides:
+                definition_overrides = overrides["definitions"]
+                num_overrides = len(definition_overrides)
+                definitions.update(definition_overrides)
+                _type_definitions_cache = definitions
+                logger.info(f"📝 Loaded {num_overrides} definition overrides from {options.overrides}")
         except Exception as e:
             logging.error(f"Failed to load overrides file: {e}")
+            sys.exit(1)
+
+    # DEPRECATED: Support legacy --definitions flag for backward compatibility
+    # Users should migrate to putting definitions in overrides.json under "definitions" key
+    if options.definitions and os.path.exists(options.definitions):
+        try:
+            logger.warning("⚠️  --definitions flag is deprecated. Please move definitions to overrides.json under 'definitions' key")
+            with open(options.definitions) as json_file:
+                static_definitions = json.load(json_file)
+
+            # Merge: static overrides take precedence
+            num_overrides = len(static_definitions)
+            definitions.update(static_definitions)
+            _type_definitions_cache = definitions
+
+            logger.info(f"📝 Loaded {num_overrides} legacy definition overrides from {options.definitions}")
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to parse definitions file: {e}")
             sys.exit(1)
 
     treesitter_dir = os.path.join(os.getcwd(), "tree-sitter/tree-sitter-cpp")
@@ -1858,6 +2797,11 @@ def main():
         treesitter_dir, destination_path
     )
 
+    # Pre-build constexpr cache for performance
+    # This avoids repeated filesystem walks when resolving C++ identifiers and function calls
+    logger.info("🔧 Building constexpr identifier cache...")
+    _constexpr_cache.build_cache(options.path)
+    logger.info(f"✅ Cached {len(_constexpr_cache.constexpr_cache)} constexpr identifiers and {len(_constexpr_cache.function_cache)} functions")
 
     files_with_properties = get_files_with_properties(
         file_pairs, treesitter_parser, cpp_language
@@ -1867,8 +2811,27 @@ def main():
     # Extract topic properties and add them to the main properties dictionary
     topic_properties = extract_topic_properties(options.path)
     if topic_properties:
+        # Apply transformers to topic properties to ensure they get the same metadata as cluster properties
+        topic_properties = apply_transformers_to_topic_properties(topic_properties)
         properties.update(topic_properties)
         logging.info(f"Added {len(topic_properties)} topic properties to the main properties collection")
+
+        # Fix up corresponding_cluster_property mappings
+        # Some cluster properties have a "_default" suffix that the extractor doesn't catch
+        fixup_count = 0
+        for prop_name, prop_data in properties.items():
+            if prop_data.get('is_topic_property') and prop_data.get('corresponding_cluster_property'):
+                cluster_prop = prop_data['corresponding_cluster_property']
+                # Check if the mapped cluster property exists
+                if cluster_prop not in properties:
+                    # Try the _default variant
+                    default_variant = f'{cluster_prop}_default'
+                    if default_variant in properties:
+                        prop_data['corresponding_cluster_property'] = default_variant
+                        fixup_count += 1
+
+        if fixup_count > 0:
+            logging.info(f"Fixed {fixup_count} cluster property mappings by adding '_default' suffix")
 
     # First, create the original properties without overrides for the base JSON output
     # 1. Add config_scope field based on which source file defines the property
@@ -1893,10 +2856,22 @@ def main():
     
     # 3. Resolve type references and expand default values for original properties
     original_properties = resolve_type_and_default(original_properties, definitions)
-    
+
+    # 4. Map enum default values to user-facing strings
+    original_properties = map_enum_defaults(original_properties)
+
+    # 5. Evaluate chrono expressions in default values
+    original_properties = evaluate_chrono_expressions(original_properties)
+
+    # 6. Filter definitions to only include referenced types (reduces bloat)
+    filtered_definitions = filter_referenced_definitions(original_properties, definitions)
+
+    # 6. Clean private fields from definitions (keep JSON output clean)
+    filtered_definitions = clean_private_fields_from_definitions(filtered_definitions)
+
     # Generate original properties JSON (without overrides)
     original_properties_and_definitions = merge_properties_and_definitions(
-        original_properties, definitions
+        original_properties, filtered_definitions
     )
     original_json_output = json.dumps(original_properties_and_definitions, indent=4, sort_keys=True)
 
@@ -1914,14 +2889,26 @@ def main():
     
     # 4. Resolve type references and expand default values
     # This step converts:
-    # - C++ type names (model::broker_endpoint) to JSON schema types (object)  
+    # - C++ type names (model::broker_endpoint) to JSON schema types (object)
     # - C++ constructor defaults to structured JSON objects
     # - Single object defaults to arrays for one_or_many_property types
     enhanced_properties = resolve_type_and_default(enhanced_properties, definitions)
 
+    # 5. Map enum default values to user-facing strings
+    enhanced_properties = map_enum_defaults(enhanced_properties)
+
+    # 6. Evaluate chrono expressions in default values
+    enhanced_properties = evaluate_chrono_expressions(enhanced_properties)
+
+    # 7. Filter definitions to only include referenced types (reduces bloat)
+    filtered_enhanced_definitions = filter_referenced_definitions(enhanced_properties, definitions)
+
+    # 7. Clean private fields from definitions (keep JSON output clean)
+    filtered_enhanced_definitions = clean_private_fields_from_definitions(filtered_enhanced_definitions)
+
     # Generate enhanced properties JSON (with overrides)
     enhanced_properties_and_definitions = merge_properties_and_definitions(
-        enhanced_properties, definitions
+        enhanced_properties, filtered_enhanced_definitions
     )
     enhanced_json_output = json.dumps(enhanced_properties_and_definitions, indent=4, sort_keys=True)
 

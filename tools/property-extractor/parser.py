@@ -4,19 +4,99 @@ from property_bag import PropertyBag
 from copy import deepcopy
 import itertools as it
 import re
+import logging
+
+logger = logging.getLogger(__name__)
+
+def _is_config_property_type(type_str):
+    """
+    Check if a C++ type is a Redpanda configuration property.
+
+    Returns True only for property wrapper types like:
+    - property<T>
+    - bounded_property<T>
+    - deprecated_property<T>
+    - one_or_many_property<T>
+    - enum_property<T>
+    - enterprise<property<T>>
+    - enterprise<bounded_property<T>>
+
+    Returns False for internal structs like:
+    - connection_cfg, consumer_cfg, ack_level, proxy_request, etc.
+    - Primitive types: ss::sstring, iobuf, std::vector<T>, etc.
+    """
+    if not type_str:
+        return False
+
+    type_str = type_str.strip()
+
+    # Known property wrapper types (defined first for exclusion check)
+    PROPERTY_WRAPPERS = [
+        'property<',
+        'bounded_property<',
+        'deprecated_property<',
+        'one_or_many_property<',
+        'enum_property<',
+        'retention_duration_property',
+        'development_feature_property<',
+        'hidden_when_default_property<',
+    ]
+
+    # Explicitly exclude common non-property types
+    # (unless they're wrapped in a property type)
+    NON_PROPERTY_TYPES = [
+        'ss::sstring',
+        'sstring',
+        'iobuf',
+        'std::string',
+        'std::vector<',
+        'std::optional<',
+        'std::chrono::',
+        'model::node_id',
+        'net::unresolved_address',
+        'serde::envelope<',
+    ]
+
+    # Check if type contains any property wrapper
+    has_property_wrapper = any(
+        wrapper in type_str or type_str.startswith(wrapper.replace('<', ''))
+        for wrapper in PROPERTY_WRAPPERS
+    )
+
+    # Quick rejection of known non-property types (unless wrapped in property)
+    if not has_property_wrapper:
+        for non_prop in NON_PROPERTY_TYPES:
+            if non_prop in type_str:
+                return False
+
+    # Check for direct property wrapper usage
+    if any(type_str.startswith(wrapper.replace('<', '')) or wrapper in type_str
+           for wrapper in PROPERTY_WRAPPERS):
+        return True
+
+    # Check for enterprise wrapper containing property types
+    if type_str.startswith('enterprise<'):
+        return any(wrapper in type_str for wrapper in PROPERTY_WRAPPERS)
+
+    return False
+
 
 
 HEADER_QUERY = """
 (field_declaration
-    type: (_) @type
-    (#match? @type ".*property.*")
-    declarator: (_) @name
+    type: [
+        (type_identifier)
+        (template_type)
+        (qualified_identifier)
+    ] @type
+    declarator: (field_identifier) @name
 ) @declaration
 """
 
+
 # Tree-sitter query for extracting C++ property constructor arguments and enterprise values
 #
-# - Enhanced to capture all expression types including:
+# - Capture all expression types including:
 #   * call_expression: Handles function calls like model::kafka_audit_logging_topic()
 #   * template_instantiation: Handles template syntax like std::vector<ss::sstring>{...}
 #   * concatenated_string: Handles C++ string concatenation with +
@@ -71,6 +151,21 @@ def get_file_contents(path):
 
 
 def parse_cpp_header(treesitter_parser, cpp_language, source_code):
+    """
+    Parses a C++ configuration header file to extract property declarations
+    and classify them by type (enterprise, deprecated, bounded, etc.).
+
+    Detects and annotates:
+      - is_enterprise
+      - is_deprecated
+      - is_bounded
+      - is_enum
+      - is_one_or_many
+      - is_enterprise_wrapper
+      - base_property_type (the inner C++ type, if extractable)
+      - property_kinds (list of wrapper kinds, e.g. ['enterprise', 'bounded'])
+    """
+
     query = cpp_language.query(HEADER_QUERY)
     tree = treesitter_parser.parse(source_code)
 
@@ -83,11 +178,51 @@ def parse_cpp_header(treesitter_parser, cpp_language, source_code):
     for node, label in captures:
         if label == "name":
             property_name = node.text.decode("utf-8")
+            
+            # Validate this is a config property type - skip internal structs
+            if not _is_config_property_type(current_type):
+                logger.debug(f"Skipping non-property field '{property_name}' with type '{current_type}'")
+                current_type = None
+                current_declaration = None
+                continue
+                
             properties[property_name]["name_in_file"] = property_name
             properties[property_name]["type"] = current_type
             properties[property_name]["declaration"] = current_declaration
+
+            t = current_type or ""
+
+            # --- Detect property wrapper kinds dynamically ---
+            wrapper_kinds = [
+                "enterprise",
+                "deprecated_property",
+                "bounded_property",
+                "enum_property",
+                "one_or_many_property",
+                "property",
+            ]
+
+            property_kinds = [k for k in wrapper_kinds if k in t]
+
+            # --- Flags for common wrappers ---
+            properties[property_name]["is_enterprise"] = "enterprise<" in t
+            properties[property_name]["is_deprecated"] = "deprecated_property" in t
+            properties[property_name]["is_bounded"] = "bounded_property" in t
+            properties[property_name]["is_enum"] = "enum_property" in t
+            properties[property_name]["is_one_or_many"] = "one_or_many_property" in t
+            properties[property_name]["is_enterprise_wrapper"] = t.strip().startswith("enterprise<")
+            properties[property_name]["property_kinds"] = property_kinds
+
+            # --- Extract inner property type (recursively handles nesting) ---
+            base_match = re.search(r'property<\s*([^>]+)\s*>', t)
+            if base_match:
+                properties[property_name]["base_property_type"] = base_match.group(1).strip()
+            else:
+                properties[property_name]["base_property_type"] = None
+
             current_type = None
             current_declaration = None
+
         elif label == "type":
             current_type = node.text.decode("utf-8")
         elif label == "declaration":
@@ -99,8 +234,21 @@ def parse_cpp_header(treesitter_parser, cpp_language, source_code):
 def __unquote_string(value):
     # placeholder to keep escaped double quotes (e.g. \"name\")
     escaped_quotes_placeholder = "$$$___quote___$$$"
+    
+    # Handle C++ raw string literals: R"(content)" or R"delimiter(content)delimiter"
+    # First try simple case without delimiter: R"(content)"
+    simple_raw_match = re.match(r'^R"[(](.*)[)]"\s*$', value.strip(), re.DOTALL)
+    if simple_raw_match:
+        return simple_raw_match.group(1)
+    
+    # Handle raw string with custom delimiter: R"delimiter(content)delimiter"  
+    delimited_raw_match = re.match(r'^R"([^(]+)[(](.*)[)]\1"\s*$', value.strip(), re.DOTALL)
+    if delimited_raw_match:
+        return delimited_raw_match.group(2)
+    
+    # Handle regular quoted strings
     return re.sub(
-        r'^R?"([^"]*)"\s*$',
+        r'^"([^"]*)"\s*$',
         "\\1",
         re.sub(
             '\\\\"',
@@ -176,55 +324,129 @@ def __normalize_param(param, node, treesitter_parser, cpp_language, source_code)
 
 
 def parse_cpp_source(treesitter_parser, cpp_language, source_code):
+    """
+    Parse C++ source file and extract constructor arguments for each config field.
+
+    For each field initializer like:
+
+        core_balancing_continuous(
+            *this,
+            true,
+            false,
+            "core_balancing_continuous",
+            "If set to ...",
+            meta{ ... },
+            true,
+            property<bool>::noop_validator,
+            legacy_default<bool>{false, legacy_version{16}})
+
+    we produce:
+
+        parameters["core_balancing_continuous"]["params"] = [
+            { "value": "true",  "type": "true" },
+            { "value": "false", "type": "false" },
+            { "value": "core_balancing_continuous", "type": "string_literal" },
+            { "value": "If set to ...", "type": "string_literal" },
+            { "value": { ... }, "type": "initializer_list" },
+            { "value": "true", "type": "true" },
+            { "value": "property<bool>::noop_validator", "type": "call_expression" },
+            { "value": "legacy_default<bool>{false, legacy_version{16}}", "type": "_" },
+        ]
+
+    (the initial `*this` is intentionally skipped).
+    """
     query = cpp_language.query(SOURCE_QUERY)
     tree = treesitter_parser.parse(source_code)
-
     captures = query.captures(tree.root_node)
 
-    current_parameter = None
-    state = "read_field"
-
     parameters = PropertyBag()
+    current_field = None
+    seen_first_argument = False
 
-    for i in captures:
-        node = i[0]
-        if node.type == "field_initializer":
-            state = "read_field"
+    for node, label in captures:
+        # Start of a new field initializer
+        if label == "field" and node.type == "field_identifier":
+            current_field = node.text.decode("utf-8")
+            parameters[current_field] = PropertyBag()
+            parameters[current_field]["params"] = []
+            seen_first_argument = False
+            continue
 
-        if state == "read_field" or node.type == "field_identifier":
-            if node.type != "field_identifier":
-                continue
-            current_parameter = node.text.decode("utf-8")
-            parameters[current_parameter] = PropertyBag()
-            parameters[current_parameter]["params"] = []
-            state = "skip_until_pointer"
-        elif state == "skip_until_pointer":
-            if node.type != "pointer_expression":
-                continue
-            state = "read_parameters"
-        elif state == "read_parameters":
-            param = dict(value=node.text.decode("utf-8"), type=node.type)
+        # Individual arguments for the current field
+        if label == "argument" and current_field is not None:
+            raw_value = node.text.decode("utf-8").strip()
+
+            # Skip the first argument if it's the context pointer (*this)
+            if not seen_first_argument:
+                seen_first_argument = True
+                if raw_value == "*this":
+                    continue  # do not store *this
+                # If the first argument is not *this (weird edge case), fall through and record it.
+
+            param = dict(value=raw_value, type=node.type or "_")
             normalized_param = __normalize_param(
                 param, node, treesitter_parser, cpp_language, source_code
             )
 
             if normalized_param:
-                parameters[current_parameter]["params"].append(normalized_param)
+                parameters[current_field]["params"].append(normalized_param)
 
     return parameters
 
 
+
 def __merge_header_and_source_properties(header_properties, source_properties):
+    """
+    Merge header-based property metadata (types, wrappers, flags)
+    with source-based initialization parameters.
+
+    This function ensures:
+      - Header-only metadata like 'is_enterprise', 'base_property_type', etc.
+        are always preserved.
+      - Source-derived data like 'params' are merged without overwriting
+        header metadata.
+      - Missing source entries still return valid PropertyBags with only header info.
+    """
     properties = deepcopy(header_properties)
 
-    for key in header_properties.keys():
+    for key, header_entry in header_properties.items():
+        merged = deepcopy(header_entry)
+
         if key in source_properties:
-            properties[key].update(source_properties[key])
+            # Merge parameter list
+            source_entry = source_properties[key]
+            for k, v in source_entry.items():
+                # If the key doesn't exist in header, copy it over
+                # Otherwise, keep header's metadata (type flags, etc.)
+                if k not in merged:
+                    merged[k] = v
+                elif k == "params":
+                    # Always take params from source
+                    merged["params"] = v
+
         else:
-            return PropertyBag()
+            # No source info → ensure params is at least an empty list
+            merged["params"] = merged.get("params", [])
+
+        # Reinforce that header metadata should not be lost
+        for meta_key in [
+            "type",
+            "declaration",
+            "is_enterprise",
+            "is_deprecated",
+            "is_bounded",
+            "is_enum",
+            "is_one_or_many",
+            "is_enterprise_wrapper",
+            "base_property_type",
+            "property_kinds",
+        ]:
+            if meta_key not in merged and meta_key in header_entry:
+                merged[meta_key] = header_entry[meta_key]
+
+        properties[key] = merged
 
     return properties
-
 
 def extract_properties_from_file_pair(
     treesitter_parser, cpp_language, file_pair: FilePair
