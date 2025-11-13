@@ -138,34 +138,49 @@ module.exports = function renderConnectFields(children, prefix = '') {
     if (child.examples && child.examples.length) {
       block += `[source,yaml]\n----\n# Examples:\n`;
       if (child.kind === 'array') {
-        // Render arrays in flow style (with brackets) instead of block style
         child.examples.forEach(example => {
           if (Array.isArray(example)) {
-            // Format as flow style: fieldName: [item1, item2, ...]
-            const items = example.map(item => {
-              if (typeof item === 'string') {
-                // Check if quoting is needed
-                const needsQuoting = item === '*' ||
-                                     /[:\[\]\{\},&>|%@`"]/.test(item) ||
-                                     /^[\s]|[\s]$/.test(item); // leading/trailing whitespace
+            // Check if array contains any objects
+            const hasObjects = example.some(item => typeof item === 'object' && item !== null);
 
-                if (needsQuoting) {
-                  // Escape backslashes first, then double quotes
-                  const escaped = item.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            if (hasObjects) {
+              // Use block style for arrays of objects
+              block += renderYamlList(child.name, [example]);
+            } else {
+              // Use flow style for arrays of primitives: fieldName: [item1, item2, ...]
+              const items = example.map(item => {
+                if (typeof item === 'string') {
+                  // Check if already quoted (starts and ends with quotes)
+                  const alreadyQuoted = item.startsWith('"') && item.endsWith('"');
+
+                  if (alreadyQuoted) {
+                    // Already quoted, return as-is
+                    return item;
+                  }
+
+                  // Check if quoting is needed
+                  const needsQuoting = item === '*' ||
+                                       /[:\[\]\{\},&>|%@`"]/.test(item) ||
+                                       /\s/.test(item); // any whitespace
+
+                  if (needsQuoting) {
+                    // Escape backslashes first, then double quotes
+                    const escaped = item.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                    return `"${escaped}"`;
+                  }
+                  return item;
+                }
+                // For primitives (numbers, booleans, etc.), convert to string
+                const strValue = String(item);
+                // Check if the stringified value needs quoting
+                if (/[:\[\]\{\},&>|%@`"]/.test(strValue) || /\s/.test(strValue)) {
+                  const escaped = strValue.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
                   return `"${escaped}"`;
                 }
-                return item;
-              }
-              // For non-strings, convert to string
-              const strValue = String(item);
-              // Check if the stringified value needs quoting
-              if (/[:\[\]\{\},&>|%@`"]/.test(strValue) || /^[\s]|[\s]$/.test(strValue)) {
-                const escaped = strValue.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-                return `"${escaped}"`;
-              }
-              return strValue;
-            });
-            block += `${child.name}: [${items.join(', ')}]\n`;
+                return strValue;
+              });
+              block += `${child.name}: [${items.join(', ')}]\n`;
+            }
           } else {
             // Fallback for non-array examples (shouldn't happen for array fields)
             block += `${child.name}: ${example}\n`;
