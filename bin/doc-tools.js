@@ -949,11 +949,88 @@ automation
       // Helper function to cap description to two sentences
       const capToTwoSentences = (description) => {
         if (!description) return '';
-        // Match sentences ending with . ! ? followed by space or end of string
+
+        // Helper to check if text contains problematic content
+        const hasProblematicContent = (text) => {
+          return /```[\s\S]*?```/.test(text) ||  // code blocks
+                 /`[^`]+`/.test(text) ||          // inline code
+                 /^[=#]+\s+.+$/m.test(text) ||    // headings
+                 /\n/.test(text);                 // newlines
+        };
+
+        // Step 1: Replace common abbreviations and ellipses with placeholders
+        const abbreviations = [
+          /\bv\d+\.\d+(?:\.\d+)?/gi, // version numbers like v4.12 or v4.12.0 (must come before decimal)
+          /\d+\.\d+/g,               // decimal numbers
+          /\be\.g\./gi,              // e.g.
+          /\bi\.e\./gi,              // i.e.
+          /\betc\./gi,               // etc.
+          /\bvs\./gi,                // vs.
+          /\bDr\./gi,                // Dr.
+          /\bMr\./gi,                // Mr.
+          /\bMs\./gi,                // Ms.
+          /\bMrs\./gi,               // Mrs.
+          /\bSt\./gi,                // St.
+          /\bNo\./gi                 // No.
+        ];
+
+        let normalized = description;
+        const placeholders = [];
+
+        // Replace abbreviations with placeholders
+        abbreviations.forEach((abbrevRegex, idx) => {
+          normalized = normalized.replace(abbrevRegex, (match) => {
+            const placeholder = `__ABBREV${idx}_${placeholders.length}__`;
+            placeholders.push({ placeholder, original: match });
+            return placeholder;
+          });
+        });
+
+        // Replace ellipses (three or more dots) with placeholder
+        normalized = normalized.replace(/\.{3,}/g, (match) => {
+          const placeholder = `__ELLIPSIS_${placeholders.length}__`;
+          placeholders.push({ placeholder, original: match });
+          return placeholder;
+        });
+
+        // Step 2: Split sentences using the regex
         const sentenceRegex = /[^.!?]+[.!?]+(?:\s|$)/g;
-        const sentences = description.match(sentenceRegex);
-        if (!sentences || sentences.length === 0) return description;
-        return sentences.slice(0, 2).join('').trim();
+        const sentences = normalized.match(sentenceRegex);
+
+        if (!sentences || sentences.length === 0) {
+          // Restore placeholders and return original
+          let result = normalized;
+          placeholders.forEach(({ placeholder, original }) => {
+            result = result.replace(placeholder, original);
+          });
+          return result;
+        }
+
+        // Step 3: Determine how many sentences to include
+        let maxSentences = 2;
+
+        // If we have at least 2 sentences, check if the second one has problematic content
+        if (sentences.length >= 2) {
+          // Restore placeholders in second sentence to check original content
+          let secondSentence = sentences[1];
+          placeholders.forEach(({ placeholder, original }) => {
+            secondSentence = secondSentence.replace(new RegExp(placeholder, 'g'), original);
+          });
+
+          // If second sentence has problematic content, only take first sentence
+          if (hasProblematicContent(secondSentence)) {
+            maxSentences = 1;
+          }
+        }
+
+        let result = sentences.slice(0, maxSentences).join('');
+
+        // Step 4: Restore placeholders back to original text
+        placeholders.forEach(({ placeholder, original }) => {
+          result = result.replace(new RegExp(placeholder, 'g'), original);
+        });
+
+        return result.trim();
       };
 
       try {
@@ -1039,7 +1116,7 @@ automation
             });
           }
           for (const [type, fields] of Object.entries(fieldsByType)) {
-            section += `* ${type.charAt(0).toUpperCase() + type.slice(1)} components\n`;
+            section += `* ${type.charAt(0).toUpperCase() + type.slice(1)}:\n`;
             // Group by component name
             const byComp = {};
             for (const f of fields) {
@@ -1047,19 +1124,12 @@ automation
               byComp[f.compName].push(f);
             }
             for (const [comp, compFields] of Object.entries(byComp)) {
-              section += `** xref:components:${type}/${comp}.adoc[\`${comp}\`]`;
-              if (compFields.length === 1) {
-                const f = compFields[0];
-                section += `: xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]`;
-                if (f.description) section += ` - ${capToTwoSentences(f.description)}`;
+              section += `** xref:components:${type}/${comp}.adoc[\`${comp}\`]:`;
+              section += '\n';
+              for (const f of compFields) {
+                section += `*** xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]`;
+                if (f.description) section += `: ${capToTwoSentences(f.description)}`;
                 section += '\n';
-              } else {
-                section += '\n';
-                for (const f of compFields) {
-                  section += `*** xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]`;
-                  if (f.description) section += ` - ${capToTwoSentences(f.description)}`;
-                  section += '\n';
-                }
               }
             }
           }

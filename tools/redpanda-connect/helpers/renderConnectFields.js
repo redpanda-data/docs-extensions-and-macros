@@ -144,13 +144,26 @@ module.exports = function renderConnectFields(children, prefix = '') {
             // Format as flow style: fieldName: [item1, item2, ...]
             const items = example.map(item => {
               if (typeof item === 'string') {
-                // Quote strings that need it
-                if (item === '*' || /[:\[\]\{\},&>|%@`]/.test(item)) {
-                  return `"${item}"`;
+                // Check if quoting is needed
+                const needsQuoting = item === '*' ||
+                                     /[:\[\]\{\},&>|%@`"]/.test(item) ||
+                                     /^[\s]|[\s]$/.test(item); // leading/trailing whitespace
+
+                if (needsQuoting) {
+                  // Escape backslashes first, then double quotes
+                  const escaped = item.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                  return `"${escaped}"`;
                 }
                 return item;
               }
-              return String(item);
+              // For non-strings, convert to string
+              const strValue = String(item);
+              // Check if the stringified value needs quoting
+              if (/[:\[\]\{\},&>|%@`"]/.test(strValue) || /^[\s]|[\s]$/.test(strValue)) {
+                const escaped = strValue.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                return `"${escaped}"`;
+              }
+              return strValue;
             });
             block += `${child.name}: [${items.join(', ')}]\n`;
           } else {

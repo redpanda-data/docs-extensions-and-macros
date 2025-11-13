@@ -127,8 +127,8 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
         newFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
       }
 
-      const oldDeprecated = oldFieldObj && (oldFieldObj.deprecated === true || (oldFieldObj.status || '').toLowerCase() === 'deprecated');
-      const newDeprecated = newFieldObj && (newFieldObj.deprecated === true || (newFieldObj.status || '').toLowerCase() === 'deprecated');
+      const oldDeprecated = oldFieldObj && (oldFieldObj.is_deprecated === true || oldFieldObj.deprecated === true || (oldFieldObj.status || '').toLowerCase() === 'deprecated');
+      const newDeprecated = newFieldObj && (newFieldObj.is_deprecated === true || newFieldObj.deprecated === true || (newFieldObj.status || '').toLowerCase() === 'deprecated');
 
       if (!oldDeprecated && newDeprecated) {
         deprecatedFields.push({
@@ -301,8 +301,8 @@ function printDeltaReport(oldIndex, newIndex) {
       } else {
         newFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
       }
-      const oldDeprecated = oldFieldObj && (oldFieldObj.deprecated === true || (oldFieldObj.status || '').toLowerCase() === 'deprecated');
-      const newDeprecated = newFieldObj && (newFieldObj.deprecated === true || (newFieldObj.status || '').toLowerCase() === 'deprecated');
+      const oldDeprecated = oldFieldObj && (oldFieldObj.is_deprecated === true || oldFieldObj.deprecated === true || (oldFieldObj.status || '').toLowerCase() === 'deprecated');
+      const newDeprecated = newFieldObj && (newFieldObj.is_deprecated === true || newFieldObj.deprecated === true || (newFieldObj.status || '').toLowerCase() === 'deprecated');
       if (!oldDeprecated && newDeprecated) {
         deprecatedFieldsList.push({ component: cKey, field: fName });
       }
