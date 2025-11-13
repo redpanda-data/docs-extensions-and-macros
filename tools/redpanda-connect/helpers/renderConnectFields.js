@@ -138,7 +138,39 @@ module.exports = function renderConnectFields(children, prefix = '') {
     if (child.examples && child.examples.length) {
       block += `[source,yaml]\n----\n# Examples:\n`;
       if (child.kind === 'array') {
-        block += renderYamlList(child.name, child.examples);
+        // Render arrays in flow style (with brackets) instead of block style
+        child.examples.forEach(example => {
+          if (Array.isArray(example)) {
+            // Format as flow style: fieldName: [item1, item2, ...]
+            const items = example.map(item => {
+              if (typeof item === 'string') {
+                // Check if quoting is needed
+                const needsQuoting = item === '*' ||
+                                     /[:\[\]\{\},&>|%@`"]/.test(item) ||
+                                     /^[\s]|[\s]$/.test(item); // leading/trailing whitespace
+
+                if (needsQuoting) {
+                  // Escape backslashes first, then double quotes
+                  const escaped = item.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                  return `"${escaped}"`;
+                }
+                return item;
+              }
+              // For non-strings, convert to string
+              const strValue = String(item);
+              // Check if the stringified value needs quoting
+              if (/[:\[\]\{\},&>|%@`"]/.test(strValue) || /^[\s]|[\s]$/.test(strValue)) {
+                const escaped = strValue.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                return `"${escaped}"`;
+              }
+              return strValue;
+            });
+            block += `${child.name}: [${items.join(', ')}]\n`;
+          } else {
+            // Fallback for non-array examples (shouldn't happen for array fields)
+            block += `${child.name}: ${example}\n`;
+          }
+        });
       } else {
         child.examples.forEach(example => {
           if (typeof example === 'object') {
