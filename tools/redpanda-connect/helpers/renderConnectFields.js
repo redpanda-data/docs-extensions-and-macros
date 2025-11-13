@@ -159,7 +159,10 @@ module.exports = function renderConnectFields(children, prefix = '') {
                   }
 
                   // Check if quoting is needed
-                  const needsQuoting = item === '*' ||
+                  const needsQuoting = item === '' ||
+                                       item === '*' ||
+                                       /^(true|false|null|yes|no|on|off)$/i.test(item) ||
+                                       /^[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$/.test(item) ||
                                        /[:\[\]\{\},&>|%@`"]/.test(item) ||
                                        /\s/.test(item); // any whitespace
 
