@@ -795,28 +795,6 @@ This creates:
 * `output/pages/object-storage-properties.adoc` - Cloud storage configuration
 * `output/pages/deprecated/partials/deprecated-properties.adoc` - Deprecated properties
 
-=== Validation and error reporting
-
-The docs generator validates properties and reports issues:
-
-[cols="1,2"]
-|===
-| Error file | Content
-
-| `empty_description.txt`
-| Properties without descriptions
-
-| `empty_type.txt`
-| Properties without types
-
-| `max_without_min.txt`
-| Properties with maximum but no minimum
-
-| `min_without_max.txt`
-| Properties with minimum but no maximum
-|===
-
-Fix reported issues by adding overrides in `overrides.json`.
 
 == Troubleshooting
 

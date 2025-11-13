@@ -59,7 +59,7 @@ function deepEqual(a, b) {
  *   - single item → `[<formatted item>]` (recursively formatted)
  *   - multiple items → `'[<n> items]'`
  * - Object → JSON string via `JSON.stringify`
- * - String → quoted; truncated with `...` if longer than 50 characters
+ * - String → quoted
  * - Other primitives → `String(value)`
  *
  * @param {*} value - The value to format for display.
@@ -78,7 +78,7 @@ function formatValue(value) {
     return JSON.stringify(value);
   }
   if (typeof value === 'string') {
-    return value.length > 50 ? `"${value.substring(0, 50)}..."` : `"${value}"`;
+    return `"${value}"`;
   }
   return String(value);
 }
@@ -121,8 +121,7 @@ function extractProperties(data) {
  * into newProperties, changedDefaults, changedDescriptions, changedTypes,
  * deprecatedProperties (newly deprecated in newData), removedProperties, and
  * emptyDescriptions (non-deprecated properties missing descriptions in newData).
- * Description fields in the report are truncated for brevity; default equality
- * is determined by a deep structural comparison.
+ * Default equality is determined by a deep structural comparison.
  *
  * @param {Object} oldData - Parsed JSON of the older property file.
  * @param {Object} newData - Parsed JSON of the newer property file.

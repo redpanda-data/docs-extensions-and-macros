@@ -16,6 +16,7 @@ jobs:
       macros: ${{ steps.changes.outputs.macros }}
       asciidoc_extensions: ${{ steps.changes.outputs.asciidoc_extensions }}
       tools: ${{ steps.changes.outputs.tools }}
+      property_extractor: ${{ steps.changes.outputs.property_extractor }}
       package_json: ${{ steps.changes.outputs.package_json }}
       all_tests: ${{ steps.changes.outputs.all_tests }}
     steps:
@@ -45,6 +46,10 @@ jobs:
               - 'bin/**'
               - '__tests__/tools/**'
               - '__tests__/**/*tool*.test.js'
+            property_extractor:
+              - 'tools/property-extractor/**/*.py'
+              - 'tools/property-extractor/tests/**'
+              - 'tools/property-extractor/requirements.txt'
             package_json:
               - 'package.json'
               - 'package-lock.json'
@@ -199,6 +204,34 @@ jobs:
       - name: Run tools tests
         run: npm test -- __tests__/tools/ __tests__/**/*tool*.test.js --passWithNoTests
 
+  test-property-extractor:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.property_extractor == 'true' || needs.detect-changes.outputs.all_tests == 'true' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.11']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+          cache-dependency-path: 'tools/property-extractor/requirements.txt'
+
+      - name: Install dependencies
+        working-directory: tools/property-extractor
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run property-extractor tests
+        working-directory: tools/property-extractor
+        run: |
+          python -m pytest tests/ -v --tb=short
+
   # Run all tests if core files changed or on schedule
   test-all:
     needs: detect-changes
@@ -225,13 +258,13 @@ jobs:
   # Summary job that all other jobs depend on
   test-summary:
     if: always()
-    needs: [detect-changes, test-extensions, test-macros, test-asciidoc-extensions, test-tools, test-all]
+    needs: [detect-changes, test-extensions, test-macros, test-asciidoc-extensions, test-tools, test-property-extractor, test-all]
     runs-on: ubuntu-latest
     steps:
       - name: Check test results
         run: |
           # Check if any required job failed
-          if [[ "${{ needs.test-extensions.result }}" == "failure" || "${{ needs.test-macros.result }}" == "failure" || "${{ needs.test-asciidoc-extensions.result }}" == "failure" || "${{ needs.test-tools.result }}" == "failure" || "${{ needs.test-all.result }}" == "failure" ]]; then
+          if [[ "${{ needs.test-extensions.result }}" == "failure" || "${{ needs.test-macros.result }}" == "failure" || "${{ needs.test-asciidoc-extensions.result }}" == "failure" || "${{ needs.test-tools.result }}" == "failure" || "${{ needs.test-property-extractor.result }}" == "failure" || "${{ needs.test-all.result }}" == "failure" ]]; then
             echo "❌ Some tests failed"
             exit 1
           else

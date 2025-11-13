@@ -230,6 +230,17 @@ FLOAT_PATTERN = re.compile(r"^-?\d+\.\d+$")
 INT_PATTERN = re.compile(r"^-?\d+$")
 SIZE_SUFFIX_PATTERN = re.compile(r"(\d+)_([KMGTP])iB")
 
+# Computed C++ constant definitions that require evaluation
+# These are constants defined with complex expressions that can't be easily parsed
+# Values are computed from the C++ definitions
+COMPUTED_CONSTANTS = {
+    # From src/v/serde/rw/chrono.h:20
+    # inline constexpr auto max_serializable_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::nanoseconds::max());
+    # Calculation: std::numeric_limits<int64_t>::max() / 1,000,000 = 9223372036854775807 / 1000000 = 9223372036854 ms
+    "max_serializable_ms": 9223372036854,  # ~292 years in milliseconds
+    "serde::max_serializable_ms": 9223372036854,  # Namespace-qualified version
+}
+
 # Debug configuration - useful for development and troubleshooting
 DEBUG_TRANSFORMERS = False  # Master switch for transformer debugging
 DEBUG_FILTER = None                               # Filter to specific property name (or None for all)
@@ -1470,7 +1481,14 @@ class FriendlyDefaultTransformer:
       - ss::sstring{CONSTEXPR}
       - { "a", "b" } and std::vector<...>{...}
       - std::nullopt and legacy_default<...>
+      - Computed C++ constants (max_serializable_ms, etc.)
       - Complex symbolic constants
+
+    COMPUTED CONSTANTS:
+    Some C++ constants involve complex compile-time expressions that cannot be easily parsed.
+    These are pre-computed and stored in the COMPUTED_CONSTANTS dictionary. For example:
+      - max_serializable_ms: std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::nanoseconds::max()) = 9223372036854 ms
     """
 
     ARRAY_PATTERN_STD_VECTOR = r"std::vector<[^>]+>\s*\{(.*)\}$"
@@ -1660,11 +1678,14 @@ class FriendlyDefaultTransformer:
         if d in ("true", "false"):
             property["default"] = (d == "true")
             return property
-        if re.match(r"^-?\d+\.\d+$", d):
-            property["default"] = float(d)
+        if re.match(r"^-?\d+\.\d+[fFlL]*$", d):
+            # Strip C++ floating point suffixes (f, F, l, L)
+            property["default"] = float(re.sub(r"[fFlL]+$", "", d))
             return property
-        if re.match(r"^-?\d+$", d):
-            property["default"] = int(d)
+        # Strip C++ integer suffixes (u, U, l, L, ll, LL, ul, UL, etc.)
+        int_match = re.match(r"^(-?\d+)([uUlL]+)?$", d)
+        if int_match:
+            property["default"] = int(int_match.group(1))
             return property
 
         # ------------------------------------------------------------------
@@ -1675,6 +1696,14 @@ class FriendlyDefaultTransformer:
             num, unit = int(size_match.group(1)), size_match.group(2)
             mult = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}[unit]
             property["default"] = num * mult
+            return property
+
+        # ------------------------------------------------------------------
+        # Computed C++ constants (max_serializable_ms, serde::max_serializable_ms, etc.)
+        # Check this BEFORE generic namespace identifier check to ensure computed constants are resolved
+        # ------------------------------------------------------------------
+        if d in COMPUTED_CONSTANTS:
+            property["default"] = COMPUTED_CONSTANTS[d]
             return property
 
         # ------------------------------------------------------------------

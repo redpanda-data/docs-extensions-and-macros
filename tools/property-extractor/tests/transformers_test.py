@@ -109,8 +109,9 @@ class NeedsRestartTransformerTestCase(unittest.TestCase):
             )
         )
 
-    def test_rejects_without_needs_restart(self):
-        self.assertFalse(
+    def test_accepts_without_needs_restart(self):
+        """NeedsRestartTransformer now accepts all properties and applies defaults"""
+        self.assertTrue(
             self.transformer.accepts(
                 create_property_info(
                     "test_property", "test description", "bool", PropertyBag()
@@ -251,8 +252,23 @@ class DeprecatedTransformerTestCase(unittest.TestCase):
     def setUp(self):
         self.transformer = DeprecatedTransformer()
 
-    def test_accepts_deprecated_visibility(self):
+    def test_accepts_deprecated_metadata(self):
+        """DeprecatedTransformer accepts properties with .deprecated in meta"""
         self.assertTrue(
+            self.transformer.accepts(
+                create_property_info(
+                    "test_property",
+                    "test description",
+                    "bool",
+                    PropertyBag(deprecated="yes"),
+                ),
+                None,
+            )
+        )
+
+    def test_rejects_without_deprecated_metadata(self):
+        """DeprecatedTransformer rejects properties without .deprecated in meta"""
+        self.assertFalse(
             self.transformer.accepts(
                 create_property_info(
                     "test_property",
@@ -263,9 +279,7 @@ class DeprecatedTransformerTestCase(unittest.TestCase):
                 None,
             )
         )
-
-    def test_accepts_deprecated_property_type(self):
-        self.assertTrue(
+        self.assertFalse(
             self.transformer.accepts(
                 create_property_info(
                     "test_property",
@@ -370,6 +384,67 @@ class IsSecretTransformerTestCase(unittest.TestCase):
         )
         self.transformer.parse(property, info, FilePair("testfile.h", "testfile.cc"))
         self.assertFalse(property["is_secret"])
+
+
+class FriendlyDefaultTransformerTestCase(unittest.TestCase):
+    def setUp(self):
+        self.transformer = FriendlyDefaultTransformer()
+
+    def test_strips_unsigned_integer_suffix(self):
+        """Test that C++ unsigned integer suffixes are stripped from defaults"""
+        property = PropertyBag()
+        info = create_property_info(
+            "test_property",
+            "test description",
+            "uint32_t",
+            PropertyBag(needs_restart="needs_restart::no"),
+            default_value="1024u",
+            default_value_type="number_literal"
+        )
+        self.transformer.parse(property, info, FilePair("testfile.h", "testfile.cc"))
+        self.assertEqual(1024, property["default"])
+
+    def test_strips_long_integer_suffix(self):
+        """Test that C++ long integer suffixes are stripped from defaults"""
+        property = PropertyBag()
+        info = create_property_info(
+            "test_property",
+            "test description",
+            "int64_t",
+            PropertyBag(needs_restart="needs_restart::no"),
+            default_value="42L",
+            default_value_type="number_literal"
+        )
+        self.transformer.parse(property, info, FilePair("testfile.h", "testfile.cc"))
+        self.assertEqual(42, property["default"])
+
+    def test_strips_unsigned_long_long_suffix(self):
+        """Test that C++ unsigned long long suffixes are stripped from defaults"""
+        property = PropertyBag()
+        info = create_property_info(
+            "test_property",
+            "test description",
+            "uint64_t",
+            PropertyBag(needs_restart="needs_restart::no"),
+            default_value="999ULL",
+            default_value_type="number_literal"
+        )
+        self.transformer.parse(property, info, FilePair("testfile.h", "testfile.cc"))
+        self.assertEqual(999, property["default"])
+
+    def test_strips_float_suffix(self):
+        """Test that C++ float suffixes are stripped from defaults"""
+        property = PropertyBag()
+        info = create_property_info(
+            "test_property",
+            "test description",
+            "float",
+            PropertyBag(needs_restart="needs_restart::no"),
+            default_value="3.14f",
+            default_value_type="number_literal"
+        )
+        self.transformer.parse(property, info, FilePair("testfile.h", "testfile.cc"))
+        self.assertAlmostEqual(3.14, property["default"], places=2)
 
 
 if __name__ == "__main__":
