@@ -107,7 +107,7 @@ class TopicPropertyExtractor:
                         self.topic_properties[property_name] = {
                             "variable_name": f"topic_property_{var_name}",
                             "property_name": property_name,
-                            "source_file": str(file_path.relative_to(self.source_path)),
+                            "defined_in": str(file_path.relative_to(self.source_path)),
                             "description": "",
                             "type": self._determine_property_type(property_name),
                             "acceptable_values": None,
@@ -120,6 +120,10 @@ class TopicPropertyExtractor:
             
     def _scan_file_for_topic_properties(self, file_path: Path):
         """Scan any file for topic_property_ constants"""
+        # Skip admin proxy files - they contain RPC service definitions, not topic properties
+        if 'admin/proxy/' in str(file_path):
+            return
+
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
@@ -156,7 +160,7 @@ class TopicPropertyExtractor:
                         self.topic_properties[property_name] = {
                             "variable_name": f"topic_property_{var_name}",
                             "property_name": property_name,
-                            "source_file": str(file_path.relative_to(self.source_path)),
+                            "defined_in": str(file_path.relative_to(self.source_path)),
                             "description": "",
                             "type": self._determine_property_type(property_name),
                             "acceptable_values": None,
@@ -231,7 +235,7 @@ class TopicPropertyExtractor:
                 values = self._extract_enum_values(enum_body)
                 if values:
                     self.enum_values[enum_name] = {
-                        "source_file": str(file_path.relative_to(self.source_path)),
+                        "defined_in": str(file_path.relative_to(self.source_path)),
                         "values": values
                     }
                     
@@ -243,7 +247,7 @@ class TopicPropertyExtractor:
                 values = self._extract_enum_values(enum_body)
                 if values:
                     self.enum_values[enum_name] = {
-                        "source_file": str(file_path.relative_to(self.source_path)),
+                        "defined_in": str(file_path.relative_to(self.source_path)),
                         "values": values
                     }
                     
@@ -265,7 +269,7 @@ class TopicPropertyExtractor:
                     values = self._extract_enum_values(enum_body)
                     if values:
                         self.enum_values[enum_name] = {
-                            "source_file": str(file_path.relative_to(self.source_path)),
+                            "defined_in": str(file_path.relative_to(self.source_path)),
                             "values": values
                         }
         except Exception as e:
@@ -273,14 +277,22 @@ class TopicPropertyExtractor:
             
     def _is_valid_topic_property(self, prop_name: str) -> bool:
         """Validate that a string looks like a real topic property"""
-        
+
         # Must be non-empty and reasonable length
         if not prop_name or len(prop_name) < 3 or len(prop_name) > 100:
             return False
-            
+
         # Must contain only valid characters for topic properties
         if not re.match(r'^[a-zA-Z][a-zA-Z0-9._-]*$', prop_name):
             return False
+
+        # Reject Java-style package names (e.g., "redpanda.core.admin.Service")
+        # Topic properties use lowercase with dots (e.g., "cleanup.policy", "segment.ms")
+        # Split by dots and check each segment - reject if any segment after first has uppercase
+        segments = prop_name.split('.')
+        for i, segment in enumerate(segments):
+            if i > 0 and segment and segment[0].isupper():
+                return False
             
         # Known topic property prefixes/patterns
         valid_patterns = [
@@ -525,10 +537,11 @@ class TopicPropertyExtractor:
                     
         elif "timestamp.type" in prop_name:
             return "[`CreateTime`, `LogAppendTime`]"
-            
+
         elif prop_data.get("type") == "boolean":
-            return "[`true`, `false`]"
-            
+            # Boolean properties don't need acceptable_values - it's redundant
+            return ""
+
         # For numeric properties, determine format based on type and name
         elif prop_data.get("type") == "number" and "ratio" in prop_name:
             return "[`0`, `1.0`]"  

@@ -2,13 +2,15 @@
 
 /**
  * Property Comparison Tool
- * 
+ *
  * Compares two property JSON files and generates a detailed report of:
  * - New properties added
  * - Properties with changed defaults
  * - Properties with changed descriptions
  * - Properties with changed types
  * - Deprecated properties
+ * - Removed properties
+ * - Properties with empty descriptions (excluding deprecated)
  */
 
 const fs = require('fs');
@@ -57,7 +59,7 @@ function deepEqual(a, b) {
  *   - single item → `[<formatted item>]` (recursively formatted)
  *   - multiple items → `'[<n> items]'`
  * - Object → JSON string via `JSON.stringify`
- * - String → quoted; truncated with `...` if longer than 50 characters
+ * - String → quoted
  * - Other primitives → `String(value)`
  *
  * @param {*} value - The value to format for display.
@@ -76,7 +78,7 @@ function formatValue(value) {
     return JSON.stringify(value);
   }
   if (typeof value === 'string') {
-    return value.length > 50 ? `"${value.substring(0, 50)}..."` : `"${value}"`;
+    return `"${value}"`;
   }
   return String(value);
 }
@@ -117,28 +119,29 @@ function extractProperties(data) {
  *
  * Compares properties extracted from oldData and newData and classifies differences
  * into newProperties, changedDefaults, changedDescriptions, changedTypes,
- * deprecatedProperties (newly deprecated in newData), and removedProperties.
- * Description fields in the report are truncated for brevity; default equality
- * is determined by a deep structural comparison.
+ * deprecatedProperties (newly deprecated in newData), removedProperties, and
+ * emptyDescriptions (non-deprecated properties missing descriptions in newData).
+ * Default equality is determined by a deep structural comparison.
  *
  * @param {Object} oldData - Parsed JSON of the older property file.
  * @param {Object} newData - Parsed JSON of the newer property file.
  * @param {string} oldVersion - Version string corresponding to oldData.
  * @param {string} newVersion - Version string corresponding to newData.
  * @return {Object} Report object with arrays: newProperties, changedDefaults,
- *   changedDescriptions, changedTypes, deprecatedProperties, removedProperties.
+ *   changedDescriptions, changedTypes, deprecatedProperties, removedProperties, emptyDescriptions.
  */
 function compareProperties(oldData, newData, oldVersion, newVersion) {
   const oldProps = extractProperties(oldData);
   const newProps = extractProperties(newData);
-  
+
   const report = {
     newProperties: [],
     changedDefaults: [],
     changedDescriptions: [],
     changedTypes: [],
     deprecatedProperties: [],
-    removedProperties: []
+    removedProperties: [],
+    emptyDescriptions: []
   };
   
   // Find new properties
@@ -207,7 +210,21 @@ function compareProperties(oldData, newData, oldVersion, newVersion) {
       });
     }
   }
-  
+
+  // Find properties with empty descriptions in the new version (excluding deprecated)
+  for (const [name, prop] of Object.entries(newProps)) {
+    const hasEmptyDescription = !prop.description ||
+      (typeof prop.description === 'string' && prop.description.trim().length === 0) ||
+      prop.description === 'No description';
+
+    if (hasEmptyDescription && !prop.is_deprecated) {
+      report.emptyDescriptions.push({
+        name,
+        type: prop.type
+      });
+    }
+  }
+
   return report;
 }
 
@@ -273,7 +290,14 @@ function generateConsoleReport(report, oldVersion, newVersion) {
       console.log(`   • ${prop.name} (${prop.type})`);
     });
   }
-  
+
+  if (report.emptyDescriptions.length > 0) {
+    console.log(`\n⚠️  Properties with empty descriptions (${report.emptyDescriptions.length}):`);
+    report.emptyDescriptions.forEach(prop => {
+      console.log(`   • ${prop.name} (${prop.type})`);
+    });
+  }
+
   console.log('\n' + '='.repeat(60));
 }
 
@@ -283,7 +307,7 @@ function generateConsoleReport(report, oldVersion, newVersion) {
  * Produces a JSON file containing a comparison header (old/new versions and timestamp),
  * a summary with counts for each change category, and the full details object passed as `report`.
  *
- * @param {Object} report - Comparison details object produced by compareProperties; expected to contain arrays: `newProperties`, `changedDefaults`, `changedDescriptions`, `changedTypes`, `deprecatedProperties`, and `removedProperties`.
+ * @param {Object} report - Comparison details object produced by compareProperties; expected to contain arrays: `newProperties`, `changedDefaults`, `changedDescriptions`, `changedTypes`, `deprecatedProperties`, `removedProperties`, and `emptyDescriptions`.
  * @param {string} oldVersion - The previous version identifier included in the comparison header.
  * @param {string} newVersion - The new version identifier included in the comparison header.
  * @param {string} outputPath - Filesystem path where the JSON report will be written.
@@ -301,7 +325,8 @@ function generateJsonReport(report, oldVersion, newVersion, outputPath) {
       changedDescriptions: report.changedDescriptions.length,
       changedTypes: report.changedTypes.length,
       deprecatedProperties: report.deprecatedProperties.length,
-      removedProperties: report.removedProperties.length
+      removedProperties: report.removedProperties.length,
+      emptyDescriptions: report.emptyDescriptions.length
     },
     details: report
   };

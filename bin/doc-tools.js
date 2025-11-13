@@ -1148,8 +1148,10 @@ automation
 
     // If we used Antora's latest-redpanda-tag for diff, update it to the new tag
     if (!options.diff && !tagsAreSame) {
-      setAntoraValue('asciidoc.attributes.latest-redpanda-tag', newTag);
-      console.log(`✅ Updated Antora latest-redpanda-tag to: ${newTag}`);
+      const success = setAntoraValue('asciidoc.attributes.latest-redpanda-tag', newTag);
+      if (success) {
+        console.log(`✅ Updated Antora latest-redpanda-tag to: ${newTag}`);
+      }
     }
 
     process.exit(0);

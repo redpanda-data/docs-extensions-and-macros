@@ -1,206 +1,937 @@
-= Redpanda Property Generator
+= Redpanda Property Extractor
 
-The Redpanda Property Generator is a CLI tool designed to extract properties from Redpanda's source code and generate a JSON output with their definitions as well as Asciidoc pages.
+The Redpanda Property Extractor automatically extracts configuration properties and type definitions from Redpanda's C++ source code and generates JSON schemas and AsciiDoc documentation.
 
 == Prerequisites
 
-Ensure the following prerequisites are installed on your system:
+Ensure the following prerequisites are installed:
 
 - https://www.python.org/downloads/[Python 3.10 or higher]
-- A C++ compiler (such as `gcc`, `clang`)
-- https://www.google.com/search?q=how+to+install+make[`make` utility] (to use the Makefile for automation)
-+
-To ensure `make` is available:
-+
+- A C++ compiler (such as `gcc` or `clang`)
+- https://www.gnu.org/software/make/[`make` utility]
+
+Verify `make` installation:
+
 [,bash]
 ----
 make --version
 ----
 
-== Install
+== Quick start
 
 . Clone the repository:
 +
 [,bash]
 ----
 git clone https://github.com/redpanda-data/docs-extensions-and-macros.git
-cd docs-extensions-and-macros
+cd docs-extensions-and-macros/tools/property-extractor
 ----
 
-== Generate properties
-
-. Run the build process:
+. Build and generate documentation:
 +
 [,bash]
 ----
-cd tools/property-extractor
 make build
 ----
 +
 This command:
 +
-- Sets up the Python virtual environment (`venv`).
-- Checks out the Redpanda source code to the specified branch or tag.
-- Runs the extractor to generate a JSON file at `gen/properties-output.json`.
-- Runs the docs generator to generate Asciidoc pages from the `properties-output.json`.
+* Sets up a Python virtual environment
+* Clones the Redpanda source code to the specified branch or tag
+* Extracts properties and type definitions to `gen/properties-output.json`
+* Generates AsciiDoc documentation files in `output/`
 
-. Locate the generated files:
+. View generated files:
 +
 [,bash]
 ----
 ls gen/properties-output.json
-ls output
+ls output/pages/
 ----
 
-To clean the environment and generated files:
+To clean generated files:
 
 [,bash]
 ----
 make clean
 ----
 
-== Run the extractor manually
+== How it works
 
-To run the extractor tool directly:
+=== Architecture overview
 
-[,bash]
+The property extractor uses a multi-stage pipeline:
+
+[source,text]
 ----
-./property_extractor.py --path <path-to-redpanda-source> [options]
+C++ Source Code
+    ↓
+[Tree-sitter Parser] → AST
+    ↓
+[Property Extractor] → Raw properties
+    ↓
+[Type Definition Extractor] → Auto-discovered types
+    ↓
+[Transformers Pipeline] → Enriched properties
+    ↓
+[Type Resolver] → Resolved types & defaults
+    ↓
+[Enum Default Mapper] → User-facing enum values
+    ↓
+[Chrono Evaluator] → Numeric values & human-readable times
+    ↓
+[Overrides Applier] → Final properties
+    ↓
+JSON Schema Output
 ----
 
-=== Command options
+=== Stage 1: Source code parsing
 
+The extractor uses https://tree-sitter.github.io/tree-sitter/[Tree-sitter] to parse C++ source code into Abstract Syntax Trees (ASTs). It identifies property declarations in:
+
+* `src/v/config/configuration.cc` - Broker and cluster properties
+* `src/v/kafka/client/configuration.cc` - Kafka client properties
+* Other configuration files
+
+Properties are declared using Redpanda's property template classes:
+
+[,cpp]
+----
+property<std::optional<int>>("property_name", "Description")
+  .default_value(42)
+  .visibility(visibility::tunable);
+----
+
+=== Stage 2: Type definition extraction
+
+The extractor automatically discovers type definitions from C++ headers:
+
+==== Automatically extracted types
+
+[cols="1,2,2"]
 |===
-| Option | Description
+| Type category | Example | Extraction method
 
-| `--path <path>`
-| Path to the Redpanda source directory to extract properties from (required).
-| `--recursive`
-| Recursively scan the provided path for header (`*.h`) and implementation (`*.cc`) file pairs.
-| `--output <output>`
-| Path to the output JSON file. If not provided, the output will be printed to the console.
-| `--definitions <definitions>`
-| Path to the `definitions.json` file for type definitions (default: included `definitions.json`).
-| `-v`, `--verbose`
-| Enable verbose logging for debugging purposes.
+| *Structs and classes*
+| `model::broker_endpoint`, `config::tls_config`
+| Brace-counting algorithm extracts complete struct bodies including nested types and methods
+
+| *Enumerations*
+| `model::compression`, `config::tls_version`
+| Regex pattern matching with support for four conversion function patterns: `_to_string()`, `operator<<`, `string_switch`, and `to_string_view()`
+
+| *Type aliases*
+| `using node_id = named_type<int32_t, ...>`
+| Pattern matching for `using` declarations with underlying type resolution
+
+| *Enum string mappings*
+| `write_caching_mode::default_false` → `"false"`
+| Extracted from enum-to-string conversion functions using four pattern-matching strategies
 |===
 
-=== Example command
+==== Enum string mapping patterns
 
-[,bash]
+The extractor supports four C++ patterns for mapping enum values to user-facing strings:
+
+[cols="1,2"]
+|===
+| Pattern | C++ Code Example
+
+| *Pattern 1: `_to_string()` method*
+|
+[,cpp]
 ----
-./property_extractor.py --path ./tmp/redpanda --recursive --output autogenerated/properties.json
-----
-
-=== How it works
-
-. The tool identifies pairs of header (`*.h`) and implementation (`*.cc`) files in the specified Redpanda source directory. This ensures that both the declaration and definition of properties are available.
-
-. Tree-sitter is used to parse the C{plus}{plus} source code and create abstract syntax trees (ASTs). Both the Tree-sitter C++ library (via a Git submodule) and its Python bindings (`tree_sitter`) are required for this step.
-
-. Custom logic in `property_extractor.py` processes the ASTs to extract property definitions from specific files like:
-+
-- `src/v/config/configuration.cc`
-- `src/v/kafka/client/configuration.cc`
-
-. Extracted properties are processed by a series of transformers to enrich and normalize the data. For example:
-+
-- `BasicInfoTransformer`: Extracts names and metadata.
-- `VisibilityTransformer`: Determines visibility (e.g., public or private).
-- `IsNullableTransformer`: Detects if a property is nullable.
-
-. The `definitions.json` file is merged into the output, linking property types to their descriptions.
-
-=== JSON output
-
-The final JSON contains:
-
-- `properties`: Extracted properties with metadata.
-- `definitions`: Type definitions, merged from `definitions.json`.
-
-Example JSON structure:
-
-[,json]
-----
-{
-    "properties": {
-        "example_property": {
-            "type": "string",
-            "description": "An example property."
-        }
-    },
-    "definitions": {
-        "string": {
-            "description": "A string type."
-        }
+std::string_view write_caching_mode_to_string(write_caching_mode s) {
+    switch(s) {
+    case write_caching_mode::default_false:
+        return "false";
     }
 }
 ----
 
-=== Custom definitions
+| *Pattern 2: `operator<<` overload*
+|
+[,cpp]
+----
+std::ostream& operator<<(std::ostream& os, compression c) {
+    switch(c) {
+    case compression::gzip:
+        os << "gzip";
+    }
+}
+----
 
-You can provide a custom `definitions.json` file:
+| *Pattern 3: `string_switch` reverse lookup*
+|
+[,cpp]
+----
+compression from_string(std::string_view s) {
+    return string_switch<compression>(s)
+        .match("gzip", compression::gzip)
+        .match("snappy", compression::snappy);
+}
+----
+
+| *Pattern 4: `to_string_view()` function*
+|
+[,cpp]
+----
+constexpr std::string_view to_string_view(tls_version v) {
+    switch(v) {
+    case tls_version::v1_0:
+        return "v1.0";
+    case tls_version::v1_2:
+        return "v1.2";
+    }
+}
+----
+|===
+
+The extractor searches for these patterns in `.cc` files related to the enum's `.h` header file.
+
+==== Type namespace resolution
+
+The extractor resolves unqualified type names by trying common namespace prefixes:
+
+* `config::` - Configuration types
+* `model::` - Core data model types
+* `security::` - Security and authentication types
+* `net::` - Network types
+* `kafka::` - Kafka protocol types
+* `pandaproxy::` - Schema registry types
+
+Example: An unqualified type `tls_version` automatically resolves to `config::tls_version` if found in the `config` namespace.
+
+The extractor scans these source directories:
+
+* `model/` - Core data model types
+* `config/` - Configuration types
+* `net/` - Network types
+* `kafka/` - Kafka protocol types
+* `pandaproxy/` - Schema registry types
+* `security/` - Security and audit types
+* `utils/` - Utility types
+
+=== Stage 3: Property enrichment
+
+A series of transformers processes extracted properties:
+
+[cols="1,2"]
+|===
+| Transformer | Function
+
+| `BasicInfoTransformer`
+| Extracts property names, types, and descriptions
+
+| `VisibilityTransformer`
+| Determines visibility (public, tunable, deprecated)
+
+| `IsNullableTransformer`
+| Detects optional properties
+
+| `DefaultValueTransformer`
+| Extracts and resolves default values
+
+| `UnitsTransformer`
+| Identifies units (bytes, milliseconds, etc.)
+
+| `RequiresRestartTransformer`
+| Determines if changes require restart
+
+| `IsSecretTransformer`
+| Marks sensitive properties
+|===
+
+==== Deprecated property detection
+
+The extractor identifies deprecated properties using three methods:
+
+[cols="1,2,2"]
+|===
+| Detection method | C++ pattern | Result
+
+| *Type-based*
+| `deprecated_property<T>("name", ...)`
+| Sets `is_deprecated: true` in JSON output
+
+| *Metadata-based*
+| `meta{.deprecated = "reason"}` +
+`meta{.deprecated = yes}`
+| Sets `is_deprecated: true` and optionally captures `deprecated_reason`
+
+| *Visibility-based*
+| `meta{.visibility = visibility::deprecated}`
+| Sets `is_deprecated: true` and marks for migration documentation only
+|===
+
+Example C++ declarations:
+
+[,cpp]
+----
+// Type-based deprecation
+deprecated_property<int>("old_setting", "Legacy configuration")
+  .default_value(42);
+
+// Metadata-based deprecation with reason
+property<bool>("legacy_mode", "Old behavior flag")
+  .default_value(false)
+  .visibility(visibility::user)
+  .meta{.deprecated = "Use new_mode instead"};
+
+// Visibility-based deprecation
+property<std::string>("obsolete_path", "Deprecated file path")
+  .default_value("/old/location")
+  .visibility(visibility::deprecated);
+----
+
+Generated JSON output:
+
+[,json]
+----
+{
+  "old_setting": {
+    "type": "integer",
+    "default": 42,
+    "is_deprecated": true
+  },
+  "legacy_mode": {
+    "type": "boolean",
+    "default": false,
+    "is_deprecated": true,
+    "deprecated_reason": "Use new_mode instead"
+  },
+  "obsolete_path": {
+    "type": "string",
+    "default": "/old/location",
+    "is_deprecated": true,
+    "visibility": "deprecated"
+  }
+}
+----
+
+Deprecated properties appear in migration guides but are excluded from standard user documentation.
+
+==== Experimental property detection
+
+The extractor identifies experimental properties that are in development or testing:
+
+[cols="1,2,2"]
+|===
+| Detection method | C++ pattern | Result
+
+| *Type-based*
+| `experimental_property<T>("name", ...)`
+| Sets `is_experimental_property: true` in JSON output
+
+| *Metadata-based*
+| `meta{.experimental = true}` +
+`meta{.experimental = "description"}`
+| Sets `is_experimental_property: true` and optionally captures experimental notes
+|===
+
+Example C++ declarations:
+
+[,cpp]
+----
+// Type-based experimental
+experimental_property<int>("new_feature", "Feature in development")
+  .default_value(0);
+
+// Metadata-based experimental
+property<bool>("beta_mode", "Experimental feature flag")
+  .default_value(false)
+  .visibility(visibility::tunable)
+  .meta{.experimental = true};
+----
+
+Generated JSON output:
+
+[,json]
+----
+{
+  "new_feature": {
+    "type": "integer",
+    "default": 0,
+    "is_experimental_property": true
+  },
+  "beta_mode": {
+    "type": "boolean",
+    "default": false,
+    "is_experimental_property": true
+  }
+}
+----
+
+Experimental properties are excluded from the documentation.
+
+=== Stage 4: Type resolution
+
+The type resolver:
+
+. Resolves `$ref` pointers to actual type definitions
+. Expands C++ constructors into JSON-compatible default values
+. Maps C++ types to JSON Schema types
+. Applies enum constraints to properties
+
+Example transformation:
+
+[,cpp]
+----
+// C++ source
+property<std::vector<model::broker_endpoint>>("kafka_api")
+  .default_value({model::broker_endpoint{"internal", "127.0.0.1", 9092}})
+----
+
+Becomes:
+
+[,json]
+----
+{
+  "kafka_api": {
+    "type": "array",
+    "items": {"$ref": "#/definitions/model::broker_endpoint"},
+    "default": [{"name": "internal", "address": "127.0.0.1", "port": 9092}]
+  }
+}
+----
+
+=== Stage 5: Chrono expression evaluation and human-readable formatting
+
+The extractor automatically evaluates C++ chrono expressions in default values and provides human-readable time representations:
+
+==== Chrono expression evaluation
+
+Mathematical time expressions are converted to numeric values:
+
+[,cpp]
+----
+// C++ source with chrono expressions
+property<std::chrono::milliseconds>("log_segment_ms_max")
+  .default_value(24h * 365);  // One year in hours
+
+property<std::chrono::seconds>("connection_timeout")
+  .default_value(7 * 24h);  // One week
+----
+
+The extractor:
+
+1. Parses time literals: `24h`, `365d`, `5min`, `30s`, `100ms`
+2. Evaluates arithmetic: `24h * 365`, `7 * 24h`, `60s + 30s`
+3. Converts to appropriate unit based on C++ type
+4. Adds human-readable representation for documentation
+
+Example transformation:
+
+[cols="1,1,1,1"]
+|===
+| C++ Expression | C++ Type | Numeric Value | Human-Readable
+
+| `24h * 365`
+| `std::chrono::milliseconds`
+| `31536000000`
+| "1 year"
+
+| `7 * 24h`
+| `std::chrono::seconds`
+| `604800`
+| "1 week"
+
+| `5min`
+| `std::chrono::seconds`
+| `300`
+| "5 minutes"
+
+| `24h`
+| `std::chrono::milliseconds`
+| `86400000`
+| "1 day"
+|===
+
+Generated JSON output:
+
+[,json]
+----
+{
+  "log_segment_ms_max": {
+    "type": "integer",
+    "default": 31536000000,
+    "default_human_readable": "1 year",
+    "c_type": "std::chrono::milliseconds"
+  },
+  "connection_timeout": {
+    "type": "integer",
+    "default": 604800,
+    "default_human_readable": "1 week",
+    "c_type": "std::chrono::seconds"
+  }
+}
+----
+
+==== Human-readable time formatting
+
+The `format_time_human_readable()` function automatically selects the most appropriate time unit:
+
+* Prefers larger units (years > weeks > days > hours > minutes > seconds > milliseconds)
+* Only uses a unit if the value divides evenly
+* Example: 604800 seconds becomes "1 week" instead of "7 days"
+
+This human-readable format appears in documentation templates alongside the numeric value:
+
+[source,asciidoc]
+----
+| Default
+| `604800` (1 week)
+----
+
+=== Stage 6: Enum default mapping
+
+Raw C++ enum values are mapped to user-facing strings:
+
+[,cpp]
+----
+enum class write_caching_mode {
+    default_true,
+    default_false,
+    disabled
+};
+
+const char* write_caching_mode_to_string(write_caching_mode s) {
+    case write_caching_mode::default_false: return "false";
+    // ...
+}
+----
+
+Properties using this enum automatically map:
+
+* Default: `default_false` → `"false"`
+* Enum values: `["true", "false", "disabled"]`
+
+=== Stage 7: Override application
+
+The `overrides.json` file allows customization of both properties and type definitions:
+
+[,json]
+----
+{
+  "properties": {
+    "kafka_api": {
+      "description": "Custom description",
+      "example": "kafka_api:\n  - name: internal\n    address: 0.0.0.0\n    port: 9092"
+    }
+  },
+  "definitions": {
+    "model::compression": {
+      "enum": ["none", "gzip", "snappy", "lz4", "zstd", "producer"]
+    }
+  }
+}
+----
+
+== Command-line reference
+
+=== Basic usage
 
 [,bash]
 ----
-./property_extractor.py --path ./tmp/redpanda --definitions custom-definitions.json --output autogenerated/custom-output.json
+./property_extractor.py --path <redpanda-source-path> [options]
 ----
 
-=== Debugging
+=== Options
 
-Enable verbose logging to see detailed information:
+[cols="1,2,1"]
+|===
+| Option | Description | Default
+
+| `--path <path>`
+| Path to Redpanda source directory (required)
+| None
+
+| `--recursive`
+| Recursively scan for header/implementation file pairs
+| False
+
+| `--output <file>`
+| Output JSON file path
+| stdout
+
+| `--overrides <file>`
+| JSON file with property and definition overrides
+| `overrides.json`
+
+| `-v`, `--verbose`
+| Enable verbose logging
+| False
+|===
+
+=== Examples
+
+Extract properties from Redpanda source:
 
 [,bash]
 ----
-./property_extractor.py --path ./tmp/redpanda --verbose
+./property_extractor.py --path ./tmp/redpanda/src/v --output properties.json
 ----
 
-== Run the docs generator manually
+Use custom overrides:
 
-. Make sure you have the `autogenerated/properties-output.json` file, relative to the `Makefile` location.
+[,bash]
+----
+./property_extractor.py \
+  --path ./tmp/redpanda/src/v \
+  --overrides custom-overrides.json \
+  --output properties.json
+----
 
-. Run the script:
-+
+Enable verbose logging for debugging:
+
+[,bash]
+----
+./property_extractor.py --path ./tmp/redpanda/src/v --verbose
+----
+
+== Customization
+
+=== When to add manual definitions
+
+You need manual definitions in `overrides.json` only for:
+
+==== 1. Types removed from codebase
+
+If a type was removed from Redpanda source but properties still reference it:
+
+[,json]
+----
+{
+  "definitions": {
+    "legacy_type": {
+      "type": "string",
+      "description": "Maintained for backward compatibility"
+    }
+  }
+}
+----
+
+==== 2. Complex types not auto-extractable
+
+Property classes inheriting from template base classes:
+
+[,cpp]
+----
+class retention_duration_property final
+  : public property<std::optional<std::chrono::milliseconds>> {
+  // Complex logic, no simple fields to extract
+};
+----
+
+Define manually:
+
+[,json]
+----
+{
+  "definitions": {
+    "retention_duration_property": {
+      "type": "integer",
+      "minimum": -2147483648,
+      "maximum": 2147483647
+    }
+  }
+}
+----
+
+==== 3. Override auto-extracted definitions
+
+Provide cleaner enum values or simplified field lists:
+
+[,json]
+----
+{
+  "definitions": {
+    "model::compression": {
+      "$comment": "Overrides auto-extracted enum to exclude internal values",
+      "enum": ["none", "gzip", "snappy", "lz4", "zstd", "producer"]
+    }
+  }
+}
+----
+
+==== 4. Documentation-only types
+
+Types needed for documentation but not in C++ source:
+
+[,json]
+----
+{
+  "definitions": {
+    "custom_config_type": {
+      "type": "object",
+      "properties": {
+        "host": {"type": "string"},
+        "port": {"type": "integer"}
+      }
+    }
+  }
+}
+----
+
+=== Override precedence
+
+Definitions are applied in this order (later overrides earlier):
+
+. Auto-extracted from C++ source
+. `overrides.json` definitions
+
+=== Overrides file format
+
+The `overrides.json` file supports two top-level keys:
+
+[,json]
+----
+{
+  "$comment": "Property and definition overrides for Redpanda property extraction",
+
+  "properties": {
+    "property_name": {
+      "description": "Custom description text",
+      "example": ".Example\n[,yaml]\n----\nredpanda:\n  property_name: value\n----",
+      "version": "24.3",
+      "related_topics": ["xref:topic.adoc[Link]"],
+      "default": "custom_default",
+      "config_scope": "broker",
+      "type": "string"
+    }
+  },
+
+  "definitions": {
+    "type::name": {
+      "$comment": "Overrides or adds type definition",
+      "type": "enum",
+      "enum": ["value1", "value2", "value3"],
+      "defined_in": "https://github.com/.../file.h#L123"
+    }
+  }
+}
+----
+
+Property override fields:
+
+* `description` - Override auto-extracted description
+* `example` - Add AsciiDoc example block
+* `example_file` - Load example from external file
+* `version` - Version when property was introduced
+* `related_topics` - Array of cross-reference links
+* `default` - Override default value
+* `config_scope` - Specify scope for new properties (broker/cluster/topic)
+* `type` - Specify type for new properties
+
+== JSON output format
+
+The extractor generates a JSON Schema-like document:
+
+[,json]
+----
+{
+  "properties": {
+    "property_name": {
+      "type": "string",
+      "description": "Property description",
+      "default": "default_value",
+      "required": false,
+      "visibility": "tunable",
+      "requires_restart": false,
+      "config_scope": "broker",
+      "units": "bytes",
+      "minimum": 0,
+      "maximum": 1000,
+      "enum": ["option1", "option2"],
+      "example": ".Example\n[,yaml]\n----\nredpanda:\n  property_name: value\n----"
+    }
+  },
+
+  "definitions": {
+    "model::broker_endpoint": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "address": {"type": "string"},
+        "port": {"type": "integer", "minimum": 0, "maximum": 65535}
+      },
+      "defined_in": "model/metadata.h"
+    },
+
+    "model::compression": {
+      "type": "enum",
+      "enum": ["none", "gzip", "snappy", "lz4", "zstd", "producer"],
+      "enum_string_mappings": {
+        "compression_type_none": "none",
+        "compression_type_gzip": "gzip"
+      },
+      "defined_in": "model/compression.h"
+    },
+
+    "model::node_id": {
+      "type": "integer",
+      "minimum": -2147483648,
+      "maximum": 2147483647,
+      "alias_for": "named_type<int32_t, struct node_id_model_type>",
+      "defined_in": "model/fundamental.h"
+    }
+  }
+}
+----
+
+== Documentation generation
+
+To generate AsciiDoc documentation from the JSON:
+
 [,bash]
 ----
 python3 generate_docs.py
 ----
 
-The script will process the JSON and generate AsciiDoc files in the `output/pages/` directory.
+This creates:
 
-=== Output files
+* `output/pages/broker-properties.adoc` - Broker configuration
+* `output/pages/cluster-properties.adoc` - Cluster configuration
+* `output/pages/object-storage-properties.adoc` - Cloud storage configuration
+* `output/pages/deprecated/partials/deprecated-properties.adoc` - Deprecated properties
 
-The following files will be generated:
 
-- Broker Properties: `output/pages/broker-properties.adoc`
-- Cluster Properties: `output/pages/cluster-properties.adoc`
-- Object Storage Properties: `output/pages/object-storage-properties.adoc`
-- Deprecated Properties: `output/pages/deprecated/partials/deprecated-properties.adoc`
+== Troubleshooting
 
-=== Error reports
+=== Type not found
 
-If the script encounters issues, it will generate error files in the `output/error/` directory:
+If a property references a type that isn't extracted:
 
-- `empty_description.txt`: Properties without descriptions.
-- `empty_type.txt`: Properties without types.
-- `max_without_min.txt`: Properties with a maximum value but no minimum.
-- `min_without_max.txt`: Properties with a minimum value but no maximum.
+. Check if the type exists in Redpanda source:
++
+[,bash]
+----
+find tmp/redpanda/src/v -name "*.h" -exec grep -l "your_type_name" {} \;
+----
 
-The console output will summarize the errors and property statistics.
+. If found, check extraction:
++
+[,bash]
+----
+./property_extractor.py --path tmp/redpanda/src/v --verbose 2>&1 | grep "your_type_name"
+----
 
-=== How it works
+. If not extracted, add manual definition to `overrides.json`
 
-. Input parsing:
-   - The script loads the JSON file from the `autogenerated/` directory.
-   - Properties are categorized into groups based on their `defined_in` field or specific naming conventions such as the `cloud_` prefix.
+=== Enum values incorrect
 
-. Validation:
-   - Validates fields like `description`, `type`, `maximum`, and `minimum`.
-   - Identifies missing or inconsistent data and logs these to error files.
+If enum values don't match user-facing strings:
 
-. Documentation generation:
-   - Creates AsciiDoc files with categorized properties, including metadata such as type, default value, visibility, and restart requirements.
-   - Appends appropriate titles, introductions, and formatting for each group.
+. Check for `_to_string()` function in source
+. If missing or incorrect, override in `overrides.json`:
++
+[,json]
+----
+{
+  "definitions": {
+    "model::your_enum": {
+      "enum": ["user_value1", "user_value2"]
+    }
+  }
+}
+----
 
-. Error reporting: Generates error reports for easy debugging and correction of the input JSON.
+=== Missing property fields
 
+If extracted properties lack descriptions or defaults:
+
+. Check C++ source for property declaration
+. Add override in `overrides.json`:
++
+[,json]
+----
+{
+  "properties": {
+    "property_name": {
+      "description": "Detailed description",
+      "example": "..."
+    }
+  }
+}
+----
+
+=== Build failures
+
+Tree-sitter compilation errors:
+
+[,bash]
+----
+cd tree-sitter/tree-sitter-cpp
+git submodule update --init --recursive
+----
+
+Python dependency errors:
+
+[,bash]
+----
+make clean
+make venv
+----
+
+== Advanced usage
+
+=== Adding new transformers
+
+To add custom property transformations:
+
+. Create a transformer function in `transformers.py`:
++
+[,python]
+----
+def my_custom_transformer(properties):
+    """Add custom metadata to properties."""
+    for prop_name, prop in properties.items():
+        # Add custom logic
+        prop['custom_field'] = compute_value(prop)
+    return properties
+----
+
+. Register in transformer pipeline in `property_extractor.py`:
++
+[,python]
+----
+properties = transform_files_with_properties(files_with_properties)
+properties = my_custom_transformer(properties)  # Add here
+----
+
+=== Extending type extraction
+
+To support additional C++ patterns:
+
+. Add extraction method to `type_definition_extractor.py`
+. Register in `_extract_from_file()` method
+. Test extraction on sample files
+
+=== Custom output formats
+
+To generate additional output formats:
+
+. Load the JSON output:
++
+[,python]
+----
+import json
+with open('gen/properties-output.json') as f:
+    data = json.load(f)
+----
+
+. Transform to desired format (YAML, XML, etc.)
+
+== Contributing
+
+When modifying the extractor:
+
+. Test on multiple Redpanda versions
+. Update `overrides.json` for new types
+. Run validation: `make test`
+. Document changes in this README
+
+== Additional resources
+
+* https://github.com/redpanda-data/redpanda[Redpanda GitHub Repository]
+* https://tree-sitter.github.io/tree-sitter/[Tree-sitter Documentation]
