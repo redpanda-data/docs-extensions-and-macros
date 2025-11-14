@@ -20,6 +20,7 @@ describe('topic_property_extractor.py', () => {
         `inline constexpr std::string_view topic_property_retention_ms = "retention.ms";
 inline constexpr std::string_view topic_property_segment_bytes = "segment.bytes";
 inline constexpr std::string_view topic_property_flush_messages = "flush.messages";
+inline constexpr std::string_view topic_property_no_mapping = "redpanda.no.mapping";
 
 // Mock allowlist for no-op properties
 inline constexpr std::array<std::string_view, 3> allowlist_topic_noop_confs = {
@@ -34,12 +35,30 @@ inline constexpr std::array<std::string_view, 3> allowlist_topic_noop_confs = {
         path.join(headerDir, 'types.cc'),
         `// Copyright 2025 Redpanda Data, Inc.\n#include "kafka/server/handlers/topics/types.h"\n// ...rest of the file...\n`
       );
-      // Add a mock config file to simulate a cluster property mapping
-      const configDir = path.join(mockSourcePath, 'src/v/config');
+      // Add a mock config_response_utils.cc file to simulate cluster property mappings
+      const configDir = path.join(mockSourcePath, 'src/v/kafka/server/handlers/configs');
       fs.mkdirSync(configDir, { recursive: true });
       fs.writeFileSync(
-        path.join(configDir, 'mock_config.cc'),
-        'config.get("log_retention_ms");\nconfig.get("log_segment_size");\n'
+        path.join(configDir, 'config_response_utils.cc'),
+        `// Mock config response utils
+add_topic_config_if_requested(
+    topic_property_retention_ms,
+    config::shard_local_cfg().log_retention_ms.name(),
+    config::shard_local_cfg().log_retention_ms.desc()
+);
+
+add_topic_config_if_requested(
+    topic_property_segment_bytes,
+    config::shard_local_cfg().log_segment_size.name(),
+    config::shard_local_cfg().log_segment_size.desc()
+);
+
+add_topic_config_if_requested(
+    topic_property_flush_messages,
+    config::shard_local_cfg().flush_messages.name(),
+    config::shard_local_cfg().flush_messages.desc()
+);
+`
       );
     }
   });
@@ -83,15 +102,44 @@ inline constexpr std::array<std::string_view, 3> allowlist_topic_noop_confs = {
   it('excludes no-op properties from AsciiDoc generation', () => {
     execSync(`python3 ${scriptPath} --source-path ${mockSourcePath} --output-adoc ${outputAdoc}`);
     const adoc = fs.readFileSync(outputAdoc, 'utf8');
-    
-    // Should contain regular properties
+
+    // Should contain regular properties in the documentation
     expect(adoc).toContain('= Topic Configuration Properties');
     expect(adoc).toContain('retention.ms');
     expect(adoc).toContain('segment.bytes');
-    
+
     // Should NOT contain no-op properties in documentation
     expect(adoc).not.toContain('flush.messages');
     expect(adoc).not.toContain('segment.index.bytes');
     expect(adoc).not.toContain('preallocate');
+
+    // Properties with cluster mappings should appear in the mappings table
+    expect(adoc).toMatch(/Topic property mappings[\s\S]*retention\.ms[\s\S]*log_retention_ms/);
+    expect(adoc).toMatch(/Topic property mappings[\s\S]*segment\.bytes[\s\S]*log_segment_size/);
+  });
+
+  it('documents properties without cluster mappings', () => {
+    execSync(`python3 ${scriptPath} --source-path ${mockSourcePath} --output-adoc ${outputAdoc}`);
+    const adoc = fs.readFileSync(outputAdoc, 'utf8');
+
+    // Property without cluster mapping should appear in the main documentation
+    expect(adoc).toContain('redpanda.no.mapping');
+
+    // Extract the mappings table section (between "Topic property mappings" and "== Topic properties")
+    const mappingsSection = adoc.match(/Topic property mappings[\s\S]*?(?===\s+Topic properties)/);
+
+    // Property without mapping should NOT appear in the mappings table
+    if (mappingsSection) {
+      expect(mappingsSection[0]).not.toContain('redpanda.no.mapping');
+    }
+
+    // But it should appear in the Topic properties section
+    const propertiesSection = adoc.match(/==\s+Topic properties[\s\S]*/);
+    expect(propertiesSection[0]).toContain('redpanda.no.mapping');
+
+    // And should not have a "Related cluster property" line
+    const noMappingSection = adoc.match(/===\s+redpanda\.no\.mapping[\s\S]*?---/);
+    expect(noMappingSection).toBeTruthy();
+    expect(noMappingSection[0]).not.toContain('Related cluster property');
   });
 });

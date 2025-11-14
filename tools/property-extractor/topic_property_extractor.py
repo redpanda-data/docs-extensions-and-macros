@@ -770,19 +770,19 @@ NOTE: All topic properties take effect immediately after being set.
 
 """
 
-        # Add individual property documentation - ONLY include properties with cluster mappings and exclude no-ops
+        # Add individual property documentation - include ALL non-no-op properties
         for prop_name, prop_data in sorted(self.topic_properties.items()):
             cluster_prop = prop_data.get("corresponding_cluster_property")
             is_noop = prop_data.get("is_noop", False)
-            
-            # Skip properties without cluster mappings or no-op properties
-            if not cluster_prop or is_noop:
+
+            # Skip only no-op properties
+            if is_noop:
                 continue
-                
+
             anchor = prop_name.replace(".", "").replace("-", "").lower()
             acceptable_values = prop_data.get("acceptable_values", "")
             prop_type = prop_data.get("type", "string")
-            
+
             adoc_content += f"""
 [[{anchor}]]
 === {prop_name}
@@ -793,9 +793,13 @@ NOTE: All topic properties take effect immediately after being set.
             # If the property type is boolean, never include an Accepted values section
             if acceptable_values and str(prop_type).lower() not in ("boolean", "bool"):
                 adoc_content += f"*Accepted values:* {acceptable_values}\n\n"
-            
+
             adoc_content += "*Default:* null\n\n"
-            adoc_content += f"*Related cluster property:* xref:./cluster-properties.adoc#{cluster_prop}[`{cluster_prop}`]\n\n"
+
+            # Only show related cluster property if one exists
+            if cluster_prop:
+                adoc_content += f"*Related cluster property:* xref:./cluster-properties.adoc#{cluster_prop}[`{cluster_prop}`]\n\n"
+
             adoc_content += "---\n\n"
 
         # Write the file
