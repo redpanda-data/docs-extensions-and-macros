@@ -4,8 +4,13 @@
 
 {{#each topicProperties}}
 | <<{{anchorName name}},`{{name}}`>>
-| xref:./cluster-properties.adoc#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`]
+| {{#if alternate_cluster_property~}}
+xref:./{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`] or xref:./{{alternate_cluster_property_doc_file}}#{{alternate_cluster_property}}[`{{alternate_cluster_property}}`]
+{{~else~}}
+xref:./{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`]
+{{~/if}}
 {{/each}}
+
 |===
 
 {{!-- Helper to generate anchor names --}}

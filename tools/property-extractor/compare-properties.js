@@ -202,12 +202,16 @@ function compareProperties(oldData, newData, oldVersion, newVersion) {
         });
       }
     } else {
-      // Property was removed
-      report.removedProperties.push({
-        name,
-        type: oldProp.type,
-        description: oldProp.description || 'No description'
-      });
+      // Property was removed - skip experimental properties
+      // Check both the is_experimental_property field and development_ prefix
+      const isExperimental = oldProp.is_experimental_property || name.startsWith('development_');
+      if (!isExperimental) {
+        report.removedProperties.push({
+          name,
+          type: oldProp.type,
+          description: oldProp.description || 'No description'
+        });
+      }
     }
   }
 

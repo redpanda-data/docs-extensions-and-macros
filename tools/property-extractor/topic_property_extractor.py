@@ -15,6 +15,8 @@ class TopicPropertyExtractor:
         self.cluster_mappings = {}
         self.enum_values = {}
         self.noop_properties = set()
+        self.dynamic_correlations = {}  # Cache for dynamically discovered mappings
+        self.alternate_mappings = {}  # topic_prop -> alternate_cluster_prop for conditional mappings
         
     def extract_topic_properties(self) -> Dict:
         """Extract topic property constants from source files"""
@@ -27,11 +29,11 @@ class TopicPropertyExtractor:
         
         # Step 3: Discover no-op properties
         self._discover_noop_properties()
-        
-        # Step 4: Discover cluster property mappings from source code
-        self._discover_cluster_mappings()
-        
-        # Step 5: Match properties with their validators and mappings
+
+        # Step 4: Discover cluster property mappings from source code (now using dynamic extraction)
+        # Note: Dynamic extraction happens in _correlate_properties_with_data
+
+        # Step 5: Match properties with their validators and mappings (includes dynamic extraction)
         self._correlate_properties_with_data()
         
         return {
@@ -107,12 +109,15 @@ class TopicPropertyExtractor:
                         self.topic_properties[property_name] = {
                             "variable_name": f"topic_property_{var_name}",
                             "property_name": property_name,
+                            "name": property_name,  # Used by generate-handlebars-docs.js
                             "defined_in": str(file_path.relative_to(self.source_path)),
                             "description": "",
                             "type": self._determine_property_type(property_name),
                             "acceptable_values": None,
                             "corresponding_cluster_property": None,
-                            "is_noop": False  # Will be updated later in _correlate_properties_with_data
+                            "is_noop": False,  # Will be updated later in _correlate_properties_with_data
+                            "is_topic_property": True,
+                            "config_scope": "topic"
                         }
             print(f"Found {total_matches} topic properties in {file_path}")
         except Exception as e:
@@ -160,12 +165,15 @@ class TopicPropertyExtractor:
                         self.topic_properties[property_name] = {
                             "variable_name": f"topic_property_{var_name}",
                             "property_name": property_name,
+                            "name": property_name,  # Used by generate-handlebars-docs.js
                             "defined_in": str(file_path.relative_to(self.source_path)),
                             "description": "",
                             "type": self._determine_property_type(property_name),
                             "acceptable_values": None,
                             "corresponding_cluster_property": None,
-                            "is_noop": False  # Will be updated later in _correlate_properties_with_data
+                            "is_noop": False,  # Will be updated later in _correlate_properties_with_data
+                            "is_topic_property": True,
+                            "config_scope": "topic"
                         }
         except Exception as e:
             print(f"Debug: Skipping {file_path}: {e}", file=sys.stderr)
@@ -220,7 +228,154 @@ class TopicPropertyExtractor:
                 
         except Exception as e:
             print(f"Error reading no-op properties from {types_file}: {e}")
-        
+
+    def _extract_mappings_from_config_response_utils(self) -> Dict[str, Dict[str, str]]:
+        """
+        Dynamically extract cluster-to-topic property mappings from config_response_utils.cc
+
+        Parses add_topic_config_if_requested() calls to extract:
+        - Cluster property names from config::shard_local_cfg().PROPERTY.name()
+        - Topic property constants like topic_property_retention_duration
+
+        Returns a mapping dict: {"topic.property": {"primary": "cluster_property", "alternate": "alt_cluster_property"}}
+        """
+        config_utils_file = self.source_path / "src/v/kafka/server/handlers/configs/config_response_utils.cc"
+
+        if not config_utils_file.exists():
+            print(f"Warning: config_response_utils.cc not found at {config_utils_file}")
+            return {}
+
+        try:
+            with open(config_utils_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception as e:
+            print(f"Error reading config_response_utils.cc: {e}")
+            return {}
+
+        # Build a reverse lookup of topic property constants to their actual values
+        # topic_property_retention_duration -> "retention.ms"
+        topic_const_to_value = {}
+        for prop_name, prop_value in self.topic_properties.items():
+            # Search for the constant name pattern: topic_property_XXX = "prop_name"
+            # We need to reverse lookup: given prop_name, find topic_property_XXX
+            const_name = self._find_topic_property_constant_name(prop_name)
+            if const_name:
+                topic_const_to_value[const_name] = prop_name
+
+        mappings = {}
+
+        # Pattern to find add_topic_config_if_requested calls (just the start)
+        # We'll then search forward from each match to find the relevant properties
+        pattern = r'add_topic_config_if_requested\s*\('
+
+        # Find all function call starts
+        function_starts = [match.start() for match in re.finditer(pattern, content)]
+
+        for i, start_pos in enumerate(function_starts):
+            # Determine the search range: from this call to the next call (or end of file)
+            if i + 1 < len(function_starts):
+                end_pos = function_starts[i + 1]
+            else:
+                end_pos = min(start_pos + 2000, len(content))
+
+            # Extract the text of this function call
+            call_text = content[start_pos:end_pos]
+
+            # First, find where the topic property constant appears
+            topic_const_match = re.search(
+                r'topic_property_([a-z_]+(?:_[a-z0-9]+)*)',
+                call_text
+            )
+
+            if not topic_const_match:
+                continue
+
+            # Search for cluster properties in the full call_text
+            # We need to find the end of the current add_topic_config_if_requested call
+            # to avoid picking up properties from the next call
+            # The call ends at the closing ");", so search for that
+            call_end_match = re.search(r'\)\s*;', call_text)
+            if call_end_match:
+                # Limit our search to just this function call
+                search_text = call_text[:call_end_match.end()]
+            else:
+                # Fallback: limit to the first 1500 characters
+                search_text = call_text[:1500]
+
+            cluster_prop_matches = re.findall(
+                r'config::shard_local_cfg\(\)\s*\.\s*([a-z_]+(?:_[a-z0-9]+)*)\s*\.\s*(name|desc)\s*\(\)',
+                search_text,
+                re.DOTALL
+            )
+
+            # Note: We intentionally do NOT use metadata_cache.get_default_XXX() as a fallback
+            # because those methods often return computed values (like record_key_schema_id_validation)
+            # that are NOT actual cluster properties that users can configure.
+            # Only properties explicitly defined in config::shard_local_cfg() are real cluster properties.
+
+            if cluster_prop_matches:
+                topic_const = f"topic_property_{topic_const_match.group(1)}"
+
+                # Resolve the constant to its actual string value
+                if topic_const in topic_const_to_value:
+                    topic_prop = topic_const_to_value[topic_const]
+
+                    # Extract unique cluster property names
+                    cluster_props = list(dict.fromkeys([match[0] for match in cluster_prop_matches]))
+
+                    if len(cluster_props) == 1:
+                        # Single mapping
+                        mappings[topic_prop] = {"primary": cluster_props[0]}
+                        print(f"  Found mapping: {cluster_props[0]} -> {topic_prop}")
+                    elif len(cluster_props) > 1:
+                        # Conditional mapping - store primary and alternate
+                        # Use the second one as primary (typically the 'else' case is the default)
+                        primary = cluster_props[1] if len(cluster_props) > 1 else cluster_props[0]
+                        alternate = cluster_props[0]
+                        mappings[topic_prop] = {"primary": primary, "alternate": alternate}
+                        print(f"  Found conditional mapping: {primary} (or {alternate}) -> {topic_prop}")
+                else:
+                    # Debug: constant not found in lookup
+                    if cluster_prop_matches:
+                        print(f"  Debug: Unresolved constant {topic_const} for cluster props {cluster_prop_matches}")
+
+        print(f"Dynamically discovered {len(mappings)} cluster property mappings")
+        return mappings
+
+    def _find_topic_property_constant_name(self, prop_value: str) -> Optional[str]:
+        """
+        Given a topic property value like 'retention.ms', find its constant name
+        like 'topic_property_retention_duration'
+        """
+        # Search in header files for the constant definition
+        header_files = [
+            "src/v/kafka/protocol/topic_properties.h",
+            "src/v/kafka/server/handlers/topics/types.h",
+        ]
+
+        for header_file in header_files:
+            file_path = self.source_path / header_file
+            if not file_path.exists():
+                continue
+
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                # Pattern: topic_property_XXX = "prop_value"
+                pattern = rf'topic_property_(\w+)\s*=\s*"{re.escape(prop_value)}"'
+                match = re.search(pattern, content)
+
+                if match:
+                    const_name = f"topic_property_{match.group(1)}"
+                    return const_name
+
+            except Exception as e:
+                print(f"Error searching {file_path}: {e}")
+                continue
+
+        return None
+
     def _parse_enums_from_file(self, file_path: Path):
         """Parse enum definitions from a file"""
         try:
@@ -441,46 +596,18 @@ class TopicPropertyExtractor:
         
     def _correlate_cluster_to_topic_property(self, cluster_prop: str) -> Optional[str]:
         """Try to correlate a cluster property name to a topic property"""
-        
-        # Known correlation patterns
-        correlations = {
-            "log_cleanup_policy": "cleanup.policy",
-            "log_compression_type": "compression.type", 
-            "log_retention_ms": "retention.ms",
-            "retention_bytes": "retention.bytes",
-            "log_segment_ms": "segment.ms",
-            "log_segment_size": "segment.bytes",
-            "log_message_timestamp_type": "message.timestamp.type",
-            "kafka_batch_max_bytes": "max.message.bytes",
-            "default_topic_replication": "replication.factor",
-            "write_caching_default": "write.caching",
-        }
-        
-        # Direct lookup first
-        if cluster_prop in correlations:
-            return correlations[cluster_prop]
-            
-        # Remove common prefixes/suffixes
-        cleaned = cluster_prop
-        if cleaned.startswith("log_"):
-            cleaned = cleaned[4:]
-        if cleaned.endswith("_default"):
-            cleaned = cleaned[:-8]
-        if cleaned.endswith("_ms"):
-            cleaned = cleaned[:-3] + ".ms"
-        if cleaned.endswith("_bytes"):
-            cleaned = cleaned[:-6] + ".bytes"
-        if cleaned.endswith("_policy"):
-            cleaned = cleaned[:-7] + ".policy"
-        if cleaned.endswith("_type"):
-            cleaned = cleaned[:-5] + ".type"
-            
-        # Convert snake_case to dot.case
-        topic_candidate = cleaned.replace("_", ".")
-        
-        if topic_candidate in self.topic_properties:
-            return topic_candidate
-            
+
+        # Lazy load dynamic correlations on first call
+        if not self.dynamic_correlations:
+            print("Extracting cluster property mappings dynamically from source code...")
+            self.dynamic_correlations = self._extract_mappings_from_config_response_utils()
+
+        # Use ONLY dynamically discovered mappings (no fallback heuristics)
+        # This ensures we only use accurate mappings from source code
+        if cluster_prop in self.dynamic_correlations:
+            return self.dynamic_correlations[cluster_prop]
+
+        # No fallback - if it wasn't discovered dynamically, don't guess
         return None
             
     def _process_mapping_candidates(self, mapping_candidates: Dict[str, str]):
@@ -495,15 +622,64 @@ class TopicPropertyExtractor:
             if prop_data["variable_name"] == f"topic_property_{var_name}":
                 return prop_name
         return None
-        
+
+    def _is_object_storage_property(self, prop_name: str) -> bool:
+        """
+        Determines if a cluster property is related to object storage.
+        This matches the logic from generate-handlebars-docs.js
+        """
+        return (
+            'cloud_storage' in prop_name or
+            's3_' in prop_name or
+            'azure_' in prop_name or
+            'gcs_' in prop_name or
+            'archival_' in prop_name or
+            'remote_' in prop_name or
+            'tiered_' in prop_name
+        )
+
+    def _get_cluster_property_doc_file(self, prop_name: str) -> str:
+        """
+        Determines which documentation file a cluster property should link to.
+        Returns either 'cluster-properties.adoc' or 'object-storage-properties.adoc'
+        """
+        if self._is_object_storage_property(prop_name):
+            return 'object-storage-properties.adoc'
+        return 'cluster-properties.adoc'
+
     def _correlate_properties_with_data(self):
         """Correlate topic properties with their acceptable values and cluster mappings"""
-        
+
+        # First, populate cluster_mappings from dynamically discovered mappings
+        if not self.dynamic_correlations:
+            print("Extracting cluster property mappings dynamically from source code...")
+            self.dynamic_correlations = self._extract_mappings_from_config_response_utils()
+
+        # Apply dynamic correlations to properties
+        for topic_prop, mapping_info in self.dynamic_correlations.items():
+            if topic_prop in self.topic_properties:
+                primary = mapping_info.get("primary")
+                alternate = mapping_info.get("alternate")
+
+                if primary:
+                    self.cluster_mappings[topic_prop] = primary
+
+                if alternate:
+                    self.alternate_mappings[topic_prop] = alternate
+
         for prop_name, prop_data in self.topic_properties.items():
             # Update cluster mapping if found
             if prop_name in self.cluster_mappings:
-                prop_data["corresponding_cluster_property"] = self.cluster_mappings[prop_name]
-                
+                cluster_prop = self.cluster_mappings[prop_name]
+                prop_data["corresponding_cluster_property"] = cluster_prop
+                prop_data["cluster_property_doc_file"] = self._get_cluster_property_doc_file(cluster_prop)
+
+            # Add alternate cluster property if this has conditional mapping
+            if prop_name in self.alternate_mappings:
+                alternate_prop = self.alternate_mappings[prop_name]
+                prop_data["alternate_cluster_property"] = alternate_prop
+                prop_data["alternate_cluster_property_doc_file"] = self._get_cluster_property_doc_file(alternate_prop)
+
             # Mark as no-op if found in the allowlist
             prop_data["is_noop"] = prop_name in self.noop_properties
                 
