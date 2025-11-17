@@ -24,8 +24,13 @@ module.exports = function renderYamlList(name, exampleGroups) {
         }
         out += `  - ${value}\n`;
       } else {
-        // Objects/arrays: stringify with indentation
-        const snippet = yaml.stringify(item).trim();
+        // Objects/arrays: stringify with indentation using block style
+        const snippet = yaml.stringify(item, {
+          defaultStringType: 'PLAIN',
+          defaultKeyType: 'PLAIN',
+          lineWidth: 0,
+          simpleKeys: false
+        }).trim();
         const lines = snippet.split('\n');
         out += lines
           .map((line, idx) => (idx === 0 ? `  - ${line}` : `    ${line}`))

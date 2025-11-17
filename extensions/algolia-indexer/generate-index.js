@@ -6,6 +6,9 @@ const path        = require('path')
 const URL         = require('url')
 const chalk       = require('chalk')
 
+// Create encoder once at module scope for efficiency
+const textEncoder = new TextEncoder()
+
 /**
  * Generates an Algolia index:
  *
@@ -156,26 +159,28 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       let currentSize = 0;
       // Maximum size in bytes (Algolia's limit is 100KB, using 50KB for safety)
       const MAX_SIZE = 50000;
-      const encoder = new TextEncoder();
-      contentElements.forEach(element => {
+      
+      for (const element of contentElements) {
         let elementText = '';
         if (element.tagName === 'TABLE') {
-          element.querySelectorAll('tr').forEach(tr => {
-            tr.querySelectorAll('td, th').forEach(cell => {
-              elementText += cell.text + ' ';
-            });
-          });
+          for (const tr of element.querySelectorAll('tr')) {
+            for (const cell of tr.querySelectorAll('td, th')) {
+              elementText += cell.textContent + ' ';
+            }
+          }
         } else {
-          elementText = decode(element.rawText);
+          elementText = element.textContent;
         }
-        const elementSize = encoder.encode(elementText).length;
+        
+        const elementSize = textEncoder.encode(elementText).length;
         if (currentSize + elementSize > MAX_SIZE) {
-          return;
-        } else {
-          contentText += elementText;
-          currentSize += elementSize;
+          break;
         }
-      });
+        
+        contentText += elementText;
+        currentSize += elementSize;
+      }
+      
       text = contentText.replace(/\n/g, ' ')
         .replace(/\r/g, ' ')
         .replace(/\s+/g, ' ')

@@ -104,7 +104,12 @@ module.exports = function renderConnectFields(children, prefix = '') {
       }
       // Complex object/array
       else if (typeof child.default === 'object') {
-        const defYaml = yaml.stringify(child.default).trim();
+        const defYaml = yaml.stringify(child.default, {
+          defaultStringType: 'PLAIN',
+          defaultKeyType: 'PLAIN',
+          lineWidth: 0,
+          simpleKeys: false
+        }).trim();
         block += `*Default*:\n[source,yaml]\n----\n${defYaml}\n----\n\n`;
       }
       // Primitive
@@ -143,46 +148,52 @@ module.exports = function renderConnectFields(children, prefix = '') {
             // Check if array contains any objects
             const hasObjects = example.some(item => typeof item === 'object' && item !== null);
 
+            // Always use block style for arrays
             if (hasObjects) {
-              // Use block style for arrays of objects
+              // Arrays of objects
               block += renderYamlList(child.name, [example]);
             } else {
-              // Use flow style for arrays of primitives: fieldName: [item1, item2, ...]
-              const items = example.map(item => {
+              // Arrays of primitives - use block style
+              block += `${child.name}:\n`;
+              example.forEach(item => {
+                let value;
                 if (typeof item === 'string') {
                   // Check if already quoted (starts and ends with quotes)
                   const alreadyQuoted = item.startsWith('"') && item.endsWith('"');
 
                   if (alreadyQuoted) {
                     // Already quoted, return as-is
-                    return item;
-                  }
+                    value = item;
+                  } else {
+                    // Check if quoting is needed
+                    const needsQuoting = item === '' ||
+                                         item === '*' ||
+                                         /^(true|false|null|yes|no|on|off)$/i.test(item) ||
+                                         /^[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$/.test(item) ||
+                                         /[:\[\]\{\},&>|%@`"]/.test(item) ||
+                                         /\s/.test(item); // any whitespace
 
-                  // Check if quoting is needed
-                  const needsQuoting = item === '' ||
-                                       item === '*' ||
-                                       /^(true|false|null|yes|no|on|off)$/i.test(item) ||
-                                       /^[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$/.test(item) ||
-                                       /[:\[\]\{\},&>|%@`"]/.test(item) ||
-                                       /\s/.test(item); // any whitespace
-
-                  if (needsQuoting) {
-                    // Escape backslashes first, then double quotes
-                    const escaped = item.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-                    return `"${escaped}"`;
+                    if (needsQuoting) {
+                      // Escape backslashes first, then double quotes
+                      const escaped = item.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                      value = `"${escaped}"`;
+                    } else {
+                      value = item;
+                    }
                   }
-                  return item;
+                } else {
+                  // For primitives (numbers, booleans, etc.), convert to string
+                  const strValue = String(item);
+                  // Check if the stringified value needs quoting
+                  if (/[:\[\]\{\},&>|%@`"]/.test(strValue) || /\s/.test(strValue)) {
+                    const escaped = strValue.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                    value = `"${escaped}"`;
+                  } else {
+                    value = strValue;
+                  }
                 }
-                // For primitives (numbers, booleans, etc.), convert to string
-                const strValue = String(item);
-                // Check if the stringified value needs quoting
-                if (/[:\[\]\{\},&>|%@`"]/.test(strValue) || /\s/.test(strValue)) {
-                  const escaped = strValue.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-                  return `"${escaped}"`;
-                }
-                return strValue;
+                block += `  - ${value}\n`;
               });
-              block += `${child.name}: [${items.join(', ')}]\n`;
             }
           } else {
             // Fallback for non-array examples (shouldn't happen for array fields)
@@ -192,7 +203,12 @@ module.exports = function renderConnectFields(children, prefix = '') {
       } else {
         child.examples.forEach(example => {
           if (typeof example === 'object') {
-            const snippet = yaml.stringify(example).trim();
+            const snippet = yaml.stringify(example, {
+              defaultStringType: 'PLAIN',
+              defaultKeyType: 'PLAIN',
+              lineWidth: 0,
+              simpleKeys: false
+            }).trim();
             block += `${child.name}:\n`;
             block += snippet.split('\n').map(line => '  ' + line).join('\n') + '\n';
           } else if (typeof example === 'string' && example.includes('\n')) {

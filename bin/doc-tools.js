@@ -895,6 +895,26 @@ automation
 
     const newIndex = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
 
+    // Check if versions match - skip diff and updates if so
+    if (oldVersion && newVersion && oldVersion === newVersion) {
+      console.log(`\n✓ Already at version ${newVersion}`);
+      console.log('  No diff or version updates needed.\n');
+
+      console.log('📊 Generation Report:');
+      console.log(`   • Partial files: ${partialsWritten}`);
+      const fieldsPartials   = partialFiles.filter(fp => fp.includes('/fields/'));
+      const examplesPartials = partialFiles.filter(fp => fp.includes('/examples/'));
+
+      console.log(`   • Fields partials: ${fieldsPartials.length}`);
+      console.log(`   • Examples partials: ${examplesPartials.length}`);
+
+      if (options.draftMissing && draftsWritten) {
+        console.log(`   • Draft files: ${draftsWritten}`);
+      }
+
+      process.exit(0);
+    }
+
     // Publish merged version with overrides to modules/components/attachments
     if (options.overrides && fs.existsSync(options.overrides)) {
       try {
