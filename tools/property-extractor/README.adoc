@@ -1,385 +1,390 @@
 = Redpanda Property Extractor
 
-The Redpanda Property Extractor automatically extracts configuration properties and type definitions from Redpanda's C++ source code and generates JSON schemas and AsciiDoc documentation.
+Automatically generates Redpanda configuration property documentation from C++ source code.
 
-== Prerequisites
+== What is this?
 
-Ensure the following prerequisites are installed:
+The Property Extractor is part of the https://github.com/redpanda-data/docs-extensions-and-macros[`docs-extensions-and-macros`] package. It analyzes Redpanda's C++ source code to automatically generate accurate, up-to-date configuration property documentation in AsciiDoc format.
 
-- https://www.python.org/downloads/[Python 3.10 or higher]
-- A C++ compiler (such as `gcc` or `clang`)
-- https://www.gnu.org/software/make/[`make` utility]
+**Why it exists:** Redpanda has hundreds of configuration properties defined in C++ code. Rather than manually maintaining documentation that can drift out of sync, this tool automatically extracts property definitions, default values, types, and descriptions directly from the source of truth—the code itself.
 
-Verify `make` installation:
+**What it generates:**
 
-[,bash]
-----
-make --version
-----
+* *Property reference documentation* (AsciiDoc files)
+* *Topic property documentation* including defaults inherited from cluster properties
+* *JSON schemas* with complete property metadata
+* *Version-specific property files* for tracking changes across releases
+* *Property change diffs* highlighting what changed between versions
 
-== Quick start
+== For documentation writers
 
-. Clone the repository:
-+
-[,bash]
-----
-git clone https://github.com/redpanda-data/docs-extensions-and-macros.git
-cd docs-extensions-and-macros/tools/property-extractor
-----
+=== Quick start
 
-. Build and generate documentation:
-+
-[,bash]
-----
-make build
-----
-+
-This command:
-+
-* Sets up a Python virtual environment
-* Clones the Redpanda source code to the specified branch or tag
-* Extracts properties and type definitions to `gen/properties-output.json`
-* Generates AsciiDoc documentation files in `output/`
+The Property Extractor is installed as part of the `docs-extensions-and-macros` npm package. You interact with it through the `doc-tools` CLI from within your documentation repository.
 
-. View generated files:
-+
-[,bash]
-----
-ls gen/properties-output.json
-ls output/pages/
-----
+*Prerequisites:*
 
-To clean generated files:
+* Node.js 18+ and npm
+* Python 3.10+
+* A C++ compiler (gcc/clang)
+* Git
+
+*Installation:*
 
 [,bash]
 ----
-make clean
+# In your docs repository
+npm install @redpanda-data/docs-extensions-and-macros
+----
+
+*Generate property documentation:*
+
+[,bash]
+----
+# Generate docs for a specific Redpanda version
+npx doc-tools generate property-docs --tag v25.3.1
+
+# Generate docs with custom overrides
+npx doc-tools generate property-docs \
+  --tag v25.3.1 \
+  --overrides path/to/property-overrides.json
+
+# Generate docs and create consolidated partials
+npx doc-tools generate property-docs \
+  --tag v25.3.1 \
+  --generate-partials
+
+# Generate with diff from previous version
+npx doc-tools generate property-docs \
+  --tag v25.3.1 \
+  --diff v25.2.1
+----
+
+*Automatic version detection and diff generation:*
+
+If your repository has an `antora.yml` file at the root with a `latest-redpanda-tag` attribute, the tool provides automatic version management:
+
+[,yaml]
+----
+# antora.yml
+name: redpanda
+title: Redpanda Documentation
+asciidoc:
+  attributes:
+    latest-redpanda-tag: v25.2.1  # Current documented version
+----
+
+When you specify a new `--tag` without `--diff`, the tool automatically:
+
+1. Creates a diff between the current `latest-redpanda-tag` (v25.2.1) and your new tag (v25.3.1)
+2. Generates property documentation for the new version
+3. Updates `antora.yml` with the new tag
+
+[,bash]
+----
+# Current antora.yml has v25.2.1
+# This command will:
+#  - Generate diff from v25.2.1 to v25.3.1
+#  - Generate docs for v25.3.1
+#  - Update antora.yml to v25.3.1
+npx doc-tools generate property-docs --tag v25.3.1 --generate-partials
+
+# Explicit --diff prevents automatic diff and antora.yml update
+npx doc-tools generate property-docs --tag v25.3.1 --diff v25.1.1
+----
+
+This workflow makes version updates seamless: specify the new version, and the tool handles diffing and updating your Antora configuration automatically.
+
+=== Generated output
+
+Running `doc-tools generate property-docs` creates:
+
+[,text]
+----
+modules/reference/
+├── pages/
+│   └── (individual property pages - not commonly used)
+├── partials/
+│   ├── properties/
+│   │   ├── cluster-properties.adoc       # All cluster properties
+│   │   ├── broker-properties.adoc        # All broker properties
+│   │   ├── topic-properties.adoc         # All topic properties
+│   │   ├── topic-property-mappings.adoc  # Topic→Cluster mappings
+│   │   └── object-storage-properties.adoc
+│   └── deprecated/
+│       └── deprecated-properties.adoc
+└── attachments/
+    ├── redpanda-properties-v25.3.1.json  # Versioned snapshot
+    └── redpanda-property-changes-*.json  # Change logs
+----
+
+*Include in your documentation:*
+
+[,asciidoc]
+----
+// In your cluster properties reference page
+\include::reference:partial$properties/cluster-properties.adoc[]
+
+// In your topic properties reference page
+\include::reference:partial$properties/topic-properties.adoc[]
+----
+
+=== Overriding property documentation
+
+Create a `property-overrides.json` file to customize extracted documentation:
+
+[,json]
+----
+{
+  "$comment": "Override descriptions, add examples, specify versions",
+  "properties": {
+    "kafka_api": {
+      "description": "Network address and port for Kafka API clients to connect to Redpanda brokers.",
+      "example": ".Example\n[,yaml]\n----\nredpanda:\n  kafka_api:\n    - name: internal\n      address: 0.0.0.0\n      port: 9092\n    - name: external\n      address: redpanda.example.com\n      port: 19092\n----",
+      "version": "v21.4.1",
+      "related_topics": [
+        "xref:manage:kubernetes/networking/k-networking-and-connectivity.adoc[]"
+      ]
+    }
+  }
+}
+----
+
+*Override fields:*
+
+* `description` - Replace auto-extracted description with custom text
+* `example` - Add usage example in AsciiDoc format
+* `example_file` - Load example from external file
+* `version` - Document when property was introduced
+* `related_topics` - Array of AsciiDoc xrefs to related content
+
+=== Understanding property changes
+
+When you generate docs with `--diff`, a change report is created:
+
+[,bash]
+----
+npx doc-tools generate property-docs --tag v25.3.1 --diff v25.2.1
+----
+
+The generated `redpanda-property-changes-v25.2.1-to-v25.3.1.json` contains:
+
+[,json]
+----
+{
+  "new_properties": [
+    {"name": "new_feature_enabled", "type": "boolean", "default": false}
+  ],
+  "changed_defaults": [
+    {"name": "log_segment_size", "old": 536870912, "new": 1073741824}
+  ],
+  "deprecated_properties": [
+    {"name": "legacy_setting", "reason": "Use new_setting instead"}
+  ]
+}
+----
+
+Use this to:
+
+* Update release notes
+* Identify breaking changes
+* Track configuration evolution
+
+=== Common workflows
+
+==== Documenting a new Redpanda release
+
+[,bash]
+----
+# 1. Generate docs for the new version
+npx doc-tools generate property-docs \
+  --tag v25.3.1 \
+  --diff v25.2.1 \
+  --generate-partials \
+  --overrides property-overrides.json
+
+# 2. Review the generated change report
+cat modules/reference/attachments/redpanda-property-changes-*.json
+
+# 3. Update release notes with new/changed properties
+
+# 4. Commit the generated files
+git add modules/reference/partials/properties/
+git add modules/reference/attachments/redpanda-properties-v25.3.1.json
+git commit -m "docs: Update property docs for v25.3.1"
+----
+
+==== Updating descriptions for existing properties
+
+[,bash]
+----
+# 1. Edit your property-overrides.json
+{
+  "properties": {
+    "my_property": {
+      "description": "Updated description",
+      "example": ".Example\n..."
+    }
+  }
+}
+
+# 2. Regenerate docs
+npx doc-tools generate property-docs \
+  --tag v25.3.1 \
+  --overrides property-overrides.json \
+  --generate-partials
+
+# 3. Review changes
+git diff modules/reference/partials/properties/
+----
+
+==== Checking if properties exist in a version
+
+[,bash]
+----
+# List all properties in a version
+cat modules/reference/attachments/redpanda-properties-v25.3.1.json | \
+  jq '.properties | keys'
+
+# Check specific property
+cat modules/reference/attachments/redpanda-properties-v25.3.1.json | \
+  jq '.properties.kafka_api'
 ----
 
 == How it works
 
 === Architecture overview
 
-The property extractor uses a multi-stage pipeline:
-
-[source,text]
+[,text]
 ----
-C++ Source Code
-    ↓
-[Tree-sitter Parser] → AST
-    ↓
-[Property Extractor] → Raw properties
-    ↓
-[Type Definition Extractor] → Auto-discovered types
-    ↓
-[Transformers Pipeline] → Enriched properties
-    ↓
-[Type Resolver] → Resolved types & defaults
-    ↓
-[Enum Default Mapper] → User-facing enum values
-    ↓
-[Chrono Evaluator] → Numeric values & human-readable times
-    ↓
-[Overrides Applier] → Final properties
-    ↓
-JSON Schema Output
+┌─────────────────────────────────────────────────────────────┐
+│ doc-tools CLI                                               │
+│  └─ generate property-docs command                          │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Property Extractor Pipeline                                 │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. Clone Redpanda source code (specific version/tag)      │
+│                                                             │
+│  2. Parse C++ with Tree-sitter                             │
+│     ├─ Extract property declarations                        │
+│     ├─ Extract topic properties                            │
+│     └─ Extract type definitions (structs, enums)           │
+│                                                             │
+│  3. Enrich with transformers                               │
+│     ├─ Resolve types and defaults                          │
+│     ├─ Map enum values to strings                          │
+│     ├─ Evaluate chrono expressions (24h → milliseconds)    │
+│     ├─ Detect deprecated/experimental properties           │
+│     └─ Link topic properties to cluster defaults          │
+│                                                             │
+│  4. Apply overrides from JSON                              │
+│     └─ Merge custom descriptions, examples, versions       │
+│                                                             │
+│  5. Generate outputs                                        │
+│     ├─ JSON schema (complete property metadata)            │
+│     ├─ AsciiDoc partials (via Handlebars templates)       │
+│     └─ Change reports (diffs between versions)            │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Generated Documentation                                     │
+├─────────────────────────────────────────────────────────────┤
+│  • cluster-properties.adoc                                  │
+│  • topic-properties.adoc                                    │
+│  • broker-properties.adoc                                   │
+│  • redpanda-properties-v25.3.1.json                        │
+│  • redpanda-property-changes-v25.2.1-to-v25.3.1.json       │
+└─────────────────────────────────────────────────────────────┘
 ----
 
-=== Stage 1: Source code parsing
+=== What gets extracted
 
-The extractor uses https://tree-sitter.github.io/tree-sitter/[Tree-sitter] to parse C++ source code into Abstract Syntax Trees (ASTs). It identifies property declarations in:
+==== 1. Cluster and broker properties
 
-* `src/v/config/configuration.cc` - Broker and cluster properties
-* `src/v/kafka/client/configuration.cc` - Kafka client properties
-* Other configuration files
-
-Properties are declared using Redpanda's property template classes:
+Redpanda properties are declared in C++ using a template pattern:
 
 [,cpp]
 ----
-property<std::optional<int>>("property_name", "Description")
-  .default_value(42)
-  .visibility(visibility::tunable);
+// src/v/config/configuration.cc
+property<int64_t>(
+    *this,
+    "log_segment_size",
+    "Maximum log segment size in bytes",
+    {.needs_restart = config::needs_restart::no,
+     .example = "536870912",
+     .visibility = visibility::user},
+    1_GiB)
+.with_validator(validate_log_segment_size);
 ----
 
-=== Stage 2: Type definition extraction
-
-The extractor automatically discovers type definitions from C++ headers:
-
-==== Automatically extracted types
-
-[cols="1,2,2"]
-|===
-| Type category | Example | Extraction method
-
-| *Structs and classes*
-| `model::broker_endpoint`, `config::tls_config`
-| Brace-counting algorithm extracts complete struct bodies including nested types and methods
-
-| *Enumerations*
-| `model::compression`, `config::tls_version`
-| Regex pattern matching with support for four conversion function patterns: `_to_string()`, `operator<<`, `string_switch`, and `to_string_view()`
-
-| *Type aliases*
-| `using node_id = named_type<int32_t, ...>`
-| Pattern matching for `using` declarations with underlying type resolution
-
-| *Enum string mappings*
-| `write_caching_mode::default_false` → `"false"`
-| Extracted from enum-to-string conversion functions using four pattern-matching strategies
-|===
-
-==== Enum string mapping patterns
-
-The extractor supports four C++ patterns for mapping enum values to user-facing strings:
-
-[cols="1,2"]
-|===
-| Pattern | C++ Code Example
-
-| *Pattern 1: `_to_string()` method*
-|
-[,cpp]
-----
-std::string_view write_caching_mode_to_string(write_caching_mode s) {
-    switch(s) {
-    case write_caching_mode::default_false:
-        return "false";
-    }
-}
-----
-
-| *Pattern 2: `operator<<` overload*
-|
-[,cpp]
-----
-std::ostream& operator<<(std::ostream& os, compression c) {
-    switch(c) {
-    case compression::gzip:
-        os << "gzip";
-    }
-}
-----
-
-| *Pattern 3: `string_switch` reverse lookup*
-|
-[,cpp]
-----
-compression from_string(std::string_view s) {
-    return string_switch<compression>(s)
-        .match("gzip", compression::gzip)
-        .match("snappy", compression::snappy);
-}
-----
-
-| *Pattern 4: `to_string_view()` function*
-|
-[,cpp]
-----
-constexpr std::string_view to_string_view(tls_version v) {
-    switch(v) {
-    case tls_version::v1_0:
-        return "v1.0";
-    case tls_version::v1_2:
-        return "v1.2";
-    }
-}
-----
-|===
-
-The extractor searches for these patterns in `.cc` files related to the enum's `.h` header file.
-
-==== Type namespace resolution
-
-The extractor resolves unqualified type names by trying common namespace prefixes:
-
-* `config::` - Configuration types
-* `model::` - Core data model types
-* `security::` - Security and authentication types
-* `net::` - Network types
-* `kafka::` - Kafka protocol types
-* `pandaproxy::` - Schema registry types
-
-Example: An unqualified type `tls_version` automatically resolves to `config::tls_version` if found in the `config` namespace.
-
-The extractor scans these source directories:
-
-* `model/` - Core data model types
-* `config/` - Configuration types
-* `net/` - Network types
-* `kafka/` - Kafka protocol types
-* `pandaproxy/` - Schema registry types
-* `security/` - Security and audit types
-* `utils/` - Utility types
-
-=== Stage 3: Property enrichment
-
-A series of transformers processes extracted properties:
-
-[cols="1,2"]
-|===
-| Transformer | Function
-
-| `BasicInfoTransformer`
-| Extracts property names, types, and descriptions
-
-| `VisibilityTransformer`
-| Determines visibility (public, tunable, deprecated)
-
-| `IsNullableTransformer`
-| Detects optional properties
-
-| `DefaultValueTransformer`
-| Extracts and resolves default values
-
-| `UnitsTransformer`
-| Identifies units (bytes, milliseconds, etc.)
-
-| `RequiresRestartTransformer`
-| Determines if changes require restart
-
-| `IsSecretTransformer`
-| Marks sensitive properties
-|===
-
-==== Deprecated property detection
-
-The extractor identifies deprecated properties using three methods:
-
-[cols="1,2,2"]
-|===
-| Detection method | C++ pattern | Result
-
-| *Type-based*
-| `deprecated_property<T>("name", ...)`
-| Sets `is_deprecated: true` in JSON output
-
-| *Metadata-based*
-| `meta{.deprecated = "reason"}` +
-`meta{.deprecated = yes}`
-| Sets `is_deprecated: true` and optionally captures `deprecated_reason`
-
-| *Visibility-based*
-| `meta{.visibility = visibility::deprecated}`
-| Sets `is_deprecated: true` and marks for migration documentation only
-|===
-
-Example C++ declarations:
-
-[,cpp]
-----
-// Type-based deprecation
-deprecated_property<int>("old_setting", "Legacy configuration")
-  .default_value(42);
-
-// Metadata-based deprecation with reason
-property<bool>("legacy_mode", "Old behavior flag")
-  .default_value(false)
-  .visibility(visibility::user)
-  .meta{.deprecated = "Use new_mode instead"};
-
-// Visibility-based deprecation
-property<std::string>("obsolete_path", "Deprecated file path")
-  .default_value("/old/location")
-  .visibility(visibility::deprecated);
-----
-
-Generated JSON output:
+The extractor parses this to generate:
 
 [,json]
 ----
 {
-  "old_setting": {
+  "log_segment_size": {
+    "name": "log_segment_size",
     "type": "integer",
-    "default": 42,
-    "is_deprecated": true
-  },
-  "legacy_mode": {
-    "type": "boolean",
-    "default": false,
-    "is_deprecated": true,
-    "deprecated_reason": "Use new_mode instead"
-  },
-  "obsolete_path": {
-    "type": "string",
-    "default": "/old/location",
-    "is_deprecated": true,
-    "visibility": "deprecated"
+    "description": "Maximum log segment size in bytes",
+    "default": 1073741824,
+    "default_human_readable": "1 GiB",
+    "needs_restart": false,
+    "visibility": "user",
+    "example": "536870912",
+    "config_scope": "cluster"
   }
 }
 ----
 
-Deprecated properties appear in migration guides but are excluded from standard user documentation.
+==== 2. Topic properties
 
-==== Experimental property detection
-
-The extractor identifies experimental properties that are in development or testing:
-
-[cols="1,2,2"]
-|===
-| Detection method | C++ pattern | Result
-
-| *Type-based*
-| `experimental_property<T>("name", ...)`
-| Sets `is_experimental_property: true` in JSON output
-
-| *Metadata-based*
-| `meta{.experimental = true}` +
-`meta{.experimental = "description"}`
-| Sets `is_experimental_property: true` and optionally captures experimental notes
-|===
-
-Example C++ declarations:
+Topic properties are simpler string constants:
 
 [,cpp]
 ----
-// Type-based experimental
-experimental_property<int>("new_feature", "Feature in development")
-  .default_value(0);
-
-// Metadata-based experimental
-property<bool>("beta_mode", "Experimental feature flag")
-  .default_value(false)
-  .visibility(visibility::tunable)
-  .meta{.experimental = true};
+// src/v/kafka/server/handlers/topics/types.h
+inline constexpr std::string_view topic_property_retention_ms = "retention.ms";
 ----
 
-Generated JSON output:
+The extractor:
+
+. Finds all `topic_property_*` constants
+. Discovers cluster property mappings in `config_response_utils.cc`
+. Inherits default values from corresponding cluster properties
 
 [,json]
 ----
 {
-  "new_feature": {
+  "retention.ms": {
+    "name": "retention.ms",
     "type": "integer",
-    "default": 0,
-    "is_experimental_property": true
-  },
-  "beta_mode": {
-    "type": "boolean",
-    "default": false,
-    "is_experimental_property": true
+    "config_scope": "topic",
+    "corresponding_cluster_property": "log_retention_ms",
+    "default": 604800000,
+    "default_human_readable": "7 days"
   }
 }
 ----
 
-Experimental properties are excluded from the documentation.
+==== 3. Type definitions
 
-=== Stage 4: Type resolution
+The extractor automatically discovers types from C++ headers:
 
-The type resolver:
-
-. Resolves `$ref` pointers to actual type definitions
-. Expands C++ constructors into JSON-compatible default values
-. Maps C++ types to JSON Schema types
-. Applies enum constraints to properties
-
-Example transformation:
+*Structs and classes:*
 
 [,cpp]
 ----
-// C++ source
-property<std::vector<model::broker_endpoint>>("kafka_api")
-  .default_value({model::broker_endpoint{"internal", "127.0.0.1", 9092}})
+struct broker_endpoint {
+    ss::sstring name;
+    ss::sstring address;
+    uint16_t port;
+};
 ----
 
 Becomes:
@@ -387,105 +392,81 @@ Becomes:
 [,json]
 ----
 {
-  "kafka_api": {
-    "type": "array",
-    "items": {"$ref": "#/definitions/model::broker_endpoint"},
-    "default": [{"name": "internal", "address": "127.0.0.1", "port": 9092}]
+  "model::broker_endpoint": {
+    "type": "object",
+    "properties": {
+      "name": {"type": "string"},
+      "address": {"type": "string"},
+      "port": {"type": "integer", "minimum": 0, "maximum": 65535}
+    }
   }
 }
 ----
 
-=== Stage 5: Chrono expression evaluation and human-readable formatting
-
-The extractor automatically evaluates C++ chrono expressions in default values and provides human-readable time representations:
-
-==== Chrono expression evaluation
-
-Mathematical time expressions are converted to numeric values:
+*Enumerations:*
 
 [,cpp]
 ----
-// C++ source with chrono expressions
-property<std::chrono::milliseconds>("log_segment_ms_max")
-  .default_value(24h * 365);  // One year in hours
+enum class compression {
+    none,
+    gzip,
+    snappy,
+    lz4,
+    zstd
+};
 
-property<std::chrono::seconds>("connection_timeout")
-  .default_value(7 * 24h);  // One week
+// String conversion function
+std::ostream& operator<<(std::ostream& os, compression c) {
+    switch(c) {
+        case compression::none: os << "none"; break;
+        case compression::gzip: os << "gzip"; break;
+        // ...
+    }
+}
 ----
 
-The extractor:
-
-1. Parses time literals: `24h`, `365d`, `5min`, `30s`, `100ms`
-2. Evaluates arithmetic: `24h * 365`, `7 * 24h`, `60s + 30s`
-3. Converts to appropriate unit based on C++ type
-4. Adds human-readable representation for documentation
-
-Example transformation:
-
-[cols="1,1,1,1"]
-|===
-| C++ Expression | C++ Type | Numeric Value | Human-Readable
-
-| `24h * 365`
-| `std::chrono::milliseconds`
-| `31536000000`
-| "1 year"
-
-| `7 * 24h`
-| `std::chrono::seconds`
-| `604800`
-| "1 week"
-
-| `5min`
-| `std::chrono::seconds`
-| `300`
-| "5 minutes"
-
-| `24h`
-| `std::chrono::milliseconds`
-| `86400000`
-| "1 day"
-|===
-
-Generated JSON output:
+Becomes:
 
 [,json]
 ----
 {
-  "log_segment_ms_max": {
-    "type": "integer",
-    "default": 31536000000,
-    "default_human_readable": "1 year",
-    "c_type": "std::chrono::milliseconds"
-  },
-  "connection_timeout": {
-    "type": "integer",
-    "default": 604800,
-    "default_human_readable": "1 week",
-    "c_type": "std::chrono::seconds"
+  "model::compression": {
+    "type": "string",
+    "enum": ["none", "gzip", "snappy", "lz4", "zstd"]
   }
 }
 ----
 
-==== Human-readable time formatting
+=== Key transformations
 
-The `format_time_human_readable()` function automatically selects the most appropriate time unit:
+==== Chrono expression evaluation
 
-* Prefers larger units (years > weeks > days > hours > minutes > seconds > milliseconds)
-* Only uses a unit if the value divides evenly
-* Example: 604800 seconds becomes "1 week" instead of "7 days"
+C++ time expressions are converted to numeric values with human-readable formats:
 
-This human-readable format appears in documentation templates alongside the numeric value:
-
-[source,asciidoc]
+[,cpp]
 ----
-| Default
-| `604800` (1 week)
+property<std::chrono::milliseconds>("log_retention_ms")
+    .default_value(7 * 24h);  // 7 days
 ----
 
-=== Stage 6: Enum default mapping
+Evaluates to:
 
-Raw C++ enum values are mapped to user-facing strings:
+[,json]
+----
+{
+  "log_retention_ms": {
+    "type": "integer",
+    "default": 604800000,
+    "default_human_readable": "7 days"
+  }
+}
+----
+
+Supported units: `h` (hours), `min` (minutes), `s` (seconds), `ms` (milliseconds), `d` (days)
+
+==== Enum default mapping
+
+Enum identifiers are mapped to user-facing strings:
 
 [,cpp]
 ----
@@ -495,443 +476,814 @@ enum class write_caching_mode {
     disabled
 };
 
-const char* write_caching_mode_to_string(write_caching_mode s) {
-    case write_caching_mode::default_false: return "false";
-    // ...
+const char* write_caching_mode_to_string(write_caching_mode m) {
+    switch(m) {
+        case write_caching_mode::default_false: return "false";
+        case write_caching_mode::default_true: return "true";
+        case write_caching_mode::disabled: return "disabled";
+    }
+}
+
+property<write_caching_mode>("write_caching")
+    .default_value(write_caching_mode::default_false);
+----
+
+Maps to:
+
+[,json]
+----
+{
+  "write_caching": {
+    "type": "string",
+    "enum": ["false", "true", "disabled"],
+    "default": "false"
+  }
 }
 ----
 
-Properties using this enum automatically map:
+==== Topic property defaults
 
-* Default: `default_false` → `"false"`
-* Enum values: `["true", "false", "disabled"]`
+Topic properties inherit defaults from cluster properties:
 
-=== Stage 7: Override application
+. Extract topic property `retention.ms`
+. Find cluster mapping: `retention.ms` → `log_retention_ms`
+. Look up `log_retention_ms` default: `604800000` (7 days)
+. Copy to topic property JSON
 
-The `overrides.json` file allows customization of both properties and type definitions:
+This ensures topic property documentation always shows current defaults.
+
+=== Template rendering
+
+Property data flows through Handlebars templates:
+
+[,text]
+----
+JSON Data → Handlebars Template → AsciiDoc Output
+
+{                    {{#each properties}}      === retention.ms
+  "retention.ms": {    === {{name}}
+    "type": "integer", *Type:* {{type}}        *Type:* integer
+    "default": 604800000,
+                       *Default:*              *Default:* 604800000
+    "default_human_readable":                   (7 days)
+      "7 days"           {{default}}
+  }                      ({{default_human_readable}})
+}                    {{/each}}
+----
+
+Templates live in `tools/property-extractor/templates/`:
+
+* `property.hbs` - Cluster/broker property template
+* `topic-property.hbs` - Topic property template
+* `deprecated-property.hbs` - Deprecated property template
+
+Handlebars helpers in `tools/property-extractor/helpers.js` format values:
+
+* `formatPropertyValue` - Formats defaults based on type
+* `join` - Joins arrays with separators
+* `parseRelatedTopic` - Processes xref links
+* `eq`, `ne`, `gt`, `and`, `or` - Logic helpers
+
+== Understanding the codebase
+
+=== Project structure
+
+[,text]
+----
+tools/property-extractor/
+├── property_extractor.py          # Main extraction pipeline
+├── topic_property_extractor.py    # Topic property extraction
+├── type_definition_extractor.py   # Type discovery from headers
+├── transformers.py                 # Property enrichment transformers
+├── property_bag.py                 # Auto-expanding dict structure
+├── helpers.js                      # Handlebars template helpers
+├── generate-handlebars-docs.js    # AsciiDoc generation
+├── compare-properties.js           # Version diff generation
+├── Makefile                        # Build automation
+├── requirements.txt                # Python dependencies
+├── templates/
+│   ├── property.hbs                # Cluster/broker template
+│   ├── topic-property.hbs          # Topic property template
+│   └── deprecated-property.hbs     # Deprecated template
+└── tree-sitter/
+    └── tree-sitter-cpp/            # C++ parser (git submodule)
+----
+
+=== Extraction pipeline deep dive
+
+==== Stage 1: Tree-sitter parsing
+
+Tree-sitter converts C++ code into Abstract Syntax Trees:
+
+[,cpp]
+----
+property<int>("my_property", "Description").default_value(42);
+----
+
+Becomes an AST:
+
+[,text]
+----
+declaration
+  ├─ template_function (property<int>)
+  ├─ argument_list
+  │   ├─ string_literal ("my_property")
+  │   ├─ string_literal ("Description")
+  └─ call_expression (.default_value)
+      └─ argument_list
+          └─ number_literal (42)
+----
+
+The extractor walks this tree to identify:
+
+* Property names (first argument)
+* Descriptions (second argument)
+* Template types (`<int>`, `<std::optional<string>>`)
+* Method calls (`.default_value()`, `.visibility()`)
+* Metadata structs (`{.needs_restart = no}`)
+
+**Key function:** `get_properties()` in `property_extractor.py`
+
+==== Stage 2: Type definition extraction
+
+The `TypeDefinitionExtractor` class scans header files for types:
+
+**Struct extraction:**
+
+Uses a brace-counting algorithm to extract complete struct bodies:
+
+[,python]
+----
+def _extract_structs_with_brace_counting(content, file_path):
+    """
+    Find struct/class declarations and extract their complete body
+    by counting braces.
+    """
+    for match in STRUCT_OR_CLASS_PATTERN.finditer(content):
+        # Find opening brace
+        # Count braces to find matching closing brace
+        # Extract complete struct body
+        # Parse fields with regex
+----
+
+**Enum extraction:**
+
+Finds enums and their string conversion functions:
+
+1. Locate `enum class name { ... };`
+2. Search for conversion function: `name_to_string()` or `operator<<`
+3. Extract string mappings: `case value: return "string";`
+4. Build enum → string map
+
+**Key class:** `TypeDefinitionExtractor` in `type_definition_extractor.py`
+
+==== Stage 3: Transformation pipeline
+
+Transformers enrich raw extracted data:
+
+[,python]
+----
+# In property_extractor.py
+transformers = [
+    TypeTransformer(),                 # C++ → JSON type mapping
+    NeedsRestartTransformer(),         # Extract needs_restart metadata
+    VisibilityTransformer(),           # Extract visibility level
+    DeprecatedTransformer(),           # Mark deprecated properties
+    ExperimentalTransformer(),         # Mark experimental properties
+    IsSecretTransformer(),             # Mark sensitive properties
+    SimpleDefaultValuesTransformer(),  # Extract default values
+    FriendlyDefaultTransformer(),      # Format defaults nicely
+    EnterpriseTransformer()            # Mark enterprise features
+]
+
+for transformer in transformers:
+    if transformer.accepts(property_definition, file_path):
+        transformer.parse(property_definition, properties, file_path)
+----
+
+Each transformer:
+
+. Checks if it applies (`accepts()`)
+. Extracts specific metadata (`parse()`)
+. Updates property definition in-place
+
+**Example - NeedsRestartTransformer:**
+
+[,python]
+----
+class NeedsRestartTransformer:
+    def accepts(self, prop, file_path):
+        return 'needs_restart' in str(prop)
+
+    def parse(self, prop, all_props, file_path):
+        # Extract from metadata: {.needs_restart = no}
+        if match := re.search(r'needs_restart\s*=\s*(yes|no)', str(prop)):
+            prop['needs_restart'] = (match.group(1) == 'yes')
+----
+
+**Key file:** `transformers.py`
+
+==== Stage 4: Type and default resolution
+
+The `resolve_type_and_default()` function:
+
+1. Resolves template types: `property<std::optional<int>>` → `integer`, `nullable: true`
+2. Expands C++ constructors: `{field1, field2}` → `{"field1": val, "field2": val}`
+3. Evaluates expressions: `24h * 365` → `31536000000` milliseconds
+4. Maps enums: `write_caching_mode::default_false` → `"false"`
+5. Formats human-readable: `604800000ms` → `"7 days"`
+
+**Key functions:**
+
+* `resolve_type_and_default()` - Main resolution logic
+* `evaluate_chrono_expressions()` - Time expression evaluation
+* `map_enum_defaults()` - Enum value mapping
+* `expand_constructor_syntax()` - C++ initializer expansion
+
+**Location:** `property_extractor.py` lines 1445-2250
+
+==== Stage 5: Topic property extraction
+
+The `TopicPropertyExtractor` class:
+
+. Scans `types.h` for `topic_property_*` constants
+. Reads `config_response_utils.cc` for cluster mappings:
++
+[,cpp]
+----
+add_topic_config_if_requested(
+    topic_property_retention_ms,          // Topic property
+    config::shard_local_cfg().log_retention_ms.name(),  // Cluster property
+    config::shard_local_cfg().log_retention_ms.desc()
+);
+----
+
+. Looks up cluster property defaults from main properties dict
+. Copies `default` and `default_human_readable` to topic property
+
+**Key class:** `TopicPropertyExtractor` in `topic_property_extractor.py`
+
+==== Stage 6: Override application
+
+Overrides are applied after extraction but before output:
+
+[,python]
+----
+def apply_overrides(properties, overrides, overrides_file_path):
+    """
+    Apply manual overrides from JSON file.
+
+    For each property in overrides:
+    1. Find matching property (by key or by name field)
+    2. Deep merge override fields into property
+    3. Resolve example_file references to actual content
+    """
+    for override_key, override_data in overrides['properties'].items():
+        if override_key in properties:
+            properties[override_key].update(override_data)
+        else:
+            # Create new property from override
+            properties[override_key] = override_data
+----
+
+**Key function:** `apply_overrides()` in `property_extractor.py`
+
+==== Stage 7: AsciiDoc generation
+
+The `generate-handlebars-docs.js` script:
+
+1. Loads property JSON
+2. Groups by config_scope and category
+3. Renders each property through Handlebars template
+4. Writes AsciiDoc files
+
+[,javascript]
+----
+// In generate-handlebars-docs.js
+const properties = JSON.parse(fs.readFileSync(inputFile));
+
+// Group properties
+const clusterProps = Object.values(properties.properties)
+    .filter(p => p.config_scope === 'cluster');
+
+// Render template
+const template = handlebars.compile(templateSource);
+const output = template({properties: clusterProps});
+
+// Write file
+fs.writeFileSync('cluster-properties.adoc', output);
+----
+
+**Key files:**
+
+* `generate-handlebars-docs.js` - Main generation script
+* `helpers.js` - Template helper functions
+* `templates/*.hbs` - Handlebars templates
+
+==== Stage 8: Diff generation
+
+The `compare-properties.js` script compares two JSON files:
+
+[,javascript]
+----
+function compareProperties(oldData, newData) {
+    return {
+        newProperties: findNew(oldData, newData),
+        changedDefaults: findDefaultChanges(oldData, newData),
+        changedDescriptions: findDescriptionChanges(oldData, newData),
+        deprecatedProperties: findNewlyDeprecated(oldData, newData),
+        removedProperties: findRemoved(oldData, newData)
+    };
+}
+----
+
+Uses deep equality checking to detect:
+
+* New properties in new version
+* Properties removed from old version
+* Changed default values
+* Changed descriptions/types
+* Newly deprecated properties
+
+**Key file:** `compare-properties.js`
+
+=== Adding new transformers
+
+To add custom property metadata extraction:
+
+. **Create transformer class** in `transformers.py`:
++
+[,python]
+----
+class MyCustomTransformer:
+    """Extract custom metadata from properties."""
+
+    def accepts(self, property_definition, file_path):
+        """Check if this transformer applies to this property."""
+        return 'custom_metadata' in str(property_definition)
+
+    def parse(self, property_definition, all_properties, file_path):
+        """Extract metadata and update property_definition."""
+        # Extract from C++ source
+        if match := re.search(r'custom_field\s*=\s*(\w+)', str(property_definition)):
+            property_definition['custom_field'] = match.group(1)
+----
+
+. **Register transformer** in `property_extractor.py`:
++
+[,python]
+----
+# In transform_files_with_properties()
+transformers = [
+    # ... existing transformers ...
+    MyCustomTransformer(),  # Add here
+]
+----
+
+. **Test on sample property:**
++
+[,bash]
+----
+./property_extractor.py --path tmp/redpanda/src/v --verbose | \
+    jq '.properties.test_property'
+----
+
+=== Extending type extraction
+
+To support new C++ patterns:
+
+. **Add extraction method** in `type_definition_extractor.py`:
++
+[,python]
+----
+def _extract_my_new_pattern(self, content, file_path):
+    """Extract custom C++ pattern."""
+    pattern = re.compile(r'my_pattern\s+(\w+)\s*{([^}]+)}')
+
+    for match in pattern.finditer(content):
+        name = match.group(1)
+        body = match.group(2)
+
+        # Parse and build definition
+        self.definitions[name] = {
+            'type': 'custom',
+            'body': body,
+            'defined_in': file_path
+        }
+----
+
+. **Call from `_extract_from_file()`**:
++
+[,python]
+----
+def _extract_from_file(self, file_path):
+    content = file_path.read_text()
+
+    # Existing extraction calls
+    self._extract_structs(content, file_path)
+    self._extract_enums(content, file_path)
+
+    # Add your new extraction
+    self._extract_my_new_pattern(content, file_path)
+----
+
+. **Test extraction:**
++
+[,bash]
+----
+python3 -c "
+from type_definition_extractor import TypeDefinitionExtractor
+from pathlib import Path
+
+extractor = TypeDefinitionExtractor(Path('tmp/redpanda/src/v'))
+extractor.extract()
+print(extractor.definitions['my_type'])
+"
+----
+
+=== Adding template helpers
+
+To add new Handlebars formatting helpers:
+
+. **Add function** to `helpers.js`:
++
+[,javascript]
+----
+/**
+ * Format byte values with units
+ */
+function formatBytes(value) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = value;
+    let unitIndex = 0;
+
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex++;
+    }
+
+    return `${size.toFixed(2)} ${units[unitIndex]}`;
+}
+
+module.exports = {
+    // ... existing helpers ...
+    formatBytes: formatBytes
+};
+----
+
+. **Use in template** (`templates/property.hbs`):
++
+[,handlebars]
+----
+{{#if (eq type "integer")}}
+| Default
+| `{{formatBytes default}}`
+{{/if}}
+----
+
+. **Test rendering:**
++
+[,bash]
+----
+node generate-handlebars-docs.js test-input.json test-output
+cat test-output/property.adoc
+----
+
+=== Debugging tips
+
+==== Enable verbose logging
+
+[,bash]
+----
+# Python extractor
+./property_extractor.py --path tmp/redpanda/src/v --verbose
+
+# Makefile with debug
+make build TAG=v25.3.1 VERBOSE=1
+----
+
+==== Inspect AST for property
+
+[,python]
+----
+# In property_extractor.py, add temporary debug:
+def get_properties(node, source_bytes):
+    if property_name == "debug_this_property":
+        print(f"AST: {node}")
+        print(f"Source: {source_bytes[node.start_byte:node.end_byte]}")
+        import pdb; pdb.set_trace()  # Drop into debugger
+----
+
+==== Check type extraction
+
+[,bash]
+----
+# See all extracted types
+./property_extractor.py --path tmp/redpanda/src/v --output test.json
+jq '.definitions | keys' test.json
+
+# Check specific type
+jq '.definitions."model::compression"' test.json
+----
+
+==== Test transformer in isolation
+
+[,python]
+----
+# test_transformer.py
+from transformers import NeedsRestartTransformer
+from property_bag import PropertyBag
+
+prop = PropertyBag()
+prop['raw'] = 'property<int>("test").needs_restart(no)'
+
+transformer = NeedsRestartTransformer()
+if transformer.accepts(prop, "test.cc"):
+    transformer.parse(prop, {}, "test.cc")
+    print(f"Result: {prop}")
+----
+
+==== Compare JSON outputs
+
+[,bash]
+----
+# Diff two versions
+diff <(jq -S . old.json) <(jq -S . new.json)
+
+# Check if property exists in version
+jq '.properties | has("property_name")' redpanda-properties-v25.3.1.json
+----
+
+== Limitations and known issues
+
+=== What works well
+
+* Standard property declarations using `property<T>` template
+* Common C++ types (int, string, bool, chrono types)
+* Struct and class types with public fields
+* Enums with string conversion functions
+* Chrono expression evaluation (`24h`, `7 * 24h`)
+* Optional types (`std::optional<T>`)
+* Array types (`std::vector<T>`)
+* Metadata extraction (`.visibility()`, `.needs_restart()`)
+* Topic property cluster mapping
+
+=== Current limitations
+
+* *Complex template types*: Highly nested templates may not resolve correctly
+* *Constexpr evaluation*: Complex compile-time expressions beyond chrono may not evaluate
+* *Private fields*: Struct fields marked private are not extracted
+* *Inheritance*: Properties in derived classes may not be fully captured
+* *Preprocessor macros*: Properties defined via macros may be missed
+* *Runtime defaults*: Defaults computed at runtime cannot be extracted
+
+=== Alternative approach: Admin API
+
+An alternative to C++ source extraction is using the Redpanda Admin API to fetch configuration properties at runtime. This approach would provide:
+
+* Runtime-accurate default values
+* Dynamically computed defaults
+* No C++ parsing complexity
+
+However, this approach has drawbacks:
+
+* ❌ Requires running Redpanda cluster
+* ❌ Current endpoint limitations:
+** Only cluster properties available (no topic properties yet)
+** Schema doesn't include enterprise feature flags
+
+See https://redpandadata.atlassian.net/browse/DOC-1828[DOC-1828] for proposed enhancements to the Admin API that would make this approach more viable.
+
+=== Workarounds
+
+For unsupported patterns, use `overrides.json`:
 
 [,json]
 ----
 {
   "properties": {
-    "kafka_api": {
-      "description": "Custom description",
-      "example": "kafka_api:\n  - name: internal\n    address: 0.0.0.0\n    port: 9092"
+    "complex_property": {
+      "type": "object",
+      "default": {"field": "value"},
+      "description": "Manual override for complex property"
     }
   },
   "definitions": {
-    "model::compression": {
-      "enum": ["none", "gzip", "snappy", "lz4", "zstd", "producer"]
-    }
-  }
-}
-----
-
-== Command-line reference
-
-=== Basic usage
-
-[,bash]
-----
-./property_extractor.py --path <redpanda-source-path> [options]
-----
-
-=== Options
-
-[cols="1,2,1"]
-|===
-| Option | Description | Default
-
-| `--path <path>`
-| Path to Redpanda source directory (required)
-| None
-
-| `--recursive`
-| Recursively scan for header/implementation file pairs
-| False
-
-| `--output <file>`
-| Output JSON file path
-| stdout
-
-| `--overrides <file>`
-| JSON file with property and definition overrides
-| `overrides.json`
-
-| `-v`, `--verbose`
-| Enable verbose logging
-| False
-|===
-
-=== Examples
-
-Extract properties from Redpanda source:
-
-[,bash]
-----
-./property_extractor.py --path ./tmp/redpanda/src/v --output properties.json
-----
-
-Use custom overrides:
-
-[,bash]
-----
-./property_extractor.py \
-  --path ./tmp/redpanda/src/v \
-  --overrides custom-overrides.json \
-  --output properties.json
-----
-
-Enable verbose logging for debugging:
-
-[,bash]
-----
-./property_extractor.py --path ./tmp/redpanda/src/v --verbose
-----
-
-== Customization
-
-=== When to add manual definitions
-
-You need manual definitions in `overrides.json` only for:
-
-==== 1. Types removed from codebase
-
-If a type was removed from Redpanda source but properties still reference it:
-
-[,json]
-----
-{
-  "definitions": {
-    "legacy_type": {
-      "type": "string",
-      "description": "Maintained for backward compatibility"
-    }
-  }
-}
-----
-
-==== 2. Complex types not auto-extractable
-
-Property classes inheriting from template base classes:
-
-[,cpp]
-----
-class retention_duration_property final
-  : public property<std::optional<std::chrono::milliseconds>> {
-  // Complex logic, no simple fields to extract
-};
-----
-
-Define manually:
-
-[,json]
-----
-{
-  "definitions": {
-    "retention_duration_property": {
-      "type": "integer",
-      "minimum": -2147483648,
-      "maximum": 2147483647
-    }
-  }
-}
-----
-
-==== 3. Override auto-extracted definitions
-
-Provide cleaner enum values or simplified field lists:
-
-[,json]
-----
-{
-  "definitions": {
-    "model::compression": {
-      "$comment": "Overrides auto-extracted enum to exclude internal values",
-      "enum": ["none", "gzip", "snappy", "lz4", "zstd", "producer"]
-    }
-  }
-}
-----
-
-==== 4. Documentation-only types
-
-Types needed for documentation but not in C++ source:
-
-[,json]
-----
-{
-  "definitions": {
-    "custom_config_type": {
+    "ComplexType": {
       "type": "object",
       "properties": {
-        "host": {"type": "string"},
-        "port": {"type": "integer"}
+        "field": {"type": "string"}
       }
     }
   }
 }
 ----
 
-=== Override precedence
+== Contributing
 
-Definitions are applied in this order (later overrides earlier):
-
-. Auto-extracted from C++ source
-. `overrides.json` definitions
-
-=== Overrides file format
-
-The `overrides.json` file supports two top-level keys:
-
-[,json]
-----
-{
-  "$comment": "Property and definition overrides for Redpanda property extraction",
-
-  "properties": {
-    "property_name": {
-      "description": "Custom description text",
-      "example": ".Example\n[,yaml]\n----\nredpanda:\n  property_name: value\n----",
-      "version": "24.3",
-      "related_topics": ["xref:topic.adoc[Link]"],
-      "default": "custom_default",
-      "config_scope": "broker",
-      "type": "string"
-    }
-  },
-
-  "definitions": {
-    "type::name": {
-      "$comment": "Overrides or adds type definition",
-      "type": "enum",
-      "enum": ["value1", "value2", "value3"],
-      "defined_in": "https://github.com/.../file.h#L123"
-    }
-  }
-}
-----
-
-Property override fields:
-
-* `description` - Override auto-extracted description
-* `example` - Add AsciiDoc example block
-* `example_file` - Load example from external file
-* `version` - Version when property was introduced
-* `related_topics` - Array of cross-reference links
-* `default` - Override default value
-* `config_scope` - Specify scope for new properties (broker/cluster/topic)
-* `type` - Specify type for new properties
-
-== JSON output format
-
-The extractor generates a JSON Schema-like document:
-
-[,json]
-----
-{
-  "properties": {
-    "property_name": {
-      "type": "string",
-      "description": "Property description",
-      "default": "default_value",
-      "required": false,
-      "visibility": "tunable",
-      "requires_restart": false,
-      "config_scope": "broker",
-      "units": "bytes",
-      "minimum": 0,
-      "maximum": 1000,
-      "enum": ["option1", "option2"],
-      "example": ".Example\n[,yaml]\n----\nredpanda:\n  property_name: value\n----"
-    }
-  },
-
-  "definitions": {
-    "model::broker_endpoint": {
-      "type": "object",
-      "properties": {
-        "name": {"type": "string"},
-        "address": {"type": "string"},
-        "port": {"type": "integer", "minimum": 0, "maximum": 65535}
-      },
-      "defined_in": "model/metadata.h"
-    },
-
-    "model::compression": {
-      "type": "enum",
-      "enum": ["none", "gzip", "snappy", "lz4", "zstd", "producer"],
-      "enum_string_mappings": {
-        "compression_type_none": "none",
-        "compression_type_gzip": "gzip"
-      },
-      "defined_in": "model/compression.h"
-    },
-
-    "model::node_id": {
-      "type": "integer",
-      "minimum": -2147483648,
-      "maximum": 2147483647,
-      "alias_for": "named_type<int32_t, struct node_id_model_type>",
-      "defined_in": "model/fundamental.h"
-    }
-  }
-}
-----
-
-== Documentation generation
-
-To generate AsciiDoc documentation from the JSON:
+=== Development setup
 
 [,bash]
 ----
-python3 generate_docs.py
+# Clone repository
+git clone https://github.com/redpanda-data/docs-extensions-and-macros.git
+cd docs-extensions-and-macros/tools/property-extractor
+
+# Set up Python environment
+make venv
+
+# Install Node dependencies
+npm install
+
+# Clone Redpanda source for testing
+make redpanda-git TAG=v25.3.1
+
+# Build tree-sitter parser
+make treesitter
 ----
 
-This creates:
+=== Running tests
 
-* `output/pages/broker-properties.adoc` - Broker configuration
-* `output/pages/cluster-properties.adoc` - Cluster configuration
-* `output/pages/object-storage-properties.adoc` - Cloud storage configuration
-* `output/pages/deprecated/partials/deprecated-properties.adoc` - Deprecated properties
+[,bash]
+----
+# Run test suite
+npm test
 
+# Run specific test file
+npx jest __tests__/tools/topic_property_extractor.test.js
+
+# Run with coverage
+npm test -- --coverage
+----
+
+=== Making changes
+
+1. **Before you start:**
+   - Open an issue describing the problem/enhancement
+   - Discuss approach with maintainers
+
+2. **Make your changes:**
+   - Follow existing code style
+   - Add tests for new functionality
+   - Update this README for significant changes
+
+3. **Test thoroughly:**
+   - Run existing tests: `npm test`
+   - Test on multiple Redpanda versions
+   - Generate docs locally and verify output
+
+4. **Submit PR:**
+   - Include issue reference
+   - Describe what changed and why
+   - Show before/after examples
+
+=== Testing checklist
+
+Before submitting changes, verify:
+
+* [ ] All tests pass: `npm test`
+* [ ] Generated docs look correct: `npx doc-tools generate property-docs --tag v25.3.1`
+* [ ] No regression on older versions: Test with v24.x and v25.x
+* [ ] Override handling still works
+* [ ] Topic properties get correct defaults
+* [ ] Diff generation works between versions
+* [ ] Templates render correctly
+* [ ] New transformers don't break existing extraction
+
+=== Code style guidelines
+
+*Python:*
+
+* Follow PEP 8
+* Use type hints where possible
+* Document complex functions with docstrings
+* Keep functions focused and testable
+
+*JavaScript:*
+
+* Use modern ES6+ features
+* Prefer const/let over var
+* Document helper functions with JSDoc
+* Use async/await over callbacks
+
+*Documentation:*
+
+* Use AsciiDoc format
+* Include code examples
+* Explain the "why" not just the "what"
+* Keep README in sync with code
 
 == Troubleshooting
 
-=== Type not found
-
-If a property references a type that isn't extracted:
-
-. Check if the type exists in Redpanda source:
-+
-[,bash]
-----
-find tmp/redpanda/src/v -name "*.h" -exec grep -l "your_type_name" {} \;
-----
-
-. If found, check extraction:
-+
-[,bash]
-----
-./property_extractor.py --path tmp/redpanda/src/v --verbose 2>&1 | grep "your_type_name"
-----
-
-. If not extracted, add manual definition to `overrides.json`
-
-=== Enum values incorrect
-
-If enum values don't match user-facing strings:
-
-. Check for `_to_string()` function in source
-. If missing or incorrect, override in `overrides.json`:
-+
-[,json]
-----
-{
-  "definitions": {
-    "model::your_enum": {
-      "enum": ["user_value1", "user_value2"]
-    }
-  }
-}
-----
-
-=== Missing property fields
-
-If extracted properties lack descriptions or defaults:
-
-. Check C++ source for property declaration
-. Add override in `overrides.json`:
-+
-[,json]
-----
-{
-  "properties": {
-    "property_name": {
-      "description": "Detailed description",
-      "example": "..."
-    }
-  }
-}
-----
-
 === Build failures
 
-Tree-sitter compilation errors:
+**Tree-sitter won't compile:**
 
 [,bash]
 ----
+# Update submodule
 cd tree-sitter/tree-sitter-cpp
 git submodule update --init --recursive
+
+# Clean and rebuild
+cd ../..
+make clean
+make treesitter
 ----
 
-Python dependency errors:
+**Python dependencies fail:**
 
 [,bash]
 ----
+# Remove and recreate venv
 make clean
+rm -rf tmp/redpanda-property-extractor-venv
 make venv
 ----
 
-== Advanced usage
+**Node modules missing:**
 
-=== Adding new transformers
+[,bash]
+----
+npm install
+----
 
-To add custom property transformations:
+=== Extraction issues
 
-. Create a transformer function in `transformers.py`:
+**Property not found:**
+
+1. Verify property exists in Redpanda source:
 +
-[,python]
+[,bash]
 ----
-def my_custom_transformer(properties):
-    """Add custom metadata to properties."""
-    for prop_name, prop in properties.items():
-        # Add custom logic
-        prop['custom_field'] = compute_value(prop)
-    return properties
+grep -r "property_name" tmp/redpanda/src/v/config/
 ----
 
-. Register in transformer pipeline in `property_extractor.py`:
+2. Check if property uses unsupported pattern
+
+3. Add override to `property-overrides.json`
+
+**Type not resolved:**
+
+1. Check type definition exists:
 +
-[,python]
+[,bash]
 ----
-properties = transform_files_with_properties(files_with_properties)
-properties = my_custom_transformer(properties)  # Add here
+find tmp/redpanda/src/v -name "*.h" -exec grep -l "TypeName" {} \;
 ----
 
-=== Extending type extraction
+2. Verify type is in scanned directories
 
-To support additional C++ patterns:
+3. Add manual definition to `overrides.json`
 
-. Add extraction method to `type_definition_extractor.py`
-. Register in `_extract_from_file()` method
-. Test extraction on sample files
+**Wrong default value:**
 
-=== Custom output formats
+1. Check C++ source for actual default
+2. Verify chrono evaluation is correct
+3. Override in `property-overrides.json` if needed
 
-To generate additional output formats:
+**Missing topic property defaults:**
 
-. Load the JSON output:
+1. Verify cluster property has a default:
 +
-[,python]
+[,bash]
 ----
-import json
-with open('gen/properties-output.json') as f:
-    data = json.load(f)
+jq '.properties.log_retention_ms.default' output.json
 ----
 
-. Transform to desired format (YAML, XML, etc.)
+2. Check topic → cluster mapping exists
 
-== Contributing
+3. Ensure `extract_topic_properties()` receives cluster properties
 
-When modifying the extractor:
+=== Template rendering issues
 
-. Test on multiple Redpanda versions
-. Update `overrides.json` for new types
-. Run validation: `make test`
-. Document changes in this README
+**Handlebars error:**
+
+[,bash]
+----
+# Validate JSON
+jq . generated.json
+
+# Test template manually
+node generate-handlebars-docs.js test-input.json test-output
+----
+
+**Missing values in output:**
+
+1. Check property has required field in JSON
+2. Verify template references correct field name
+3. Test with minimal property to isolate issue
+
+**Formatting looks wrong:**
+
+1. Check helper function in `helpers.js`
+2. Verify AsciiDoc syntax in template
+3. Test rendering with sample property
 
 == Additional resources
 
 * https://github.com/redpanda-data/redpanda[Redpanda GitHub Repository]
+* https://github.com/redpanda-data/docs-extensions-and-macros[docs-extensions-and-macros Repository]
 * https://tree-sitter.github.io/tree-sitter/[Tree-sitter Documentation]
+* https://handlebarsjs.com/[Handlebars.js Guide]
+* https://docs.asciidoctor.org/asciidoc/latest/[AsciiDoc Language Documentation]

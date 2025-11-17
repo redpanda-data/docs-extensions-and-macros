@@ -31,7 +31,7 @@ module.exports = function renderLeafField(field, indentLevel) {
 
   // If a default is provided, use it:
   if (field.default !== undefined) {
-    // Empty array inline
+    // Empty array - use block style
     if (Array.isArray(field.default) && field.default.length === 0) {
       return `${indent}${name}: []`;
     }
@@ -45,10 +45,16 @@ module.exports = function renderLeafField(field, indentLevel) {
       return `${indent}${name}: {}`;
     }
 
-    // Complex object/array: dump as YAML block
+    // Complex object/array: dump as YAML block style
     if (typeof field.default === 'object') {
       try {
-        const rawYaml = yaml.stringify(field.default).trim();
+        // Force block style for all arrays and nested structures
+        const rawYaml = yaml.stringify(field.default, {
+          defaultStringType: 'PLAIN',
+          defaultKeyType: 'PLAIN',
+          lineWidth: 0,  // Disable line wrapping to prevent flow style
+          simpleKeys: false
+        }).trim();
         const indentedYaml = rawYaml
           .split('\n')
           .map(line => ' '.repeat(indentLevel + 2) + line)
@@ -79,6 +85,7 @@ module.exports = function renderLeafField(field, indentLevel) {
   }
 
   // No default → choose representation
+  // Note: Empty arrays still use [] for brevity when showing placeholder with comment
   if (field.kind === 'array') {
     return `${indent}${name}: [] ${comment}`;
   } else {

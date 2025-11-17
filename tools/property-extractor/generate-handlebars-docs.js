@@ -240,7 +240,7 @@ function generateTopicPropertyMappings(properties, partialsDir) {
     throw new Error(`topic-property-mappings.hbs template not found: ${mappingsTemplatePath}`);
   }
   const topicProperties = Object.values(properties).filter(
-    p => p.is_topic_property && p.corresponding_cluster_property
+    p => p.is_topic_property && p.corresponding_cluster_property && !p.exclude_from_docs
   );
   if (topicProperties.length === 0) {
     console.log('ℹ️ No topic properties with corresponding_cluster_property found. Skipping topic-property-mappings.adoc.');
@@ -249,7 +249,9 @@ function generateTopicPropertyMappings(properties, partialsDir) {
   const hbsSource = fs.readFileSync(mappingsTemplatePath, 'utf8');
   const hbs = handlebars.compile(hbsSource);
   const rendered = hbs({ topicProperties });
-  const mappingsOut = path.join(partialsDir, 'topic-property-mappings.adoc');
+  const propertiesPartialsDir = path.join(partialsDir, 'properties');
+  fs.mkdirSync(propertiesPartialsDir, { recursive: true });
+  const mappingsOut = path.join(propertiesPartialsDir, 'topic-property-mappings.adoc');
   fs.writeFileSync(mappingsOut, AUTOGEN_NOTICE + rendered, 'utf8');
   console.log(`✅ Generated ${mappingsOut}`);
   return topicProperties.length;
@@ -288,9 +290,9 @@ function generateErrorReports(properties, documentedProperties = []) {
   const pctDeprecated = total ? ((deprecatedProperties.length / total) * 100).toFixed(2) : '0.00';
   const pctUndocumented = total ? ((undocumented.length / total) * 100).toFixed(2) : '0.00';
 
-  console.log(`📉 Empty descriptions: ${emptyDescriptions.length} (${pctEmpty}%) (excludes deprecated)`);
-  console.log(`🕸️ Deprecated: ${deprecatedProperties.length} (${pctDeprecated}%)`);
-  console.log(`🚫 Not documented: ${undocumented.length} (${pctUndocumented}%)`);
+  console.log(`Empty descriptions: ${emptyDescriptions.length} (${pctEmpty}%) (excludes deprecated)`);
+  console.log(`Deprecated: ${deprecatedProperties.length} (${pctDeprecated}%)`);
+  console.log(`Not documented: ${undocumented.length} (${pctUndocumented}%)`);
 
   return {
     empty_descriptions: emptyDescriptions.sort(),
@@ -304,7 +306,8 @@ function generateErrorReports(properties, documentedProperties = []) {
  */
 function generateAllDocs(inputFile, outputDir) {
   const data = JSON.parse(fs.readFileSync(inputFile, 'utf8'));
-  const properties = data.properties || {};
+  // Support both 'properties' (from property_extractor.py) and 'topic_properties' (from topic_property_extractor.py)
+  const properties = data.properties || data.topic_properties || {};
 
   registerPartials();
 

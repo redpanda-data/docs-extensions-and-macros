@@ -1,0 +1,736 @@
+= Redpanda Connect Documentation Automation
+
+Automatically generates Redpanda Connect connector documentation and manages version updates.
+
+== What is this?
+
+The Redpanda Connect automation is part of the https://github.com/redpanda-data/docs-extensions-and-macros[`docs-extensions-and-macros`] package. It automates the generation and maintenance of Redpanda Connect component documentation by:
+
+* Fetching connector metadata from the Redpanda Connect repository
+* Generating AsciiDoc documentation for inputs, outputs, processors, caches, and other components
+* Managing version tracking and change detection
+* Creating connector catalogs and category pages
+
+**Why it exists:** Redpanda Connect has hundreds of connectors and components with complex configurations. Manually maintaining documentation for all these components would be time-consuming and error-prone. This automation extracts component schemas from the Redpanda Connect repository and generates accurate, up-to-date documentation.
+
+**What it generates:**
+
+* *Component reference documentation* (AsciiDoc files for each connector)
+* *Connector catalog* with support levels and availability
+* *Version tracking* and change reports
+* *Category pages* organizing components by type
+
+== For documentation writers
+
+=== Quick start
+
+The Redpanda Connect automation is installed as part of the `docs-extensions-and-macros` npm package. You interact with it through the `doc-tools` CLI from within your documentation repository.
+
+*Prerequisites:*
+
+* Node.js 18+ and npm
+* Git
+
+*Installation:*
+
+[,bash]
+----
+# In your docs repository
+npm install @redpanda-data/docs-extensions-and-macros
+----
+
+*Generate connector documentation:*
+
+[,bash]
+----
+# Generate connector documentation with latest data
+npx doc-tools generate rpcn-connector-docs --fetch-connectors
+
+# Generate with custom overrides
+npx doc-tools generate rpcn-connector-docs \
+  --fetch-connectors \
+  --overrides path/to/overrides.json
+
+# Generate and draft missing connectors
+npx doc-tools generate rpcn-connector-docs \
+  --fetch-connectors \
+  --draft-missing
+
+# Use existing data file without fetching
+npx doc-tools generate rpcn-connector-docs \
+  --data-dir docs-data
+----
+
+=== Version matching behavior
+
+**IMPORTANT:** When the fetched Redpanda Connect version matches the version already specified in `antora.yml`, the automation automatically skips:
+
+* Diff generation (no changes to compare)
+* "What's New" updates (no new features to document)
+* Version attribute updates (already at that version)
+
+This prevents unnecessary churn when re-running the automation on the same version.
+
+[,yaml]
+----
+# antora.yml
+name: redpanda-connect
+asciidoc:
+  attributes:
+    latest-connect-version: 4.53.0  # Current documented version
+----
+
+[,bash]
+----
+# If you run automation and rpk reports 4.53.0, antora.yml already has 4.53.0:
+npx doc-tools generate rpcn-connector-docs --fetch-connectors
+
+# Output:
+# ✓ Already at version 4.53.0
+#   No diff or version updates needed.
+# (Still generates partials but skips diff/updates)
+
+# If you run automation and rpk reports 4.54.0, antora.yml has 4.53.0:
+npx doc-tools generate rpcn-connector-docs --fetch-connectors
+
+# Output:
+# ✅ Connector diff JSON written to: docs-data/connect-diff-4.53.0_to_4.54.0.json
+# ✅ Updated Antora version: 4.54.0
+# (Generates diff, updates version, creates "what's new" data)
+----
+
+=== Generated output
+
+Running Connect automation creates:
+
+[,text]
+----
+modules/components/
+├── partials/
+│   ├── fields/
+│   │   ├── inputs/
+│   │   │   ├── kafka_franz.adoc
+│   │   │   ├── http_server.adoc
+│   │   │   └── ...
+│   │   ├── outputs/
+│   │   │   ├── elasticsearch_v8.adoc
+│   │   │   ├── kafka_franz.adoc
+│   │   │   └── ...
+│   │   ├── processors/
+│   │   ├── caches/
+│   │   └── ...
+│   ├── examples/
+│   │   ├── inputs/
+│   │   ├── outputs/
+│   │   └── ...
+│   └── drafts/  # Full draft pages (if --writeFullDrafts)
+├── examples/
+│   ├── common/  # Common configuration examples
+│   └── advanced/  # Advanced configuration examples
+└── pages/
+    ├── connect-api-reference.adoc
+    └── ...
+----
+
+=== Common workflows
+
+==== Updating to a new Redpanda Connect version
+
+[,bash]
+----
+# 1. Check current version in antora.yml
+cat antora.yml | grep latest-connect-version
+
+# 2. Generate connector docs for new version
+npx doc-tools generate rpcn-connector-docs \
+  --fetch-connectors \
+  --draft-missing
+
+# 3. Review changes
+git status
+git diff docs-data/
+git diff modules/components/
+
+# 4. Commit
+git add docs-data/ modules/components/
+git commit -m "docs: Update Connect to v4.54.0"
+----
+
+==== Generating connector documentation manually
+
+You can generate connector documentation with various options:
+
+[,bash]
+----
+# Basic generation with fetching latest data
+npx doc-tools generate rpcn-connector-docs --fetch-connectors
+
+# Generate with custom overrides for descriptions/examples
+npx doc-tools generate rpcn-connector-docs \
+  --fetch-connectors \
+  --overrides overrides.json
+
+# Draft full pages for connectors missing documentation
+npx doc-tools generate rpcn-connector-docs \
+  --fetch-connectors \
+  --draft-missing \
+  --csv internal/plugins/info.csv
+
+# Use existing data file from docs-data directory
+npx doc-tools generate rpcn-connector-docs \
+  --data-dir docs-data
+
+# Generate diff comparing with specific old version
+npx doc-tools generate rpcn-connector-docs \
+  --fetch-connectors \
+  --old-data docs-data/connect-4.52.0.json
+----
+
+**Available options:**
+
+* `--fetch-connectors` - Fetch latest data using `rpk connect list`
+* `--draft-missing` - Generate full draft pages for undocumented connectors
+* `--overrides <path>` - Apply custom descriptions/examples from JSON
+* `--data-dir <path>` - Directory containing versioned connect JSON files
+* `--old-data <path>` - Specific old version file for diff comparison
+* `--csv <path>` - Connector metadata CSV (default: `internal/plugins/info.csv`)
+* `--include-bloblang` - Include Bloblang functions/methods
+
+==== Checking connector availability
+
+The automation fetches and parses the connector catalog CSV from the Redpanda Connect repository:
+
+[,bash]
+----
+# View connector catalog (requires build)
+cat modules/components/partials/connector-catalog.csv
+----
+
+This catalog includes:
+
+* Connector name and type (input/output/processor)
+* Support level (certified, community, experimental)
+* Cloud availability
+* Deprecated status
+* Documentation URLs
+
+== How it works
+
+=== Architecture overview
+
+[,text]
+----
+┌─────────────────────────────────────────────────────────────┐
+│ doc-tools CLI                                               │
+│  └─ generate rpcn-connector-docs command                    │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Connector Documentation Pipeline                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. Fetch connector data using rpk connect                 │
+│     └─ Runs: rpk connect list --format json-full           │
+│     └─ Saves: docs-data/connect-<version>.json             │
+│                                                             │
+│  2. Check version match (skip if same as antora.yml)       │
+│     └─ Compare: rpk version vs latest-connect-version      │
+│     └─ Exit early if versions match                        │
+│                                                             │
+│  3. Generate AsciiDoc partials for each connector          │
+│     ├─ Apply overrides (custom descriptions/examples)      │
+│     ├─ Resolve $ref references                             │
+│     ├─ Render fields using Handlebars templates            │
+│     └─ Output: modules/components/partials/fields/         │
+│                                                             │
+│  4. Generate diff report (if versions differ)              │
+│     ├─ Compare old vs new connector schemas                │
+│     ├─ Identify new/removed connectors and fields          │
+│     └─ Output: docs-data/connect-diff-X_to_Y.json          │
+│                                                             │
+│  5. Update version in antora.yml (if versions differ)      │
+│     └─ Set: latest-connect-version attribute               │
+│                                                             │
+└─────────────────────┬───────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Antora Build Process                                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Extensions:                                                │
+│  • generate-rp-connect-info                                 │
+│    └─ Fetches connector catalog CSV                        │
+│    └─ Enriches with documentation URLs                     │
+│    └─ Attaches to component attributes                     │
+│                                                             │
+│  • generate-rp-connect-categories                           │
+│    └─ Generates category pages by type                     │
+│    └─ Sorts connectors by support level                    │
+│                                                             │
+│  • modify-connect-tag-playbook                              │
+│    └─ Manages version tracking                             │
+│    └─ Detects version changes                              │
+│    └─ Skips processing if version matches                  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+----
+
+=== What gets generated
+
+==== 1. Connector documentation
+
+Component schemas are fetched from the Redpanda Connect repository and transformed into AsciiDoc:
+
+[,json]
+----
+{
+  "name": "kafka_franz",
+  "type": "input",
+  "config": {
+    "children": [
+      {
+        "name": "seed_brokers",
+        "type": "string",
+        "kind": "array",
+        "description": "A list of broker addresses..."
+      }
+    ]
+  }
+}
+----
+
+Generates:
+
+[,asciidoc]
+----
+=== `seed_brokers`
+
+A list of broker addresses to connect to.
+
+*Type:* `string[]`
+
+*Examples:*
+
+[source,yaml]
+----
+seed_brokers:
+  - localhost:9092
+  - broker1:9092
+----
+----
+
+==== 2. Connector catalog
+
+The CSV catalog from the Connect repository is parsed and enriched:
+
+[,csv]
+----
+name,type,commercial_name,version,support,cloud,deprecated
+kafka_franz,input,Apache Kafka,4.53.0,certified,y,n
+elasticsearch_v8,output,Elasticsearch,4.53.0,certified,y,n
+----
+
+Enriched with documentation URLs and support metadata:
+
+[,json]
+----
+{
+  "connector": "kafka_franz",
+  "type": "input",
+  "support_level": "certified",
+  "is_cloud_supported": "y",
+  "redpandaConnectUrl": "/connect/components/inputs/kafka_franz",
+  "redpandaCloudUrl": "/cloud/connect/components/inputs/kafka_franz"
+}
+----
+
+=== Key transformations
+
+==== Version detection and matching
+
+The automation detects the current Connect version from `antora.yml`:
+
+[,javascript]
+----
+const currentVersion = getAntoraValue(antoraYmlPath, 'asciidoc.attributes.latest-connect-version');
+const fetchedVersion = await getRpkConnectVersion(tag);
+
+if (currentVersion === fetchedVersion) {
+  console.log(`✓ Already at version ${fetchedVersion}, skipping diff and updates`);
+  process.exit(0);
+}
+----
+
+==== Connector documentation generation
+
+Uses Handlebars templates to render component fields and examples:
+
+[,handlebars]
+----
+{{#each config.children}}
+=== `{{name}}`
+
+{{description}}
+
+*Type:* `{{type}}`
+
+{{#if default}}
+*Default:* `{{formatValue default type}}`
+{{/if}}
+
+{{#if examples}}
+*Examples:*
+
+{{#each examples}}
+[source,yaml]
+----
+{{this}}
+----
+{{/each}}
+{{/if}}
+
+{{/each}}
+----
+
+== Understanding the codebase
+
+=== Project structure
+
+[,text]
+----
+tools/redpanda-connect/
+├── generate-rpcn-connector-docs.js  # Main connector doc generator
+├── parse-csv-connectors.js          # CSV catalog parser
+├── report-delta.js                   # Version comparison
+├── helpers/
+│   ├── renderConnectFields.js       # Renders field documentation
+│   ├── renderConnectExamples.js     # Renders examples
+│   ├── buildConfigYaml.js           # Builds YAML examples
+│   ├── commonConfig.js              # Common config helper
+│   ├── advancedConfig.js            # Advanced config helper
+│   └── ...
+└── templates/
+    ├── connector.hbs                 # Full connector template
+    ├── fields.hbs                    # Fields partial
+    ├── examples.hbs                  # Examples partial
+    └── bloblang-function.hbs         # Bloblang function template
+
+extensions/
+├── generate-rp-connect-info.js       # Fetches and enriches catalog
+├── generate-rp-connect-categories.js # Generates category pages
+└── modify-connect-tag-playbook.js    # Version tracking
+----
+
+=== Connector documentation generation
+
+The `generateRpcnConnectorDocs()` function processes component schemas:
+
+1. **Load data**: Read component schemas (JSON or YAML)
+2. **Apply overrides**: Merge custom descriptions and examples
+3. **Resolve references**: Expand `$ref` pointers
+4. **Mark beta features**: Detect and flag beta components
+5. **Render templates**: Generate AsciiDoc using Handlebars
+6. **Write outputs**: Create partials, examples, and drafts
+
+**Key parameters:**
+
+* `data` - Path to component schema file
+* `overrides` - Optional overrides JSON
+* `template` - Main template (for full drafts)
+* `templateFields` - Fields partial template
+* `templateExamples` - Examples partial template
+* `writeFullDrafts` - Generate full pages vs partials
+
+=== Version tracking
+
+The `modify-connect-tag-playbook` extension manages version detection:
+
+[,javascript]
+----
+// Detect current version
+const currentVersion = contentCatalog
+  .getComponent('redpanda-connect')
+  .latest.asciidoc.attributes['latest-connect-version'];
+
+// Fetch new version from repository
+const newVersion = await getRpkConnectVersion(tag);
+
+// Compare and skip if match
+if (currentVersion === newVersion) {
+  logger.info(`Already at version ${newVersion}`);
+  return; // Skip diff and updates
+}
+
+// Generate diff and update antora.yml
+const delta = compareVersions(currentVersion, newVersion);
+await updateAntoraVersion(newVersion);
+----
+
+=== Override system
+
+Overrides allow customizing extracted documentation:
+
+[,json]
+----
+{
+  "$comment": "Custom descriptions and examples for Connect components",
+  "definitions": {
+    "client_certs": {
+      "description": "A list of client certificates to use for mTLS..."
+    }
+  },
+  "inputs": [
+    {
+      "name": "kafka_franz",
+      "config": {
+        "children": [
+          {
+            "name": "seed_brokers",
+            "$ref": "#/definitions/seed_brokers_description"
+          }
+        ]
+      },
+      "examples": [
+        {
+          "title": "Basic Kafka consumer",
+          "summary": "Connect to a Kafka broker and consume messages",
+          "config": "input:\n  kafka_franz:\n    seed_brokers:\n      - localhost:9092"
+        }
+      ]
+    }
+  ]
+}
+----
+
+Overrides support:
+
+* `description` - Replace auto-extracted descriptions
+* `examples` - Add usage examples
+* `$ref` - JSON Pointer references for reusable content
+* `annotated_options` - Add human-readable enum descriptions
+
+== Limitations and known issues
+
+=== What works well
+
+* Standard component schema extraction
+* Connector catalog enrichment
+* Version tracking and change detection
+* Handlebars template rendering
+* Override system for custom documentation
+
+=== Current limitations
+
+* *Manual override maintenance*: Custom descriptions must be maintained in overrides.json
+* *Example quality*: Auto-generated examples may not represent best practices
+* *Duplicate YAML keys*: Some examples contain multiple configurations in one block, creating invalid YAML with duplicate top-level keys (e.g., multiple `processors:` keys)
+* *CSV catalog dependency*: Relies on manually maintained CSV in Connect repository
+* *Version detection timing*: Must be called during Antora build to access component attributes
+
+=== Known issues
+
+==== Duplicate keys in examples
+
+Multiple Connect component examples contain duplicate top-level YAML keys, which is invalid YAML:
+
+[,yaml]
+----
+# Invalid: Two processors: keys
+pipeline:
+  processors:    # First occurrence
+    - branch:
+        request_map: 'root = ""'
+        processors:  # Second occurrence (nested, OK)
+          - http:
+              url: example.com
+
+  processors:    # Third occurrence (DUPLICATE - INVALID)
+    - mapping: |
+        root = content().uppercase()
+----
+
+This occurs when multiple separate configurations are concatenated into a single example. These should be split into separate examples or restructured.
+
+=== Workarounds
+
+For unsupported patterns or issues, use overrides.json:
+
+[,json]
+----
+{
+  "inputs": [
+    {
+      "name": "problematic_connector",
+      "description": "Custom description overriding auto-extracted text",
+      "examples": [
+        {
+          "title": "Corrected example",
+          "config": "input:\n  problematic_connector:\n    field: value"
+        }
+      ]
+    }
+  ]
+}
+----
+
+== Contributing
+
+=== Development setup
+
+[,bash]
+----
+# Clone repository
+git clone https://github.com/redpanda-data/docs-extensions-and-macros.git
+cd docs-extensions-and-macros
+
+# Install dependencies
+npm install
+
+# Test connector doc generation
+npm test -- __tests__/tools/generate-rpcn-connector-docs.test.js
+----
+
+=== Making changes
+
+1. **Before you start:**
+   - Open an issue describing the problem/enhancement
+   - Discuss approach with maintainers
+
+2. **Make your changes:**
+   - Follow existing code style
+   - Add tests for new functionality
+   - Update this README for significant changes
+
+3. **Test thoroughly:**
+   - Run existing tests: `npm test`
+   - Test on actual Connect schemas
+   - Verify generated AsciiDoc renders correctly
+
+4. **Submit PR:**
+   - Include issue reference
+   - Describe what changed and why
+   - Show before/after examples
+
+=== Testing checklist
+
+Before submitting changes, verify:
+
+* [ ] All tests pass: `npm test`
+* [ ] Generated docs look correct when built with Antora
+* [ ] Override handling still works
+* [ ] Version detection correctly skips when versions match
+* [ ] Templates render without errors
+* [ ] No regression on existing connectors
+
+=== Code style guidelines
+
+*JavaScript:*
+
+* Use modern ES6+ features
+* Prefer const/let over var
+* Document helper functions with JSDoc
+* Use async/await over callbacks
+
+*Handlebars templates:*
+
+* Keep logic minimal - move complex logic to helpers
+* Use descriptive helper names
+* Comment non-obvious template sections
+
+*Documentation:*
+
+* Use AsciiDoc format
+* Include code examples
+* Explain the "why" not just the "what"
+* Keep README in sync with code
+
+== Troubleshooting
+
+=== Generation issues
+
+**Connector not generated:**
+
+1. Verify connector exists in schema:
++
+[,bash]
+----
+cat connect-schema.json | jq '.inputs[] | select(.name=="connector_name")'
+----
+
+2. Check if connector is deprecated (skipped in draft mode)
+
+3. Add override to force generation
+
+**Invalid AsciiDoc output:**
+
+1. Check template syntax:
++
+[,bash]
+----
+node -e "const h = require('handlebars'); h.compile(require('fs').readFileSync('template.hbs', 'utf8'))"
+----
+
+2. Verify data structure matches template expectations
+
+3. Test with minimal example data
+
+**Version detection fails:**
+
+1. Verify antora.yml exists at repository root
+
+2. Check attribute name matches:
++
+[,bash]
+----
+cat antora.yml | grep latest-connect-version
+----
+
+3. Ensure modify-connect-tag-playbook extension is registered
+
+=== Template rendering issues
+
+**Handlebars error:**
+
+[,bash]
+----
+# Validate JSON data
+jq . generated.json
+
+# Test template manually
+node -e "const hbs = require('handlebars'); const fs = require('fs'); const tpl = hbs.compile(fs.readFileSync('template.hbs', 'utf8')); console.log(tpl(JSON.parse(fs.readFileSync('data.json', 'utf8'))))"
+----
+
+**Missing values in output:**
+
+1. Check data has required field in JSON
+2. Verify template references correct field name
+3. Test with minimal data to isolate issue
+
+**Helper not found:**
+
+1. Verify helper is registered:
++
+[,javascript]
+----
+// In generate-rpcn-connector-docs.js
+Object.entries(helpers).forEach(([name, fn]) => {
+  handlebars.registerHelper(name, fn);
+});
+----
+
+2. Check helper is exported from helpers/index.js
+
+3. Ensure helper function exists
+
+== Additional resources
+
+* https://github.com/redpanda-data/connect[Redpanda Connect Repository]
+* https://github.com/redpanda-data/docs-extensions-and-macros[docs-extensions-and-macros Repository]
+* https://handlebarsjs.com/[Handlebars.js Documentation]
+* https://docs.asciidoctor.org/asciidoc/latest/[AsciiDoc Language Documentation]
+
+== License
+
+See LICENSE file in repository root.

@@ -6,6 +6,9 @@ const path        = require('path')
 const URL         = require('url')
 const chalk       = require('chalk')
 
+// Create encoder once at module scope for efficiency
+const textEncoder = new TextEncoder()
+
 /**
  * Generates an Algolia index:
  *
@@ -143,37 +146,50 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     if (!(cname in algolia)) algolia[cname] = {}
     if (!(version in algolia[cname])) algolia[cname][version] = []
 
+    // Check if this is a properties reference page (or has many titles)
+    const isPropertiesPage = page.pub.url.includes('/properties/') || titles.length > 30;
+
     // Handle the article text
-    const contentElements = article.querySelectorAll('p, table, li');
-    let contentText = '';
-    let currentSize = 0;
-    // Maximum size in bytes
-    const MAX_SIZE = 50000;
-    const encoder = new TextEncoder();
-    contentElements.forEach(element => {
-      let elementText = '';
-      if (element.tagName === 'TABLE') {
-        element.querySelectorAll('tr').forEach(tr => {
-          tr.querySelectorAll('td, th').forEach(cell => {
-            elementText += cell.text + ' ';
-          });
-        });
-      } else {
-        elementText = decode(element.rawText);
-      }
-      const elementSize = encoder.encode(elementText).length;
-      if (currentSize + elementSize > MAX_SIZE) {
-        return;
-      } else {
+    let text = '';
+
+    if (!isPropertiesPage) {
+      // For normal pages, index full text content
+      const contentElements = article.querySelectorAll('p, table, li');
+      let contentText = '';
+      let currentSize = 0;
+      // Maximum size in bytes (Algolia's limit is 100KB, using 50KB for safety)
+      const MAX_SIZE = 50000;
+      
+      for (const element of contentElements) {
+        let elementText = '';
+        if (element.tagName === 'TABLE') {
+          for (const tr of element.querySelectorAll('tr')) {
+            for (const cell of tr.querySelectorAll('td, th')) {
+              elementText += cell.textContent + ' ';
+            }
+          }
+        } else {
+          elementText = element.textContent;
+        }
+        
+        const elementSize = textEncoder.encode(elementText).length;
+        if (currentSize + elementSize > MAX_SIZE) {
+          break;
+        }
+        
         contentText += elementText;
         currentSize += elementSize;
       }
-    });
-
-    var text = contentText.replace(/\n/g, ' ')
-      .replace(/\r/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+      
+      text = contentText.replace(/\n/g, ' ')
+        .replace(/\r/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    } else {
+      // For long pages, only use intro as text (property names are already in titles array)
+      text = intro;
+      logger.info(`Skipping full text indexing for long page: ${page.pub.url} (${titles.length} properties)`);
+    }
 
     let tag;
     const title = (component.title || '').trim();

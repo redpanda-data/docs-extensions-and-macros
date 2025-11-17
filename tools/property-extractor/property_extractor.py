@@ -748,6 +748,10 @@ def transform_files_with_properties(files_with_properties):
                 if transformer.accepts(properties[name], fp):
                     transformer.parse(property_definition, properties[name], fp)
 
+            # Skip experimental properties
+            if property_definition.get('is_experimental_property'):
+                continue
+
             if len(property_definition) > 0:
                 all_properties[name] = property_definition
 
@@ -787,7 +791,11 @@ def apply_transformers_to_topic_properties(topic_properties):
         for transformer in transformers:
             if transformer.accepts(property_definition, mock_fp):
                 transformer.parse(property_definition, property_definition, mock_fp)
-        
+
+        # Skip experimental properties
+        if property_definition.get('is_experimental_property'):
+            continue
+
         transformed_properties[prop_name] = property_definition
     
     logging.info(f"Applied transformers to {len(transformed_properties)} topic properties")
@@ -2540,22 +2548,28 @@ def resolve_type_and_default(properties, definitions):
     return properties
 
 
-def extract_topic_properties(source_path):
+def extract_topic_properties(source_path, cluster_properties=None):
     """
     Extract topic properties and convert them to the standard properties format.
-    
+
     Args:
         source_path: Path to the Redpanda source code
-        
+        cluster_properties: Optional dictionary of cluster properties for default value lookup
+
     Returns:
         Dictionary of topic properties in the standard format with config_scope: "topic"
     """
     if TopicPropertyExtractor is None:
         logging.warning("TopicPropertyExtractor not available, skipping topic property extraction")
         return {}
-    
+
     try:
-        extractor = TopicPropertyExtractor(source_path)
+        # Format cluster properties for TopicPropertyExtractor
+        cluster_props_for_extractor = None
+        if cluster_properties:
+            cluster_props_for_extractor = {"properties": cluster_properties}
+
+        extractor = TopicPropertyExtractor(source_path, cluster_props_for_extractor)
         topic_data = extractor.extract_topic_properties()
         topic_properties = topic_data.get("topic_properties", {})
         
@@ -2616,11 +2630,20 @@ def extract_topic_properties(source_path):
                 "config_scope": "topic",
                 "defined_in": prop_data.get("defined_in", ""),
                 "corresponding_cluster_property": prop_data.get("corresponding_cluster_property", ""),
+                "cluster_property_doc_file": prop_data.get("cluster_property_doc_file", ""),
+                "alternate_cluster_property": prop_data.get("alternate_cluster_property", ""),
+                "alternate_cluster_property_doc_file": prop_data.get("alternate_cluster_property_doc_file", ""),
                 "acceptable_values": prop_data.get("acceptable_values", ""),
                 "is_deprecated": False,
                 "is_topic_property": True,
                 "category": infer_category(prop_name)
             }
+
+            # Add default values if they exist (inherited from cluster properties)
+            if "default" in prop_data:
+                converted_properties[prop_name]["default"] = prop_data["default"]
+            if "default_human_readable" in prop_data:
+                converted_properties[prop_name]["default_human_readable"] = prop_data["default_human_readable"]
             
         logging.info(f"Extracted {len(converted_properties)} topic properties (excluding {len([p for p in topic_properties.values() if p.get('is_noop', False)])} no-op properties)")
         return converted_properties
@@ -2809,18 +2832,25 @@ def main():
     properties = transform_files_with_properties(files_with_properties)
 
     # Extract topic properties and add them to the main properties dictionary
-    topic_properties = extract_topic_properties(options.path)
+    # Pass cluster properties so topic properties can inherit default values
+    topic_properties = extract_topic_properties(options.path, properties)
     if topic_properties:
         # Apply transformers to topic properties to ensure they get the same metadata as cluster properties
         topic_properties = apply_transformers_to_topic_properties(topic_properties)
         properties.update(topic_properties)
         logging.info(f"Added {len(topic_properties)} topic properties to the main properties collection")
 
-        # Fix up corresponding_cluster_property mappings
+        # Validate and fix up corresponding_cluster_property mappings
         # Some cluster properties have a "_default" suffix that the extractor doesn't catch
         fixup_count = 0
+        invalid_mappings = []
+
         for prop_name, prop_data in properties.items():
-            if prop_data.get('is_topic_property') and prop_data.get('corresponding_cluster_property'):
+            if not prop_data.get('is_topic_property'):
+                continue
+
+            # Validate primary cluster property mapping
+            if prop_data.get('corresponding_cluster_property'):
                 cluster_prop = prop_data['corresponding_cluster_property']
                 # Check if the mapped cluster property exists
                 if cluster_prop not in properties:
@@ -2828,10 +2858,63 @@ def main():
                     default_variant = f'{cluster_prop}_default'
                     if default_variant in properties:
                         prop_data['corresponding_cluster_property'] = default_variant
+                        # Update doc file for the new property name
+                        if prop_data.get('cluster_property_doc_file'):
+                            # Re-determine doc file for the _default variant
+                            if ('cloud_storage' in default_variant or 'remote_' in default_variant or
+                                's3_' in default_variant or 'azure_' in default_variant or
+                                'gcs_' in default_variant or 'archival_' in default_variant or
+                                'tiered_' in default_variant):
+                                prop_data['cluster_property_doc_file'] = 'object-storage-properties.adoc'
+                            else:
+                                prop_data['cluster_property_doc_file'] = 'cluster-properties.adoc'
                         fixup_count += 1
+                    else:
+                        invalid_mappings.append({
+                            'topic_property': prop_name,
+                            'cluster_property': cluster_prop,
+                            'type': 'primary'
+                        })
+
+            # Validate alternate cluster property mapping (for conditional mappings)
+            if prop_data.get('alternate_cluster_property'):
+                alternate_prop = prop_data['alternate_cluster_property']
+                if alternate_prop not in properties:
+                    # Try the _default variant
+                    default_variant = f'{alternate_prop}_default'
+                    if default_variant in properties:
+                        prop_data['alternate_cluster_property'] = default_variant
+                        # Update doc file for the new property name
+                        if prop_data.get('alternate_cluster_property_doc_file'):
+                            if ('cloud_storage' in default_variant or 'remote_' in default_variant or
+                                's3_' in default_variant or 'azure_' in default_variant or
+                                'gcs_' in default_variant or 'archival_' in default_variant or
+                                'tiered_' in default_variant):
+                                prop_data['alternate_cluster_property_doc_file'] = 'object-storage-properties.adoc'
+                            else:
+                                prop_data['alternate_cluster_property_doc_file'] = 'cluster-properties.adoc'
+                        fixup_count += 1
+                    else:
+                        invalid_mappings.append({
+                            'topic_property': prop_name,
+                            'cluster_property': alternate_prop,
+                            'type': 'alternate'
+                        })
 
         if fixup_count > 0:
-            logging.info(f"Fixed {fixup_count} cluster property mappings by adding '_default' suffix")
+            print(f"✅ Fixed {fixup_count} cluster property mappings by adding '_default' suffix", file=sys.stderr, flush=True)
+
+        # Report invalid mappings
+        if invalid_mappings:
+            print(f"\n⚠️  Found {len(invalid_mappings)} topic properties with invalid cluster property mappings:", file=sys.stderr, flush=True)
+            for mapping in invalid_mappings:
+                print(f"  • {mapping['topic_property']} -> {mapping['cluster_property']} ({mapping['type']}) [CLUSTER PROPERTY NOT FOUND]", file=sys.stderr, flush=True)
+            print("These mappings reference cluster properties that do not exist in the extracted properties.", file=sys.stderr, flush=True)
+            print("This could indicate:", file=sys.stderr, flush=True)
+            print("  1. The cluster property name changed in the source code", file=sys.stderr, flush=True)
+            print("  2. The cluster property is not being extracted properly", file=sys.stderr, flush=True)
+            print("  3. The mapping logic in config_response_utils.cc uses a computed value, not a real cluster property", file=sys.stderr, flush=True)
+            print("", file=sys.stderr, flush=True)
 
     # First, create the original properties without overrides for the base JSON output
     # 1. Add config_scope field based on which source file defines the property
