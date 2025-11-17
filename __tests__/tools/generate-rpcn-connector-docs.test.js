@@ -439,7 +439,7 @@ describe('Utility Helpers', () => {
       expect(result).toContain("*Default*: `foo`");
     });
 
-    it('renders examples for array of strings using YAML flow style', () => {
+    it('renders examples for array of strings using YAML block style', () => {
       const exampleField = [
         {
           name: 'notes',
@@ -454,12 +454,12 @@ describe('Utility Helpers', () => {
       ];
       const result = renderConnectFields(exampleField).toString();
 
-      // 1) Check that "notes:" appears in flow style (with brackets)
+      // 1) Check that "notes:" appears in block style (with dashes)
       // Strings with whitespace should be quoted
-      expect(result).toMatch(/notes: \["single line note", "another single note"\]/);
+      expect(result).toMatch(/notes:\s+- "single line note"\s+- "another single note"/);
 
-      // 2) Check that multi-line strings are rendered in flow style and quoted
-      expect(result).toMatch(/notes: \["multi[\s\S]*line[\s\S]*note"\]/);
+      // 2) Check that multi-line strings are rendered in block style and quoted
+      expect(result).toMatch(/notes:\s+- "multi[\s\S]*line[\s\S]*note"/);
     });
 
     it('renders a list of example configs in renderConnectExamples', () => {
