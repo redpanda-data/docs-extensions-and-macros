@@ -2548,22 +2548,28 @@ def resolve_type_and_default(properties, definitions):
     return properties
 
 
-def extract_topic_properties(source_path):
+def extract_topic_properties(source_path, cluster_properties=None):
     """
     Extract topic properties and convert them to the standard properties format.
-    
+
     Args:
         source_path: Path to the Redpanda source code
-        
+        cluster_properties: Optional dictionary of cluster properties for default value lookup
+
     Returns:
         Dictionary of topic properties in the standard format with config_scope: "topic"
     """
     if TopicPropertyExtractor is None:
         logging.warning("TopicPropertyExtractor not available, skipping topic property extraction")
         return {}
-    
+
     try:
-        extractor = TopicPropertyExtractor(source_path)
+        # Format cluster properties for TopicPropertyExtractor
+        cluster_props_for_extractor = None
+        if cluster_properties:
+            cluster_props_for_extractor = {"properties": cluster_properties}
+
+        extractor = TopicPropertyExtractor(source_path, cluster_props_for_extractor)
         topic_data = extractor.extract_topic_properties()
         topic_properties = topic_data.get("topic_properties", {})
         
@@ -2632,6 +2638,12 @@ def extract_topic_properties(source_path):
                 "is_topic_property": True,
                 "category": infer_category(prop_name)
             }
+
+            # Add default values if they exist (inherited from cluster properties)
+            if "default" in prop_data:
+                converted_properties[prop_name]["default"] = prop_data["default"]
+            if "default_human_readable" in prop_data:
+                converted_properties[prop_name]["default_human_readable"] = prop_data["default_human_readable"]
             
         logging.info(f"Extracted {len(converted_properties)} topic properties (excluding {len([p for p in topic_properties.values() if p.get('is_noop', False)])} no-op properties)")
         return converted_properties
@@ -2820,7 +2832,8 @@ def main():
     properties = transform_files_with_properties(files_with_properties)
 
     # Extract topic properties and add them to the main properties dictionary
-    topic_properties = extract_topic_properties(options.path)
+    # Pass cluster properties so topic properties can inherit default values
+    topic_properties = extract_topic_properties(options.path, properties)
     if topic_properties:
         # Apply transformers to topic properties to ensure they get the same metadata as cluster properties
         topic_properties = apply_transformers_to_topic_properties(topic_properties)

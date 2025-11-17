@@ -7,6 +7,7 @@ describe('topic_property_extractor.py', () => {
   const mockSourcePath = path.resolve(__dirname, 'mock-redpanda-src');
   const outputJson = path.resolve(__dirname, 'topic-properties-output.json');
   const outputAdoc = path.resolve(__dirname, 'topic-properties.adoc');
+  const clusterPropsJson = path.resolve(__dirname, 'mock-cluster-properties.json');
 
   beforeAll(() => {
     // Create a minimal mock Redpanda source tree
@@ -60,6 +61,32 @@ add_topic_config_if_requested(
 );
 `
       );
+
+      // Create mock cluster properties JSON with default values
+      const mockClusterProps = {
+        properties: {
+          log_retention_ms: {
+            name: 'log_retention_ms',
+            type: 'integer',
+            default: 604800000,
+            default_human_readable: '7 days',
+            description: 'Retention time in milliseconds'
+          },
+          log_segment_size: {
+            name: 'log_segment_size',
+            type: 'integer',
+            default: 1073741824,
+            description: 'Segment size in bytes'
+          },
+          flush_messages: {
+            name: 'flush_messages',
+            type: 'integer',
+            default: 100000,
+            description: 'Number of messages before flush'
+          }
+        }
+      };
+      fs.writeFileSync(clusterPropsJson, JSON.stringify(mockClusterProps, null, 2));
     }
   });
 
@@ -67,11 +94,12 @@ add_topic_config_if_requested(
     // Cleanup
     if (fs.existsSync(outputJson)) fs.unlinkSync(outputJson);
     if (fs.existsSync(outputAdoc)) fs.unlinkSync(outputAdoc);
+    if (fs.existsSync(clusterPropsJson)) fs.unlinkSync(clusterPropsJson);
     fs.rmdirSync(mockSourcePath, { recursive: true });
   });
 
   it('extracts topic properties and generates JSON', () => {
-    execSync(`python3 ${scriptPath} --source-path ${mockSourcePath} --output-json ${outputJson}`);
+    execSync(`python3 ${scriptPath} --source-path ${mockSourcePath} --output-json ${outputJson} --cluster-properties-json ${clusterPropsJson}`);
     const result = JSON.parse(fs.readFileSync(outputJson, 'utf8'));
     expect(result.topic_properties).toBeDefined();
     expect(result.topic_properties['retention.ms']).toBeDefined();
@@ -79,7 +107,7 @@ add_topic_config_if_requested(
   });
 
   it('detects no-op properties correctly', () => {
-    execSync(`python3 ${scriptPath} --source-path ${mockSourcePath} --output-json ${outputJson}`);
+    execSync(`python3 ${scriptPath} --source-path ${mockSourcePath} --output-json ${outputJson} --cluster-properties-json ${clusterPropsJson}`);
     const result = JSON.parse(fs.readFileSync(outputJson, 'utf8'));
     
     // Check that noop_properties array is present
@@ -100,7 +128,7 @@ add_topic_config_if_requested(
   });
 
   it('excludes no-op properties from AsciiDoc generation', () => {
-    execSync(`python3 ${scriptPath} --source-path ${mockSourcePath} --output-adoc ${outputAdoc}`);
+    execSync(`python3 ${scriptPath} --source-path ${mockSourcePath} --output-adoc ${outputAdoc} --cluster-properties-json ${clusterPropsJson}`);
     const adoc = fs.readFileSync(outputAdoc, 'utf8');
 
     // Should contain regular properties in the documentation
@@ -119,7 +147,7 @@ add_topic_config_if_requested(
   });
 
   it('documents properties without cluster mappings', () => {
-    execSync(`python3 ${scriptPath} --source-path ${mockSourcePath} --output-adoc ${outputAdoc}`);
+    execSync(`python3 ${scriptPath} --source-path ${mockSourcePath} --output-adoc ${outputAdoc} --cluster-properties-json ${clusterPropsJson}`);
     const adoc = fs.readFileSync(outputAdoc, 'utf8');
 
     // Property without cluster mapping should appear in the main documentation
@@ -141,5 +169,30 @@ add_topic_config_if_requested(
     const noMappingSection = adoc.match(/===\s+redpanda\.no\.mapping[\s\S]*?---/);
     expect(noMappingSection).toBeTruthy();
     expect(noMappingSection[0]).not.toContain('Related cluster property');
+  });
+
+  it('populates default values from cluster properties', () => {
+    execSync(`python3 ${scriptPath} --source-path ${mockSourcePath} --output-json ${outputJson} --cluster-properties-json ${clusterPropsJson}`);
+    const result = JSON.parse(fs.readFileSync(outputJson, 'utf8'));
+
+    // Check that default values are populated from cluster properties
+    expect(result.topic_properties['retention.ms'].default).toBe(604800000);
+    expect(result.topic_properties['retention.ms'].default_human_readable).toBe('7 days');
+    expect(result.topic_properties['segment.bytes'].default).toBe(1073741824);
+
+    // Property without cluster mapping should not have a default
+    expect(result.topic_properties['redpanda.no.mapping'].default).toBeNull();
+  });
+
+  it('populates default values in JSON for use by Handlebars templates', () => {
+    // The Python script doesn't format defaults in AsciiDoc - that's handled by Handlebars
+    // But it should populate the default field in the JSON output
+    execSync(`python3 ${scriptPath} --source-path ${mockSourcePath} --output-json ${outputJson} --cluster-properties-json ${clusterPropsJson}`);
+    const result = JSON.parse(fs.readFileSync(outputJson, 'utf8'));
+
+    // Verify the JSON has raw default values that Handlebars will format
+    expect(result.topic_properties['retention.ms'].default).toBe(604800000);
+    expect(result.topic_properties['retention.ms'].default_human_readable).toBe('7 days');
+    expect(result.topic_properties['segment.bytes'].default).toBe(1073741824);
   });
 });

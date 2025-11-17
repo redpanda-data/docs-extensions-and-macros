@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 
 
 class TopicPropertyExtractor:
-    def __init__(self, source_path: str):
+    def __init__(self, source_path: str, cluster_properties: Optional[Dict] = None):
         self.source_path = Path(source_path)
         self.topic_properties = {}
         self.cluster_mappings = {}
@@ -17,6 +17,7 @@ class TopicPropertyExtractor:
         self.noop_properties = set()
         self.dynamic_correlations = {}  # Cache for dynamically discovered mappings
         self.alternate_mappings = {}  # topic_prop -> alternate_cluster_prop for conditional mappings
+        self.cluster_properties = cluster_properties or {}  # Cluster properties for default value lookup
         
     def extract_topic_properties(self) -> Dict:
         """Extract topic property constants from source files"""
@@ -115,6 +116,7 @@ class TopicPropertyExtractor:
                             "type": self._determine_property_type(property_name),
                             "acceptable_values": None,
                             "corresponding_cluster_property": None,
+                            "default": None,  # Will be populated from cluster property if available
                             "is_noop": False,  # Will be updated later in _correlate_properties_with_data
                             "is_topic_property": True,
                             "config_scope": "topic"
@@ -171,6 +173,7 @@ class TopicPropertyExtractor:
                             "type": self._determine_property_type(property_name),
                             "acceptable_values": None,
                             "corresponding_cluster_property": None,
+                            "default": None,  # Will be populated from cluster property if available
                             "is_noop": False,  # Will be updated later in _correlate_properties_with_data
                             "is_topic_property": True,
                             "config_scope": "topic"
@@ -674,6 +677,16 @@ class TopicPropertyExtractor:
                 prop_data["corresponding_cluster_property"] = cluster_prop
                 prop_data["cluster_property_doc_file"] = self._get_cluster_property_doc_file(cluster_prop)
 
+                # Populate default value from cluster property if available
+                if self.cluster_properties:
+                    cluster_props = self.cluster_properties.get("properties", {})
+                    if cluster_prop in cluster_props:
+                        cluster_prop_data = cluster_props[cluster_prop]
+                        prop_data["default"] = cluster_prop_data.get("default")
+                        # Also copy default_human_readable if available
+                        if "default_human_readable" in cluster_prop_data:
+                            prop_data["default_human_readable"] = cluster_prop_data["default_human_readable"]
+
             # Add alternate cluster property if this has conditional mapping
             if prop_name in self.alternate_mappings:
                 alternate_prop = self.alternate_mappings[prop_name]
@@ -682,7 +695,7 @@ class TopicPropertyExtractor:
 
             # Mark as no-op if found in the allowlist
             prop_data["is_noop"] = prop_name in self.noop_properties
-                
+
             # Update acceptable values based on property type
             prop_data["acceptable_values"] = self._determine_acceptable_values(prop_name, prop_data)
             
@@ -817,10 +830,21 @@ def main():
     parser.add_argument("--source-path", required=True, help="Path to Redpanda source code")
     parser.add_argument("--output-json", help="Output JSON file path")
     parser.add_argument("--output-adoc", help="Output AsciiDoc file path")
-    
+    parser.add_argument("--cluster-properties-json", help="Path to cluster properties JSON file for default value lookup")
+
     args = parser.parse_args()
-    
-    extractor = TopicPropertyExtractor(args.source_path)
+
+    # Load cluster properties if provided
+    cluster_properties = None
+    if args.cluster_properties_json:
+        try:
+            with open(args.cluster_properties_json, 'r', encoding='utf-8') as f:
+                cluster_properties = json.load(f)
+            print(f"Loaded cluster properties from: {args.cluster_properties_json}")
+        except Exception as e:
+            print(f"Warning: Failed to load cluster properties: {e}")
+
+    extractor = TopicPropertyExtractor(args.source_path, cluster_properties)
     result = extractor.extract_topic_properties()
     
     # Calculate properties that will be included in documentation (non-no-op with cluster mappings)
