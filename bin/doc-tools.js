@@ -1130,22 +1130,73 @@ automation
           endIdx = nextMatch ? startIdx + 1 + nextMatch.index : whatsNew.length;
         }
         // Compose new section
-        let section = `\n== Version ${diff.comparison.newVersion}\n\n=== Component updates\n\n`;
-        // Add link to full release notes for this connector version after version heading and before component updates
+        // Add link to full release notes for this connector version after version heading
         let releaseNotesLink = '';
         if (diff.comparison && diff.comparison.newVersion) {
           releaseNotesLink = `link:https://github.com/redpanda-data/connect/releases/tag/v${diff.comparison.newVersion}[See the full release notes^].\n\n`;
         }
-        section = `\n== Version ${diff.comparison.newVersion}\n\n${releaseNotesLink}=== Component updates\n\n`;
-        // New components
+        let section = `\n== Version ${diff.comparison.newVersion}\n\n${releaseNotesLink}`;
+
+        // Separate Bloblang components from regular components
+        const bloblangComponents = [];
+        const regularComponents = [];
+
         if (diff.details.newComponents && diff.details.newComponents.length) {
-          section += 'This release adds the following new components:\n\n';
-          // Group by type
-          const byType = {};
           for (const comp of diff.details.newComponents) {
+            if (comp.type === 'bloblang-functions' || comp.type === 'bloblang-methods') {
+              bloblangComponents.push(comp);
+            } else {
+              regularComponents.push(comp);
+            }
+          }
+        }
+
+        // Bloblang updates section
+        if (bloblangComponents.length > 0) {
+          section += '=== Bloblang updates\n\n';
+          section += 'This release adds the following new Bloblang capabilities:\n\n';
+
+          // Group by type (functions vs methods)
+          const byType = {};
+          for (const comp of bloblangComponents) {
             if (!byType[comp.type]) byType[comp.type] = [];
             byType[comp.type].push(comp);
           }
+
+          for (const [type, comps] of Object.entries(byType)) {
+            if (type === 'bloblang-functions') {
+              section += '* Functions:\n';
+              for (const comp of comps) {
+                section += `** xref:guides:bloblang/functions.adoc#${comp.name}[\`${comp.name}\`]`;
+                if (comp.status && comp.status !== 'stable') section += ` (${comp.status})`;
+                if (comp.description) section += `: ${capToTwoSentences(comp.description)}`;
+                section += '\n';
+              }
+            } else if (type === 'bloblang-methods') {
+              section += '* Methods:\n';
+              for (const comp of comps) {
+                section += `** xref:guides:bloblang/methods.adoc#${comp.name}[\`${comp.name}\`]`;
+                if (comp.status && comp.status !== 'stable') section += ` (${comp.status})`;
+                if (comp.description) section += `: ${capToTwoSentences(comp.description)}`;
+                section += '\n';
+              }
+            }
+          }
+          section += '\n';
+        }
+
+        // Regular component updates section
+        if (regularComponents.length > 0) {
+          section += '=== Component updates\n\n';
+          section += 'This release adds the following new components:\n\n';
+
+          // Group by type
+          const byType = {};
+          for (const comp of regularComponents) {
+            if (!byType[comp.type]) byType[comp.type] = [];
+            byType[comp.type].push(comp);
+          }
+
           for (const [type, comps] of Object.entries(byType)) {
             section += `* ${type.charAt(0).toUpperCase() + type.slice(1)}:\n`;
             for (const comp of comps) {
@@ -1157,36 +1208,44 @@ automation
           }
         }
 
-        // New fields
+        // New fields (exclude Bloblang functions/methods)
         if (diff.details.newFields && diff.details.newFields.length) {
-          section += '\nThis release adds support for the following new fields:\n\n';
-          // Group new fields by component type
-          const fieldsByType = {};
-          for (const field of diff.details.newFields) {
-            // component: "inputs:kafka", field: "timely_nacks_maximum_wait"
-            const [type, compName] = field.component.split(':');
-            if (!fieldsByType[type]) fieldsByType[type] = [];
-            fieldsByType[type].push({
-              compName,
-              field: field.field,
-              description: field.description || '',
-            });
-          }
-          for (const [type, fields] of Object.entries(fieldsByType)) {
-            section += `* ${type.charAt(0).toUpperCase() + type.slice(1)}:\n`;
-            // Group by component name
-            const byComp = {};
-            for (const f of fields) {
-              if (!byComp[f.compName]) byComp[f.compName] = [];
-              byComp[f.compName].push(f);
+          // Filter out Bloblang components
+          const regularFields = diff.details.newFields.filter(field => {
+            const [type] = field.component.split(':');
+            return type !== 'bloblang-functions' && type !== 'bloblang-methods';
+          });
+
+          if (regularFields.length > 0) {
+            section += '\nThis release adds support for the following new fields:\n\n';
+            // Group new fields by component type
+            const fieldsByType = {};
+            for (const field of regularFields) {
+              // component: "inputs:kafka", field: "timely_nacks_maximum_wait"
+              const [type, compName] = field.component.split(':');
+              if (!fieldsByType[type]) fieldsByType[type] = [];
+              fieldsByType[type].push({
+                compName,
+                field: field.field,
+                description: field.description || '',
+              });
             }
-            for (const [comp, compFields] of Object.entries(byComp)) {
-              section += `** xref:components:${type}/${comp}.adoc[\`${comp}\`]:`;
-              section += '\n';
-              for (const f of compFields) {
-                section += `*** xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]`;
-                if (f.description) section += `: ${capToTwoSentences(f.description)}`;
+            for (const [type, fields] of Object.entries(fieldsByType)) {
+              section += `* ${type.charAt(0).toUpperCase() + type.slice(1)}:\n`;
+              // Group by component name
+              const byComp = {};
+              for (const f of fields) {
+                if (!byComp[f.compName]) byComp[f.compName] = [];
+                byComp[f.compName].push(f);
+              }
+              for (const [comp, compFields] of Object.entries(byComp)) {
+                section += `** xref:components:${type}/${comp}.adoc[\`${comp}\`]:`;
                 section += '\n';
+                for (const f of compFields) {
+                  section += `*** xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]`;
+                  if (f.description) section += `: ${capToTwoSentences(f.description)}`;
+                  section += '\n';
+                }
               }
             }
           }
@@ -1203,49 +1262,148 @@ automation
             byType[comp.type].push(comp);
           }
           for (const [type, comps] of Object.entries(byType)) {
-            section += `* ${type.charAt(0).toUpperCase() + type.slice(1)}:\n`;
-            for (const comp of comps) {
-              section += `** xref:components:${type}/${comp.name}.adoc[\`${comp.name}\`]\n`;
+            if (type === 'bloblang-functions') {
+              section += '* Bloblang functions:\n';
+              for (const comp of comps) {
+                section += `** xref:guides:bloblang/functions.adoc#${comp.name}[\`${comp.name}\`]\n`;
+              }
+            } else if (type === 'bloblang-methods') {
+              section += '* Bloblang methods:\n';
+              for (const comp of comps) {
+                section += `** xref:guides:bloblang/methods.adoc#${comp.name}[\`${comp.name}\`]\n`;
+              }
+            } else {
+              section += `* ${type.charAt(0).toUpperCase() + type.slice(1)}:\n`;
+              for (const comp of comps) {
+                section += `** xref:components:${type}/${comp.name}.adoc[\`${comp.name}\`]\n`;
+              }
             }
           }
         }
 
-        // Deprecated fields
+        // Deprecated fields (exclude Bloblang functions/methods)
         if (diff.details.deprecatedFields && diff.details.deprecatedFields.length) {
-          if (!diff.details.deprecatedComponents || diff.details.deprecatedComponents.length === 0) {
-            section += '\n=== Deprecations\n\n';
-          }
-          section += '\nThe following fields are now deprecated:\n\n';
-          // Group deprecated fields by component type
-          const fieldsByType = {};
-          for (const field of diff.details.deprecatedFields) {
-            const [type, compName] = field.component.split(':');
-            if (!fieldsByType[type]) fieldsByType[type] = [];
-            fieldsByType[type].push({
-              compName,
-              field: field.field
-            });
-          }
-          for (const [type, fields] of Object.entries(fieldsByType)) {
-            section += `* ${type.charAt(0).toUpperCase() + type.slice(1)} components\n`;
-            // Group by component name
-            const byComp = {};
-            for (const f of fields) {
-              if (!byComp[f.compName]) byComp[f.compName] = [];
-              byComp[f.compName].push(f);
+          // Filter out Bloblang components
+          const regularDeprecatedFields = diff.details.deprecatedFields.filter(field => {
+            const [type] = field.component.split(':');
+            return type !== 'bloblang-functions' && type !== 'bloblang-methods';
+          });
+
+          if (regularDeprecatedFields.length > 0) {
+            if (!diff.details.deprecatedComponents || diff.details.deprecatedComponents.length === 0) {
+              section += '\n=== Deprecations\n\n';
             }
-            for (const [comp, compFields] of Object.entries(byComp)) {
-              section += `** xref:components:${type}/${comp}.adoc[\`${comp}\`]`;
-              if (compFields.length === 1) {
-                const f = compFields[0];
-                section += `: xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]\n`;
-              } else {
-                section += '\n';
-                for (const f of compFields) {
-                  section += `*** xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]\n`;
+            section += '\nThe following fields are now deprecated:\n\n';
+            // Group deprecated fields by component type
+            const fieldsByType = {};
+            for (const field of regularDeprecatedFields) {
+              const [type, compName] = field.component.split(':');
+              if (!fieldsByType[type]) fieldsByType[type] = [];
+              fieldsByType[type].push({
+                compName,
+                field: field.field
+              });
+            }
+            for (const [type, fields] of Object.entries(fieldsByType)) {
+              section += `* ${type.charAt(0).toUpperCase() + type.slice(1)} components\n`;
+              // Group by component name
+              const byComp = {};
+              for (const f of fields) {
+                if (!byComp[f.compName]) byComp[f.compName] = [];
+                byComp[f.compName].push(f);
+              }
+              for (const [comp, compFields] of Object.entries(byComp)) {
+                section += `** xref:components:${type}/${comp}.adoc[\`${comp}\`]`;
+                if (compFields.length === 1) {
+                  const f = compFields[0];
+                  section += `: xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]\n`;
+                } else {
+                  section += '\n';
+                  for (const f of compFields) {
+                    section += `*** xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]\n`;
+                  }
                 }
               }
             }
+          }
+        }
+
+        // Changed defaults (exclude Bloblang functions/methods)
+        if (diff.details.changedDefaults && diff.details.changedDefaults.length) {
+          // Filter out Bloblang components
+          const regularChangedDefaults = diff.details.changedDefaults.filter(change => {
+            const [type] = change.component.split(':');
+            return type !== 'bloblang-functions' && type !== 'bloblang-methods';
+          });
+
+          if (regularChangedDefaults.length > 0) {
+            section += '\n=== Default value changes\n\n';
+            section += 'This release includes the following default value changes:\n\n';
+
+            // Group by field name to combine same field across multiple components
+            const byFieldName = {};
+            for (const change of regularChangedDefaults) {
+              const [type, compName] = change.component.split(':');
+              if (!byFieldName[change.field]) {
+                byFieldName[change.field] = {
+                  field: change.field,
+                  oldDefault: change.oldDefault,
+                  newDefault: change.newDefault,
+                  description: change.description,
+                  components: []
+                };
+              }
+              byFieldName[change.field].components.push({
+                type,
+                name: compName
+              });
+            }
+
+          for (const [fieldName, info] of Object.entries(byFieldName)) {
+            // Format component references
+            let componentRefs = '';
+            if (info.components.length === 1) {
+              const c = info.components[0];
+              componentRefs = `xref:components:${c.type}/${c.name}.adoc[\`${c.name}\`]`;
+            } else {
+              // Group by type for readability
+              const byType = {};
+              for (const comp of info.components) {
+                if (!byType[comp.type]) byType[comp.type] = [];
+                byType[comp.type].push(comp.name);
+              }
+              const parts = [];
+              for (const [type, names] of Object.entries(byType)) {
+                if (names.length === 1) {
+                  parts.push(`${type} xref:components:${type}/${names[0]}.adoc[\`${names[0]}\`]`);
+                } else {
+                  const nameLinks = names.map(n => `xref:components:${type}/${n}.adoc[\`${n}\`]`).join(', ');
+                  parts.push(`${type}s ${nameLinks}`);
+                }
+              }
+              componentRefs = parts.join(' and ');
+            }
+
+            // Format old and new defaults
+            const formatDefault = (val) => {
+              if (val === undefined || val === null) return 'none';
+              if (typeof val === 'string') return `\`${val}\``;
+              if (typeof val === 'number' || typeof val === 'boolean') return `\`${val}\``;
+              return `\`${JSON.stringify(val)}\``;
+            };
+
+            const oldVal = formatDefault(info.oldDefault);
+            const newVal = formatDefault(info.newDefault);
+
+            section += `* *xref:components:${info.components[0].type}/${info.components[0].name}.adoc#${fieldName}[\`${fieldName}\`]* (${componentRefs}): The default changed from ${oldVal} to ${newVal}.`;
+
+            if (info.description) {
+              section += ` ${capToTwoSentences(info.description)}`;
+            }
+
+            section += '\n';
+          }
+          section += '\n';
           }
         }
 

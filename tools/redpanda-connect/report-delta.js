@@ -101,6 +101,9 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
 
   // Newly deprecated fields (exist in both versions but became deprecated)
   const deprecatedFields = [];
+  // Changed default values
+  const changedDefaults = [];
+
   Object.keys(newMap).forEach(cKey => {
     if (!(cKey in oldMap)) return;
     const oldFieldsArr = oldMap[cKey].fields || [];
@@ -137,6 +140,26 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
           description: newFieldObj && newFieldObj.description
         });
       }
+
+      // Check for changed default values
+      if (oldFieldObj && newFieldObj) {
+        const oldDefault = oldFieldObj.default;
+        const newDefault = newFieldObj.default;
+
+        // Compare defaults using JSON stringification to handle objects/arrays
+        const oldDefaultStr = JSON.stringify(oldDefault);
+        const newDefaultStr = JSON.stringify(newDefault);
+
+        if (oldDefaultStr !== newDefaultStr) {
+          changedDefaults.push({
+            component: cKey,
+            field: fName,
+            oldDefault: oldDefault,
+            newDefault: newDefault,
+            description: newFieldObj && newFieldObj.description
+          });
+        }
+      }
     });
   });
 
@@ -152,7 +175,8 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       newFields: newFields.length,
       removedFields: removedFields.length,
       deprecatedComponents: deprecatedComponents.length,
-      deprecatedFields: deprecatedFields.length
+      deprecatedFields: deprecatedFields.length,
+      changedDefaults: changedDefaults.length
     },
     details: {
       newComponents,
@@ -160,7 +184,8 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       newFields,
       removedFields,
       deprecatedComponents,
-      deprecatedFields
+      deprecatedFields,
+      changedDefaults
     }
   };
 }
@@ -281,6 +306,9 @@ function printDeltaReport(oldIndex, newIndex) {
 
   // Newly deprecated fields
   const deprecatedFieldsList = [];
+  // Changed default values
+  const changedDefaultsList = [];
+
   Object.keys(newMap).forEach(cKey => {
     if (!(cKey in oldMap)) return;
     const oldFieldsArr = oldMap[cKey].fields || [];
@@ -305,6 +333,25 @@ function printDeltaReport(oldIndex, newIndex) {
       const newDeprecated = newFieldObj && (newFieldObj.is_deprecated === true || newFieldObj.deprecated === true || (newFieldObj.status || '').toLowerCase() === 'deprecated');
       if (!oldDeprecated && newDeprecated) {
         deprecatedFieldsList.push({ component: cKey, field: fName });
+      }
+
+      // Check for changed default values
+      if (oldFieldObj && newFieldObj) {
+        const oldDefault = oldFieldObj.default;
+        const newDefault = newFieldObj.default;
+
+        // Compare defaults using JSON stringification to handle objects/arrays
+        const oldDefaultStr = JSON.stringify(oldDefault);
+        const newDefaultStr = JSON.stringify(newDefault);
+
+        if (oldDefaultStr !== newDefaultStr) {
+          changedDefaultsList.push({
+            component: cKey,
+            field: fName,
+            oldDefault: oldDefault,
+            newDefault: newDefault
+          });
+        }
       }
     });
   });
@@ -364,6 +411,21 @@ function printDeltaReport(oldIndex, newIndex) {
     console.log('');
   } else {
     console.log('➤ No newly deprecated fields.\n');
+  }
+
+  if (changedDefaultsList.length) {
+    console.log('➤ Changed default values:');
+    changedDefaultsList.forEach(entry => {
+      const { component, field, oldDefault, newDefault } = entry;
+      const oldStr = JSON.stringify(oldDefault);
+      const newStr = JSON.stringify(newDefault);
+      console.log(`   • ${component} → ${field}`);
+      console.log(`     Old: ${oldStr}`);
+      console.log(`     New: ${newStr}`);
+    });
+    console.log('');
+  } else {
+    console.log('➤ No changed default values.\n');
   }
 }
 
