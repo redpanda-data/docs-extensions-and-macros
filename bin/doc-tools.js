@@ -1190,22 +1190,22 @@ automation
           section += '=== Component updates\n\n';
           section += 'This release adds the following new components:\n\n';
 
-          // Group by type
-          const byType = {};
+          section += '[cols="1m,1,1,3"]\n';
+          section += '|===\n';
+          section += '|Component |Type |Status |Description\n\n';
+
           for (const comp of regularComponents) {
-            if (!byType[comp.type]) byType[comp.type] = [];
-            byType[comp.type].push(comp);
+            const typeLabel = comp.type.charAt(0).toUpperCase() + comp.type.slice(1);
+            const statusLabel = comp.status || '-';
+            const desc = comp.description ? capToTwoSentences(comp.description) : '-';
+
+            section += `|xref:components:${comp.type}/${comp.name}.adoc[${comp.name}]\n`;
+            section += `|${typeLabel}\n`;
+            section += `|${statusLabel}\n`;
+            section += `|${desc}\n\n`;
           }
 
-          for (const [type, comps] of Object.entries(byType)) {
-            section += `* ${type.charAt(0).toUpperCase() + type.slice(1)}:\n`;
-            for (const comp of comps) {
-              section += `** xref:components:${type}/${comp.name}.adoc[\`${comp.name}\`]`;
-              if (comp.status) section += ` (${comp.status})`;
-              if (comp.description) section += `: ${capToTwoSentences(comp.description)}`;
-              section += '\n';
-            }
-          }
+          section += '|===\n\n';
         }
 
         // New fields (exclude Bloblang functions/methods)
@@ -1217,37 +1217,57 @@ automation
           });
 
           if (regularFields.length > 0) {
-            section += '\nThis release adds support for the following new fields:\n\n';
-            // Group new fields by component type
-            const fieldsByType = {};
+            section += '\n=== New field support\n\n';
+            section += 'This release adds support for the following new fields:\n\n';
+
+            // Group by field name
+            const byField = {};
             for (const field of regularFields) {
-              // component: "inputs:kafka", field: "timely_nacks_maximum_wait"
               const [type, compName] = field.component.split(':');
-              if (!fieldsByType[type]) fieldsByType[type] = [];
-              fieldsByType[type].push({
-                compName,
-                field: field.field,
-                description: field.description || '',
-              });
-            }
-            for (const [type, fields] of Object.entries(fieldsByType)) {
-              section += `* ${type.charAt(0).toUpperCase() + type.slice(1)}:\n`;
-              // Group by component name
-              const byComp = {};
-              for (const f of fields) {
-                if (!byComp[f.compName]) byComp[f.compName] = [];
-                byComp[f.compName].push(f);
+              if (!byField[field.field]) {
+                byField[field.field] = {
+                  description: field.description,
+                  components: []
+                };
               }
-              for (const [comp, compFields] of Object.entries(byComp)) {
-                section += `** xref:components:${type}/${comp}.adoc[\`${comp}\`]:`;
-                section += '\n';
-                for (const f of compFields) {
-                  section += `*** xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]`;
-                  if (f.description) section += `: ${capToTwoSentences(f.description)}`;
-                  section += '\n';
-                }
-              }
+              byField[field.field].components.push({ type, name: compName });
             }
+
+            section += '[cols="1m,3,2a"]\n';
+            section += '|===\n';
+            section += '|Field |Description |Affected components\n\n';
+
+            for (const [fieldName, info] of Object.entries(byField)) {
+              // Format component list - group by type
+              const byType = {};
+              for (const comp of info.components) {
+                if (!byType[comp.type]) byType[comp.type] = [];
+                byType[comp.type].push(comp.name);
+              }
+
+              let componentList = '';
+              for (const [type, names] of Object.entries(byType)) {
+                if (componentList) componentList += '\n\n';
+
+                // Smart pluralization: don't add 's' if already plural
+                const typeLabel = names.length === 1
+                  ? type.charAt(0).toUpperCase() + type.slice(1)
+                  : type.charAt(0).toUpperCase() + type.slice(1) + (type.endsWith('s') ? '' : 's');
+
+                componentList += `*${typeLabel}:*\n\n`;
+                names.forEach(name => {
+                  componentList += `* xref:components:${type}/${name}.adoc#${fieldName}[${name}]\n`;
+                });
+              }
+
+              const desc = info.description ? capToTwoSentences(info.description) : '-';
+
+              section += `|${fieldName}\n`;
+              section += `|${desc}\n`;
+              section += `|${componentList}\n\n`;
+            }
+
+            section += '|===\n\n';
           }
         }
 
@@ -1255,30 +1275,27 @@ automation
         if (diff.details.deprecatedComponents && diff.details.deprecatedComponents.length) {
           section += '\n=== Deprecations\n\n';
           section += 'The following components are now deprecated:\n\n';
-          // Group by type
-          const byType = {};
+
+          section += '[cols="1m,1,3"]\n';
+          section += '|===\n';
+          section += '|Component |Type |Description\n\n';
+
           for (const comp of diff.details.deprecatedComponents) {
-            if (!byType[comp.type]) byType[comp.type] = [];
-            byType[comp.type].push(comp);
-          }
-          for (const [type, comps] of Object.entries(byType)) {
-            if (type === 'bloblang-functions') {
-              section += '* Bloblang functions:\n';
-              for (const comp of comps) {
-                section += `** xref:guides:bloblang/functions.adoc#${comp.name}[\`${comp.name}\`]\n`;
-              }
-            } else if (type === 'bloblang-methods') {
-              section += '* Bloblang methods:\n';
-              for (const comp of comps) {
-                section += `** xref:guides:bloblang/methods.adoc#${comp.name}[\`${comp.name}\`]\n`;
-              }
+            const typeLabel = comp.type.charAt(0).toUpperCase() + comp.type.slice(1);
+            const desc = comp.description ? capToTwoSentences(comp.description) : '-';
+
+            if (comp.type === 'bloblang-functions') {
+              section += `|xref:guides:bloblang/functions.adoc#${comp.name}[${comp.name}]\n`;
+            } else if (comp.type === 'bloblang-methods') {
+              section += `|xref:guides:bloblang/methods.adoc#${comp.name}[${comp.name}]\n`;
             } else {
-              section += `* ${type.charAt(0).toUpperCase() + type.slice(1)}:\n`;
-              for (const comp of comps) {
-                section += `** xref:components:${type}/${comp.name}.adoc[\`${comp.name}\`]\n`;
-              }
+              section += `|xref:components:${comp.type}/${comp.name}.adoc[${comp.name}]\n`;
             }
+            section += `|${typeLabel}\n`;
+            section += `|${desc}\n\n`;
           }
+
+          section += '|===\n\n';
         }
 
         // Deprecated fields (exclude Bloblang functions/methods)
@@ -1292,39 +1309,59 @@ automation
           if (regularDeprecatedFields.length > 0) {
             if (!diff.details.deprecatedComponents || diff.details.deprecatedComponents.length === 0) {
               section += '\n=== Deprecations\n\n';
+            } else {
+              section += '\n';
             }
-            section += '\nThe following fields are now deprecated:\n\n';
-            // Group deprecated fields by component type
-            const fieldsByType = {};
+            section += 'The following fields are now deprecated:\n\n';
+
+            // Group by field name
+            const byField = {};
             for (const field of regularDeprecatedFields) {
               const [type, compName] = field.component.split(':');
-              if (!fieldsByType[type]) fieldsByType[type] = [];
-              fieldsByType[type].push({
-                compName,
-                field: field.field
-              });
-            }
-            for (const [type, fields] of Object.entries(fieldsByType)) {
-              section += `* ${type.charAt(0).toUpperCase() + type.slice(1)} components\n`;
-              // Group by component name
-              const byComp = {};
-              for (const f of fields) {
-                if (!byComp[f.compName]) byComp[f.compName] = [];
-                byComp[f.compName].push(f);
+              if (!byField[field.field]) {
+                byField[field.field] = {
+                  description: field.description,
+                  components: []
+                };
               }
-              for (const [comp, compFields] of Object.entries(byComp)) {
-                section += `** xref:components:${type}/${comp}.adoc[\`${comp}\`]`;
-                if (compFields.length === 1) {
-                  const f = compFields[0];
-                  section += `: xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]\n`;
-                } else {
-                  section += '\n';
-                  for (const f of compFields) {
-                    section += `*** xref:components:${type}/${comp}.adoc#${f.field}[\`${f.field}\`]\n`;
-                  }
-                }
-              }
+              byField[field.field].components.push({ type, name: compName });
             }
+
+            section += '[cols="1m,3,2a"]\n';
+            section += '|===\n';
+            section += '|Field |Description |Affected components\n\n';
+
+            for (const [fieldName, info] of Object.entries(byField)) {
+              // Format component list - group by type
+              const byType = {};
+              for (const comp of info.components) {
+                if (!byType[comp.type]) byType[comp.type] = [];
+                byType[comp.type].push(comp.name);
+              }
+
+              let componentList = '';
+              for (const [type, names] of Object.entries(byType)) {
+                if (componentList) componentList += '\n\n';
+
+                // Smart pluralization: don't add 's' if already plural
+                const typeLabel = names.length === 1
+                  ? type.charAt(0).toUpperCase() + type.slice(1)
+                  : type.charAt(0).toUpperCase() + type.slice(1) + (type.endsWith('s') ? '' : 's');
+
+                componentList += `*${typeLabel}:*\n\n`;
+                names.forEach(name => {
+                  componentList += `* xref:components:${type}/${name}.adoc#${fieldName}[${name}]\n`;
+                });
+              }
+
+              const desc = info.description ? capToTwoSentences(info.description) : '-';
+
+              section += `|${fieldName}\n`;
+              section += `|${desc}\n`;
+              section += `|${componentList}\n\n`;
+            }
+
+            section += '|===\n\n';
           }
         }
 
@@ -1340,12 +1377,13 @@ automation
             section += '\n=== Default value changes\n\n';
             section += 'This release includes the following default value changes:\n\n';
 
-            // Group by field name to combine same field across multiple components
-            const byFieldName = {};
+            // Group by field name and default values to avoid overwriting different default changes
+            const byFieldAndDefaults = {};
             for (const change of regularChangedDefaults) {
               const [type, compName] = change.component.split(':');
-              if (!byFieldName[change.field]) {
-                byFieldName[change.field] = {
+              const compositeKey = `${change.field}|${String(change.oldDefault)}|${String(change.newDefault)}`;
+              if (!byFieldAndDefaults[compositeKey]) {
+                byFieldAndDefaults[compositeKey] = {
                   field: change.field,
                   oldDefault: change.oldDefault,
                   newDefault: change.newDefault,
@@ -1353,57 +1391,64 @@ automation
                   components: []
                 };
               }
-              byFieldName[change.field].components.push({
+              byFieldAndDefaults[compositeKey].components.push({
                 type,
                 name: compName
               });
             }
 
-          for (const [fieldName, info] of Object.entries(byFieldName)) {
-            // Format component references
-            let componentRefs = '';
-            if (info.components.length === 1) {
-              const c = info.components[0];
-              componentRefs = `xref:components:${c.type}/${c.name}.adoc[\`${c.name}\`]`;
-            } else {
-              // Group by type for readability
+            // Create table
+            section += '[cols="1m,1,1,3,2a"]\n';
+            section += '|===\n';
+            section += '|Field |Old default |New default |Description |Affected components\n\n';
+
+            for (const [compositeKey, info] of Object.entries(byFieldAndDefaults)) {
+              // Format old and new defaults
+              const formatDefault = (val) => {
+                if (val === undefined || val === null) return 'none';
+                if (typeof val === 'string') return val;
+                if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+                return JSON.stringify(val);
+              };
+
+              const oldVal = formatDefault(info.oldDefault);
+              const newVal = formatDefault(info.newDefault);
+
+              // Get description
+              const desc = info.description ? capToTwoSentences(info.description) : '-';
+
+              // Format component references - group by type
               const byType = {};
               for (const comp of info.components) {
                 if (!byType[comp.type]) byType[comp.type] = [];
                 byType[comp.type].push(comp.name);
               }
-              const parts = [];
+
+              let componentList = '';
               for (const [type, names] of Object.entries(byType)) {
-                if (names.length === 1) {
-                  parts.push(`${type} xref:components:${type}/${names[0]}.adoc[\`${names[0]}\`]`);
-                } else {
-                  const nameLinks = names.map(n => `xref:components:${type}/${n}.adoc[\`${n}\`]`).join(', ');
-                  parts.push(`${type}s ${nameLinks}`);
-                }
+                if (componentList) componentList += '\n\n';
+
+                // Smart pluralization: don't add 's' if already plural
+                const typeLabel = names.length === 1
+                  ? type.charAt(0).toUpperCase() + type.slice(1)
+                  : type.charAt(0).toUpperCase() + type.slice(1) + (type.endsWith('s') ? '' : 's');
+
+                componentList += `*${typeLabel}:*\n\n`;
+
+                // List components, with links to the field anchor
+                names.forEach(name => {
+                  componentList += `* xref:components:${type}/${name}.adoc#${info.field}[${name}]\n`;
+                });
               }
-              componentRefs = parts.join(' and ');
+
+              section += `|${info.field}\n`;
+              section += `|${oldVal}\n`;
+              section += `|${newVal}\n`;
+              section += `|${desc}\n`;
+              section += `|${componentList}\n\n`;
             }
 
-            // Format old and new defaults
-            const formatDefault = (val) => {
-              if (val === undefined || val === null) return 'none';
-              if (typeof val === 'string') return `\`${val}\``;
-              if (typeof val === 'number' || typeof val === 'boolean') return `\`${val}\``;
-              return `\`${JSON.stringify(val)}\``;
-            };
-
-            const oldVal = formatDefault(info.oldDefault);
-            const newVal = formatDefault(info.newDefault);
-
-            section += `* *xref:components:${info.components[0].type}/${info.components[0].name}.adoc#${fieldName}[\`${fieldName}\`]* (${componentRefs}): The default changed from ${oldVal} to ${newVal}.`;
-
-            if (info.description) {
-              section += ` ${capToTwoSentences(info.description)}`;
-            }
-
-            section += '\n';
-          }
-          section += '\n';
+            section += '|===\n\n';
           }
         }
 

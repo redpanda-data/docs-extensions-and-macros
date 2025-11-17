@@ -143,7 +143,7 @@ module.exports = function renderConnectFields(children, prefix = '') {
     if (child.examples && child.examples.length) {
       block += `[source,yaml]\n----\n# Examples:\n`;
       if (child.kind === 'array') {
-        child.examples.forEach(example => {
+        child.examples.forEach((example, exampleIndex) => {
           if (Array.isArray(example)) {
             // Check if array contains any objects
             const hasObjects = example.some(item => typeof item === 'object' && item !== null);
@@ -199,9 +199,14 @@ module.exports = function renderConnectFields(children, prefix = '') {
             // Fallback for non-array examples (shouldn't happen for array fields)
             block += `${child.name}: ${example}\n`;
           }
+
+          // Add separator between examples, but not after the last one
+          if (exampleIndex < child.examples.length - 1) {
+            block += `\n# ---\n\n`;
+          }
         });
       } else {
-        child.examples.forEach(example => {
+        child.examples.forEach((example, exampleIndex) => {
           if (typeof example === 'object') {
             const snippet = yaml.stringify(example, {
               defaultStringType: 'PLAIN',
@@ -217,6 +222,11 @@ module.exports = function renderConnectFields(children, prefix = '') {
           } else {
             // Primitive values
             block += `${child.name}: ${example}\n`;
+          }
+
+          // Add separator between examples, but not after the last one
+          if (exampleIndex < child.examples.length - 1) {
+            block += `\n# ---\n\n`;
           }
         });
       }
