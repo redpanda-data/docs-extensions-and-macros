@@ -80,24 +80,45 @@ Redpanda configuration properties are C++ objects with constructor signatures th
 based on feature requirements. Understanding these "arities" (parameter counts) is crucial
 for correctly extracting property metadata.
 
+┌─────────────────────────────────────────────────────────────────────────────
+│ ALL properties have a runtime mutability flag as their FIRST parameter
+│ (after *this which is skipped by the parser). This boolean indicates whether
+│ the property can be changed at runtime without restarting Redpanda.
+│
+│ C++ signature: property<T>(*this, runtime_mutable, name, description, ...)
+│ After parsing:  params[0] = runtime_mutable, params[1] = name, ...
+│                 params[-1] = default OR validator (validator is skipped)
+│
+│ Note: Some properties include validators as the last parameter. These are
+│       automatically detected and skipped when extracting the default value.
+│       The default is the last NON-VALIDATOR parameter.
+└─────────────────────────────────────────────────────────────────────────────
+
 BASIC PROPERTY PATTERNS:
 ┌─────────────────────────────────────────────────────────────────────────────
-│ 2-PARAMETER: property<T>(name, description)
-│ Example: property<bool>(*this, "enable_feature", "Enable the feature")
+│ 3-PARAMETER: property<T>(runtime_mutable, name, description)
+│ Example: property<bool>(*this, true, "enable_feature", "Enable the feature")
 │ Used for: Simple properties with no metadata or custom defaults
-│ Extraction: [0] = name, [1] = description
+│ Extraction: [0] = runtime_mutable, [1] = name, [2] = description
 └─────────────────────────────────────────────────────────────────────────────
 ┌─────────────────────────────────────────────────────────────────────────────
-│ 3-PARAMETER: property<T>(name, description, default)
-│ Example: property<int>(*this, "port", "Server port", 9092)
+│ 4-PARAMETER: property<T>(runtime_mutable, name, description, default)
+│ Example: property<int>(*this, false, "port", "Server port", 9092)
 │ Used for: Properties with simple custom default values
-│ Extraction: [0] = name, [1] = description, [2] = default
+│ Extraction: [0] = runtime_mutable, [1] = name, [2] = description, [3] = default
 └─────────────────────────────────────────────────────────────────────────────
 ┌─────────────────────────────────────────────────────────────────────────────
-│ 4-PARAMETER: property<T>(name, description, meta, default)
-│ Example: property<bool>(*this, "flag", "Description", meta{.needs_restart=yes}, true)
+│ 5-PARAMETER: property<T>(runtime_mutable, name, description, meta, default)
+│ Example: property<bool>(*this, true, "flag", "Desc", meta{.needs_restart=yes}, true)
 │ Used for: Properties with metadata (restart requirements, visibility, etc.)
-│ Extraction: [0] = name, [1] = description, [2] = meta{}, [3] = default
+│ Extraction: [0] = runtime_mutable, [1] = name, [2] = description, [3] = meta{}, [4] = default
+└─────────────────────────────────────────────────────────────────────────────
+┌─────────────────────────────────────────────────────────────────────────────
+│ WITH VALIDATOR: property<T>(runtime_mutable, name, description, [meta], default, validator)
+│ Example: property<int>(*this, true, "port", "Port", 9092, [](int v){return v > 0;})
+│ Used for: Properties with runtime validation functions
+│ Extraction: Validator is automatically skipped; default is found by searching backwards
+│ Note: Validators detected by is_validator_param() and excluded from default extraction
 └─────────────────────────────────────────────────────────────────────────────
 
 ENTERPRISE PROPERTY PATTERNS (More Complex):
@@ -1391,30 +1412,36 @@ class SimpleDefaultValuesTransformer:
             return property
 
         # Find where the meta{} param is
+        # MetaParamTransformer converts meta strings to dicts with "type": "initializer_list"
         meta_index = next(
             (i for i, p in enumerate(params)
              if isinstance(p.get("value"), (dict, str))
              and ("meta{" in str(p["value"]) or
-                  (isinstance(p["value"], dict) and "needs_restart" in p["value"]))),
-            None,
+                  (isinstance(p["value"], dict) and p["value"].get("type") == "initializer_list"))
+            ),
+            None
         )
 
-        # Default comes immediately after meta
-        if meta_index is None:
-            default_index = 3 if len(params) > 3 else None
-        else:
-            default_index = meta_index + 1 if len(params) > meta_index + 1 else None
+        # The default value is the LAST NON-VALIDATOR parameter in the constructor
+        # Property structure: (*this, runtime_mutability_flag, name, description, [meta], default, [validator])
+        # After *this is skipped: [0]=runtime_flag, [1]=name, [2]=desc, [3]=meta?, [4]=default, [5]=validator?
+        # We need to search backwards to find the last parameter that's not a validator
+        if len(params) < 2:
+            return property
 
-        if default_index is None or default_index >= len(params):
+        # Search backwards for the last non-validator parameter
+        default_index = None
+        for i in range(len(params) - 1, -1, -1):
+            if not is_validator_param(params[i]):
+                default_index = i
+                break
+
+        if default_index is None:
             return property
 
         # Candidate default param
         default_param = params[default_index]
         default = default_param.get("value")
-
-        # Skip obvious validator params
-        if is_validator_param(default_param):
-            return property
 
         # std::nullopt means "no default"
         if isinstance(default, str) and "std::nullopt" in default:
