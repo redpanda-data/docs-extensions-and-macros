@@ -34,9 +34,12 @@ module.exports.register = function ({ config }) {
 
     logger.info(`Processing context-switcher attribute for ${pagesToProcess.length} pages`);
 
+    // Track pages that have been marked as already processed (to avoid redundant processing)
+    const processedPages = new Set();
+
     // Process each page with context-switcher
     for (const page of pagesToProcess) {
-      processContextSwitcher(page, contentCatalog, logger);
+      processContextSwitcher(page, contentCatalog, logger, processedPages);
     }
   });
 
@@ -45,9 +48,17 @@ module.exports.register = function ({ config }) {
    * @param {Object} page - The page object
    * @param {Object} contentCatalog - The content catalog
    * @param {Object} logger - Logger instance
+   * @param {Set} processedPages - Set of page resource IDs that have been processed
    */
-  function processContextSwitcher(page, contentCatalog, logger) {
+  function processContextSwitcher(page, contentCatalog, logger, processedPages) {
     const contextSwitcherAttr = page.asciidoc.attributes['page-context-switcher'];
+    const currentResourceId = buildResourceId(page);
+
+    // Skip if this page has already been marked as processed
+    if (processedPages.has(currentResourceId)) {
+      logger.debug(`Skipping already processed page: ${currentResourceId}`);
+      return;
+    }
 
     try {
       // Parse the JSON attribute
@@ -58,8 +69,6 @@ module.exports.register = function ({ config }) {
         return;
       }
 
-      // Get current page's full resource ID
-      const currentResourceId = buildResourceId(page);
       logger.debug(`Processing context-switcher for page: ${currentResourceId}`);
 
       // Make a copy for processing target pages (before modifying "current")
@@ -78,7 +87,7 @@ module.exports.register = function ({ config }) {
           // For non-current items, find and update the target page
           const targetPage = findPageByResourceId(item.to, contentCatalog, page);
           if (targetPage) {
-            injectContextSwitcherToTargetPage(targetPage, originalContextSwitcher, currentResourceId, logger);
+            injectContextSwitcherToTargetPage(targetPage, originalContextSwitcher, currentResourceId, logger, processedPages);
           } else {
             logger.warn(`Target page not found for resource ID: '${item.to}'. Check that the component, module, and path exist. Enable debug logging to see available pages.`);
           }
@@ -201,15 +210,32 @@ module.exports.register = function ({ config }) {
    * @param {Array} contextSwitcher - The context switcher configuration
    * @param {string} currentPageResourceId - The current page's resource ID
    * @param {Object} logger - Logger instance
+   * @param {Set} processedPages - Set of page resource IDs that have been processed
    */
-  function injectContextSwitcherToTargetPage(targetPage, contextSwitcher, currentPageResourceId, logger) {
+  function injectContextSwitcherToTargetPage(targetPage, contextSwitcher, currentPageResourceId, logger, processedPages) {
+    const targetPageResourceId = buildResourceId(targetPage);
+
     // Check if target page already has context-switcher attribute
     if (targetPage.asciidoc.attributes['page-context-switcher']) {
-      logger.info(`Target page ${buildResourceId(targetPage)} already has context-switcher attribute. Skipping injection to avoid overwriting existing configuration: ${targetPage.asciidoc.attributes['page-context-switcher']}`);
+      logger.info(`Target page ${targetPageResourceId} already has context-switcher attribute. Skipping injection to avoid overwriting existing configuration: ${targetPage.asciidoc.attributes['page-context-switcher']}`);
+
+      // Only mark as processed if it doesn't contain "current" (meaning it doesn't need processing)
+      try {
+        const existingContextSwitcher = JSON.parse(targetPage.asciidoc.attributes['page-context-switcher']);
+        const needsProcessing = Array.isArray(existingContextSwitcher) &&
+                               existingContextSwitcher.some(item => item.to === 'current');
+
+        if (!needsProcessing) {
+          // Mark this page as processed so we don't try to process it again in the main loop
+          processedPages.add(targetPageResourceId);
+        }
+      } catch (e) {
+        // If we can't parse it, don't mark as processed to allow error handling in main loop
+        logger.debug(`Could not parse existing context-switcher for ${targetPageResourceId}: ${e.message}`);
+      }
+
       return;
     }
-
-    const targetPageResourceId = buildResourceId(targetPage);
 
     logger.debug(`Injecting context switcher to target page: ${targetPageResourceId}`);
 
