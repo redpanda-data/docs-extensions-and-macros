@@ -205,7 +205,7 @@ module.exports.register = function ({ config }) {
   function injectContextSwitcherToTargetPage(targetPage, contextSwitcher, currentPageResourceId, logger) {
     // Check if target page already has context-switcher attribute
     if (targetPage.asciidoc.attributes['page-context-switcher']) {
-      logger.warn(`Target page ${buildResourceId(targetPage)} already has context-switcher attribute. Skipping injection to avoid overwriting existing configuration: ${targetPage.asciidoc.attributes['page-context-switcher']}`);
+      logger.info(`Target page ${buildResourceId(targetPage)} already has context-switcher attribute. Skipping injection to avoid overwriting existing configuration: ${targetPage.asciidoc.attributes['page-context-switcher']}`);
       return;
     }
 
