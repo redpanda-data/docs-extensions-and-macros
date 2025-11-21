@@ -2134,6 +2134,8 @@ class MetaParamTransformer:
 
                 key, value = [s.strip() for s in field.split("=", 1)]
                 clean_key = key.replace(".", "")
+                # Strip trailing commas from value (last field in meta block has trailing comma)
+                value = value.rstrip(",").strip()
                 meta_dict[clean_key] = value
 
                 # 🔹 Inline special handlers for known meta keys
