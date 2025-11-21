@@ -381,7 +381,7 @@ describe('process-context-switcher extension', () => {
 
     // Target page should keep its original context switcher unchanged
     expect(targetPage.asciidoc.attributes['page-context-switcher']).toBe(originalTargetAttribute);
-
+    
     // Should log info that target already has context switcher (with the existing value)
     expect(mockLogger.info).toHaveBeenCalledWith(
       'Target page current@ROOT:console:target.adoc already has context-switcher attribute. Skipping injection to avoid overwriting existing configuration: [{"name": "Existing", "to": "somewhere-else.adoc"}]'
