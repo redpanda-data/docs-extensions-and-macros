@@ -95,13 +95,13 @@ endif::[]
 | Default
 |{{#if is_enterprise}}{{#if enterprise_default_description}}{{{enterprise_default_description}}}{{else}}
 ifdef::env-cloud[]
-Available in the Redpanda Cloud Console
+Available in the Redpanda Cloud Console{{#if cloud_readonly}} (read-only){{else if cloud_editable}} (editable){{/if}}
 endif::[]
 ifndef::env-cloud[]
 `{{formatPropertyValue default type}}`{{#if default_human_readable}} ({{default_human_readable}}){{/if}}
 endif::[]{{/if}}{{else}}
 ifdef::env-cloud[]
-Available in the Redpanda Cloud Console
+Available in the Redpanda Cloud Console{{#if cloud_readonly}} (read-only){{else if cloud_editable}} (editable){{/if}}
 endif::[]
 ifndef::env-cloud[]
 `{{formatPropertyValue default type}}`{{#if default_human_readable}} ({{default_human_readable}}){{/if}}
