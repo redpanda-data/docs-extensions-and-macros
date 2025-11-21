@@ -146,6 +146,12 @@ endif::[]
 | {{#each aliases}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
 // end::self-managed-only[]
 {{/if}}
+{{#if example}}
+
+| Example
+|
+{{{example}}}
+{{/if}}
 {{#if related_topics}}
 {{#with (allTopicsConditional related_topics) as |sectionType|}}
 
