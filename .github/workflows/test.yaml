@@ -48,7 +48,6 @@ jobs:
               - '__tests__/**/*tool*.test.js'
             property_extractor:
               - 'tools/property-extractor/**/*.py'
-              - 'tools/property-extractor/tests/**'
               - 'tools/property-extractor/requirements.txt'
             package_json:
               - 'package.json'
@@ -228,9 +227,8 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run property-extractor tests
-        working-directory: tools/property-extractor
         run: |
-          python -m pytest tests/ -v --tb=short
+          python -m pytest __tests__/tools/property-extractor/ -v --tb=short
 
   # Run all tests if core files changed or on schedule
   test-all:
