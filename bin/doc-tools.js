@@ -443,6 +443,41 @@ programCli
     }
   });
 
+programCli
+  .command('setup-mcp')
+  .description('Configure the Redpanda Docs MCP server for Claude Code/Desktop')
+  .option('--force', 'Force update even if already configured', false)
+  .option('--target <type>', 'Target application: auto, code, or desktop', 'auto')
+  .option('--local', 'Use local development mode (requires running from this repo)', false)
+  .option('--status', 'Show current MCP server configuration status', false)
+  .action(async (options) => {
+    try {
+      const { setupMCP, showStatus, printNextSteps } = require('../cli-utils/setup-mcp.js');
+
+      if (options.status) {
+        showStatus();
+        return;
+      }
+
+      const result = await setupMCP({
+        force: options.force,
+        target: options.target,
+        local: options.local
+      });
+
+      if (result.success) {
+        printNextSteps(result);
+        process.exit(0);
+      } else {
+        console.error(`❌ Setup failed: ${result.error}`);
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(`❌ ${err.message}`);
+      process.exit(1);
+    }
+  });
+
 // Create an "automation" subcommand group.
 const automation = new Command('generate').description('Run docs automations');
 

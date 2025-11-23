@@ -11,3 +11,4 @@ test/
 modules/
 cloud-controlplane/
 node_modules
+.env
