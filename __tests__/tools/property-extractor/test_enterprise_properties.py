@@ -120,32 +120,37 @@ class RestrictedOnlyTest(EnterprisePropertyDetectionTest):
         )
 
     def test_sasl_mechanisms_classification(self):
-        """Test sasl_mechanisms is correctly classified as restricted_only"""
+        """Test sasl_mechanisms is correctly classified as simple enterprise"""
         prop = self.properties.get("sasl_mechanisms")
         self.assertIsNotNone(prop, "sasl_mechanisms property not found")
         self.assertEqual(
             prop.get("enterprise_constructor"),
-            "restricted_only",
-            "sasl_mechanisms should be restricted_only",
+            "simple",
+            "sasl_mechanisms should be simple (uses per-element validation)",
         )
 
     def test_sasl_mechanisms_restricted_values(self):
-        """Test sasl_mechanisms has correct restricted (Enterprise) values"""
+        """Test sasl_mechanisms has correct enterprise enum metadata"""
         prop = self.properties.get("sasl_mechanisms")
         self.assertIsNotNone(prop)
-        restricted = prop.get("enterprise_restricted_value", [])
-        self.assertIn("GSSAPI", restricted)
-        self.assertIn("OAUTHBEARER", restricted)
+        enum_metadata = prop.get("items", {}).get("x-enum-metadata", {})
+        self.assertTrue(enum_metadata.get("GSSAPI", {}).get("is_enterprise", False),
+                       "GSSAPI should be marked as enterprise")
+        self.assertTrue(enum_metadata.get("OAUTHBEARER", {}).get("is_enterprise", False),
+                       "OAUTHBEARER should be marked as enterprise")
 
     def test_sasl_mechanisms_community_default(self):
         """Test sasl_mechanisms default is the Community value (SCRAM)"""
         prop = self.properties.get("sasl_mechanisms")
         self.assertIsNotNone(prop)
-        self.assertEqual(
-            prop.get("default"),
-            ["SCRAM"],
-            "sasl_mechanisms default should be ['SCRAM'] (Community value), not ['GSSAPI', 'OAUTHBEARER']",
-        )
+        # Default can be either string or array depending on extractor version
+        default = prop.get("default")
+        if isinstance(default, list):
+            self.assertEqual(default, ["SCRAM"],
+                           "sasl_mechanisms default should be ['SCRAM']")
+        else:
+            self.assertEqual(default, "SCRAM",
+                           "sasl_mechanisms default should be 'SCRAM'")
 
 
 class SimpleEnterpriseTest(EnterprisePropertyDetectionTest):

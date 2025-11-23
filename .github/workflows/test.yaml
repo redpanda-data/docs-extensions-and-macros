@@ -225,14 +225,17 @@ jobs:
         with:
           node-version: 20
 
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
       - name: Cache Redpanda repository
         uses: actions/cache@v4
         with:
           path: tools/property-extractor/tmp/redpanda
-          key: redpanda-repo-${{ hashFiles('tools/property-extractor/Makefile') }}-dev
+          key: redpanda-repo-dev-${{ steps.date.outputs.date }}
           restore-keys: |
-            redpanda-repo-${{ hashFiles('tools/property-extractor/Makefile') }}-
-            redpanda-repo-
+            redpanda-repo-dev-
 
       - name: Cache tree-sitter build
         uses: actions/cache@v4
