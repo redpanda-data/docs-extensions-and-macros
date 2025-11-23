@@ -220,10 +220,22 @@ jobs:
           cache: 'pip'
           cache-dependency-path: 'tools/property-extractor/requirements.txt'
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'tools/property-extractor/tree-sitter/tree-sitter-cpp/package-lock.json'
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r tools/property-extractor/requirements.txt
+
+      - name: Generate test fixtures
+        working-directory: tools/property-extractor
+        run: |
+          make build
 
       - name: Run property-extractor tests
         run: |
