@@ -224,8 +224,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
-          cache-dependency-path: 'tools/property-extractor/tree-sitter/tree-sitter-cpp/package-lock.json'
+
+      - name: Cache Redpanda repository
+        uses: actions/cache@v4
+        with:
+          path: tools/property-extractor/tmp/redpanda
+          key: redpanda-repo-${{ hashFiles('tools/property-extractor/Makefile') }}-dev
+          restore-keys: |
+            redpanda-repo-${{ hashFiles('tools/property-extractor/Makefile') }}-
+            redpanda-repo-
+
+      - name: Cache tree-sitter build
+        uses: actions/cache@v4
+        with:
+          path: |
+            tools/property-extractor/tree-sitter/tree-sitter-cpp/build
+            tools/property-extractor/tree-sitter/tree-sitter-cpp/node_modules
+          key: tree-sitter-${{ runner.os }}-${{ hashFiles('tools/property-extractor/tree-sitter/tree-sitter-cpp/package-lock.json') }}
+          restore-keys: |
+            tree-sitter-${{ runner.os }}-
 
       - name: Install dependencies
         run: |
