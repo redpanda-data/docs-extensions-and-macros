@@ -538,6 +538,51 @@ def get_meta_value(info, key, default=None):
     return val
 
 
+def resolve_cpp_literal(value_str):
+    """
+    Resolve C++ literal expressions to their actual values.
+
+    Handles:
+    - Size literals: 5_MiB → 5242880
+    - std::to_string() wrapper: std::to_string(5_MiB) → 5242880
+    - Plain integers: 42 → 42
+    - Plain floats: 3.14 → 3.14
+
+    Args:
+        value_str: String containing C++ literal expression
+
+    Returns:
+        Resolved value (int, float, or original string if can't resolve)
+    """
+    if not isinstance(value_str, str):
+        return value_str
+
+    val = value_str.strip()
+
+    # Handle std::to_string() wrapper
+    to_string_match = re.match(r"std::to_string\((.+)\)", val)
+    if to_string_match:
+        val = to_string_match.group(1).strip()
+
+    # Try size literals like 5_MiB
+    size_match = re.match(r"(\d+)_([KMGTP])iB", val)
+    if size_match:
+        num, unit = int(size_match.group(1)), size_match.group(2)
+        mult = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}[unit]
+        return num * mult
+
+    # Try plain integer
+    if re.fullmatch(r"-?\d+", val):
+        return int(val)
+
+    # Try plain float
+    if re.fullmatch(r"-?\d+\.\d+", val):
+        return float(val)
+
+    # Return original if can't resolve
+    return value_str
+
+
 def get_resolve_constexpr_identifier():
     """
     Lazily import constexpr identifier resolution function to avoid circular imports.
@@ -1965,9 +2010,12 @@ class EnterpriseTransformer:
             info["params"] = params[:-1]
 
         # --- restricted_with_sanctioned (scalar form) ---
+        # Pattern: (restricted, sanctioned, name, description, meta, default)
+        # Must check that params[1] is NOT the property name (which would make it restricted_only)
         elif (
             len(params) >= 6
             and all(p["type"] in ("true", "false", "integer_literal", "string_literal", "qualified_identifier") for p in params[:2])
+            and self._clean_value(params[1]["value"]) != info.get("name_in_file")
         ):
             enterprise_constructor = "restricted_with_sanctioned"
             restricted_vals = [self._clean_value(params[0]["value"])]
@@ -1982,13 +2030,15 @@ class EnterpriseTransformer:
             restricted_vals = [self._clean_value(params[0]["value"])]
             info["params"] = params[1:]
 
-        # --- simple enterprise property (lambda validator pattern) ---
-        elif (len(params) >= 3 and 
-              params[0].get("type") == "lambda_expression" and
+        # --- simple enterprise property (function/lambda validator pattern) ---
+        # Pattern: (validator_function, name, description, meta, default, ...)
+        # The validator can be a lambda or a function identifier
+        elif (len(params) >= 3 and
+              params[0].get("type") in ("lambda_expression", "identifier", "qualified_identifier") and
               params[1].get("type") == "string_literal"):
             enterprise_constructor = "simple"
             # Don't modify params for simple enterprise properties - they have normal structure
-            # Remove the lambda validator from parameters as it's not needed for documentation
+            # Remove the validator from parameters as it's not needed for documentation
             info["params"] = params[1:]
 
         if not enterprise_constructor:
@@ -2006,28 +2056,6 @@ class EnterpriseTransformer:
 
         if sanctioned_vals is not None:
             property["enterprise_sanctioned_value"] = sanctioned_vals
-
-        # Add friendly description (values are already cleaned by _clean_value)
-        if enterprise_constructor == "restricted_with_sanctioned":
-            r = restricted_vals[0]
-            s = sanctioned_vals[0]
-            property["enterprise_default_description"] = (
-                f"Default: `{s}` (Community) or `{r}` (Enterprise)"
-            )
-        elif enterprise_constructor == "restricted_only":
-            if len(restricted_vals) > 1:
-                vals = ", ".join(f"`{v}`" for v in restricted_vals)
-                property["enterprise_default_description"] = (
-                    f"Available only with Enterprise license: {vals}"
-                )
-            else:
-                property["enterprise_default_description"] = (
-                    f"Available only with Enterprise license: `{restricted_vals[0]}`"
-                )
-        elif enterprise_constructor == "sanctioned_only":
-            property["enterprise_default_description"] = (
-                f"Community-only configuration. Sanctioned value: `{sanctioned_vals[0]}`"
-            )
 
         return property
 
@@ -2144,13 +2172,12 @@ class MetaParamTransformer:
                 # Example values
                 if clean_key == "example":
                     val_clean = value.strip().strip('"')
-                    # Try to coerce to int or float, else leave as string
-                    if re.fullmatch(r"-?\d+", val_clean):
-                        property["example"] = int(val_clean)
-                    elif re.fullmatch(r"-?\d+\.\d+", val_clean):
-                        property["example"] = float(val_clean)
+                    resolved = resolve_cpp_literal(val_clean)
+                    # Wrap in backticks for inline code formatting (handles overrides with AsciiDoc blocks)
+                    if isinstance(resolved, str):
+                        property["example"] = f"`{normalize_string(resolved)}`"
                     else:
-                        property["example"] = normalize_string(val_clean)
+                        property["example"] = f"`{resolved}`"
 
                 # Gets_restored / restored flags
                 elif clean_key in ("gets_restored", "restored"):
@@ -2233,21 +2260,18 @@ class ExampleTransformer:
                 meta_dict = param["value"]
                 if "example" in meta_dict:
                     example_val = meta_dict["example"]
-                    
+
                     # Clean up the value (remove quotes, etc.)
                     if isinstance(example_val, str):
                         example_val = example_val.strip().strip('"\'')
-                    
-                    # Try to coerce to appropriate type
-                    if isinstance(example_val, str):
-                        if re.fullmatch(r"-?\d+", example_val):
-                            property["example"] = int(example_val)
-                        elif re.fullmatch(r"-?\d+\.\d+", example_val):
-                            property["example"] = float(example_val)
-                        else:
-                            property["example"] = example_val
+
+                    # Use shared resolution logic
+                    resolved = resolve_cpp_literal(example_val)
+                    # Wrap in backticks for inline code formatting
+                    if isinstance(resolved, str):
+                        property["example"] = f"`{normalize_string(resolved)}`"
                     else:
-                        property["example"] = example_val
+                        property["example"] = f"`{resolved}`"
                     break
                     
         return property

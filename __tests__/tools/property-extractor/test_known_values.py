@@ -10,6 +10,12 @@ mistakes in the complex transformation logic.
 """
 
 import unittest
+import sys
+from pathlib import Path
+
+# Add tools/property-extractor to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / 'tools' / 'property-extractor'))
+
 from property_bag import PropertyBag
 from file_pair import FilePair
 from transformers import (
@@ -238,20 +244,22 @@ class EnterprisePropertyTest(unittest.TestCase):
     """Test enterprise properties with known values"""
 
     def test_enterprise_property_with_restrictions(self):
-        """Test enterprise property with restricted values (enterprise-only values)"""
-        # Simulate enterprise_property with restricted value
-        # Pattern: enterprise_property<string>(restricted_value, *this, name, description, meta, default)
+        """Test enterprise property with restricted and sanctioned values"""
+        # Simulate enterprise_property with both restricted and sanctioned values
+        # Pattern: enterprise_property<string>(restricted_value, sanctioned_value, name, description, meta, default)
+        # This matches core_balancing_continuous and partition_autobalancing_mode
         info = PropertyBag()
         info["name_in_file"] = "partition_autobalancing_mode"
         info["declaration"] = "enterprise_property<ss::sstring> partition_autobalancing_mode;"
         info["type"] = "enterprise_property"
         info["is_enterprise"] = True
         info["params"] = [
-            PropertyBag(value="continuous", type="string_literal"),  # Restricted enterprise value
-            PropertyBag(value="partition_autobalancing_mode", type="string_literal"),
+            PropertyBag(value="continuous", type="qualified_identifier"),  # Restricted enterprise value
+            PropertyBag(value="node_add", type="qualified_identifier"),    # Sanctioned community value
+            PropertyBag(value="partition_autobalancing_mode", type="string_literal"),  # Property name
             PropertyBag(value="Partition autobalancing mode", type="string_literal"),
             PropertyBag(value="meta{.needs_restart = needs_restart::no}", type="initializer_list"),
-            PropertyBag(value='"off"', type="string_literal"),  # Default value
+            PropertyBag(value="continuous", type="qualified_identifier"),  # Default value
         ]
 
         property = apply_transformer_pipeline(info)
@@ -259,8 +267,9 @@ class EnterprisePropertyTest(unittest.TestCase):
         self.assertEqual(property["name"], "partition_autobalancing_mode")
         self.assertEqual(property["type"], "string")
         self.assertTrue(property.get("is_enterprise", False))
-        self.assertEqual(property.get("enterprise_constructor"), "restricted_only")
+        self.assertEqual(property.get("enterprise_constructor"), "restricted_with_sanctioned")
         self.assertIn("continuous", property.get("enterprise_restricted_value", []))
+        self.assertIn("node_add", property.get("enterprise_sanctioned_value", []))
 
     def test_simple_enterprise_property_without_restrictions(self):
         """Test that simple enterprise properties without restrictions are not marked as enterprise
@@ -467,7 +476,7 @@ class ExampleMetadataTest(unittest.TestCase):
         property = apply_transformer_pipeline(info)
 
         self.assertEqual(property["name"], "log_cleanup_policy")
-        self.assertEqual(property.get("example"), "delete")
+        self.assertEqual(property.get("example"), "`delete`")
         self.assertEqual(property["default"], "compact")
 
 
