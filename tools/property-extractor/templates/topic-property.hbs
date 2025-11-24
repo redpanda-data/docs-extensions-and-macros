@@ -46,7 +46,7 @@ endif::[]
 
 {{/if}}
 
-[cols="1e,2a"]
+[cols="1s,2a"]
 |===
 | Property | Value
 
@@ -55,10 +55,21 @@ endif::[]
 
 {{#if enum}}
 | Accepted Values
-| {{#each enum}}`{{this}}`{{#if (isEnterpriseEnum this ../x-enum-metadata)}} (Enterprise){{/if}}{{#unless @last}}, {{/unless}}{{/each}}
+|
+ifndef::env-cloud[]
+{{#each enum}}`{{this}}`{{#if (isEnterpriseEnum this ../x-enum-metadata)}} (Enterprise){{/if}}{{#unless @last}}, {{/unless}}{{/each}}
+endif::[]
+ifdef::env-cloud[]
+{{#each enum}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
+endif::[]
 {{else}}{{#if items.enum}}
 | Accepted Values
-| {{#each items.enum}}`{{this}}`{{#if (isEnterpriseEnum this ../items.x-enum-metadata)}} (Enterprise){{/if}}{{#unless @last}}, {{/unless}}{{/each}}
+|ifndef::env-cloud[]
+{{#each items.enum}}`{{this}}`{{#if (isEnterpriseEnum this ../items.x-enum-metadata)}} (Enterprise){{/if}}{{#unless @last}}, {{/unless}}{{/each}}
+endif::[]
+ifdef::env-cloud[]
+{{#each items.enum}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
+endif::[]
 {{else}}{{#if acceptable_values}}
 | Accepted values
 | {{{acceptable_values}}}
@@ -87,19 +98,13 @@ endif::[]
 {{#if (ne default undefined)}}
 
 | Default
-| {{#if cloud_supported}}
+|
 ifdef::env-cloud[]
-Available in the Redpanda Cloud Console
+Available in the Redpanda Cloud Console{{#if cloud_readonly}} (read-only){{else if cloud_editable}} (editable){{/if}}
 endif::[]
 ifndef::env-cloud[]
 `{{formatPropertyValue default type}}`{{#if default_human_readable}} ({{default_human_readable}}){{/if}}
-endif::[]{{else}}
-ifdef::env-cloud[]
-Available in the Redpanda Cloud Console
 endif::[]
-ifndef::env-cloud[]
-`{{formatPropertyValue default type}}`{{#if default_human_readable}} ({{default_human_readable}}){{/if}}
-endif::[]{{/if}}
 {{/if}}
 
 | Nullable
@@ -112,7 +117,8 @@ endif::[]
 {{#if example}}
 
 | Example
-| {{{example}}}
+|
+{{{example}}}
 {{/if}}
 {{#if related_topics}}
 {{#with (allTopicsConditional related_topics) as |sectionType|}}
@@ -120,55 +126,82 @@ endif::[]
 {{#if (eq sectionType "cloud")}}
 ifdef::env-cloud[]
 | Related topics
-|
-{{#each ../related_topics}}
+|{{#if (gt (length ../related_topics) 1)}}{{#each ../related_topics}}
 {{#with (parseRelatedTopic this)}}
-{{#if (gt ../../related_topics.length 1)}}* {{/if}}{{{value}}}
+* {{{value}}}
 {{/with}}
 {{/each}}
+{{else}}
+{{#each ../related_topics}}
+{{#with (parseRelatedTopic this)}}
+{{{value}}}
+{{/with}}
+{{/each}}
+{{/if}}
 endif::[]
 {{else if (eq sectionType "self-managed")}}
 ifndef::env-cloud[]
 | Related topics
-|
-{{#each ../related_topics}}
+|{{#if (gt (length ../related_topics) 1)}}{{#each ../related_topics}}
 {{#with (parseRelatedTopic this)}}
-{{#if (gt ../../related_topics.length 1)}}* {{/if}}{{{value}}}
+* {{{value}}}
 {{/with}}
 {{/each}}
+{{else}}
+{{#each ../related_topics}}
+{{#with (parseRelatedTopic this)}}
+{{{value}}}
+{{/with}}
+{{/each}}
+{{/if}}
 endif::[]
 {{else}}
 | Related topics
-|
+|{{#if (gt (length ../related_topics) 1)}}{{#each ../related_topics}}
+{{#with (parseRelatedTopic this)}}
+{{#if (eq type "cloud")}}
+ifdef::env-cloud[]
+* {{{value}}}
+endif::[]
+{{else if (eq type "self-managed")}}
+ifndef::env-cloud[]
+* {{{value}}}
+endif::[]
+{{else}}
+* {{{value}}}
+{{/if}}
+{{/with}}
+{{/each}}
+{{else}}
 {{#each ../related_topics}}
 {{#with (parseRelatedTopic this)}}
 {{#if (eq type "cloud")}}
 ifdef::env-cloud[]
-{{#if (gt ../../related_topics.length 1)}}* {{/if}}{{{value}}}
+{{{value}}}
 endif::[]
 {{else if (eq type "self-managed")}}
 ifndef::env-cloud[]
-{{#if (gt ../../related_topics.length 1)}}* {{/if}}{{{value}}}
+{{{value}}}
 endif::[]
 {{else}}
-{{#if (gt ../../related_topics.length 1)}}* {{/if}}{{{value}}}
+{{{value}}}
 {{/if}}
 {{/with}}
 {{/each}}
+{{/if}}
 {{/if}}
 {{/with}}
 {{/if}}
 {{#if aliases}}
 
-// tag::self-managed-only[]
+ifndef::env-cloud[]
 | Aliases
-| {{join aliases ", "}}
-// end::self-managed-only[]
+| {{#each aliases}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
+endif::[]
 {{/if}}
 
 |===
 
----
 {{#if is_experimental_property}}
 // end::experimental[]
 {{/if}}

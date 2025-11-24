@@ -23,4 +23,4 @@ echo "🔄 Installing Python dependencies..."
 # Run tests
 echo "🧪 Running Python tests..."
 cd "$SCRIPT_DIR"
-"$VENV/bin/python" -m pytest test_transformers.py -v
+"$VENV/bin/python" -m pytest . -v

@@ -677,7 +677,7 @@ class TopicPropertyExtractor:
                 prop_data["corresponding_cluster_property"] = cluster_prop
                 prop_data["cluster_property_doc_file"] = self._get_cluster_property_doc_file(cluster_prop)
 
-                # Populate default value from cluster property if available
+                # Populate default value and type from cluster property if available
                 if self.cluster_properties:
                     cluster_props = self.cluster_properties.get("properties", {})
                     if cluster_prop in cluster_props:
@@ -686,6 +686,9 @@ class TopicPropertyExtractor:
                         # Also copy default_human_readable if available
                         if "default_human_readable" in cluster_prop_data:
                             prop_data["default_human_readable"] = cluster_prop_data["default_human_readable"]
+                        # Inherit type from cluster property (more reliable than heuristics)
+                        if "type" in cluster_prop_data:
+                            prop_data["type"] = cluster_prop_data["type"]
 
             # Add alternate cluster property if this has conditional mapping
             if prop_name in self.alternate_mappings:
@@ -706,8 +709,12 @@ class TopicPropertyExtractor:
         if "compression" in prop_name:
             if "compression" in self.enum_values:
                 values = self.enum_values["compression"]["values"]
-                # Filter out special values like 'count', 'producer'
-                filtered_values = [v for v in values if v not in ['count', 'producer']]
+                # Filter out internal values like 'count', but keep 'producer' (it's a valid Kafka value)
+                filtered_values = [v for v in values if v not in ['count']]
+                # Ensure 'producer' is first if present (it's the default and most common)
+                if 'producer' in filtered_values:
+                    filtered_values.remove('producer')
+                    filtered_values.insert(0, 'producer')
                 return f"[`{'`, `'.join(filtered_values)}`]"
                 
         elif "cleanup.policy" in prop_name:

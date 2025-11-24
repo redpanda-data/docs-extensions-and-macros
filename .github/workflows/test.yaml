@@ -48,7 +48,6 @@ jobs:
               - '__tests__/**/*tool*.test.js'
             property_extractor:
               - 'tools/property-extractor/**/*.py'
-              - 'tools/property-extractor/tests/**'
               - 'tools/property-extractor/requirements.txt'
             package_json:
               - 'package.json'
@@ -221,16 +220,46 @@ jobs:
           cache: 'pip'
           cache-dependency-path: 'tools/property-extractor/requirements.txt'
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Cache Redpanda repository
+        uses: actions/cache@v4
+        with:
+          path: tools/property-extractor/tmp/redpanda
+          key: redpanda-repo-dev-${{ steps.date.outputs.date }}
+          restore-keys: |
+            redpanda-repo-dev-
+
+      - name: Cache tree-sitter build
+        uses: actions/cache@v4
+        with:
+          path: |
+            tools/property-extractor/tree-sitter/tree-sitter-cpp/build
+            tools/property-extractor/tree-sitter/tree-sitter-cpp/node_modules
+          key: tree-sitter-${{ runner.os }}-${{ hashFiles('tools/property-extractor/tree-sitter/tree-sitter-cpp/package-lock.json') }}
+          restore-keys: |
+            tree-sitter-${{ runner.os }}-
+
       - name: Install dependencies
-        working-directory: tools/property-extractor
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r tools/property-extractor/requirements.txt
 
-      - name: Run property-extractor tests
+      - name: Generate test fixtures
         working-directory: tools/property-extractor
         run: |
-          python -m pytest tests/ -v --tb=short
+          make build
+
+      - name: Run property-extractor tests
+        run: |
+          python -m pytest __tests__/tools/property-extractor/ -v --tb=short
 
   # Run all tests if core files changed or on schedule
   test-all:
