@@ -97,8 +97,25 @@ function getAntoraStructure(repoRoot, skipDirs = DEFAULT_SKIP_DIRS) {
     playbook: playbookContent,
     playbookPath,
     components,
-    hasDocTools: fs.existsSync(path.join(rootPath, 'package.json')) &&
-                 fs.existsSync(path.join(rootPath, 'bin', 'doc-tools.js'))
+    hasDocTools: (() => {
+      // Check if we're in the source repo (docs-extensions-and-macros)
+      if (fs.existsSync(path.join(rootPath, 'bin', 'doc-tools.js'))) {
+        return true;
+      }
+
+      // Check if doc-tools is available via npx or as installed dependency
+      try {
+        const { execSync } = require('child_process');
+        execSync('npx doc-tools --version', {
+          stdio: 'ignore',
+          timeout: 5000,
+          cwd: rootPath
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    })()
   };
 }
 
