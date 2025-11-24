@@ -59,13 +59,21 @@ function generateRpConnectDocs(args = {}) {
 
     // Check for spawn errors
     if (result.error) {
-      throw new Error(`Failed to execute command: ${result.error.message}`);
+      const err = new Error(`Failed to execute command: ${result.error.message}`);
+      err.stdout = result.stdout || '';
+      err.stderr = result.stderr || '';
+      err.status = result.status;
+      throw err;
     }
 
     // Check for non-zero exit codes
     if (result.status !== 0) {
       const errorMsg = result.stderr || `Command failed with exit code ${result.status}`;
-      throw new Error(errorMsg);
+      const err = new Error(errorMsg);
+      err.stdout = result.stdout || '';
+      err.stderr = result.stderr || '';
+      err.status = result.status;
+      throw err;
     }
 
     const output = result.stdout;

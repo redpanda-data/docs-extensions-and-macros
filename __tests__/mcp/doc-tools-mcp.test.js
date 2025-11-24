@@ -415,9 +415,12 @@ describe('MCP Server Library - Repository Detection', () => {
     });
 
     it('should return false for hasDocTools when not available', () => {
+      const { execSync } = require('child_process');
       fs.existsSync = jest.fn(() => false);
       fs.realpathSync = jest.fn((p) => p);
       fs.readdirSync = jest.fn(() => []);
+      // Mock execSync to throw when checking for doc-tools
+      execSync.mockImplementation(() => { throw new Error('Command not found'); });
 
       const result = getAntoraStructure('/test');
 
@@ -606,7 +609,7 @@ describe('MCP Server Library - Repository Detection', () => {
   });
 
   describe('Documentation Generation Tools', () => {
-    const { execSync } = require('child_process');
+    const { execSync, spawnSync } = require('child_process');
 
     beforeEach(() => {
       // Reset mocks before each test
@@ -614,6 +617,7 @@ describe('MCP Server Library - Repository Detection', () => {
       fs.realpathSync.mockReset();
       fs.readdirSync.mockReset();
       execSync.mockReset();
+      spawnSync.mockReset();
     });
 
     describe('generatePropertyDocs', () => {
@@ -685,6 +689,8 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.existsSync = jest.fn(() => false);
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
+        // Mock execSync to throw when checking for doc-tools in getAntoraStructure
+        execSync.mockImplementation(() => { throw new Error('Command not found'); });
 
         const result = generatePropertyDocs({ version: '25.3.1' });
 
@@ -731,7 +737,13 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
-        execSync.mockReturnValue('Generated 156 metrics\n');
+        // Mock spawnSync (used by generateMetricsDocs) to return success
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generated 156 metrics\n',
+          stderr: '',
+          error: null
+        });
 
         const result = generateMetricsDocs({ version: '25.3.1' });
 
@@ -746,7 +758,13 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
-        execSync.mockReturnValue('Generated 156 metrics\n');
+        // Mock spawnSync (used by generateMetricsDocs) to return success
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generated 156 metrics\n',
+          stderr: '',
+          error: null
+        });
 
         const result = generateMetricsDocs({ version: '25.3.1' });
 
@@ -757,6 +775,8 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.existsSync = jest.fn(() => false);
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
+        // Mock execSync to throw when checking for doc-tools in getAntoraStructure
+        execSync.mockImplementation(() => { throw new Error('Command not found'); });
 
         const result = generateMetricsDocs({ version: '25.3.1' });
 
@@ -807,6 +827,8 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.existsSync = jest.fn(() => false);
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
+        // Mock execSync to throw when checking for doc-tools in getAntoraStructure
+        execSync.mockImplementation(() => { throw new Error('Command not found'); });
 
         const result = generateRpkDocs({ version: '25.3.1' });
 
@@ -832,7 +854,13 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
-        execSync.mockReturnValue('Generated 245 connectors\n');
+        // Mock spawnSync (used by generateRpConnectDocs) to return success
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generated 245 connectors\n',
+          stderr: '',
+          error: null
+        });
 
         const result = generateRpConnectDocs({});
 
@@ -846,18 +874,21 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
-        execSync.mockReturnValue('Generated 250 connectors\n');
+        // Mock spawnSync (used by generateRpConnectDocs) to return success
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generated 250 connectors\n',
+          stderr: '',
+          error: null
+        });
 
         const result = generateRpConnectDocs({ fetch_connectors: true, draft_missing: true });
 
         expect(result.success).toBe(true);
         expect(result.connectors_documented).toBe(250);
-        expect(execSync).toHaveBeenCalledWith(
-          expect.stringContaining('--fetch-connectors'),
-          expect.any(Object)
-        );
-        expect(execSync).toHaveBeenCalledWith(
-          expect.stringContaining('--draft-missing'),
+        expect(spawnSync).toHaveBeenCalledWith(
+          'npx',
+          expect.arrayContaining(['--fetch-connectors', '--draft-missing']),
           expect.any(Object)
         );
       });
@@ -867,7 +898,13 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
-        execSync.mockReturnValue('Generation complete\n');
+        // Mock spawnSync (used by generateRpConnectDocs) to return success
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generation complete\n',
+          stderr: '',
+          error: null
+        });
 
         const result = generateRpConnectDocs({});
 
@@ -879,6 +916,8 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.existsSync = jest.fn(() => false);
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
+        // Mock execSync to throw when checking for doc-tools in getAntoraStructure
+        execSync.mockImplementation(() => { throw new Error('Command not found'); });
 
         const result = generateRpConnectDocs({});
 
@@ -892,16 +931,18 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
-        const error = new Error('Command failed');
-        error.stdout = 'stdout output';
-        error.stderr = 'Network error';
-        error.status = 1;
-        execSync.mockImplementation(() => { throw error; });
+        // Mock spawnSync to return non-zero status with stderr
+        spawnSync.mockReturnValue({
+          status: 1,
+          stdout: 'stdout output',
+          stderr: 'Network error',
+          error: null
+        });
 
         const result = generateRpConnectDocs({ fetch_connectors: true });
 
         expect(result.success).toBe(false);
-        expect(result.error).toBe('Command failed');
+        expect(result.error).toContain('Network error');
         expect(result.stderr).toContain('Network error');
         expect(result.suggestion).toContain('network access');
       });
