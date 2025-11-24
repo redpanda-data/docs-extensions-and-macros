@@ -78,6 +78,13 @@ function executeTool(toolName, args = {}) {
 
       case 'run_doc_tools_command': {
         // Validate and execute raw doc-tools command
+        if (!args || typeof args !== 'object') {
+          return {
+            success: false,
+            error: 'Invalid arguments: expected an object'
+          };
+        }
+        
         const validation = validateDocToolsCommand(args.command);
         if (!validation.valid) {
           return {

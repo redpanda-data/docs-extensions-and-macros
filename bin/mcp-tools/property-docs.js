@@ -42,17 +42,14 @@ function generatePropertyDocs(args) {
   }
 
   // Build command
-  const flags = [];
-  flags.push(`--tag ${version}`);
+  const cmdArgs = ['npx', 'doc-tools', 'generate', 'property-docs', '--tag', version];
   if (args.generate_partials) {
-    flags.push('--generate-partials');
+    cmdArgs.push('--generate-partials');
   }
-
-  const cmd = `npx doc-tools generate property-docs ${flags.join(' ')}`;
 
   // If background mode, create job and return immediately
   if (args.background) {
-    const jobId = createJob('generate_property_docs', cmd, {
+    const jobId = createJob('generate_property_docs', cmdArgs, {
       cwd: repoRoot.root
     });
 
@@ -67,7 +64,7 @@ function generatePropertyDocs(args) {
 
   // Otherwise run synchronously
   try {
-    const output = execSync(cmd, {
+    const output = execSync(cmdArgs.join(' '), {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',

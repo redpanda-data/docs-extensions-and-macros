@@ -984,7 +984,7 @@ generate ../../../etc/passwd          ✗ (path traversal)
 * Commands are restricted to `npx doc-tools` only
 * All operations are local to your machine
 * File modifications are handled by Claude's built-in tools (which you control)
-* 5-minute timeout on all commands
+* 10-minute timeout on all commands
 * 50MB output buffer limit
 
 == Advanced usage

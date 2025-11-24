@@ -34,7 +34,7 @@ function initializeJobQueue(server) {
 /**
  * Create a new background job
  * @param {string} toolName - Name of the tool
- * @param {string} command - Command to execute
+ * @param {string|Array} command - Command to execute (array format preferred for security)
  * @param {Object} options - Execution options
  * @returns {string} Job ID
  */
@@ -65,9 +65,88 @@ function createJob(toolName, command, options = {}) {
 }
 
 /**
+ * Parse a command string into executable and arguments
+ * Handles basic quoted arguments safely
+ */
+function parseCommand(command) {
+  const args = [];
+  let current = '';
+  let inQuotes = false;
+  let quoteChar = '';
+  
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+    
+    if (!inQuotes && (char === '"' || char === "'")) {
+      inQuotes = true;
+      quoteChar = char;
+    } else if (inQuotes && char === quoteChar) {
+      inQuotes = false;
+      quoteChar = '';
+    } else if (!inQuotes && char === ' ') {
+      if (current.trim()) {
+        args.push(current.trim());
+        current = '';
+      }
+    } else {
+      current += char;
+    }
+  }
+  
+  if (current.trim()) {
+    args.push(current.trim());
+  }
+  
+  return args;
+}
+
+/**
+ * Validate that an executable is safe to run
+ * Whitelist known safe executables
+ */
+function isValidExecutable(executable) {
+  const allowedExecutables = [
+    'npx',
+    'node', 
+    'npm',
+    'yarn',
+    'doc-tools',
+    'helm-docs',
+    'crd-ref-docs',
+    'git',
+    'make',
+    'docker',
+    'timeout'
+  ];
+  
+  // Allow absolute paths to known tools in common locations
+  const allowedPaths = [
+    '/usr/bin/',
+    '/usr/local/bin/',
+    '/bin/',
+    '/opt/homebrew/bin/'
+  ];
+  
+  // Check if it's a whitelisted executable
+  if (allowedExecutables.includes(executable)) {
+    return true;
+  }
+  
+  // Check if it's an absolute path to a whitelisted location
+  if (executable.startsWith('/')) {
+    return allowedPaths.some(path => 
+      executable.startsWith(path) && 
+      allowedExecutables.some(exe => executable.endsWith(`/${exe}`) || executable.endsWith(`/${exe}.exe`))
+    );
+  }
+  
+  return false;
+}
+
+/**
  * Execute a job in the background
  * @param {string} jobId - Job ID
- * @param {string} command - Command to execute
+ * @param {string|Array} command - Command to execute (string will be parsed, array is preferred)
  * @param {Object} options - Execution options
  */
 async function executeJob(jobId, command, options = {}) {
@@ -81,12 +160,28 @@ async function executeJob(jobId, command, options = {}) {
   const cwd = options.cwd || process.cwd();
   const timeout = options.timeout || DEFAULT_COMMAND_TIMEOUT;
 
-  // Parse command into executable and args
-  const [executable, ...args] = command.split(' ');
+  let executable, args;
+  
+  if (Array.isArray(command)) {
+    // Preferred: pre-parsed array [executable, ...args]
+    [executable, ...args] = command;
+  } else if (typeof command === 'string') {
+    // Legacy string command - use safer parsing
+    // Basic parsing that handles simple quoted arguments
+    const parsedArgs = parseCommand(command);
+    [executable, ...args] = parsedArgs;
+  } else {
+    throw new Error('Command must be a string or array');
+  }
+
+  // Validate executable to prevent injection
+  if (!isValidExecutable(executable)) {
+    throw new Error(`Invalid executable: ${executable}`);
+  }
 
   const childProcess = spawn(executable, args, {
     cwd,
-    shell: true,
+    shell: false, // Explicitly disable shell to prevent injection
     stdio: ['ignore', 'pipe', 'pipe']
   });
 

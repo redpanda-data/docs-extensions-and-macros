@@ -129,5 +129,5 @@ jobs:
 
       - name: Verify MCP server can start
         run: |
-          timeout 5s npx node bin/doc-tools-mcp.js 2>&1 | grep -q "Redpanda Docs Tools MCP Server running" || true
+          timeout 5s node bin/doc-tools-mcp.js 2>&1 | grep -q "Redpanda Docs Tools MCP Server running"
           echo "✅ MCP server starts successfully"

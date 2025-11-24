@@ -2,7 +2,7 @@
  * MCP Tools - Redpanda Connect Documentation Generation
  */
 
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 
@@ -24,26 +24,51 @@ function generateRpConnectDocs(args = {}) {
   }
 
   try {
-    // Build command with optional flags
-    const flags = [];
-    if (args.fetch_connectors) flags.push('--fetch-connectors');
-    if (args.draft_missing) flags.push('--draft-missing');
-    if (args.update_whats_new) flags.push('--update-whats-new');
-    if (args.include_bloblang) flags.push('--include-bloblang');
-    if (args.data_dir) flags.push(`--data-dir "${args.data_dir}"`);
-    if (args.old_data) flags.push(`--old-data "${args.old_data}"`);
-    if (args.csv) flags.push(`--csv "${args.csv}"`);
-    if (args.overrides) flags.push(`--overrides "${args.overrides}"`);
+    // Build command arguments array (no shell interpolation)
+    const cmdArgs = ['doc-tools', 'generate', 'rpcn-connector-docs'];
+    
+    // Add flags only when present, each as separate array entries
+    if (args.fetch_connectors) cmdArgs.push('--fetch-connectors');
+    if (args.draft_missing) cmdArgs.push('--draft-missing');
+    if (args.update_whats_new) cmdArgs.push('--update-whats-new');
+    if (args.include_bloblang) cmdArgs.push('--include-bloblang');
+    if (args.data_dir) {
+      cmdArgs.push('--data-dir');
+      cmdArgs.push(args.data_dir);
+    }
+    if (args.old_data) {
+      cmdArgs.push('--old-data');
+      cmdArgs.push(args.old_data);
+    }
+    if (args.csv) {
+      cmdArgs.push('--csv');
+      cmdArgs.push(args.csv);
+    }
+    if (args.overrides) {
+      cmdArgs.push('--overrides');
+      cmdArgs.push(args.overrides);
+    }
 
-    const cmd = `npx doc-tools generate rpcn-connector-docs ${flags.join(' ')}`;
-
-    const output = execSync(cmd, {
+    const result = spawnSync('npx', cmdArgs, {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',
       maxBuffer: MAX_EXEC_BUFFER_SIZE,
       timeout: DEFAULT_COMMAND_TIMEOUT
     });
+
+    // Check for spawn errors
+    if (result.error) {
+      throw new Error(`Failed to execute command: ${result.error.message}`);
+    }
+
+    // Check for non-zero exit codes
+    if (result.status !== 0) {
+      const errorMsg = result.stderr || `Command failed with exit code ${result.status}`;
+      throw new Error(errorMsg);
+    }
+
+    const output = result.stdout;
 
     const connectorsMatch = output.match(/(\d+) connectors/i);
 

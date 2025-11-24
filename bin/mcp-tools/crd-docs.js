@@ -3,7 +3,7 @@
  */
 
 const { execSync } = require('child_process');
-const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, normalizeVersion } = require('./utils');
+const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, normalizeVersion, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 
 /**

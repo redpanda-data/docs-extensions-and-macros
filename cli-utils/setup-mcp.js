@@ -62,7 +62,6 @@ function getConfigPaths() {
 
     case 'win32': // Windows
       const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
-
       paths.claudeCode = [
         path.join(home, '.claude', '.mcp.json'), // User-level MCP config
       ];
@@ -470,4 +469,4 @@ module.exports = {
   getConfigPaths,
   findConfigFiles,
   getMCPServerPath
-};
+}

@@ -28,6 +28,44 @@ function getHelpOutput(command) {
 }
 
 /**
+ * Sanitize path values in option descriptions to remove user-specific absolute paths
+ */
+function sanitizePathInDescription(description) {
+  // Get the repository root path for relativization
+  const repoRoot = path.resolve(__dirname, '..');
+  
+  let sanitized = description;
+  
+  // First, handle repository root paths specifically
+  const repoRootEscaped = repoRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const repoRootPattern = new RegExp(repoRootEscaped, 'g');
+  
+  sanitized = sanitized.replace(repoRootPattern, '<repository-root>');
+  
+  // Then handle any remaining long absolute paths that contain our repo structure
+  // This regex matches paths that look like they're part of our repository
+  const longPathPattern = /\/[^\/\s"')]*docs-extensions-and-macros[^\/\s"')]*(?:\/[^\/\s"')\]]+)*/g;
+  
+  sanitized = sanitized.replace(longPathPattern, (match) => {
+    // If this path wasn't already replaced and looks like a subpath, make it relative
+    if (!match.includes('<repository-root>')) {
+      const relativePath = path.relative(repoRoot, match);
+      if (relativePath && !relativePath.startsWith('..') && relativePath !== match) {
+        return `./${relativePath}`;
+      }
+      return '<repository-root>';
+    }
+    return match;
+  });
+  
+  // Finally, handle generic home directory patterns for any remaining absolute paths
+  const homePattern = /\/(?:Users|home)\/[^\/\s"')]+/g;
+  sanitized = sanitized.replace(homePattern, '~');
+  
+  return sanitized;
+}
+
+/**
  * Parse command help output into structured data
  */
 function parseHelp(helpText) {
@@ -175,7 +213,8 @@ function generateCommandDoc(commandName, helpData, jsdoc, level = 2) {
     doc += `*Options:*\n\n`;
     helpData.options.forEach(opt => {
       const name = opt.name.replace(/\s+/g, ' ');
-      doc += `\`${name}\`::\n${opt.description}\n\n`;
+      const sanitizedDescription = sanitizePathInDescription(opt.description);
+      doc += `\`${name}\`::\n${sanitizedDescription}\n\n`;
     });
   }
 

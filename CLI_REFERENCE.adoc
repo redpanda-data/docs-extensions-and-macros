@@ -631,7 +631,7 @@ doc-tools generate rpcn-connector-docs [options]
 *Options:*
 
 `-d, --data-dir <path>`::
-Directory where versioned connect JSON files live (default: "/Users/jakecahill/Documents/docs-extensions-and-macros/docs-data")
+Directory where versioned connect JSON files live (default: "<repository-root>/docs-data")
 
 `--old-data <path>`::
 Optional override for old data file (for diff)
@@ -649,16 +649,16 @@ Generate full-doc drafts for connectors missing in output
 Path to connector metadata CSV file (default: "internal/plugins/info.csv")
 
 `--template-main <path>`::
-Main Handlebars template (default: "/Users/jakecahill/Documents/docs-extensions-and-macros/tools/redpanda-connect/templates/connector.hbs")
+Main Handlebars template (default: "<repository-root>/tools/redpanda-connect/templates/connector.hbs")
 
 `--template-intro <path>`::
-Intro section partial template (default: "/Users/jakecahill/Documents/docs-extensions-and-macros/tools/redpanda-connect/templates/intro.hbs")
+Intro section partial template (default: "<repository-root>/tools/redpanda-connect/templates/intro.hbs")
 
 `--template-fields <path>`::
-Fields section partial template (default: "/Users/jakecahill/Documents/docs-extensions-and-macros/tools/redpanda-connect/templates/fields-partials.hbs")
+Fields section partial template (default: "<repository-root>/tools/redpanda-connect/templates/fields-partials.hbs")
 
 `--template-examples <path>`::
-Examples section partial template (default: "/Users/jakecahill/Documents/docs-extensions-and-macros/tools/redpanda-connect/templates/examples-partials.hbs")
+Examples section partial template (default: "<repository-root>/tools/redpanda-connect/templates/examples-partials.hbs")
 
 `--template-bloblang <path>`::
 Custom Handlebars template for bloblang function/method partials

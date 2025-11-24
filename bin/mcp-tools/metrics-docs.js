@@ -2,7 +2,7 @@
  * MCP Tools - Metrics Documentation Generation
  */
 
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 
@@ -39,15 +39,37 @@ function generateMetricsDocs(args) {
       version = `v${version}`;
     }
 
-    const cmd = `npx doc-tools generate metrics-docs --tag ${version}`;
+    // Validate version string to prevent command injection
+    const versionRegex = /^v[0-9A-Za-z._-]+$/;
+    if (!versionRegex.test(version)) {
+      return {
+        success: false,
+        error: 'Invalid version format',
+        suggestion: 'Version must contain only alphanumeric characters, dots, underscores, and hyphens after the "v" prefix (e.g., "v25.3.1", "v25.3.1-rc1")'
+      };
+    }
 
-    const output = execSync(cmd, {
+    // Use safe command execution with argument array
+    const result = spawnSync('npx', ['doc-tools', 'generate', 'metrics-docs', '--tag', version], {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',
       maxBuffer: MAX_EXEC_BUFFER_SIZE,
       timeout: DEFAULT_COMMAND_TIMEOUT
     });
+
+    // Check for spawn errors
+    if (result.error) {
+      throw new Error(`Failed to execute command: ${result.error.message}`);
+    }
+
+    // Check for non-zero exit codes
+    if (result.status !== 0) {
+      const errorMsg = result.stderr || `Command failed with exit code ${result.status}`;
+      throw new Error(errorMsg);
+    }
+
+    const output = result.stdout;
 
     const metricsCountMatch = output.match(/(\d+) metrics/i);
 
