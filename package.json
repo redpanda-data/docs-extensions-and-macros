@@ -23,8 +23,12 @@
     "build": "antora --to-dir docs --fetch local-antora-playbook.yml",
     "serve": "wds --node-resolve --open preview/test/ --watch --root-dir docs",
     "test": "jest",
+    "test:mcp": "jest __tests__/mcp/",
+    "test:mcp:integration": "jest __tests__/mcp/integration.test.js",
+    "test:mcp:contract": "jest __tests__/mcp/cli-contract.test.js",
     "test:python": "./__tests__/tools/property-extractor/setup-and-test.sh",
     "test:all": "npm run test && npm run test:python",
+    "generate:cli-docs": "node tools/generate-cli-docs.js",
     "bundle:admin": "doc-tools generate bundle-openapi --surface admin",
     "bundle:connect": "doc-tools generate bundle-openapi --surface connect",
     "bundle:both": "doc-tools generate bundle-openapi --surface both"
