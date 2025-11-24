@@ -92,7 +92,8 @@ redpanda-git:
 # --- Clone Tree-sitter grammar & generate parser ---
 treesitter:
 	@echo "🌲 Ensuring tree-sitter-cpp grammar…"
-	@if [ ! -d "$(TREESITTER_DIR)" ]; then \
+	@if [ ! -d "$(TREESITTER_DIR)/.git" ]; then \
+	  rm -rf "$(TREESITTER_DIR)"; \
 	  git clone https://github.com/tree-sitter/tree-sitter-cpp.git "$(TREESITTER_DIR)"; \
 	fi
 	@echo "🔄 Ensuring tree-sitter-cpp is at compatible version v0.20.5…"

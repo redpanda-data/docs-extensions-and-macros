@@ -16,4 +16,6 @@ module.exports = {
   anchorName: require('./anchorName.js'),
   parseRelatedTopic: require('./parseRelatedTopic.js'),
   allTopicsConditional: require('./allTopicsConditional.js'),
+  capitalize: require('./capitalize.js'),
+  length: require('./length.js'),
 };

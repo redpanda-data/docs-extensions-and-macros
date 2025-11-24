@@ -1,14 +1,11 @@
 [cols="1a,1a"]
 |===
-| Topic property | Corresponding cluster property
+| Topic Property | Corresponding Cluster Property
 
 {{#each topicProperties}}
 | <<{{anchorName name}},`{{name}}`>>
-| {{#if alternate_cluster_property~}}
-xref:./{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`] or xref:./{{alternate_cluster_property_doc_file}}#{{alternate_cluster_property}}[`{{alternate_cluster_property}}`]
-{{~else~}}
-xref:./{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`]
-{{~/if}}
+| {{#if alternate_cluster_property}}xref:./{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`] or xref:./{{alternate_cluster_property_doc_file}}#{{alternate_cluster_property}}[`{{alternate_cluster_property}}`]{{else}}xref:./{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`]{{/if}}
+
 {{/each}}
 
 |===
