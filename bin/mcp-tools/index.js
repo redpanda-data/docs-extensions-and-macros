@@ -84,7 +84,7 @@ function executeTool(toolName, args = {}) {
             error: 'Invalid arguments: expected an object'
           };
         }
-        
+
         const validation = validateDocToolsCommand(args.command);
         if (!validation.valid) {
           return {
@@ -94,7 +94,15 @@ function executeTool(toolName, args = {}) {
         }
 
         try {
-          const output = executeCommand(`npx doc-tools ${args.command}`, {
+          // Parse command into argument array (no shell interpolation)
+          // Since validation already rejects shell metacharacters, we can safely split by spaces
+          // Handle quoted strings for paths with spaces
+          const cmdArgs = parseCommandArgs(args.command);
+
+          // Build full args array: ['doc-tools', ...cmdArgs]
+          const fullArgs = ['doc-tools', ...cmdArgs];
+
+          const output = executeCommand('npx', fullArgs, {
             cwd: repoRoot.root
           });
 
@@ -127,6 +135,49 @@ function executeTool(toolName, args = {}) {
       suggestion: 'An unexpected error occurred while executing the tool'
     };
   }
+}
+
+/**
+ * Parse command string into array of arguments
+ * Handles quoted strings for paths with spaces
+ * @param {string} command - The command string to parse
+ * @returns {string[]} Array of arguments
+ */
+function parseCommandArgs(command) {
+  const args = [];
+  let current = '';
+  let inQuotes = false;
+  let quoteChar = '';
+
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+
+    if ((char === '"' || char === "'") && !inQuotes) {
+      // Start of quoted string
+      inQuotes = true;
+      quoteChar = char;
+    } else if (char === quoteChar && inQuotes) {
+      // End of quoted string
+      inQuotes = false;
+      quoteChar = '';
+    } else if (char === ' ' && !inQuotes) {
+      // Space outside quotes - end of argument
+      if (current) {
+        args.push(current);
+        current = '';
+      }
+    } else {
+      // Regular character
+      current += char;
+    }
+  }
+
+  // Add final argument if present
+  if (current) {
+    args.push(current);
+  }
+
+  return args;
 }
 
 /**

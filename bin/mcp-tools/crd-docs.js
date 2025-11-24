@@ -2,7 +2,7 @@
  * MCP Tools - Kubernetes CRD Documentation Generation
  */
 
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, normalizeVersion, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 
@@ -37,35 +37,61 @@ function generateCrdDocs(args) {
   }
 
   try {
-    // Build command
-    const flags = [];
-    flags.push(`--tag ${args.tag}`);
+    // Build command arguments array (no shell interpolation)
+    const cmdArgs = ['doc-tools', 'generate', 'crd-spec'];
+
+    // Add flags only when present, each as separate array entries
+    cmdArgs.push('--tag');
+    cmdArgs.push(args.tag);
 
     if (args.source_path) {
-      flags.push(`--source-path "${args.source_path}"`);
+      cmdArgs.push('--source-path');
+      cmdArgs.push(args.source_path);
     }
 
     if (args.depth) {
-      flags.push(`--depth ${args.depth}`);
+      cmdArgs.push('--depth');
+      cmdArgs.push(String(args.depth));
     }
 
     if (args.templates_dir) {
-      flags.push(`--templates-dir "${args.templates_dir}"`);
+      cmdArgs.push('--templates-dir');
+      cmdArgs.push(args.templates_dir);
     }
 
     if (args.output) {
-      flags.push(`--output "${args.output}"`);
+      cmdArgs.push('--output');
+      cmdArgs.push(args.output);
     }
 
-    const cmd = `npx doc-tools generate crd-spec ${flags.join(' ')}`;
-
-    const output = execSync(cmd, {
+    const result = spawnSync('npx', cmdArgs, {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',
       maxBuffer: MAX_EXEC_BUFFER_SIZE,
       timeout: DEFAULT_COMMAND_TIMEOUT
     });
+
+    // Check for spawn errors
+    if (result.error) {
+      const err = new Error(`Failed to execute command: ${result.error.message}`);
+      err.stdout = result.stdout || '';
+      err.stderr = result.stderr || '';
+      err.status = result.status;
+      throw err;
+    }
+
+    // Check for non-zero exit codes
+    if (result.status !== 0) {
+      const errorMsg = result.stderr || `Command failed with exit code ${result.status}`;
+      const err = new Error(errorMsg);
+      err.stdout = result.stdout || '';
+      err.stderr = result.stderr || '';
+      err.status = result.status;
+      throw err;
+    }
+
+    const output = result.stdout;
 
     return {
       success: true,

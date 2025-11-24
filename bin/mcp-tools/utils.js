@@ -4,7 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 // Constants
 const MAX_RECURSION_DEPTH = 3;
@@ -37,20 +37,43 @@ function findRepoRoot(start = process.cwd()) {
 }
 
 /**
- * Execute a shell command and return output
- * @param {string} command - Command to execute
+ * Execute a command safely using spawnSync (no shell)
+ * @param {string} program - Program to execute (e.g., 'npx')
+ * @param {string[]} args - Array of arguments (e.g., ['doc-tools', 'generate', 'property-docs'])
  * @param {Object} options - Execution options
- * @returns {string} Command output
+ * @returns {string} Command output (stdout)
+ * @throws {Error} Error with stdout, stderr, and status properties on failure
  */
-function executeCommand(command, options = {}) {
+function executeCommand(program, args, options = {}) {
   const defaultOptions = {
     encoding: 'utf8',
     maxBuffer: MAX_EXEC_BUFFER_SIZE,
     timeout: DEFAULT_COMMAND_TIMEOUT,
-    stdio: ['pipe', 'pipe', 'inherit']
+    stdio: 'pipe'
   };
 
-  return execSync(command, { ...defaultOptions, ...options });
+  const result = spawnSync(program, args, { ...defaultOptions, ...options });
+
+  // Check for spawn errors
+  if (result.error) {
+    const err = new Error(`Failed to execute command: ${result.error.message}`);
+    err.stdout = result.stdout || '';
+    err.stderr = result.stderr || '';
+    err.status = result.status;
+    throw err;
+  }
+
+  // Check for non-zero exit codes
+  if (result.status !== 0) {
+    const errorMsg = result.stderr || `Command failed with exit code ${result.status}`;
+    const err = new Error(errorMsg);
+    err.stdout = result.stdout || '';
+    err.stderr = result.stderr || '';
+    err.status = result.status;
+    throw err;
+  }
+
+  return result.stdout;
 }
 
 /**

@@ -2,7 +2,7 @@
  * MCP Tools - OpenAPI Bundle Generation
  */
 
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, normalizeVersion, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 
@@ -46,47 +46,74 @@ function generateBundleOpenApi(args) {
       tag = `v${tag}`;
     }
 
-    // Build command
-    const flags = [];
-    flags.push(`--tag ${tag}`);
+    // Build command arguments array (no shell interpolation)
+    const cmdArgs = ['doc-tools', 'generate', 'bundle-openapi'];
+
+    // Add flags only when present, each as separate array entries
+    cmdArgs.push('--tag');
+    cmdArgs.push(tag);
 
     if (args.repo) {
-      flags.push(`--repo "${args.repo}"`);
+      cmdArgs.push('--repo');
+      cmdArgs.push(args.repo);
     }
 
     if (args.surface) {
-      flags.push(`--surface ${args.surface}`);
+      cmdArgs.push('--surface');
+      cmdArgs.push(args.surface);
     }
 
     if (args.out_admin) {
-      flags.push(`--out-admin "${args.out_admin}"`);
+      cmdArgs.push('--out-admin');
+      cmdArgs.push(args.out_admin);
     }
 
     if (args.out_connect) {
-      flags.push(`--out-connect "${args.out_connect}"`);
+      cmdArgs.push('--out-connect');
+      cmdArgs.push(args.out_connect);
     }
 
     if (args.admin_major) {
-      flags.push(`--admin-major "${args.admin_major}"`);
+      cmdArgs.push('--admin-major');
+      cmdArgs.push(args.admin_major);
     }
 
     if (args.use_admin_major_version) {
-      flags.push('--use-admin-major-version');
+      cmdArgs.push('--use-admin-major-version');
     }
 
     if (args.quiet) {
-      flags.push('--quiet');
+      cmdArgs.push('--quiet');
     }
 
-    const cmd = `npx doc-tools generate bundle-openapi ${flags.join(' ')}`;
-
-    const output = execSync(cmd, {
+    const result = spawnSync('npx', cmdArgs, {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',
       maxBuffer: MAX_EXEC_BUFFER_SIZE,
       timeout: DEFAULT_COMMAND_TIMEOUT
     });
+
+    // Check for spawn errors
+    if (result.error) {
+      const err = new Error(`Failed to execute command: ${result.error.message}`);
+      err.stdout = result.stdout || '';
+      err.stderr = result.stderr || '';
+      err.status = result.status;
+      throw err;
+    }
+
+    // Check for non-zero exit codes
+    if (result.status !== 0) {
+      const errorMsg = result.stderr || `Command failed with exit code ${result.status}`;
+      const err = new Error(errorMsg);
+      err.stdout = result.stdout || '';
+      err.stderr = result.stderr || '';
+      err.status = result.status;
+      throw err;
+    }
+
+    const output = result.stdout;
 
     // Determine which files were generated based on surface
     const filesGenerated = [];

@@ -153,97 +153,130 @@ async function executeJob(jobId, command, options = {}) {
   const job = jobs.get(jobId);
   if (!job) return;
 
-  job.status = JobStatus.RUNNING;
-  job.startedAt = new Date().toISOString();
-  updateJobProgress(jobId, 10, 'Starting execution...');
+  try {
+    job.status = JobStatus.RUNNING;
+    job.startedAt = new Date().toISOString();
+    updateJobProgress(jobId, 10, 'Starting execution...');
 
-  const cwd = options.cwd || process.cwd();
-  const timeout = options.timeout || DEFAULT_COMMAND_TIMEOUT;
+    const cwd = options.cwd || process.cwd();
+    const timeout = options.timeout || DEFAULT_COMMAND_TIMEOUT;
 
-  let executable, args;
-  
-  if (Array.isArray(command)) {
-    // Preferred: pre-parsed array [executable, ...args]
-    [executable, ...args] = command;
-  } else if (typeof command === 'string') {
-    // Legacy string command - use safer parsing
-    // Basic parsing that handles simple quoted arguments
-    const parsedArgs = parseCommand(command);
-    [executable, ...args] = parsedArgs;
-  } else {
-    throw new Error('Command must be a string or array');
-  }
+    let executable, args;
 
-  // Validate executable to prevent injection
-  if (!isValidExecutable(executable)) {
-    throw new Error(`Invalid executable: ${executable}`);
-  }
-
-  const childProcess = spawn(executable, args, {
-    cwd,
-    shell: false, // Explicitly disable shell to prevent injection
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-
-  let stdout = '';
-  let stderr = '';
-
-  // Set up timeout
-  const timeoutHandle = setTimeout(() => {
-    childProcess.kill('SIGTERM');
-    job.error = `Job timed out after ${timeout}ms`;
-    job.status = JobStatus.FAILED;
-    updateJobProgress(jobId, 100, 'Job timed out');
-  }, timeout);
-
-  // Capture stdout
-  childProcess.stdout.on('data', (data) => {
-    const chunk = data.toString();
-    stdout += chunk;
-    job.output = stdout;
-
-    // Parse progress from output if available
-    parseProgressFromOutput(jobId, chunk);
-  });
-
-  // Capture stderr
-  childProcess.stderr.on('data', (data) => {
-    stderr += data.toString();
-  });
-
-  // Handle completion
-  childProcess.on('close', (code) => {
-    clearTimeout(timeoutHandle);
-
-    job.completedAt = new Date().toISOString();
-
-    if (code === 0) {
-      job.status = JobStatus.COMPLETED;
-      job.progress = 100;
-      job.progressMessage = 'Completed successfully';
-      job.result = {
-        success: true,
-        output: stdout.trim(),
-        command
-      };
-      updateJobProgress(jobId, 100, 'Completed successfully');
+    if (Array.isArray(command)) {
+      // Preferred: pre-parsed array [executable, ...args]
+      [executable, ...args] = command;
+    } else if (typeof command === 'string') {
+      // Legacy string command - use safer parsing
+      // Basic parsing that handles simple quoted arguments
+      const parsedArgs = parseCommand(command);
+      [executable, ...args] = parsedArgs;
     } else {
+      throw new Error('Command must be a string or array');
+    }
+
+    // Validate executable to prevent injection
+    if (!isValidExecutable(executable)) {
+      throw new Error(`Invalid executable: ${executable}`);
+    }
+
+    const childProcess = spawn(executable, args, {
+      cwd,
+      shell: false, // Explicitly disable shell to prevent injection
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+
+    // Set up timeout
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      childProcess.kill('SIGTERM');
+      job.error = `Job timed out after ${timeout}ms`;
       job.status = JobStatus.FAILED;
-      job.error = stderr || `Command exited with code ${code}`;
+      job.completedAt = new Date().toISOString();
       job.result = {
         success: false,
         error: job.error,
         stdout: stdout.trim(),
-        stderr: stderr.trim(),
-        exitCode: code
+        stderr: stderr.trim()
       };
-      updateJobProgress(jobId, 100, `Failed with exit code ${code}`);
-    }
-  });
+      updateJobProgress(jobId, 100, 'Job timed out');
+    }, timeout);
 
-  // Handle errors
-  childProcess.on('error', (err) => {
-    clearTimeout(timeoutHandle);
+    // Capture stdout
+    childProcess.stdout.on('data', (data) => {
+      const chunk = data.toString();
+      stdout += chunk;
+      job.output = stdout;
+
+      // Parse progress from output if available
+      parseProgressFromOutput(jobId, chunk);
+    });
+
+    // Capture stderr
+    childProcess.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    // Handle completion
+    childProcess.on('close', (code) => {
+      clearTimeout(timeoutHandle);
+
+      // If job already timed out, don't overwrite the timeout error
+      if (timedOut) {
+        return;
+      }
+
+      job.completedAt = new Date().toISOString();
+
+      if (code === 0) {
+        job.status = JobStatus.COMPLETED;
+        job.progress = 100;
+        job.progressMessage = 'Completed successfully';
+        job.result = {
+          success: true,
+          output: stdout.trim(),
+          command
+        };
+        updateJobProgress(jobId, 100, 'Completed successfully');
+      } else {
+        job.status = JobStatus.FAILED;
+        job.error = stderr || `Command exited with code ${code}`;
+        job.result = {
+          success: false,
+          error: job.error,
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          exitCode: code
+        };
+        updateJobProgress(jobId, 100, `Failed with exit code ${code}`);
+      }
+    });
+
+    // Handle errors
+    childProcess.on('error', (err) => {
+      clearTimeout(timeoutHandle);
+
+      // If job already timed out, don't overwrite the timeout error
+      if (timedOut) {
+        return;
+      }
+
+      job.status = JobStatus.FAILED;
+      job.error = err.message;
+      job.completedAt = new Date().toISOString();
+      job.result = {
+        success: false,
+        error: err.message
+      };
+      updateJobProgress(jobId, 100, `Error: ${err.message}`);
+    });
+  } catch (err) {
+    // Catch synchronous errors (validation failures, etc.)
+    // Record them on the job instead of throwing
     job.status = JobStatus.FAILED;
     job.error = err.message;
     job.completedAt = new Date().toISOString();
@@ -252,7 +285,7 @@ async function executeJob(jobId, command, options = {}) {
       error: err.message
     };
     updateJobProgress(jobId, 100, `Error: ${err.message}`);
-  });
+  }
 }
 
 /**
@@ -269,7 +302,7 @@ function parseProgressFromOutput(jobId, output) {
     // Percentage: "Progress: 45%", "45%", "[45%]"
     /(?:progress[:\s]*)?(\d+)%/i,
     // Step indicators: "Step 3/5", "3 of 5"
-    /(?:step\s+)?(\d+)\s*[/of]\s*(\d+)/i,
+    /(?:step\s+)?(\d+)\s*(?:\/|of)\s*(\d+)/i,
     // Processing indicators: "Processing file 3 of 10"
     /processing.*?(\d+)\s*of\s*(\d+)/i,
     // Cloning/downloading indicators

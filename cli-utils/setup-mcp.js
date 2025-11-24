@@ -60,7 +60,7 @@ function getConfigPaths() {
       ];
       break;
 
-    case 'win32': // Windows
+    case 'win32': { // Windows
       const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
       paths.claudeCode = [
         path.join(home, '.claude', '.mcp.json'), // User-level MCP config
@@ -69,6 +69,7 @@ function getConfigPaths() {
         path.join(appData, 'Claude', 'claude_desktop_config.json'),
       ];
       break;
+    }
   }
 
   return paths;

@@ -99,18 +99,23 @@ docs-extensions-and-macros/
 │   ├── doc-tools-mcp.js           # Main MCP server
 │   └── mcp-tools/                 # Tool implementations
 │       ├── antora.js              # Antora structure analysis
-│       ├── cli.js                 # CLI command execution
-│       ├── generate.js            # Generation tools
-│       └── version.js             # Version tools
-├── prompts/                       # MCP prompts
-│   ├── property-docs-guide.md
-│   ├── rpcn-connector-docs-guide.md
-│   └── README.adoc
+│       ├── cloud-regions.js       # Cloud regions table generation
+│       ├── crd-docs.js            # Kubernetes CRD docs generation
+│       ├── helm-docs.js           # Helm chart docs generation
+│       ├── index.js               # Main tool orchestrator
+│       ├── job-queue.js           # Background job management
+│       ├── metrics-docs.js        # Metrics docs generation
+│       ├── openapi.js             # OpenAPI bundle generation
+│       ├── property-docs.js       # Property docs generation
+│       ├── review.js              # Documentation quality review
+│       ├── rpcn-docs.js           # Redpanda Connect docs generation
+│       ├── rpk-docs.js            # RPK CLI docs generation
+│       ├── utils.js               # Shared utilities
+│       └── versions.js            # Version information
 ├── __tests__/mcp/                 # MCP tests
-│   ├── integration.test.js
 │   ├── cli-contract.test.js
 │   ├── doc-tools-mcp.test.js
-│   ├── CLI_INTERFACE.adoc
+│   ├── integration.test.js
 │   └── README.adoc
 └── cli-utils/
     └── setup-mcp.js               # Setup automation

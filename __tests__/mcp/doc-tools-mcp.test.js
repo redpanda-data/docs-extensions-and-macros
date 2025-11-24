@@ -627,7 +627,12 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
-        execSync.mockReturnValue('Generated 342 properties\n');
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generated 342 properties\n',
+          stderr: '',
+          error: null
+        });
 
         const result = generatePropertyDocs({ version: '25.3.1' });
 
@@ -642,7 +647,12 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
-        execSync.mockReturnValue('Generated 342 properties\n');
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generated 342 properties\n',
+          stderr: '',
+          error: null
+        });
 
         const result = generatePropertyDocs({ version: '25.3.1', generate_partials: true });
 
@@ -658,13 +668,19 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
-        execSync.mockReturnValue('Generated 342 properties\n');
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generated 342 properties\n',
+          stderr: '',
+          error: null
+        });
 
         const result = generatePropertyDocs({ version: '25.3.1' });
 
         expect(result.version).toBe('v25.3.1');
-        expect(execSync).toHaveBeenCalledWith(
-          expect.stringContaining('--tag v25.3.1'),
+        expect(spawnSync).toHaveBeenCalledWith(
+          'npx',
+          expect.arrayContaining(['doc-tools', 'generate', 'property-docs', '--tag', 'v25.3.1']),
           expect.any(Object)
         );
       });
@@ -674,13 +690,19 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
-        execSync.mockReturnValue('Generated 342 properties\n');
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generated 342 properties\n',
+          stderr: '',
+          error: null
+        });
 
         const result = generatePropertyDocs({ version: 'latest' });
 
         expect(result.version).toBe('latest');
-        expect(execSync).toHaveBeenCalledWith(
-          expect.stringContaining('--tag latest'),
+        expect(spawnSync).toHaveBeenCalledWith(
+          'npx',
+          expect.arrayContaining(['doc-tools', 'generate', 'property-docs', '--tag', 'latest']),
           expect.any(Object)
         );
       });
@@ -716,16 +738,17 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
-        const error = new Error('Tag not found');
-        error.stdout = 'stdout output';
-        error.stderr = 'Tag v25.3.1 not found';
-        error.status = 1;
-        execSync.mockImplementation(() => { throw error; });
+        spawnSync.mockReturnValue({
+          status: 1,
+          stdout: 'stdout output',
+          stderr: 'Tag v25.3.1 not found',
+          error: null
+        });
 
         const result = generatePropertyDocs({ version: '25.3.1' });
 
         expect(result.success).toBe(false);
-        expect(result.error).toBe('Tag not found');
+        expect(result.error).toBe('Tag v25.3.1 not found');
         expect(result.stderr).toContain('Tag v25.3.1 not found');
         expect(result.suggestion).toContain('version exists');
       });

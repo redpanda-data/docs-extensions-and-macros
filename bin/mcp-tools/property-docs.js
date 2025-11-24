@@ -2,7 +2,7 @@
  * MCP Tools - Property Documentation Generation
  */
 
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 const { createJob } = require('./job-queue');
@@ -64,13 +64,35 @@ function generatePropertyDocs(args) {
 
   // Otherwise run synchronously
   try {
-    const output = execSync(cmdArgs.join(' '), {
+    // Extract 'npx' from cmdArgs[0] and use rest as arguments
+    const result = spawnSync(cmdArgs[0], cmdArgs.slice(1), {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',
       maxBuffer: MAX_EXEC_BUFFER_SIZE,
       timeout: DEFAULT_COMMAND_TIMEOUT
     });
+
+    // Check for spawn errors
+    if (result.error) {
+      const err = new Error(`Failed to execute command: ${result.error.message}`);
+      err.stdout = result.stdout || '';
+      err.stderr = result.stderr || '';
+      err.status = result.status;
+      throw err;
+    }
+
+    // Check for non-zero exit codes
+    if (result.status !== 0) {
+      const errorMsg = result.stderr || `Command failed with exit code ${result.status}`;
+      const err = new Error(errorMsg);
+      err.stdout = result.stdout || '';
+      err.stderr = result.stderr || '';
+      err.status = result.status;
+      throw err;
+    }
+
+    const output = result.stdout;
 
     // Parse output to extract useful information
     const propertyCountMatch = output.match(/(\d+) properties/i);
