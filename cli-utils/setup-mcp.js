@@ -2,13 +2,14 @@
  * Cross-platform MCP Server Setup Utility
  *
  * Configures the Redpanda Docs MCP server for Claude Code across
- * macOS, Linux, and Windows platforms.
+ * macOS, Linux, and Windows platforms using the 'claude mcp add' command.
  */
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const chalk = require('chalk');
+const { execSync } = require('child_process');
 
 /**
  * Detect the operating system
@@ -149,7 +150,7 @@ function addMCPServer(config, options = {}) {
     mode = 'npx', // 'npx' or 'local'
     packageName = '@redpanda-data/docs-extensions-and-macros',
     localPath = null,
-    serverName = 'redpanda-docs'
+    serverName = 'redpanda-docs-tool-assistant'
   } = options;
 
   // Ensure mcpServers object exists
@@ -182,7 +183,7 @@ function addMCPServer(config, options = {}) {
 /**
  * Check if MCP server is already configured
  */
-function isMCPServerConfigured(config, serverName = 'redpanda-docs') {
+function isMCPServerConfigured(config, serverName = 'redpanda-docs-tool-assistant') {
   return config.mcpServers && config.mcpServers[serverName];
 }
 
@@ -206,7 +207,7 @@ function getMCPServerPath() {
 }
 
 /**
- * Main setup function
+ * Main setup function using 'claude mcp add' CLI command
  */
 async function setupMCP(options = {}) {
   const { force = false, target = 'auto', local = false } = options;
@@ -253,149 +254,98 @@ async function setupMCP(options = {}) {
     console.log(chalk.gray(`  Using npx to run from node_modules or npm\n`));
   }
 
-  // Find config files
-  const configFiles = findConfigFiles();
-  console.log();
+  // Check if MCP server is already configured
+  const configPath = path.join(os.homedir(), '.claude.json');
+  let alreadyConfigured = false;
+  let needsUpdate = false;
 
-  // Determine which config to use
-  let configPath = null;
-  let configType = null;
-
-  if (target === 'desktop' || (target === 'auto' && configFiles.claudeDesktop && !configFiles.claudeCode)) {
-    configPath = configFiles.claudeDesktop;
-    configType = 'Claude Desktop';
-  } else if (target === 'code' || (target === 'auto' && configFiles.claudeCode)) {
-    configPath = configFiles.claudeCode;
-    configType = 'Claude Code';
-  } else if (target === 'auto' && configFiles.claudeDesktop) {
-    configPath = configFiles.claudeDesktop;
-    configType = 'Claude Desktop';
-  }
-
-  // If no config found, create one for Claude Code
-  if (!configPath) {
-    console.log(chalk.yellow('⚠ ') + ' No Claude configuration found. Creating new config for Claude Code...\n');
-
-    const paths = getConfigPaths();
-    configPath = paths.claudeCode[0]; // Use first option as default
-    configType = 'Claude Code';
-
-    const newConfig = addMCPServer({}, { mode, packageName, localPath });
-
+  if (fs.existsSync(configPath)) {
     try {
-      writeConfig(configPath, newConfig);
-      console.log(chalk.green('✓') + ` Created config: ${chalk.gray(configPath)}`);
-      console.log(chalk.green('✓') + ` Added MCP server: ${chalk.cyan('redpanda-docs')}\n`);
+      const config = readConfig(configPath);
+      alreadyConfigured = isMCPServerConfigured(config);
 
-      return {
-        success: true,
-        configPath,
-        configType,
-        action: 'created',
-        mode
-      };
-    } catch (err) {
-      console.error(chalk.red('✗') + ` Failed to create config: ${err.message}`);
-      return { success: false, error: err.message };
-    }
-  }
+      if (alreadyConfigured) {
+        const existingConfig = config.mcpServers['redpanda-docs-tool-assistant'];
+        const existingCommand = existingConfig.command;
+        const existingArgs = existingConfig.args || [];
 
-  console.log(chalk.green('✓') + ` Found ${configType} config: ${chalk.gray(configPath)}\n`);
+        // Check if configuration matches desired mode
+        const isCorrectNpxConfig = mode === 'npx' && existingCommand === 'npx' &&
+                                    existingArgs.includes('doc-tools-mcp');
+        const isCorrectLocalConfig = mode === 'local' && existingCommand === 'node' &&
+                                      existingArgs[0] === localPath;
 
-  // Read existing config
-  let config;
-  try {
-    config = readConfig(configPath);
-  } catch (err) {
-    console.error(chalk.red('✗') + ` ${err.message}`);
-    return { success: false, error: err.message };
-  }
-
-  // Check if already configured
-  const alreadyConfigured = isMCPServerConfigured(config);
-
-  if (alreadyConfigured && !force) {
-    const existingConfig = config.mcpServers['redpanda-docs'];
-    const existingCommand = existingConfig.command;
-    const existingArgs = existingConfig.args || [];
-    const existingType = existingConfig.type;
-
-    // Check if it's using the correct npx format
-    const isCorrectNpxConfig = existingCommand === 'npx' &&
-                                existingArgs[0] === '-y' &&
-                                existingArgs[1] === 'doc-tools-mcp' &&
-                                existingType === 'stdio';
-
-    // Check if it's using local mode correctly
-    const isCorrectLocalConfig = existingCommand === 'node' &&
-                                   existingArgs[0] &&
-                                   existingType === 'stdio';
-
-    if ((mode === 'npx' && isCorrectNpxConfig) || (mode === 'local' && isCorrectLocalConfig)) {
-      console.log(chalk.green('✓') + ` MCP server already configured correctly\n`);
-      return {
-        success: true,
-        configPath,
-        configType,
-        action: 'already-configured',
-        mode
-      };
-    } else {
-      console.log(chalk.yellow('⚠ ') + ' MCP server configured but with different setup:');
-      console.log(chalk.gray(`  Current: ${existingCommand} ${existingArgs.join(' ')}`));
-      const newSetup = mode === 'local' ? `node ${localPath}` : 'npx -y doc-tools-mcp';
-      console.log(chalk.gray(`  New:     ${newSetup}\n`));
-
-      if (!force) {
-        console.log(chalk.blue('ℹ') + '  Use --force to update configuration\n');
-        return {
-          success: true,
-          configPath,
-          configType,
-          action: 'config-mismatch'
-        };
+        if (!isCorrectNpxConfig && !isCorrectLocalConfig) {
+          needsUpdate = true;
+          console.log(chalk.yellow('⚠ ') + ' MCP server configured but with different setup:');
+          console.log(chalk.gray(`  Current: ${existingCommand} ${existingArgs.join(' ')}`));
+          const newSetup = mode === 'local' ? `node ${localPath}` : 'npx -y doc-tools-mcp';
+          console.log(chalk.gray(`  New:     ${newSetup}\n`));
+        } else {
+          console.log(chalk.green('✓') + ` MCP server already configured correctly\n`);
+          if (!force) {
+            return {
+              success: true,
+              configPath,
+              configType: 'Claude Code',
+              action: 'already-configured',
+              mode
+            };
+          }
+        }
       }
+    } catch (err) {
+      console.log(chalk.yellow('⚠ ') + ` Could not read config: ${err.message}`);
     }
   }
 
-  // Create backup
-  let backupPath;
-  try {
-    backupPath = backupConfig(configPath);
-    console.log(chalk.green('✓') + ` Created backup: ${chalk.gray(backupPath)}`);
-  } catch (err) {
-    console.error(chalk.yellow('⚠ ') + ` Could not create backup: ${err.message}`);
+  if (alreadyConfigured && !needsUpdate && !force) {
+    console.log(chalk.blue('ℹ') + '  Use --force to reconfigure\n');
+    return {
+      success: true,
+      configPath,
+      configType: 'Claude Code',
+      action: 'already-configured',
+      mode
+    };
   }
 
-  // Update config
-  const updatedConfig = addMCPServer(config, { mode, packageName, localPath });
+  // Build the claude mcp add command
+  const serverName = 'redpanda-docs-tool-assistant';
 
+  // If server exists and we're updating, remove it first
+  if (alreadyConfigured && (needsUpdate || force)) {
+    try {
+      console.log(chalk.gray(`Removing existing MCP server: ${serverName}\n`));
+      execSync(`claude mcp remove --scope user ${serverName}`, { stdio: 'pipe' });
+    } catch (err) {
+      console.log(chalk.yellow('⚠ ') + ` Could not remove existing server (may not exist): ${err.message}`);
+    }
+  }
+
+  let command;
+  if (mode === 'local') {
+    command = `claude mcp add --transport stdio --scope user ${serverName} -- node ${localPath}`;
+  } else {
+    command = `claude mcp add --transport stdio --scope user ${serverName} -- npx -y doc-tools-mcp`;
+  }
+
+  // Execute the command
   try {
-    writeConfig(configPath, updatedConfig);
-    console.log(chalk.green('✓') + ` Updated config: ${chalk.gray(configPath)}`);
-    console.log(chalk.green('✓') + ` ${alreadyConfigured ? 'Updated' : 'Added'} MCP server: ${chalk.cyan('redpanda-docs')}\n`);
+    console.log(chalk.gray(`Running: ${command}\n`));
+    execSync(command, { stdio: 'inherit' });
+
+    console.log(chalk.green('✓') + ` MCP server ${alreadyConfigured ? 'updated' : 'added'}: ${chalk.cyan(serverName)}\n`);
 
     return {
       success: true,
       configPath,
-      configType,
-      backupPath,
+      configType: 'Claude Code',
       action: alreadyConfigured ? 'updated' : 'added',
       mode
     };
   } catch (err) {
-    console.error(chalk.red('✗') + ` Failed to write config: ${err.message}`);
-
-    // Restore from backup if available
-    if (backupPath && fs.existsSync(backupPath)) {
-      try {
-        fs.copyFileSync(backupPath, configPath);
-        console.log(chalk.yellow('⚠ ') + ' Restored config from backup');
-      } catch (restoreErr) {
-        console.error(chalk.red('✗') + ` Could not restore backup: ${restoreErr.message}`);
-      }
-    }
-
+    console.error(chalk.red('✗') + ` Failed to add MCP server: ${err.message}`);
     return { success: false, error: err.message };
   }
 }
@@ -450,24 +400,27 @@ function showStatus() {
   console.log(chalk.blue('\n📊 MCP Server Configuration Status\n'));
   console.log(chalk.gray(`Platform: ${detectOS()}\n`));
 
-  const configFiles = findConfigFiles();
+  // Check Claude Code config in .claude.json
+  const claudeCodePath = path.join(os.homedir(), '.claude.json');
 
-  if (configFiles.claudeCode) {
+  if (fs.existsSync(claudeCodePath)) {
     console.log(chalk.bold('Claude Code:'));
-    console.log(chalk.gray(`  Config: ${configFiles.claudeCode}`));
+    console.log(chalk.gray(`  Config: ${claudeCodePath}`));
 
     try {
-      const config = readConfig(configFiles.claudeCode);
+      const config = readConfig(claudeCodePath);
       const configured = isMCPServerConfigured(config);
 
       if (configured) {
-        const server = config.mcpServers['redpanda-docs'];
-        const mode = server.command === 'node' ? 'local' : 'npx';
-        const path = server.args[0];
+        const server = config.mcpServers['redpanda-docs-tool-assistant'];
+        const mode = server.command === 'node' ? 'Local Development' : 'NPX (Published Package)';
+        const details = server.command === 'node'
+          ? `Path: ${server.args[0]}`
+          : `Package: ${server.args.join(' ')}`;
 
         console.log(chalk.green('  ✓ MCP server configured'));
-        console.log(chalk.gray(`  Mode: ${mode === 'local' ? 'Local Development' : 'NPX (Published Package)'}`));
-        console.log(chalk.gray(`  ${mode === 'local' ? 'Path' : 'Package'}: ${path}\n`));
+        console.log(chalk.gray(`  Mode: ${mode}`));
+        console.log(chalk.gray(`  ${details}\n`));
       } else {
         console.log(chalk.yellow('  ✗ MCP server not configured\n'));
       }
@@ -478,6 +431,8 @@ function showStatus() {
     console.log(chalk.gray('Claude Code: Not found\n'));
   }
 
+  // Check Claude Desktop config
+  const configFiles = findConfigFiles();
   if (configFiles.claudeDesktop) {
     console.log(chalk.bold('Claude Desktop:'));
     console.log(chalk.gray(`  Config: ${configFiles.claudeDesktop}`));
@@ -487,13 +442,15 @@ function showStatus() {
       const configured = isMCPServerConfigured(config);
 
       if (configured) {
-        const server = config.mcpServers['redpanda-docs'];
-        const mode = server.command === 'node' ? 'local' : 'npx';
-        const path = server.args[0];
+        const server = config.mcpServers['redpanda-docs-tool-assistant'];
+        const mode = server.command === 'node' ? 'Local Development' : 'NPX (Published Package)';
+        const details = server.command === 'node'
+          ? `Path: ${server.args[0]}`
+          : `Package: ${server.args.join(' ')}`;
 
         console.log(chalk.green('  ✓ MCP server configured'));
-        console.log(chalk.gray(`  Mode: ${mode === 'local' ? 'Local Development' : 'NPX (Published Package)'}`));
-        console.log(chalk.gray(`  ${mode === 'local' ? 'Path' : 'Package'}: ${path}\n`));
+        console.log(chalk.gray(`  Mode: ${mode}`));
+        console.log(chalk.gray(`  ${details}\n`));
       } else {
         console.log(chalk.yellow('  ✗ MCP server not configured\n'));
       }

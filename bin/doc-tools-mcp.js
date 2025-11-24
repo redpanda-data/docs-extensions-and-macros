@@ -12,166 +12,18 @@
  * - Automation: Run doc-tools generate commands
  */
 
+const fs = require('fs');
+const path = require('path');
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
 } = require('@modelcontextprotocol/sdk/types.js');
-const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
-const yaml = require('js-yaml');
-
-/**
- * Find the repository root from current working directory
- */
-function findRepoRoot(start = process.cwd()) {
-  let dir = start;
-  while (dir !== path.parse(dir).root) {
-    if (fs.existsSync(path.join(dir, '.git')) || fs.existsSync(path.join(dir, 'package.json'))) {
-      return dir;
-    }
-    dir = path.dirname(dir);
-  }
-  return start; // Fallback to current directory
-}
-
-/**
- * Get Antora structure information for the current repository
- */
-function getAntoraStructure(repoRoot) {
-  const playbooks = [
-    'local-antora-playbook.yml',
-    'antora-playbook.yml',
-    'docs-playbook.yml'
-  ].map(name => path.join(repoRoot, name))
-   .find(p => fs.existsSync(p));
-
-  let playbookContent = null;
-  if (playbooks) {
-    try {
-      playbookContent = yaml.load(fs.readFileSync(playbooks, 'utf8'));
-    } catch (err) {
-      // Playbook parsing error, continue without it
-    }
-  }
-
-  // Find all antora.yml files
-  const antoraYmls = [];
-  const findAntoraYmls = (dir, depth = 0) => {
-    if (depth > 3 || !fs.existsSync(dir)) return; // Limit recursion depth
-    try {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'docs') continue;
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          findAntoraYmls(fullPath, depth + 1);
-        } else if (entry.name === 'antora.yml') {
-          antoraYmls.push(fullPath);
-        }
-      }
-    } catch (err) {
-      // Permission error or other issue, skip
-    }
-  };
-  findAntoraYmls(repoRoot);
-
-  // Parse each antora.yml
-  const components = antoraYmls.map(ymlPath => {
-    try {
-      const content = yaml.load(fs.readFileSync(ymlPath, 'utf8'));
-      const componentDir = path.dirname(ymlPath);
-      const modulesDir = path.join(componentDir, 'modules');
-      const modules = fs.existsSync(modulesDir)
-        ? fs.readdirSync(modulesDir).filter(m => {
-            const stat = fs.statSync(path.join(modulesDir, m));
-            return stat.isDirectory();
-          })
-        : [];
-
-      return {
-        name: content.name,
-        version: content.version,
-        title: content.title,
-        path: componentDir,
-        modules: modules.map(moduleName => {
-          const modulePath = path.join(modulesDir, moduleName);
-          return {
-            name: moduleName,
-            path: modulePath,
-            pages: fs.existsSync(path.join(modulePath, 'pages')),
-            partials: fs.existsSync(path.join(modulePath, 'partials')),
-            examples: fs.existsSync(path.join(modulePath, 'examples')),
-            attachments: fs.existsSync(path.join(modulePath, 'attachments')),
-            images: fs.existsSync(path.join(modulePath, 'images')),
-          };
-        }),
-      };
-    } catch (err) {
-      return { error: `Failed to parse ${ymlPath}: ${err.message}` };
-    }
-  });
-
-  return {
-    repoRoot,
-    playbook: playbookContent,
-    components,
-    hasDocTools: fs.existsSync(path.join(repoRoot, 'package.json')) &&
-                 fs.existsSync(path.join(repoRoot, 'bin', 'doc-tools.js'))
-  };
-}
-
-/**
- * Execute a tool and return results
- */
-function executeTool(toolName, args) {
-  const repoRoot = findRepoRoot();
-
-  try {
-    switch (toolName) {
-      case 'get_antora_structure': {
-        return getAntoraStructure(repoRoot);
-      }
-
-      case 'run_doc_tools_command': {
-        const structure = getAntoraStructure(repoRoot);
-
-        if (!structure.hasDocTools) {
-          return {
-            error: 'doc-tools not found in this repository. This command only works in repos with doc-tools installed.',
-            suggestion: 'Navigate to the docs-extensions-and-macros repository or a repo that has doc-tools as a dependency.'
-          };
-        }
-
-        const cmd = `npx doc-tools ${args.command}`;
-
-        try {
-          const output = execSync(cmd, {
-            cwd: repoRoot,
-            encoding: 'utf8',
-            stdio: 'pipe',
-            maxBuffer: 50 * 1024 * 1024
-          });
-          return { success: true, output, command: cmd };
-        } catch (err) {
-          return {
-            error: err.message,
-            output: (err.stdout || '') + (err.stderr || ''),
-            exitCode: err.status,
-            command: cmd
-          };
-        }
-      }
-
-      default:
-        return { error: `Unknown tool: ${toolName}` };
-    }
-  } catch (err) {
-    return { error: err.message, stack: err.stack };
-  }
-}
+const { findRepoRoot, executeTool } = require('./mcp-tools');
+const { initializeJobQueue, getJob, listJobs } = require('./mcp-tools/job-queue');
 
 // Get version from package.json
 const packageJson = require('../package.json');
@@ -185,15 +37,16 @@ const server = new Server(
   {
     capabilities: {
       tools: {},
+      prompts: {},
     },
   }
 );
 
-// Tool definitions - only domain-specific tools
+// Tool definitions - Writer-friendly documentation tools
 const tools = [
   {
     name: 'get_antora_structure',
-    description: 'Get information about the Antora documentation structure in the current repository, including components, modules, and available directories. Use this to understand the docs organization before making changes.',
+    description: 'Get information about the Antora documentation structure in the current repository, including components, modules, and available directories. Use this to understand the docs organization.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -201,8 +54,292 @@ const tools = [
     }
   },
   {
+    name: 'get_redpanda_version',
+    description: 'Get the latest Redpanda version information including version number, Docker tag, and release notes URL. Writers use this to find out what version to document.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        beta: {
+          type: 'boolean',
+          description: 'Whether to get the latest beta/RC version instead of stable (optional, defaults to false)'
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'get_console_version',
+    description: 'Get the latest Redpanda Console version information including version number, Docker tag, and release notes URL.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: 'generate_property_docs',
+    description: 'Generate Redpanda configuration property documentation for a specific version. Creates JSON and optionally AsciiDoc partials with all configuration properties. Writers use this when updating docs for a new Redpanda release. Can run in background with progress streaming.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        version: {
+          type: 'string',
+          description: 'Redpanda version to generate docs for (e.g., "25.3.1", "v25.3.1", or "latest")'
+        },
+        generate_partials: {
+          type: 'boolean',
+          description: 'Whether to generate AsciiDoc partials (cluster-properties.adoc, topic-properties.adoc, etc.). Default: false (only generates JSON)'
+        },
+        background: {
+          type: 'boolean',
+          description: 'Run as background job with progress updates. Returns job ID immediately instead of waiting. Default: false (run synchronously)'
+        }
+      },
+      required: ['version']
+    }
+  },
+  {
+    name: 'generate_metrics_docs',
+    description: 'Generate Redpanda metrics documentation for a specific version. Creates the public metrics reference page. Writers use this when updating metrics docs for a new release.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        version: {
+          type: 'string',
+          description: 'Redpanda version to generate metrics docs for (e.g., "25.3.1" or "v25.3.1")'
+        }
+      },
+      required: ['version']
+    }
+  },
+  {
+    name: 'generate_rpk_docs',
+    description: 'Generate RPK command-line documentation for a specific version. Creates AsciiDoc files for all rpk commands. Writers use this when updating CLI docs for a new release.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        version: {
+          type: 'string',
+          description: 'Redpanda version to generate RPK docs for (e.g., "25.3.1" or "v25.3.1")'
+        }
+      },
+      required: ['version']
+    }
+  },
+  {
+    name: 'generate_rpcn_connector_docs',
+    description: 'Generate Redpanda Connect connector documentation. Creates component documentation for all connectors. Writers use this when updating connector reference docs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fetch_connectors: {
+          type: 'boolean',
+          description: 'Fetch latest connector data using rpk (optional, defaults to false)'
+        },
+        draft_missing: {
+          type: 'boolean',
+          description: 'Generate full-doc drafts for connectors missing in output (optional, defaults to false)'
+        },
+        update_whats_new: {
+          type: 'boolean',
+          description: 'Update whats-new.adoc with new section from diff JSON (optional, defaults to false)'
+        },
+        include_bloblang: {
+          type: 'boolean',
+          description: 'Include Bloblang functions and methods in generation (optional, defaults to false)'
+        },
+        data_dir: {
+          type: 'string',
+          description: 'Directory where versioned connect JSON files live (optional)'
+        },
+        old_data: {
+          type: 'string',
+          description: 'Optional override for old data file (for diff)'
+        },
+        csv: {
+          type: 'string',
+          description: 'Path to connector metadata CSV file (optional)'
+        },
+        overrides: {
+          type: 'string',
+          description: 'Path to optional JSON file with overrides'
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'generate_helm_docs',
+    description: 'Generate Helm chart documentation. Creates AsciiDoc documentation for Helm charts from local directories or GitHub repositories. Writers use this when updating Helm chart reference docs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chart_dir: {
+          type: 'string',
+          description: 'Chart directory (contains Chart.yaml) or root containing multiple charts, or a GitHub URL (optional, defaults to Redpanda operator charts)'
+        },
+        tag: {
+          type: 'string',
+          description: 'Branch or tag to clone when using a GitHub URL (optional)'
+        },
+        readme: {
+          type: 'string',
+          description: 'Relative README.md path inside each chart dir (optional, defaults to "README.md")'
+        },
+        output_dir: {
+          type: 'string',
+          description: 'Where to write all generated AsciiDoc files (optional, defaults to "modules/reference/pages")'
+        },
+        output_suffix: {
+          type: 'string',
+          description: 'Suffix to append to each chart name including extension (optional, defaults to "-helm-spec.adoc")'
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'generate_cloud_regions',
+    description: 'Generate cloud regions table documentation. Creates a Markdown or AsciiDoc table of cloud regions and tiers from GitHub YAML data. Writers use this when updating cloud region documentation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        output: {
+          type: 'string',
+          description: 'Output file path relative to repo root (optional, defaults to "cloud-controlplane/x-topics/cloud-regions.md")'
+        },
+        format: {
+          type: 'string',
+          description: 'Output format: "md" (Markdown) or "adoc" (AsciiDoc) (optional, defaults to "md")',
+          enum: ['md', 'adoc']
+        },
+        owner: {
+          type: 'string',
+          description: 'GitHub repository owner (optional, defaults to "redpanda-data")'
+        },
+        repo: {
+          type: 'string',
+          description: 'GitHub repository name (optional, defaults to "cloudv2-infra")'
+        },
+        path: {
+          type: 'string',
+          description: 'Path to YAML file in repository (optional)'
+        },
+        ref: {
+          type: 'string',
+          description: 'Git reference - branch, tag, or commit SHA (optional, defaults to "integration")'
+        },
+        template: {
+          type: 'string',
+          description: 'Path to custom Handlebars template relative to repo root (optional)'
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'Print output to stdout instead of writing file (optional, defaults to false)'
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'generate_crd_docs',
+    description: 'Generate Kubernetes CRD (Custom Resource Definition) documentation. Creates AsciiDoc documentation for Kubernetes operator CRDs. Writers use this when updating operator reference docs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tag: {
+          type: 'string',
+          description: 'Operator release tag or branch (e.g., "operator/v25.1.2")'
+        },
+        source_path: {
+          type: 'string',
+          description: 'CRD Go types directory or GitHub URL (optional, defaults to Redpanda operator repo)'
+        },
+        depth: {
+          type: 'number',
+          description: 'How many levels deep to generate (optional, defaults to 10)'
+        },
+        templates_dir: {
+          type: 'string',
+          description: 'Asciidoctor templates directory (optional)'
+        },
+        output: {
+          type: 'string',
+          description: 'Where to write the generated AsciiDoc file (optional, defaults to "modules/reference/pages/k-crd.adoc")'
+        }
+      },
+      required: ['tag']
+    }
+  },
+  {
+    name: 'generate_bundle_openapi',
+    description: 'Bundle Redpanda OpenAPI fragments. Creates complete OpenAPI 3.1 documents for admin and/or connect APIs by bundling fragments from the Redpanda repository. Writers use this when updating API reference docs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tag: {
+          type: 'string',
+          description: 'Branch or tag to clone from repository (e.g., "v24.3.2", "24.3.2", or "dev")'
+        },
+        repo: {
+          type: 'string',
+          description: 'Repository URL (optional, defaults to Redpanda repo)'
+        },
+        surface: {
+          type: 'string',
+          description: 'Which API surface(s) to bundle (optional, defaults to "both")',
+          enum: ['admin', 'connect', 'both']
+        },
+        out_admin: {
+          type: 'string',
+          description: 'Output path for admin API (optional, defaults to "admin/redpanda-admin-api.yaml")'
+        },
+        out_connect: {
+          type: 'string',
+          description: 'Output path for connect API (optional, defaults to "connect/redpanda-connect-api.yaml")'
+        },
+        admin_major: {
+          type: 'string',
+          description: 'Admin API major version (optional, defaults to "v2.0.0")'
+        },
+        use_admin_major_version: {
+          type: 'boolean',
+          description: 'Use admin major version for info.version instead of git tag (optional, defaults to false)'
+        },
+        quiet: {
+          type: 'boolean',
+          description: 'Suppress logs (optional, defaults to false)'
+        }
+      },
+      required: ['tag']
+    }
+  },
+  {
+    name: 'review_generated_docs',
+    description: 'Review recently generated documentation for quality issues. Checks for missing descriptions, invalid formatting, DRY violations, and other quality problems. Uses the quality criteria from the property-docs-guide and rpcn-connector-docs-guide prompts. Can generate a formatted markdown report for easy review.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        doc_type: {
+          type: 'string',
+          description: 'Type of documentation to review',
+          enum: ['properties', 'metrics', 'rpk', 'rpcn_connectors']
+        },
+        version: {
+          type: 'string',
+          description: 'Version of the docs to review (required for properties, metrics, rpk; e.g., "25.3.1" or "v25.3.1")'
+        },
+        generate_report: {
+          type: 'boolean',
+          description: 'Generate a formatted markdown report file for easy review (default: true)'
+        }
+      },
+      required: ['doc_type']
+    }
+  },
+  {
     name: 'run_doc_tools_command',
-    description: 'Run a doc-tools automation command using "npx doc-tools <command>". Only works in repositories that have doc-tools. Common commands: "generate property-docs --tag v25.3.1", "generate metrics-docs --tag v25.3.1", "generate rp-connect-docs --branch main".',
+    description: 'Advanced: Run a raw doc-tools command. Only use this if none of the specific tools above fit your needs. Requires knowledge of doc-tools CLI syntax.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -213,18 +350,168 @@ const tools = [
       },
       required: ['command']
     }
+  },
+  {
+    name: 'get_job_status',
+    description: 'Get the status and progress of a background job. Use this to check on long-running documentation generation tasks.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        job_id: {
+          type: 'string',
+          description: 'Job ID returned when the job was created'
+        }
+      },
+      required: ['job_id']
+    }
+  },
+  {
+    name: 'list_jobs',
+    description: 'List all background jobs with optional filtering. Use this to see recent documentation generation jobs and their status.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          description: 'Filter by job status (optional)',
+          enum: ['pending', 'running', 'completed', 'failed']
+        },
+        tool: {
+          type: 'string',
+          description: 'Filter by tool name (optional)'
+        }
+      },
+      required: []
+    }
   }
 ];
+
+// Prompt definitions - Contextual guides for complex workflows
+const prompts = [
+  {
+    name: 'property-docs-guide',
+    description: 'Comprehensive guide for updating Redpanda property documentation using the override system. Use this when working with configuration properties.',
+    arguments: []
+  },
+  {
+    name: 'rpcn-connector-docs-guide',
+    description: 'Comprehensive guide for updating Redpanda Connect connector reference documentation using the overrides system with $ref syntax. Use this when working with connector documentation.',
+    arguments: []
+  }
+];
+
+/**
+ * Load prompt content from markdown file
+ * @param {string} name - Name of the prompt
+ * @returns {string} Prompt content
+ */
+function getPromptContent(name) {
+  const promptPath = path.join(__dirname, '..', 'mcp', 'prompts', `${name}.md`);
+  try {
+    return fs.readFileSync(promptPath, 'utf8');
+  } catch (err) {
+    console.error(`Error loading prompt ${name}: ${err.message}`);
+    throw new Error(`Prompt not found: ${name}`);
+  }
+}
 
 // Handle list tools request
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools };
 });
 
+// Handle list prompts request
+server.setRequestHandler(ListPromptsRequestSchema, async () => {
+  return { prompts };
+});
+
+// Handle get prompt request
+server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  const { name } = request.params;
+
+  if (name === 'property-docs-guide') {
+    return {
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: getPromptContent('property-docs-guide')
+          }
+        }
+      ]
+    };
+  }
+
+  if (name === 'rpcn-connector-docs-guide') {
+    return {
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: getPromptContent('rpcn-connector-docs-guide')
+          }
+        }
+      ]
+    };
+  }
+
+  throw new Error(`Unknown prompt: ${name}`);
+});
+
 // Handle tool execution
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
+  // Handle job management tools
+  if (name === 'get_job_status') {
+    const job = getJob(args.job_id);
+    if (!job) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: `Job not found: ${args.job_id}`,
+              suggestion: 'Check the job ID or use list_jobs to see available jobs'
+            }, null, 2)
+          }
+        ]
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            job
+          }, null, 2)
+        }
+      ]
+    };
+  }
+
+  if (name === 'list_jobs') {
+    const jobs = listJobs(args || {});
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            jobs,
+            total: jobs.length
+          }, null, 2)
+        }
+      ]
+    };
+  }
+
+  // Handle regular tools
   const result = executeTool(name, args || {});
 
   return {
@@ -242,10 +529,17 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
+  // Initialize job queue with server instance for progress notifications
+  initializeJobQueue(server);
+
   // Log to stderr so it doesn't interfere with MCP protocol on stdout
-  console.error('Redpanda Docs MCP Server running');
+  const repoInfo = findRepoRoot();
+  console.error('Redpanda Docs Tools MCP Server running');
+  console.error(`Server version: ${packageJson.version}`);
   console.error(`Working directory: ${process.cwd()}`);
-  console.error(`Repository root: ${findRepoRoot()}`);
+  console.error(`Repository root: ${repoInfo.root} (${repoInfo.detected ? repoInfo.type : 'not detected'})`);
+  console.error('Background job queue: enabled');
+  console.error('Command timeout: 10 minutes');
 }
 
 main().catch((error) => {
