@@ -8,6 +8,7 @@ __pycache__/
 gen/
 tree-sitter/
 test/
+test-results/
 modules/
 cloud-controlplane/
 node_modules
