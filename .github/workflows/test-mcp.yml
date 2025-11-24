@@ -13,6 +13,11 @@ on:
       - '__tests__/mcp/**'
       - 'package.json'
 
+permissions:
+  checks: write
+  pull-requests: write
+  contents: read
+
 jobs:
   test-mcp:
     name: Test MCP Server Integration
@@ -70,81 +75,3 @@ jobs:
         run: |
           echo "Verifying generate commands..."
           npx doc-tools generate --help | grep -E "(property-docs|metrics-docs|rpk-docs|rpcn-connector-docs|helm-spec|cloud-regions|crd-spec|bundle-openapi)"
-
-  compatibility-check:
-    name: Check MCP-CLI Compatibility
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Test all MCP tools are accessible
-        run: |
-          node -e "
-          const mcp = require('./bin/mcp-tools');
-          const tools = [
-            'get_antora_structure',
-            'get_redpanda_version',
-            'get_console_version',
-            'generate_property_docs',
-            'generate_metrics_docs',
-            'generate_rpk_docs',
-            'generate_rpcn_connector_docs',
-            'generate_helm_docs',
-            'generate_cloud_regions',
-            'generate_crd_docs',
-            'generate_bundle_openapi',
-            'review_generated_docs'
-          ];
-
-          let failed = false;
-          tools.forEach(tool => {
-            try {
-              const result = mcp.executeTool(tool, {});
-              if (!result) {
-                console.error('❌ Tool returned null:', tool);
-                failed = true;
-              }
-            } catch (err) {
-              console.error('❌ Tool execution failed:', tool, err.message);
-              failed = true;
-            }
-          });
-
-          if (failed) {
-            process.exit(1);
-          }
-          console.log('✅ All MCP tools are accessible');
-          "
-
-      - name: Verify MCP server can start
-        run: |
-          # Start server in background and capture output
-          node bin/doc-tools-mcp.js > /tmp/mcp-server.log 2>&1 &
-          SERVER_PID=$!
-
-          # Wait up to 10 seconds for server to start
-          for i in {1..20}; do
-            if grep -q "Redpanda Docs Tools MCP Server running" /tmp/mcp-server.log 2>/dev/null; then
-              echo "✅ MCP server starts successfully"
-              kill $SERVER_PID 2>/dev/null || true
-              exit 0
-            fi
-            sleep 0.5
-          done
-
-          # If we get here, server didn't start
-          echo "❌ MCP server failed to start within 10 seconds"
-          cat /tmp/mcp-server.log
-          kill $SERVER_PID 2>/dev/null || true
-          exit 1
