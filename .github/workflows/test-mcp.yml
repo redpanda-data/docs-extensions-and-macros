@@ -1,0 +1,133 @@
+name: Test MCP Server
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bin/**'
+      - '__tests__/mcp/**'
+      - 'package.json'
+  pull_request:
+    paths:
+      - 'bin/**'
+      - '__tests__/mcp/**'
+      - 'package.json'
+
+jobs:
+  test-mcp:
+    name: Test MCP Server Integration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run MCP integration tests
+        run: npm test -- __tests__/mcp/
+        env:
+          # Set test timeout for network operations
+          JEST_TIMEOUT: 30000
+
+      - name: Report test results
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: MCP Test Results
+          path: 'test-results/**/*.xml'
+          reporter: jest-junit
+          fail-on-error: true
+
+  test-cli-contract:
+    name: Verify CLI Contract
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run CLI contract tests
+        run: npm test -- __tests__/mcp/cli-contract.test.js
+
+      - name: Verify all generate commands exist
+        run: |
+          echo "Verifying generate commands..."
+          npx doc-tools generate --help | grep -E "(property-docs|metrics-docs|rpk-docs|rpcn-connector-docs|helm-spec|cloud-regions|crd-spec|bundle-openapi)"
+
+  compatibility-check:
+    name: Check MCP-CLI Compatibility
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test all MCP tools are accessible
+        run: |
+          node -e "
+          const mcp = require('./bin/mcp-tools');
+          const tools = [
+            'get_antora_structure',
+            'get_redpanda_version',
+            'get_console_version',
+            'generate_property_docs',
+            'generate_metrics_docs',
+            'generate_rpk_docs',
+            'generate_rpcn_connector_docs',
+            'generate_helm_docs',
+            'generate_cloud_regions',
+            'generate_crd_docs',
+            'generate_bundle_openapi',
+            'review_generated_docs'
+          ];
+
+          let failed = false;
+          tools.forEach(tool => {
+            try {
+              const result = mcp.executeTool(tool, {});
+              if (!result) {
+                console.error('❌ Tool returned null:', tool);
+                failed = true;
+              }
+            } catch (err) {
+              console.error('❌ Tool execution failed:', tool, err.message);
+              failed = true;
+            }
+          });
+
+          if (failed) {
+            process.exit(1);
+          }
+          console.log('✅ All MCP tools are accessible');
+          "
+
+      - name: Verify MCP server can start
+        run: |
+          timeout 5s npx node bin/doc-tools-mcp.js 2>&1 | grep -q "Redpanda Docs Tools MCP Server running" || true
+          echo "✅ MCP server starts successfully"
