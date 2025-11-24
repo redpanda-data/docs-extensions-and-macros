@@ -1,0 +1,339 @@
+= Antora Extensions User Guide
+:toc:
+:toclevels: 3
+
+Complete guide to using Antora extensions in your documentation projects.
+
+== Getting started
+
+=== Installation
+
+Install the package via npm:
+
+[,bash]
+----
+npm i @redpanda-data/docs-extensions-and-macros
+----
+
+=== Basic configuration
+
+Extensions are configured in your Antora playbook under the `antora.extensions` key:
+
+[,yaml]
+----
+antora:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/extensions/extension-name'
+----
+
+IMPORTANT: Extensions must be under `antora.extensions`, not `asciidoc.extensions`. AsciiDoc macros go under `asciidoc.extensions`.
+
+=== Extension with options
+
+Pass configuration options to extensions:
+
+[,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/extension-name'
+      option1: value1
+      option2: value2
+----
+
+== Configuration patterns
+
+=== Simple registration
+
+For extensions without configuration options:
+
+[,yaml]
+----
+antora:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/extensions/unlisted-pages.js'
+----
+
+=== With environment variables
+
+Some extensions use environment variables for sensitive data:
+
+[,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/algolia-indexer'
+      algolia_app_id: $ALGOLIA_APP_ID
+      algolia_api_key: $ALGOLIA_API_KEY
+      algolia_index_name: docs
+----
+
+[,bash]
+----
+export ALGOLIA_APP_ID=your_app_id
+export ALGOLIA_API_KEY=your_api_key
+npx antora local-antora-playbook.yml
+----
+
+=== Multiple extensions
+
+Register multiple extensions in order:
+
+[,yaml]
+----
+antora:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/extensions/version-fetcher/set-latest-version'
+    - '@redpanda-data/docs-extensions-and-macros/extensions/generate-index-data.js'
+    - '@redpanda-data/docs-extensions-and-macros/extensions/produce-redirects.js'
+----
+
+Extensions run in the order they're listed.
+
+== Common workflows
+
+=== Version management
+
+Automatically fetch and set the latest Redpanda version:
+
+[,yaml]
+----
+antora:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/extensions/version-fetcher/set-latest-version'
+----
+
+This sets the `latest-redpanda-version` attribute for use in your documentation.
+
+=== Search integration
+
+Enable Algolia search indexing:
+
+[,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/algolia-indexer'
+      algolia_app_id: $ALGOLIA_APP_ID
+      algolia_api_key: $ALGOLIA_API_KEY
+      algolia_index_name: redpanda-docs
+      algolia_index_version: latest
+----
+
+=== Redirect management
+
+Generate redirects from old URLs to new ones:
+
+[,yaml]
+----
+antora:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/extensions/produce-redirects.js'
+----
+
+Define redirects in your `antora.yml`:
+
+[,yaml]
+----
+name: redpanda
+asciidoc:
+  attributes:
+    page-aliases: old-page.adoc,another-old-page.adoc
+----
+
+=== Content generation
+
+Generate component categories for Redpanda Connect:
+
+[,yaml]
+----
+antora:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/extensions/generate-rp-connect-categories.js'
+    - '@redpanda-data/docs-extensions-and-macros/extensions/generate-rp-connect-info.js'
+----
+
+=== Navigation customization
+
+Manage unlisted pages that appear in navigation:
+
+[,yaml]
+----
+antora:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/extensions/unlisted-pages.js'
+----
+
+Mark pages as unlisted in their AsciiDoc header:
+
+[,asciidoc]
+----
+= Page Title
+:page-unlisted:
+
+Content here...
+----
+
+== Extension order matters
+
+Extensions execute in registration order. Some extensions depend on others running first:
+
+[,yaml]
+----
+antora:
+  extensions:
+    # 1. Fetch versions first
+    - '@redpanda-data/docs-extensions-and-macros/extensions/version-fetcher/set-latest-version'
+    # 2. Then generate content that uses versions
+    - '@redpanda-data/docs-extensions-and-macros/extensions/generate-index-data.js'
+    # 3. Finally index for search
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/algolia-indexer'
+      algolia_app_id: $ALGOLIA_APP_ID
+      algolia_api_key: $ALGOLIA_API_KEY
+      algolia_index_name: docs
+----
+
+== Troubleshooting
+
+=== Extension not loading
+
+*Problem:* Extension doesn't seem to run
+
+*Solutions:*
+
+* Check the extension is under `antora.extensions`, not `asciidoc.extensions`
+* Verify the path to the extension is correct
+* Ensure the package is installed (`npm install`)
+* Check for typos in the extension name
+
+=== Environment variables not working
+
+*Problem:* Extensions using environment variables fail
+
+*Solutions:*
+
+* Set environment variables before running Antora:
++
+[,bash]
+----
+export VAR_NAME=value
+npx antora playbook.yml
+----
+
+* Check variable names match exactly (case-sensitive)
+* Use `$VAR_NAME` syntax in playbook
+* Verify variables are exported, not just set
+
+=== Extension execution order issues
+
+*Problem:* Extensions not working as expected
+
+*Solutions:*
+
+* Check extension order in playbook
+* Some extensions must run before others
+* Review extension dependencies in link:REFERENCE.adoc[Reference docs]
+
+=== Build performance
+
+*Problem:* Build is slow with extensions enabled
+
+*Solutions:*
+
+* Some extensions make network requests (e.g., version fetcher, Algolia)
+* Use caching when possible
+* Disable non-essential extensions during development
+* Run only necessary extensions for your workflow
+
+=== Extension errors
+
+*Problem:* Extension throws errors during build
+
+*Solutions:*
+
+* Check extension configuration options are correct
+* Verify required environment variables are set
+* Review extension logs for specific error messages
+* Ensure your Antora version is compatible
+* Check link:REFERENCE.adoc[Reference docs] for requirements
+
+== Best practices
+
+=== Development vs production
+
+Use different playbooks for development and production:
+
+*Development playbook* (`local-antora-playbook.yml`):
+[,yaml]
+----
+antora:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/extensions/version-fetcher/set-latest-version'
+    # Skip search indexing during development
+----
+
+*Production playbook* (`antora-playbook.yml`):
+[,yaml]
+----
+antora:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/extensions/version-fetcher/set-latest-version'
+    - '@redpanda-data/docs-extensions-and-macros/extensions/generate-index-data.js'
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/algolia-indexer'
+      algolia_app_id: $ALGOLIA_APP_ID
+      algolia_api_key: $ALGOLIA_API_KEY
+      algolia_index_name: docs
+----
+
+=== Organizing playbooks
+
+Keep extension configuration organized:
+
+[,yaml]
+----
+antora:
+  extensions:
+    # Version management
+    - '@redpanda-data/docs-extensions-and-macros/extensions/version-fetcher/set-latest-version'
+
+    # Content generation
+    - '@redpanda-data/docs-extensions-and-macros/extensions/generate-rp-connect-categories.js'
+    - '@redpanda-data/docs-extensions-and-macros/extensions/generate-rp-connect-info.js'
+
+    # Search integration
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/algolia-indexer'
+      algolia_app_id: $ALGOLIA_APP_ID
+      algolia_api_key: $ALGOLIA_API_KEY
+      algolia_index_name: docs
+----
+
+=== Security
+
+* Never commit API keys or secrets to version control
+* Use environment variables for sensitive data
+* Set permissions appropriately in CI/CD
+* Rotate API keys regularly
+
+=== Testing
+
+Test your playbook locally before deploying:
+
+[,bash]
+----
+# Set test environment variables
+export ALGOLIA_APP_ID=test_app_id
+export ALGOLIA_API_KEY=test_api_key
+
+# Run Antora
+npx antora local-antora-playbook.yml
+
+# Check the output
+ls -la build/site/
+----
+
+== Related documentation
+
+* link:REFERENCE.adoc[Extensions reference] - Complete documentation for all extensions
+* link:DEVELOPMENT.adoc[Development guide] - How to create new extensions
+* https://docs.antora.org/antora/latest/playbook/[Antora Playbook Reference]
+* https://docs.antora.org/antora/latest/extend/extensions/[Antora Extensions]

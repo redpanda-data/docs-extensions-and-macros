@@ -1,0 +1,220 @@
+= AsciiDoc Macros User Guide
+:toc:
+:toclevels: 3
+
+Complete guide to using AsciiDoc macros in your documentation.
+
+== Getting started
+
+=== Installation
+
+Install the package:
+
+[,bash]
+----
+npm i @redpanda-data/docs-extensions-and-macros
+----
+
+=== Configuration
+
+Register macros in your Antora playbook under `asciidoc.extensions`:
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/glossary'
+    - '@redpanda-data/docs-extensions-and-macros/macros/config-ref'
+    - '@redpanda-data/docs-extensions-and-macros/macros/helm-ref'
+----
+
+IMPORTANT: Use `asciidoc.extensions` for macros, not `antora.extensions`.
+
+== Using macros
+
+=== glossterm - Glossary terms
+
+Reference glossary terms with tooltips:
+
+[,asciidoc]
+----
+The glossterm:partition[partition] stores data.
+glossterm:broker[broker,A server that handles requests]
+----
+
+*Syntax:* `glossterm:term[definition]`
+
+* `term` - The term to reference (required)
+* `definition` - Custom definition (optional, uses global glossary by default)
+
+=== config_ref - Configuration references
+
+Link to configuration properties:
+
+[,asciidoc]
+----
+config_ref:log.retention.ms,true,tunable-properties[]
+config_ref:cleanup.policy,false[]
+----
+
+*Syntax:* `config_ref:property,isLink,path[]`
+
+* `property` - Configuration property name (required)
+* `isLink` - Whether to create a link (true/false, required)
+* `path` - Document path for link (required if isLink is true)
+
+=== helm_ref - Helm value references
+
+Link to Helm chart values:
+
+[,asciidoc]
+----
+helm_ref:storage.tieredConfig.cloud_storage_enabled[]
+helm_ref:[]
+----
+
+*Syntax:* `helm_ref:value[]`
+
+* `value` - Helm value path (optional, links to values.yaml overview if omitted)
+
+=== components_by_category - Component display
+
+Display Redpanda Connect components by category:
+
+[,asciidoc]
+----
+components_by_category::inputs[]
+components_by_category::outputs[]
+components_by_category::processors[]
+----
+
+*Syntax:* `components_by_category::[type]`
+
+* `type` - Component type (inputs, outputs, processors, etc.)
+
+=== component_table - Component table
+
+Generate searchable component table:
+
+[,asciidoc]
+----
+component_table::[]
+----
+
+Generates a searchable table of all components with filters.
+
+=== component_type_dropdown - Type switcher
+
+Create dropdown for switching between component types:
+
+[,asciidoc]
+----
+component_type_dropdown::[]
+----
+
+Generates a dropdown to switch between different implementations of the same component.
+
+== Configuration options
+
+=== Glossary configuration
+
+Configure glossary behavior in playbook:
+
+[,yaml]
+----
+asciidoc:
+  attributes:
+    glossary-tooltip: data-tooltip  # Enable tooltips
+    glossary-page: glossary.adoc    # Link target
+    glossary-links: true             # Enable links
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/glossary'
+----
+
+*Options:*
+
+* `glossary-tooltip` - Tooltip implementation (title, true, or data-attribute-name)
+* `glossary-page` - Page to link glossary terms to
+* `glossary-links` - Enable/disable links (default: true)
+* `glossary-term-role` - CSS role for terms (default: glossary-term)
+
+== Troubleshooting
+
+=== Macro not rendering
+
+*Problem:* Macro appears as plain text
+
+*Solutions:*
+
+* Verify macro is registered under `asciidoc.extensions`
+* Check macro syntax is correct
+* Ensure package is installed
+* Try rebuilding: `npx antora playbook.yml`
+
+=== Glossary terms not found
+
+*Problem:* Glossary definitions missing
+
+*Solutions:*
+
+* Define terms in shared component or local `antora.yml`
+* Check term spelling matches exactly
+* Provide inline definition as fallback
+
+=== Links not working
+
+*Problem:* config_ref or helm_ref links broken
+
+*Solutions:*
+
+* Verify target page exists
+* Check path is relative to reference module
+* Ensure property/value name is correct
+
+=== Component macros empty
+
+*Problem:* components_by_category shows no components
+
+*Solutions:*
+
+* Ensure component aggregator extension is enabled
+* Check component data is generated
+* Verify component type is correct
+
+== Best practices
+
+=== Use glossary terms consistently
+
+[,asciidoc]
+----
+✓ Good: glossterm:partition[]
+✗ Bad:  partition (without macro)
+----
+
+=== Provide fallback definitions
+
+[,asciidoc]
+----
+glossterm:custom-term[A definition in case term isn't in glossary]
+----
+
+=== Link to configuration when relevant
+
+[,asciidoc]
+----
+To configure retention, set config_ref:log.retention.ms,true,tunable-properties[].
+----
+
+=== Keep macro usage readable
+
+[,asciidoc]
+----
+✓ Good: Configure config_ref:retention.ms,true,topic-properties[].
+✗ Bad:  config_ref:retention.ms,true,topic-properties[]config_ref:cleanup.policy,true,topic-properties[].
+----
+
+== Related documentation
+
+* link:REFERENCE.adoc[Macros reference] - Complete macro documentation
+* link:DEVELOPMENT.adoc[Development guide] - How to create new macros
+* https://docs.asciidoctor.org/asciidoc/latest/macros/[AsciiDoc Macro Syntax]

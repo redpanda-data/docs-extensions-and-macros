@@ -1,0 +1,464 @@
+= Antora Extensions Development Guide
+:toc:
+:toclevels: 3
+
+Guide for developing new Antora extensions.
+
+Antora extensions are Node.js modules that hook into the Antora build pipeline to modify, enhance, or generate content. Extensions can run at different stages of the build process and access the content catalog, component descriptors, and more.
+
+== Extension architecture
+
+Antora extensions are JavaScript modules that export a `register` function. This function receives a context object that provides access to the Antora build lifecycle and APIs.
+
+=== Extension lifecycle
+
+Extensions register event listeners that execute at specific points in the Antora build:
+
+. **contentAggregated** - After content is collected but before conversion
+. **uiLoaded** - After UI bundle is loaded
+. **contentClassified** - After content is organized by component/module
+. **documentsConverted** - After AsciiDoc conversion to HTML
+. **beforePublish** - Before site is written to disk
+. **sitepublished** - After site is published
+
+=== Extension structure
+
+Basic extension structure:
+
+[,javascript]
+----
+module.exports.register = function ({ config }) {
+  // Extension logic here
+}
+----
+
+With event listeners:
+
+[,javascript]
+----
+module.exports.register = function ({ config }) {
+  this
+    .on('contentAggregated', ({ contentAggregate }) => {
+      // Process aggregated content
+    })
+    .on('documentsConverted', ({ contentCatalog }) => {
+      // Process converted documents
+    })
+}
+----
+
+== Creating a new extension
+
+=== Create the file
+
+Create a new JavaScript file in the `extensions/` directory:
+
+[,bash]
+----
+touch extensions/my-extension.js
+----
+
+=== Implement the register function
+
+[,javascript]
+----
+/**
+ * My Extension - Does something useful
+ *
+ * Configuration options:
+ * - option1: Description of option1
+ * - option2: Description of option2
+ */
+module.exports.register = function ({ config }) {
+  const logger = this.getLogger('my-extension')
+
+  // Access configuration
+  const option1 = config.option1 || 'default-value'
+  const option2 = config.option2
+
+  // Validate configuration
+  if (!option2) {
+    logger.error('option2 is required')
+    return
+  }
+
+  // Register event listeners
+  this.on('contentClassified', ({ contentCatalog }) => {
+    logger.info('Processing content...')
+
+    // Your extension logic here
+    const pages = contentCatalog.getPages()
+
+    pages.forEach(page => {
+      // Do something with each page
+      logger.debug(`Processing ${page.src.relative}`)
+    })
+
+    logger.info('Processing complete')
+  })
+}
+----
+
+=== Add to playbook
+
+Test your extension by adding it to a playbook:
+
+[,yaml]
+----
+antora:
+  extensions:
+    - require: './extensions/my-extension.js'
+      option1: value1
+      option2: value2
+----
+
+=== Test
+
+Run Antora and verify your extension works:
+
+[,bash]
+----
+npx antora local-antora-playbook.yml
+----
+
+== Common patterns
+
+=== Accessing content
+
+Get all pages:
+
+[,javascript]
+----
+this.on('contentClassified', ({ contentCatalog }) => {
+  const pages = contentCatalog.getPages()
+
+  pages.forEach(page => {
+    console.log(page.src.relative)
+    console.log(page.asciidoc) // AsciiDoc content
+    console.log(page.contents) // Converted HTML
+  })
+})
+----
+
+Filter pages by component:
+
+[,javascript]
+----
+const pages = contentCatalog.getPages(page =>
+  page.src.component === 'redpanda'
+)
+----
+
+=== Creating new pages
+
+Add a generated page to the catalog:
+
+[,javascript]
+----
+this.on('contentClassified', ({ contentCatalog }) => {
+  const newPage = contentCatalog.addFile({
+    contents: Buffer.from('<h1>Generated Page</h1>'),
+    src: {
+      component: 'redpanda',
+      version: '1.0',
+      module: 'ROOT',
+      family: 'page',
+      relative: 'generated-page.adoc'
+    },
+    out: {
+      path: 'generated-page.html'
+    },
+    pub: {
+      url: '/generated-page.html'
+    }
+  })
+
+  // Set page attributes
+  newPage.asciidoc = {
+    attributes: {
+      'page-title': 'Generated Page'
+    }
+  }
+})
+----
+
+=== Modifying pages
+
+Update page content:
+
+[,javascript]
+----
+this.on('documentsConverted', ({ contentCatalog }) => {
+  const pages = contentCatalog.getPages()
+
+  pages.forEach(page => {
+    if (page.asciidoc) {
+      // Modify AsciiDoc attributes
+      page.asciidoc.attributes['custom-attr'] = 'value'
+
+      // Modify HTML content
+      page.contents = Buffer.from(
+        page.contents.toString().replace(/old/g, 'new')
+      )
+    }
+  })
+})
+----
+
+=== Working with components
+
+Access component descriptors:
+
+[,javascript]
+----
+this.on('contentAggregated', ({ contentAggregate }) => {
+  contentAggregate.forEach(aggregate => {
+    const { name, version, title } = aggregate
+    console.log(`Component: ${name} v${version}`)
+
+    // Access component files
+    aggregate.files.forEach(file => {
+      console.log(file.path)
+    })
+  })
+})
+----
+
+=== Reading external data
+
+Load external files or fetch data:
+
+[,javascript]
+----
+const fs = require('fs')
+const path = require('path')
+
+module.exports.register = function ({ config }) {
+  this.on('contentClassified', ({ contentCatalog, playbook }) => {
+    const dataPath = path.join(playbook.dir, 'data', 'my-data.json')
+    const data = JSON.parse(fs.readFileSync(dataPath, 'utf8'))
+
+    // Use data to generate or modify content
+  })
+}
+----
+
+Fetch data from APIs:
+
+[,javascript]
+----
+const https = require('https')
+
+function fetchData(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      let data = ''
+      res.on('data', chunk => data += chunk)
+      res.on('end', () => resolve(JSON.parse(data)))
+      res.on('error', reject)
+    })
+  })
+}
+
+module.exports.register = function ({ config }) {
+  this.on('contentClassified', async ({ contentCatalog }) => {
+    const data = await fetchData('https://api.example.com/data')
+    // Process data
+  })
+}
+----
+
+=== Logging
+
+Use the logger for debugging:
+
+[,javascript]
+----
+const logger = this.getLogger('my-extension')
+
+logger.error('Critical error message')
+logger.warn('Warning message')
+logger.info('Informational message')
+logger.debug('Debug message')
+----
+
+Set log level in playbook:
+
+[,yaml]
+----
+runtime:
+  log:
+    level: debug
+----
+
+=== Environment variables
+
+Access environment variables:
+
+[,javascript]
+----
+module.exports.register = function ({ config }) {
+  const apiKey = process.env.API_KEY || config.api_key
+
+  if (!apiKey) {
+    this.getLogger('my-extension').error('API_KEY not set')
+    return
+  }
+
+  // Use apiKey
+}
+----
+
+== Best practices
+
+=== Error handling
+
+Always handle errors gracefully:
+
+[,javascript]
+----
+this.on('contentClassified', ({ contentCatalog }) => {
+  try {
+    // Extension logic
+  } catch (err) {
+    const logger = this.getLogger('my-extension')
+    logger.error(`Error: ${err.message}`)
+    logger.debug(err.stack)
+    // Don't throw - let build continue
+  }
+})
+----
+
+=== Performance
+
+* Cache expensive operations
+* Use async/await for I/O operations
+* Avoid processing files multiple times
+* Filter content early to reduce iterations
+
+[,javascript]
+----
+// Good: Filter early
+const relevantPages = contentCatalog.getPages(page =>
+  page.src.component === 'redpanda' && page.asciidoc
+)
+
+relevantPages.forEach(page => {
+  // Process only relevant pages
+})
+
+// Bad: Filter during iteration
+const allPages = contentCatalog.getPages()
+allPages.forEach(page => {
+  if (page.src.component === 'redpanda' && page.asciidoc) {
+    // Process
+  }
+})
+----
+
+=== Testing
+
+Test extensions independently:
+
+[,javascript]
+----
+// extensions/__tests__/my-extension.test.js
+const myExtension = require('../my-extension')
+
+describe('my-extension', () => {
+  test('registers correctly', () => {
+    const context = {
+      on: jest.fn(),
+      getLogger: jest.fn(() => ({
+        info: jest.fn(),
+        error: jest.fn()
+      }))
+    }
+
+    myExtension.register.call(context, { config: {} })
+
+    expect(context.on).toHaveBeenCalled()
+  })
+})
+----
+
+=== Documentation
+
+Document your extension:
+
+[,javascript]
+----
+/**
+ * My Extension
+ *
+ * Description of what the extension does.
+ *
+ * Configuration:
+ * @param {string} option1 - Description of option1
+ * @param {boolean} option2 - Description of option2 (required)
+ *
+ * Environment variables:
+ * - MY_VAR: Description
+ *
+ * Example:
+ * antora:
+ *   extensions:
+ *     - require: './extensions/my-extension.js'
+ *       option1: value
+ *       option2: true
+ */
+module.exports.register = function ({ config }) {
+  // Implementation
+}
+----
+
+=== Code organization
+
+For complex extensions, split into modules:
+
+----
+extensions/
+  my-extension/
+    index.js        # Main extension file
+    processor.js    # Processing logic
+    generator.js    # Content generation
+    utils.js        # Utility functions
+----
+
+== Debugging
+
+=== Enable debug logging
+
+[,bash]
+----
+ANTORA_LOG_LEVEL=debug npx antora playbook.yml
+----
+
+=== Use console.log sparingly
+
+Prefer the logger:
+
+[,javascript]
+----
+// Good
+const logger = this.getLogger('my-extension')
+logger.debug('Debug info')
+
+// Avoid
+console.log('Debug info')
+----
+
+=== Inspect objects
+
+[,javascript]
+----
+const util = require('util')
+
+console.log(util.inspect(object, { depth: null, colors: true }))
+----
+
+== Related documentation
+
+* link:USER_GUIDE.adoc[User guide] - How to use extensions
+* link:REFERENCE.adoc[Reference] - Complete extension documentation
+* https://docs.antora.org/antora/latest/extend/extensions/[Antora Extensions API]

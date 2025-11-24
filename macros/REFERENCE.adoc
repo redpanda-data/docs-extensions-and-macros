@@ -1,0 +1,222 @@
+= AsciiDoc macros reference
+:toc:
+:toclevels: 3
+
+Reference documentation for all AsciiDoc macros and extensions provided by this library.
+
+IMPORTANT: Be sure to register each extension under the `asciidoc.extensions` key in the playbook, not the `antora.extensions` key.
+
+== Add line numbers and highlights
+
+This extension adds the necessary classes to make line numbers and line highlighting work with Prism.js.
+
+=== Registration
+
+```yaml
+antora:
+  extensions:
+  - '@redpanda-data/docs-extensions-and-macros/asciidoc-extensions/add-line-numbers-highlights'
+```
+
+== config_ref
+
+This inline macro is used to generate a reference to a configuration value in the Redpanda documentation. The macro's parameters allow for control over the generated reference's format and the type of output produced.
+
+=== Usage
+
+The `config_ref` macro is used in an AsciiDoc document as follows:
+
+[,asciidoc]
+----
+config_ref:configRef,isLink,path[]
+----
+
+The `config_ref` macro takes three parameters:
+
+configRef::
+This is the configuration reference, which is also used to generate the anchor link if `isLink` is `true`.
+
+isLink::
+Whether the output should be a link. If `isLink` is set to `true`, the output will be a cross-reference (xref) to the relevant configuration value.
+
+path::
+This is the path to the document where the configuration value is defined. This parameter is used to to generate the link if `isLink` is `true`.
+
+IMPORTANT: The path must be the name of a document at the root of the `reference` module.
+
+NOTE: The `config_ref` macro is environment-aware. It checks if the document it is being used in is part of a Kubernetes environment by checking if the `env-kubernetes` attribute is set in the document's attributes. Depending on this check, it either prepends `storage.tieredConfig.` to the `configRef` or just uses the `configRef` as is.
+
+For example:
+
+[,asciidoc]
+----
+config_ref:example_config,true,tunable-properties[]
+----
+
+=== Registration
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/config-ref'
+----
+
+== glossterm
+
+The `glossterm` inline macro provides a way to define and reference glossary terms in your AsciiDoc documents.
+
+NOTE: This macro is a customized version of https://gitlab.com/djencks/asciidoctor-glossary[`asciidoctor-glossary`].
+
+=== Usage
+
+Use the `glossterm` inline macro to reference a term within the text of the document:
+
+[,asciidoc]
+----
+glossterm:my term[myDefinition]
+----
+
+It takes two parameters:
+
+term::
+The term to be defined.
+
+definition (optional)::
+The definition of the term. If the term is defined in the https://github.com/redpanda-data/docs-site[`shared` component] or the `local-terms` object of the `antora.yml` file, you can omit the definition as it will always be replaced by those definitions.
+
+=== Configuration options
+
+glossary-log-terms (optional)::
+Whether to log a textual representation of a definition list item to the console.
+
+glossary-term-role (optional)::
+Role to assign each term. By default, glossary terms are assigned the `glossary-term` role, which gives them the class `glossary-term` in generated html.
+
+glossary-links (optional)::
+Whether to generate links to glossary entries.
+By default, links to the glossary entries are generated from the glossary terms. To avoid this, set the attribute to `false` as either asciidoctor configuration or a header attribute.
+
+glossary-page (optional)::
+Target page for glossary links. By default, links are generated to the same page as the glossary term. To specify the target page, set this attribute to the resource ID of a page where the `glossary` block macro is used.
+
+glossary-tooltip (optional)::
+Whether to enable tooltips for the defined terms. Valid values are:
+- title: This uses the browser built-in `title` attribute to display the definition.
+
+- true: This inserts the definition as the value of the attribute `data-glossary-tooltip`.
+
+- data-<attribute-name>​: This inserts the definition as the value of the supplied attribute name, which must start with `data`.
+
+The last two options are intended to support js/css tooltip solutions such as tippy.js.
+
+=== Registration
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/glossary'
+----
+
+== helm_ref
+
+This is an inline macro to create links to a Helm `values.yaml` file on ArtifactHub.
+
+=== Usage
+
+In an AsciiDoc document, use the `helm_ref` macro as follows:
+
+[,asciidoc]
+----
+helm_ref:<helmRef>[]
+----
+
+Where `<helmRef>` is the Helm configuration value you want to reference in the `values.yaml` file.
+
+For example:
+
+Given a Helm reference value of `myConfigValue`, you would use the macro like this:
+
+[,asciidoc]
+----
+helm_ref:myConfigValue[]
+----
+
+This will generate the following output:
+
+[,asciidoc]
+----
+For default values and documentation for configuration options, see the https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path=myConfigValue[values.yaml] file.
+----
+
+If you do not specify a Helm reference value, the macro generates a link without specifying a path.
+
+=== Registration
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/helm-ref'
+----
+
+== components_by_category
+
+This macro generates a tabbed interface to display Redpanda Connect components by category.
+
+The categories are fetched from the `connectCategoriesData` that's generated in the Component category aggregator extension.
+
+=== Usage
+
+```asciidoc
+components_by_category::[<type>]
+```
+
+=== Registration
+
+```yaml
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/rp-connect-components'
+```
+
+== component_table
+
+This macro generates a searchable table of all Redpanda Connect components with filters for support and type.
+
+The types are fetched from the `flatComponentsData` that's generated in the Component category aggregator extension.
+
+=== Usage
+
+```asciidoc
+component_table::[]
+```
+
+=== Registration
+
+```yaml
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/rp-connect-components'
+```
+
+== component_type_dropdown
+
+This macro generates a dropdown of other supported types for a particular component, allowing users to switch between different types.
+
+The types are fetched from the `flatComponentsData` that's generated in the Component category aggregator extension.
+
+=== Usage
+
+```asciidoc
+component_type_dropdown::[]
+```
+
+=== Registration
+
+```yaml
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/rp-connect-components'
+```
