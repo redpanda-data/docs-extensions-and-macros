@@ -1,0 +1,124 @@
+= MCP Server Documentation
+:toc:
+:toclevels: 2
+
+Documentation for the Redpanda Docs Tools MCP (Model Context Protocol) server.
+
+The MCP server exposes `doc-tools` functionality to Claude Code, allowing technical writers to automate documentation tasks through natural conversation. No CLI knowledge required.
+
+== Documentation
+
+=== For writers
+
+link:USER_GUIDE.adoc[**User guide**]:: Complete guide to using the MCP server with Claude Code
++
+* Setup and installation
+* Available tools and how to use them
+* Usage examples and workflows
+* Troubleshooting
+
+=== For developers
+
+link:DEVELOPMENT.adoc[**Development guide**]:: Guide for working on the MCP server
++
+* Architecture overview
+* Adding new tools and prompts
+* Testing guidelines
+* Security and best practices
+
+link:CLI_INTERFACE.adoc[**CLI interface contract**]:: Contract specification for the `doc-tools` CLI
++
+* Command structure and syntax
+* Output format contracts
+* Error handling requirements
+* Stability guarantees
+
+link:../CLI_REFERENCE.adoc[**CLI reference**]:: Complete command reference for `doc-tools`
++
+* All commands and subcommands
+* Options and usage examples
+* Auto-generated from CLI help
+
+link:../\__tests__/mcp/README.adoc[**Test documentation**]:: How to run and write MCP tests
++
+* Test types (integration, contract, unit)
+* Running tests
+* Understanding failures
+
+=== Prompts
+
+link:prompts/README.adoc[**Prompts documentation**]:: Guide to the MCP prompt system
++
+* What prompts are and how they work
+* Available prompts
+* Adding new prompts
+
+== Quickstart
+
+=== Install and configure
+
+[,bash]
+----
+cd /path/to/docs-extensions-and-macros
+npm install
+npx doc-tools setup-mcp --local
+----
+
+=== Restart Claude Code
+
+After setup, restart Claude Code to load the MCP server.
+
+=== Start using it
+
+Navigate to any Redpanda repository and start chatting:
+
+----
+You: "What's the latest Redpanda version?"
+Claude: *uses get_redpanda_version tool*
+
+You: "Generate property docs for v25.3.1"
+Claude: *uses generate_property_docs tool*
+----
+
+== What's included
+
+=== Tools
+
+* **Version information** - Get latest Redpanda and Console versions
+* **Property docs** - Generate configuration property documentation
+* **Metrics docs** - Generate metrics reference documentation
+* **RPK docs** - Generate RPK CLI documentation
+* **Connector docs** - Generate Redpanda Connect connector documentation
+* **Antora structure** - Analyze documentation repository structure
+
+=== Prompts
+
+Contextual guides that Claude automatically uses:
+
+* **property-docs-guide** - Workflow for updating property documentation
+* **rpcn-connector-docs-guide** - Workflow for updating connector documentation
+
+=== Automation
+
+* **setup-mcp** - Automated MCP server configuration for Claude Code/Desktop
+* **Context detection** - Automatic repository and Antora structure detection
+
+== Architecture
+
+The MCP server consists of:
+
+* **Server** (`bin/doc-tools-mcp.js`) - Main MCP protocol handler
+* **Tool modules** (`bin/mcp-tools/`) - Individual tool implementations
+* **Prompts** (`mcp/prompts/`) - Contextual documentation guides
+* **Tests** (`__tests__/mcp/`) - Integration, contract, and unit tests
+
+== Support
+
+* link:USER_GUIDE.adoc#troubleshooting[Troubleshooting guide]
+* link:../\__tests__/mcp/README.adoc#understanding-test-failures[Test failures]
+* https://github.com/redpanda-data/docs-extensions-and-macros/issues[Report issues]
+
+== External resources
+
+* https://modelcontextprotocol.io/[MCP Protocol Specification]
+* https://docs.anthropic.com/claude[Claude Code Documentation]

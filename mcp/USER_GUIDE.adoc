@@ -1,0 +1,1099 @@
+= Redpanda Docs Tools MCP Server
+:toc:
+:toclevels: 3
+
+An MCP (Model Context Protocol) server that provides writer-friendly documentation tools to Claude Code. This allows technical writers to manage documentation through natural conversation without needing to know CLI commands or syntax.
+
+== Features
+
+* *Writer-friendly*: Natural language interface - no CLI knowledge needed
+* *Version information*: Get latest Redpanda and Console versions with Docker tags
+* *Documentation generation*: Generate property, metrics, and RPK docs for any version
+* *Background jobs*: Long-running tasks can run in background with progress updates
+* *10-minute timeout*: Extended timeout for large documentation generation tasks
+* *Progress streaming*: Real-time progress updates via MCP notifications
+* *Context-aware*: Automatically works in any Redpanda repo based on your current directory
+* *Antora intelligence*: Understands component/module structure
+* *Helpful errors*: Clear error messages with suggestions
+* *No API key needed*: Uses your existing Claude Code authentication
+
+== Quickstart
+
+=== Install dependencies
+
+From this repository:
+
+[,bash]
+----
+npm install
+----
+
+=== Run setup command
+
+Use the built-in setup command (works on macOS, Linux, and Windows):
+
+[,bash]
+----
+npx doc-tools setup-mcp
+----
+
+This automatically:
+
+* Detects your operating system
+* Finds your Claude Code/Desktop config location
+* Creates or updates the configuration
+* Creates a backup of existing config
+* Validates everything is correct
+
+*Check status:*
+
+[,bash]
+----
+npx doc-tools setup-mcp --status
+----
+
+*Options:*
+
+[,bash]
+----
+# Force update even if already configured
+npx doc-tools setup-mcp --force
+
+# Target specific application
+npx doc-tools setup-mcp --target code     # Claude Code
+npx doc-tools setup-mcp --target desktop  # Claude Desktop
+----
+
+=== Restart Claude Code
+
+After setup completes, restart Claude Code to load the MCP server.
+
+=== Start using it!
+
+Navigate to any Redpanda repository and start chatting:
+
+[,bash]
+----
+cd ~/repos/docs
+claude
+----
+
+Then in Claude Code:
+
+----
+You: "Show me the Antora structure of this repo"
+Claude: *uses get_antora_structure MCP tool*
+
+You: "Generate property docs for v25.3.1"
+Claude: *uses run_doc_tools_command MCP tool*
+        *shows generated documentation*
+----
+
+== Available tools
+
+The MCP server provides *writer-friendly tools* designed for natural language interaction:
+
+=== Version information tools
+
+*get_redpanda_version*:: Get the latest Redpanda version information
++
+* Returns version number, Docker tag, and release notes URL
+* Optional: Get beta/RC versions with `beta: true`
+* Writers use this to find out what version to document
+
+*get_console_version*:: Get the latest Redpanda Console version information
++
+* Returns version number, Docker tag, and release notes URL
+* Helps writers stay current with Console releases
+
+=== Documentation generation tools
+
+*generate_property_docs*:: Generate Redpanda configuration property documentation
++
+* Input: Version (e.g., "25.3.1", "v25.3.1", or "latest")
+* Optional: Generate AsciiDoc partials with `generate_partials: true`
+* Returns: Files generated, property count, summary
+* Writers use this when updating docs for a new Redpanda release
+
+*generate_metrics_docs*:: Generate Redpanda metrics documentation
++
+* Input: Version (e.g., "25.3.1")
+* Creates the public metrics reference page
+* Returns: Files generated, metrics count, summary
+* Writers use this when updating metrics docs for a new release
+
+*generate_rpk_docs*:: Generate RPK command-line documentation
++
+* Input: Version (e.g., "25.3.1")
+* Creates AsciiDoc files for all rpk commands
+* Returns: Commands documented, files generated
+* Writers use this when updating CLI docs for a new release
+
+*generate_rpcn_connector_docs*:: Generate Redpanda Connect connector documentation
++
+* Input: Branch (optional, defaults to "main")
+* Creates component documentation for all connectors from the Redpanda Connect repository
+* Returns: Branch used, connectors documented, files generated
+* Writers use this when updating connector reference docs
+
+=== Quality review tools
+
+*review_generated_docs*:: Review generated documentation for quality issues
++
+* Input: Type (e.g., "property-docs", "connector-docs") and version
+* Analyzes generated documentation for common quality issues
+* Checks for consistency, completeness, and documentation standards
+* Returns: Review report with issues found, suggestions, and quality score
+* Writers use this after generating documentation to ensure quality before committing
+
+=== Structure and discovery tools
+
+*get_antora_structure*:: Analyze and understand the Antora component/module structure
++
+* Shows all components, versions, and modules
+* Lists available directories (pages, partials, examples, etc.)
+* Detects if doc-tools is available
+* Helps writers understand the documentation layout
+
+=== Advanced tools
+
+*run_doc_tools_command*:: Execute raw `npx doc-tools <command>`
++
+* Advanced: Only use if none of the specific tools above fit your needs
+* Requires knowledge of doc-tools CLI syntax
+* Only works in repos that have doc-tools installed
+
+=== Contextual guides (prompts)
+
+*property-docs-guide*:: Comprehensive guide for updating Redpanda property documentation
++
+* Explains the auto-generation system and override workflow
+* Provides rules for property descriptions (no cloud conditionals, no enterprise includes)
+* Lists common scenarios and validation steps
+* Claude automatically retrieves this when working with property documentation
+* Ensures correct workflow: update property-overrides.json, not generated .adoc files
+
+*rpcn-connector-docs-guide*:: Comprehensive guide for updating Redpanda Connect connector reference documentation
++
+* Explains the override system with `$ref` syntax for DRY (Don't Repeat Yourself) principles
+* Describes repository structure and how autogenerated content works with overrides
+* Provides workflow for improving connector documentation
+* Claude automatically retrieves this when working with connector documentation
+* Ensures correct workflow: update docs-data/overrides.json, use $ref for deduplication
+
+=== Background job management
+
+Long-running documentation generation tasks support background execution with progress updates:
+
+*get_job_status*:: Check the status and progress of a background job
++
+* Returns job status, progress percentage, and progress message
+* Use the job ID returned when creating a background job
+* Job statuses: `pending`, `running`, `completed`, `failed`
+
+*list_jobs*:: List all background jobs with optional filtering
++
+* Returns list of recent jobs with their status
+* Optional filters: status (pending/running/completed/failed), tool name
+* Jobs are automatically cleaned up after 1 hour
+
+*How to use background jobs:*
+
+Add `background: true` to any long-running generation tool:
+
+[,bash]
+----
+# Synchronous (default) - waits for completion
+generate_property_docs(version: "v25.3.1", generate_partials: true)
+
+# Background - returns job ID immediately
+generate_property_docs(version: "v25.3.1", generate_partials: true, background: true)
+
+# Check job status
+get_job_status(job_id: "abc-123-def-456")
+
+# List all jobs
+list_jobs(status: "running")
+----
+
+*Progress updates:*
+
+Background jobs send real-time progress notifications via MCP protocol, so Claude Code can show you:
+
+* Current progress percentage (0-100%)
+* Current operation being performed
+* Estimated time remaining (when available)
+
+*Timeout:*
+
+All commands have a 10-minute timeout (increased from 5 minutes) to handle large documentation generation tasks.
+
+=== Design philosophy
+
+These tools are designed to be *conversational*:
+
+* Writers use natural language: "What's the latest Redpanda version?"
+* Claude understands and calls the appropriate tool
+* No need to remember CLI commands or flags
+* Clear, structured responses with helpful error messages
+
+Claude Code's built-in tools handle everything else:
+
+* *File operations* (Read, Write, Edit)
+* *Search* (Glob for files, Grep for content)
+* *Git operations* (Bash tool)
+
+== JSON response structures
+
+=== get_antora_structure
+
+Returns comprehensive information about the Antora documentation structure:
+
+[,json]
+----
+{
+  "repoRoot": "/absolute/path/to/repo",
+  "repoInfo": {
+    "root": "/absolute/path/to/repo",
+    "detected": true,
+    "type": "git"  // or "npm" or null
+  },
+  "playbook": {
+    // Parsed playbook YAML content (if found)
+    "site": { /* ... */ },
+    "content": { /* ... */ }
+  },
+  "playbookPath": "/absolute/path/to/local-antora-playbook.yml",
+  "components": [
+    {
+      "name": "redpanda",
+      "version": "25.3",
+      "title": "Redpanda Documentation",
+      "path": "/absolute/path/to/component",
+      "modules": [
+        {
+          "name": "ROOT",
+          "path": "/absolute/path/to/component/modules/ROOT",
+          "pages": true,
+          "partials": true,
+          "examples": false,
+          "attachments": false,
+          "images": true
+        }
+      ]
+    }
+  ],
+  "hasDocTools": true  // Whether doc-tools is available
+}
+----
+
+*Field descriptions:*
+
+repoRoot:: Absolute path to repository root
+repoInfo.detected:: Whether a repository was detected (vs using current directory)
+repoInfo.type:: Repository type (`"git"`, `"npm"`, or `null`)
+playbook:: Parsed YAML content of the Antora playbook (if found)
+playbookPath:: Full path to the playbook file used
+components[]:: Array of Antora components found
+* `name`: Component name from antora.yml
+* `version`: Component version
+* `title`: Component display title
+* `path`: Absolute path to component directory
+* `modules[]`: Array of modules in this component
+** Boolean flags indicate which directories exist in each module
+
+=== run_doc_tools_command
+
+==== Success response
+
+[,json]
+----
+{
+  "success": true,
+  "output": "Generated property docs for v25.3.1\n✓ Created 42 documentation files",
+  "command": "npx doc-tools generate property-docs --tag v25.3.1",
+  "repoRoot": "/absolute/path/to/repo"
+}
+----
+
+*Field descriptions:*
+
+success:: Always `true` for successful executions
+output:: Combined stdout from the command
+command:: The full command that was executed
+repoRoot:: Repository root where command was executed
+
+==== Error response - Command validation failed
+
+[,json]
+----
+{
+  "success": false,
+  "error": "Invalid command: shell metacharacters not allowed. Use simple doc-tools commands only.",
+  "suggestion": "Use simple doc-tools commands like: \"generate property-docs --tag v25.3.1\""
+}
+----
+
+==== Error response - doc-tools not found
+
+[,json]
+----
+{
+  "success": false,
+  "error": "doc-tools not found in this repository. This command only works in repos with doc-tools installed.",
+  "suggestion": "Navigate to the docs-extensions-and-macros repository or a repo that has doc-tools as a dependency.",
+  "repoInfo": {
+    "root": "/current/directory",
+    "detected": false,
+    "type": null
+  }
+}
+----
+
+==== Error response - Command execution failed
+
+[,json]
+----
+{
+  "success": false,
+  "error": "Command failed with exit code 1",
+  "stdout": "Processing files...\nFound 10 properties",
+  "stderr": "Error: Tag v25.3.1 not found",
+  "exitCode": 1,
+  "command": "npx doc-tools generate property-docs --tag v25.3.1",
+  "repoRoot": "/absolute/path/to/repo"
+}
+----
+
+*Field descriptions:*
+
+success:: Always `false` for errors
+error:: Human-readable error message
+stdout:: Standard output from the command (if any)
+stderr:: Standard error from the command (if any)
+exitCode:: Exit code from the command
+suggestion:: Helpful suggestion for resolving the error (when applicable)
+
+=== Error response - Unknown tool
+
+[,json]
+----
+{
+  "success": false,
+  "error": "Unknown tool: invalid_tool_name",
+  "availableTools": ["get_antora_structure", "run_doc_tools_command"]
+}
+----
+
+=== Error response - Internal error
+
+[,json]
+----
+{
+  "success": false,
+  "error": "Detailed error message",
+  "stack": "Error stack trace..."  // Only in development mode
+}
+----
+
+NOTE: Stack traces are only included when `NODE_ENV=development` for security reasons.
+
+=== get_redpanda_version
+
+==== Success response
+
+[,json]
+----
+{
+  "success": true,
+  "version": "v25.3.1",
+  "docker_tag": "docker.redpanda.com/redpandadata/redpanda:v25.3.1",
+  "is_beta": false,
+  "notes_url": "https://github.com/redpanda-data/redpanda/releases/tag/v25.3.1"
+}
+----
+
+*Field descriptions:*
+
+success:: Always `true` for successful requests
+version:: Latest Redpanda version (with 'v' prefix)
+docker_tag:: Full Docker image tag for this version
+is_beta:: Whether this is a beta/RC version
+notes_url:: GitHub release notes URL
+
+==== Beta version response
+
+[,json]
+----
+{
+  "success": true,
+  "version": "v25.4.1-rc1",
+  "docker_tag": "docker.redpanda.com/redpandadata/redpanda-unstable:v25.4.1-rc1",
+  "is_beta": true,
+  "notes_url": "https://github.com/redpanda-data/redpanda/releases/tag/v25.4.1-rc1"
+}
+----
+
+==== Error response
+
+[,json]
+----
+{
+  "success": false,
+  "error": "Network error: Failed to fetch version information",
+  "suggestion": "Make sure you have network access to fetch version information from GitHub"
+}
+----
+
+=== get_console_version
+
+==== Success response
+
+[,json]
+----
+{
+  "success": true,
+  "version": "v2.7.2",
+  "docker_tag": "docker.redpanda.com/redpandadata/console:v2.7.2",
+  "notes_url": "https://github.com/redpanda-data/console/releases/tag/v2.7.2"
+}
+----
+
+*Field descriptions:*
+
+success:: Always `true` for successful requests
+version:: Latest Console version (with 'v' prefix)
+docker_tag:: Full Docker image tag for Console
+notes_url:: GitHub release notes URL
+
+==== Error response
+
+[,json]
+----
+{
+  "success": false,
+  "error": "Network error: Failed to fetch version information",
+  "suggestion": "Make sure you have network access to fetch version information from GitHub"
+}
+----
+
+=== generate_property_docs
+
+==== Success response (JSON only)
+
+[,json]
+----
+{
+  "success": true,
+  "version": "v25.3.1",
+  "files_generated": [
+    "modules/reference/partials/properties.json"
+  ],
+  "property_count": 342,
+  "output": "Generated 342 properties\nSaved to modules/reference/partials/properties.json",
+  "summary": "Generated property documentation for Redpanda v25.3.1"
+}
+----
+
+==== Success response (with AsciiDoc partials)
+
+[,json]
+----
+{
+  "success": true,
+  "version": "v25.3.1",
+  "files_generated": [
+    "modules/reference/partials/cluster-properties.adoc",
+    "modules/reference/partials/broker-properties.adoc",
+    "modules/reference/partials/tunable-properties.adoc",
+    "modules/reference/partials/topic-properties.adoc",
+    "modules/reference/partials/properties.json"
+  ],
+  "property_count": 342,
+  "output": "Generated 342 properties...",
+  "summary": "Generated property documentation for Redpanda v25.3.1"
+}
+----
+
+*Field descriptions:*
+
+success:: Always `true` for successful generation
+version:: Redpanda version used (normalized with 'v' prefix)
+files_generated:: Array of files created
+property_count:: Number of properties documented (if parseable from output)
+output:: Raw output from the generation command
+summary:: Human-readable summary
+
+==== Error response - Missing version
+
+[,json]
+----
+{
+  "success": false,
+  "error": "Version is required",
+  "suggestion": "Provide a version like \"25.3.1\", \"v25.3.1\", or \"latest\""
+}
+----
+
+==== Error response - doc-tools not found
+
+[,json]
+----
+{
+  "success": false,
+  "error": "doc-tools not found in this repository",
+  "suggestion": "Navigate to the docs-extensions-and-macros repository"
+}
+----
+
+==== Error response - Generation failed
+
+[,json]
+----
+{
+  "success": false,
+  "error": "Command failed with exit code 1",
+  "stdout": "Processing files...\nFound 0 properties",
+  "stderr": "Error: Tag v25.3.1 not found in Redpanda repository",
+  "exitCode": 1,
+  "suggestion": "Check that the version exists in the Redpanda repository"
+}
+----
+
+=== generate_metrics_docs
+
+==== Success response
+
+[,json]
+----
+{
+  "success": true,
+  "version": "v25.3.1",
+  "files_generated": [
+    "modules/reference/pages/public-metrics-reference.adoc"
+  ],
+  "metrics_count": 156,
+  "output": "Generated 156 metrics...",
+  "summary": "Generated metrics documentation for Redpanda v25.3.1"
+}
+----
+
+*Field descriptions:*
+
+success:: Always `true` for successful generation
+version:: Redpanda version used (normalized with 'v' prefix)
+files_generated:: Array of files created
+metrics_count:: Number of metrics documented (if parseable)
+output:: Raw output from the generation command
+summary:: Human-readable summary
+
+==== Error responses
+
+Same error response structure as `generate_property_docs` (missing version, doc-tools not found, generation failed).
+
+=== generate_rpk_docs
+
+==== Success response
+
+[,json]
+----
+{
+  "success": true,
+  "version": "v25.3.1",
+  "commands_documented": 87,
+  "files_generated": ["autogenerated/v25.3.1/rpk/*.adoc"],
+  "output": "Generated 87 commands...",
+  "summary": "Generated RPK documentation for Redpanda v25.3.1"
+}
+----
+
+*Field descriptions:*
+
+success:: Always `true` for successful generation
+version:: Redpanda version used (normalized with 'v' prefix)
+commands_documented:: Number of RPK commands documented
+files_generated:: Array indicating where files were created
+output:: Raw output from the generation command
+summary:: Human-readable summary
+
+==== Error responses
+
+Same error response structure as `generate_property_docs` (missing version, doc-tools not found, generation failed).
+
+=== generate_rpcn_connector_docs
+
+==== Success response
+
+[,json]
+----
+{
+  "success": true,
+  "branch": "main",
+  "connectors_documented": 245,
+  "files_generated": ["modules/reference/pages/redpanda-connect/components/"],
+  "output": "Generated 245 connectors...",
+  "summary": "Generated Redpanda Connect connector documentation from branch main"
+}
+----
+
+*Field descriptions:*
+
+success:: Always `true` for successful generation
+branch:: Branch used to generate documentation (defaults to "main")
+connectors_documented:: Number of connectors documented (if parseable, otherwise `null`)
+files_generated:: Array indicating where files were created
+output:: Raw output from the generation command
+summary:: Human-readable summary
+
+==== Error responses
+
+Same error response structure as `generate_property_docs` (doc-tools not found, generation failed).
+
+=== review_generated_docs
+
+==== Success response
+
+[,json]
+----
+{
+  "success": true,
+  "doc_type": "property-docs",
+  "version": "v25.3.1",
+  "report_file": "review-properties-25.3.1-2025-11-24.adoc",
+  "issues_found": {
+    "missing_descriptions": 3,
+    "formatting_issues": 5,
+    "inconsistencies": 2
+  },
+  "quality_score": 92,
+  "summary": "Review completed for property documentation v25.3.1. Found 10 issues across 342 properties."
+}
+----
+
+*Field descriptions:*
+
+success:: Always `true` for successful review
+doc_type:: Type of documentation reviewed ("property-docs", "connector-docs", etc.)
+version:: Version of the documentation reviewed
+report_file:: Path to the generated review report file
+issues_found:: Object containing counts of different issue types
+quality_score:: Overall quality score (0-100)
+summary:: Human-readable summary of the review
+
+==== Error responses
+
+Same error response structure as `generate_property_docs` (missing required parameters, doc-tools not found).
+
+== Usage examples
+
+=== Example 1: Get version information
+
+----
+You: What's the latest Redpanda version?
+Claude: *uses get_redpanda_version MCP tool*
+
+The latest Redpanda version is v25.3.1, released on January 15, 2024.
+
+Docker tag: docker.redpanda.com/redpandadata/redpanda:v25.3.1
+Release notes: https://github.com/redpanda-data/redpanda/releases/tag/v25.3.1
+----
+
+----
+You: What about the latest beta version?
+Claude: *uses get_redpanda_version with beta: true*
+
+The latest beta version is v25.4.1-rc1.
+
+Docker tag: docker.redpanda.com/redpandadata/redpanda-unstable:v25.4.1-rc1
+----
+
+=== Example 2: Generate property documentation
+
+----
+You: Generate property docs for version 25.3.1
+Claude: *uses generate_property_docs MCP tool*
+
+✓ Generated property documentation for Redpanda v25.3.1
+
+Files created:
+- modules/reference/partials/properties.json
+
+Documented 342 properties from Redpanda v25.3.1
+----
+
+----
+You: Now generate the AsciiDoc partials too
+Claude: *uses generate_property_docs with generate_partials: true*
+
+✓ Generated property documentation for Redpanda v25.3.1
+
+Files created:
+- modules/reference/partials/cluster-properties.adoc
+- modules/reference/partials/broker-properties.adoc
+- modules/reference/partials/tunable-properties.adoc
+- modules/reference/partials/topic-properties.adoc
+- modules/reference/partials/properties.json
+
+Documented 342 properties
+----
+
+=== Example 3: Complete documentation update workflow
+
+----
+You: I need to update the docs for Redpanda 25.3.1. Can you:
+1. Get the latest version to confirm
+2. Generate property docs
+3. Generate metrics docs
+4. Generate RPK docs
+5. Show me what files changed
+
+Claude: *uses get_redpanda_version*
+Confirmed: Latest version is v25.3.1
+
+*uses generate_property_docs*
+✓ Generated 342 properties
+
+*uses generate_metrics_docs*
+✓ Generated 156 metrics
+
+*uses generate_rpk_docs*
+✓ Generated 87 RPK commands
+
+*uses Bash tool to run git status*
+Changes:
+- modules/reference/partials/properties.json
+- modules/reference/pages/public-metrics-reference.adoc
+- autogenerated/v25.3.1/rpk/*.adoc
+
+Would you like me to review the changes or commit them?
+----
+
+=== Example 4: Console version information
+
+----
+You: What's the latest Redpanda Console version and Docker tag?
+Claude: *uses get_console_version MCP tool*
+
+The latest Redpanda Console version is v2.7.2.
+
+Docker tag: docker.redpanda.com/redpandadata/console:v2.7.2
+Release notes: https://github.com/redpanda-data/console/releases/tag/v2.7.2
+----
+
+=== Example 5: Understanding documentation structure
+
+----
+You: Show me the Antora structure of this repo
+Claude: *uses get_antora_structure MCP tool*
+
+This repository has the following Antora structure:
+
+Components:
+- redpanda (version: 25.3)
+  - Modules:
+    - ROOT (pages, partials, images)
+    - reference (pages, partials)
+    - deployment (pages, examples)
+
+The repository has doc-tools installed, so you can generate documentation.
+----
+
+=== Example 6: Error handling
+
+----
+You: Generate property docs for version 99.9.9
+Claude: *uses generate_property_docs MCP tool*
+
+❌ Generation failed: Tag v99.9.9 not found in Redpanda repository
+
+Suggestion: Check that the version exists in the Redpanda repository. You can find available versions at:
+https://github.com/redpanda-data/redpanda/releases
+----
+
+=== Example 7: Property documentation updates (with prompt)
+
+----
+You: Improve the description for cleanup.policy property to explain what each value does
+
+Claude: *retrieves property-docs-guide prompt*
+        *reads property-overrides.json*
+        *updates the description field with enhanced explanation*
+        *uses generate_property_docs MCP tool with generate_partials: true*
+
+✓ Updated property-overrides.json with enhanced description for cleanup.policy
+✓ Generated property documentation for Redpanda v25.3.1
+
+Files updated:
+- docs-data/property-overrides.json
+- modules/reference/partials/properties/topic-properties.adoc
+
+The description now explains:
+- `delete` - Deletes data according to retention limits
+- `compact` - Keeps latest value per key
+- `compact,delete` - Compaction + time-based deletion
+----
+
+This example shows how the prompt automatically provides context about the property documentation workflow, ensuring Claude follows the correct process (update overrides, not generated files).
+
+== How it works
+
+=== Context detection
+
+The MCP server automatically:
+
+. Detects the repository root from your current working directory
+. Looks for Antora structure (components, modules)
+. Checks if `doc-tools` is available
+. All operations happen relative to the detected repo
+
+=== Multi-repo support
+
+You can use the *same MCP server* across all your repos:
+
+[,bash]
+----
+# In docs-extensions-and-macros
+cd ~/repos/docs-extensions-and-macros
+claude  # MCP server works here
+
+# In main docs repo
+cd ~/repos/docs
+claude  # Same MCP server, different context
+
+# In cloud docs
+cd ~/repos/cloud-docs
+claude  # Still works!
+----
+
+=== Tool execution
+
+When you ask Claude to do something:
+
+. Claude decides which tools to use
+. Claude calls the MCP server with tool requests
+. The server executes in your current repo context
+. Results are returned to Claude
+. Claude shows you what happened
+
+== Configuration
+
+=== Configuration locations
+
+The `setup-mcp` command uses the official `claude mcp add` CLI command, which automatically configures the MCP server in the correct location:
+
+*Claude Code:*
+
+* *All platforms*: `~/.claude.json` (user configuration file with `mcpServers` section)
+* This works across macOS, Linux, and Windows
+
+*Claude Desktop:*
+
+* *macOS*: `~/Library/Application Support/Claude/claude_desktop_config.json`
+* *Linux*: `~/.config/Claude/claude_desktop_config.json`
+* *Windows*: `%APPDATA%\Claude\claude_desktop_config.json`
+
+=== Manual configuration (advanced)
+
+If you need to configure manually, use the `claude mcp add` command directly:
+
+*For local development:*
+
+[,bash]
+----
+claude mcp add --transport stdio --scope user redpanda-docs-tool-assistant -- \
+  node /absolute/path/to/docs-extensions-and-macros/bin/doc-tools-mcp.js
+----
+
+*For published package:*
+
+[,bash]
+----
+claude mcp add --transport stdio --scope user redpanda-docs-tool-assistant -- \
+  npx -y doc-tools-mcp
+----
+
+This adds the MCP server configuration to `~/.claude.json`.
+
+NOTE: We recommend using `npx doc-tools setup-mcp` instead, as it automatically detects your environment and uses the appropriate configuration!
+
+== Troubleshooting
+
+=== MCP server not showing up
+
+. Run `npx doc-tools setup-mcp --status` to verify configuration
+. Check your config file: `~/.claude.json` (look for the `mcpServers` section)
+. Verify the configuration includes `"type": "stdio"` field
+. For local mode: Verify the path to `doc-tools-mcp.js` is correct and absolute
+. For npx mode: Ensure the package is installed globally or locally
+. Restart Claude Code completely (exit and start a new session)
+. Check Claude Code logs for errors
+. Try running `claude mcp list` to see if the server appears
+. If still not working, try removing and re-adding with `claude mcp add` (see Manual Configuration)
+
+=== "doc-tools not found" error
+
+This means you're in a repo that doesn't have doc-tools. The `run_doc_tools_command` tool only works in repos that have doc-tools installed.
+
+Solution: Navigate to the docs-extensions-and-macros repo or another repo that has doc-tools.
+
+=== Tools not working
+
+. Make sure you're in a git repository
+. Check that you have the required permissions
+. For doc-tools commands, ensure dependencies are installed (`npm install`)
+
+=== Understanding repository structure
+
+* Use `get_antora_structure` MCP tool to understand the Antora layout
+* Then use Claude's built-in Glob/Grep tools to find specific files
+* Claude's Read/Write/Edit tools handle all file operations
+
+== Security
+
+=== Command injection protection
+
+The MCP server includes protection against command injection attacks:
+
+* *Input validation*: All commands are validated before execution
+* *Shell metacharacter blocking*: Characters like `;`, `|`, `&`, `$`, ``` ` ```, `<`, `>`, `()` are blocked
+* *Path traversal prevention*: Sequences like `..` and `~` are rejected
+* *Type checking*: Commands must be non-empty strings
+
+Safe commands:
+
+[,bash]
+----
+generate property-docs --tag v25.3.1  ✓
+generate metrics-docs --branch main    ✓
+help                                   ✓
+----
+
+Blocked commands:
+
+[,bash]
+----
+generate property-docs; rm -rf /      ✗ (semicolon)
+generate property-docs | malicious    ✗ (pipe)
+generate ../../../etc/passwd          ✗ (path traversal)
+----
+
+=== General security
+
+* The MCP server is read-only for analysis (get_antora_structure)
+* Only runs commands you explicitly request (run_doc_tools_command)
+* Commands are restricted to `npx doc-tools` only
+* All operations are local to your machine
+* File modifications are handled by Claude's built-in tools (which you control)
+* 5-minute timeout on all commands
+* 50MB output buffer limit
+
+== Advanced usage
+
+=== Using with multiple Claude Code instances
+
+You can run Claude Code in different directories simultaneously, and each will use the same MCP server but operate in its own repo context.
+
+=== Combining with other MCP servers
+
+You can have multiple MCP servers configured. Claude will use the appropriate tools from each server as needed.
+
+=== Scripting workflows
+
+Since this integrates with Claude Code, you can create complex multi-step workflows through conversation:
+
+----
+You: I need to:
+1. Generate property docs for v25.3.1
+2. Review the changes
+3. Create a branch called 'props-v25.3.1'
+4. Commit with an appropriate message
+5. Give me a summary for the PR description
+
+Can you do all of that?
+
+Claude: *executes each step sequentially*
+        *asks for confirmation at key points*
+        *provides final summary*
+----
+
+== Status messages
+
+The MCP server logs to stderr (not stdout) so it doesn't interfere with the protocol:
+
+* Server startup message
+* Working directory
+* Repository root detected
+
+These appear in Claude Code's logs but won't clutter your chat.
+
+== Best practices
+
+. *Start with structure*: Use `get_antora_structure` MCP tool to understand the repo layout
+. *Let Claude work naturally*: It will use its built-in tools (Read, Write, Edit, Bash, Glob, Grep) automatically
+. *Run automation explicitly*: Use `run_doc_tools_command` for generating docs
+. *Trust the tools*: Claude knows when to use MCP tools vs built-in tools
+. *Be specific about goals*: Tell Claude what you want to achieve, not how to do it
+
+== Updates
+
+To update the MCP server:
+
+[,bash]
+----
+cd /path/to/docs-extensions-and-macros
+git pull
+npm install
+----
+
+Then restart Claude Code.
+
+== Getting help
+
+If you encounter issues:
+
+. Check Claude Code logs
+. Verify your MCP server configuration
+. Test with simple commands first (e.g., "Show me the Antora structure")
+. Check that you're in a git repository
+. Open an issue in the repository
+
+== Learning more
+
+* https://modelcontextprotocol.io/[MCP Documentation]
+* https://docs.anthropic.com/claude[Claude Code Documentation]
+* https://docs.antora.org/[Antora Documentation]
+
+== What's next
+
+With the MCP server set up, you can use *natural language* to:
+
+=== Version information
+
+* "What's the latest Redpanda version?"
+* "Get me the Redpanda Docker tag"
+* "What's the latest Console version?"
+* "Show me the beta version"
+
+=== Documentation generation
+
+* "Generate property docs for 25.3.1"
+* "Generate property docs with AsciiDoc partials"
+* "Generate metrics docs for the latest version"
+* "Generate RPK command docs for 25.3.1"
+* "Update all docs for the latest version"
+
+=== Understanding your repo
+
+* "Show me the Antora structure"
+* "What modules do we have?"
+* "Is doc-tools available here?"
+
+=== Complete workflows
+
+* "Update docs for 25.3.1 and show me what changed"
+* "Generate all docs for latest version and create a PR"
+* "Get the latest version info and update the Docker compose file"
+
+*No CLI commands to remember. No flags to look up. Just talk naturally!*
+
+The MCP server provides writer-friendly tools, Claude provides the intelligence. You focus on the content!

@@ -1,0 +1,644 @@
+= MCP Server Development Guide
+:toc:
+:toclevels: 3
+
+Developer guide for working on the Redpanda Docs Tools MCP server.
+
+The MCP (Model Context Protocol) server exposes `doc-tools` functionality to Claude Code through a writer-friendly natural language interface. This guide covers the architecture, development workflow, and how to extend the server.
+
+== Architecture
+
+=== Components
+
+The MCP server consists of several key components:
+
+*Server implementation* (`bin/doc-tools-mcp.js`):: Main MCP server that handles the protocol communication with Claude Code
+
+*Tool modules* (`bin/mcp-tools/`):: Individual tool implementations that wrap CLI commands
++
+* `antora.js` - Antora structure analysis
+* `version.js` - Version information from GitHub
+* `generate.js` - Documentation generation commands
+* `cli.js` - Raw CLI command execution
+
+*Prompt system* (`prompts/`):: Pre-defined instructions for specific documentation workflows
++
+See link:prompts/README.adoc[Prompts documentation]
+
+*Setup automation* (`cli-utils/setup-mcp.js`):: Automated MCP server configuration for Claude Code/Desktop
+
+=== How it works
+
+. Claude Code starts the MCP server when you launch Claude Code in any directory
+. The server detects the repository context (git root, Antora structure, doc-tools availability)
+. When you ask Claude to perform a task, Claude decides which tools to use
+. The server receives tool requests via the MCP protocol
+. Tool modules execute CLI commands in the detected repository context
+. Results are returned to Claude, which presents them to you
+
+=== Protocol flow
+
+[,mermaid]
+----
+sequenceDiagram
+    participant User
+    participant Claude
+    participant MCP Server
+    participant CLI
+
+    User->>Claude: "Generate property docs for v25.3.1"
+    Claude->>MCP Server: generate_property_docs(version: "v25.3.1")
+    MCP Server->>CLI: npx doc-tools generate property-docs --tag v25.3.1
+    CLI-->>MCP Server: Output + exit code
+    MCP Server-->>Claude: JSON response
+    Claude-->>User: "✓ Generated 342 properties"
+----
+
+== Development setup
+
+=== Prerequisites
+
+* Node.js 18 or later
+* Claude Code installed
+* Git
+
+=== Initial setup
+
+. Clone the repository:
++
+[,bash]
+----
+git clone https://github.com/redpanda-data/docs-extensions-and-macros.git
+cd docs-extensions-and-macros
+----
+
+. Install dependencies:
++
+[,bash]
+----
+npm install
+----
+
+. Configure MCP server for local development:
++
+[,bash]
+----
+npx doc-tools setup-mcp
+----
++
+This configures Claude Code to use your local development version.
+
+. Restart Claude Code to load the server
+
+=== Project structure
+
+[,bash]
+----
+docs-extensions-and-macros/
+├── bin/
+│   ├── doc-tools-mcp.js           # Main MCP server
+│   └── mcp-tools/                 # Tool implementations
+│       ├── antora.js              # Antora structure analysis
+│       ├── cli.js                 # CLI command execution
+│       ├── generate.js            # Generation tools
+│       └── version.js             # Version tools
+├── prompts/                       # MCP prompts
+│   ├── property-docs-guide.md
+│   ├── rpcn-connector-docs-guide.md
+│   └── README.adoc
+├── __tests__/mcp/                 # MCP tests
+│   ├── integration.test.js
+│   ├── cli-contract.test.js
+│   ├── doc-tools-mcp.test.js
+│   ├── CLI_INTERFACE.adoc
+│   └── README.adoc
+└── cli-utils/
+    └── setup-mcp.js               # Setup automation
+----
+
+== Adding a new tool
+
+=== Step 1: Define the tool schema
+
+Edit `bin/doc-tools-mcp.js` and add your tool to the tools array:
+
+[,javascript]
+----
+{
+  name: 'my_new_tool',
+  description: 'Description of what this tool does for writers',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      my_parameter: {
+        type: 'string',
+        description: 'Description of this parameter'
+      }
+    },
+    required: ['my_parameter']
+  }
+}
+----
+
+*Design principles for tool schemas:*
+
+* Use writer-friendly descriptions (no technical jargon)
+* Parameter names should be clear and intuitive
+* Use natural language in descriptions
+* Mark parameters as required only if absolutely necessary
+
+=== Step 2: Create the tool module
+
+Create a new file in `bin/mcp-tools/my-tool.js`:
+
+[,javascript]
+----
+const { execSync } = require('child_process');
+
+/**
+ * Execute my new tool
+ * @param {Object} params - Tool parameters
+ * @param {string} params.my_parameter - Description
+ * @param {Object} context - Execution context
+ * @param {string} context.repoRoot - Repository root path
+ * @returns {Object} Result object with success and data
+ */
+function executeMyTool(params, context) {
+  try {
+    // Validate parameters
+    if (!params.my_parameter) {
+      return {
+        success: false,
+        error: 'Parameter my_parameter is required',
+        suggestion: 'Provide a value like "example"'
+      };
+    }
+
+    // Execute CLI command
+    const output = execSync(
+      `npx doc-tools my-command --param ${params.my_parameter}`,
+      {
+        cwd: context.repoRoot,
+        encoding: 'utf8',
+        maxBuffer: 50 * 1024 * 1024,
+        timeout: 5 * 60 * 1000
+      }
+    );
+
+    // Parse output and return structured result
+    return {
+      success: true,
+      output,
+      summary: 'Successfully executed my tool'
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: `Command failed: ${err.message}`,
+      stdout: err.stdout || '',
+      stderr: err.stderr || '',
+      exitCode: err.status
+    };
+  }
+}
+
+module.exports = { executeMyTool };
+----
+
+*Best practices for tool modules:*
+
+* Always return structured JSON objects
+* Include helpful error messages and suggestions
+* Use appropriate timeouts (default: 5 minutes)
+* Parse CLI output to extract useful information
+* Handle all error cases gracefully
+
+=== Step 3: Wire up the tool
+
+In `bin/doc-tools-mcp.js`, import your tool module and add a case to the tool handler:
+
+[,javascript]
+----
+const { executeMyTool } = require('./mcp-tools/my-tool');
+
+// In the tool handler switch statement:
+case 'my_new_tool':
+  result = executeMyTool(params, context);
+  break;
+----
+
+=== Step 4: Add tests
+
+See <<Testing>> section below.
+
+=== Step 5: Document the tool
+
+Update link:USER_GUIDE.adoc[USER_GUIDE.adoc] to document:
+
+* The tool in the "Available tools" section
+* JSON response structure
+* Usage examples
+
+Update link:CLI_INTERFACE.adoc[CLI_INTERFACE.adoc] if you added a new CLI command.
+
+== Adding a new prompt
+
+Prompts provide contextual guidance to Claude when working on specific documentation tasks.
+
+=== Step 1: Create the prompt file
+
+Create a new Markdown file in `prompts/`:
+
+[,bash]
+----
+prompts/my-docs-guide.md
+----
+
+[,markdown]
+----
+# My Documentation Guide
+
+This guide explains how to work with [specific documentation type].
+
+## Overview
+
+[Explanation of the documentation system]
+
+## Workflow
+
+1. First step
+2. Second step
+3. Third step
+
+## Important rules
+
+- Rule 1
+- Rule 2
+- Rule 3
+
+## Common tasks
+
+### Task 1: Do something
+
+[Detailed instructions]
+
+### Task 2: Do something else
+
+[Detailed instructions]
+
+## Validation
+
+Before committing, check:
+
+- [ ] Checklist item 1
+- [ ] Checklist item 2
+----
+
+*Best practices for prompts:*
+
+* Write for technical writers, not developers
+* Include concrete examples
+* Explain the "why" behind rules
+* Provide validation checklists
+* Use clear, scannable structure
+
+=== Step 2: Register the prompt
+
+Edit `bin/doc-tools-mcp.js` and add your prompt to the prompts array:
+
+[,javascript]
+----
+{
+  name: 'my-docs-guide',
+  description: 'Guide for working with [specific documentation]',
+  arguments: []
+}
+----
+
+And add a case to the prompt handler:
+
+[,javascript]
+----
+case 'my-docs-guide':
+  promptText = fs.readFileSync(
+    path.join(__dirname, '../prompts/my-docs-guide.md'),
+    'utf8'
+  );
+  break;
+----
+
+=== Step 3: Document the prompt
+
+Update `prompts/README.adoc` to document when Claude should use this prompt.
+
+See link:prompts/README.adoc[Prompts documentation] for more details.
+
+== Testing
+
+The MCP server has three types of tests:
+
+=== Integration tests
+
+Test MCP tools end-to-end through the tool execution layer.
+
+*Location:* `__tests__/mcp/integration.test.js`
+
+*Add tests for new tools:*
+
+[,javascript]
+----
+test('my_new_tool returns expected result', () => {
+  const result = mcpTools.executeTool('my_new_tool', {
+    my_parameter: 'test-value'
+  });
+
+  expect(result).toBeDefined();
+  expect(result.success).toBe(true);
+  expect(result.summary).toContain('Successfully');
+});
+
+test('my_new_tool validates parameters', () => {
+  const result = mcpTools.executeTool('my_new_tool', {});
+
+  expect(result.success).toBe(false);
+  expect(result.error.toLowerCase()).toContain('required');
+});
+----
+
+=== CLI contract tests
+
+Verify that the doc-tools CLI maintains the expected interface.
+
+*Location:* `__tests__/mcp/cli-contract.test.js`
+
+*Add tests for new CLI commands:*
+
+[,javascript]
+----
+test('my-command exists', () => {
+  const result = executeCLI('my-command --help');
+  expect(result.success).toBe(true);
+});
+
+test('my-command supports required flag --param', () => {
+  const result = executeCLI('my-command --help');
+  expect(result.output).toContain('--param');
+});
+----
+
+See link:CLI_INTERFACE.adoc[CLI Interface Contract] for details on the contract.
+
+=== Unit tests
+
+Test individual MCP server components in isolation.
+
+*Location:* `__tests__/mcp/doc-tools-mcp.test.js`
+
+*Add tests for tool modules:*
+
+[,javascript]
+----
+describe('executeMyTool', () => {
+  test('executes successfully with valid params', () => {
+    const result = executeMyTool(
+      { my_parameter: 'test' },
+      { repoRoot: '/test' }
+    );
+
+    expect(result.success).toBeDefined();
+  });
+
+  test('returns error for missing parameters', () => {
+    const result = executeMyTool({}, { repoRoot: '/test' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('required');
+  });
+});
+----
+
+=== Running tests
+
+Run all MCP tests:
+
+[,bash]
+----
+npm run test:mcp
+----
+
+Run specific test suites:
+
+[,bash]
+----
+npm run test:mcp:integration  # Integration tests only
+npm run test:mcp:contract     # Contract tests only
+----
+
+Run with coverage:
+
+[,bash]
+----
+npm test -- --coverage __tests__/mcp/
+----
+
+Run in watch mode during development:
+
+[,bash]
+----
+npm test -- --watch __tests__/mcp/
+----
+
+See link:../__tests__/mcp/README.adoc[Test documentation] for more details.
+
+== Debugging
+
+=== Enable debug logging
+
+Set the `NODE_ENV` environment variable to see detailed logs:
+
+[,bash]
+----
+NODE_ENV=development claude
+----
+
+This enables:
+
+* Stack traces in error responses
+* Additional console logging
+* Verbose MCP protocol messages
+
+=== View MCP server logs
+
+The server logs to stderr (not stdout) to avoid interfering with the MCP protocol.
+
+Claude Code captures these logs. Check:
+
+* macOS: `~/Library/Logs/Claude/`
+* Linux: `~/.local/share/Claude/logs/`
+* Windows: `%APPDATA%\Claude\logs\`
+
+=== Test the server directly
+
+You can test tool execution without Claude Code:
+
+[,javascript]
+----
+// test-tool.js
+const mcpTools = require('./bin/mcp-tools');
+
+const result = mcpTools.executeTool('get_redpanda_version', {});
+console.log(JSON.stringify(result, null, 2));
+----
+
+[,bash]
+----
+node test-tool.js
+----
+
+=== Common issues
+
+*Tool not showing up in Claude Code*
+
+* Run `npx doc-tools setup-mcp --status` to verify configuration
+* Check `~/.claude.json` for the `mcpServers` section
+* Restart Claude Code completely
+* Check logs for server startup errors
+
+*"doc-tools not found" errors*
+
+* Ensure you're in a repository that has doc-tools installed
+* Check that `npx doc-tools --version` works
+* Verify `repoRoot` is correctly detected
+
+*Timeout errors*
+
+* Increase timeout in tool module (default: 5 minutes)
+* Check network connectivity for version tools
+* Look for infinite loops in CLI commands
+
+== Security
+
+=== Command injection prevention
+
+All CLI commands go through validation in `cli.js`:
+
+* Shell metacharacters blocked: `;`, `|`, `&`, `$`, ``` ` ```, `<`, `>`, `(`, `)`
+* Path traversal sequences blocked: `..`, `~`
+* Commands must be non-empty strings
+
+*Always use the CLI validation when executing shell commands.*
+
+=== Sensitive data
+
+* Never log sensitive data (tokens, passwords, API keys)
+* Don't expose internal paths in error messages
+* Sanitize file paths before returning to Claude
+
+=== Resource limits
+
+All CLI commands have:
+
+* 5-minute timeout
+* 50MB output buffer limit
+* Execution in detected repository context only
+
+== Best practices
+
+=== Tool design
+
+* *Writer-focused*: Design tools for technical writers, not developers
+* *Natural language*: Use conversational descriptions and parameter names
+* *Helpful errors*: Always include suggestions for fixing errors
+* *Structured output*: Return consistent JSON structures
+* *Fail gracefully*: Handle all error cases with clear messages
+
+=== Code organization
+
+* One tool module per file in `bin/mcp-tools/`
+* Keep modules focused and single-purpose
+* Export only necessary functions
+* Document function parameters and return values
+
+=== Error handling
+
+* Always catch exceptions
+* Return structured error objects with `success: false`
+* Include helpful suggestions in error responses
+* Preserve stdout/stderr for debugging
+
+=== Performance
+
+* Use appropriate timeouts for different operations
+* Parse CLI output efficiently
+* Cache repository detection when possible
+* Avoid unnecessary file system operations
+
+== Release process
+
+=== Before releasing
+
+. Run all tests: `npm run test:mcp`
+. Update version in `package.json`
+. Update link:USER_GUIDE.adoc[USER_GUIDE.adoc] with any changes
+. Test manually with Claude Code
+. Check that setup command works: `npx doc-tools setup-mcp`
+
+=== Publishing
+
+. Commit all changes
+. Tag the release: `git tag -a v1.2.3 -m "Release 1.2.3"`
+. Push with tags: `git push --tags`
+. Publish to npm: `npm publish`
+
+=== After releasing
+
+. Update documentation if needed
+. Notify writers of any breaking changes
+. Monitor for issues
+
+== Related documentation
+
+*User documentation*
+
+* link:USER_GUIDE.adoc[User guide] - Guide for writers using the MCP server with Claude Code
+
+*Developer documentation*
+
+* link:../__tests__/mcp/README.adoc[Test documentation] - How to run and write tests
+* link:CLI_INTERFACE.adoc[CLI interface contract] - CLI interface that the MCP server depends on
+* link:prompts/README.adoc[Prompts documentation] - How the prompt system works
+
+*External documentation*
+
+* https://modelcontextprotocol.io/[MCP Protocol Specification]
+* https://docs.anthropic.com/claude[Claude Code Documentation]
+* https://nodejs.org/docs/latest/api/child_process.html[Node.js child_process]
+
+== Contributing
+
+When contributing to the MCP server:
+
+. Read this guide thoroughly
+. Review existing tool implementations for patterns
+. Write tests for all new functionality
+. Update documentation
+. Follow the existing code style
+. Test manually with Claude Code before submitting PR
+
+== Getting help
+
+* Check Claude Code logs for errors
+* Review the link:../__tests__/mcp/README.adoc[test documentation]
+* Look at existing tool implementations for examples
+* Open an issue in the repository
+
+== Roadmap
+
+Potential future improvements:
+
+* Additional documentation generation tools
+* More sophisticated prompt selection
+* Caching layer for expensive operations
+* Better error recovery
+* Streaming output for long-running operations
+* Tool result validation
