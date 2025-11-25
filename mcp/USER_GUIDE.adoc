@@ -1,4 +1,4 @@
-= Redpanda Docs Tools MCP Server
+= Redpanda Doc Tools MCP Server
 :toc:
 :toclevels: 3
 

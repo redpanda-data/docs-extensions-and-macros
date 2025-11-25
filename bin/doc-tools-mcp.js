@@ -571,7 +571,7 @@ async function main() {
 
   // Log to stderr so it doesn't interfere with MCP protocol on stdout
   const repoInfo = findRepoRoot();
-  console.error('Redpanda Docs Tools MCP Server running');
+  console.error('Redpanda Doc Tools MCP Server running');
   console.error(`Server version: ${packageJson.version}`);
   console.error(`Working directory: ${process.cwd()}`);
   console.error(`Repository root: ${repoInfo.root} (${repoInfo.detected ? repoInfo.type : 'not detected'})`);

@@ -2,7 +2,7 @@
 :toc:
 :toclevels: 2
 
-Documentation for the Redpanda Docs Tools MCP (Model Context Protocol) server.
+Documentation for the Redpanda Doc Tools MCP (Model Context Protocol) server.
 
 The MCP server exposes `doc-tools` functionality to Claude Code, allowing technical writers to automate documentation tasks through natural conversation. No CLI knowledge required.
 
