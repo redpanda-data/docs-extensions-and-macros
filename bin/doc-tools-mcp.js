@@ -104,7 +104,7 @@ const tools = [
   },
   {
     name: 'generate_metrics_docs',
-    description: 'Generate Redpanda metrics documentation for a specific version. Creates the public metrics reference page. Writers use this when updating metrics docs for a new release.',
+    description: 'Generate Redpanda metrics documentation for a specific version. Creates the public metrics reference page. Writers use this when updating metrics docs for a new release. Can run in background with progress streaming.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -115,6 +115,10 @@ const tools = [
         branch: {
           type: 'string',
           description: 'Branch name for in-progress content (e.g., "dev", "main"). Use branches for documentation under development.'
+        },
+        background: {
+          type: 'boolean',
+          description: 'Run as background job with progress updates. Returns job ID immediately instead of waiting. Default: false (run synchronously)'
         }
       },
       required: []
@@ -122,7 +126,7 @@ const tools = [
   },
   {
     name: 'generate_rpk_docs',
-    description: 'Generate RPK command-line documentation for a specific version. Creates AsciiDoc files for all rpk commands. Writers use this when updating CLI docs for a new release.',
+    description: 'Generate RPK command-line documentation for a specific version. Creates AsciiDoc files for all rpk commands. Writers use this when updating CLI docs for a new release. Can run in background with progress streaming.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -133,6 +137,10 @@ const tools = [
         branch: {
           type: 'string',
           description: 'Branch name for in-progress content (e.g., "dev", "main"). Use branches for documentation under development.'
+        },
+        background: {
+          type: 'boolean',
+          description: 'Run as background job with progress updates. Returns job ID immediately instead of waiting. Default: false (run synchronously)'
         }
       },
       required: []

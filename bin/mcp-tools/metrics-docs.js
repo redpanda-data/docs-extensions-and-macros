@@ -5,6 +5,7 @@
 const { execSync, spawnSync } = require('child_process');
 const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
+const { createJob } = require('./job-queue');
 
 /**
  * Generate Redpanda metrics documentation
@@ -15,6 +16,7 @@ const { getAntoraStructure } = require('./antora');
  * @param {Object} args - Arguments
  * @param {string} [args.tag] - Git tag for released content (e.g., "v25.3.1")
  * @param {string} [args.branch] - Branch name for in-progress content (e.g., "dev", "main")
+ * @param {boolean} [args.background] - Run as background job
  * @returns {Object} Generation results
  */
 function generateMetricsDocs(args) {
@@ -48,30 +50,49 @@ function generateMetricsDocs(args) {
     version = `v${version}`;
   }
 
+  // Validate version string to prevent command injection
+  const versionRegex = /^[0-9A-Za-z._\/-]+$/;
+  if (!versionRegex.test(version)) {
+    return {
+      success: false,
+      error: 'Invalid version format',
+      suggestion: 'Version must contain only alphanumeric characters, dots, underscores, slashes, and hyphens (e.g., "v25.3.1", "v25.3.1-rc1", "dev", "main")'
+    };
+  }
+
+  // Build command arguments
+  const cmdArgs = ['npx', 'doc-tools', 'generate', 'metrics-docs'];
+
+  if (args.tag) {
+    cmdArgs.push('--tag');
+    cmdArgs.push(version);
+  } else {
+    cmdArgs.push('--branch');
+    cmdArgs.push(version);
+  }
+
+  // If background mode, create job and return immediately
+  if (args.background) {
+    const jobId = createJob('generate_metrics_docs', cmdArgs, {
+      cwd: repoRoot.root
+    });
+
+    return {
+      success: true,
+      background: true,
+      job_id: jobId,
+      message: `Metrics docs generation started in background. Use get_job_status with job_id: ${jobId} to check progress.`,
+      [refType]: version
+    };
+  }
+
+  // Otherwise run synchronously
   try {
-    // Validate version string to prevent command injection
-    const versionRegex = /^[0-9A-Za-z._\/-]+$/;
-    if (!versionRegex.test(version)) {
-      return {
-        success: false,
-        error: 'Invalid version format',
-        suggestion: 'Version must contain only alphanumeric characters, dots, underscores, slashes, and hyphens (e.g., "v25.3.1", "v25.3.1-rc1", "dev", "main")'
-      };
-    }
-
-    // Build command arguments
-    const cmdArgs = ['doc-tools', 'generate', 'metrics-docs'];
-
-    if (args.tag) {
-      cmdArgs.push('--tag');
-      cmdArgs.push(version);
-    } else {
-      cmdArgs.push('--branch');
-      cmdArgs.push(version);
-    }
+    // Remove 'npx' from cmdArgs for spawnSync since we already have it
+    const syncCmdArgs = cmdArgs.slice(1);
 
     // Use safe command execution with argument array
-    const result = spawnSync('npx', cmdArgs, {
+    const result = spawnSync('npx', syncCmdArgs, {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',

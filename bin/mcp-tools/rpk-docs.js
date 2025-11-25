@@ -5,6 +5,7 @@
 const { spawnSync } = require('child_process');
 const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
+const { createJob } = require('./job-queue');
 
 /**
  * Generate RPK command documentation
@@ -15,6 +16,7 @@ const { getAntoraStructure } = require('./antora');
  * @param {Object} args - Arguments
  * @param {string} [args.tag] - Git tag for released content (e.g., "v25.3.1")
  * @param {string} [args.branch] - Branch name for in-progress content (e.g., "dev", "main")
+ * @param {boolean} [args.background] - Run as background job
  * @returns {Object} Generation results
  */
 function generateRpkDocs(args) {
@@ -48,19 +50,38 @@ function generateRpkDocs(args) {
     version = `v${version}`;
   }
 
+  // Build command arguments array (no shell interpolation)
+  const cmdArgs = ['npx', 'doc-tools', 'generate', 'rpk-docs'];
+
+  if (args.tag) {
+    cmdArgs.push('--tag');
+    cmdArgs.push(version);
+  } else {
+    cmdArgs.push('--branch');
+    cmdArgs.push(version);
+  }
+
+  // If background mode, create job and return immediately
+  if (args.background) {
+    const jobId = createJob('generate_rpk_docs', cmdArgs, {
+      cwd: repoRoot.root
+    });
+
+    return {
+      success: true,
+      background: true,
+      job_id: jobId,
+      message: `RPK docs generation started in background. Use get_job_status with job_id: ${jobId} to check progress.`,
+      [refType]: version
+    };
+  }
+
+  // Otherwise run synchronously
   try {
-    // Build command arguments array (no shell interpolation)
-    const cmdArgs = ['doc-tools', 'generate', 'rpk-docs'];
+    // Remove 'npx' from cmdArgs for spawnSync
+    const syncCmdArgs = cmdArgs.slice(1);
 
-    if (args.tag) {
-      cmdArgs.push('--tag');
-      cmdArgs.push(version);
-    } else {
-      cmdArgs.push('--branch');
-      cmdArgs.push(version);
-    }
-
-    const result = spawnSync('npx', cmdArgs, {
+    const result = spawnSync('npx', syncCmdArgs, {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',
