@@ -20,9 +20,11 @@ module.exports = async function getRedpandaVersion({ beta = false, fromAntora = 
   }
 
   // Load Octokit
+  const { getGitHubToken } = require('../cli-utils/github-token');
   const { Octokit } = await import('@octokit/rest');
-  const octokit = process.env.REDPANDA_GITHUB_TOKEN
-    ? new Octokit({ auth: process.env.REDPANDA_GITHUB_TOKEN })
+  const token = getGitHubToken();
+  const octokit = token
+    ? new Octokit({ auth: token })
     : new Octokit();
 
   // Fetch version data

@@ -1907,9 +1907,10 @@ automation
     // Validate cloud support dependencies if requested
     if (options.cloudSupport) {
       console.log('🔍 Validating cloud support dependencies...');
-      const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || process.env.REDPANDA_GITHUB_TOKEN;
+      const { getGitHubToken } = require('../cli-utils/github-token');
+      const token = getGitHubToken();
       if (!token) {
-        console.error('❌ Cloud support requires GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN environment variable');
+        console.error('❌ Cloud support requires a GitHub token');
         console.error('   Set up GitHub token:');
         console.error('   1. Go to https://github.com/settings/tokens');
         console.error('   2. Generate token with "repo" scope');
@@ -2217,10 +2218,21 @@ automation
         process.exit(1);
       }
 
+      const { getAuthenticatedGitHubUrl, hasGitHubToken } = require('../cli-utils/github-token');
+
       tmpClone = fs.mkdtempSync(path.join(os.tmpdir(), 'helm-'));
-      console.log(`⏳ Cloning ${repoUrl}@${gitRef} → ${tmpClone}`);
+
+      // Use token if available for GitHub repos
+      let cloneUrl = repoUrl;
+      if (hasGitHubToken() && repoUrl.includes('github.com')) {
+        cloneUrl = getAuthenticatedGitHubUrl(repoUrl);
+        console.log(`⏳ Cloning ${repoUrl}@${gitRef} → ${tmpClone} (authenticated)`);
+      } else {
+        console.log(`⏳ Cloning ${repoUrl}@${gitRef} → ${tmpClone}`);
+      }
+
       if (
-        spawnSync('git', ['clone', '--depth', '1', '--branch', gitRef, repoUrl, tmpClone], {
+        spawnSync('git', ['clone', '--depth', '1', '--branch', gitRef, cloneUrl, tmpClone], {
           stdio: 'inherit',
         }).status !== 0
       ) {
@@ -2372,11 +2384,12 @@ automation
   .option('--dry-run', 'Print output to stdout instead of writing file')
   .action(async (options) => {
     const { generateCloudRegions } = require('../tools/cloud-regions/generate-cloud-regions.js');
+    const { getGitHubToken } = require('../cli-utils/github-token');
 
     try {
-      const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || process.env.REDPANDA_GITHUB_TOKEN;
+      const token = getGitHubToken();
       if (!token) {
-        throw new Error('GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN environment variable is required to fetch from private cloudv2-infra repo.');
+        throw new Error('GitHub token is required to fetch from private cloudv2-infra repo. Set GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN.');
       }
       const fmt = (options.format || 'md').toLowerCase();
       let templatePath = undefined;
@@ -2558,10 +2571,21 @@ automation
         console.error(`❌ Tag or branch "${configRef}" not found on ${repoUrl}`);
         process.exit(1);
       }
+      const { getAuthenticatedGitHubUrl, hasGitHubToken } = require('../cli-utils/github-token');
+
       tmpSrc = fs.mkdtempSync(path.join(os.tmpdir(), 'crd-src-'));
-      console.log(`⏳ Cloning ${repoUrl}@${configRef} → ${tmpSrc}`);
+
+      // Use token if available for GitHub repos
+      let cloneUrl = repoUrl;
+      if (hasGitHubToken() && repoUrl.includes('github.com')) {
+        cloneUrl = getAuthenticatedGitHubUrl(repoUrl);
+        console.log(`⏳ Cloning ${repoUrl}@${configRef} → ${tmpSrc} (authenticated)`);
+      } else {
+        console.log(`⏳ Cloning ${repoUrl}@${configRef} → ${tmpSrc}`);
+      }
+
       if (
-        spawnSync('git', ['clone', '--depth', '1', '--branch', configRef, repoUrl, tmpSrc], {
+        spawnSync('git', ['clone', '--depth', '1', '--branch', configRef, cloneUrl, tmpSrc], {
           stdio: 'inherit',
         }).status !== 0
       ) {

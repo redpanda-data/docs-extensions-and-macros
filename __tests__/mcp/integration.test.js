@@ -19,17 +19,21 @@ describe('MCP Tools Integration Tests', () => {
   describe('CLI Availability', () => {
     test('doc-tools CLI is available', () => {
       expect(() => {
-        execSync('npx doc-tools --version', {
+        // Use local bin/doc-tools.js to avoid npx cache issues in CI
+        execSync('node bin/doc-tools.js --version', {
           encoding: 'utf8',
-          stdio: 'pipe'
+          stdio: 'pipe',
+          cwd: repoRoot.root
         });
       }).not.toThrow();
     });
 
     test('all required generate subcommands exist', () => {
-      const output = execSync('npx doc-tools generate --help', {
+      // Use local bin/doc-tools.js to avoid npx cache issues in CI
+      const output = execSync('node bin/doc-tools.js generate --help', {
         encoding: 'utf8',
-        stdio: 'pipe'
+        stdio: 'pipe',
+        cwd: repoRoot.root
       });
 
       const requiredCommands = [
