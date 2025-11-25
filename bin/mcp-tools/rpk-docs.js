@@ -3,7 +3,7 @@
  */
 
 const { spawnSync } = require('child_process');
-const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
+const { findRepoRoot, getDocToolsCommand, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 const { createJob } = require('./job-queue');
 
@@ -50,19 +50,23 @@ function generateRpkDocs(args) {
     version = `v${version}`;
   }
 
-  // Build command arguments array (no shell interpolation)
-  const cmdArgs = ['npx', 'doc-tools', 'generate', 'rpk-docs'];
+  // Get doc-tools command (handles both local and installed)
+  const docTools = getDocToolsCommand(repoRoot);
+
+  // Build command arguments array
+  const baseArgs = ['generate', 'rpk-docs'];
 
   if (args.tag) {
-    cmdArgs.push('--tag');
-    cmdArgs.push(version);
+    baseArgs.push('--tag');
+    baseArgs.push(version);
   } else {
-    cmdArgs.push('--branch');
-    cmdArgs.push(version);
+    baseArgs.push('--branch');
+    baseArgs.push(version);
   }
 
   // If background mode, create job and return immediately
   if (args.background) {
+    const cmdArgs = [docTools.program, ...docTools.getArgs(baseArgs)];
     const jobId = createJob('generate_rpk_docs', cmdArgs, {
       cwd: repoRoot.root
     });
@@ -78,10 +82,7 @@ function generateRpkDocs(args) {
 
   // Otherwise run synchronously
   try {
-    // Remove 'npx' from cmdArgs for spawnSync
-    const syncCmdArgs = cmdArgs.slice(1);
-
-    const result = spawnSync('npx', syncCmdArgs, {
+    const result = spawnSync(docTools.program, docTools.getArgs(baseArgs), {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',

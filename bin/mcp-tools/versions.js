@@ -2,7 +2,8 @@
  * MCP Tools - Version Information
  */
 
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
+const { findRepoRoot, getDocToolsCommand } = require('./utils');
 
 /**
  * Get the latest Redpanda version information
@@ -12,12 +13,33 @@ const { execSync } = require('child_process');
  */
 function getRedpandaVersion(args = {}) {
   try {
-    const betaFlag = args.beta ? '--beta' : '';
-    const output = execSync(`npx doc-tools get-redpanda-version ${betaFlag}`, {
+    // Get doc-tools command (handles both local and installed)
+    const repoRoot = findRepoRoot();
+    const docTools = getDocToolsCommand(repoRoot);
+
+    // Build command arguments array
+    const baseArgs = ['get-redpanda-version'];
+    if (args.beta) {
+      baseArgs.push('--beta');
+    }
+
+    const result = spawnSync(docTools.program, docTools.getArgs(baseArgs), {
       encoding: 'utf8',
       stdio: 'pipe',
       timeout: 30000
     });
+
+    // Check for errors
+    if (result.error) {
+      throw new Error(`Failed to execute command: ${result.error.message}`);
+    }
+
+    if (result.status !== 0) {
+      const errorMsg = result.stderr || `Command failed with exit code ${result.status}`;
+      throw new Error(errorMsg);
+    }
+
+    const output = result.stdout;
 
     // Parse the output (format: REDPANDA_VERSION=vX.Y.Z\nREDPANDA_DOCKER_REPO=redpanda)
     const lines = output.trim().split('\n');
@@ -56,11 +78,27 @@ function getRedpandaVersion(args = {}) {
  */
 function getConsoleVersion() {
   try {
-    const output = execSync('npx doc-tools get-console-version', {
+    // Get doc-tools command (handles both local and installed)
+    const repoRoot = findRepoRoot();
+    const docTools = getDocToolsCommand(repoRoot);
+
+    const result = spawnSync(docTools.program, docTools.getArgs(['get-console-version']), {
       encoding: 'utf8',
       stdio: 'pipe',
       timeout: 30000
     });
+
+    // Check for errors
+    if (result.error) {
+      throw new Error(`Failed to execute command: ${result.error.message}`);
+    }
+
+    if (result.status !== 0) {
+      const errorMsg = result.stderr || `Command failed with exit code ${result.status}`;
+      throw new Error(errorMsg);
+    }
+
+    const output = result.stdout;
 
     // Parse the output (format: CONSOLE_VERSION=vX.Y.Z\nCONSOLE_DOCKER_REPO=console)
     const lines = output.trim().split('\n');

@@ -94,22 +94,26 @@ function executeTool(toolName, args = {}) {
         }
 
         try {
+          // Get doc-tools command (handles both local and installed)
+          const { getDocToolsCommand } = require('./utils');
+          const docTools = getDocToolsCommand(repoRoot);
+
           // Parse command into argument array (no shell interpolation)
           // Since validation already rejects shell metacharacters, we can safely split by spaces
           // Handle quoted strings for paths with spaces
           const cmdArgs = parseCommandArgs(args.command);
 
-          // Build full args array: ['doc-tools', ...cmdArgs]
-          const fullArgs = ['doc-tools', ...cmdArgs];
+          // Build full args using the appropriate command
+          const fullArgs = docTools.getArgs(cmdArgs);
 
-          const output = executeCommand('npx', fullArgs, {
+          const output = executeCommand(docTools.program, fullArgs, {
             cwd: repoRoot.root
           });
 
           return {
             success: true,
             output: output.trim(),
-            command: `npx doc-tools ${args.command}`
+            command: `${docTools.program} ${fullArgs.join(' ')}`
           };
         } catch (err) {
           return {

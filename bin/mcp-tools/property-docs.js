@@ -3,7 +3,7 @@
  */
 
 const { spawnSync } = require('child_process');
-const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
+const { findRepoRoot, getDocToolsCommand, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 const { createJob } = require('./job-queue');
 
@@ -51,23 +51,27 @@ function generatePropertyDocs(args) {
     version = `v${version}`;
   }
 
-  // Build command
-  const cmdArgs = ['npx', 'doc-tools', 'generate', 'property-docs'];
+  // Get doc-tools command (handles both local and installed)
+  const docTools = getDocToolsCommand(repoRoot);
+
+  // Build command arguments
+  const baseArgs = ['generate', 'property-docs'];
 
   if (args.tag) {
-    cmdArgs.push('--tag');
-    cmdArgs.push(version);
+    baseArgs.push('--tag');
+    baseArgs.push(version);
   } else {
-    cmdArgs.push('--branch');
-    cmdArgs.push(version);
+    baseArgs.push('--branch');
+    baseArgs.push(version);
   }
 
   if (args.generate_partials) {
-    cmdArgs.push('--generate-partials');
+    baseArgs.push('--generate-partials');
   }
 
   // If background mode, create job and return immediately
   if (args.background) {
+    const cmdArgs = [docTools.program, ...docTools.getArgs(baseArgs)];
     const jobId = createJob('generate_property_docs', cmdArgs, {
       cwd: repoRoot.root
     });
@@ -83,8 +87,7 @@ function generatePropertyDocs(args) {
 
   // Otherwise run synchronously
   try {
-    // Extract 'npx' from cmdArgs[0] and use rest as arguments
-    const result = spawnSync(cmdArgs[0], cmdArgs.slice(1), {
+    const result = spawnSync(docTools.program, docTools.getArgs(baseArgs), {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',

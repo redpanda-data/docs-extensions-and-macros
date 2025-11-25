@@ -37,6 +37,29 @@ function findRepoRoot(start = process.cwd()) {
 }
 
 /**
+ * Get the doc-tools command and arguments
+ * Handles both development mode (source repo) and installed mode (npm package)
+ * @param {Object} repoRoot - Repository root information from findRepoRoot()
+ * @returns {{ program: string, getArgs: function }} Command configuration
+ */
+function getDocToolsCommand(repoRoot) {
+  // Check if we're in the source repository (development mode)
+  const localDocTools = path.join(repoRoot.root, 'bin', 'doc-tools.js');
+  if (fs.existsSync(localDocTools)) {
+    return {
+      program: 'node',
+      getArgs: (cmdArgs) => [localDocTools, ...cmdArgs]
+    };
+  }
+
+  // Otherwise use npx, which will find the installed package in node_modules
+  return {
+    program: 'npx',
+    getArgs: (cmdArgs) => ['doc-tools', ...cmdArgs]
+  };
+}
+
+/**
  * Execute a command safely using spawnSync (no shell)
  * @param {string} program - Program to execute (e.g., 'npx')
  * @param {string[]} args - Array of arguments (e.g., ['doc-tools', 'generate', 'property-docs'])
@@ -101,6 +124,7 @@ module.exports = {
   DEFAULT_SKIP_DIRS,
   PLAYBOOK_NAMES,
   findRepoRoot,
+  getDocToolsCommand,
   executeCommand,
   normalizeVersion,
   formatDate

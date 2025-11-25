@@ -2,8 +2,8 @@
  * MCP Tools - Cloud Regions Table Generation
  */
 
-const { execSync } = require('child_process');
-const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
+const { spawnSync } = require('child_process');
+const { findRepoRoot, getDocToolsCommand, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 
 /**
@@ -32,50 +32,71 @@ function generateCloudRegions(args = {}) {
   }
 
   try {
-    // Build command
-    const flags = [];
+    // Get doc-tools command (handles both local and installed)
+    const docTools = getDocToolsCommand(repoRoot);
+
+    // Build command arguments array
+    const baseArgs = ['generate', 'cloud-regions'];
 
     if (args.output) {
-      flags.push(`--output "${args.output}"`);
+      baseArgs.push('--output');
+      baseArgs.push(args.output);
     }
 
     if (args.format) {
-      flags.push(`--format ${args.format}`);
+      baseArgs.push('--format');
+      baseArgs.push(args.format);
     }
 
     if (args.owner) {
-      flags.push(`--owner ${args.owner}`);
+      baseArgs.push('--owner');
+      baseArgs.push(args.owner);
     }
 
     if (args.repo) {
-      flags.push(`--repo ${args.repo}`);
+      baseArgs.push('--repo');
+      baseArgs.push(args.repo);
     }
 
     if (args.path) {
-      flags.push(`--path "${args.path}"`);
+      baseArgs.push('--path');
+      baseArgs.push(args.path);
     }
 
     if (args.ref) {
-      flags.push(`--ref ${args.ref}`);
+      baseArgs.push('--ref');
+      baseArgs.push(args.ref);
     }
 
     if (args.template) {
-      flags.push(`--template "${args.template}"`);
+      baseArgs.push('--template');
+      baseArgs.push(args.template);
     }
 
     if (args.dry_run) {
-      flags.push('--dry-run');
+      baseArgs.push('--dry-run');
     }
 
-    const cmd = `npx doc-tools generate cloud-regions ${flags.join(' ')}`;
-
-    const output = execSync(cmd, {
+    const result = spawnSync(docTools.program, docTools.getArgs(baseArgs), {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',
       maxBuffer: MAX_EXEC_BUFFER_SIZE,
       timeout: DEFAULT_COMMAND_TIMEOUT
     });
+
+    // Check for spawn errors
+    if (result.error) {
+      throw new Error(`Failed to execute command: ${result.error.message}`);
+    }
+
+    // Check for non-zero exit codes
+    if (result.status !== 0) {
+      const errorMsg = result.stderr || `Command failed with exit code ${result.status}`;
+      throw new Error(errorMsg);
+    }
+
+    const output = result.stdout;
 
     // Parse output to extract information
     const regionCountMatch = output.match(/(\d+) regions?/i);

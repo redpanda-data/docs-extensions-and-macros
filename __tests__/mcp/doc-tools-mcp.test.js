@@ -506,11 +506,22 @@ describe('MCP Server Library - Repository Detection', () => {
   });
 
   describe('Version Information Tools', () => {
-    const { execSync } = require('child_process');
+    const { spawnSync } = require('child_process');
+
+    beforeEach(() => {
+      fs.existsSync = jest.fn((p) => p.includes('package.json') || p.includes('doc-tools.js'));
+      fs.realpathSync = jest.fn((p) => p);
+      fs.readdirSync = jest.fn(() => []);
+    });
 
     describe('getRedpandaVersion', () => {
       it('should return version information for stable release', () => {
-        execSync.mockReturnValue('REDPANDA_VERSION=v25.3.1\nREDPANDA_DOCKER_REPO=redpanda\n');
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'REDPANDA_VERSION=v25.3.1\nREDPANDA_DOCKER_REPO=redpanda\n',
+          stderr: '',
+          error: null
+        });
 
         const result = getRedpandaVersion({});
 
@@ -522,7 +533,12 @@ describe('MCP Server Library - Repository Detection', () => {
       });
 
       it('should return version information for beta release', () => {
-        execSync.mockReturnValue('REDPANDA_VERSION=v25.4.1-rc1\nREDPANDA_DOCKER_REPO=redpanda-unstable\n');
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'REDPANDA_VERSION=v25.4.1-rc1\nREDPANDA_DOCKER_REPO=redpanda-unstable\n',
+          stderr: '',
+          error: null
+        });
 
         const result = getRedpandaVersion({ beta: true });
 
@@ -533,7 +549,12 @@ describe('MCP Server Library - Repository Detection', () => {
       });
 
       it('should handle missing docker repo in output', () => {
-        execSync.mockReturnValue('REDPANDA_VERSION=v25.3.1\n');
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'REDPANDA_VERSION=v25.3.1\n',
+          stderr: '',
+          error: null
+        });
 
         const result = getRedpandaVersion({});
 
@@ -543,19 +564,27 @@ describe('MCP Server Library - Repository Detection', () => {
       });
 
       it('should handle command execution errors', () => {
-        execSync.mockImplementation(() => {
-          throw new Error('Network error');
+        spawnSync.mockReturnValue({
+          status: 1,
+          stdout: '',
+          stderr: 'Network error',
+          error: new Error('Network error')
         });
 
         const result = getRedpandaVersion({});
 
         expect(result.success).toBe(false);
-        expect(result.error).toBe('Network error');
+        expect(result.error).toContain('Network error');
         expect(result.suggestion).toContain('network access');
       });
 
       it('should handle malformed output', () => {
-        execSync.mockReturnValue('INVALID_OUTPUT\n');
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'INVALID_OUTPUT\n',
+          stderr: '',
+          error: null
+        });
 
         const result = getRedpandaVersion({});
 
@@ -566,7 +595,12 @@ describe('MCP Server Library - Repository Detection', () => {
 
     describe('getConsoleVersion', () => {
       it('should return Console version information', () => {
-        execSync.mockReturnValue('CONSOLE_VERSION=v2.7.2\nCONSOLE_DOCKER_REPO=console\n');
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'CONSOLE_VERSION=v2.7.2\nCONSOLE_DOCKER_REPO=console\n',
+          stderr: '',
+          error: null
+        });
 
         const result = getConsoleVersion();
 
@@ -577,7 +611,12 @@ describe('MCP Server Library - Repository Detection', () => {
       });
 
       it('should handle missing docker repo in output', () => {
-        execSync.mockReturnValue('CONSOLE_VERSION=v2.7.2\n');
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'CONSOLE_VERSION=v2.7.2\n',
+          stderr: '',
+          error: null
+        });
 
         const result = getConsoleVersion();
 
@@ -586,19 +625,27 @@ describe('MCP Server Library - Repository Detection', () => {
       });
 
       it('should handle command execution errors', () => {
-        execSync.mockImplementation(() => {
-          throw new Error('Network error');
+        spawnSync.mockReturnValue({
+          status: 1,
+          stdout: '',
+          stderr: 'Network error',
+          error: new Error('Network error')
         });
 
         const result = getConsoleVersion();
 
         expect(result.success).toBe(false);
-        expect(result.error).toBe('Network error');
+        expect(result.error).toContain('Network error');
         expect(result.suggestion).toContain('network access');
       });
 
       it('should handle malformed output', () => {
-        execSync.mockReturnValue('INVALID_OUTPUT\n');
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'INVALID_OUTPUT\n',
+          stderr: '',
+          error: null
+        });
 
         const result = getConsoleVersion();
 
@@ -679,8 +726,8 @@ describe('MCP Server Library - Repository Detection', () => {
 
         expect(result.tag).toBe('v25.3.1');
         expect(spawnSync).toHaveBeenCalledWith(
-          'npx',
-          expect.arrayContaining(['doc-tools', 'generate', 'property-docs', '--tag', 'v25.3.1']),
+          'node',
+          expect.arrayContaining(['generate', 'property-docs', '--tag', 'v25.3.1']),
           expect.any(Object)
         );
       });
@@ -701,8 +748,8 @@ describe('MCP Server Library - Repository Detection', () => {
 
         expect(result.tag).toBe('latest');
         expect(spawnSync).toHaveBeenCalledWith(
-          'npx',
-          expect.arrayContaining(['doc-tools', 'generate', 'property-docs', '--tag', 'latest']),
+          'node',
+          expect.arrayContaining(['generate', 'property-docs', '--tag', 'latest']),
           expect.any(Object)
         );
       });
@@ -737,7 +784,7 @@ describe('MCP Server Library - Repository Detection', () => {
 
         expect(result.branch).toBe('dev');
         expect(spawnSync).toHaveBeenCalledWith(
-          'npx',
+          'node',
           expect.arrayContaining(['--branch', 'dev']),
           expect.any(Object)
         );
@@ -833,7 +880,7 @@ describe('MCP Server Library - Repository Detection', () => {
 
         expect(result.branch).toBe('dev');
         expect(spawnSync).toHaveBeenCalledWith(
-          'npx',
+          'node',
           expect.arrayContaining(['--branch', 'dev']),
           expect.any(Object)
         );
@@ -906,7 +953,7 @@ describe('MCP Server Library - Repository Detection', () => {
 
         expect(result.branch).toBe('dev');
         expect(spawnSync).toHaveBeenCalledWith(
-          'npx',
+          'node',
           expect.arrayContaining(['--branch', 'dev']),
           expect.any(Object)
         );

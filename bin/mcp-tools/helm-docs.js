@@ -3,7 +3,7 @@
  */
 
 const { spawnSync } = require('child_process');
-const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
+const { findRepoRoot, getDocToolsCommand, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 
 /**
@@ -53,38 +53,41 @@ function generateHelmDocs(args = {}) {
       }
     }
 
-    // Build command arguments array (no shell interpolation)
-    const cmdArgs = ['doc-tools', 'generate', 'helm-spec'];
+    // Get doc-tools command (handles both local and installed)
+    const docTools = getDocToolsCommand(repoRoot);
+
+    // Build command arguments array
+    const baseArgs = ['generate', 'helm-spec'];
 
     if (args.chart_dir) {
-      cmdArgs.push('--chart-dir');
-      cmdArgs.push(args.chart_dir);
+      baseArgs.push('--chart-dir');
+      baseArgs.push(args.chart_dir);
     }
 
     if (normalizedTag) {
-      cmdArgs.push('--tag');
-      cmdArgs.push(normalizedTag);
+      baseArgs.push('--tag');
+      baseArgs.push(normalizedTag);
     } else if (args.branch) {
-      cmdArgs.push('--branch');
-      cmdArgs.push(args.branch);
+      baseArgs.push('--branch');
+      baseArgs.push(args.branch);
     }
 
     if (args.readme) {
-      cmdArgs.push('--readme');
-      cmdArgs.push(args.readme);
+      baseArgs.push('--readme');
+      baseArgs.push(args.readme);
     }
 
     if (args.output_dir) {
-      cmdArgs.push('--output-dir');
-      cmdArgs.push(args.output_dir);
+      baseArgs.push('--output-dir');
+      baseArgs.push(args.output_dir);
     }
 
     if (args.output_suffix) {
-      cmdArgs.push('--output-suffix');
-      cmdArgs.push(args.output_suffix);
+      baseArgs.push('--output-suffix');
+      baseArgs.push(args.output_suffix);
     }
 
-    const result = spawnSync('npx', cmdArgs, {
+    const result = spawnSync(docTools.program, docTools.getArgs(baseArgs), {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',

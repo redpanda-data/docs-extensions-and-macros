@@ -2,8 +2,8 @@
  * MCP Tools - Metrics Documentation Generation
  */
 
-const { execSync, spawnSync } = require('child_process');
-const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
+const { spawnSync } = require('child_process');
+const { findRepoRoot, getDocToolsCommand, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 const { createJob } = require('./job-queue');
 
@@ -60,19 +60,23 @@ function generateMetricsDocs(args) {
     };
   }
 
+  // Get doc-tools command (handles both local and installed)
+  const docTools = getDocToolsCommand(repoRoot);
+
   // Build command arguments
-  const cmdArgs = ['npx', 'doc-tools', 'generate', 'metrics-docs'];
+  const baseArgs = ['generate', 'metrics-docs'];
 
   if (args.tag) {
-    cmdArgs.push('--tag');
-    cmdArgs.push(version);
+    baseArgs.push('--tag');
+    baseArgs.push(version);
   } else {
-    cmdArgs.push('--branch');
-    cmdArgs.push(version);
+    baseArgs.push('--branch');
+    baseArgs.push(version);
   }
 
   // If background mode, create job and return immediately
   if (args.background) {
+    const cmdArgs = [docTools.program, ...docTools.getArgs(baseArgs)];
     const jobId = createJob('generate_metrics_docs', cmdArgs, {
       cwd: repoRoot.root
     });
@@ -88,11 +92,7 @@ function generateMetricsDocs(args) {
 
   // Otherwise run synchronously
   try {
-    // Remove 'npx' from cmdArgs for spawnSync since we already have it
-    const syncCmdArgs = cmdArgs.slice(1);
-
-    // Use safe command execution with argument array
-    const result = spawnSync('npx', syncCmdArgs, {
+    const result = spawnSync(docTools.program, docTools.getArgs(baseArgs), {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',
