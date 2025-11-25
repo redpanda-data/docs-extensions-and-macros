@@ -31,7 +31,7 @@ const packageJson = require('../package.json');
 // Create the MCP server
 const server = new Server(
   {
-    name: 'redpanda-docs-tools',
+    name: 'redpanda-doc-tools-assistant',
     version: packageJson.version,
   },
   {

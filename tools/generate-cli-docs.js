@@ -252,7 +252,7 @@ function generateDocs() {
   const jsdocs = parseJSDocComments(sourceFile);
   console.log(`  Found ${Object.keys(jsdocs).length} documented commands`);
 
-  let doc = `= doc-tools CLI Reference
+  let doc = `= Doc Tools CLI Reference
 :toc:
 :toclevels: 3
 

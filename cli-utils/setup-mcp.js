@@ -87,7 +87,7 @@ function getMCPServerPath() {
 async function setupMCP(options = {}) {
   const { force = false, target = 'auto', local = false } = options;
 
-  console.log(chalk.blue('\n🚀 Redpanda Docs MCP Server Setup\n'));
+  console.log(chalk.blue('\n🚀 Redpanda Doc Tools MCP Server Setup\n'));
   console.log(chalk.gray(`Platform: ${detectOS()}`));
   console.log(chalk.gray(`Node: ${process.version}\n`));
 
@@ -135,7 +135,7 @@ async function setupMCP(options = {}) {
       alreadyConfigured = isMCPServerConfigured(config);
 
       if (alreadyConfigured) {
-        const existingConfig = config.mcpServers['redpanda-docs-tool-assistant'];
+        const existingConfig = config.mcpServers['redpanda-doc-tools-assistant'];
         const existingCommand = existingConfig.command;
         const existingArgs = existingConfig.args || [];
 
