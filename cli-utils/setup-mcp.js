@@ -29,90 +29,18 @@ function detectOS() {
 }
 
 /**
- * Get Claude Code config file locations for different platforms
- * Claude Code uses .mcp.json format as of latest versions
+ * Get Claude Code config file path
+ * Claude Code uses ~/.claude.json for configuration
  */
-function getConfigPaths() {
-  const home = os.homedir();
-  const platform = os.platform();
-
-  const paths = {
-    claudeCode: [],
-    claudeDesktop: []
-  };
-
-  switch (platform) {
-    case 'darwin': // macOS
-      paths.claudeCode = [
-        path.join(home, '.claude', '.mcp.json'), // User-level MCP config
-      ];
-      paths.claudeDesktop = [
-        path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
-      ];
-      break;
-
-    case 'linux':
-      paths.claudeCode = [
-        path.join(home, '.claude', '.mcp.json'), // User-level MCP config
-      ];
-      paths.claudeDesktop = [
-        path.join(home, '.config', 'Claude', 'claude_desktop_config.json'),
-      ];
-      break;
-
-    case 'win32': { // Windows
-      const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
-      paths.claudeCode = [
-        path.join(home, '.claude', '.mcp.json'), // User-level MCP config
-      ];
-      paths.claudeDesktop = [
-        path.join(appData, 'Claude', 'claude_desktop_config.json'),
-      ];
-      break;
-    }
-  }
-
-  return paths;
+function getConfigPath() {
+  return path.join(os.homedir(), '.claude.json');
 }
 
 /**
- * Find existing config files
+ * Check if config file exists
  */
-function findConfigFiles() {
-  const paths = getConfigPaths();
-  const found = {
-    claudeCode: null,
-    claudeDesktop: null
-  };
-
-  // Check Claude Code configs
-  for (const configPath of paths.claudeCode) {
-    if (fs.existsSync(configPath)) {
-      found.claudeCode = configPath;
-      break;
-    }
-  }
-
-  // Check Claude Desktop configs
-  for (const configPath of paths.claudeDesktop) {
-    if (fs.existsSync(configPath)) {
-      found.claudeDesktop = configPath;
-      break;
-    }
-  }
-
-  return found;
-}
-
-/**
- * Create a backup of the config file
- */
-function backupConfig(configPath) {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0] +
-                    '_' + new Date().toTimeString().split(' ')[0].replace(/:/g, '-');
-  const backupPath = `${configPath}.backup.${timestamp}`;
-  fs.copyFileSync(configPath, backupPath);
-  return backupPath;
+function configExists() {
+  return fs.existsSync(getConfigPath());
 }
 
 /**
@@ -125,59 +53,6 @@ function readConfig(configPath) {
   } catch (err) {
     throw new Error(`Failed to read config: ${err.message}`);
   }
-}
-
-/**
- * Write config file with proper formatting
- */
-function writeConfig(configPath, config) {
-  const dir = path.dirname(configPath);
-
-  // Create directory if it doesn't exist
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
-}
-
-/**
- * Add MCP server to config
- * Uses Claude Code's .mcp.json format with stdio transport
- */
-function addMCPServer(config, options = {}) {
-  const {
-    mode = 'npx', // 'npx' or 'local'
-    packageName = '@redpanda-data/docs-extensions-and-macros',
-    localPath = null,
-    serverName = 'redpanda-docs-tool-assistant'
-  } = options;
-
-  // Ensure mcpServers object exists
-  if (!config.mcpServers) {
-    config.mcpServers = {};
-  }
-
-  if (mode === 'local') {
-    // Local development mode - use node with absolute path
-    if (!localPath) {
-      throw new Error('localPath is required for local mode');
-    }
-    config.mcpServers[serverName] = {
-      type: 'stdio',
-      command: 'node',
-      args: [localPath]
-    };
-  } else {
-    // Default npx mode - use published package binary directly
-    config.mcpServers[serverName] = {
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', 'doc-tools-mcp']
-    };
-  }
-
-  return config;
 }
 
 /**
@@ -222,23 +97,18 @@ async function setupMCP(options = {}) {
   const packageName = '@redpanda-data/docs-extensions-and-macros';
   let packageVersion = 'unknown';
 
-  // Check if we can detect local installation
-  try {
-    const mcpServerPath = getMCPServerPath();
-    localPath = mcpServerPath;
-    const packageJsonPath = path.join(path.dirname(path.dirname(mcpServerPath)), 'package.json');
-    if (fs.existsSync(packageJsonPath)) {
-      const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-      packageVersion = pkg.version;
-    }
-
-    // If --local flag is set, or if we're running from the local repo, use local mode
-    if (local) {
+  // Only check for local installation if --local flag is set
+  if (local) {
+    try {
+      const mcpServerPath = getMCPServerPath();
+      localPath = mcpServerPath;
+      const packageJsonPath = path.join(path.dirname(path.dirname(mcpServerPath)), 'package.json');
+      if (fs.existsSync(packageJsonPath)) {
+        const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+        packageVersion = pkg.version;
+      }
       mode = 'local';
-    }
-  } catch (err) {
-    // Not in local repo, must use npx mode
-    if (local) {
+    } catch (err) {
       console.error(chalk.red('✗') + ' --local flag requires running from docs-extensions-and-macros repository');
       return { success: false, error: 'Not in local repository' };
     }
@@ -255,11 +125,11 @@ async function setupMCP(options = {}) {
   }
 
   // Check if MCP server is already configured
-  const configPath = path.join(os.homedir(), '.claude.json');
+  const configPath = getConfigPath();
   let alreadyConfigured = false;
   let needsUpdate = false;
 
-  if (fs.existsSync(configPath)) {
+  if (configExists()) {
     try {
       const config = readConfig(configPath);
       alreadyConfigured = isMCPServerConfigured(config);
@@ -390,7 +260,7 @@ function printNextSteps(result) {
   }
 
   console.log(chalk.bold('🎉 Setup complete!\n'));
-  console.log(chalk.gray('Documentation: MCP_SERVER.md\n'));
+  console.log(chalk.gray('Documentation: mcp/USER_GUIDE.adoc\n'));
 }
 
 /**
@@ -400,15 +270,15 @@ function showStatus() {
   console.log(chalk.blue('\n📊 MCP Server Configuration Status\n'));
   console.log(chalk.gray(`Platform: ${detectOS()}\n`));
 
-  // Check Claude Code config in .claude.json
-  const claudeCodePath = path.join(os.homedir(), '.claude.json');
+  // Check Claude Code config
+  const configPath = getConfigPath();
 
-  if (fs.existsSync(claudeCodePath)) {
+  if (configExists()) {
     console.log(chalk.bold('Claude Code:'));
-    console.log(chalk.gray(`  Config: ${claudeCodePath}`));
+    console.log(chalk.gray(`  Config: ${configPath}`));
 
     try {
-      const config = readConfig(claudeCodePath);
+      const config = readConfig(configPath);
       const configured = isMCPServerConfigured(config);
 
       if (configured) {
@@ -428,37 +298,7 @@ function showStatus() {
       console.log(chalk.red(`  ✗ Error reading config: ${err.message}\n`));
     }
   } else {
-    console.log(chalk.gray('Claude Code: Not found\n'));
-  }
-
-  // Check Claude Desktop config
-  const configFiles = findConfigFiles();
-  if (configFiles.claudeDesktop) {
-    console.log(chalk.bold('Claude Desktop:'));
-    console.log(chalk.gray(`  Config: ${configFiles.claudeDesktop}`));
-
-    try {
-      const config = readConfig(configFiles.claudeDesktop);
-      const configured = isMCPServerConfigured(config);
-
-      if (configured) {
-        const server = config.mcpServers['redpanda-docs-tool-assistant'];
-        const mode = server.command === 'node' ? 'Local Development' : 'NPX (Published Package)';
-        const details = server.command === 'node'
-          ? `Path: ${server.args[0]}`
-          : `Package: ${server.args.join(' ')}`;
-
-        console.log(chalk.green('  ✓ MCP server configured'));
-        console.log(chalk.gray(`  Mode: ${mode}`));
-        console.log(chalk.gray(`  ${details}\n`));
-      } else {
-        console.log(chalk.yellow('  ✗ MCP server not configured\n'));
-      }
-    } catch (err) {
-      console.log(chalk.red(`  ✗ Error reading config: ${err.message}\n`));
-    }
-  } else {
-    console.log(chalk.gray('Claude Desktop: Not found\n'));
+    console.log(chalk.gray('Claude Code: Config not found\n'));
   }
 }
 
@@ -467,7 +307,7 @@ module.exports = {
   showStatus,
   printNextSteps,
   detectOS,
-  getConfigPaths,
-  findConfigFiles,
+  getConfigPath,
+  configExists,
   getMCPServerPath
 }

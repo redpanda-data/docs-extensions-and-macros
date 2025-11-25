@@ -27,20 +27,34 @@ async function saveFile(content, saveDir, filename) {
   console.log(`Saved: ${target}`);
 }
 
-async function fetchFromGithub(owner, repo, remotePath, saveDir, customFilename) {
+/**
+ * Fetch file or directory from GitHub repository
+ * @param {string} owner - Repository owner (e.g., "redpanda-data")
+ * @param {string} repo - Repository name (e.g., "redpanda-operator")
+ * @param {string} remotePath - Path to file or directory in repository
+ * @param {string} saveDir - Local directory to save files to
+ * @param {string} [customFilename] - Optional custom filename (for single files)
+ * @param {string} [ref=null] - Git ref (branch, tag, or commit SHA). Defaults to repository's default branch if null
+ * @returns {Promise<void>}
+ */
+async function fetchFromGithub(owner, repo, remotePath, saveDir, customFilename, ref = null) {
   const octokit = await loadOctokit();
 
   try {
-    const resp = await octokit.repos.getContent({ owner, repo, path: remotePath });
+    const params = { owner, repo, path: remotePath };
+    if (ref) {
+      params.ref = ref;
+    }
+    const resp = await octokit.repos.getContent(params);
     if (Array.isArray(resp.data)) {
       // directory
       for (const item of resp.data) {
         if (item.type === 'file') {
-          await fetchFromGithub(owner, repo, item.path, saveDir, customFilename);
+          await fetchFromGithub(owner, repo, item.path, saveDir, customFilename, ref);
         } else if (item.type === 'dir') {
           // For directories, maintain the directory structure
           const nestedDir = path.join(saveDir, path.basename(item.path));
-          await fetchFromGithub(owner, repo, item.path, nestedDir);
+          await fetchFromGithub(owner, repo, item.path, nestedDir, null, ref);
         }
       }
     } else {

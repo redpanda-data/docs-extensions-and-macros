@@ -9,8 +9,13 @@ const { createJob } = require('./job-queue');
 
 /**
  * Generate Redpanda property documentation
+ *
+ * Use tags for released content (GA or beta), branches for in-progress content.
+ * Defaults to branch "dev" if neither tag nor branch is provided.
+ *
  * @param {Object} args - Arguments
- * @param {string} args.version - Redpanda version/tag (e.g., "v25.3.1", "25.3.1", or "latest")
+ * @param {string} [args.tag] - Git tag for released content (e.g., "v25.3.1")
+ * @param {string} [args.branch] - Branch name for in-progress content (e.g., "dev", "main")
  * @param {boolean} [args.generate_partials] - Whether to generate AsciiDoc partials
  * @param {boolean} [args.background] - Run as background job
  * @returns {Object} Generation results
@@ -27,22 +32,36 @@ function generatePropertyDocs(args) {
     };
   }
 
-  if (!args.version) {
+  // Validate that tag and branch are mutually exclusive
+  if (args.tag && args.branch) {
     return {
       success: false,
-      error: 'Version is required',
-      suggestion: 'Provide a version like "25.3.1", "v25.3.1", or "latest"'
+      error: 'Cannot specify both tag and branch',
+      suggestion: 'Use either --tag or --branch, not both'
     };
   }
 
-  // Normalize version (add 'v' prefix if not present and not "latest")
-  let version = args.version;
-  if (version !== 'latest' && !version.startsWith('v')) {
+  // Default to 'dev' branch if neither provided
+  const gitRef = args.tag || args.branch || 'dev';
+  const refType = args.tag ? 'tag' : 'branch';
+
+  // Normalize version (add 'v' prefix if tag and not present and not "latest")
+  let version = gitRef;
+  if (args.tag && version !== 'latest' && !version.startsWith('v')) {
     version = `v${version}`;
   }
 
   // Build command
-  const cmdArgs = ['npx', 'doc-tools', 'generate', 'property-docs', '--tag', version];
+  const cmdArgs = ['npx', 'doc-tools', 'generate', 'property-docs'];
+
+  if (args.tag) {
+    cmdArgs.push('--tag');
+    cmdArgs.push(version);
+  } else {
+    cmdArgs.push('--branch');
+    cmdArgs.push(version);
+  }
+
   if (args.generate_partials) {
     cmdArgs.push('--generate-partials');
   }
@@ -58,7 +77,7 @@ function generatePropertyDocs(args) {
       background: true,
       job_id: jobId,
       message: `Property docs generation started in background. Use get_job_status with job_id: ${jobId} to check progress.`,
-      version
+      [refType]: version
     };
   }
 
@@ -108,11 +127,11 @@ function generatePropertyDocs(args) {
 
     return {
       success: true,
-      version,
+      [refType]: version,
       files_generated: filesGenerated,
       property_count: propertyCountMatch ? parseInt(propertyCountMatch[1]) : null,
       output: output.trim(),
-      summary: `Generated property documentation for Redpanda ${version}`
+      summary: `Generated property documentation for Redpanda ${refType} ${version}`
     };
   } catch (err) {
     return {

@@ -253,7 +253,7 @@ async function generateRpcnConnectorDocs(options) {
   markBeta(dataObj);
 
   // Apply overrides if provided
-  if (overrides) {
+  if (overrides && fs.existsSync(overrides)) {
     const ovRaw = fs.readFileSync(overrides, 'utf8');
     const ovObj = JSON.parse(ovRaw);
     // Resolve any $ref references in the overrides
@@ -281,9 +281,11 @@ async function generateRpcnConnectorDocs(options) {
         }
       }
     }
+  } else if (overrides) {
+    console.log(`Overrides file not found: ${overrides} (skipping)`);
   }
 
-  // Compile the “main” template (used when writeFullDrafts = true)
+  // Compile the "main" template (used when writeFullDrafts = true)
   const compiledTemplate = handlebars.compile(fs.readFileSync(template, 'utf8'));
 
   // Determine which templates to use for “fields” and “examples”

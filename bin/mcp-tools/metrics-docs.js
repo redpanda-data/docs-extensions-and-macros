@@ -8,8 +8,13 @@ const { getAntoraStructure } = require('./antora');
 
 /**
  * Generate Redpanda metrics documentation
+ *
+ * Use tags for released content (GA or beta), branches for in-progress content.
+ * Defaults to branch "dev" if neither tag nor branch is provided.
+ *
  * @param {Object} args - Arguments
- * @param {string} args.version - Redpanda version/tag (e.g., "v25.3.1" or "25.3.1")
+ * @param {string} [args.tag] - Git tag for released content (e.g., "v25.3.1")
+ * @param {string} [args.branch] - Branch name for in-progress content (e.g., "dev", "main")
  * @returns {Object} Generation results
  */
 function generateMetricsDocs(args) {
@@ -24,33 +29,49 @@ function generateMetricsDocs(args) {
     };
   }
 
-  if (!args.version) {
+  // Validate that tag and branch are mutually exclusive
+  if (args.tag && args.branch) {
     return {
       success: false,
-      error: 'Version is required',
-      suggestion: 'Provide a version like "25.3.1" or "v25.3.1"'
+      error: 'Cannot specify both tag and branch',
+      suggestion: 'Use either --tag or --branch, not both'
     };
   }
 
-  try {
-    // Normalize version
-    let version = args.version;
-    if (!version.startsWith('v')) {
-      version = `v${version}`;
-    }
+  // Default to 'dev' branch if neither provided
+  const gitRef = args.tag || args.branch || 'dev';
+  const refType = args.tag ? 'tag' : 'branch';
 
+  // Normalize version (add 'v' prefix if tag and not present)
+  let version = gitRef;
+  if (args.tag && !version.startsWith('v')) {
+    version = `v${version}`;
+  }
+
+  try {
     // Validate version string to prevent command injection
-    const versionRegex = /^v[0-9A-Za-z._-]+$/;
+    const versionRegex = /^[0-9A-Za-z._\/-]+$/;
     if (!versionRegex.test(version)) {
       return {
         success: false,
         error: 'Invalid version format',
-        suggestion: 'Version must contain only alphanumeric characters, dots, underscores, and hyphens after the "v" prefix (e.g., "v25.3.1", "v25.3.1-rc1")'
+        suggestion: 'Version must contain only alphanumeric characters, dots, underscores, slashes, and hyphens (e.g., "v25.3.1", "v25.3.1-rc1", "dev", "main")'
       };
     }
 
+    // Build command arguments
+    const cmdArgs = ['doc-tools', 'generate', 'metrics-docs'];
+
+    if (args.tag) {
+      cmdArgs.push('--tag');
+      cmdArgs.push(version);
+    } else {
+      cmdArgs.push('--branch');
+      cmdArgs.push(version);
+    }
+
     // Use safe command execution with argument array
-    const result = spawnSync('npx', ['doc-tools', 'generate', 'metrics-docs', '--tag', version], {
+    const result = spawnSync('npx', cmdArgs, {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',
@@ -75,13 +96,13 @@ function generateMetricsDocs(args) {
 
     return {
       success: true,
-      version,
+      [refType]: version,
       files_generated: [
         'modules/reference/pages/public-metrics-reference.adoc'
       ],
       metrics_count: metricsCountMatch ? parseInt(metricsCountMatch[1]) : null,
       output: output.trim(),
-      summary: `Generated metrics documentation for Redpanda ${version}`
+      summary: `Generated metrics documentation for Redpanda ${refType} ${version}`
     };
   } catch (err) {
     return {

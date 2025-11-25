@@ -8,8 +8,12 @@ const { getAntoraStructure } = require('./antora');
 
 /**
  * Generate Kubernetes CRD documentation
+ *
+ * Use tags for released content (GA or beta), branches for in-progress content.
+ *
  * @param {Object} args - Arguments
- * @param {string} args.tag - Operator release tag or branch (e.g., "operator/v25.1.2")
+ * @param {string} [args.tag] - Operator release tag for GA/beta content (e.g., operator/v2.2.6-25.3.1 or v25.1.2). Auto-prepends "operator/" if not present.
+ * @param {string} [args.branch] - Branch name for in-progress content (e.g., release/v2.2.x, main, dev)
  * @param {string} [args.source_path] - CRD Go types dir or GitHub URL
  * @param {number} [args.depth] - How many levels deep to generate
  * @param {string} [args.templates_dir] - Asciidoctor templates directory
@@ -28,11 +32,20 @@ function generateCrdDocs(args) {
     };
   }
 
-  if (!args.tag) {
+  // Validate that either tag or branch is provided (but not both)
+  if (!args.tag && !args.branch) {
     return {
       success: false,
-      error: 'Tag is required',
-      suggestion: 'Provide an operator tag like "operator/v25.1.2"'
+      error: 'Either tag or branch is required',
+      suggestion: 'Provide --tag "operator/v25.1.2" or --branch "main"'
+    };
+  }
+
+  if (args.tag && args.branch) {
+    return {
+      success: false,
+      error: 'Cannot specify both tag and branch',
+      suggestion: 'Use either --tag or --branch, not both'
     };
   }
 
@@ -40,9 +53,14 @@ function generateCrdDocs(args) {
     // Build command arguments array (no shell interpolation)
     const cmdArgs = ['doc-tools', 'generate', 'crd-spec'];
 
-    // Add flags only when present, each as separate array entries
-    cmdArgs.push('--tag');
-    cmdArgs.push(args.tag);
+    // Add tag or branch flag
+    if (args.tag) {
+      cmdArgs.push('--tag');
+      cmdArgs.push(args.tag);
+    } else {
+      cmdArgs.push('--branch');
+      cmdArgs.push(args.branch);
+    }
 
     if (args.source_path) {
       cmdArgs.push('--source-path');
@@ -93,12 +111,15 @@ function generateCrdDocs(args) {
 
     const output = result.stdout;
 
+    const ref = args.tag || args.branch;
+    const refType = args.tag ? 'tag' : 'branch';
+
     return {
       success: true,
-      tag: args.tag,
+      [refType]: ref,
       files_generated: [args.output || 'modules/reference/pages/k-crd.adoc'],
       output: output.trim(),
-      summary: `Generated CRD documentation for operator ${args.tag}`
+      summary: `Generated CRD documentation for operator ${refType} ${ref}`
     };
   } catch (err) {
     return {

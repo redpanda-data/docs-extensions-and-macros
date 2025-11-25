@@ -2,15 +2,21 @@
  * MCP Tools - Helm Chart Documentation Generation
  */
 
-const { execSync } = require('child_process');
-const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT, normalizeVersion } = require('./utils');
+const { spawnSync } = require('child_process');
+const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 
 /**
  * Generate Helm chart documentation
+ *
+ * Use tags for released content (GA or beta), branches for in-progress content.
+ * When using GitHub URLs, requires either --tag or --branch to be specified.
+ * Auto-prepends "operator/" for tags when using redpanda-operator repository.
+ *
  * @param {Object} args - Arguments
  * @param {string} [args.chart_dir] - Chart directory, root, or GitHub URL
- * @param {string} [args.tag] - Branch or tag to clone when using GitHub URL
+ * @param {string} [args.tag] - Git tag for released content when using GitHub URL (auto-prepends "operator/" for redpanda-operator repository)
+ * @param {string} [args.branch] - Branch name for in-progress content when using GitHub URL
  * @param {string} [args.readme] - Relative README.md path inside each chart dir
  * @param {string} [args.output_dir] - Where to write generated AsciiDoc files
  * @param {string} [args.output_suffix] - Suffix to append to each chart name
@@ -28,34 +34,57 @@ function generateHelmDocs(args = {}) {
     };
   }
 
-  try {
-    // Build command
-    const flags = [];
+  // Validate that tag and branch are mutually exclusive
+  if (args.tag && args.branch) {
+    return {
+      success: false,
+      error: 'Cannot specify both tag and branch',
+      suggestion: 'Use either --tag or --branch, not both'
+    };
+  }
 
-    if (args.chart_dir) {
-      flags.push(`--chart-dir "${args.chart_dir}"`);
+  try {
+    // Normalize tag: add 'v' prefix if not present
+    let normalizedTag = null;
+    if (args.tag) {
+      normalizedTag = args.tag;
+      if (!normalizedTag.startsWith('v')) {
+        normalizedTag = `v${normalizedTag}`;
+      }
     }
 
-    if (args.tag) {
-      const normalizedTag = normalizeVersion(args.tag);
-      flags.push(`--tag ${normalizedTag}`);
+    // Build command arguments array (no shell interpolation)
+    const cmdArgs = ['doc-tools', 'generate', 'helm-spec'];
+
+    if (args.chart_dir) {
+      cmdArgs.push('--chart-dir');
+      cmdArgs.push(args.chart_dir);
+    }
+
+    if (normalizedTag) {
+      cmdArgs.push('--tag');
+      cmdArgs.push(normalizedTag);
+    } else if (args.branch) {
+      cmdArgs.push('--branch');
+      cmdArgs.push(args.branch);
     }
 
     if (args.readme) {
-      flags.push(`--readme "${args.readme}"`);
+      cmdArgs.push('--readme');
+      cmdArgs.push(args.readme);
     }
 
     if (args.output_dir) {
-      flags.push(`--output-dir "${args.output_dir}"`);
+      cmdArgs.push('--output-dir');
+      cmdArgs.push(args.output_dir);
     }
 
     if (args.output_suffix) {
-      flags.push(`--output-suffix "${args.output_suffix}"`);
+      cmdArgs.push('--output-suffix');
+      cmdArgs.push(args.output_suffix);
     }
 
-    const cmd = `npx doc-tools generate helm-spec ${flags.join(' ')}`;
-
-    const output = execSync(cmd, {
+    const result = spawnSync('npx', cmdArgs, {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',
@@ -63,17 +92,41 @@ function generateHelmDocs(args = {}) {
       timeout: DEFAULT_COMMAND_TIMEOUT
     });
 
+    // Check for spawn errors
+    if (result.error) {
+      const err = new Error(`Failed to execute command: ${result.error.message}`);
+      err.stdout = result.stdout || '';
+      err.stderr = result.stderr || '';
+      err.status = result.status;
+      throw err;
+    }
+
+    // Check for non-zero exit codes
+    if (result.status !== 0) {
+      const errorMsg = result.stderr || `Command failed with exit code ${result.status}`;
+      const err = new Error(errorMsg);
+      err.stdout = result.stdout || '';
+      err.stderr = result.stderr || '';
+      err.status = result.status;
+      throw err;
+    }
+
+    const output = result.stdout;
+
     // Parse output to extract information
     const chartCountMatch = output.match(/(\d+) charts?/i);
 
+    const refType = normalizedTag ? 'tag' : args.branch ? 'branch' : null;
+    const gitRef = normalizedTag || args.branch;
+
     return {
       success: true,
-      tag: args.tag || 'default',
+      ...(refType && { [refType]: gitRef }),
       chart_dir: args.chart_dir || 'default',
       charts_documented: chartCountMatch ? parseInt(chartCountMatch[1]) : null,
       files_generated: [args.output_dir || 'modules/reference/pages'],
       output: output.trim(),
-      summary: `Generated Helm chart documentation`
+      summary: `Generated Helm chart documentation${gitRef ? ` for ${refType} ${gitRef}` : ''}`
     };
   } catch (err) {
     return {

@@ -8,8 +8,13 @@ const { getAntoraStructure } = require('./antora');
 
 /**
  * Generate bundled OpenAPI documentation
+ *
+ * Use tags for released content (GA or beta), branches for in-progress content.
+ * Requires either --tag or --branch to be specified.
+ *
  * @param {Object} args - Arguments
- * @param {string} args.tag - Branch or tag to clone (e.g., "v24.3.2", "24.3.2", or "dev")
+ * @param {string} [args.tag] - Git tag for released content (e.g., "v24.3.2" or "24.3.2")
+ * @param {string} [args.branch] - Branch name for in-progress content (e.g., "dev", "main")
  * @param {string} [args.repo] - Repository URL
  * @param {string} [args.surface] - Which API surface(s) to bundle: 'admin', 'connect', or 'both'
  * @param {string} [args.out_admin] - Output path for admin API
@@ -31,27 +36,44 @@ function generateBundleOpenApi(args) {
     };
   }
 
-  if (!args.tag) {
+  // Validate that either tag or branch is provided (but not both)
+  if (!args.tag && !args.branch) {
     return {
       success: false,
-      error: 'Tag is required',
-      suggestion: 'Provide a tag like "v24.3.2", "24.3.2", or "dev"'
+      error: 'Either tag or branch is required',
+      suggestion: 'Provide --tag "v24.3.2" or --branch "dev"'
+    };
+  }
+
+  if (args.tag && args.branch) {
+    return {
+      success: false,
+      error: 'Cannot specify both tag and branch',
+      suggestion: 'Use either --tag or --branch, not both'
     };
   }
 
   try {
-    // Normalize version
-    let tag = args.tag;
-    if (tag !== 'dev' && !tag.startsWith('v')) {
-      tag = `v${tag}`;
+    const gitRef = args.tag || args.branch;
+    const refType = args.tag ? 'tag' : 'branch';
+
+    // Normalize version (add 'v' prefix if tag and not present and not branch-like names)
+    let version = gitRef;
+    if (args.tag && !version.startsWith('v') && version !== 'dev' && version !== 'main') {
+      version = `v${version}`;
     }
 
     // Build command arguments array (no shell interpolation)
     const cmdArgs = ['doc-tools', 'generate', 'bundle-openapi'];
 
     // Add flags only when present, each as separate array entries
-    cmdArgs.push('--tag');
-    cmdArgs.push(tag);
+    if (args.tag) {
+      cmdArgs.push('--tag');
+      cmdArgs.push(version);
+    } else {
+      cmdArgs.push('--branch');
+      cmdArgs.push(version);
+    }
 
     if (args.repo) {
       cmdArgs.push('--repo');
@@ -129,11 +151,11 @@ function generateBundleOpenApi(args) {
 
     return {
       success: true,
-      tag,
+      [refType]: version,
       surface,
       files_generated: filesGenerated,
       output: output.trim(),
-      summary: `Bundled OpenAPI documentation for ${surface} API(s) at ${tag}`
+      summary: `Bundled OpenAPI documentation for ${surface} API(s) at ${refType} ${version}`
     };
   } catch (err) {
     return {

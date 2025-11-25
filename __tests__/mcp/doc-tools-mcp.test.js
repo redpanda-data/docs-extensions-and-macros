@@ -634,10 +634,10 @@ describe('MCP Server Library - Repository Detection', () => {
           error: null
         });
 
-        const result = generatePropertyDocs({ version: '25.3.1' });
+        const result = generatePropertyDocs({ tag: '25.3.1' });
 
         expect(result.success).toBe(true);
-        expect(result.version).toBe('v25.3.1');
+        expect(result.tag).toBe('v25.3.1');
         expect(result.files_generated).toContain('modules/reference/partials/properties.json');
         expect(result.property_count).toBe(342);
       });
@@ -654,7 +654,7 @@ describe('MCP Server Library - Repository Detection', () => {
           error: null
         });
 
-        const result = generatePropertyDocs({ version: '25.3.1', generate_partials: true });
+        const result = generatePropertyDocs({ tag: '25.3.1', generate_partials: true });
 
         expect(result.success).toBe(true);
         expect(result.files_generated).toContain('modules/reference/partials/cluster-properties.adoc');
@@ -675,9 +675,9 @@ describe('MCP Server Library - Repository Detection', () => {
           error: null
         });
 
-        const result = generatePropertyDocs({ version: '25.3.1' });
+        const result = generatePropertyDocs({ tag: '25.3.1' });
 
-        expect(result.version).toBe('v25.3.1');
+        expect(result.tag).toBe('v25.3.1');
         expect(spawnSync).toHaveBeenCalledWith(
           'npx',
           expect.arrayContaining(['doc-tools', 'generate', 'property-docs', '--tag', 'v25.3.1']),
@@ -697,9 +697,9 @@ describe('MCP Server Library - Repository Detection', () => {
           error: null
         });
 
-        const result = generatePropertyDocs({ version: 'latest' });
+        const result = generatePropertyDocs({ tag: 'latest' });
 
-        expect(result.version).toBe('latest');
+        expect(result.tag).toBe('latest');
         expect(spawnSync).toHaveBeenCalledWith(
           'npx',
           expect.arrayContaining(['doc-tools', 'generate', 'property-docs', '--tag', 'latest']),
@@ -714,23 +714,33 @@ describe('MCP Server Library - Repository Detection', () => {
         // Mock execSync to throw when checking for doc-tools in getAntoraStructure
         execSync.mockImplementation(() => { throw new Error('Command not found'); });
 
-        const result = generatePropertyDocs({ version: '25.3.1' });
+        const result = generatePropertyDocs({ tag: '25.3.1' });
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('doc-tools not found');
         expect(result.suggestion).toContain('docs-extensions-and-macros');
       });
 
-      it('should return error when version is missing', () => {
+      it('should default to dev branch when no parameters provided', () => {
         fs.existsSync = jest.fn((p) => p.includes('package.json') || p.includes('doc-tools.js'));
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generated 342 properties\n',
+          stderr: '',
+          error: null
+        });
+
         const result = generatePropertyDocs({});
 
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('Version is required');
-        expect(result.suggestion).toBeDefined();
+        expect(result.branch).toBe('dev');
+        expect(spawnSync).toHaveBeenCalledWith(
+          'npx',
+          expect.arrayContaining(['--branch', 'dev']),
+          expect.any(Object)
+        );
       });
 
       it('should handle command execution errors', () => {
@@ -745,7 +755,7 @@ describe('MCP Server Library - Repository Detection', () => {
           error: null
         });
 
-        const result = generatePropertyDocs({ version: '25.3.1' });
+        const result = generatePropertyDocs({ tag: '25.3.1' });
 
         expect(result.success).toBe(false);
         expect(result.error).toBe('Tag v25.3.1 not found');
@@ -768,10 +778,10 @@ describe('MCP Server Library - Repository Detection', () => {
           error: null
         });
 
-        const result = generateMetricsDocs({ version: '25.3.1' });
+        const result = generateMetricsDocs({ tag: '25.3.1' });
 
         expect(result.success).toBe(true);
-        expect(result.version).toBe('v25.3.1');
+        expect(result.tag).toBe('v25.3.1');
         expect(result.files_generated).toContain('modules/reference/pages/public-metrics-reference.adoc');
         expect(result.metrics_count).toBe(156);
       });
@@ -789,9 +799,9 @@ describe('MCP Server Library - Repository Detection', () => {
           error: null
         });
 
-        const result = generateMetricsDocs({ version: '25.3.1' });
+        const result = generateMetricsDocs({ tag: '25.3.1' });
 
-        expect(result.version).toBe('v25.3.1');
+        expect(result.tag).toBe('v25.3.1');
       });
 
       it('should return error when doc-tools not found', () => {
@@ -801,21 +811,32 @@ describe('MCP Server Library - Repository Detection', () => {
         // Mock execSync to throw when checking for doc-tools in getAntoraStructure
         execSync.mockImplementation(() => { throw new Error('Command not found'); });
 
-        const result = generateMetricsDocs({ version: '25.3.1' });
+        const result = generateMetricsDocs({ tag: '25.3.1' });
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('doc-tools not found');
       });
 
-      it('should return error when version is missing', () => {
+      it('should default to dev branch when no parameters provided', () => {
         fs.existsSync = jest.fn((p) => p.includes('package.json') || p.includes('doc-tools.js'));
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generated 150 metrics\n',
+          stderr: '',
+          error: null
+        });
+
         const result = generateMetricsDocs({});
 
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('Version is required');
+        expect(result.branch).toBe('dev');
+        expect(spawnSync).toHaveBeenCalledWith(
+          'npx',
+          expect.arrayContaining(['--branch', 'dev']),
+          expect.any(Object)
+        );
       });
     });
 
@@ -825,12 +846,17 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
-        execSync.mockReturnValue('Generated 87 commands\n');
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generated 87 commands\n',
+          stderr: '',
+          error: null
+        });
 
-        const result = generateRpkDocs({ version: '25.3.1' });
+        const result = generateRpkDocs({ tag: '25.3.1' });
 
         expect(result.success).toBe(true);
-        expect(result.version).toBe('v25.3.1');
+        expect(result.tag).toBe('v25.3.1');
         expect(result.commands_documented).toBe(87);
       });
 
@@ -839,11 +865,16 @@ describe('MCP Server Library - Repository Detection', () => {
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
-        execSync.mockReturnValue('Generated 87 commands\n');
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generated 87 commands\n',
+          stderr: '',
+          error: null
+        });
 
-        const result = generateRpkDocs({ version: '25.3.1' });
+        const result = generateRpkDocs({ tag: '25.3.1' });
 
-        expect(result.version).toBe('v25.3.1');
+        expect(result.tag).toBe('v25.3.1');
       });
 
       it('should return error when doc-tools not found', () => {
@@ -853,21 +884,32 @@ describe('MCP Server Library - Repository Detection', () => {
         // Mock execSync to throw when checking for doc-tools in getAntoraStructure
         execSync.mockImplementation(() => { throw new Error('Command not found'); });
 
-        const result = generateRpkDocs({ version: '25.3.1' });
+        const result = generateRpkDocs({ tag: '25.3.1' });
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('doc-tools not found');
       });
 
-      it('should return error when version is missing', () => {
+      it('should default to dev branch when no parameters provided', () => {
         fs.existsSync = jest.fn((p) => p.includes('package.json') || p.includes('doc-tools.js'));
         fs.realpathSync = jest.fn((p) => p);
         fs.readdirSync = jest.fn(() => []);
 
+        spawnSync.mockReturnValue({
+          status: 0,
+          stdout: 'Generated 120 commands\n',
+          stderr: '',
+          error: null
+        });
+
         const result = generateRpkDocs({});
 
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('Version is required');
+        expect(result.branch).toBe('dev');
+        expect(spawnSync).toHaveBeenCalledWith(
+          'npx',
+          expect.arrayContaining(['--branch', 'dev']),
+          expect.any(Object)
+        );
       });
     });
 

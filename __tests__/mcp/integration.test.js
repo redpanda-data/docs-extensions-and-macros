@@ -88,28 +88,49 @@ describe('MCP Tools Integration Tests', () => {
   });
 
   describe('Generate Tools - Parameter Validation', () => {
-    test('generate_property_docs requires version parameter', () => {
+    test('generate_property_docs defaults to dev branch when no parameters provided', () => {
       const result = mcpTools.executeTool('generate_property_docs', {});
 
       expect(result).toBeDefined();
-      expect(result.success).toBe(false);
-      expect(result.error.toLowerCase()).toContain('version');
+      // Now defaults to branch 'dev', so should be treated as if branch was provided
+      // Test will attempt to run but may fail due to missing dependencies - that's OK
+      // The key is that it should NOT error about missing parameters
+      if (result.error) {
+        expect(result.error.toLowerCase()).not.toContain('required');
+        expect(result.error.toLowerCase()).not.toContain('missing');
+      } else {
+        expect(result).toHaveProperty('branch', 'dev');
+      }
     });
 
-    test('generate_metrics_docs requires version parameter', () => {
+    test('generate_metrics_docs defaults to dev branch when no parameters provided', () => {
       const result = mcpTools.executeTool('generate_metrics_docs', {});
 
       expect(result).toBeDefined();
-      expect(result.success).toBe(false);
-      expect(result.error.toLowerCase()).toContain('version');
+      // Now defaults to branch 'dev', so should be treated as if branch was provided
+      // Test will attempt to run but may fail due to missing dependencies - that's OK
+      // The key is that it should NOT error about missing parameters
+      if (result.error) {
+        expect(result.error.toLowerCase()).not.toContain('required');
+        expect(result.error.toLowerCase()).not.toContain('missing');
+      } else {
+        expect(result).toHaveProperty('branch', 'dev');
+      }
     });
 
-    test('generate_rpk_docs requires version parameter', () => {
+    test('generate_rpk_docs defaults to dev branch when no parameters provided', () => {
       const result = mcpTools.executeTool('generate_rpk_docs', {});
 
       expect(result).toBeDefined();
-      expect(result.success).toBe(false);
-      expect(result.error.toLowerCase()).toContain('version');
+      // Now defaults to branch 'dev', so should be treated as if branch was provided
+      // Test will attempt to run but may fail due to missing dependencies - that's OK
+      // The key is that it should NOT error about missing parameters
+      if (result.error) {
+        expect(result.error.toLowerCase()).not.toContain('required');
+        expect(result.error.toLowerCase()).not.toContain('missing');
+      } else {
+        expect(result).toHaveProperty('branch', 'dev');
+      }
     });
 
     test('generate_crd_docs requires tag parameter', () => {

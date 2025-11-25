@@ -82,9 +82,13 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        version: {
+        tag: {
           type: 'string',
-          description: 'Redpanda version to generate docs for (e.g., "25.3.1", "v25.3.1", or "latest")'
+          description: 'Git tag for released content (e.g., "25.3.1", "v25.3.1", or "latest"). Auto-prepends "v" if not present. Use tags for GA or beta releases.'
+        },
+        branch: {
+          type: 'string',
+          description: 'Branch name for in-progress content (e.g., "dev", "main"). Use branches for documentation under development.'
         },
         generate_partials: {
           type: 'boolean',
@@ -95,7 +99,7 @@ const tools = [
           description: 'Run as background job with progress updates. Returns job ID immediately instead of waiting. Default: false (run synchronously)'
         }
       },
-      required: ['version']
+      required: []
     }
   },
   {
@@ -104,12 +108,16 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        version: {
+        tag: {
           type: 'string',
-          description: 'Redpanda version to generate metrics docs for (e.g., "25.3.1" or "v25.3.1")'
+          description: 'Git tag for released content (e.g., "25.3.1" or "v25.3.1"). Auto-prepends "v" if not present. Use tags for GA or beta releases.'
+        },
+        branch: {
+          type: 'string',
+          description: 'Branch name for in-progress content (e.g., "dev", "main"). Use branches for documentation under development.'
         }
       },
-      required: ['version']
+      required: []
     }
   },
   {
@@ -118,12 +126,16 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        version: {
+        tag: {
           type: 'string',
-          description: 'Redpanda version to generate RPK docs for (e.g., "25.3.1" or "v25.3.1")'
+          description: 'Git tag for released content (e.g., "25.3.1" or "v25.3.1"). Auto-prepends "v" if not present. Use tags for GA or beta releases.'
+        },
+        branch: {
+          type: 'string',
+          description: 'Branch name for in-progress content (e.g., "dev", "main"). Use branches for documentation under development.'
         }
       },
-      required: ['version']
+      required: []
     }
   },
   {
@@ -180,7 +192,11 @@ const tools = [
         },
         tag: {
           type: 'string',
-          description: 'Branch or tag to clone when using a GitHub URL (optional)'
+          description: 'Git tag for released content when using GitHub URL (e.g., "25.1.2" or "v25.1.2"). Auto-prepends "v" if not present. For redpanda-operator repository, also auto-prepends "operator/".'
+        },
+        branch: {
+          type: 'string',
+          description: 'Branch name for in-progress content when using GitHub URL (e.g., "dev", "main").'
         },
         readme: {
           type: 'string',
@@ -249,7 +265,11 @@ const tools = [
       properties: {
         tag: {
           type: 'string',
-          description: 'Operator release tag or branch (e.g., "operator/v25.1.2")'
+          description: 'Operator release tag (e.g., "operator/v25.1.2", "25.1.2", or "v25.1.2"). Auto-prepends "operator/" for redpanda-operator repository.'
+        },
+        branch: {
+          type: 'string',
+          description: 'Branch name for in-progress content (e.g., "dev", "main").'
         },
         source_path: {
           type: 'string',
@@ -268,7 +288,7 @@ const tools = [
           description: 'Where to write the generated AsciiDoc file (optional, defaults to "modules/reference/pages/k-crd.adoc")'
         }
       },
-      required: ['tag']
+      required: []
     }
   },
   {
@@ -279,7 +299,11 @@ const tools = [
       properties: {
         tag: {
           type: 'string',
-          description: 'Branch or tag to clone from repository (e.g., "v24.3.2", "24.3.2", or "dev")'
+          description: 'Git tag for released content (e.g., "v24.3.2" or "24.3.2"). Use tags for GA or beta releases.'
+        },
+        branch: {
+          type: 'string',
+          description: 'Branch name for in-progress content (e.g., "dev", "main"). Use branches for documentation under development.'
         },
         repo: {
           type: 'string',
@@ -311,7 +335,7 @@ const tools = [
           description: 'Suppress logs (optional, defaults to false)'
         }
       },
-      required: ['tag']
+      required: []
     }
   },
   {
@@ -406,6 +430,11 @@ const prompts = [
  * @returns {string} Prompt content
  */
 function getPromptContent(name) {
+  // Validate name to prevent path traversal
+  if (!name || typeof name !== 'string' || name.includes('..') || name.includes('/') || name.includes('\\')) {
+    throw new Error(`Invalid prompt name: ${name}`);
+  }
+
   const promptPath = path.join(__dirname, '..', 'mcp', 'prompts', `${name}.md`);
   try {
     return fs.readFileSync(promptPath, 'utf8');
