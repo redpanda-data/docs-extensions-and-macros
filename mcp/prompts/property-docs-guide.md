@@ -114,23 +114,6 @@ Important notes:
 
 ## Property description rules (MANDATORY)
 
-### Never add cloud-specific conditional blocks
-Do not include cloud-specific descriptions. These belong in metadata, not description text.
-
-Wrong:
-```
-ifdef::env-cloud[]
-This property is read-only in Redpanda Cloud.
-endif::[]
-```
-
-Right:
-```
-Controls the maximum segment size for topics.
-```
-
-Reason: Cloud-specific information is displayed in the metadata table.
-
 ### Never add enterprise license includes
 Do not include enterprise license markers in descriptions.
 
