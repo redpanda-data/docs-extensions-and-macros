@@ -12,7 +12,7 @@
  */
 module.exports = async (github, owner, repo, stableDockerTag, betaDockerTag) => {
   const yaml = require('js-yaml');
-  const path = 'charts/redpanda/Chart.yaml';
+  const path = 'charts/redpanda/chart/Chart.yaml';
 
   /**
    * Helper function to fetch chart version from a branch derived from a docker tag
