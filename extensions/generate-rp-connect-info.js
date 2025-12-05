@@ -13,10 +13,9 @@ module.exports.register = function ({ config }) {
 
   async function loadOctokit() {
     const { Octokit } = await import('@octokit/rest');
-    if (!process.env.REDPANDA_GITHUB_TOKEN) return new Octokit()
-    return new Octokit({
-      auth: process.env.REDPANDA_GITHUB_TOKEN,
-    });
+    const { getGitHubToken } = require('../cli-utils/github-token')
+    const token = getGitHubToken()
+    return token ? new Octokit({ auth: token }) : new Octokit();
   }
 
   this.once('contentClassified', async ({ contentCatalog }) => {

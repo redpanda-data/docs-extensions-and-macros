@@ -1,0 +1,377 @@
+= AsciiDoc Macros Development Guide
+:toc:
+:toclevels: 3
+
+Guide for developing new AsciiDoc macros.
+
+AsciiDoc macros extend AsciiDoc syntax with custom inline and block elements. Macros are Asciidoctor.js extensions that process custom syntax and generate HTML output.
+
+== Macro types
+
+=== Inline macros
+
+Inline macros appear within text and generate inline HTML:
+
+[,asciidoc]
+----
+Text with glossterm:term[] inline.
+----
+
+=== Block macros
+
+Block macros appear on their own lines and generate block-level HTML:
+
+[,asciidoc]
+----
+component_table::[]
+----
+
+== Creating an inline macro
+
+=== Create the file
+
+[,bash]
+----
+touch macros/my-macro.js
+----
+
+=== Implement the macro
+
+[,javascript]
+----
+module.exports.register = function register (registry, context) {
+  // Register inline macro
+  registry.inlineMacro('mymacro', function () {
+    const self = this
+
+    // Define macro processing
+    self.process(function (parent, target, attrs) {
+      // target: the value after the colon
+      // attrs: positional and named attributes
+
+      // Generate HTML
+      const html = `<span class="my-macro">${target}</span>`
+
+      // Return as passthrough
+      return self.createInline(parent, 'quoted', html, { type: 'unquoted' })
+    })
+  })
+}
+----
+
+=== Register in playbook
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - './macros/my-macro.js'
+----
+
+=== Use in AsciiDoc
+
+[,asciidoc]
+----
+This is my mymacro:example[] macro.
+----
+
+== Creating a block macro
+
+[,javascript]
+----
+module.exports.register = function register (registry, context) {
+  registry.blockMacro('myblock', function () {
+    const self = this
+
+    self.process(function (parent, target, attrs) {
+      // Generate block HTML
+      const html = `
+        <div class="my-block">
+          <h3>${target}</h3>
+          <p>${attrs.content || 'No content'}</p>
+        </div>
+      `
+
+      // Return as passthrough block
+      return self.createBlock(parent, 'pass', html)
+    })
+  })
+}
+----
+
+Use in AsciiDoc:
+
+[,asciidoc]
+----
+myblock::title[content=Some content here]
+----
+
+== Common patterns
+
+=== Accessing attributes
+
+[,javascript]
+----
+self.process(function (parent, target, attrs) {
+  // Positional attributes
+  const first = attrs.$positional[0]
+  const second = attrs.$positional[1]
+
+  // Named attributes
+  const name = attrs.name
+  const value = attrs.value || 'default'
+
+  // Document attributes
+  const docAttr = parent.getDocument().getAttribute('my-attr')
+
+  return self.createInline(parent, 'quoted', html, { type: 'unquoted' })
+})
+----
+
+=== Generating links
+
+[,javascript]
+----
+self.process(function (parent, target, attrs) {
+  const url = `https://example.com/${target}`
+  const text = attrs.text || target
+
+  const html = `<a href="${url}" class="external">${text}</a>`
+
+  return self.createInline(parent, 'quoted', html, { type: 'unquoted' })
+})
+----
+
+=== Accessing page context
+
+[,javascript]
+----
+module.exports.register = function register (registry, context) {
+  // Access Antora context
+  const { contentCatalog, file } = context
+
+  registry.inlineMacro('pagemacro', function () {
+    const self = this
+
+    self.process(function (parent, target, attrs) {
+      // Access current page
+      const doc = parent.getDocument()
+      const component = doc.getAttribute('page-component-name')
+      const version = doc.getAttribute('page-component-version')
+
+      // Access content catalog
+      const page = contentCatalog.getById({
+        component,
+        version,
+        module: 'ROOT',
+        family: 'page',
+        relative: `${target}.adoc`
+      })
+
+      if (page) {
+        const html = `<a href="${page.pub.url}">${page.asciidoc.doctitle}</a>`
+        return self.createInline(parent, 'quoted', html, { type: 'unquoted' })
+      }
+
+      return self.createInline(parent, 'quoted', target, { type: 'unquoted' })
+    })
+  })
+}
+----
+
+=== Creating complex HTML
+
+[,javascript]
+----
+self.process(function (parent, target, attrs) {
+  const items = attrs.items ? attrs.items.split(',') : []
+
+  const html = `
+    <div class="custom-list">
+      <ul>
+        ${items.map(item => `<li>${item.trim()}</li>`).join('\n')}
+      </ul>
+    </div>
+  `
+
+  return self.createBlock(parent, 'pass', html)
+})
+----
+
+=== Error handling
+
+[,javascript]
+----
+self.process(function (parent, target, attrs) {
+  try {
+    if (!target) {
+      console.warn('mymacro: target is required')
+      return self.createInline(parent, 'quoted', '[Missing target]', { type: 'unquoted' })
+    }
+
+    // Process macro
+    const html = `<span>${target}</span>`
+    return self.createInline(parent, 'quoted', html, { type: 'unquoted' })
+
+  } catch (err) {
+    console.error(`mymacro error: ${err.message}`)
+    return self.createInline(parent, 'quoted', '[Macro error]', { type: 'unquoted' })
+  }
+})
+----
+
+== Testing
+
+=== Unit tests
+
+[,javascript]
+----
+// macros/__tests__/my-macro.test.js
+const asciidoctor = require('@asciidoctor/core')()
+const myMacro = require('../my-macro')
+
+describe('my-macro', () => {
+  let registry
+
+  beforeEach(() => {
+    registry = asciidoctor.Extensions.create()
+    myMacro.register(registry)
+  })
+
+  test('processes inline macro', () => {
+    const html = asciidoctor.convert(
+      'Text with mymacro:value[] inline.',
+      { extension_registry: registry }
+    )
+
+    expect(html).toContain('class="my-macro"')
+    expect(html).toContain('value')
+  })
+})
+----
+
+=== Integration tests
+
+Test with Antora:
+
+[,bash]
+----
+npx antora --fetch local-antora-playbook.yml
+----
+
+== Best practices
+
+=== Validate input
+
+[,javascript]
+----
+if (!target) {
+  console.warn('Macro requires a target')
+  return self.createInline(parent, 'quoted', '', { type: 'unquoted' })
+}
+----
+
+=== Escape HTML
+
+[,javascript]
+----
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+const safeTarget = escapeHtml(target)
+const html = `<span>${safeTarget}</span>`
+----
+
+=== Provide defaults
+
+[,javascript]
+----
+const cssClass = attrs.class || 'default-class'
+const text = attrs.text || target || 'Default text'
+----
+
+=== Use semantic HTML
+
+[,javascript]
+----
+// Good
+const html = `<code class="property">${target}</code>`
+
+// Avoid
+const html = `<span class="code-like property">${target}</span>`
+----
+
+=== Document your macro
+
+[,javascript]
+----
+/**
+ * My Macro - Short description
+ *
+ * Syntax: mymacro:target[attr1,attr2]
+ *
+ * Parameters:
+ * - target: The target value (required)
+ * - attr1: First attribute (optional)
+ * - attr2: Second attribute (optional)
+ *
+ * Example:
+ * mymacro:example[foo,bar]
+ */
+module.exports.register = function register (registry, context) {
+  // Implementation
+}
+----
+
+== Debugging
+
+=== Enable logging
+
+[,javascript]
+----
+console.log('Macro target:', target)
+console.log('Macro attrs:', JSON.stringify(attrs, null, 2))
+console.log('Document attrs:', parent.getDocument().getAttributes())
+----
+
+=== Test locally
+
+Create a test AsciiDoc file:
+
+[,asciidoc]
+----
+= Test Page
+
+Testing mymacro:value[attr1,attr2] inline.
+----
+
+Convert directly:
+
+[,bash]
+----
+node -e "
+const asciidoctor = require('@asciidoctor/core')()
+const macro = require('./macros/my-macro')
+const registry = asciidoctor.Extensions.create()
+macro.register(registry)
+const html = asciidoctor.convertFile('test.adoc', {
+  extension_registry: registry,
+  to_file: false
+})
+console.log(html)
+"
+----
+
+== Related documentation
+
+* link:USER_GUIDE.adoc[User guide] - How to use macros
+* link:REFERENCE.adoc[Reference] - Complete macro documentation
+* https://docs.asciidoctor.org/asciidoctor.js/latest/extend/extensions/[Asciidoctor.js Extensions]
+* https://docs.asciidoctor.org/asciidoctor.js/latest/extend/extensions/inline-macro-processor/[Inline Macro Processor]
+* https://docs.asciidoctor.org/asciidoctor.js/latest/extend/extensions/block-macro-processor/[Block Macro Processor]

@@ -1,0 +1,216 @@
+= MCP Server Prompts
+
+This directory contains prompt files for the Redpanda Docs MCP Server. Prompts provide contextual guides and instructions to LLMs when working with specific documentation tasks.
+
+== What are prompts?
+
+MCP Prompts are pre-defined instructions that LLMs can access when needed. They provide:
+
+* Detailed context about complex workflows
+* Rules and best practices
+* Step-by-step instructions
+* Quality checks and validation
+
+== How prompts work
+
+. **Writer makes a request**: "Improve the description for cleanup.policy"
+. **Claude detects the topic**: Recognizes this is about property documentation
+. **Retrieves the prompt**: Automatically loads `property-docs-guide.md`
+. **Follows instructions**: Updates overrides correctly, uses proper workflow
+. **Ensures quality**: Applies all rules and validation checks
+
+== Available prompts
+
+=== property-docs-guide.md
+
+**Purpose**: Comprehensive guide for updating Redpanda property documentation
+
+**When used**: Automatically retrieved when working with configuration properties
+
+**Key content**:
+
+* Override system explanation
+* Mandatory rules (no cloud conditionals, no enterprise includes)
+* Workflow instructions (update property-overrides.json, use generate_property_docs tool)
+* Common scenarios and examples
+* Validation steps
+
+=== rpcn-connector-docs-guide.md
+
+**Purpose**: Comprehensive guide for updating Redpanda Connect connector reference documentation
+
+**When used**: Automatically retrieved when working with connector documentation
+
+**Key content**:
+
+* Override system with `$ref` syntax explanation
+* DRY (Don't Repeat Yourself) principles
+* Repository structure and folder organization
+* Workflow instructions (update overrides.json, use generate_rpcn_connector_docs tool)
+* Quality checks and validation
+* Examples of `$ref` usage
+
+== Adding new prompts
+
+=== 1. Create the markdown file
+
+Create a new file in this directory:
+
+[,bash]
+----
+prompts/your-prompt-name.md
+----
+
+=== 2. Write the content
+
+Write clear instructions for the LLM (not for users):
+
+[,markdown]
+----
+# Your Prompt Title
+
+This guide explains how to...
+
+## Your workflow:
+1. Do this
+2. Then do that
+3. Use the `tool_name` MCP tool to...
+
+## Rules you must follow:
+- Never do X
+- Always do Y
+----
+
+=== 3. Register the prompt
+
+Add it to the prompts array in `bin/doc-tools-mcp.js`:
+
+[,javascript]
+----
+const prompts = [
+  {
+    name: 'property-docs-guide',
+    description: 'Comprehensive guide for...',
+    arguments: []
+  },
+  {
+    name: 'your-prompt-name',  // Must match filename (without .md)
+    description: 'Brief description for LLM to understand when to use this',
+    arguments: []  // Can specify arguments if needed
+  }
+];
+----
+
+=== 4. Handle the prompt request
+
+Add a case in the GetPromptRequestSchema handler:
+
+[,javascript]
+----
+server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  const { name } = request.params;
+
+  if (name === 'property-docs-guide') {
+    return {
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: getPromptContent('property-docs-guide')
+          }
+        }
+      ]
+    };
+  }
+
+  if (name === 'your-prompt-name') {
+    return {
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: getPromptContent('your-prompt-name')
+          }
+        }
+      ]
+    };
+  }
+
+  throw new Error(`Unknown prompt: ${name}`);
+});
+----
+
+=== 5. Test it
+
+[,bash]
+----
+# Start the server
+node bin/doc-tools-mcp.js
+
+# The prompt will be automatically available to Claude
+----
+
+== Writing good prompts
+
+**Do:**
+
+* **Write for LLMs**: Instructions should be direct ("You should..." not "Tell the user to...")
+* **Be specific**: Clear, actionable steps
+* **Include examples**: Show the correct way to do things
+* **Define rules**: List what must/must not be done
+* **Provide context**: Explain why rules exist
+* **Use workflow sections**: Step-by-step instructions
+
+**Don't:**
+
+* **Don't write for users**: Prompts are consumed by LLMs
+* **Don't be vague**: "Handle it appropriately" is not helpful
+* **Don't skip validation**: Always include quality checks
+* **Don't forget edge cases**: Cover error scenarios
+* **Don't embed in code**: Keep content in .md files
+
+== Prompt structure template
+
+[,markdown]
+----
+# Title - What This Prompt Does
+
+Brief explanation of the purpose.
+
+## Overview
+
+Context about the system/workflow.
+
+## Critical Rules (MANDATORY)
+
+- Never do X
+- Always do Y
+- Must include Z
+
+## Your workflow:
+
+1. First step
+2. Second step
+3. Use the `tool_name` MCP tool to...
+4. Validate the result
+
+## Common scenarios
+
+### Scenario 1: Description
+Steps to handle this case.
+
+### Scenario 2: Description
+Steps to handle this case.
+
+## Quality checks you must perform:
+
+- Check for A
+- Verify B
+- Ensure C
+
+## Validation
+
+How to verify everything worked correctly.
+----

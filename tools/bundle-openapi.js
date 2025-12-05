@@ -625,9 +625,19 @@ async function bundleOpenAPI(options) {
     if (!quiet) {
       console.log('📥 Cloning redpanda repository...');
     }
-    
-    const repositoryUrl = repo || 'https://github.com/redpanda-data/redpanda.git';
-    
+
+    const { getAuthenticatedGitHubUrl, hasGitHubToken } = require('../cli-utils/github-token');
+
+    let repositoryUrl = repo || 'https://github.com/redpanda-data/redpanda.git';
+
+    // Use token if available for better rate limits and reliability
+    if (hasGitHubToken() && repositoryUrl.includes('github.com')) {
+      repositoryUrl = getAuthenticatedGitHubUrl(repositoryUrl);
+      if (!quiet) {
+        console.log('🔑 Using authenticated clone (token provided)');
+      }
+    }
+
     try {
       execSync(`git clone --depth 1 --branch ${tag} ${repositoryUrl} redpanda`, {
         cwd: tempDir,

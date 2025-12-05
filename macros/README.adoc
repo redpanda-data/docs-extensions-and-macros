@@ -1,0 +1,105 @@
+= AsciiDoc Macros
+:toc:
+:toclevels: 2
+
+Documentation for AsciiDoc macros and extensions for Redpanda documentation.
+
+== What are AsciiDoc macros?
+
+AsciiDoc macros are custom inline and block elements that extend AsciiDoc syntax. These macros provide specialized formatting, references, and dynamic content generation within documentation pages.
+
+== Documentation
+
+link:USER_GUIDE.adoc[**User guide**]:: How to use AsciiDoc macros in your documentation
++
+* Installation and setup
+* Using macros in AsciiDoc
+* Common usage patterns
+* Troubleshooting
+
+link:REFERENCE.adoc[**Reference**]:: Complete reference for all available macros
++
+* Macro descriptions
+* Syntax and parameters
+* Configuration options
+* Examples for each macro
+
+link:DEVELOPMENT.adoc[**Development guide**]:: How to develop new AsciiDoc macros
++
+* Macro architecture
+* Creating inline and block macros
+* Testing and debugging
+* Best practices
+
+== Quickstart
+
+=== Install the package
+
+[,bash]
+----
+npm i @redpanda-data/docs-extensions-and-macros
+----
+
+=== Configure in your playbook
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/glossary'
+----
+
+IMPORTANT: Macros must be registered under the `asciidoc.extensions` key in your playbook, not `antora.extensions`.
+
+== Available macros
+
+=== Inline macros
+
+* **glossterm** - Reference glossary terms with tooltips
+* **config_ref** - Link to configuration properties
+* **helm_ref** - Link to Helm chart values
+* **badge** - Display status badges
+
+=== Block macros
+
+* **components_by_category** - Display Redpanda Connect components grouped by category
+* **component_table** - Generate searchable component tables
+* **component_type_dropdown** - Create dropdown for component types
+
+See link:REFERENCE.adoc[Reference documentation] for complete details on each macro.
+
+== Common use cases
+
+=== Reference glossary terms
+
+[,asciidoc]
+----
+The glossterm:partition[partition] contains the data.
+----
+
+=== Link to configuration
+
+[,asciidoc]
+----
+Configure the config_ref:retention.ms,true,topic-properties[] property.
+----
+
+=== Link to Helm values
+
+[,asciidoc]
+----
+For configuration options, see the helm_ref:storage.tieredConfig.cloud_storage_enabled[] value.
+----
+
+=== Display Redpanda Connect components
+
+[,asciidoc]
+----
+components_by_category::inputs[]
+----
+
+== Support
+
+* link:USER_GUIDE.adoc#troubleshooting[Troubleshooting guide]
+* https://github.com/redpanda-data/docs-extensions-and-macros/issues[Report issues]
+* https://docs.asciidoctor.org/asciidoctor.js/latest/extend/extensions/[Asciidoctor.js Extensions]

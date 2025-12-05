@@ -18,7 +18,9 @@ suggestedReadings = """
 
 
 cmd_dict = {}
-basic_commands_docker = ["docker","exec","-it"]
+# Use 'docker exec' without -it flags for non-interactive/background execution
+# -it flags require a TTY and fail in CI/background jobs
+basic_commands_docker = ["docker", "exec"]
 basic_commands_docker.append("redpanda-1")
 rpk_basic_command = ["rpk"]
 

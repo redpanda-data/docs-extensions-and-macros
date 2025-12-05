@@ -78,7 +78,13 @@ redpanda-git:
 	@if [ -d "$(REDPANDA_SRC)" ]; then \
 	  git -C "$(REDPANDA_SRC)" fetch --all --tags -q; \
 	else \
-	  git clone -q https://github.com/redpanda-data/redpanda.git "$(REDPANDA_SRC)"; \
+	  GH_TOKEN=$${REDPANDA_GITHUB_TOKEN:-$${GITHUB_TOKEN:-$${GH_TOKEN}}}; \
+	  if [ -n "$$GH_TOKEN" ]; then \
+	    echo "🔑 Using authenticated clone (token provided)"; \
+	    git clone -q https://$$GH_TOKEN@github.com/redpanda-data/redpanda.git "$(REDPANDA_SRC)"; \
+	  else \
+	    git clone -q https://github.com/redpanda-data/redpanda.git "$(REDPANDA_SRC)"; \
+	  fi; \
 	fi; \
 	if git -C "$(REDPANDA_SRC)" rev-parse --verify -q "$(TAG)" >/dev/null; then \
 	  echo "🔖 Checking out '$(TAG)'"; \

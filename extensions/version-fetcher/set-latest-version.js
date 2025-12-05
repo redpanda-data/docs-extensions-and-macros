@@ -8,8 +8,11 @@ module.exports.register = function ({ config }) {
   const GetLatestConnectVersion = require('./get-latest-connect');
   const logger = this.getLogger('set-latest-version-extension');
 
-  if (!process.env.REDPANDA_GITHUB_TOKEN) {
-    logger.warn('REDPANDA_GITHUB_TOKEN environment variable not set. Attempting unauthenticated request.');
+  const { getGitHubToken } = require('../../cli-utils/github-token');
+  const token = getGitHubToken();
+
+  if (!token) {
+    logger.warn('GitHub token not set (REDPANDA_GITHUB_TOKEN, GITHUB_TOKEN, or GH_TOKEN). Attempting unauthenticated request.');
   }
 
   this.on('contentClassified', async ({ contentCatalog }) => {
@@ -22,7 +25,7 @@ module.exports.register = function ({ config }) {
     const githubOptions = {
       userAgent: 'Redpanda Docs',
       baseUrl: 'https://api.github.com',
-      auth: process.env.REDPANDA_GITHUB_TOKEN || undefined,
+      auth: token || undefined,
     };
     const github = new OctokitWithRetries(githubOptions);
     const dockerNamespace = 'redpandadata'

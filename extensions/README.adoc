@@ -1,0 +1,124 @@
+= Antora Extensions
+:toc:
+:toclevels: 2
+
+Documentation for Antora extensions that enhance the documentation build process.
+
+== What are Antora extensions?
+
+Antora extensions are Node.js modules that extend Antora's capabilities during the documentation site build. These extensions can modify content, generate new pages, integrate with external services, and customize the build pipeline.
+
+== Documentation
+
+link:USER_GUIDE.adoc[**User guide**]:: How to use and configure Antora extensions in your playbook
++
+* Installation and setup
+* Configuring extensions
+* Common usage patterns
+* Troubleshooting
+
+link:REFERENCE.adoc[**Reference**]:: Complete reference for all available extensions
++
+* Extension descriptions
+* Configuration options
+* Environment variables
+* Examples for each extension
+
+link:DEVELOPMENT.adoc[**Development guide**]:: How to develop new Antora extensions
++
+* Extension architecture
+* Creating new extensions
+* Testing and debugging
+* Best practices
+
+== Quickstart
+
+=== Install the package
+
+[,bash]
+----
+npm i @redpanda-data/docs-extensions-and-macros
+----
+
+=== Configure in your playbook
+
+[,yaml]
+----
+antora:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/extensions/version-fetcher/set-latest-version'
+----
+
+IMPORTANT: Extensions must be registered under the `antora.extensions` key in your playbook, not `asciidoc.extensions`.
+
+== Available extensions
+
+=== Version management
+* **set-latest-version** - Automatically fetch latest versions from GitHub releases
+
+=== Content generation
+* **generate-index-data** - Generate searchable indexes from content
+* **generate-rp-connect-categories** - Generate Redpanda Connect component categories
+* **generate-rp-connect-info** - Generate Redpanda Connect component information
+
+=== Navigation
+* **unlisted-pages** - Manage pages that appear in navigation but aren't listed
+* **produce-redirects** - Generate redirect configurations
+* **unpublish-pages** - Mark pages as unpublished
+
+=== Integrations
+* **algolia-indexer** - Index content for Algolia search
+* **compute-end-of-life** - Calculate and display EOL information
+* **find-related-docs** - Find and link related documentation
+* **find-related-labs** - Find and link related lab exercises
+
+=== File processing
+* **archive-attachments** - Archive file attachments
+* **replace-attributes-in-attachments** - Replace AsciiDoc attributes in attached files
+* **collect-bloblang-samples** - Collect Bloblang code samples
+
+=== Content enhancement
+* **add-global-attributes** - Add attributes globally to all pages
+* **add-pages-to-root** - Add pages to the root navigation
+* **process-context-switcher** - Handle context-dependent content
+* **validate-attributes** - Validate AsciiDoc attributes
+
+See link:REFERENCE.adoc[Reference documentation] for complete details on each extension.
+
+== Common use cases
+
+=== Automatically update version numbers
+
+[,yaml]
+----
+antora:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/extensions/version-fetcher/set-latest-version'
+----
+
+=== Enable Algolia search
+
+[,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/algolia-indexer'
+      algolia_app_id: YOUR_APP_ID
+      algolia_api_key: YOUR_API_KEY
+      algolia_index_name: YOUR_INDEX
+----
+
+=== Generate redirects
+
+[,yaml]
+----
+antora:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/extensions/produce-redirects.js'
+----
+
+== Support
+
+* link:USER_GUIDE.adoc#troubleshooting[Troubleshooting guide]
+* https://github.com/redpanda-data/docs-extensions-and-macros/issues[Report issues]
+* https://docs.antora.org/antora/latest/extend/extensions/[Antora Extensions Documentation]

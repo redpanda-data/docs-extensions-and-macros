@@ -2775,7 +2775,7 @@ def main():
 
     # Load overrides file (contains both property and definition overrides)
     overrides = None
-    if options.overrides:
+    if options.overrides and os.path.exists(options.overrides):
         try:
             with open(options.overrides) as f:
                 overrides = json.load(f)
@@ -2790,6 +2790,8 @@ def main():
         except Exception as e:
             logging.error(f"Failed to load overrides file: {e}")
             sys.exit(1)
+    elif options.overrides:
+        logger.info(f"Overrides file not found: {options.overrides} (skipping)")
 
     # DEPRECATED: Support legacy --definitions flag for backward compatibility
     # Users should migrate to putting definitions in overrides.json under "definitions" key
