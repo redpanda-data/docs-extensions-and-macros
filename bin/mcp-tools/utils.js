@@ -61,8 +61,8 @@ function getDocToolsCommand(repoRoot) {
 
 /**
  * Execute a command safely using spawnSync (no shell)
- * @param {string} program - Program to execute (e.g., 'npx')
- * @param {string[]} args - Array of arguments (e.g., ['doc-tools', 'generate', 'property-docs'])
+ * @param {string} program - Program to execute (for example, 'npx')
+ * @param {string[]} args - Array of arguments (for example, ['doc-tools', 'generate', 'property-docs'])
  * @param {Object} options - Execution options
  * @returns {string} Command output (stdout)
  * @throws {Error} Error with stdout, stderr, and status properties on failure

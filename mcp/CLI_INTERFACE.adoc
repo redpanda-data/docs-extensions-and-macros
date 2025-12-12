@@ -99,7 +99,7 @@ npx doc-tools generate property-docs --tag <version> [options]
 
 *Required flags:*
 
---tag:: Redpanda version to generate docs for (e.g., `v25.3.1`, `25.3.1`, or `latest`)
+--tag:: Redpanda version to generate docs for (for example, `v25.3.1`, `25.3.1`, or `latest`)
 
 *Optional flags:*
 
@@ -279,7 +279,7 @@ Generate commands should:
 
 The MCP server parses stdout to extract:
 
-* File counts (e.g., "Generated 342 properties")
+* File counts (for example, "Generated 342 properties")
 * File paths created
 * Success/failure status
 
@@ -329,7 +329,7 @@ $ echo $?
 
 === Network errors
 
-Network errors (e.g., GitHub API failures) are acceptable for version commands, but:
+Network errors (for example, GitHub API failures) are acceptable for version commands, but:
 
 * Must write error message to stderr
 * Must exit with non-zero status

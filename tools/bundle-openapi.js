@@ -12,8 +12,8 @@ const yaml = require('yaml');
  * and validates that the result matches MAJOR.MINOR.PATCH with optional pre-release/build metadata.
  * Throws if the input is not a non-empty string or does not conform to the expected version format.
  *
- * @param {string} tag - Git tag (e.g., 'v25.1.1', '25.1.1', or 'dev').
- * @returns {string} Normalized version (e.g., '25.1.1' or 'dev').
+ * @param {string} tag - Git tag (for example, 'v25.1.1', '25.1.1', or 'dev').
+ * @returns {string} Normalized version (for example, '25.1.1' or 'dev').
  * @throws {Error} If `tag` is not a non-empty string or does not match the semantic version pattern.
  */
 function normalizeTag(tag) {
@@ -44,8 +44,8 @@ function normalizeTag(tag) {
  *
  * Accepts a semantic version like `25.1.1` and yields `25.1`. The special value
  * `'dev'` is returned unchanged.
- * @param {string} version - Semantic version (e.g., `'25.1.1'`) or `'dev'`.
- * @returns {string} The `major.minor` string (e.g., `'25.1'`) or `'dev'`.
+ * @param {string} version - Semantic version (for example, `'25.1.1'`) or `'dev'`.
+ * @returns {string} The `major.minor` string (for example, `'25.1'`) or `'dev'`.
  * @throws {Error} If `version` is not a non-empty string, lacks major/minor parts, or if major/minor are not numeric.
  */
 function getMajorMinor(version) {
@@ -554,13 +554,13 @@ function postProcessBundle(filePath, options, quiet = false) {
  * Bundle OpenAPI fragments for the specified API surface(s) from a repository tag and write the resulting bundled YAML files to disk.
  *
  * @param {Object} options - Configuration options.
- * @param {string} options.tag - Git tag to checkout (e.g., 'v25.1.1').
+ * @param {string} options.tag - Git tag to checkout (for example, 'v25.1.1').
  * @param {'admin'|'connect'|'both'} options.surface - API surface to process.
  * @param {string} [options.output] - Standalone output file path; when provided, used for the single output file.
  * @param {string} [options.outAdmin] - Output path for the admin API when integrating with doc-tools mode.
  * @param {string} [options.outConnect] - Output path for the connect API when integrating with doc-tools mode.
  * @param {string} [options.repo] - Repository URL to clone (defaults to https://github.com/redpanda-data/redpanda.git).
- * @param {string} [options.adminMajor] - Admin API major version string used for metadata (e.g., 'v2.0.0').
+ * @param {string} [options.adminMajor] - Admin API major version string used for metadata (for example, 'v2.0.0').
  * @param {boolean} [options.useAdminMajorVersion] - When true and processing the admin surface, use `adminMajor` for the bundle info.version.
  * @param {boolean} [options.quiet=false] - Suppress logging to stdout/stderr when true.
  * @returns {Object|Object[]} An object (for a single surface) or an array of objects (for both surfaces) with fields:
@@ -788,7 +788,7 @@ if (require.main === module) {
   program
     .name('bundle-openapi')
     .description('Bundle OpenAPI fragments from Redpanda repository')
-    .requiredOption('-t, --tag <tag>', 'Git tag to checkout (e.g., v25.1.1)')
+    .requiredOption('-t, --tag <tag>', 'Git tag to checkout (for example, v25.1.1)')
     .requiredOption('-s, --surface <surface>', 'API surface', (value) => {
       if (!['admin', 'connect', 'both'].includes(value)) {
         throw new Error('Invalid API surface. Must be "admin", "connect", or "both"');

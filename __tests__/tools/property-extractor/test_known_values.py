@@ -380,7 +380,7 @@ class SecretPropertyTest(unittest.TestCase):
 
 
 class SizeLiteralTest(unittest.TestCase):
-    """Test size literal conversion (e.g., 20_GiB)"""
+    """Test size literal conversion (for example, 20_GiB)"""
 
     def test_gib_size_literal(self):
         """Test conversion of _GiB size literal"""

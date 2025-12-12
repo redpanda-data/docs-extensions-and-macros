@@ -12,8 +12,8 @@ const { getAntoraStructure } = require('./antora');
  * Use tags for released content (GA or beta), branches for in-progress content.
  *
  * @param {Object} args - Arguments
- * @param {string} [args.tag] - Operator release tag for GA/beta content (e.g., operator/v2.2.6-25.3.1 or v25.1.2). Auto-prepends "operator/" if not present.
- * @param {string} [args.branch] - Branch name for in-progress content (e.g., release/v2.2.x, main, dev)
+ * @param {string} [args.tag] - Operator release tag for GA/beta content (for example, operator/v2.2.6-25.3.1 or v25.1.2). Auto-prepends "operator/" if not present.
+ * @param {string} [args.branch] - Branch name for in-progress content (for example, release/v2.2.x, main, dev)
  * @param {string} [args.source_path] - CRD Go types dir or GitHub URL
  * @param {number} [args.depth] - How many levels deep to generate
  * @param {string} [args.templates_dir] - Asciidoctor templates directory

@@ -1,3 +1,8 @@
+---
+description: Comprehensive guide for updating Redpanda Connect connector reference documentation using the overrides system with $ref syntax. Explains the DRY approach for connector documentation.
+version: 1.0.0
+---
+
 # Redpanda Connect Reference Documentation: LLM Prompt Guide
 
 Redpanda Connect reference documentation is generated using a combination of:
@@ -85,7 +90,7 @@ When asked to improve or work with Redpanda Connect reference documentation:
 
 6. **Explain your changes**: Provide a clear explanation of what you changed and why.
 
-## Quality Checks You Must Perform
+## Quality checks you must perform
 
 - **Preserve technical accuracy**: Ensure that all field descriptions are correct, actionable, and user-friendly
 - **Maintain DRY principles**: Avoid unnecessary repetition in the documentation

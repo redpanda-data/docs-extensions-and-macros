@@ -233,7 +233,7 @@ class ConstexprCache:
             position (int): Position in the file
 
         Returns:
-            str: Namespace (e.g., "model" or "config::tls")
+            str: Namespace (for example, "model" or "config::tls")
         """
         # Look backwards from position to find namespace declaration
         preceding = content[:position]
@@ -403,7 +403,7 @@ def process_enterprise_value(enterprise_str):
     2. C++ scoped enum-like tokens (foo::bar::BAZ) → "BAZ".
     3. Lambda expressions (strings starting with "[](" and ending with "}") → a short
        human-readable hint such as "Enterprise feature enabled" or context-specific text.
-    4. Simple literal values (e.g., "true", "false", "OIDC", or quoted strings) → returned as-is.
+    4. Simple literal values (for example, "true", "false", "OIDC", or quoted strings) → returned as-is.
     
     Parameters:
         enterprise_str (str): Raw C++ expression text to be converted.
@@ -496,7 +496,7 @@ def resolve_cpp_function_call(function_name):
     functions from source using general patterns. No hardcoded patterns needed.
 
     Parameters:
-        function_name (str): Fully-qualified C++ function name to resolve (e.g., "model::kafka_audit_logging_topic")
+        function_name (str): Fully-qualified C++ function name to resolve (for example, "model::kafka_audit_logging_topic")
 
     Returns:
         str or None: The literal string returned by the C++ function, or None if not found in cache
@@ -509,7 +509,7 @@ def resolve_cpp_function_call(function_name):
         logger.debug(f"Resolved function '{function_name}' -> '{cached_result}' from cache")
         return cached_result
 
-    # Also try without namespace qualifier (e.g., "kafka_audit_logging_topic")
+    # Also try without namespace qualifier (for example, "kafka_audit_logging_topic")
     if '::' in function_name:
         simple_name = function_name.split('::')[-1]
         cached_result = _constexpr_cache.lookup_function(simple_name)
@@ -529,7 +529,7 @@ def resolve_constexpr_identifier(identifier):
     Searches common Redpanda source locations for constexpr string or string_view definitions matching the given identifier and returns the literal if found.
 
     Parameters:
-        identifier (str): The identifier name to resolve (e.g., "scram" or "net::tls_v1_2_cipher_suites").
+        identifier (str): The identifier name to resolve (for example, "scram" or "net::tls_v1_2_cipher_suites").
 
     Returns:
         str or None: The resolved literal string value if found, otherwise `None`.
@@ -546,7 +546,7 @@ def resolve_constexpr_identifier(identifier):
         logger.debug(f"Could not find Redpanda source directory to resolve identifier: {identifier}")
         return None
 
-    # Strip namespace qualifier if present (e.g., "net::tls_v1_2_cipher_suites" -> "tls_v1_2_cipher_suites")
+    # Strip namespace qualifier if present (for example, "net::tls_v1_2_cipher_suites" -> "tls_v1_2_cipher_suites")
     search_identifier = identifier.split('::')[-1] if '::' in identifier else identifier
     
     # Pattern to match constexpr string_view definitions
@@ -1567,7 +1567,7 @@ def resolve_type_and_default(properties, definitions):
     └─────────────────────────────────────────────────────────────────────────
 
     HOW TO ADD NEW TYPE DEFINITIONS:
-    1. Identify the C++ type that needs a definition (e.g., new_endpoint_type)
+    1. Identify the C++ type that needs a definition (for example, new_endpoint_type)
     2. Analyze the C++ struct/class to determine JSON schema structure
     3. Add entry to definitions.json with appropriate JSON Schema:
        {
@@ -1662,10 +1662,10 @@ def resolve_type_and_default(properties, definitions):
 
         This function recognises common C++ patterns produced by the extractor and maps them to values suitable for JSON schema defaults and examples. Handled cases include:
         - std::nullopt -> null
-        - zero-argument functions (e.g., model::kafka_audit_logging_topic()) resolved from source when possible
-        - enum tokens (e.g., fips_mode_flag::disabled -> "disabled")
+        - zero-argument functions (for example, model::kafka_audit_logging_topic()) resolved from source when possible
+        - enum tokens (for example, fips_mode_flag::disabled -> "disabled")
         - constexpr identifiers and simple string constructors resolved to their literal strings when available
-        - known default constructors and truncated type names mapped to sensible defaults (e.g., duration -> 0, path -> "")
+        - known default constructors and truncated type names mapped to sensible defaults (for example, duration -> 0, path -> "")
         - simple heuristics for unknown constructors and concatenated expressions
 
         Returns:
@@ -1722,7 +1722,7 @@ def resolve_type_and_default(properties, definitions):
                     base = base + "s"
                 return f'"{num} {base}"'
 
-            # Evaluate arithmetic in duration constructors (e.g., "60 * 5" -> "300 seconds")
+            # Evaluate arithmetic in duration constructors (for example, "60 * 5" -> "300 seconds")
             if "*" in value:
                 try:
                     result = safe_arithmetic_eval(value)
@@ -1854,12 +1854,12 @@ def resolve_type_and_default(properties, definitions):
         - Integer and boolean literals → Python int and bool.
         - Object constructors (Type(arg1, arg2) or Type{...}) → dict mapping constructor arguments to the object's properties when a corresponding type definition exists.
         - Nested constructors → nested dicts with their fields expanded.
-        - Array initializer lists (e.g., {Type(...), Type(...)}) → Python list with each element expanded.
+        - Array initializer lists (for example, {Type(...), Type(...)}) → Python list with each element expanded.
         - Special-case mappings for known type patterns (for example, an address-type constructor expanded into {"address", "port"} when the target type expects that shape).
         If a default cannot be resolved or the type is an enum, the original input is returned unchanged; the string "null" is converted to None. If default_str is not a string, it is returned as-is.
         
         Parameters:
-            type_name (str): The resolved type name for the default value (e.g., "model::broker_endpoint" or a primitive type like "string").
+            type_name (str): The resolved type name for the default value (for example, "model::broker_endpoint" or a primitive type like "string").
             default_str (str | any): The C++ default expression to expand, or a non-string value already decoded.
         
         Returns:
@@ -1881,7 +1881,7 @@ def resolve_type_and_default(properties, definitions):
                 else:
                     return processed
         
-        # Handle string type with constructor syntax (e.g., ss::sstring{scram})
+        # Handle string type with constructor syntax (for example, ss::sstring{scram})
         if type_name == "string" and ("{" in default_str or "(" in default_str):
             tname, args = parse_constructor(default_str)
             if tname and args:
@@ -1897,7 +1897,7 @@ def resolve_type_and_default(properties, definitions):
         type_def = resolve_definition_type(resolve_type_with_namespace(type_name, definitions))
         if "enum" in type_def:
             # Strip C++ namespace qualifiers from enum values
-            # e.g., model::partition_autobalancing_mode::continuous → continuous
+            # for example, model::partition_autobalancing_mode::continuous → continuous
             if isinstance(default_str, str) and '::' in default_str:
                 return default_str.split('::')[-1]
             return default_str

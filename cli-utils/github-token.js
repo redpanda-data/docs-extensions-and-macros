@@ -23,7 +23,7 @@ function getGitHubToken() {
 
 /**
  * Get an authenticated GitHub URL by injecting the token
- * @param {string} url - The GitHub HTTPS URL (e.g., https://github.com/owner/repo.git)
+ * @param {string} url - The GitHub HTTPS URL (for example, https://github.com/owner/repo.git)
  * @returns {string} Authenticated URL with token, or original URL if no token available
  */
 function getAuthenticatedGitHubUrl(url) {

@@ -57,7 +57,7 @@ function fail(msg) {
  *
  * Attempts to execute the tool with a version flag to verify its presence. If the tool is missing or fails to run, the process exits with an error message and optional installation hint.
  *
- * @param {string} cmd - The name of the tool to check (e.g., 'docker', 'helm-docs').
+ * @param {string} cmd - The name of the tool to check (for example, 'docker', 'helm-docs').
  * @param {object} [opts] - Optional settings.
  * @param {string} [opts.versionFlag='--version'] - The flag used to test the tool's execution.
  * @param {string} [opts.help] - An optional hint or installation instruction shown on failure.
@@ -240,7 +240,7 @@ function verifyPropertyDependencies() {
   requirePython();
   
   // Check for Node.js (required for Handlebars templates)
-  requireCmd('node', 'https://nodejs.org/en/download/ or use your package manager (e.g., brew install node)');
+  requireCmd('node', 'https://nodejs.org/en/download/ or use your package manager (for example, brew install node)');
   requireCmd('npm', 'Usually installed with Node.js');
 
   // Check for C++ compiler
@@ -714,7 +714,7 @@ const commonOptions = {
  * process; if the script exits with a non-zero status, this function will terminate
  * the Node.js process with that status code.
  *
- * @param {string} mode - Operation mode passed to the script (e.g., "generate" or "clean").
+ * @param {string} mode - Operation mode passed to the script (for example, "generate" or "clean").
  * @param {string} tag - Release tag or version to generate docs for.
  * @param {Object} options - Runtime options.
  * @param {string} options.dockerRepo - Docker repository used by the script.
@@ -841,7 +841,7 @@ function generatePropertyComparisonReport(oldTag, newTag, outputDir) {
  * provided temporary directories. On missing inputs or if the diff subprocess
  * fails to spawn, the process exits with a non-zero status.
  *
- * @param {string} kind - Logical category for the diff (e.g., "metrics" or "rpk"); used in the output path.
+ * @param {string} kind - Logical category for the diff (for example, "metrics" or "rpk"); used in the output path.
  * @param {string} oldTag - Identifier for the "old" version (used in the output path).
  * @param {string} newTag - Identifier for the "new" version (used in the output path).
  * @param {string} oldTempDir - Path to the existing temporary directory containing the old output; must exist.
@@ -2716,8 +2716,8 @@ automation
 automation
   .command('bundle-openapi')
   .description('Bundle Redpanda OpenAPI fragments for admin and connect APIs into complete OpenAPI 3.1 documents. Requires either --tag or --branch to be specified.')
-  .option('-t, --tag <tag>', 'Git tag for released content (e.g., v24.3.2 or 24.3.2)')
-  .option('-b, --branch <branch>', 'Branch name for in-progress content (e.g., dev, main)')
+  .option('-t, --tag <tag>', 'Git tag for released content (for example, v24.3.2 or 24.3.2)')
+  .option('-b, --branch <branch>', 'Branch name for in-progress content (for example, dev, main)')
   .option('--repo <url>', 'Repository URL', 'https://github.com/redpanda-data/redpanda.git')
   .addOption(new Option('-s, --surface <surface>', 'Which API surface(s) to bundle').choices(['admin', 'connect', 'both']).makeOptionMandatory())
   .option('--out-admin <path>', 'Output path for admin API', 'admin/redpanda-admin-api.yaml')
@@ -2765,6 +2765,250 @@ automation
     } catch (err) {
       console.error(`❌ ${err.message}`);
       process.exit(err.message.includes('Validation failed') ? 2 : 1);
+    }
+  });
+
+/**
+ * Validate MCP configuration
+ *
+ * Validates that all prompts and resources are properly configured and accessible.
+ * Checks for:
+ * - Valid frontmatter in all prompt files
+ * - Accessible resource files
+ * - Proper metadata and descriptions
+ * - No naming conflicts
+ *
+ * @example
+ * npx doc-tools validate-mcp
+ */
+programCli
+  .command('validate-mcp')
+  .description('Validate MCP server configuration (prompts, resources, metadata)')
+  .action(() => {
+    const {
+      PromptCache,
+      loadAllPrompts
+    } = require('./mcp-tools/prompt-discovery');
+    const {
+      validateMcpConfiguration,
+      formatValidationResults
+    } = require('./mcp-tools/mcp-validation');
+
+    const baseDir = findRepoRoot();
+    const promptCache = new PromptCache();
+
+    // Resources configuration
+    const resources = [
+      {
+        uri: 'redpanda://style-guide',
+        name: 'Redpanda Documentation Style Guide',
+        description: 'Complete style guide based on Google Developer Documentation Style Guide with Redpanda-specific guidelines',
+        mimeType: 'text/markdown',
+        version: '1.0.0',
+        lastUpdated: '2025-12-11'
+      }
+    ];
+
+    const resourceMap = {
+      'redpanda://style-guide': { file: 'style-guide.md', mimeType: 'text/markdown' }
+    };
+
+    try {
+      // Load prompts
+      console.log('Loading prompts...');
+      const prompts = loadAllPrompts(baseDir, promptCache);
+      console.log(`Found ${prompts.length} prompts`);
+
+      // Validate configuration
+      console.log('\nValidating configuration...');
+      const validation = validateMcpConfiguration({
+        resources,
+        resourceMap,
+        prompts,
+        baseDir
+      });
+
+      // Format and display results
+      const output = formatValidationResults(validation, { resources, prompts });
+      console.log('\n' + output);
+
+      if (!validation.valid) {
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(`❌ Validation failed: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+/**
+ * Preview a prompt with arguments
+ *
+ * Loads a prompt and shows how it will appear when used with specified arguments.
+ * Useful for testing prompts before using them in Claude Code.
+ *
+ * @example
+ * npx doc-tools preview-prompt review-for-style --content "Sample content"
+ * npx doc-tools preview-prompt write-new-guide --topic "Deploy Redpanda"
+ */
+programCli
+  .command('preview-prompt')
+  .description('Preview a prompt with arguments to see the final output')
+  .argument('<prompt-name>', 'Name of the prompt to preview')
+  .option('--content <text>', 'Content argument (for review/check prompts)')
+  .option('--topic <text>', 'Topic argument (for write prompts)')
+  .option('--audience <text>', 'Audience argument (for write prompts)')
+  .action((promptName, options) => {
+    const {
+      PromptCache,
+      loadAllPrompts,
+      buildPromptWithArguments
+    } = require('./mcp-tools/prompt-discovery');
+
+    const baseDir = findRepoRoot();
+    const promptCache = new PromptCache();
+
+    try {
+      // Load prompts
+      loadAllPrompts(baseDir, promptCache);
+
+      // Get the requested prompt
+      const prompt = promptCache.get(promptName);
+      if (!prompt) {
+        console.error(`❌ Prompt not found: ${promptName}`);
+        console.error(`\nAvailable prompts: ${promptCache.getNames().join(', ')}`);
+        process.exit(1);
+      }
+
+      // Build arguments object from options
+      const args = {};
+      if (options.content) args.content = options.content;
+      if (options.topic) args.topic = options.topic;
+      if (options.audience) args.audience = options.audience;
+
+      // Build final prompt text
+      const promptText = buildPromptWithArguments(prompt, args);
+
+      // Display preview
+      console.log('='.repeat(70));
+      console.log(`PROMPT PREVIEW: ${promptName}`);
+      console.log('='.repeat(70));
+      console.log(`Description: ${prompt.description}`);
+      console.log(`Version: ${prompt.version}`);
+      if (prompt.arguments.length > 0) {
+        console.log(`Arguments: ${prompt.arguments.map(a => a.name).join(', ')}`);
+      }
+      console.log('='.repeat(70));
+      console.log('\n' + promptText);
+      console.log('\n' + '='.repeat(70));
+    } catch (err) {
+      console.error(`❌ Preview failed: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+/**
+ * Show MCP server version and statistics
+ *
+ * Displays version information for the MCP server, including:
+ * - Server version
+ * - Available prompts and their versions
+ * - Available resources and their versions
+ * - Usage statistics (if available)
+ *
+ * @example
+ * npx doc-tools mcp-version
+ * npx doc-tools mcp-version --stats  # Show usage statistics if available
+ */
+programCli
+  .command('mcp-version')
+  .description('Show MCP server version and configuration information')
+  .option('--stats', 'Show usage statistics if available', false)
+  .action((options) => {
+    const packageJson = require('../package.json');
+    const {
+      PromptCache,
+      loadAllPrompts
+    } = require('./mcp-tools/prompt-discovery');
+
+    const baseDir = findRepoRoot();
+    const promptCache = new PromptCache();
+
+    try {
+      // Load prompts
+      const prompts = loadAllPrompts(baseDir, promptCache);
+
+      // Resources configuration
+      const resources = [
+        {
+          uri: 'redpanda://style-guide',
+          name: 'Redpanda Documentation Style Guide',
+          version: '1.0.0',
+          lastUpdated: '2025-12-11'
+        }
+      ];
+
+      // Display version information
+      console.log('Redpanda Doc Tools MCP Server');
+      console.log('='.repeat(60));
+      console.log(`Server version: ${packageJson.version}`);
+      console.log(`Base directory: ${baseDir}`);
+      console.log('');
+
+      // Prompts
+      console.log(`Prompts (${prompts.length} available):`);
+      prompts.forEach(prompt => {
+        const args = prompt.arguments.length > 0
+          ? ` [${prompt.arguments.map(a => a.name).join(', ')}]`
+          : '';
+        console.log(`  - ${prompt.name} (v${prompt.version})${args}`);
+        console.log(`    ${prompt.description}`);
+      });
+      console.log('');
+
+      // Resources
+      console.log(`Resources (${resources.length} available):`);
+      resources.forEach(resource => {
+        console.log(`  - ${resource.uri}`);
+        console.log(`    ${resource.name} (v${resource.version})`);
+        console.log(`    Last updated: ${resource.lastUpdated}`);
+      });
+      console.log('');
+
+      // Check for usage statistics
+      if (options.stats) {
+        const statsPath = path.join(baseDir, 'mcp-usage-stats.json');
+        if (fs.existsSync(statsPath)) {
+          console.log('Usage Statistics:');
+          console.log('='.repeat(60));
+          const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
+          console.log(`Exported at: ${stats.exportedAt}`);
+          console.log(`Total prompt calls: ${stats.totalPromptCalls}`);
+          console.log(`Total resource calls: ${stats.totalResourceCalls}`);
+          console.log(`Total tool calls: ${stats.totalToolCalls}`);
+
+          if (stats.totalPromptCalls > 0) {
+            console.log('\nMost used prompts:');
+            Object.entries(stats.prompts)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 5)
+              .forEach(([name, count]) => {
+                console.log(`  ${name}: ${count} calls`);
+              });
+          }
+        } else {
+          console.log('No usage statistics available yet.');
+          console.log('Statistics are exported when the MCP server shuts down.');
+        }
+      }
+
+      console.log('');
+      console.log('For more information, see:');
+      console.log('  mcp/WRITER_EXTENSION_GUIDE.adoc');
+      console.log('  mcp/AI_CONSISTENCY_ARCHITECTURE.adoc');
+    } catch (err) {
+      console.error(`❌ Failed to retrieve version information: ${err.message}`);
+      process.exit(1);
     }
   });
 

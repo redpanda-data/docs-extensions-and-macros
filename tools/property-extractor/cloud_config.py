@@ -117,7 +117,7 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
         GitHubAuthError: Authentication or access problems with the GitHub API (including 401/403 responses).
         NetworkError: Network connectivity or timeout failures when contacting the GitHub API.
         CloudConfigParsingError: Failure to parse or validate the repository YAML files or their expected structure.
-        CloudConfigError: Generic configuration error (e.g., missing token) or unexpected internal failures.
+        CloudConfigError: Generic configuration error (for example, missing token) or unexpected internal failures.
     """
     if not github_token:
         github_token = os.environ.get('GITHUB_TOKEN') or os.environ.get('REDPANDA_GITHUB_TOKEN')
@@ -246,10 +246,10 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
                 logger.warning(f"Skipping file with missing name/url: {file}")
                 continue
             
-            # Look for version YAML files (e.g., "25.1.yml", "25.2.yml")
+            # Look for version YAML files (for example, "25.1.yml", "25.2.yml")
             if file_name.endswith('.yml'):
                 version_part = file_name.replace('.yml', '')
-                # Check if it looks like a version number (e.g., "25.1", "25.2.1")
+                # Check if it looks like a version number (for example, "25.1", "25.2.1")
                 if version_part.replace('.', '').isdigit():
                     version_files.append((version_part, download_url))
                     logger.debug(f"Found version file: {file_name} -> {version_part}")
@@ -282,7 +282,7 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
                 "No valid version files found in cloudv2/install-pack directory.\n"
                 f"Found {len(version_files)} files but none had valid version formats.\n"
                 f"Available files: {[v[0] for v in version_files]}\n"
-                "Expected version format: 'X.Y' or 'X.Y.Z' (e.g., '25.1', '25.2.1')\n"
+                "Expected version format: 'X.Y' or 'X.Y.Z' (for example, '25.1', '25.2.1')\n"
                 "Contact cloud team to verify configuration file naming convention."
             )
             logger.error(error_msg)

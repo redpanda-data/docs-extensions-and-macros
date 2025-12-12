@@ -13,8 +13,8 @@ const { getAntoraStructure } = require('./antora');
  * Requires either --tag or --branch to be specified.
  *
  * @param {Object} args - Arguments
- * @param {string} [args.tag] - Git tag for released content (e.g., "v24.3.2" or "24.3.2")
- * @param {string} [args.branch] - Branch name for in-progress content (e.g., "dev", "main")
+ * @param {string} [args.tag] - Git tag for released content (for example, "v24.3.2" or "24.3.2")
+ * @param {string} [args.branch] - Branch name for in-progress content (for example, "dev", "main")
  * @param {string} [args.repo] - Repository URL
  * @param {string} [args.surface] - Which API surface(s) to bundle: 'admin', 'connect', or 'both'
  * @param {string} [args.out_admin] - Output path for admin API

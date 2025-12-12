@@ -354,7 +354,7 @@ NOTE: Ensure filters are well-defined to minimize unnecessary processing. Avoid 
 
 ** `filter` (string, optional): A substring to match within page URLs.
 
-** `env_type` (string, optional): Matches pages with environment-specific attributes (e.g., Docker, Kubernetes).
+** `env_type` (string, optional): Matches pages with environment-specific attributes (for example, Docker, Kubernetes).
 
 ** `output_file` (string, optional): Save the generated index data as a JSON file at the specified path. If not provided, no file is created.
 

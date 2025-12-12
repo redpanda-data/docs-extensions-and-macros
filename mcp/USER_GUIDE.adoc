@@ -6,7 +6,7 @@ An MCP (Model Context Protocol) server that provides writer-friendly documentati
 
 == Features
 
-* *Writer-friendly*: Natural language interface - no CLI knowledge needed
+* Writer-friendly: Natural language interface, no CLI knowledge needed
 * *Version information*: Get latest Redpanda and Console versions with Docker tags
 * *Documentation generation*: Generate property, metrics, and RPK docs for any version
 * *Background jobs*: Long-running tasks can run in background with progress updates
@@ -110,21 +110,21 @@ The MCP server provides *writer-friendly tools* designed for natural language in
 
 *generate_property_docs*:: Generate Redpanda configuration property documentation
 +
-* Input: Version (e.g., "25.3.1", "v25.3.1", or "latest")
+* Input: Version (for example, "25.3.1", "v25.3.1", or "latest")
 * Optional: Generate AsciiDoc partials with `generate_partials: true`
 * Returns: Files generated, property count, summary
 * Writers use this when updating docs for a new Redpanda release
 
 *generate_metrics_docs*:: Generate Redpanda metrics documentation
 +
-* Input: Version (e.g., "25.3.1")
+* Input: Version (for example, "25.3.1")
 * Creates the public metrics reference page
 * Returns: Files generated, metrics count, summary
 * Writers use this when updating metrics docs for a new release
 
 *generate_rpk_docs*:: Generate RPK command-line documentation
 +
-* Input: Version (e.g., "25.3.1")
+* Input: Version (for example, "25.3.1")
 * Creates AsciiDoc files for all rpk commands
 * Returns: Commands documented, files generated
 * Writers use this when updating CLI docs for a new release
@@ -140,7 +140,7 @@ The MCP server provides *writer-friendly tools* designed for natural language in
 
 *review_generated_docs*:: Review generated documentation for quality issues
 +
-* Input: Type (e.g., "property-docs", "connector-docs") and version
+* Input: Type (for example, "property-docs", "connector-docs") and version
 * Analyzes generated documentation for common quality issues
 * Checks for consistency, completeness, and documentation standards
 * Returns: Review report with issues found, suggestions, and quality score
@@ -227,6 +227,131 @@ Background jobs send real-time progress notifications via MCP protocol, so Claud
 *Timeout:*
 
 All commands have a 10-minute timeout (increased from 5 minutes) to handle large documentation generation tasks.
+
+== Available prompts
+
+The MCP server provides *AI consistency prompts* that help Claude follow your team's documentation standards automatically. These prompts are pre-configured instructions that guide Claude's responses for common documentation tasks.
+
+=== Documentation review prompts
+
+*review-for-style*:: Review documentation content for style guide compliance
++
+* Checks: Style guide compliance, terminology consistency, voice/tone, AsciiDoc formatting
+* Input: Content to review (can be file path or raw text)
+* Output: Detailed feedback with critical issues, suggestions, and actionable recommendations
+* Use when: Reviewing any documentation before publishing
+
+*check-terminology*:: Validate terminology usage against approved team terminology
++
+* Checks: Incorrect terms, deprecated terms (whitelist/blacklist, master/slave), inconsistent usage
+* Input: Content to check
+* Output: Critical issues with corrections, inconsistencies found, missing glossary links
+* Use when: Ensuring consistent terminology across documentation
+
+*improve-clarity*:: Refactor existing documentation for clarity and readability
++
+* Applies: Style guide principles, simplifies complex explanations, improves structure
+* Input: Content to improve
+* Output: Refactored content with explanations of changes made
+* Use when: Content is technically correct but difficult to understand
+
+=== Content creation prompts
+
+*write-new-guide*:: Generate a new tutorial or guide following team standards
++
+* Applies: Team templates, approved terminology, voice/tone guidelines, AsciiDoc formatting
+* Input: Topic (what to write about), optional audience (beginners, experienced devs, operators)
+* Output: Complete guide following team standards
+* Use when: Starting a new tutorial, how-to, or getting started guide
+
+=== Workflow guide prompts
+
+*property-docs-guide*:: Comprehensive guide for updating Redpanda property documentation
++
+* Explains: Auto-generation system, override workflow, validation steps
+* Rules: Never edit generated `.adoc` files, always update `property-overrides.json`
+* Use when: Claude is helping with property documentation
+* Claude automatically retrieves this prompt when working with properties
+
+*rpcn-connector-docs-guide*:: Guide for updating Redpanda Connect connector documentation
++
+* Explains: Override system with `$ref` syntax for DRY principles, repository structure
+* Rules: Update `docs-data/overrides.json`, use `$ref` for deduplication
+* Use when: Claude is helping with connector documentation
+* Claude automatically retrieves this prompt when working with connectors
+
+=== How to use prompts
+
+Prompts work through natural conversation with Claude Code:
+
+*Explicit prompt usage:*
+
+----
+You: "Use the review-for-style prompt with this content: [paste content]"
+Claude: *retrieves and applies the review-for-style prompt*
+        *provides structured feedback following the prompt instructions*
+----
+
+*Implicit prompt usage:*
+
+----
+You: "Review this tutorial for our style guide"
+Claude: *automatically uses review-for-style prompt*
+        *provides feedback based on your team standards*
+----
+
+*Listing available prompts:*
+
+----
+You: "List available prompts"
+Claude: *shows all prompts with descriptions*
+----
+
+You can also preview prompts using the CLI:
+
+[,bash]
+----
+# Preview a review prompt
+npx doc-tools preview-prompt review-for-style --content "Test content"
+
+# Preview a write prompt
+npx doc-tools preview-prompt write-new-guide --topic "Deploy cluster"
+
+# List all prompts with versions
+npx doc-tools mcp-version
+----
+
+== Available resources
+
+Resources are reference materials that Claude can read to understand your team's standards.
+
+=== Style guide
+
+*redpanda://style-guide*:: Redpanda Documentation Style Guide (v1.0.0)
++
+* Complete style guide based on Google Developer Documentation Style Guide
+* Includes: Redpanda-specific guidelines, voice and tone, AsciiDoc formatting rules
+* Contains: Terminology quick reference, formatting examples, common patterns
+* Claude automatically references this when reviewing or writing documentation
+
+=== How to use resources
+
+Resources are automatically loaded by prompts, but you can also reference them explicitly:
+
+*Explicit reference:*
+
+----
+You: "Read the redpanda://style-guide resource and tell me the rules for code blocks"
+Claude: *reads the style guide resource*
+        *explains the code block formatting rules*
+----
+
+*Listing available resources:*
+
+----
+You: "List available resources"
+Claude: *shows all resources with descriptions and versions*
+----
 
 === Design philosophy
 
@@ -323,7 +448,7 @@ output:: Combined stdout from the command
 command:: The full command that was executed
 repoRoot:: Repository root where command was executed
 
-==== Error response - Command validation failed
+==== Error response: Command validation failed
 
 [,json]
 ----
@@ -334,7 +459,7 @@ repoRoot:: Repository root where command was executed
 }
 ----
 
-==== Error response - doc-tools not found
+==== Error response: doc-tools not found
 
 [,json]
 ----
@@ -350,7 +475,7 @@ repoRoot:: Repository root where command was executed
 }
 ----
 
-==== Error response - Command execution failed
+==== Error response: Command execution failed
 
 [,json]
 ----
@@ -479,7 +604,7 @@ notes_url:: GitHub release notes URL
 
 === generate_property_docs
 
-==== Success response (JSON only)
+==== Success response: (JSON only)
 
 [,json]
 ----
@@ -495,7 +620,7 @@ notes_url:: GitHub release notes URL
 }
 ----
 
-==== Success response (with AsciiDoc partials)
+==== Success response: (with AsciiDoc partials)
 
 [,json]
 ----
@@ -524,7 +649,7 @@ property_count:: Number of properties documented (if parseable from output)
 output:: Raw output from the generation command
 summary:: Human-readable summary
 
-==== Error response - Missing version
+==== Error response: Missing version
 
 [,json]
 ----
@@ -535,7 +660,7 @@ summary:: Human-readable summary
 }
 ----
 
-==== Error response - doc-tools not found
+==== Error response: doc-tools not found
 
 [,json]
 ----
@@ -546,7 +671,7 @@ summary:: Human-readable summary
 }
 ----
 
-==== Error response - Generation failed
+==== Error response: Generation failed
 
 [,json]
 ----
@@ -835,6 +960,137 @@ The description now explains:
 
 This example shows how the prompt automatically provides context about the property documentation workflow, ensuring Claude follows the correct process (update overrides, not generated files).
 
+=== Example 8: Review documentation for style compliance
+
+----
+You: Review this tutorial for style guide compliance:
+
+[Content of tutorial pasted here]
+
+Claude: *uses review-for-style prompt*
+        *analyzes content against team style guide*
+
+Style Review for Tutorial
+==========================================
+
+Critical Issues (3):
+
+1. **Deprecated Terminology**
+   - Location: Prerequisites section
+   - Found: "whitelist the following IPs"
+   - Should be: "allowlist the following IPs"
+   - Reason: "whitelist" is deprecated terminology
+
+2. **Inconsistent Heading Format**
+   - Location: Section 3
+   - Found: "step 1: configure broker"
+   - Should be: "Step 1: Configure broker"
+   - Reason: Headings must use title case
+
+3. **Missing Glossary Link**
+   - Location: Introduction, first mention of "partition"
+   - Should use: `glossterm:partition,partitions[]`
+   - Reason: First mention of technical terms should link to glossary
+
+Suggestions (5):
+- Voice could be more active in section 2
+- Code example in section 4 missing expected output
+[...]
+
+Overall: Good structure, clear explanations. Fix critical issues before publishing.
+----
+
+=== Example 9: Check terminology in existing content
+
+----
+You: Check the terminology in this doc for any deprecated or incorrect terms
+
+Claude: *uses check-terminology prompt*
+
+Terminology Review
+==========================================
+
+Critical Issues (2):
+
+**Location**: Configuration section, step 3
+**Found**: "SSL encryption"
+**Should be**: "TLS encryption"
+**Reason**: SSL is deprecated. TLS is the current standard.
+
+**Location**: Architecture diagram
+**Found**: "master node"
+**Should be**: "leader node"
+**Reason**: master/slave terminology is deprecated. Use leader/replica.
+
+Summary:
+- Total issues found: 2
+- Critical fixes needed: 2
+- Overall terminology health: Good (once fixed)
+----
+
+=== Example 10: Write a new guide with team standards
+
+----
+You: Write a getting started guide for deploying a 3-node Redpanda cluster
+
+Claude: *uses write-new-guide prompt*
+        *applies team templates and standards*
+
+= Deploy a Three-Node Redpanda Cluster
+:description: Learn how to deploy a production-ready Redpanda cluster with three nodes
+:page-aliases: deployment:deploy-three-node.adoc
+
+This guide walks you through deploying a three-node glossterm:cluster[] for production use.
+
+== Prerequisites
+
+Before you begin, ensure you have:
+
+* Three servers or VMs with supported operating systems
+* At least 2 GB RAM per server
+* Network connectivity between all nodes
+
+[Additional sections following team structure...]
+
+✓ Generated guide following team standards:
+- Uses approved terminology with glossary links
+- Follows team voice/tone guidelines
+- Includes proper AsciiDoc metadata
+- Uses team-standard structure for tutorials
+----
+
+=== Example 11: Improve clarity of complex explanation
+
+----
+You: This explanation of compaction is too complex. Can you simplify it?
+
+[Paste complex explanation]
+
+Claude: *uses improve-clarity prompt*
+
+Here's a clearer version:
+
+**Original** (complex, nested concepts):
+"Log compaction ensures the retention of the most recent update for each record key
+within the log of data, while simultaneously removing older updates to the same key
+in a manner that preserves the temporal ordering of messages..."
+
+**Improved** (clear, progressive):
+Log compaction keeps only the latest value for each key in a topic:
+
+1. For each message key, Redpanda keeps the most recent message
+2. Older messages with the same key are deleted
+3. Message order is preserved
+
+This reduces storage while maintaining the current state of your data.
+
+**Changes made:**
+- Simplified sentence structure
+- Broke complex sentence into numbered steps
+- Added concrete example
+- Kept technical accuracy while improving readability
+----
+
 == How it works
 
 === Context detection
@@ -1053,7 +1309,7 @@ If you encounter issues:
 
 . Check Claude Code logs
 . Verify your MCP server configuration
-. Test with simple commands first (e.g., "Show me the Antora structure")
+. Test with simple commands first (for example, "Show me the Antora structure")
 . Check that you're in a git repository
 . Open an issue in the repository
 
@@ -1065,7 +1321,7 @@ If you encounter issues:
 
 == What's next
 
-With the MCP server set up, you can use *natural language* to:
+With the MCP server set up, you can use natural language to:
 
 === Version information
 

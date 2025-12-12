@@ -324,7 +324,7 @@ function parseProgressFromOutput(jobId, output) {
           return;
         }
       } else if (match.length === 3) {
-        // Step match (e.g., "3/5")
+        // Step match (for example, "3/5")
         const current = parseInt(match[1]);
         const total = parseInt(match[2]);
         const percentage = Math.round((current / total) * 100);

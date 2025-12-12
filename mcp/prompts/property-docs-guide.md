@@ -1,3 +1,8 @@
+---
+description: Comprehensive guide for updating Redpanda property documentation using the override system. Explains how to work with auto-generated property files and the property-overrides.json system.
+version: 1.0.0
+---
+
 # Property documentation update guide for LLMs
 
 This guide explains how to update Redpanda property documentation when all property reference pages are auto-generated.
@@ -112,7 +117,7 @@ Important notes:
 - The `--cloud-support` flag must ALWAYS be included - never exclude it
 - The `--overrides` flag points to the property overrides JSON file
 
-## Property description rules (MANDATORY)
+## Property description rules (mandatory)
 
 ### Never add enterprise license includes
 Do not include enterprise license markers in descriptions.

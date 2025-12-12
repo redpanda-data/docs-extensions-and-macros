@@ -525,7 +525,7 @@ Overrides support:
 
 * *Manual override maintenance*: Custom descriptions must be maintained in overrides.json
 * *Example quality*: Auto-generated examples may not represent best practices
-* *Duplicate YAML keys*: Some examples contain multiple configurations in one block, creating invalid YAML with duplicate top-level keys (e.g., multiple `processors:` keys)
+* *Duplicate YAML keys*: Some examples contain multiple configurations in one block, creating invalid YAML with duplicate top-level keys (for example, multiple `processors:` keys)
 * *CSV catalog dependency*: Relies on manually maintained CSV in Connect repository
 * *Version detection timing*: Must be called during Antora build to access component attributes
 

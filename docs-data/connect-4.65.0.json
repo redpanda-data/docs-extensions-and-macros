@@ -7294,7 +7294,7 @@
             "name": "include_patterns",
             "type": "string",
             "kind": "array",
-            "description": "A list of file patterns to include (e.g., '**/*.md', 'configs/*.yaml'). If empty, all files will be included. Supports glob patterns: *, /**/, ?, and character ranges [a-z]. Any character with a special meaning can be escaped with a backslash.",
+            "description": "A list of file patterns to include (for example, '**/*.md', 'configs/*.yaml'). If empty, all files will be included. Supports glob patterns: *, /**/, ?, and character ranges [a-z]. Any character with a special meaning can be escaped with a backslash.",
             "is_optional": true,
             "default": []
           },
@@ -7302,7 +7302,7 @@
             "name": "exclude_patterns",
             "type": "string",
             "kind": "array",
-            "description": "A list of file patterns to exclude (e.g., '.git/**', '**/*.png'). These patterns take precedence over include_patterns. Supports glob patterns: *, /**/, ?, and character ranges [a-z]. Any character with a special meaning can be escaped with a backslash.",
+            "description": "A list of file patterns to exclude (for example, '.git/**', '**/*.png'). These patterns take precedence over include_patterns. Supports glob patterns: *, /**/, ?, and character ranges [a-z]. Any character with a special meaning can be escaped with a backslash.",
             "is_optional": true,
             "default": []
           },

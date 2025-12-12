@@ -58,7 +58,7 @@ function readConfig(configPath) {
 /**
  * Check if MCP server is already configured
  */
-function isMCPServerConfigured(config, serverName = 'redpanda-docs-tool-assistant') {
+function isMCPServerConfigured(config, serverName = 'redpanda-doc-tools-assistant') {
   return config.mcpServers && config.mcpServers[serverName];
 }
 
@@ -181,7 +181,7 @@ async function setupMCP(options = {}) {
   }
 
   // Build the claude mcp add command
-  const serverName = 'redpanda-docs-tool-assistant';
+  const serverName = 'redpanda-doc-tools-assistant';
 
   // If server exists and we're updating, remove it first
   if (alreadyConfigured && (needsUpdate || force)) {

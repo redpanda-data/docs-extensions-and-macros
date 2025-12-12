@@ -240,7 +240,7 @@ npx antora playbook.yml
 
 *Solutions:*
 
-* Some extensions make network requests (e.g., version fetcher, Algolia)
+* Some extensions make network requests (for example, version fetcher, Algolia)
 * Use caching when possible
 * Disable non-essential extensions during development
 * Run only necessary extensions for your workflow

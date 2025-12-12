@@ -1,0 +1,212 @@
+= MCP Extension Templates
+:toc:
+
+== Overview
+
+This directory contains ready-to-use templates for extending the MCP server. Copy these templates and customize them for your needs.
+
+== Available templates
+
+[cols="1,3"]
+|===
+|Template |Use For
+
+|`prompt-review-template.md`
+|Creating review prompts for specific content types
+
+|`prompt-write-template.md`
+|Creating writing prompts that generate new content
+
+|`resource-template.md`
+|Creating reference resources (guides, checklists, templates)
+|===
+
+== How to use these templates
+
+=== Quick start
+
+. Copy the template you need
+. Replace `[PLACEHOLDERS]` with your content
+. Add YAML frontmatter (for prompts)
+. Validate with `npx doc-tools validate-mcp`
+. Restart Claude Code and test
+
+=== Detailed steps
+
+**Step 1: Choose a template**
+
+Pick the template that matches what you're creating:
+- Review prompts → `prompt-review-template.md`
+- Writing prompts → `prompt-write-template.md`
+- Resources → `resource-template.md`
+
+**Step 2: Copy and rename**
+
+[source,bash]
+----
+# For a prompt
+cp mcp/templates/prompt-review-template.md mcp/prompts/review-api-docs.md
+
+# For a resource
+cp mcp/templates/resource-template.md mcp/team-standards/api-guide.md
+----
+
+**Step 3: Add frontmatter (prompts only)**
+
+Prompts need YAML frontmatter at the top. The templates include placeholder frontmatter - customize it:
+
+[source,yaml]
+----
+---
+description: "Your prompt description"
+version: "1.0.0"
+arguments:
+  content:
+    description: "The content to process"
+    required: true
+---
+----
+
+**Step 4: Customize the content**
+
+Replace all `[PLACEHOLDERS]` with your specific content:
+
+- `[CONTENT-TYPE]` → "API documentation", "troubleshooting guide", etc.
+- `[First thing to check]` → Specific checks for your use case
+- `[Section names]` → Appropriate section names
+
+**Step 5: Validate**
+
+Check your prompt or resource for errors:
+
+[source,bash]
+----
+npx doc-tools validate-mcp
+----
+
+**Step 6: Test**
+
+Restart Claude Code and test your new prompt or resource.
+
+No code editing required - the MCP server auto-discovers files in `mcp/prompts/` and `mcp/team-standards/`!
+
+== Customization tips
+
+=== For review prompts
+
+Focus on:
+- **Specific checks** relevant to the content type
+- **Common mistakes** you see in reviews
+- **Required elements** that must be present
+- **Output format** that's easy to act on
+
+Good checklist items:
+- Concrete and testable
+- Focused on one aspect
+- Clear about what success looks like
+
+=== For writing prompts
+
+Focus on:
+- **Clear structure** that matches your templates
+- **Specific requirements** for the content type
+- **Quality standards** that must be met
+- **Examples** showing what good looks like
+
+Good requirements:
+- Specific and actionable
+- Based on real patterns
+- Include rationale
+
+=== For resources
+
+Focus on:
+- **Practical examples** showing how to apply rules
+- **Good vs bad** comparisons
+- **Checklists** for quick verification
+- **Clear organization** that's easy to scan
+
+Good resources:
+- Scannable with clear headings
+- More examples than rules
+- Actionable guidance
+
+== Examples
+
+=== Example: Review prompt for API docs
+
+[source,bash]
+----
+# Copy template
+cp mcp/templates/prompt-review-template.md mcp/prompts/review-api-docs.md
+
+# Edit and customize
+vi mcp/prompts/review-api-docs.md
+----
+
+Key customizations:
+- Replace `[CONTENT-TYPE]` with "API documentation"
+- Add checks for: authentication section, request/response examples, error codes
+- Add common issues: missing status codes, unclear parameter descriptions
+- Define output format for API-specific feedback
+
+=== Example: Resource for code examples
+
+[source,bash]
+----
+# Copy template
+cp mcp/templates/resource-template.md mcp/team-standards/code-examples-guide.md
+
+# Edit and customize
+vi mcp/team-standards/code-examples-guide.md
+----
+
+Key customizations:
+- Add language-specific guidelines (bash, Python, YAML)
+- Include examples of good vs bad code formatting
+- Add checklist for code review
+- Show proper use of code block roles
+
+== Template placeholders reference
+
+Common placeholders you'll find in templates:
+
+[cols="1,2"]
+|===
+|Placeholder |Replace With
+
+|`[CONTENT-TYPE]`
+|Specific type: "API docs", "tutorials", "troubleshooting guides"
+
+|`[First thing to check]`
+|Specific checks relevant to your use case
+
+|`[Required section X]`
+|Sections that must be present
+
+|`[Resource Name]`
+|Name of your resource
+
+|`[Main Section X]`
+|Appropriate section names for your content
+
+|`[Check item X]`
+|Specific checklist items
+|===
+
+== Getting help
+
+- See link:../WRITER_EXTENSION_GUIDE.adoc[Writer Extension Guide] for complete instructions
+- Check existing prompts in `mcp/prompts/` for examples
+- Review existing resources in `mcp/team-standards/` for patterns
+- Ask your team lead for guidance
+
+== Contributing
+
+When you create a great prompt or resource:
+
+. Add it to the examples in link:../WRITER_EXTENSION_GUIDE.adoc[Writer Extension Guide]
+. Share it with the team
+. Consider if it should become a new template
+
+The more prompts and resources we build, the more consistent and efficient our docs team becomes!

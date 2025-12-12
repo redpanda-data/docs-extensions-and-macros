@@ -273,10 +273,10 @@ module.exports.register = function (registry, context) {
    *
    * @returns {Object} - An object with two properties:
    *   - `certified`: An array of SQL drivers with 'certified' support level. Each driver contains:
-   *     - `commercialName`: The trimmed commercial name of the driver (e.g., 'PostgreSQL').
+   *     - `commercialName`: The trimmed commercial name of the driver (for example, 'PostgreSQL').
    *     - `isCloudSupported`: A boolean indicating whether the driver supports cloud.
    *   - `community`: An array of SQL drivers with 'community' support level. Each driver contains:
-   *     - `commercialName`: The trimmed commercial name of the driver (e.g., 'Trino').
+   *     - `commercialName`: The trimmed commercial name of the driver (for example, 'Trino').
    *     - `isCloudSupported`: A boolean indicating whether the driver supports cloud.
    *
    * Example return structure:
@@ -330,7 +330,7 @@ module.exports.register = function (registry, context) {
    * @param {Object} connectors - An object containing the connector data, where each key is a connector name and
    *   each value contains details about its types, licensing, and cloud support.
    *   {
-   *     types: Map - A map of connector types (e.g., Input, Output, Processor), with associated commercial names.
+   *     types: Map - A map of connector types (for example, Input, Output, Processor), with associated commercial names.
    *     isLicensed: 'Yes' or 'No' - Indicates if the connector requires an enterprise license.
    *     isCloudConnectorSupported: true or false - Indicates if any type for this connector supports Redpanda Cloud.
    *   }
@@ -340,7 +340,7 @@ module.exports.register = function (registry, context) {
    *     community: Array<{ commercialName: string, isCloudSupported: boolean }>
    *   }
    * @param {boolean} isCloud - A flag indicating whether to filter by cloud support. If true, only cloud-supported connectors are shown.
-   * @param {boolean} showAllInfo - A flag indicating whether to show all information or limit the data displayed (e.g., for cloud-only views).
+   * @param {boolean} showAllInfo - A flag indicating whether to show all information or limit the data displayed (for example, for cloud-only views).
    *
    * @returns {string} - A string containing the generated HTML for the connectors table rows.
    *   The output is a string of HTML rows with the following columns:
@@ -831,7 +831,7 @@ module.exports.register = function (registry, context) {
               // Generic fallback for words ending in 's Selected'
               return pluralText.replace(/s Selected$/, ' Selected');
             } else if (pluralText.endsWith('ies Selected')) {
-              // Handle words ending in 'ies' (e.g., "Categories Selected" -> "Category Selected")
+              // Handle words ending in 'ies' (for example, "Categories Selected" -> "Category Selected")
               return pluralText.replace(/ies Selected$/, 'y Selected');
             } else {
               // If no pattern matches, return as-is
@@ -984,7 +984,7 @@ module.exports.register = function (registry, context) {
     self.named('component_type_dropdown');
     self.process((parent, target, attrs) => {
       const attributes = parent.getDocument().getAttributes();
-      const component = attributes['page-component-title'];  // Current component (e.g., 'Redpanda Cloud' or 'Redpanda Connect')
+      const component = attributes['page-component-title'];  // Current component (for example, 'Redpanda Cloud' or 'Redpanda Connect')
       const name = attributes['doctitle'];
       const type = attributes['type'];
       if (!name || !type) {

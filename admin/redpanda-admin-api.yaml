@@ -776,7 +776,7 @@ components:
           title: has_more_requests
           type: boolean
         sampledInFlightRequests:
-          description: A sample (e.g., the 5 latest) of the currently in-flight requests
+          description: A sample (for example, the 5 latest) of the currently in-flight requests
           items:
             $ref: "#/components/schemas/redpanda.core.admin.v2.InFlightRequests.Request"
           title: sampled_in_flight_requests
@@ -788,7 +788,7 @@ components:
       properties:
         apiKey:
           description: |-
-            API key for the request type (e.g., produce/fetch/metadata/etc)
+            API key for the request type (for example, produce/fetch/metadata/etc)
              https://kafka.apache.org/0101/protocol.html#protocol_api_keys
           format: int32
           title: api_key
@@ -923,7 +923,7 @@ components:
         tlsInfo:
           $ref: "#/components/schemas/redpanda.core.admin.v2.TLSInfo"
           description: |-
-            Information about the TLS state of the connection (e.g., whether TLS
+            Information about the TLS state of the connection (for example, whether TLS
              encryption is used for this connection)
           title: tls_info
         totalRequestStatistics:

@@ -281,7 +281,7 @@ class TypeDefinitionExtractor:
                 if cc_path.exists():
                     files_to_search.append(cc_path)
 
-                # Also look for parent directory's main .cc file (e.g., model/model.cc)
+                # Also look for parent directory's main .cc file (for example, model/model.cc)
                 parent_dir = file_path.parent
                 parent_cc = parent_dir / f"{parent_dir.name}.cc"
                 if parent_cc.exists() and parent_cc != cc_path:
@@ -364,7 +364,7 @@ class TypeDefinitionExtractor:
         Resolve a C++ type alias to a JSON schema type.
 
         Args:
-            alias_type (str): The C++ type expression (e.g., "named_type<int32_t, ...>")
+            alias_type (str): The C++ type expression (for example, "named_type<int32_t, ...>")
 
         Returns:
             str: JSON schema type (integer, string, etc.) or None if unknown
@@ -525,7 +525,7 @@ class TypeDefinitionExtractor:
                     # Convert C++ type to JSON schema type
                     json_type = self._cpp_type_to_json_type(return_type)
 
-                    # Use method name as field name (e.g., host() becomes "host")
+                    # Use method name as field name (for example, host() becomes "host")
                     properties[method_name] = {"type": json_type}
                     continue
 
@@ -555,7 +555,7 @@ class TypeDefinitionExtractor:
             position (int): Position in the file
 
         Returns:
-            str: Namespace (e.g., "model" or "config::tls")
+            str: Namespace (for example, "model" or "config::tls")
         """
         # Look backwards from position to find namespace declaration
         preceding = content[:position]

@@ -195,7 +195,7 @@ function resolveReferences(obj, root) {
  *
  * @param {Object} options - Configuration options for documentation generation.
  * @param {string} options.data - Path to the connector data file (JSON or YAML).
- * @param {string} [options.overrides] - Optional path to a JSON file with override data. Supports $ref references in JSON Pointer format (e.g., "#/definitions/client_certs").
+ * @param {string} [options.overrides] - Optional path to a JSON file with override data. Supports $ref references in JSON Pointer format (for example, "#/definitions/client_certs").
  * @param {string} options.template - Path to the main Handlebars template.
  * @param {string} [options.templateIntro] - Path to the intro partial template (used in full draft mode).
  * @param {string} [options.templateFields] - Path to the fields partial template.

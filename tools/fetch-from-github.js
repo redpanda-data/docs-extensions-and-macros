@@ -29,8 +29,8 @@ async function saveFile(content, saveDir, filename) {
 
 /**
  * Fetch file or directory from GitHub repository
- * @param {string} owner - Repository owner (e.g., "redpanda-data")
- * @param {string} repo - Repository name (e.g., "redpanda-operator")
+ * @param {string} owner - Repository owner (for example, "redpanda-data")
+ * @param {string} repo - Repository name (for example, "redpanda-operator")
  * @param {string} remotePath - Path to file or directory in repository
  * @param {string} saveDir - Local directory to save files to
  * @param {string} [customFilename] - Optional custom filename (for single files)

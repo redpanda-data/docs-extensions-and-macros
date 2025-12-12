@@ -10,6 +10,9 @@
  * - Context-aware: Works from any repository based on cwd
  * - Antora intelligence: Understands component/module structure
  * - Automation: Run doc-tools generate commands
+ * - Auto-discovery: Prompts loaded automatically from mcp/prompts/
+ * - Validation: Startup checks ensure all resources are accessible
+ * - Telemetry: Usage tracking for adoption metrics
  */
 
 const fs = require('fs');
@@ -21,12 +24,39 @@ const {
   ListToolsRequestSchema,
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
 } = require('@modelcontextprotocol/sdk/types.js');
 const { findRepoRoot, executeTool } = require('./mcp-tools');
 const { initializeJobQueue, getJob, listJobs } = require('./mcp-tools/job-queue');
 
+// New modules for improved architecture
+const {
+  PromptCache,
+  loadAllPrompts,
+  watchPrompts,
+  buildPromptWithArguments,
+  promptsToMcpFormat
+} = require('./mcp-tools/prompt-discovery');
+const {
+  validatePromptArguments,
+  validateMcpConfiguration
+} = require('./mcp-tools/mcp-validation');
+const {
+  UsageStats,
+  createPeriodicReporter,
+  createShutdownHandler
+} = require('./mcp-tools/telemetry');
+
 // Get version from package.json
 const packageJson = require('../package.json');
+
+// Base directory
+const baseDir = path.join(__dirname, '..');
+
+// Initialize prompt cache and usage stats
+const promptCache = new PromptCache();
+const usageStats = new UsageStats();
 
 // Create the MCP server
 const server = new Server(
@@ -38,6 +68,7 @@ const server = new Server(
     capabilities: {
       tools: {},
       prompts: {},
+      resources: {},
     },
   }
 );
@@ -84,11 +115,11 @@ const tools = [
       properties: {
         tag: {
           type: 'string',
-          description: 'Git tag for released content (e.g., "25.3.1", "v25.3.1", or "latest"). Auto-prepends "v" if not present. Use tags for GA or beta releases.'
+          description: 'Git tag for released content (for example "25.3.1", "v25.3.1", or "latest"). Auto-prepends "v" if not present. Use tags for GA or beta releases.'
         },
         branch: {
           type: 'string',
-          description: 'Branch name for in-progress content (e.g., "dev", "main"). Use branches for documentation under development.'
+          description: 'Branch name for in-progress content (for example "dev", "main"). Use branches for documentation under development.'
         },
         generate_partials: {
           type: 'boolean',
@@ -110,11 +141,11 @@ const tools = [
       properties: {
         tag: {
           type: 'string',
-          description: 'Git tag for released content (e.g., "25.3.1" or "v25.3.1"). Auto-prepends "v" if not present. Use tags for GA or beta releases.'
+          description: 'Git tag for released content (for example "25.3.1" or "v25.3.1"). Auto-prepends "v" if not present. Use tags for GA or beta releases.'
         },
         branch: {
           type: 'string',
-          description: 'Branch name for in-progress content (e.g., "dev", "main"). Use branches for documentation under development.'
+          description: 'Branch name for in-progress content (for example "dev", "main"). Use branches for documentation under development.'
         },
         background: {
           type: 'boolean',
@@ -132,11 +163,11 @@ const tools = [
       properties: {
         tag: {
           type: 'string',
-          description: 'Git tag for released content (e.g., "25.3.1" or "v25.3.1"). Auto-prepends "v" if not present. Use tags for GA or beta releases.'
+          description: 'Git tag for released content (for example "25.3.1" or "v25.3.1"). Auto-prepends "v" if not present. Use tags for GA or beta releases.'
         },
         branch: {
           type: 'string',
-          description: 'Branch name for in-progress content (e.g., "dev", "main"). Use branches for documentation under development.'
+          description: 'Branch name for in-progress content (for example "dev", "main"). Use branches for documentation under development.'
         },
         background: {
           type: 'boolean',
@@ -200,11 +231,11 @@ const tools = [
         },
         tag: {
           type: 'string',
-          description: 'Git tag for released content when using GitHub URL (e.g., "25.1.2" or "v25.1.2"). Auto-prepends "v" if not present. For redpanda-operator repository, also auto-prepends "operator/".'
+          description: 'Git tag for released content when using GitHub URL (for example "25.1.2" or "v25.1.2"). Auto-prepends "v" if not present. For redpanda-operator repository, also auto-prepends "operator/".'
         },
         branch: {
           type: 'string',
-          description: 'Branch name for in-progress content when using GitHub URL (e.g., "dev", "main").'
+          description: 'Branch name for in-progress content when using GitHub URL (for example "dev", "main").'
         },
         readme: {
           type: 'string',
@@ -273,11 +304,11 @@ const tools = [
       properties: {
         tag: {
           type: 'string',
-          description: 'Operator release tag (e.g., "operator/v25.1.2", "25.1.2", or "v25.1.2"). Auto-prepends "operator/" for redpanda-operator repository.'
+          description: 'Operator release tag (for example "operator/v25.1.2", "25.1.2", or "v25.1.2"). Auto-prepends "operator/" for redpanda-operator repository.'
         },
         branch: {
           type: 'string',
-          description: 'Branch name for in-progress content (e.g., "dev", "main").'
+          description: 'Branch name for in-progress content (for example "dev", "main").'
         },
         source_path: {
           type: 'string',
@@ -307,11 +338,11 @@ const tools = [
       properties: {
         tag: {
           type: 'string',
-          description: 'Git tag for released content (e.g., "v24.3.2" or "24.3.2"). Use tags for GA or beta releases.'
+          description: 'Git tag for released content (for example "v24.3.2" or "24.3.2"). Use tags for GA or beta releases.'
         },
         branch: {
           type: 'string',
-          description: 'Branch name for in-progress content (e.g., "dev", "main"). Use branches for documentation under development.'
+          description: 'Branch name for in-progress content (for example "dev", "main"). Use branches for documentation under development.'
         },
         repo: {
           type: 'string',
@@ -359,7 +390,7 @@ const tools = [
         },
         version: {
           type: 'string',
-          description: 'Version of the docs to review (required for properties, metrics, rpk; e.g., "25.3.1" or "v25.3.1")'
+          description: 'Version of the docs to review (required for properties, metrics, rpk; for example "25.3.1" or "v25.3.1")'
         },
         generate_report: {
           type: 'boolean',
@@ -418,37 +449,47 @@ const tools = [
   }
 ];
 
-// Prompt definitions - Contextual guides for complex workflows
-const prompts = [
+// Resource definitions - Team standards and guidelines
+const resources = [
   {
-    name: 'property-docs-guide',
-    description: 'Comprehensive guide for updating Redpanda property documentation using the override system. Use this when working with configuration properties.',
-    arguments: []
-  },
-  {
-    name: 'rpcn-connector-docs-guide',
-    description: 'Comprehensive guide for updating Redpanda Connect connector reference documentation using the overrides system with $ref syntax. Use this when working with connector documentation.',
-    arguments: []
+    uri: 'redpanda://style-guide',
+    name: 'Redpanda Documentation Style Guide',
+    description: 'Complete style guide based on Google Developer Documentation Style Guide with Redpanda-specific guidelines, voice/tone standards, and formatting preferences. Includes references to official glossary sources.',
+    mimeType: 'text/markdown',
+    version: '1.0.0',
+    lastUpdated: '2025-12-11'
   }
 ];
 
+// Resource file mappings
+const resourceMap = {
+  'redpanda://style-guide': { file: 'style-guide.md', mimeType: 'text/markdown' }
+};
+
 /**
- * Load prompt content from markdown file
- * @param {string} name - Name of the prompt
- * @returns {string} Prompt content
+ * Load resource content from team-standards directory
+ * @param {string} uri - Resource URI (such as 'redpanda://style-guide')
+ * @returns {Object} Resource content
  */
-function getPromptContent(name) {
-  // Validate name to prevent path traversal
-  if (!name || typeof name !== 'string' || name.includes('..') || name.includes('/') || name.includes('\\')) {
-    throw new Error(`Invalid prompt name: ${name}`);
+function getResourceContent(uri) {
+  const resource = resourceMap[uri];
+  if (!resource) {
+    throw new Error(`Unknown resource: ${uri}`);
   }
 
-  const promptPath = path.join(__dirname, '..', 'mcp', 'prompts', `${name}.md`);
+  const resourcePath = path.join(baseDir, 'mcp', 'team-standards', resource.file);
   try {
-    return fs.readFileSync(promptPath, 'utf8');
+    const content = fs.readFileSync(resourcePath, 'utf8');
+    return {
+      contents: [{
+        uri,
+        mimeType: resource.mimeType,
+        text: content
+      }]
+    };
   } catch (err) {
-    console.error(`Error loading prompt ${name}: ${err.message}`);
-    throw new Error(`Prompt not found: ${name}`);
+    console.error(`Error loading resource ${uri}: ${err.message}`);
+    throw new Error(`Resource not found: ${uri}`);
   }
 }
 
@@ -459,47 +500,75 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 // Handle list prompts request
 server.setRequestHandler(ListPromptsRequestSchema, async () => {
-  return { prompts };
+  const allPrompts = promptCache.getAll();
+  return { prompts: promptsToMcpFormat(allPrompts) };
+});
+
+// Handle list resources request
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  return { resources };
+});
+
+// Handle read resource request
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const { uri } = request.params;
+
+  // Record usage
+  usageStats.recordResource(uri);
+
+  return getResourceContent(uri);
 });
 
 // Handle get prompt request
 server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-  const { name } = request.params;
+  const { name, arguments: args } = request.params;
 
-  if (name === 'property-docs-guide') {
-    return {
-      messages: [
-        {
+  // Record usage
+  usageStats.recordPrompt(name);
+
+  // Get prompt from cache
+  const prompt = promptCache.get(name);
+  if (!prompt) {
+    throw new Error(`Unknown prompt: ${name}`);
+  }
+
+  // Validate arguments if schema exists
+  if (prompt.arguments && prompt.arguments.length > 0) {
+    try {
+      validatePromptArguments(name, args, prompt.arguments);
+    } catch (err) {
+      return {
+        messages: [{
           role: 'user',
           content: {
             type: 'text',
-            text: getPromptContent('property-docs-guide')
+            text: `Error: ${err.message}`
           }
-        }
-      ]
-    };
+        }]
+      };
+    }
   }
 
-  if (name === 'rpcn-connector-docs-guide') {
-    return {
-      messages: [
-        {
-          role: 'user',
-          content: {
-            type: 'text',
-            text: getPromptContent('rpcn-connector-docs-guide')
-          }
-        }
-      ]
-    };
-  }
+  // Build prompt with arguments
+  const promptText = buildPromptWithArguments(prompt, args);
 
-  throw new Error(`Unknown prompt: ${name}`);
+  return {
+    messages: [{
+      role: 'user',
+      content: {
+        type: 'text',
+        text: promptText
+      }
+    }]
+  };
 });
 
 // Handle tool execution
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+
+  // Record usage
+  usageStats.recordTool(name);
 
   // Handle job management tools
   if (name === 'get_job_status') {
@@ -563,6 +632,50 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Start the server
 async function main() {
+  // Load and validate prompts
+  console.error('Loading prompts...');
+  const prompts = loadAllPrompts(baseDir, promptCache);
+  console.error(`Loaded ${prompts.length} prompts`);
+
+  // Validate configuration at startup
+  console.error('Validating MCP configuration...');
+  const validation = validateMcpConfiguration({
+    resources,
+    resourceMap,
+    prompts,
+    baseDir
+  });
+
+  if (!validation.valid) {
+    console.error('\nMCP Configuration validation FAILED:');
+    validation.errors.forEach(err => console.error(`  ${err}`));
+    console.error('\nServer cannot start with invalid configuration.');
+    process.exit(1);
+  }
+
+  if (validation.warnings.length > 0) {
+    console.error('\nWarnings:');
+    validation.warnings.forEach(warn => console.error(`  ⚠ ${warn}`));
+  }
+
+  console.error('Configuration valid');
+
+  // Enable file watching in dev mode
+  if (process.env.MCP_DEV_MODE === 'true') {
+    watchPrompts(baseDir, promptCache, (reloadedPrompts) => {
+      console.error(`Prompts reloaded: ${reloadedPrompts.length} available`);
+    });
+  }
+
+  // Initialize usage tracking
+  createShutdownHandler(usageStats, baseDir);
+
+  // Periodic reporting (every hour)
+  if (process.env.MCP_TELEMETRY_REPORTING === 'true') {
+    createPeriodicReporter(usageStats, 3600000);
+  }
+
+  // Connect MCP server
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
@@ -577,6 +690,9 @@ async function main() {
   console.error(`Repository root: ${repoInfo.root} (${repoInfo.detected ? repoInfo.type : 'not detected'})`);
   console.error('Background job queue: enabled');
   console.error('Command timeout: 10 minutes');
+  console.error('Auto-discovery: enabled');
+  console.error('Startup validation: enabled');
+  console.error('Usage telemetry: enabled');
 }
 
 main().catch((error) => {

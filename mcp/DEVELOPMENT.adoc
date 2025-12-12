@@ -250,17 +250,41 @@ Update link:CLI_INTERFACE.adoc[CLI_INTERFACE.adoc] if you added a new CLI comman
 
 Prompts provide contextual guidance to Claude when working on specific documentation tasks.
 
-=== Step 1: Create the prompt file
+NOTE: This section is for *developers* adding prompts programmatically. *Technical writers* should use link:WRITER_EXTENSION_GUIDE.adoc[Writer Extension Guide] which provides step-by-step instructions with no code required.
 
-Create a new Markdown file in `prompts/`:
+=== How the prompt system works
+
+The MCP server uses *automatic discovery* of prompts:
+
+. Prompts are Markdown files in `mcp/prompts/` directory
+. Each prompt has YAML frontmatter defining metadata (description, version, arguments)
+. At startup, the server scans the directory and loads all `.md` files
+. Prompts are cached in memory for performance
+. Changes are automatically reloaded in development mode (`MCP_DEV_MODE=true`)
+
+*No code changes needed!* Just drop a `.md` file with valid frontmatter and restart.
+
+=== Step 1: Create the prompt file with frontmatter
+
+Create a new Markdown file in `mcp/prompts/` with YAML frontmatter:
 
 [,bash]
 ----
-prompts/my-docs-guide.md
+mcp/prompts/my-docs-guide.md
 ----
 
 [,markdown]
 ----
+---
+description: Guide for working with specific documentation type
+version: 1.0.0
+arguments:
+  - name: content
+    description: The documentation content to process
+    required: true
+argumentFormat: content-append
+---
+
 # My Documentation Guide
 
 This guide explains how to work with [specific documentation type].
@@ -299,6 +323,18 @@ Before committing, check:
 - [ ] Checklist item 2
 ----
 
+*Required frontmatter fields:*
+
+description:: Clear explanation of what the prompt does (min 10 characters)
+version:: Semantic version (for example, "1.0.0")
+arguments:: (Optional) Array of argument definitions
+* `name`: Argument name (lowercase, underscores only)
+* `description`: What this argument is for
+* `required`: Boolean indicating if required
+argumentFormat:: (Optional) How to append arguments:
+* `content-append`: Append content with separator (default)
+* `structured`: Insert arguments as structured sections
+
 *Best practices for prompts:*
 
 * Write for technical writers, not developers
@@ -306,37 +342,78 @@ Before committing, check:
 * Explain the "why" behind rules
 * Provide validation checklists
 * Use clear, scannable structure
+* Keep version updated when making significant changes
 
-=== Step 2: Register the prompt
+=== Step 2: Validate the prompt
 
-Edit `bin/doc-tools-mcp.js` and add your prompt to the prompts array:
+Run validation to check frontmatter and metadata:
 
-[,javascript]
+[,bash]
 ----
-{
-  name: 'my-docs-guide',
-  description: 'Guide for working with [specific documentation]',
-  arguments: []
-}
+npx doc-tools validate-mcp
 ----
 
-And add a case to the prompt handler:
+This checks:
 
-[,javascript]
+* YAML frontmatter is valid
+* Required fields are present (description, version)
+* Argument names use only lowercase and underscores
+* Version follows semantic versioning
+* No naming conflicts with existing prompts
+
+=== Step 3: Preview the prompt
+
+Test the prompt before deploying:
+
+[,bash]
 ----
-case 'my-docs-guide':
-  promptText = fs.readFileSync(
-    path.join(__dirname, '../prompts/my-docs-guide.md'),
-    'utf8'
-  );
-  break;
+# Preview with content argument
+npx doc-tools preview-prompt my-docs-guide --content "Test content"
+
+# See how it appears to Claude
 ----
 
-=== Step 3: Document the prompt
+=== Step 4: Deploy and test
 
-Update `prompts/README.adoc` to document when Claude should use this prompt.
+. Restart Claude Code to load the new prompt
+. Test with Claude:
++
+----
+You: "List available prompts"
+Claude: *shows your new prompt in the list*
 
-See link:prompts/README.adoc[Prompts documentation] for more details.
+You: "Use the my-docs-guide prompt with this content: [...]"
+Claude: *retrieves and applies your prompt*
+----
+
+=== Auto-discovery details
+
+The prompt discovery system (`bin/mcp-tools/prompt-discovery.js`):
+
+. Scans `mcp/prompts/*.md` files
+. Parses YAML frontmatter using `js-yaml`
+. Validates against JSON schema using `ajv`
+. Extracts prompt name from filename (for example, `my-docs-guide.md` → `my-docs-guide`)
+. Caches content and metadata in memory
+. Provides generic handler that works for all prompts
+
+*Development mode:*
+
+Enable file watching to automatically reload changes:
+
+[,bash]
+----
+export MCP_DEV_MODE=true
+# Restart Claude Code
+# Now changes to prompts are automatically reloaded
+----
+
+=== For more information
+
+* link:WRITER_EXTENSION_GUIDE.adoc[Writer Extension Guide] - Complete guide for writers adding prompts (no code)
+* link:TEAM_ROLLOUT_GUIDE.adoc#operational-playbook[Operational Playbook] - Managing prompts in production
+* `bin/mcp-tools/prompt-discovery.js` - Auto-discovery implementation
+* `bin/mcp-tools/frontmatter.js` - Frontmatter parsing and validation
 
 == Testing
 

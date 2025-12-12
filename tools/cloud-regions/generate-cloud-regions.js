@@ -203,7 +203,7 @@ function processCloudRegions(yamlText) {
  * @param {string} options.repo - GitHub repository name.
  * @param {string} options.path - Path to the YAML file within the repository.
  * @param {string} [options.ref='main'] - Git reference (branch, tag, or commit SHA).
- * @param {string} [options.format='md'] - The output format (e.g., 'md' for Markdown).
+ * @param {string} [options.format='md'] - The output format (for example, 'md' for Markdown).
  * @param {string} [options.token] - Optional GitHub token for authentication.
  * @param {string} [options.template] - Optional path to custom Handlebars template.
  * @returns {string} The rendered cloud regions output.

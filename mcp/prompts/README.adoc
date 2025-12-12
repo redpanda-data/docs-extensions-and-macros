@@ -52,6 +52,8 @@ MCP Prompts are pre-defined instructions that LLMs can access when needed. They 
 
 == Adding new prompts
 
+The MCP server uses automatic prompt discovery. No code editing required!
+
 === 1. Create the markdown file
 
 Create a new file in this directory:
@@ -61,12 +63,21 @@ Create a new file in this directory:
 prompts/your-prompt-name.md
 ----
 
-=== 2. Write the content
+=== 2. Add YAML frontmatter
 
-Write clear instructions for the LLM (not for users):
+At the top of your file, add metadata:
 
 [,markdown]
 ----
+---
+description: "Brief description for LLM to understand when to use this"
+version: "1.0.0"
+arguments:
+  content:
+    description: "The content to process (if needed)"
+    required: true
+---
+
 # Your Prompt Title
 
 This guide explains how to...
@@ -81,75 +92,31 @@ This guide explains how to...
 - Always do Y
 ----
 
-=== 3. Register the prompt
+Required frontmatter fields:
+- description: What the prompt does
+- version: Semantic version (1.0.0)
+- arguments: (optional) Input parameters
 
-Add it to the prompts array in `bin/doc-tools-mcp.js`:
+=== 3. Validate the prompt
 
-[,javascript]
-----
-const prompts = [
-  {
-    name: 'property-docs-guide',
-    description: 'Comprehensive guide for...',
-    arguments: []
-  },
-  {
-    name: 'your-prompt-name',  // Must match filename (without .md)
-    description: 'Brief description for LLM to understand when to use this',
-    arguments: []  // Can specify arguments if needed
-  }
-];
-----
-
-=== 4. Handle the prompt request
-
-Add a case in the GetPromptRequestSchema handler:
-
-[,javascript]
-----
-server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-  const { name } = request.params;
-
-  if (name === 'property-docs-guide') {
-    return {
-      messages: [
-        {
-          role: 'user',
-          content: {
-            type: 'text',
-            text: getPromptContent('property-docs-guide')
-          }
-        }
-      ]
-    };
-  }
-
-  if (name === 'your-prompt-name') {
-    return {
-      messages: [
-        {
-          role: 'user',
-          content: {
-            type: 'text',
-            text: getPromptContent('your-prompt-name')
-          }
-        }
-      ]
-    };
-  }
-
-  throw new Error(`Unknown prompt: ${name}`);
-});
-----
-
-=== 5. Test it
+Check for errors:
 
 [,bash]
 ----
-# Start the server
-node bin/doc-tools-mcp.js
+npx doc-tools validate-mcp
+----
 
-# The prompt will be automatically available to Claude
+=== 4. Test it
+
+Restart Claude Code and test:
+
+[,text]
+----
+You: "List available prompts"
+Claude: *shows your new prompt*
+
+You: "Use the your-prompt-name prompt"
+Claude: *loads and follows your instructions*
 ----
 
 == Writing good prompts

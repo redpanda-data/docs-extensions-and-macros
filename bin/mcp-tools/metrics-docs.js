@@ -14,8 +14,8 @@ const { createJob } = require('./job-queue');
  * Defaults to branch "dev" if neither tag nor branch is provided.
  *
  * @param {Object} args - Arguments
- * @param {string} [args.tag] - Git tag for released content (e.g., "v25.3.1")
- * @param {string} [args.branch] - Branch name for in-progress content (e.g., "dev", "main")
+ * @param {string} [args.tag] - Git tag for released content (for example, "v25.3.1")
+ * @param {string} [args.branch] - Branch name for in-progress content (for example, "dev", "main")
  * @param {boolean} [args.background] - Run as background job
  * @returns {Object} Generation results
  */
@@ -56,7 +56,7 @@ function generateMetricsDocs(args) {
     return {
       success: false,
       error: 'Invalid version format',
-      suggestion: 'Version must contain only alphanumeric characters, dots, underscores, slashes, and hyphens (e.g., "v25.3.1", "v25.3.1-rc1", "dev", "main")'
+      suggestion: 'Version must contain only alphanumeric characters, dots, underscores, slashes, and hyphens (for example, "v25.3.1", "v25.3.1-rc1", "dev", "main")'
     };
   }
 

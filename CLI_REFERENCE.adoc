@@ -942,10 +942,10 @@ doc-tools generate bundle-openapi [options]
 *Options:*
 
 `-t, --tag <tag>`::
-Git tag for released content (e.g., v24.3.2 or 24.3.2)
+Git tag for released content (for example, v24.3.2 or 24.3.2)
 
 `-b, --branch <branch>`::
-Branch name for in-progress content (e.g., dev, main)
+Branch name for in-progress content (for example, dev, main)
 
 `--repo <url>`::
 Repository URL (default: "https://github.com/redpanda-data/redpanda.git")
