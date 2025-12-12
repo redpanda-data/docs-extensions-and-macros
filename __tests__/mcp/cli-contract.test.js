@@ -84,8 +84,8 @@ describe('CLI Contract Tests', () => {
       },
       {
         name: 'crd-spec',
-        requiredFlags: ['--tag'],
-        optionalFlags: ['--source-path', '--depth', '--templates-dir', '--output']
+        requiredFlags: [], // Either --tag or --branch required (enforced by CLI validation)
+        optionalFlags: ['--tag', '--branch', '--source-path', '--depth', '--templates-dir', '--output']
       },
       {
         name: 'bundle-openapi',

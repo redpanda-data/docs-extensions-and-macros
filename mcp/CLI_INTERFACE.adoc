@@ -219,11 +219,13 @@ Generate Custom Resource Definition (CRD) specification documentation.
 [,bash]
 ----
 npx doc-tools generate crd-spec --tag <version> [options]
+npx doc-tools generate crd-spec --branch <branch> [options]
 ----
 
-*Required flags:*
+*Required flags (one of):*
 
---tag:: Redpanda Operator version
+--tag:: Redpanda Operator version tag (for released content)
+--branch:: Branch name (for in-progress content)
 
 *Optional flags:*
 

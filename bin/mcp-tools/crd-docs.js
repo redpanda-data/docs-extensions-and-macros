@@ -3,7 +3,7 @@
  */
 
 const { spawnSync } = require('child_process');
-const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, normalizeVersion, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
+const { findRepoRoot, getDocToolsCommand, MAX_EXEC_BUFFER_SIZE, normalizeVersion, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 
 /**
@@ -50,8 +50,11 @@ function generateCrdDocs(args) {
   }
 
   try {
+    // Get the appropriate doc-tools command (local or installed)
+    const docTools = getDocToolsCommand(repoRoot);
+
     // Build command arguments array (no shell interpolation)
-    const cmdArgs = ['doc-tools', 'generate', 'crd-spec'];
+    const cmdArgs = ['generate', 'crd-spec'];
 
     // Add tag or branch flag
     if (args.tag) {
@@ -82,7 +85,7 @@ function generateCrdDocs(args) {
       cmdArgs.push(args.output);
     }
 
-    const result = spawnSync('npx', cmdArgs, {
+    const result = spawnSync(docTools.program, docTools.getArgs(cmdArgs), {
       cwd: repoRoot.root,
       encoding: 'utf8',
       stdio: 'pipe',
@@ -122,13 +125,21 @@ function generateCrdDocs(args) {
       summary: `Generated CRD documentation for operator ${refType} ${ref}`
     };
   } catch (err) {
+    // Check if the error is due to --branch not being supported (old doc-tools version)
+    const isOldVersionError = err.stderr &&
+      err.stderr.includes('required option') &&
+      err.stderr.includes('--tag') &&
+      args.branch;
+
     return {
       success: false,
       error: err.message,
       stdout: err.stdout || '',
       stderr: err.stderr || '',
       exitCode: err.status,
-      suggestion: 'Check that the operator tag exists in the repository'
+      suggestion: isOldVersionError
+        ? 'Your doc-tools version doesn\'t support --branch. Update with: npm install (in docs-extensions-and-macros repo)'
+        : 'Check that the operator tag exists in the repository'
     };
   }
 }
