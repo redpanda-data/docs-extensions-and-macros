@@ -23,7 +23,7 @@ INPUT FORMAT (from parser):
 - info["declaration"]: Full C++ type declaration
 - info["params"]: List of parsed constructor parameters
 - info["name_in_file"]: C++ variable name
-- info["type"]: Property template type (e.g., "property", "enterprise_property")
+- info["type"]: Property template type (for example, "property", "enterprise_property")
 
 OUTPUT FORMAT (PropertyBag):
 - Complete JSON schema-compatible property definition
@@ -511,7 +511,7 @@ def get_meta_value(info, key, default=None):
     
     Args:
         info (dict): Property info dictionary to search for metadata
-        key (str): Metadata key to extract (e.g., "needs_restart", "visibility")
+        key (str): Metadata key to extract (for example, "needs_restart", "visibility")
         default (any): Default value if key not found or metadata missing
         
     Returns:
@@ -1254,7 +1254,7 @@ class TypeTransformer:
             
             Parameters:
                 text (str): The string to search for the template.
-                template_name (str): The template name (e.g., "std::vector" or "property").
+                template_name (str): The template name (for example, "std::vector" or "property").
             
             Returns:
                 str or None: The substring inside the outermost angle brackets for the matched template (excluding the brackets),
@@ -2068,7 +2068,7 @@ class EnterpriseTransformer:
         if len(val) >= 2 and val[0] == '"' and val[-1] == '"':
             val = val[1:-1]
         # Strip C++ namespace qualifiers from enum values
-        # e.g., model::partition_autobalancing_mode::continuous → continuous
+        # for example, model::partition_autobalancing_mode::continuous → continuous
         if '::' in val:
             val = val.split('::')[-1]
         return val
@@ -2286,7 +2286,7 @@ class ValidatorEnumExtractor:
     Analyzes validator functions to extract enum constraints for array-typed properties.
     For example, if sasl_mechanisms uses validate_sasl_mechanisms, this transformer:
     1. Finds the validator function in validators.cc
-    2. Identifies the constraint array (e.g., supported_sasl_mechanisms)
+    2. Identifies the constraint array (for example, supported_sasl_mechanisms)
     3. Resolves that array to get the actual enum values
     4. Adds them to property['items']['enum']
 
@@ -2294,7 +2294,7 @@ class ValidatorEnumExtractor:
     1. Detects array properties (type="array") with validator parameters
     2. Extracts validator function name from params
     3. Parses validator to find constraint array
-    4. Resolves array to get enum values (e.g., ["SCRAM", "GSSAPI", "OAUTHBEARER", "PLAIN"])
+    4. Resolves array to get enum values (for example, ["SCRAM", "GSSAPI", "OAUTHBEARER", "PLAIN"])
     5. Sets property['items']['enum'] with the discovered values
 
     DOWNSTREAM USAGE:
@@ -2408,7 +2408,7 @@ class RuntimeValidationEnumExtractor:
     PROCESSING:
     1. Detects string properties (not arrays) without validator parameters
     2. Searches the source file for validation functions that reference the property
-    3. Parses comparison patterns (e.g., property != constant1 && property != constant2)
+    3. Parses comparison patterns (for example, property != constant1 && property != constant2)
     4. Resolves constants to actual string values
     5. Sets property['enum'] with discovered values
 

@@ -1,0 +1,291 @@
+= Contributing
+:url-org: https://github.com/redpanda-data
+:url-project: {url-org}/docs-extensions-and-macros
+:url-git: https://git-scm.com
+:url-nodejs: https://nodejs.org
+:toc:
+:toclevels: 2
+
+Guide to contributing to this project.
+
+Thank you for your interest in contributing to the Redpanda documentation tools! This project includes Antora extensions, AsciiDoc macros, and an MCP server that helps automate documentation tasks.
+
+== Development guides
+
+Choose the guide for the component you want to work on:
+
+link:extensions/DEVELOPMENT.adoc[**Antora extensions development**]:: How to create and modify Antora extensions
++
+* Extension architecture and lifecycle
+* Creating new extensions
+* Common patterns and APIs
+* Testing and debugging
+
+link:macros/DEVELOPMENT.adoc[**AsciiDoc macros development**]:: How to create and modify AsciiDoc macros
++
+* Inline and block macro types
+* Macro processing and HTML generation
+* Asciidoctor.js extension API
+* Testing and debugging
+
+link:mcp/DEVELOPMENT.adoc[**MCP server development**]:: How to work on the MCP server
++
+* Server architecture and tools
+* Adding new tools and prompts
+* Testing guidelines
+* Security and best practices
+
+== Quickstart
+
+=== Prerequisites
+
+* {url-git}[git] - Version control
+* {url-nodejs}[Node.js] 18+ - Runtime and package manager
+
+Verify installations:
+
+[,bash]
+----
+git --version
+node --version
+npm --version
+----
+
+=== Get the code
+
+Clone the repository:
+
+[,bash,subs=attributes+]
+----
+git clone {url-project}
+cd docs-extensions-and-macros
+----
+
+=== Install dependencies
+
+[,bash]
+----
+npm ci
+----
+
+This installs exact versions from `package-lock.json`.
+
+=== Run tests
+
+[,bash]
+----
+# Run all tests
+npm test
+
+# Run specific test suites
+npm run test:mcp           # MCP server tests
+npm run test:extensions    # Extension tests (if available)
+
+# Watch mode for development
+npm test -- --watch
+----
+
+== Development workflow
+
+=== Create a branch
+
+[,bash]
+----
+git checkout -b feature/my-new-feature
+----
+
+Use descriptive branch names:
+* `feature/add-new-extension`
+* `fix/glossary-macro-bug`
+* `docs/update-user-guide`
+
+=== Make your changes
+
+Follow the relevant development guide:
+* link:extensions/DEVELOPMENT.adoc[Extensions] - For Antora extensions
+* link:macros/DEVELOPMENT.adoc[Macros] - For AsciiDoc macros
+* link:mcp/DEVELOPMENT.adoc[MCP] - For MCP server tools
+
+=== Test locally
+
+Test with a local Antora build:
+
+[,bash]
+----
+# Point to your local development version
+npx antora local-antora-playbook.yml
+----
+
+For extensions and macros, update your playbook:
+
+[,yaml]
+----
+antora:
+  extensions:
+    - '/absolute/path/to/docs-extensions-and-macros/extensions/my-extension.js'
+
+asciidoc:
+  extensions:
+    - '/absolute/path/to/docs-extensions-and-macros/macros/my-macro.js'
+----
+
+For MCP server:
+
+[,bash]
+----
+npx doc-tools setup-mcp
+# Restart Claude Code
+----
+
+=== Write tests
+
+Add tests for new functionality:
+
+[,javascript]
+----
+// For extensions
+__tests__/extensions/my-extension.test.js
+
+// For macros
+__tests__/macros/my-macro.test.js
+
+// For MCP
+__tests__/mcp/integration.test.js
+----
+
+Run tests:
+
+[,bash]
+----
+npm test
+----
+
+=== Update documentation
+
+Update relevant documentation:
+
+* Extension/macro reference documentation
+* User guides if behavior changed
+* README files if new features added
+
+=== Commit your changes
+
+Write clear commit messages:
+
+[,bash]
+----
+git add .
+git commit -m "Add new glossary tooltip feature
+
+- Implement data-tooltip attribute support
+- Add tests for tooltip rendering
+- Update user guide with tooltip examples"
+----
+
+=== Push and create PR
+
+[,bash]
+----
+git push origin feature/my-new-feature
+----
+
+Open a pull request on GitHub with:
+* Clear description of changes
+* Link to related issues
+* Screenshots/examples if applicable
+
+== Coding standards
+
+=== JavaScript style
+
+* Use 2 spaces for indentation
+* Use semicolons
+* Use single quotes for strings
+* Use `const` and `let`, avoid `var`
+* Add JSDoc comments for functions
+
+=== File naming
+
+* Use kebab-case for files: `my-extension.js`
+* Use descriptive names: `generate-index-data.js` not `gen.js`
+
+=== Error handling
+
+* Catch and log errors, don't let builds fail silently
+* Provide helpful error messages
+* Use the logger when available
+
+=== Testing
+
+* Write tests for all new functionality
+* Maintain test coverage
+* Test edge cases and error conditions
+
+== Documentation standards
+
+* Use AsciiDoc for all documentation
+* Use sentence case for headings (except main title)
+* Keep documentation in sync with code
+* Provide examples for new features
+* Link between related documentation
+
+== Pull request guidelines
+
+=== Before submitting
+
+- [ ] Tests pass (`npm test`)
+- [ ] Documentation updated
+- [ ] Commit messages are clear
+- [ ] Branch is up to date with main
+
+=== PR description
+
+Include:
+
+* **What**: Summary of changes
+* **Why**: Reason for changes
+* **How**: Implementation approach
+* **Testing**: How you tested the changes
+* **Breaking changes**: If any, clearly noted
+
+=== Review process
+
+* Keep PRs focused and reasonably sized
+* Update documentation if behavior changes
+* Ensure CI passes
+
+== Testing requirements
+
+All contributions must include tests:
+
+* **Unit tests** - Test individual functions/components
+* **Integration tests** - Test components working together
+* **Manual testing** - Test in real Antora builds
+
+Run the full test suite before submitting:
+
+[,bash]
+----
+npm test
+----
+
+== Code of conduct
+
+* Be respectful and inclusive
+* Provide constructive feedback
+* Focus on the code, not the person
+* Help newcomers get started
+
+== Getting help
+
+* **Questions**: Open a discussion on GitHub
+* **Bugs**: Open an issue with reproduction steps
+* **Features**: Open an issue with use case description
+* **Chat**: Join the Redpanda Community Slack
+
+== Related resources
+
+* https://docs.antora.org/[Antora Documentation]
+* https://docs.asciidoctor.org/[AsciiDoc Documentation]
+* https://modelcontextprotocol.io/[MCP Specification]
+* {url-project}[Project Repository]

@@ -5,7 +5,7 @@ const { spawnSync } = require('child_process');
 /**
  * Retrieves the current Self-Managed documentation version from the remote antora.yml file.
  *
- * @returns {Promise<string>} Resolves with the version string (e.g., "25.1").
+ * @returns {Promise<string>} Resolves with the version string (for example, "25.1").
  *
  * @throws {Error} If the antora.yml file cannot be fetched, parsed, or if the version field is missing.
  */
@@ -39,7 +39,7 @@ function fetchRemoteAntoraVersion() {
  *
  * Normalizes the input tag, extracts the major.minor version, and applies version-specific logic to select the correct branch. Verifies that the chosen branch exists in the remote repository.
  *
- * @param {string} operatorTag - The operator tag to evaluate (e.g., "operator/v25.1.2" or "v25.1.2").
+ * @param {string} operatorTag - The operator tag to evaluate (for example, "operator/v25.1.2" or "v25.1.2").
  * @returns {Promise<string>} The name of the documentation branch to use.
  *
  * @throws {Error} If the tag cannot be parsed or if the determined branch does not exist in the remote repository.

@@ -1,0 +1,1013 @@
+= Docs CLI Reference
+:toc:
+:toclevels: 3
+
+Auto-generated reference documentation for the `doc-tools` command-line interface.
+
+IMPORTANT: This documentation is auto-generated. Do not edit manually. Run `npm run generate:cli-docs` to regenerate.
+
+== doc-tools
+
+Redpanda Document Automation CLI
+
+*Usage:*
+
+[,bash]
+----
+doc-tools [options] [command]
+----
+
+*Options:*
+
+`-V, --version`::
+output the version number
+
+`-h, --help`::
+display help for command
+
+*Commands:*
+
+* `install-test-dependencies` - Install packages for doc test workflows
+* `get-redpanda-version` - Print the latest Redpanda version
+* `get-console-version` - Print the latest Console version
+* `link-readme` - Symlink a README.adoc into docs/modules/<module>/pages/
+* `fetch` - Fetch a file or directory from GitHub and save it locally
+* `setup-mcp` - Configure the Redpanda Docs MCP server for Claude Code/Desktop
+* `generate` - Run docs automations
+* `help` - display help for command
+
+== install-test-dependencies
+
+Installs all packages and dependencies required for documentation testing workflows. This includes Redpanda Docker images, Python virtual environments for property extraction, and other test dependencies.
+
+*Why use it:*
+
+Setting up a documentation environment requires multiple dependencies across different package managers (npm, pip, Docker). This command automates the entire setup process.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools install-test-dependencies [options]
+----
+
+*Options:*
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Set up a new documentation environment
+npx doc-tools install-test-dependencies
+
+# Use in CI/CD before running doc tests
+- run: npx doc-tools install-test-dependencies
+- run: npm test
+----
+
+*Requirements:*
+
+- Node.js and npm
+- Python 3.9 or higher
+- Docker (for some dependencies)
+
+== get-redpanda-version
+
+Fetches the latest Redpanda version from GitHub releases. Can retrieve either stable releases or beta/RC versions. Returns the version in format "v25.3.1" which can be used directly with other doc-tools commands.
+
+*Why use it:*
+
+Documentation must reference the correct current version. This command ensures version numbers are accurate and can be used in CI/CD pipelines or before generating version-specific documentation. The version is fetched from GitHub releases, which is the source of truth for Redpanda releases.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools get-redpanda-version [options]
+----
+
+*Options:*
+
+`--beta`::
+Return the latest RC (beta) version if available
+
+`--from-antora`::
+Read prerelease flag from local antora.yml
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Get latest stable version
+npx doc-tools get-redpanda-version
+# Output: v25.3.1
+
+# Get latest beta/RC version
+npx doc-tools get-redpanda-version --beta
+# Output: v26.1.1-rc1
+
+# Auto-detect from antora.yml prerelease flag
+cd docs-site
+npx doc-tools get-redpanda-version --from-antora
+
+# Use in CI/CD or scripts
+VERSION=$(npx doc-tools get-redpanda-version)
+npx doc-tools generate property-docs --tag $VERSION
+----
+
+*Requirements:*
+
+- Internet connection to access GitHub API
+- GitHub API rate limits apply (60 requests/hour unauthenticated)
+
+== get-console-version
+
+Fetches the latest Redpanda Console version from GitHub releases. Can retrieve either stable releases or beta versions. Returns the version in format "v2.7.2" which can be used for documentation references and Docker image tags.
+
+*Why use it:*
+
+Console is released separately from Redpanda core. This command keeps Console documentation in sync with releases and provides the correct version for Docker Compose files and deployment documentation.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools get-console-version [options]
+----
+
+*Options:*
+
+`--beta`::
+Return the latest beta version if available
+
+`--from-antora`::
+Read prerelease flag from local antora.yml
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Get latest stable Console version
+npx doc-tools get-console-version
+# Output: v2.7.2
+
+# Get latest beta version
+npx doc-tools get-console-version --beta
+# Output: v2.8.0-beta1
+
+# Auto-detect from antora.yml prerelease flag
+cd docs-site
+npx doc-tools get-console-version --from-antora
+
+# Use in Docker Compose documentation
+CONSOLE_VERSION=$(npx doc-tools get-console-version)
+echo "image: redpandadata/console:$CONSOLE_VERSION"
+----
+
+*Requirements:*
+
+- Internet connection to access GitHub API
+- GitHub API rate limits apply (60 requests/hour unauthenticated)
+
+== link-readme
+
+Creates a symbolic link from a project's README.adoc file into the Antora documentation structure. This allows project README files to be included in the documentation site without duplication. The command creates the necessary directory structure and establishes a symlink in docs/modules/<module>/pages/ that points to the project's README.adoc.
+
+*Why use it:*
+
+Documentation repositories often contain multiple sub-projects (like labs or examples) that have their own README files. Rather than manually copying these files into the Antora structure (which creates maintenance burden), symlinks keep the content in one place while making it available to Antora. Changes to the project README automatically appear in the docs site.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools link-readme [options]
+----
+
+*Options:*
+
+`-s, --subdir <subdir>`::
+Relative path to the lab project subdirectory
+
+`-t, --target <filename>`::
+Name of the target AsciiDoc file in pages/
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Link a lab project README into documentation
+npx doc-tools link-readme \\
+  --subdir labs/docker-compose \\
+  --target docker-compose-lab.adoc
+
+# Link multiple lab READMEs
+npx doc-tools link-readme -s labs/kubernetes -t k8s-lab.adoc
+npx doc-tools link-readme -s labs/terraform -t terraform-lab.adoc
+
+# The symlink structure created:
+# docs/modules/labs/pages/docker-compose-lab.adoc -> ../../../../labs/docker-compose/README.adoc
+----
+
+*Requirements:*
+
+- Must run from repository root
+- Target project must have README.adoc file
+- Operating system must support symbolic links
+
+== fetch
+
+Downloads specific files or directories from GitHub repositories without cloning the entire repository. Uses the GitHub API to fetch content and saves it to a local directory. Useful for grabbing examples, configuration files, or documentation snippets from other repositories. Supports both individual files and entire directories.
+
+*Why use it:*
+
+Documentation often needs to reference or include files from other repositories (examples, configuration templates, code samples). Cloning entire repositories is inefficient when you only need specific files. This command provides targeted fetching, saving bandwidth and time. It's particularly useful in CI/CD pipelines where you need specific assets without full clones.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools fetch [options]
+----
+
+*Options:*
+
+`-o, --owner <owner>`::
+GitHub repo owner or org
+
+`-r, --repo <repo>`::
+GitHub repo name
+
+`-p, --remote-path <path>`::
+Path in the repo to fetch
+
+`-d, --save-dir <dir>`::
+Local directory to save into
+
+`-f, --filename <name>`::
+Custom filename to save as
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Fetch a specific configuration file
+npx doc-tools fetch \\
+  --owner redpanda-data \\
+  --repo redpanda \\
+  --remote-path docker/docker-compose.yml \\
+  --save-dir examples/
+
+# Fetch an entire directory of examples
+npx doc-tools fetch \\
+  -o redpanda-data \\
+  -r connect-examples \\
+  -p pipelines/mongodb \\
+  -d docs/modules/examples/attachments/
+
+# Fetch with custom filename
+npx doc-tools fetch \\
+  -o redpanda-data \\
+  -r helm-charts \\
+  -p charts/redpanda/values.yaml \\
+  -d examples/ \\
+  --filename redpanda-values-example.yaml
+----
+
+*Requirements:*
+
+- Internet connection to access GitHub API
+- GitHub API rate limits apply (60 requests/hour unauthenticated, 5000 with token)
+- For private repositories: GitHub token with repo permissions
+
+== setup-mcp
+
+Configures the Redpanda Docs MCP (Model Context Protocol) server for Claude Code or Claude Desktop. Automatically detects the installed application, updates the appropriate configuration file, and enables Claude to use doc-tools commands through natural conversation. Supports both production (npm package) and local development modes.
+
+*Why use it:*
+
+Manual MCP configuration requires editing JSON configuration files in the correct location with the correct schema. This command handles all setup automatically, including path detection, configuration merging, and validation. It enables AI-assisted documentation workflows where writers can use natural language to run doc-tools commands.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools setup-mcp [options]
+----
+
+*Options:*
+
+`--force`::
+Force update even if already configured (default: false)
+
+`--target <type>`::
+Target application: auto, code, or desktop (default: "auto")
+
+`--local`::
+Use local development mode (requires running from this repo) (default: false)
+
+`--status`::
+Show current MCP server configuration status (default: false)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Auto-detect and configure for Claude Code or Desktop
+npx doc-tools setup-mcp
+
+# Configure for local development (run from this repository)
+cd /path/to/docs-extensions-and-macros
+npx doc-tools setup-mcp --local
+
+# Force update existing configuration
+npx doc-tools setup-mcp --force
+
+# Target specific application
+npx doc-tools setup-mcp --target code
+npx doc-tools setup-mcp --target desktop
+
+# Check current configuration status
+npx doc-tools setup-mcp --status
+
+# After setup, restart Claude Code and use natural language
+"What's the latest Redpanda version?"
+"Generate property docs for v25.3.1"
+----
+
+*Requirements:*
+
+- Claude Code or Claude Desktop must be installed
+- For --local mode: must run from docs-extensions-and-macros repository
+- After setup: restart Claude Code/Desktop to load the MCP server
+
+== generate
+
+Run docs automations
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate [options] [command]
+----
+
+*Options:*
+
+`-h, --help`::
+display help for command
+
+*Commands:*
+
+* `metrics-docs` - Generate JSON and AsciiDoc documentation for Redpanda metrics. Defaults to branch "dev" if neither --tag nor --branch is specified.
+* `rpcn-connector-docs` - Generate RPCN connector docs and diff changes since the last version
+* `property-docs` - Generate JSON and consolidated AsciiDoc partials for Redpanda configuration properties. By default, only extracts properties to JSON. Use --generate-partials to create consolidated AsciiDoc partials (including deprecated properties). Defaults to branch "dev" if neither --tag nor --branch is specified.
+* `rpk-docs` - Generate AsciiDoc documentation for rpk CLI commands. Defaults to branch "dev" if neither --tag nor --branch is specified.
+* `helm-spec` - Generate AsciiDoc documentation for one or more Helm charts (supports local dirs or GitHub URLs). When using GitHub URLs, requires either --tag or --branch to be specified.
+* `cloud-regions` - Generate Markdown table of cloud regions and tiers from GitHub YAML file
+* `crd-spec` - Generate Asciidoc documentation for Kubernetes CRD references. Requires either --tag or --branch to be specified.
+* `bundle-openapi` - Bundle Redpanda OpenAPI fragments for admin and connect APIs into complete OpenAPI 3.1 documents. Requires either --tag or --branch to be specified.
+* `help` - display help for command
+
+=== generate property-docs
+
+Generates comprehensive reference documentation for Redpanda cluster and topic configuration properties. Clones the Redpanda repository at a specified version, runs a Python extractor to parse C++ configuration code, and outputs JSON data files with all property metadata (descriptions, types, defaults, constraints). Optionally generates consolidated AsciiDoc partials for direct inclusion in documentation sites.
+
+*Why use it:*
+
+Property definitions in the C++ source code are the single source of truth for Redpanda configuration. Manual documentation becomes outdated quickly. This automation ensures docs stay perfectly in sync with implementation by extracting properties directly from code, including type information, default values, and constraints that would be error-prone to maintain manually.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate property-docs [options]
+----
+
+*Options:*
+
+`-t, --tag <tag>`::
+Git tag for released content (GA/beta)
+
+`-b, --branch <branch>`::
+Branch name for in-progress content
+
+`--diff <oldTag>`::
+Also diff autogenerated properties from <oldTag> to current tag/branch
+
+`--overrides <path>`::
+Optional JSON file with property description overrides (default: "docs-data/property-overrides.json")
+
+`--output-dir <dir>`::
+Where to write all generated files (default: "modules/reference")
+
+`--cloud-support`::
+Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. Set the token as an environment variable using GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN
+
+`--template-property <path>`::
+Custom Handlebars template for individual property sections
+
+`--template-topic-property <path>`::
+Custom Handlebars template for individual topic property sections
+
+`--template-topic-property-mappings <path>`::
+Custom Handlebars template for topic property mappings table
+
+`--template-deprecated <path>`::
+Custom Handlebars template for deprecated properties page
+
+`--template-deprecated-property <path>`::
+Custom Handlebars template for individual deprecated property sections
+
+`--generate-partials`::
+Generate consolidated property partials (cluster-properties.adoc, topic-properties.adoc, etc.) in the partials directory
+
+`--partials-dir <path>`::
+Directory for property partials (relative to output-dir) (default: "partials")
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Basic: Extract properties to JSON only (default)
+npx doc-tools generate property-docs --tag v25.3.1
+
+# Generate AsciiDoc partials for documentation site
+npx doc-tools generate property-docs --tag v25.3.1 --generate-partials
+
+# Include Cloud support tags (requires GitHub token)
+export GITHUB_TOKEN=ghp_xxx
+npx doc-tools generate property-docs \\
+  --tag v25.3.1 \\
+  --generate-partials \\
+  --cloud-support
+
+# Compare properties between versions
+npx doc-tools generate property-docs \\
+  --tag v25.3.1 \\
+  --diff v25.2.1
+
+# Use custom output directory
+npx doc-tools generate property-docs \\
+  --tag v25.3.1 \\
+  --output-dir docs/modules/reference
+
+# Full workflow: document new release
+VERSION=$(npx doc-tools get-redpanda-version)
+npx doc-tools generate property-docs \\
+  --tag $VERSION \\
+  --generate-partials \\
+  --cloud-support
+----
+
+*Requirements:*
+
+- Python 3.9 or higher
+- Git
+- Internet connection to clone Redpanda repository
+- For --cloud-support: GitHub token with repo permissions (GITHUB_TOKEN env var)
+- For --cloud-support: Python packages pyyaml and requests
+
+=== generate metrics-docs
+
+Generates comprehensive metrics reference documentation by running Redpanda in Docker and scraping the `/public_metrics` Prometheus endpoint. Starts a Redpanda cluster with the specified version, waits for it to be ready, collects all exposed metrics, parses the Prometheus format, and generates categorized AsciiDoc documentation. Optionally compares metrics between versions to identify new, removed, or changed metrics.
+
+*Why use it:*
+
+Redpanda exposes hundreds of metrics for monitoring and observability. Manual documentation of metrics is error-prone and becomes outdated as new metrics are added or existing ones change. This automation ensures metrics documentation accurately reflects what Redpanda actually exports at each version. Running Redpanda in Docker and scraping metrics directly is the only reliable way to capture the complete and accurate metrics set.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate metrics-docs [options]
+----
+
+*Options:*
+
+`-t, --tag <tag>`::
+Git tag for released content (GA/beta)
+
+`-b, --branch <branch>`::
+Branch name for in-progress content
+
+`--docker-repo <repo>`::
+Docker repository to use when starting Redpanda in Docker (default: "redpanda")
+
+`--console-tag <tag>`::
+Redpanda Console version to use when starting Redpanda Console in Docker (default: "latest")
+
+`--console-docker-repo <repo>`::
+Docker repository to use when starting Redpanda Console in Docker (default: "console")
+
+`--diff <oldTag>`::
+Also diff autogenerated metrics from <oldTag> → <tag>
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Basic: Generate metrics docs for a specific version
+npx doc-tools generate metrics-docs --tag v25.3.1
+
+# Compare metrics between versions to see what changed
+npx doc-tools generate metrics-docs \\
+  --tag v25.3.1 \\
+  --diff v25.2.1
+
+# Use custom Docker repository
+npx doc-tools generate metrics-docs \\
+  --tag v25.3.1 \\
+  --docker-repo docker.redpanda.com/redpandadata/redpanda
+
+# Full workflow: document new release
+VERSION=$(npx doc-tools get-redpanda-version)
+npx doc-tools generate metrics-docs --tag $VERSION
+----
+
+*Requirements:*
+
+- Docker must be installed and running
+- Port 9644 must be available (Redpanda metrics endpoint)
+- Sufficient disk space for Docker image
+- Internet connection to pull Docker images
+
+=== generate rpk-docs
+
+Generates comprehensive CLI reference documentation for RPK (Redpanda Keeper), the official Redpanda command-line tool. Starts Redpanda in Docker (RPK is bundled with Redpanda), executes `rpk --help` for all commands and subcommands recursively, parses the help output, and generates structured AsciiDoc documentation for each command with usage, flags, and descriptions. Optionally compares RPK commands between versions to identify new or changed commands.
+
+*Why use it:*
+
+RPK has dozens of commands and subcommands with complex flags and options. The built-in help text is the source of truth for RPK's CLI interface. Manual documentation becomes outdated as RPK evolves. This automation extracts documentation directly from RPK's help output, ensuring accuracy. Running RPK from Docker guarantees the exact version being documented, and diffing between versions automatically highlights CLI changes for release notes.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate rpk-docs [options]
+----
+
+*Options:*
+
+`-t, --tag <tag>`::
+Git tag for released content (GA/beta)
+
+`-b, --branch <branch>`::
+Branch name for in-progress content
+
+`--docker-repo <repo>`::
+Docker repository to use when starting Redpanda in Docker (default: "redpanda")
+
+`--console-tag <tag>`::
+Redpanda Console version to use when starting Redpanda Console in Docker (default: "latest")
+
+`--console-docker-repo <repo>`::
+Docker repository to use when starting Redpanda Console in Docker (default: "console")
+
+`--diff <oldTag>`::
+Also diff autogenerated rpk docs from <oldTag> → <tag>
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Basic: Generate RPK docs for a specific version
+npx doc-tools generate rpk-docs --tag v25.3.1
+
+# Compare RPK commands between versions
+npx doc-tools generate rpk-docs \\
+  --tag v25.3.1 \\
+  --diff v25.2.1
+
+# Use custom Docker repository
+npx doc-tools generate rpk-docs \\
+  --tag v25.3.1 \\
+  --docker-repo docker.redpanda.com/redpandadata/redpanda
+
+# Full workflow: document new release
+VERSION=$(npx doc-tools get-redpanda-version)
+npx doc-tools generate rpk-docs --tag $VERSION
+----
+
+*Requirements:*
+
+- Docker must be installed and running
+- Sufficient disk space for Docker image
+- Internet connection to pull Docker images
+
+=== generate rpcn-connector-docs
+
+Generates complete reference documentation for Redpanda Connect (formerly Benthos) connectors, processors, and components. Clones the Redpanda Connect repository, parses component templates and configuration schemas embedded in Go code, reads connector metadata from CSV, and generates AsciiDoc documentation for each component. Supports diffing changes between versions and automatically updating what's new documentation. Can also generate Bloblang function documentation.
+
+*Why use it:*
+
+Redpanda Connect has hundreds of connectors (inputs, outputs, processors) with complex configuration schemas. Each component's documentation lives in its Go source code as struct tags and comments. Manual documentation is impossible to maintain. This automation extracts documentation directly from code, ensuring accuracy and completeness. The diff capability automatically identifies new connectors and changed configurations for release notes.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate rpcn-connector-docs [options]
+----
+
+*Options:*
+
+`-d, --data-dir <path>`::
+Directory where versioned connect JSON files live (default: "<repository-root>/docs-data")
+
+`--old-data <path>`::
+Optional override for old data file (for diff)
+
+`--update-whats-new`::
+Update whats-new.adoc with new section from diff JSON
+
+`-f, --fetch-connectors`::
+Fetch latest connector data using rpk
+
+`-m, --draft-missing`::
+Generate full-doc drafts for connectors missing in output
+
+`--csv <path>`::
+Path to connector metadata CSV file (default: "internal/plugins/info.csv")
+
+`--template-main <path>`::
+Main Handlebars template (default: "<repository-root>/tools/redpanda-connect/templates/connector.hbs")
+
+`--template-intro <path>`::
+Intro section partial template (default: "<repository-root>/tools/redpanda-connect/templates/intro.hbs")
+
+`--template-fields <path>`::
+Fields section partial template (default: "<repository-root>/tools/redpanda-connect/templates/fields-partials.hbs")
+
+`--template-examples <path>`::
+Examples section partial template (default: "<repository-root>/tools/redpanda-connect/templates/examples-partials.hbs")
+
+`--template-bloblang <path>`::
+Custom Handlebars template for bloblang function/method partials
+
+`--overrides <path>`::
+Optional JSON file with overrides (default: "docs-data/overrides.json")
+
+`--include-bloblang`::
+Include Bloblang functions and methods in generation
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Basic: Generate all connector docs
+npx doc-tools generate rpcn-connector-docs
+
+# Generate docs and automatically update what's new page
+npx doc-tools generate rpcn-connector-docs --update-whats-new
+
+# Include Bloblang function documentation
+npx doc-tools generate rpcn-connector-docs --include-bloblang
+
+# Generate with custom metadata CSV
+npx doc-tools generate rpcn-connector-docs \\
+  --csv custom/connector-metadata.csv
+
+# Full workflow with diff and what's new update
+npx doc-tools generate rpcn-connector-docs \\
+  --update-whats-new \\
+  --include-bloblang
+----
+
+*Requirements:*
+
+- Git to clone Redpanda Connect repository
+- Internet connection to clone repository
+- Node.js for parsing and generation
+- Sufficient disk space for repository clone (~500MB)
+
+=== generate helm-spec
+
+Generates Helm chart reference documentation by parsing values.yaml files and README.md documentation from Helm chart repositories. Supports both local chart directories and GitHub URLs. Extracts all configuration options with their types, defaults, and descriptions, and generates comprehensive AsciiDoc documentation. Can process single charts or entire chart repositories with multiple charts.
+
+*Why use it:*
+
+Helm charts have complex configuration with hundreds of values. The values.yaml file and chart README contain the configuration options, but they're not in a documentation-friendly format. This automation parses the YAML structure and README documentation to generate comprehensive reference documentation. Supporting both local and GitHub sources allows documenting charts from any source without manual cloning.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate helm-spec [options]
+----
+
+*Options:*
+
+`--chart-dir <dir|url>`::
+Chart directory (contains Chart.yaml) or a root containing multiple charts, or a GitHub URL (default: "https://github.com/redpanda-data/redpanda-operator/charts")
+
+`-t, --tag <tag>`::
+Git tag for released content when using GitHub URL (auto-prepends "operator/" for redpanda-operator repository)
+
+`-b, --branch <branch>`::
+Branch name for in-progress content when using GitHub URL
+
+`--readme <file>`::
+Relative README.md path inside each chart dir (default: "README.md")
+
+`--output-dir <dir>`::
+Where to write all generated AsciiDoc files (default: "modules/reference/pages")
+
+`--output-suffix <suffix>`::
+Suffix to append to each chart name (including extension) (default: "-helm-spec.adoc")
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Generate docs from GitHub repository
+npx doc-tools generate helm-spec \\
+  --chart-dir https://github.com/redpanda-data/helm-charts \\
+  --tag v5.9.0 \\
+  --output-dir modules/deploy/pages
+
+# Generate docs from local chart directory
+npx doc-tools generate helm-spec \\
+  --chart-dir ./charts/redpanda \\
+  --output-dir docs/modules/deploy/pages
+
+# Use custom README and output suffix
+npx doc-tools generate helm-spec \\
+  --chart-dir https://github.com/redpanda-data/helm-charts \\
+  --tag v5.9.0 \\
+  --readme docs/README.md \\
+  --output-suffix -values.adoc
+----
+
+*Requirements:*
+
+- For GitHub URLs: Git and internet connection
+- For local charts: Chart directory must contain Chart.yaml
+- README.md file in chart directory (optional but recommended)
+
+=== generate cloud-regions
+
+Generates a formatted table of Redpanda Cloud regions, tiers, and availability information by fetching data from the private cloudv2-infra repository. Reads a YAML configuration file that contains master data for cloud infrastructure, parses region and tier information, and generates either Markdown or AsciiDoc tables for documentation. Supports custom templates and dry-run mode for previewing output.
+
+*Why use it:*
+
+Cloud region data changes frequently as new regions are added and tier availability evolves. The cloudv2-infra repository contains the source of truth for cloud infrastructure. Manual documentation becomes outdated quickly. This automation fetches the latest data directly from the infrastructure repository, ensuring documentation always reflects current cloud offerings. Weekly or triggered updates keep docs in sync with cloud expansion.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate cloud-regions [options]
+----
+
+*Options:*
+
+`--output <file>`::
+Output file (relative to repo root) (default: "cloud-controlplane/x-topics/cloud-regions.md")
+
+`--format <fmt>`::
+Output format: md (Markdown) or adoc (AsciiDoc) (default: "md")
+
+`--owner <owner>`::
+GitHub repository owner (default: "redpanda-data")
+
+`--repo <repo>`::
+GitHub repository name (default: "cloudv2-infra")
+
+`--path <path>`::
+Path to YAML file in repository (default: "apps/master-data-reconciler/manifests/overlays/production/master-data.yaml")
+
+`--ref <ref>`::
+Git reference (branch, tag, or commit SHA) (default: "integration")
+
+`--template <path>`::
+Path to custom Handlebars template (relative to repo root)
+
+`--dry-run`::
+Print output to stdout instead of writing file
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Basic: Generate Markdown table
+export GITHUB_TOKEN=ghp_xxx
+npx doc-tools generate cloud-regions
+
+# Generate AsciiDoc format
+export GITHUB_TOKEN=ghp_xxx
+npx doc-tools generate cloud-regions --format adoc
+
+# Preview without writing file
+export GITHUB_TOKEN=ghp_xxx
+npx doc-tools generate cloud-regions --dry-run
+
+# Use custom output file
+export GITHUB_TOKEN=ghp_xxx
+npx doc-tools generate cloud-regions \\
+  --output custom/path/regions.md
+
+# Use different branch for testing
+export GITHUB_TOKEN=ghp_xxx
+npx doc-tools generate cloud-regions --ref staging
+----
+
+*Requirements:*
+
+- GitHub token with access to redpanda-data/cloudv2-infra repository
+- Token must be set via GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN environment variable
+- Internet connection to access GitHub API
+
+=== generate crd-spec
+
+Generates Kubernetes Custom Resource Definition (CRD) reference documentation by parsing Go type definitions from the Redpanda Operator repository. Uses the crd-ref-docs tool to extract API field definitions, types, descriptions, and validation rules from Go struct tags and comments, then generates comprehensive AsciiDoc documentation. Supports both local Go source directories and GitHub URLs for operator versions. When to use --tag vs --branch: - Use --tag for released content (GA or beta releases). Tags reference specific release points. - Use --branch for in-progress content (unreleased features). Branches track ongoing development.
+
+*Why use it:*
+
+Kubernetes CRDs define complex APIs for deploying and managing Redpanda. The API schema is defined in Go code with hundreds of fields across nested structures. Manual documentation is error-prone and becomes outdated as the API evolves. This automation uses specialized tooling (crd-ref-docs) to extract API documentation directly from Go source code, ensuring accuracy and completeness. It captures field types, validation rules, and descriptions that are essential for users configuring Redpanda in Kubernetes.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate crd-spec [options]
+----
+
+*Options:*
+
+`-t, --tag <operatorTag>`::
+Operator release tag for GA/beta content (for example operator/v2.2.6-25.3.1 or v25.1.2). Auto-prepends "operator/" if not present.
+
+`-b, --branch <branch>`::
+Branch name for in-progress content (for example release/v2.2.x, main, dev)
+
+`-s, --source-path <src>`::
+CRD Go types dir or GitHub URL (default: "https://github.com/redpanda-data/redpanda-operator/operator/api/redpanda/v1alpha2")
+
+`-d, --depth <n>`::
+How many levels deep (default: "10")
+
+`--templates-dir <dir>`::
+Asciidoctor templates dir (default: ".github/crd-config/templates/asciidoctor/operator")
+
+`--output <file>`::
+Where to write the generated AsciiDoc file (default: "modules/reference/pages/k-crd.adoc")
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Generate CRD docs for specific operator tag
+npx doc-tools generate crd-spec --tag operator/v2.2.6-25.3.1
+
+# Version without prefix (auto-prepends operator/)
+npx doc-tools generate crd-spec --tag v25.1.2
+
+# Generate from release branch
+npx doc-tools generate crd-spec --branch release/v2.2.x
+
+# Generate from main branch
+npx doc-tools generate crd-spec --branch main
+
+# Generate from any custom branch
+npx doc-tools generate crd-spec --branch dev
+
+# Use custom templates and output location
+npx doc-tools generate crd-spec \\
+  --tag operator/v2.2.6-25.3.1 \\
+  --templates-dir custom/templates \\
+  --output modules/reference/pages/operator-crd.adoc
+----
+
+*Requirements:*
+
+- For GitHub URLs: Git and internet connection
+- crd-ref-docs tool (automatically installed if missing)
+- Go toolchain for running crd-ref-docs
+
+=== generate bundle-openapi
+
+Bundles Redpanda's OpenAPI specification fragments into complete, usable OpenAPI 3.1 documents for both Admin API and Connect API. Clones the Redpanda repository at a specified version, collects OpenAPI fragments that are distributed throughout the codebase (alongside endpoint implementations), uses Buf and Redocly CLI to bundle and validate the specifications, and generates separate complete OpenAPI files for each API surface. The resulting specifications can be used for API documentation, client SDK generation, or API testing tools.
+
+*Why use it:*
+
+Redpanda's API documentation is defined as OpenAPI fragments alongside the C++ implementation code. This keeps API docs close to code and ensures they stay in sync, but it means the specification is fragmented across hundreds of files. Users need complete OpenAPI specifications for tooling (Swagger UI, Postman, client generators). This automation collects all fragments, bundles them into valid OpenAPI 3.1 documents, and validates the result. It's the only way to produce accurate, complete API specifications that match a specific Redpanda version.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate bundle-openapi [options]
+----
+
+*Options:*
+
+`-t, --tag <tag>`::
+Git tag for released content (for example, v24.3.2 or 24.3.2)
+
+`-b, --branch <branch>`::
+Branch name for in-progress content (for example, dev, main)
+
+`--repo <url>`::
+Repository URL (default: "https://github.com/redpanda-data/redpanda.git")
+
+`-s, --surface <surface>`::
+Which API surface(s) to bundle (choices: "admin", "connect", "both")
+
+`--out-admin <path>`::
+Output path for admin API (default: "admin/redpanda-admin-api.yaml")
+
+`--out-connect <path>`::
+Output path for connect API (default: "connect/redpanda-connect-api.yaml")
+
+`--admin-major <string>`::
+Admin API major version (default: "v2.0.0")
+
+`--use-admin-major-version`::
+Use admin major version for info.version instead of git tag (default: false)
+
+`--quiet`::
+Suppress logs (default: false)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Bundle both Admin and Connect APIs
+npx doc-tools generate bundle-openapi \\
+  --tag v25.3.1 \\
+  --surface both
+
+# Bundle only Admin API
+npx doc-tools generate bundle-openapi \\
+  --tag v25.3.1 \\
+  --surface admin
+
+# Use custom output paths
+npx doc-tools generate bundle-openapi \\
+  --tag v25.3.1 \\
+  --surface both \\
+  --out-admin api/admin-api.yaml \\
+  --out-connect api/connect-api.yaml
+
+# Use major version for Admin API version field
+npx doc-tools generate bundle-openapi \\
+  --tag v25.3.1 \\
+  --surface admin \\
+  --use-admin-major-version
+
+# Full workflow: generate API specs for new release
+VERSION=$(npx doc-tools get-redpanda-version)
+npx doc-tools generate bundle-openapi --tag $VERSION --surface both
+----
+
+*Requirements:*
+
+- Git to clone Redpanda repository
+- Buf tool (automatically installed via npm)
+- Redocly CLI or vacuum for OpenAPI bundling (automatically detected)
+- Internet connection to clone repository
+- Sufficient disk space for repository clone (~2GB)
+

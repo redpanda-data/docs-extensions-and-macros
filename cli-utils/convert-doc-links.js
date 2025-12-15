@@ -3,7 +3,7 @@ const { URL } = require('url');
 /**
  * Converts a docs.redpanda.com URL, optionally suffixed with a label in brackets, into an Antora xref resource ID string.
  *
- * If the input includes a label in square brackets (e.g., `[Label]`), the label is preserved and appended to the resulting xref.
+ * If the input includes a label in square brackets (for example, `[Label]`), the label is preserved and appended to the resulting xref.
  *
  * @param {string} input - A docs.redpanda.com URL, optionally followed by a label in square brackets.
  * @returns {string} The corresponding Antora xref resource ID, with the label preserved if present.

@@ -19,7 +19,7 @@ Each message in the `transactions` topic adheres to the following JSON schema:
 
 - **email**: The email address of the user involved in the transaction.
 - **index**: A numeric index associated with the transaction. This could represent the position or order of the transaction in a sequence.
-- **price**: A string representing the price of the product. It includes a currency code (e.g., "XXX") followed by the amount.
+- **price**: A string representing the price of the product. It includes a currency code (for example, "XXX") followed by the amount.
 - **product_url**: A URL that points to the product involved in the transaction.
 - **timestamp**: The timestamp of when the transaction occurred, formatted in ISO 8601.
 - **user_id**: A numeric identifier for the user. This is typically a unique ID assigned to each user in the system.

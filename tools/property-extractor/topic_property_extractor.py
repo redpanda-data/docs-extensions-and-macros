@@ -444,8 +444,8 @@ class TopicPropertyExtractor:
         if not re.match(r'^[a-zA-Z][a-zA-Z0-9._-]*$', prop_name):
             return False
 
-        # Reject Java-style package names (e.g., "redpanda.core.admin.Service")
-        # Topic properties use lowercase with dots (e.g., "cleanup.policy", "segment.ms")
+        # Reject Java-style package names (for example, "redpanda.core.admin.Service")
+        # Topic properties use lowercase with dots (for example, "cleanup.policy", "segment.ms")
         # Split by dots and check each segment - reject if any segment after first has uppercase
         segments = prop_name.split('.')
         for i, segment in enumerate(segments):

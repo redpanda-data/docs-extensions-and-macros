@@ -1,0 +1,147 @@
+= MCP Server Tests
+
+These tests ensure that changes to the doc-tools CLI don't break the MCP server.
+
+== Test files
+
+=== `integration.test.js`
+
+Integration tests that verify the MCP tools correctly interface with the doc-tools CLI. These tests:
+
+* Verify CLI commands are available
+* Test tool execution through the MCP layer
+* Validate parameter handling
+* Check error handling
+* Verify output parsing
+
+=== `cli-contract.test.js`
+
+Contract tests that verify the doc-tools CLI maintains the expected interface. These tests:
+
+* Check command structure
+* Verify required and optional flags exist
+* Validate output format contracts
+* Test error handling contracts
+
+== Running tests
+
+=== Run all MCP tests
+
+[,bash]
+----
+npm run test:mcp
+----
+
+=== Run integration tests only
+
+[,bash]
+----
+npm run test:mcp:integration
+----
+
+=== Run contract tests only
+
+[,bash]
+----
+npm run test:mcp:contract
+----
+
+=== Run with coverage
+
+[,bash]
+----
+npm test -- --coverage __tests__/mcp/
+----
+
+== When to run these tests
+
+=== Before merging CLI changes
+
+Always run these tests before merging any changes to `bin/doc-tools.js` or any generate commands.
+
+[,bash]
+----
+npm run test:mcp
+----
+
+=== During development
+
+Run tests continuously during development:
+
+[,bash]
+----
+npm test -- --watch __tests__/mcp/
+----
+
+=== In CI/CD
+
+These tests run automatically on every push and PR via GitHub Actions (`.github/workflows/test-mcp.yml`).
+
+== Understanding test failures
+
+=== Integration test failures
+
+If integration tests fail, it usually means:
+
+* The MCP tool module has a bug
+* The CLI command changed in an unexpected way
+* Network issues (for version commands)
+* File system issues
+
+=== Contract test failures
+
+If contract tests fail, it usually means:
+
+* The CLI interface changed (flags renamed, removed, or output format changed)
+* New required parameters were added
+* Command names changed
+
+IMPORTANT: Contract test failures indicate breaking changes that will affect the MCP server.
+
+== Adding tests
+
+=== When adding a new MCP tool
+
+. Add integration tests in `integration.test.js`:
++
+[,javascript]
+----
+test('new_tool_name returns expected result', () => {
+  const result = mcpTools.executeTool('new_tool_name', {});
+  expect(result).toBeDefined();
+  expect(result.success).toBeDefined();
+});
+----
+
+. Add contract tests in `cli-contract.test.js`:
++
+[,javascript]
+----
+test('new-cli-command exists', () => {
+  const result = executeCLI('new-cli-command --help');
+  expect(result.success).toBe(true);
+});
+----
+
+=== When modifying an existing CLI command
+
+. Update the corresponding test expectations
+. If the interface changed, update link:../../mcp/CLI_INTERFACE.adoc[CLI_INTERFACE.adoc]
+. If breaking changes, update the MCP tool module
+
+== Test environment
+
+Tests run in the actual repository environment:
+
+* Uses the real `npx doc-tools` command
+* Reads actual file system structure
+* Makes real network calls (for version commands)
+
+NOTE: Some tests may fail in CI if network is unavailable (version commands), GitHub API rate limits are hit, or required environment variables are missing. These failures are expected and handled gracefully in the tests.
+
+== Related documentation
+
+* link:../../mcp/CLI_INTERFACE.adoc[CLI interface contract] - Complete interface contract documentation
+* link:../../mcp/USER_GUIDE.adoc[User guide] - Guide for writers using the MCP server
+* link:../../mcp/DEVELOPMENT.adoc[Development guide] - Guide for developers working on the MCP server
+* link:../../.github/workflows/test-mcp.yml[CI/CD workflow] - GitHub Actions workflow

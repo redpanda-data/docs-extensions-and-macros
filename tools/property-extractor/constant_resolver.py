@@ -2,7 +2,7 @@
 """
 Resolves C++ constant references to their actual values.
 
-For properties that use constants as default values (e.g., `ss::sstring{net::tls_v1_2_cipher_suites}`),
+For properties that use constants as default values (for example, `ss::sstring{net::tls_v1_2_cipher_suites}`),
 this module looks up the constant definition and extracts the actual string value.
 """
 
@@ -30,7 +30,7 @@ class ConstantResolver:
         Resolve a C++ constant name to its actual string value.
 
         Args:
-            constant_name: The constant name (e.g., "net::tls_v1_2_cipher_suites" or "tls_v1_2_cipher_suites")
+            constant_name: The constant name (for example, "net::tls_v1_2_cipher_suites" or "tls_v1_2_cipher_suites")
 
         Returns:
             The actual string value, or None if not found
@@ -72,8 +72,8 @@ class ConstantResolver:
         Search for a constant definition in files matching the given patterns.
 
         Args:
-            patterns: List of file patterns to search (e.g., ['net/tls.cc'])
-            identifier: The constant identifier (e.g., 'tls_v1_2_cipher_suites')
+            patterns: List of file patterns to search (for example, ['net/tls.cc'])
+            identifier: The constant identifier (for example, 'tls_v1_2_cipher_suites')
 
         Returns:
             The constant's string value, or None if not found
@@ -111,7 +111,7 @@ class ConstantResolver:
         - constexpr std::array<std::string_view, N> array_name = {val1, val2, val3};
 
         Args:
-            array_name: The array constant name (e.g., "supported_sasl_mechanisms")
+            array_name: The array constant name (for example, "supported_sasl_mechanisms")
 
         Returns:
             List of string values from the array, or None if not found
@@ -230,7 +230,7 @@ class ConstantResolver:
         Finds the class definition and extracts the `static constexpr const char* name` value.
 
         Args:
-            class_ref: Qualified class name (e.g., "security::scram_sha256_authenticator")
+            class_ref: Qualified class name (for example, "security::scram_sha256_authenticator")
 
         Returns:
             Dict with 'value' and 'is_enterprise' keys, or None if not found
@@ -420,12 +420,12 @@ def resolve_validator_enum_constraint(validator_name: str, resolver: ConstantRes
 
     For validators like validate_sasl_mechanisms, this function:
     1. Finds the validator function in validators.cc
-    2. Parses it to find what constant array it validates against (e.g., supported_sasl_mechanisms)
+    2. Parses it to find what constant array it validates against (for example, supported_sasl_mechanisms)
     3. Resolves that array to get the actual enum values
-    4. Checks for enterprise values (e.g., enterprise_sasl_mechanisms)
+    4. Checks for enterprise values (for example, enterprise_sasl_mechanisms)
 
     Args:
-        validator_name: Name of the validator function (e.g., "validate_sasl_mechanisms")
+        validator_name: Name of the validator function (for example, "validate_sasl_mechanisms")
         resolver: ConstantResolver instance
 
     Returns:
@@ -521,8 +521,8 @@ def resolve_runtime_validation_enum_constraint(property_name: str, defined_in: s
         }
 
     Args:
-        property_name: Name of the property (e.g., "sasl_mechanism")
-        defined_in: Path where property is defined (e.g., "src/v/kafka/client/configuration.cc")
+        property_name: Name of the property (for example, "sasl_mechanism")
+        defined_in: Path where property is defined (for example, "src/v/kafka/client/configuration.cc")
         resolver: ConstantResolver instance
 
     Returns:

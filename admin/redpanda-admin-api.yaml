@@ -441,11 +441,11 @@ components:
           title: host
           type: string
         operation:
-          $ref: "#/components/schemas/redpanda.core.common.ACLOperation"
+          $ref: "#/components/schemas/redpanda.core.common.v1.ACLOperation"
           description: The ACL operation to match
           title: operation
         permissionType:
-          $ref: "#/components/schemas/redpanda.core.common.ACLPermissionType"
+          $ref: "#/components/schemas/redpanda.core.common.v1.ACLPermissionType"
           description: The permission type
           title: permission_type
         principal:
@@ -482,11 +482,11 @@ components:
           title: name
           type: string
         patternType:
-          $ref: "#/components/schemas/redpanda.core.common.ACLPattern"
+          $ref: "#/components/schemas/redpanda.core.common.v1.ACLPattern"
           description: The pattern to apply to name
           title: pattern_type
         resourceType:
-          $ref: "#/components/schemas/redpanda.core.common.ACLResource"
+          $ref: "#/components/schemas/redpanda.core.common.v1.ACLResource"
           description: The ACL resource type to match
           title: resource_type
       title: ACLResourceFilter
@@ -597,10 +597,6 @@ components:
           description: The effective interval for the task
           readOnly: true
           title: effective_interval
-        enabled:
-          description: Whether it's enabled
-          title: enabled
-          type: boolean
         groupFilters:
           description: The filters
           items:
@@ -613,6 +609,13 @@ components:
             Sync interval
              If 0 provided, defaults to 30 seconds
           title: interval
+        paused:
+          description: |-
+            Allows user to pause the consumer offset sync task.  If paused, then
+             the task will enter the 'paused' state and not sync consumer offsets from
+             the source cluster
+          title: paused
+          type: boolean
       title: ConsumerOffsetSyncOptions
       type: object
     redpanda.core.admin.v2.CreateShadowLinkRequest:
@@ -1032,9 +1035,13 @@ components:
         pageSize:
           description: |-
             The maximum number of connections to return. If unspecified or 0, a
-             default value may be applied. Note that paging is currently not fully
-             supported, and this field only acts as a limit for the first page of data
-             returned. Subsequent pages of data cannot be requested.
+             default value may be applied. The server may return fewer connections
+             than requested due to memory constraints; the limit is set to allow
+             listing all connections for a single broker. Consider filtering by
+             node_id to view connections for specific brokers. Note that paging is
+             currently not fully supported, and this field only acts as a limit for
+             the first page of data returned. Subsequent pages of data cannot be
+             requested.
           format: int32
           title: page_size
           type: integer
@@ -1281,16 +1288,19 @@ components:
           description: The effective interval for the task
           readOnly: true
           title: effective_interval
-        enabled:
-          description: Whether or not it's enabled
-          title: enabled
-          type: boolean
         interval:
           $ref: "#/components/schemas/google.protobuf.Duration"
           description: |-
             Sync interval
              If 0 provided, defaults to 30 seconds
           title: interval
+        paused:
+          description: |-
+            Allows user to pause the security settings sync task.  If paused,
+             then the task will enter the 'paused' state and will not sync security
+             settings from the source cluster
+          title: paused
+          type: boolean
       title: SecuritySettingsSyncOptions
       type: object
     redpanda.core.admin.v2.ShadowLink:
@@ -1407,7 +1417,7 @@ components:
         fetchPartitionMaxBytes:
           description: |-
             Fetch partition max bytes.
-             If 0 is provided, defaults to 1 MiB
+             If 0 is provided, defaults to 5 MiB
           format: int32
           title: fetch_partition_max_bytes
           type: integer
@@ -1441,7 +1451,7 @@ components:
           title: source_cluster_id
           type: string
         tlsSettings:
-          $ref: "#/components/schemas/redpanda.core.admin.v2.TLSSettings"
+          $ref: "#/components/schemas/redpanda.core.common.v1.TLSSettings"
           description: TLS settings
           nullable: true
           title: tls_settings
@@ -1527,6 +1537,11 @@ components:
           description: Reason for task being in state
           title: reason
           type: string
+        shard:
+          description: The shard the task is running on
+          format: int32
+          title: shard
+          type: integer
         state:
           $ref: "#/components/schemas/redpanda.core.admin.v2.TaskState"
           description: State of the task
@@ -1603,26 +1618,6 @@ components:
           type: integer
       title: Source
       type: object
-    redpanda.core.admin.v2.TLSFileSettings:
-      additionalProperties: false
-      description: TLS file settings
-      properties:
-        caPath:
-          description: Path to the CA
-          title: ca_path
-          type: string
-        certPath:
-          description: Path to the cert
-          title: cert_path
-          type: string
-        keyPath:
-          description: |-
-            Key and Cert are optional but if one is provided, then both must be
-             Path to the key
-          title: key_path
-          type: string
-      title: TLSFileSettings
-      type: object
     redpanda.core.admin.v2.TLSInfo:
       additionalProperties: false
       properties:
@@ -1631,64 +1626,6 @@ components:
           title: enabled
           type: boolean
       title: TLSInfo
-      type: object
-    redpanda.core.admin.v2.TLSPEMSettings:
-      additionalProperties: false
-      description: Used when providing the TLS information in PEM format
-      properties:
-        ca:
-          description: The CA
-          title: ca
-          type: string
-        cert:
-          description: The cert
-          title: cert
-          type: string
-        key:
-          description: |-
-            Key and Cert are optional but if one is provided, then both must be
-             The key
-          title: key
-          type: string
-          writeOnly: true
-        keyFingerprint:
-          description: The SHA-256 of the key, in base64 format
-          readOnly: true
-          title: key_fingerprint
-          type: string
-      title: TLSPEMSettings
-      type: object
-    redpanda.core.admin.v2.TLSSettings:
-      additionalProperties: false
-      allOf:
-        - properties:
-            doNotSetSniHostname:
-              description: If true, the SNI hostname will not be provided when TLS is used
-              title: do_not_set_sni_hostname
-              type: boolean
-            enabled:
-              description: Whether or not TLS is enabled
-              title: enabled
-              type: boolean
-        - oneOf:
-            - properties:
-                tlsFileSettings:
-                  $ref: "#/components/schemas/redpanda.core.admin.v2.TLSFileSettings"
-                  description: Certificates and keys are provided as files
-                  title: tls_file_settings
-              required:
-                - tlsFileSettings
-              title: tls_file_settings
-            - properties:
-                tlsPemSettings:
-                  $ref: "#/components/schemas/redpanda.core.admin.v2.TLSPEMSettings"
-                  description: Certificates and keys are provided in PEM format
-                  title: tls_pem_settings
-              required:
-                - tlsPemSettings
-              title: tls_pem_settings
-      description: TLS settings
-      title: TLSSettings
       type: object
     redpanda.core.admin.v2.TaskState:
       description: Task states
@@ -1748,6 +1685,13 @@ components:
                 How often to sync metadata
                  If 0 provided, defaults to 30 seconds
               title: interval
+            paused:
+              description: |-
+                Allows user to pause the topic sync task.  If paused, then
+                 the task will enter the 'paused' state and not sync topics or their
+                 properties from the source cluster
+              title: paused
+              type: boolean
             syncedShadowTopicProperties:
               description: |-
                 List of topic properties that should be synced from the source topic.
@@ -1774,36 +1718,36 @@ components:
               type: array
         - oneOf:
             - properties:
-                earliest:
+                startAtEarliest:
                   $ref: "#/components/schemas/redpanda.core.admin.v2.TopicMetadataSyncOptions.EarliestOffset"
                   description: |-
                     Enables data replication from the earliest offset
                      on the source topic/partition.
-                  title: earliest
+                  title: start_at_earliest
               required:
-                - earliest
-              title: earliest
+                - startAtEarliest
+              title: start_at_earliest
             - properties:
-                latest:
+                startAtLatest:
                   $ref: "#/components/schemas/redpanda.core.admin.v2.TopicMetadataSyncOptions.LatestOffset"
                   description: |-
                     Enables data replication from the latest offset
                      on the source topic/partition.
-                  title: latest
+                  title: start_at_latest
               required:
-                - latest
-              title: latest
+                - startAtLatest
+              title: start_at_latest
             - properties:
-                timestamp:
+                startAtTimestamp:
                   $ref: "#/components/schemas/google.protobuf.Timestamp"
                   description: |-
                     Enables data replication from the first offset on the
                      source topic/partition where the record's timestamp is
                      at or after the specified timestamp.
-                  title: timestamp
+                  title: start_at_timestamp
               required:
-                - timestamp
-              title: timestamp
+                - startAtTimestamp
+              title: start_at_timestamp
       description: Options for syncing topic metadata
       title: TopicMetadataSyncOptions
       type: object
@@ -1881,8 +1825,8 @@ components:
           title: shadow_link
       title: UpdateShadowLinkResponse
       type: object
-    redpanda.core.common.ACLOperation:
-      description: / The ACL operation to match
+    redpanda.core.common.v1.ACLOperation:
+      description: The ACL operation to match
       enum:
         - ACL_OPERATION_UNSPECIFIED
         - ACL_OPERATION_ANY
@@ -1898,8 +1842,8 @@ components:
         - ACL_OPERATION_IDEMPOTENT_WRITE
       title: ACLOperation
       type: string
-    redpanda.core.common.ACLPattern:
-      description: / The ACL pattern type
+    redpanda.core.common.v1.ACLPattern:
+      description: The ACL pattern type
       enum:
         - ACL_PATTERN_UNSPECIFIED
         - ACL_PATTERN_ANY
@@ -1908,8 +1852,8 @@ components:
         - ACL_PATTERN_MATCH
       title: ACLPattern
       type: string
-    redpanda.core.common.ACLPermissionType:
-      description: / ACL permission types
+    redpanda.core.common.v1.ACLPermissionType:
+      description: ACL permission types
       enum:
         - ACL_PERMISSION_TYPE_UNSPECIFIED
         - ACL_PERMISSION_TYPE_ANY
@@ -1917,8 +1861,8 @@ components:
         - ACL_PERMISSION_TYPE_DENY
       title: ACLPermissionType
       type: string
-    redpanda.core.common.ACLResource:
-      description: / The ACL resource types
+    redpanda.core.common.v1.ACLResource:
+      description: The ACL resource types
       enum:
         - ACL_RESOURCE_UNSPECIFIED
         - ACL_RESOURCE_ANY
@@ -1931,34 +1875,97 @@ components:
         - ACL_RESOURCE_SR_ANY
       title: ACLResource
       type: string
-    redpanda.core.common.TopicPartition:
+    redpanda.core.common.v1.TLSFileSettings:
       additionalProperties: false
-      description: A single topic partition within the kafka namespace.
+      description: TLS file settings
       properties:
-        partition:
-          description: The topic's partition, must be non-negative.
-          format: int32
-          title: partition
-          type: integer
-        topic:
-          description: The topic's name.
-          title: topic
+        caPath:
+          description: Path to the CA
+          title: ca_path
           type: string
-      title: TopicPartition
+        certPath:
+          description: Path to the cert
+          title: cert_path
+          type: string
+        keyPath:
+          description: |-
+            Key and Cert are optional but if one is provided, then both must be
+             Path to the key
+          title: key_path
+          type: string
+      title: TLSFileSettings
+      type: object
+    redpanda.core.common.v1.TLSPEMSettings:
+      additionalProperties: false
+      description: Used when providing the TLS information in PEM format
+      properties:
+        ca:
+          description: The CA
+          title: ca
+          type: string
+        cert:
+          description: The cert
+          title: cert
+          type: string
+        key:
+          description: |-
+            Key and Cert are optional but if one is provided, then both must be
+             The key
+          title: key
+          type: string
+          writeOnly: true
+        keyFingerprint:
+          description: The SHA-256 of the key, in base64 format
+          readOnly: true
+          title: key_fingerprint
+          type: string
+      title: TLSPEMSettings
+      type: object
+    redpanda.core.common.v1.TLSSettings:
+      additionalProperties: false
+      allOf:
+        - properties:
+            doNotSetSniHostname:
+              description: If true, the SNI hostname will not be provided when TLS is used
+              title: do_not_set_sni_hostname
+              type: boolean
+            enabled:
+              description: Whether or not TLS is enabled
+              title: enabled
+              type: boolean
+        - oneOf:
+            - properties:
+                tlsFileSettings:
+                  $ref: "#/components/schemas/redpanda.core.common.v1.TLSFileSettings"
+                  description: Certificates and keys are provided as files
+                  title: tls_file_settings
+              required:
+                - tlsFileSettings
+              title: tls_file_settings
+            - properties:
+                tlsPemSettings:
+                  $ref: "#/components/schemas/redpanda.core.common.v1.TLSPEMSettings"
+                  description: Certificates and keys are provided in PEM format
+                  title: tls_pem_settings
+              required:
+                - tlsPemSettings
+              title: tls_pem_settings
+      description: TLS settings
+      title: TLSSettings
       type: object
 info:
   description: Redpanda Admin API specification
   title: Redpanda Admin API
-  version: v2.0.0
+  version: "25.3"
   x-admin-api-major: v2.0.0
-  x-generated-at: 2025-10-24T16:01:15.694Z
+  x-generated-at: 2025-12-15T09:59:52.766Z
   x-generator: redpanda-docs-openapi-bundler
-  x-redpanda-core-version: kb/proto/docs/openapi-summaries
+  x-redpanda-core-version: v25.3.1
 openapi: 3.1.0
 paths:
   /redpanda.core.admin.v2.BrokerService/GetBroker:
     post:
-      description: Returns information about a single broker in the cluster.
+      description: GetBroker returns information about a single broker in the cluster.
       operationId: redpanda.core.admin.v2.BrokerService.GetBroker
       parameters:
         - in: header
@@ -1989,15 +1996,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/connect.error"
           description: Error
-      summary: GetBroker
+      summary: GetBroker returns information about a single broker in the cluster.
       tags:
         - BrokerService
   /redpanda.core.admin.v2.BrokerService/ListBrokers:
     post:
-      description: |-
-        ListBrokers 
-         
-         Returns information about all brokers in the cluster.
+      description: ListBrokers returns information about all brokers in the cluster.
       operationId: redpanda.core.admin.v2.BrokerService.ListBrokers
       parameters:
         - in: header
@@ -2028,12 +2032,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/connect.error"
           description: Error
-      summary: ListBrokers     Returns information about all brokers in the cluster.
+      summary: ListBrokers returns information about all brokers in the cluster.
       tags:
         - BrokerService
   /redpanda.core.admin.v2.ClusterService/ListKafkaConnections:
     post:
-      description: Returns information about the cluster's Kafka connections, collected and ordered across all brokers.
+      description: |-
+        ListKafkaConnections returns information about the cluster's Kafka
+         connections, collected and ordered across all brokers.
       operationId: redpanda.core.admin.v2.ClusterService.ListKafkaConnections
       parameters:
         - in: header
@@ -2064,12 +2070,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/connect.error"
           description: Error
-      summary: ListKafkaConnections
+      summary: ListKafkaConnections returns information about the cluster's Kafka  connections, collected and ordered across all brokers.
       tags:
         - ClusterService
   /redpanda.core.admin.v2.ShadowLinkService/CreateShadowLink:
     post:
-      description: Creates a new shadow link between clusters.
       operationId: redpanda.core.admin.v2.ShadowLinkService.CreateShadowLink
       parameters:
         - in: header
@@ -2105,7 +2110,6 @@ paths:
         - ShadowLinkService
   /redpanda.core.admin.v2.ShadowLinkService/DeleteShadowLink:
     post:
-      description: Deletes an existing shadow link.
       operationId: redpanda.core.admin.v2.ShadowLinkService.DeleteShadowLink
       parameters:
         - in: header
@@ -2141,7 +2145,7 @@ paths:
         - ShadowLinkService
   /redpanda.core.admin.v2.ShadowLinkService/FailOver:
     post:
-      description: Fails over a shadow link or a single shadow topic for disaster recovery.
+      description: Fails over a shadow link or a single shadow topic
       operationId: redpanda.core.admin.v2.ShadowLinkService.FailOver
       parameters:
         - in: header
@@ -2172,12 +2176,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/connect.error"
           description: Error
-      summary: FailOver
+      summary: Fails over a shadow link or a single shadow topic
       tags:
         - ShadowLinkService
   /redpanda.core.admin.v2.ShadowLinkService/GetShadowLink:
     post:
-      description: Gets information about a specific shadow link.
       operationId: redpanda.core.admin.v2.ShadowLinkService.GetShadowLink
       parameters:
         - in: header
@@ -2214,9 +2217,9 @@ paths:
   /redpanda.core.admin.v2.ShadowLinkService/GetShadowTopic:
     post:
       description: |-
-        Returns information about a shadow topic on a shadow link.
-         A shadow topic is a resource created automatically by a shadow link. The
-         shadow topic 'shadows' a topic on a source cluster, mirroring the data
+        This operation returns information about a Shadow Topic on a Shadow Link.
+         A Shadow Topic is a resource created automatically by a Shadow Link.  The
+         Shadow Topic 'shadows' a topic on a source cluster, mirroring the data
          and properties of that topic.
       operationId: redpanda.core.admin.v2.ShadowLinkService.GetShadowTopic
       parameters:
@@ -2248,12 +2251,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/connect.error"
           description: Error
-      summary: GetShadowTopic
+      summary: This operation returns information about a Shadow Topic on a Shadow Link.  A Shadow Topic is a resource created automatically by a Shadow Link.  The  Shadow Topic 'shadows' a topic on a source cluster, mirroring the data  and properties of that topic.
       tags:
         - ShadowLinkService
   /redpanda.core.admin.v2.ShadowLinkService/ListShadowLinks:
     post:
-      description: Lists all shadow links in the cluster.
       operationId: redpanda.core.admin.v2.ShadowLinkService.ListShadowLinks
       parameters:
         - in: header
@@ -2290,8 +2292,8 @@ paths:
   /redpanda.core.admin.v2.ShadowLinkService/ListShadowTopics:
     post:
       description: |-
-        Returns a list of all shadow topics on a shadow link and
-         their status.
+        This operation returns a list of all Shadow Topics on a Shadow Link and
+         their status
       operationId: redpanda.core.admin.v2.ShadowLinkService.ListShadowTopics
       parameters:
         - in: header
@@ -2322,12 +2324,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/connect.error"
           description: Error
-      summary: ListShadowTopics
+      summary: This operation returns a list of all Shadow Topics on a Shadow Link and  their status
       tags:
         - ShadowLinkService
   /redpanda.core.admin.v2.ShadowLinkService/UpdateShadowLink:
     post:
-      description: Updates an existing shadow link configuration.
       operationId: redpanda.core.admin.v2.ShadowLinkService.UpdateShadowLink
       parameters:
         - in: header
