@@ -4,25 +4,25 @@
 
 == Overview
 
-This guide shows technical writers how to add new prompts, resources, and tools to the doc-tools MCP server. Most extensions require only creating or editing simple files - no coding required!
+This guide shows technical writers how to add new prompts, resources, and tools to the doc-tools MCP server. Most extensions require only creating or editing simple files.
 
 == What you can add
 
 [cols="1,2,1"]
 |===
-|Type |What It Does |Difficulty
+|Type |What It Does
 
 |Prompts
 |Pre-configured instructions for common tasks (review, write, check, etc.)
-|Easy (just Markdown)
+
 
 |Resources
 |Reference materials (style guides, templates, terminology) that AI can read
-|Easy (Markdown/JSON)
+
 
 |Tools
-|Custom commands that execute doc-tools operations
-|Medium (requires JavaScript)
+|Custom commands that execute doc-tools operations (programming knowledge required)
+
 |===
 
 == Adding new prompts
@@ -128,7 +128,7 @@ Run the validation command to check for errors:
 
 [source,bash]
 ----
-npx doc-tools validate-mcp
+doc-tools validate-mcp
 ----
 
 If validation passes, you're ready to use it!

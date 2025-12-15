@@ -133,7 +133,7 @@ Bad: xref:security:tls-config.adoc[Click here]  // Poor link text
 - Glossary terms are in: https://github.com/redpanda-data/docs/tree/shared/modules/terms/partials
 
 ```asciidoc
-✅ Good: A glossterm:topic[] is divided into glossterm:partition,partitions[]
+✅ Good: A glossterm:topic[] is divided into glossterm:partition[,partitions]
 ✅ Good: The glossterm:broker[] handles data storage
 ❌ Bad: A topic is divided into partitions  // Terms not linked
 ```
@@ -220,7 +220,7 @@ Use these as a quick reference, but check the official glossary for complete def
 When writing documentation, link to glossary terms using the `glossterm` macro:
 
 ```asciidoc
-A glossterm:topic[] is divided into glossterm:partition,partitions[]
+A glossterm:topic[] is divided into glossterm:partition[,partitions]
 The glossterm:broker[] handles data replication
 ```
 

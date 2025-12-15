@@ -1,9 +1,15 @@
 /**
  * MCP Tools - Version Information
+ *
+ * OPTIMIZATION: This tool calls CLI and caches results.
+ * - Caches version info for 5 minutes (rarely changes)
+ * - No model recommendation (CLI tool)
+ * - Recommended model: haiku (if LLM processing needed)
  */
 
 const { spawnSync } = require('child_process');
 const { findRepoRoot, getDocToolsCommand } = require('./utils');
+const cache = require('./cache');
 
 /**
  * Get the latest Redpanda version information
@@ -12,6 +18,13 @@ const { findRepoRoot, getDocToolsCommand } = require('./utils');
  * @returns {Object} Version information
  */
 function getRedpandaVersion(args = {}) {
+  // Check cache first (5 minute TTL)
+  const cacheKey = `redpanda-version:${args.beta ? 'beta' : 'stable'}`;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    return { ...cached, _cached: true };
+  }
+
   try {
     // Get doc-tools command (handles both local and installed)
     const repoRoot = findRepoRoot();
@@ -23,23 +36,23 @@ function getRedpandaVersion(args = {}) {
       baseArgs.push('--beta');
     }
 
-    const result = spawnSync(docTools.program, docTools.getArgs(baseArgs), {
+    const cmdResult = spawnSync(docTools.program, docTools.getArgs(baseArgs), {
       encoding: 'utf8',
       stdio: 'pipe',
       timeout: 30000
     });
 
     // Check for errors
-    if (result.error) {
-      throw new Error(`Failed to execute command: ${result.error.message}`);
+    if (cmdResult.error) {
+      throw new Error(`Failed to execute command: ${cmdResult.error.message}`);
     }
 
-    if (result.status !== 0) {
-      const errorMsg = result.stderr || `Command failed with exit code ${result.status}`;
+    if (cmdResult.status !== 0) {
+      const errorMsg = cmdResult.stderr || `Command failed with exit code ${cmdResult.status}`;
       throw new Error(errorMsg);
     }
 
-    const output = result.stdout;
+    const output = cmdResult.stdout;
 
     // Parse the output (format: REDPANDA_VERSION=vX.Y.Z\nREDPANDA_DOCKER_REPO=redpanda)
     const lines = output.trim().split('\n');
@@ -56,13 +69,19 @@ function getRedpandaVersion(args = {}) {
     const version = versionLine.split('=')[1];
     const dockerRepo = dockerLine ? dockerLine.split('=')[1] : 'redpanda';
 
-    return {
+    const result = {
       success: true,
       version,
       docker_tag: `docker.redpanda.com/redpandadata/${dockerRepo}:${version}`,
       is_beta: args.beta || false,
-      notes_url: `https://github.com/redpanda-data/redpanda/releases/tag/${version}`
+      notes_url: `https://github.com/redpanda-data/redpanda/releases/tag/${version}`,
+      _modelRecommendation: 'haiku'
     };
+
+    // Cache for 5 minutes
+    cache.set(cacheKey, result, 5 * 60 * 1000);
+
+    return result;
   } catch (err) {
     return {
       success: false,
@@ -77,28 +96,35 @@ function getRedpandaVersion(args = {}) {
  * @returns {Object} Version information
  */
 function getConsoleVersion() {
+  // Check cache first (5 minute TTL)
+  const cacheKey = 'console-version';
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    return { ...cached, _cached: true };
+  }
+
   try {
     // Get doc-tools command (handles both local and installed)
     const repoRoot = findRepoRoot();
     const docTools = getDocToolsCommand(repoRoot);
 
-    const result = spawnSync(docTools.program, docTools.getArgs(['get-console-version']), {
+    const cmdResult = spawnSync(docTools.program, docTools.getArgs(['get-console-version']), {
       encoding: 'utf8',
       stdio: 'pipe',
       timeout: 30000
     });
 
     // Check for errors
-    if (result.error) {
-      throw new Error(`Failed to execute command: ${result.error.message}`);
+    if (cmdResult.error) {
+      throw new Error(`Failed to execute command: ${cmdResult.error.message}`);
     }
 
-    if (result.status !== 0) {
-      const errorMsg = result.stderr || `Command failed with exit code ${result.status}`;
+    if (cmdResult.status !== 0) {
+      const errorMsg = cmdResult.stderr || `Command failed with exit code ${cmdResult.status}`;
       throw new Error(errorMsg);
     }
 
-    const output = result.stdout;
+    const output = cmdResult.stdout;
 
     // Parse the output (format: CONSOLE_VERSION=vX.Y.Z\nCONSOLE_DOCKER_REPO=console)
     const lines = output.trim().split('\n');
@@ -115,12 +141,18 @@ function getConsoleVersion() {
     const version = versionLine.split('=')[1];
     const dockerRepo = dockerLine ? dockerLine.split('=')[1] : 'console';
 
-    return {
+    const result = {
       success: true,
       version,
       docker_tag: `docker.redpanda.com/redpandadata/${dockerRepo}:${version}`,
-      notes_url: `https://github.com/redpanda-data/console/releases/tag/${version}`
+      notes_url: `https://github.com/redpanda-data/console/releases/tag/${version}`,
+      _modelRecommendation: 'haiku'
     };
+
+    // Cache for 5 minutes
+    cache.set(cacheKey, result, 5 * 60 * 1000);
+
+    return result;
   } catch (err) {
     return {
       success: false,

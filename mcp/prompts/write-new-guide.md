@@ -15,16 +15,24 @@ argumentFormat: structured
 
 You are writing documentation for the Redpanda documentation team.
 
-## Resources to read first
+## IMPORTANT: Fetch resources first
 
-- `redpanda://style-guide` - Complete style guide with Google Developer Documentation Style Guide principles
+**Before you begin writing**, you MUST:
+
+1. **Fetch the style guide**: Use the MCP `ReadResourceTool` or equivalent to read: `redpanda://style-guide`
+   - This contains complete style guide with Google Developer Documentation Style Guide principles
+   - You cannot write compliant documentation without this resource
+2. **Get Antora structure**: Use the `get_antora_structure` MCP tool to understand documentation organization
+
+**If you cannot access these resources, inform the user immediately.**
+
+## Additional resources to reference
+
 - Official glossary sources for terminology:
   - GitHub: https://github.com/redpanda-data/docs/tree/shared/modules/terms/partials
   - Published: https://docs.redpanda.com/current/reference/glossary/
 - `/lib` directory - Custom AsciiDoc macros and extensions documentation
 - `/extensions` directory - Custom Antora extensions
-
-Use `get_antora_structure` tool to understand the documentation organization.
 
 ## Documentation format
 

@@ -110,7 +110,12 @@ function requirePython(minMajor = 3, minMinor = 10) {
   }
   fail(
     `Python ${minMajor}.${minMinor}+ not found or too old.
-→ Install from your package manager or https://python.org`
+
+**Quick Install (Recommended):**
+Run the automated installer to set up all dependencies:
+  npm run install-test-dependencies
+
+Or install manually from your package manager or https://python.org`
   );
 }
 
@@ -124,7 +129,13 @@ function requireDockerDaemon() {
   try {
     execSync('docker info', { stdio: 'ignore' });
   } catch {
-    fail('Docker daemon does not appear to be running. Please start Docker.');
+    fail(`Docker daemon does not appear to be running.
+
+**Quick Install (Recommended):**
+Run the automated installer to set up all dependencies:
+  npm run install-test-dependencies
+
+Or install and start Docker manually: https://docs.docker.com/get-docker/`);
   }
 }
 
@@ -143,7 +154,11 @@ function verifyCrdDependencies() {
     `
 The 'crd-ref-docs' command is required but was not found.
 
-To install it, follow these steps (for macOS):
+**Quick Install (Recommended):**
+Run the automated installer to set up all dependencies:
+  npm run install-test-dependencies
+
+Or install manually (for macOS):
 
 1. Determine your architecture:
    Run: \`uname -m\`
@@ -170,7 +185,11 @@ For more details, visit: https://github.com/elastic/crd-ref-docs
     `
 The 'go' command (Golang) is required but was not found.
 
-To install it on macOS:
+**Quick Install (Recommended):**
+Run the automated installer to set up all dependencies:
+  npm run install-test-dependencies
+
+Or install manually on macOS:
 
 Option 1: Install via Homebrew (recommended):
   brew install go
@@ -200,7 +219,11 @@ function verifyHelmDependencies() {
     `
 The 'helm-docs' command is required but was not found.
 
-To install it, follow these steps (for macOS):
+**Quick Install (Recommended):**
+Run the automated installer to set up all dependencies:
+  npm run install-test-dependencies
+
+Or install manually (for macOS):
 
 1. Determine your architecture:
    Run: \`uname -m\`
@@ -255,6 +278,12 @@ function verifyPropertyDependencies() {
     } catch {
       fail(`A C++ compiler (gcc or clang) is required for tree-sitter compilation.
 
+**Quick Install (Recommended):**
+Run the automated installer to set up all dependencies:
+  npm run install-test-dependencies
+
+Or install manually:
+
 On macOS, install Xcode Command Line Tools:
   xcode-select --install
 
@@ -295,6 +324,12 @@ After installation, verify with:
       }
     }
     fail(`C++ standard library headers are missing or incomplete.
+
+**Quick Install (Recommended):**
+Run the automated installer to set up all dependencies:
+  npm run install-test-dependencies
+
+Or fix manually:
 
 1. **Test if the issue exists**:
    echo '#include <functional>' | ${compileCmd} -x c++ -fsyntax-only -

@@ -1,5 +1,9 @@
 /**
  * MCP Tools - RPK Documentation Generation
+ *
+ * OPTIMIZATION: This tool calls CLI, doesn't use LLM directly.
+ * - No model recommendation (CLI tool)
+ * - Cost comes from doc-tools CLI execution
  */
 
 const { spawnSync } = require('child_process');

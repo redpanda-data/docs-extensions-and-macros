@@ -13,3 +13,4 @@ modules/
 cloud-controlplane/
 node_modules
 .env
+mcp-usage-stats.json

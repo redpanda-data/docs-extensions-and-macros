@@ -1,10 +1,17 @@
 /**
  * MCP Tools - Redpanda Connect Documentation Generation
+ *
+ * OPTIMIZATION: This tool calls CLI, doesn't use LLM directly.
+ * - Caches connector metadata when possible
+ * - Use --data-dir to avoid re-fetching
+ * - Consider incremental generation for updates
+ * - No model recommendation (CLI tool)
  */
 
 const { execSync, spawnSync } = require('child_process');
 const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
+const cache = require('./cache');
 
 /**
  * Generate Redpanda Connect connector documentation
@@ -85,7 +92,9 @@ function generateRpConnectDocs(args = {}) {
       connectors_documented: connectorsMatch ? parseInt(connectorsMatch[1]) : null,
       files_generated: ['modules/reference/pages/redpanda-connect/components/'],
       output: output.trim(),
-      summary: 'Generated Redpanda Connect connector documentation'
+      summary: 'Generated Redpanda Connect connector documentation',
+      // Cost optimization metadata
+      _optimizationNotes: 'This tool calls CLI. To reduce costs: 1) Cache connector data with --data-dir, 2) Use incremental generation when possible, 3) Avoid --fetch-connectors unless needed'
     };
   } catch (err) {
     return {

@@ -1,21 +1,42 @@
 /**
  * MCP Tools - Antora Structure
+ *
+ * OPTIMIZATION: This tool uses caching and should use Haiku model.
+ * - Caches structure for 1 hour (rarely changes)
+ * - No complex reasoning required (just directory scanning)
+ * - Recommended model: haiku
  */
 
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 const { MAX_RECURSION_DEPTH, DEFAULT_SKIP_DIRS, PLAYBOOK_NAMES } = require('./utils');
+const cache = require('./cache');
 
 /**
  * Get Antora structure information for the current repository
  * @param {string|{root: string, detected: boolean, type: string|null}} repoRoot - Repository root path or info object
  * @param {string[]} [skipDirs=DEFAULT_SKIP_DIRS] - Directories to skip during search
+ * @param {Object} [options] - Additional options
+ * @param {boolean} [options.skipCache] - Skip cache and force fresh scan
  * @returns {Object} Antora structure information
  */
-function getAntoraStructure(repoRoot, skipDirs = DEFAULT_SKIP_DIRS) {
+function getAntoraStructure(repoRoot, skipDirs = DEFAULT_SKIP_DIRS, options = {}) {
   const rootPath = typeof repoRoot === 'string' ? repoRoot : repoRoot.root;
   const repoInfo = typeof repoRoot === 'object' ? repoRoot : { root: repoRoot, detected: true, type: null };
+
+  // Check cache first (1 hour TTL)
+  const cacheKey = `antora-structure:${rootPath}`;
+  if (!options.skipCache) {
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return {
+        ...cached,
+        _cached: true,
+        _cacheHit: true
+      };
+    }
+  }
 
   const playbookPath = PLAYBOOK_NAMES
     .map(name => path.join(rootPath, name))
@@ -91,7 +112,7 @@ function getAntoraStructure(repoRoot, skipDirs = DEFAULT_SKIP_DIRS) {
     }
   });
 
-  return {
+  const result = {
     repoRoot: rootPath,
     repoInfo,
     playbook: playbookContent,
@@ -115,8 +136,16 @@ function getAntoraStructure(repoRoot, skipDirs = DEFAULT_SKIP_DIRS) {
       } catch {
         return false;
       }
-    })()
+    })(),
+    // Metadata for cost optimization
+    _modelRecommendation: 'haiku',
+    _reasoning: 'Simple directory scanning, no complex reasoning required'
   };
+
+  // Cache for 1 hour
+  cache.set(cacheKey, result, 60 * 60 * 1000);
+
+  return result;
 }
 
 module.exports = {

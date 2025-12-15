@@ -401,6 +401,25 @@ const tools = [
     }
   },
   {
+    name: 'review_content',
+    description: 'Review documentation content with automatic style guide context. This tool bundles the style guide and review instructions in a single call, ensuring the LLM has all necessary context. Use this instead of manually fetching resources when you need a quick, comprehensive review.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        content: {
+          type: 'string',
+          description: 'The documentation content to review (can be a file path or raw content)'
+        },
+        focus: {
+          type: 'string',
+          description: 'What aspect to focus on (optional, defaults to comprehensive)',
+          enum: ['comprehensive', 'style', 'terminology', 'clarity']
+        }
+      },
+      required: ['content']
+    }
+  },
+  {
     name: 'run_doc_tools_command',
     description: 'Advanced: Run a raw doc-tools command. Only use this if none of the specific tools above fit your needs. Requires knowledge of doc-tools CLI syntax.',
     inputSchema: {

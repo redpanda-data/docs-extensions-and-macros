@@ -24,10 +24,15 @@ Review the provided content against our style guide and provide detailed, action
 6. **Accessibility issues** (missing alt text, poor heading structure)
 7. **Actionable fixes** for each issue found
 
-## Style guide reference
+## IMPORTANT: Fetch the style guide first
 
-You have access to:
-- `redpanda://style-guide` - Complete style guide with all standards
+**Before you begin your review**, you MUST fetch the style guide resource:
+
+1. Use the MCP `ReadResourceTool` or equivalent to read: `redpanda://style-guide`
+2. This contains the complete Redpanda documentation style guide
+3. You cannot properly review without referencing this resource
+
+**If you cannot access the style guide resource, inform the user immediately.**
 
 **Terminology sources:**
 - GitHub: https://github.com/redpanda-data/docs/tree/shared/modules/terms/partials

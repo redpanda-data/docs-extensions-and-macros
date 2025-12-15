@@ -378,8 +378,7 @@ Test categories:
 If a breaking change to the CLI is necessary:
 
 . Update the CLI with the breaking change
-. Increment the major version of doc-tools
+. Increment the major version in package.json
 . Update the MCP server to handle both old and new interfaces (if possible)
 . Update the CLI contract tests to verify the new interface
-. Document the breaking change in release notes
 . Update this document with the new contract

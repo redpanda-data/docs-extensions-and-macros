@@ -89,6 +89,43 @@ Claude: *uses run_doc_tools_command MCP tool*
         *shows generated documentation*
 ----
 
+== Choosing the right model
+
+The Claude model you use affects both performance and costs. Start Claude Code with the appropriate model for your work:
+
+[source,bash]
+----
+# Haiku - Fast and cheap (best for simple tasks)
+claude --model haiku
+
+# Sonnet - Balanced (default, recommended for most work)
+claude --model sonnet
+
+# Opus - Most capable (use for complex reasoning)
+claude --model opus
+----
+
+=== Recommendations by task type
+
+*Use Haiku for:*
+
+* Generating documentation from structured data (properties, metrics, RPK commands)
+* Simple content reviews (terminology or style only)
+* Quick lookups and simple operations
+
+*Use Sonnet for:*
+
+* Comprehensive content reviews
+* Complex documentation tasks requiring reasoning
+* Most day-to-day documentation work (this is the default)
+
+*Use Opus for:*
+
+* Extremely complex reasoning tasks
+* Currently not needed for most documentation tasks
+
+TIP: See xref:COSTS.adoc[] for detailed cost information and optimization tips.
+
 == Available tools
 
 The MCP server provides *writer-friendly tools* designed for natural language interaction:
