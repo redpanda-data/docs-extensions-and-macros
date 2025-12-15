@@ -77,7 +77,10 @@ describe('MCP Server Library - Constants', () => {
 });
 
 describe('MCP Server Library - Repository Detection', () => {
+  const cache = require('../../bin/mcp-tools/cache');
+
   beforeEach(() => {
+    cache.clear();
     jest.clearAllMocks();
   });
 
@@ -194,8 +197,10 @@ describe('MCP Server Library - Repository Detection', () => {
 
   describe('getAntoraStructure', () => {
     const yaml = require('js-yaml');
+    const cache = require('../../bin/mcp-tools/cache');
 
     beforeEach(() => {
+      cache.clear();
       jest.clearAllMocks();
     });
 
@@ -657,8 +662,12 @@ describe('MCP Server Library - Repository Detection', () => {
 
   describe('Documentation Generation Tools', () => {
     const { execSync, spawnSync } = require('child_process');
+    const cache = require('../../bin/mcp-tools/cache');
 
     beforeEach(() => {
+      // Clear cache to prevent cross-test contamination
+      cache.clear();
+
       // Reset mocks before each test
       fs.existsSync.mockReset();
       fs.realpathSync.mockReset();
