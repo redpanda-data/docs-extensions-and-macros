@@ -17,7 +17,7 @@ link:USER_GUIDE.adoc[**User guide**]:: Complete guide to using the MCP server wi
 * Usage examples and workflows
 * Troubleshooting
 
-link:WRITER_EXTENSION_GUIDE.adoc[**Writer extension guide**]:: How to extend the MCP server (no coding required!)
+link:WRITER_EXTENSION_GUIDE.adoc[**Writer extension guide**]:: How to extend the MCP server (no coding required)
 +
 * Adding new prompts for common tasks
 * Adding new resources (style guides, templates)
@@ -72,18 +72,6 @@ link:prompts/README.adoc[**Prompts documentation**]:: Guide to the MCP prompt sy
 * What prompts are and how they work
 * Available prompts
 * Adding new prompts
-
-link:AI_CONSISTENCY_ARCHITECTURE.adoc[**AI consistency architecture**]:: Architecture for team-wide AI consistency
-+
-* Design principles
-* Technical implementation
-* Extension patterns
-
-link:AI_CONSISTENCY_SHOWCASE.adoc[**AI consistency showcase**]:: Examples and use cases
-+
-* Real-world examples
-* Before/after comparisons
-* Best practices
 
 == Quickstart
 
