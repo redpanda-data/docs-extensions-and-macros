@@ -1,13 +1,14 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "4.13.0",
+  "version": "4.13.1",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
     "extension",
     "macro",
     "documentation",
-    "redpanda"
+    "redpanda",
+    "mcp"
   ],
   "author": {
     "name": "Redpanda Docs Team"
@@ -80,7 +81,8 @@
     "bin",
     "cli-utils",
     "tools",
-    "docker-compose"
+    "docker-compose",
+    "mcp"
   ],
   "license": "ISC",
   "repository": {

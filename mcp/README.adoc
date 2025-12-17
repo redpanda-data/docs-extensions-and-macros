@@ -17,19 +17,24 @@ link:USER_GUIDE.adoc[**User guide**]:: Complete guide to using the MCP server wi
 * Usage examples and workflows
 * Troubleshooting
 
-link:WRITER_EXTENSION_GUIDE.adoc[**Writer extension guide**]:: How to extend the MCP server (no coding required!)
+link:WRITER_EXTENSION_GUIDE.adoc[**Writer extension guide**]:: How to extend the MCP server (no coding required)
 +
 * Adding new prompts for common tasks
 * Adding new resources (style guides, templates)
 * Validation and preview commands
 * Best practices and examples
 
-link:TEAM_ROLLOUT_GUIDE.adoc[**Team rollout guide**]:: Rolling out to your documentation team
+link:templates/README.adoc[**Extension templates**]:: Ready-to-use templates for extending the MCP server
 +
-* Phased rollout plan
-* Training materials and best practices
-* Operational playbook (rollback, emergency procedures)
-* Success metrics and monitoring
+* Templates for review prompts, writing prompts, and resources
+* Step-by-step customization guide
+* No coding required. Just copy and customize
+
+link:COSTS.adoc[**Cost reference**]:: Understanding and optimizing MCP tool costs
++
+* Cost breakdown by tool ($0.017 - $0.190 per operation)
+* Model selection guidance (Haiku/Sonnet/Opus)
+* Cost optimization strategies
 
 === For developers
 
@@ -68,18 +73,6 @@ link:prompts/README.adoc[**Prompts documentation**]:: Guide to the MCP prompt sy
 * Available prompts
 * Adding new prompts
 
-link:AI_CONSISTENCY_ARCHITECTURE.adoc[**AI consistency architecture**]:: Architecture for team-wide AI consistency
-+
-* Design principles
-* Technical implementation
-* Extension patterns
-
-link:AI_CONSISTENCY_SHOWCASE.adoc[**AI consistency showcase**]:: Examples and use cases
-+
-* Real-world examples
-* Before/after comparisons
-* Best practices
-
 == Quickstart
 
 === Install and configure
@@ -111,12 +104,12 @@ Claude: *uses generate_property_docs tool*
 
 === Documentation generation tools
 
-* **Version information** - Get latest Redpanda and Console versions
-* **Property docs** - Generate configuration property documentation
-* **Metrics docs** - Generate metrics reference documentation
-* **RPK docs** - Generate RPK CLI documentation
-* **Connector docs** - Generate Redpanda Connect connector documentation
-* **Antora structure** - Analyze documentation repository structure
+* **Version information**: Get latest Redpanda and Console versions
+* **Property docs**: Generate configuration property documentation
+* **Metrics docs**: Generate metrics reference documentation
+* **RPK docs**: Generate RPK CLI documentation
+* **Connector docs**: Generate Redpanda Connect connector documentation
+* **Antora structure**: Analyze documentation repository structure
 
 === AI consistency prompts
 
@@ -124,48 +117,48 @@ Pre-configured instructions that help Claude follow your team standards:
 
 **Review prompts:**
 
-* **review-for-style** - Review content for style guide compliance
-* **check-terminology** - Validate terminology against approved terms
-* **improve-clarity** - Refactor content for better readability
+* **review-for-style**: Review content for style guide compliance
+* **check-terminology**: Validate terminology against approved terms
+* **improve-clarity**: Refactor content for better readability
 
 **Content creation:**
 
-* **write-new-guide** - Generate new guides following team standards
+* **write-new-guide**: Generate new guides following team standards
 
 **Workflow guides:**
 
-* **property-docs-guide** - Workflow for updating property documentation
-* **rpcn-connector-docs-guide** - Workflow for updating connector documentation
+* **property-docs-guide**: Workflow for updating property documentation
+* **rpcn-connector-docs-guide**: Workflow for updating connector documentation
 
 === Resources
 
 Reference materials that Claude can read:
 
-* **redpanda://style-guide** - Complete team style guide with formatting rules
+* **redpanda://style-guide**: Complete team style guide with formatting rules
 
 === CLI validation commands
 
 For writers extending the MCP server:
 
-* **npx doc-tools validate-mcp** - Validate prompts and resources configuration
-* **npx doc-tools preview-prompt** - Preview prompts with test arguments
-* **npx doc-tools mcp-version** - Show versions and usage statistics
+* **npx doc-tools validate-mcp**: Validate prompts and resources configuration
+* **npx doc-tools preview-prompt**: Preview prompts with test arguments
+* **npx doc-tools mcp-version**: Show versions and usage statistics
 
 === Automation
 
-* **setup-mcp** - Automated MCP server configuration for Claude Code/Desktop
-* **Auto-discovery** - Prompts automatically loaded from `mcp/prompts/` directory
-* **Context detection** - Automatic repository and Antora structure detection
-* **Usage telemetry** - Track prompt/resource/tool usage for adoption metrics
+* **setup-mcp**: Automated MCP server configuration for Claude Code/Desktop
+* **Auto-discovery**: Prompts automatically loaded from `mcp/prompts/` directory
+* **Context detection**: Automatic repository and Antora structure detection
+* **Usage telemetry**: Track prompt/resource/tool usage for adoption metrics
 
 == Architecture
 
 The MCP server consists of:
 
-* **Server** (`bin/doc-tools-mcp.js`) - Main MCP protocol handler
-* **Tool modules** (`bin/mcp-tools/`) - Individual tool implementations
-* **Prompts** (`mcp/prompts/`) - Contextual documentation guides
-* **Tests** (`__tests__/mcp/`) - Integration, contract, and unit tests
+* **Server** (`bin/doc-tools-mcp.js`): Main MCP protocol handler
+* **Tool modules** (`bin/mcp-tools/`): Individual tool implementations
+* **Prompts** (`mcp/prompts/`): Contextual documentation guides
+* **Tests** (`__tests__/mcp/`): Integration, contract, and unit tests
 
 == Support
 
