@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "4.13.1",
+  "version": "4.13.2",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -28,7 +28,8 @@
     "test:mcp:integration": "jest __tests__/mcp/integration.test.js",
     "test:mcp:contract": "jest __tests__/mcp/cli-contract.test.js",
     "test:python": "./__tests__/tools/property-extractor/setup-and-test.sh",
-    "test:all": "npm run test && npm run test:python",
+    "test:cgo": "node test/cgo-detection.test.js",
+    "test:all": "npm run test && npm run test:python && npm run test:cgo",
     "generate:cli-docs": "node tools/generate-cli-docs.js",
     "bundle:admin": "doc-tools generate bundle-openapi --surface admin",
     "bundle:connect": "doc-tools generate bundle-openapi --surface connect",
@@ -95,7 +96,7 @@
     "@modelcontextprotocol/sdk": "^1.0.4",
     "@octokit/core": "^6.1.2",
     "@octokit/plugin-retry": "^7.1.1",
-    "@octokit/rest": "^21.0.1",
+    "@octokit/rest": "^21.1.1",
     "@redocly/cli": "^2.2.0",
     "ajv": "^8.12.0",
     "algoliasearch": "^4.17.0",
