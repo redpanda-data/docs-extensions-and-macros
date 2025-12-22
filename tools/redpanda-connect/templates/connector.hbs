@@ -10,11 +10,49 @@ component_type_dropdown::[]
 {{> intro}}
 
 {{#if (or this.config.children children)}}
+[tabs]
+======
+Common::
++
+--
+
+```yml
+include::components:example$common/{{type}}s/{{name}}.yaml[]
+```
+
+--
+Advanced::
++
+--
+
+```yml
+include::components:example$advanced/{{type}}s/{{name}}.yaml[]
+```
+
+--
+======
+{{/if}}
+
+{{#if requiresCgo}}
+== Requirements
+
+Ensure that your environment meets the following requirements:
+
+- This component is only available in cgo-enabled builds of Redpanda Connect (not in the Redpanda CLI or Docker image).
++
+You can either xref:install:prebuilt-binary.adoc[download a prebuilt cgo-enabled binary] or xref:install:build-from-source.adoc[build Redpanda Connect from source with cgo enabled].
+{{#if requiresIdempotency}}
+- Consumers must implement idempotency when processing messages to handle potential duplicates.
+{{/if}}
+
+{{/if}}
+{{#if (or this.config.children children)}}
 include::redpanda-connect:components:partial$fields/{{type}}s/{{name}}.adoc[]
 {{/if}}
 
 {{#if this.examples}}
 include::redpanda-connect:components:partial$examples/{{type}}s/{{name}}.adoc[]
 {{/if}}
+
 
 // end::single-source[]

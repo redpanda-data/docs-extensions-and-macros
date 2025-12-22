@@ -9,7 +9,7 @@ const helpers = require('./helpers');
 // Register each helper under handlebars, verifying that it’s a function
 Object.entries(helpers).forEach(([name, fn]) => {
   if (typeof fn !== 'function') {
-    console.error(`❌ Helper "${name}" is not a function`);
+    console.error(`Error: Helper "${name}" is not a function`);
     process.exit(1);
   }
   handlebars.registerHelper(name, fn);
@@ -242,7 +242,9 @@ async function generateRpcnConnectorDocs(options) {
     templateFields,
     templateExamples,
     templateBloblang,
-    writeFullDrafts
+    writeFullDrafts,
+    cgoOnly = [],        // Array of cgo-only connectors from cgo binary inspection
+    cloudOnly = []       // Array of cloud-only connectors from cloud binary inspection
   } = options;
 
   // Read connector index (JSON or YAML)
@@ -251,6 +253,26 @@ async function generateRpcnConnectorDocs(options) {
   const dataObj = ext === '.json' ? JSON.parse(raw) : yaml.parse(raw);
   // Mark beta fields/components before overrides
   markBeta(dataObj);
+
+  // Build a Set of cgo-only connector keys for fast lookup
+  const cgoOnlySet = new Set();
+  if (Array.isArray(cgoOnly)) {
+    cgoOnly.forEach(connector => {
+      if (connector.type && connector.name) {
+        cgoOnlySet.add(`${connector.type}:${connector.name}`);
+      }
+    });
+  }
+
+  // Build a Set of cloud-only connector keys for fast lookup
+  const cloudOnlySet = new Set();
+  if (Array.isArray(cloudOnly)) {
+    cloudOnly.forEach(connector => {
+      if (connector.type && connector.name) {
+        cloudOnlySet.add(`${connector.type}:${connector.name}`);
+      }
+    });
+  }
 
   // Apply overrides if provided
   if (overrides && fs.existsSync(overrides)) {
@@ -295,21 +317,26 @@ async function generateRpcnConnectorDocs(options) {
   const examplesTemplatePath = templateExamples || null;
 
   // Register partials
-  if (!writeFullDrafts) {
-    if (fieldsTemplatePath) {
-      registerPartial('fields', fieldsTemplatePath);
-    }
-    if (examplesTemplatePath) {
-      registerPartial('examples', examplesTemplatePath);
-    }
-  } else {
+  // Always register fields and examples partials (needed for rendering partials even in draft mode)
+  if (fieldsTemplatePath) {
+    registerPartial('fields', fieldsTemplatePath);
+  }
+  if (examplesTemplatePath) {
+    registerPartial('examples', examplesTemplatePath);
+  }
+
+  // In draft mode, also register the intro partial
+  if (writeFullDrafts && templateIntro) {
     registerPartial('intro', templateIntro);
   }
 
   const outputRoot     = path.resolve(process.cwd(), 'modules/components/partials');
   const fieldsOutRoot   = path.join(outputRoot, 'fields');
   const examplesOutRoot = path.join(outputRoot, 'examples');
-  const draftsRoot      = path.join(outputRoot, 'drafts');
+  // Drafts go to pages/, not partials/
+  const componentsRoot  = writeFullDrafts
+    ? path.resolve(process.cwd(), 'modules/components/pages')
+    : path.join(outputRoot, 'components');
   const configExamplesRoot = path.resolve(process.cwd(), 'modules/components/examples');
 
   if (!writeFullDrafts) {
@@ -329,30 +356,33 @@ async function generateRpcnConnectorDocs(options) {
       if (!item.name) continue;
       const name = item.name;
 
-      if (!writeFullDrafts) {
-        // Render fields using the registered “fields” partial
-        const fieldsOut = handlebars
-          .compile('{{> fields children=config.children}}')(item);
+      // Always generate field and example partials (needed for both standalone and draft modes)
+      // Render fields using the registered "fields" partial
+      const fieldsOut = handlebars
+        .compile('{{> fields children=config.children}}')(item);
 
-        // Render examples only if an examples template was provided
-        let examplesOut = '';
-        if (examplesTemplatePath) {
-          examplesOut = handlebars
-            .compile('{{> examples examples=examples}}')(item);
-        }
+      // Render examples only if an examples template was provided
+      let examplesOut = '';
+      if (examplesTemplatePath) {
+        examplesOut = handlebars
+          .compile('{{> examples examples=examples}}')(item);
+      }
 
-        if (fieldsOut.trim()) {
-          const fPath = path.join(fieldsOutRoot, type, `${name}.adoc`);
-          fs.mkdirSync(path.dirname(fPath), { recursive: true });
-          fs.writeFileSync(fPath, fieldsOut);
+      if (fieldsOut.trim()) {
+        const fPath = path.join(fieldsOutRoot, type, `${name}.adoc`);
+        fs.mkdirSync(path.dirname(fPath), { recursive: true });
+        fs.writeFileSync(fPath, fieldsOut);
+        if (!writeFullDrafts) {
           partialsWritten++;
           partialFiles.push(path.relative(process.cwd(), fPath));
         }
+      }
 
-        if (examplesOut.trim() && type !== 'bloblang-functions' && type !== 'bloblang-methods') {
-          const ePath = path.join(examplesOutRoot, type, `${name}.adoc`);
-          fs.mkdirSync(path.dirname(ePath), { recursive: true });
-          fs.writeFileSync(ePath, examplesOut);
+      if (examplesOut.trim() && type !== 'bloblang-functions' && type !== 'bloblang-methods') {
+        const ePath = path.join(examplesOutRoot, type, `${name}.adoc`);
+        fs.mkdirSync(path.dirname(ePath), { recursive: true });
+        fs.writeFileSync(ePath, examplesOut);
+        if (!writeFullDrafts) {
           partialsWritten++;
           partialFiles.push(path.relative(process.cwd(), ePath));
         }
@@ -363,6 +393,24 @@ async function generateRpcnConnectorDocs(options) {
           console.log(`Skipping draft for deprecated component: ${type}/${name}`);
           continue;
         }
+
+        // Check if this connector is cgo-only or cloud-only and mark it
+        const connectorKey = `${type}:${name}`;
+        const isCloudOnly = cloudOnlySet.has(connectorKey);
+        const isCgoOnly = cgoOnlySet.has(connectorKey);
+
+        if (isCgoOnly) {
+          item.requiresCgo = true;
+          // tigerbeetle_cdc also requires idempotency
+          if (name === 'tigerbeetle_cdc') {
+            item.requiresIdempotency = true;
+          }
+        }
+
+        if (isCloudOnly) {
+          item.cloudOnly = true;
+        }
+
         let content;
         try {
           content = compiledTemplate(item);
@@ -370,15 +418,30 @@ async function generateRpcnConnectorDocs(options) {
           throw new Error(`Template render failed for component "${name}": ${err.message}`);
         }
 
-        const draftSubdir = name === 'gateway'
-          ? path.join(draftsRoot, 'cloud-only')
-          : draftsRoot;
+        // Determine output location based on availability
+        let destFile;
+        const typeDir = type.endsWith('s') ? type : `${type}s`;
 
-        const destFile = path.join(draftSubdir, `${name}.adoc`);
+        if (isCloudOnly) {
+          // Cloud-only connectors go to partials/components/cloud-only/{type}s/{name}.adoc
+          const cloudOnlyRoot = path.resolve(process.cwd(), 'modules/components/partials/components/cloud-only');
+          destFile = path.join(cloudOnlyRoot, typeDir, `${name}.adoc`);
+        } else {
+          // Regular connectors go to pages/{type}s/{name}.adoc
+          destFile = path.join(componentsRoot, typeDir, `${name}.adoc`);
+        }
+
         fs.mkdirSync(path.dirname(destFile), { recursive: true });
         fs.writeFileSync(destFile, content, 'utf8');
         draftsWritten++;
-        draftFiles.push(path.relative(process.cwd(), destFile));
+        draftFiles.push({
+          path: path.relative(process.cwd(), destFile),
+          name: name,
+          type: type,
+          status: item.status || 'stable',
+          requiresCgo: item.requiresCgo || false,
+          cloudOnly: item.cloudOnly || false
+        });
       }
     }
   }
