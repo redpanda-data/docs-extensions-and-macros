@@ -11,25 +11,32 @@ module.exports.register = function ({ config }) {
     }
 
     const descriptions = redpandaConnect.latest.asciidoc.attributes.categories
-    const componentNameMap = redpandaConnect.latest.asciidoc.attributes.components
-    const certifiedConnectors = redpandaConnect.latest.asciidoc.attributes['certified-components']
-    const enterpriseConnectors = redpandaConnect.latest.asciidoc.attributes['enterprise-components']
+    const csvData = redpandaConnect.latest.asciidoc.attributes.csvData
 
-    if (!descriptions || !componentNameMap || !certifiedConnectors || !enterpriseConnectors) {
-      if (!descriptions) {
-        logger.error('No categories attribute found in redpanda-connect component')
-      }
-      if (!componentNameMap) {
-        logger.error('No components attribute found in redpanda-connect component')
-      }
-      if (!certifiedConnectors) {
-        logger.error('No certified-components attribute found in redpanda-connect component')
-      }
-      if (!enterpriseConnectors) {
-        logger.error('No enterprise-components attribute found in redpanda-connect component')
-      }
+    if (!descriptions) {
+      logger.error('No categories attribute found in redpanda-connect component')
       return
     }
+
+    if (!csvData || !csvData.data) {
+      logger.error('No csvData attribute found in redpanda-connect component')
+      logger.error('Make sure the generate-rp-connect-info extension runs before this extension')
+      return
+    }
+
+    // Build lookup maps from CSV data
+    const supportLookup = {}
+    csvData.data.forEach(row => {
+      const connector = row.connector
+      if (connector) {
+        supportLookup[connector] = {
+          supportLevel: row.support_level?.toLowerCase() || 'community',
+          isEnterprise: row.is_licensed === 'Yes'
+        }
+      }
+    })
+
+    logger.info(`Loaded support data for ${Object.keys(supportLookup).length} connectors from CSV`)
 
     const connectCategoriesData = {}
     const flatComponentsData = []
@@ -63,20 +70,30 @@ module.exports.register = function ({ config }) {
           // Skip deprecated components
           if (status === 'deprecated') return
 
-          const isCertified = certifiedConnectors.some(connector => connector.name === name)
+          // Get support level from CSV data
+          const csvInfo = supportLookup[name]
+          const isEnterprise = csvInfo?.isEnterprise || false
 
-          const isEnterprise = enterpriseConnectors.some(connector => connector === name)
-
-          // Override status to "certified" if in the lookup table
-          if (isCertified || isEnterprise) {
-            status = 'certified'
-          } else {
-            status = 'community'
+          // Determine status from CSV support level
+          if (csvInfo) {
+            if (csvInfo.supportLevel === 'certified' || csvInfo.supportLevel === 'enterprise') {
+              status = 'certified'
+            } else {
+              status = csvInfo.supportLevel
+            }
           }
 
-          // Find the common name
-          const componentNameEntry = componentNameMap.find(component => component.key === name)
-          const commonName = componentNameEntry ? componentNameEntry.name : name
+          // Read commercial names from frontmatter (:commercial-names: attribute)
+          const commercialNamesMatch = /:commercial-names:\s*(.*)/.exec(content)
+          let commonName = name // Default to connector key name
+
+          if (commercialNamesMatch && commercialNamesMatch[1].trim()) {
+            // Parse comma-separated list and use the first one as primary
+            const names = commercialNamesMatch[1].split(',').map(n => n.trim()).filter(n => n)
+            if (names.length > 0) {
+              commonName = names[0]
+            }
+          }
 
           // Populate connectCategoriesData
           if (types.includes(fileType) && categoryMatch) {

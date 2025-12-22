@@ -6,10 +6,10 @@ const Papa = require('papaparse');
 const CSV_PATH = 'internal/plugins/info.csv'
 const GITHUB_OWNER = 'redpanda-data'
 const GITHUB_REPO = 'connect'
-const GITHUB_REF = 'main'
 
 module.exports.register = function ({ config }) {
   const logger = this.getLogger('redpanda-connect-info-extension');
+  const { getAntoraValue } = require('../cli-utils/antora-utils');
 
   async function loadOctokit() {
     const { Octokit } = await import('@octokit/rest');
@@ -26,8 +26,11 @@ module.exports.register = function ({ config }) {
     const pages = contentCatalog.getPages();
 
     try {
-      // Fetch CSV data (either from local file or GitHub)
-      const csvData = await fetchCSV(config.csvpath);
+      // Get the Connect version from antora.yml
+      const connectVersion = getAntoraValue('asciidoc.attributes.latest-connect-version');
+
+      // Fetch CSV data (from local file first, then GitHub as fallback)
+      const csvData = await fetchCSV(config.csvpath, connectVersion, logger);
       const parsedData = Papa.parse(csvData, { header: true, skipEmptyLines: true });
       const enrichedData = translateCsvData(parsedData, pages, logger);
       parsedData.data = enrichedData;
@@ -49,33 +52,38 @@ module.exports.register = function ({ config }) {
     }
   });
 
-  // Check for local CSV file first. If not found, fetch from GitHub
-  async function fetchCSV(localCsvPath) {
+  // Fetch CSV from GitHub or local file (local file for testing/override only)
+  async function fetchCSV(localCsvPath, connectVersion, logger) {
+    // Priority 1: Use explicitly provided CSV path (for testing/override)
     if (localCsvPath && fs.existsSync(localCsvPath)) {
       if (path.extname(localCsvPath).toLowerCase() !== '.csv') {
         throw new Error(`Invalid file type: ${localCsvPath}. Expected a CSV file.`);
       }
       logger.info(`Loading CSV data from local file: ${localCsvPath}`);
       return fs.readFileSync(localCsvPath, 'utf8');
-    } else {
-      logger.info('Local CSV file not found. Fetching from GitHub...');
-      return await fetchCsvFromGitHub();
     }
+
+    // Priority 2: Fetch from GitHub using the version tag
+    logger.info(`Fetching CSV from GitHub (version: ${connectVersion || 'main'})...`);
+    return await fetchCsvFromGitHub(connectVersion);
   }
 
   // Fetch CSV data from GitHub
-  async function fetchCsvFromGitHub() {
+  async function fetchCsvFromGitHub(connectVersion) {
     const octokit = await loadOctokit();
+    // Use version tag if available, otherwise use main branch
+    const ref = connectVersion ? `v${connectVersion}` : 'main';
+
     try {
       const { data: fileContent } = await octokit.rest.repos.getContent({
         owner: GITHUB_OWNER,
         repo: GITHUB_REPO,
         path: CSV_PATH,
-        ref: GITHUB_REF,
+        ref: ref,
       });
       return Buffer.from(fileContent.content, 'base64').toString('utf8');
     } catch (error) {
-      console.error('Error fetching Redpanda Connect catalog from GitHub:', error);
+      console.error(`Error fetching Redpanda Connect catalog from GitHub (ref: ${ref}):`, error.message);
       return '';
     }
   }
