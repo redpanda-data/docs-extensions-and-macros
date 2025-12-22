@@ -5,13 +5,13 @@ on:
     branches: [main]
     paths:
       - 'tools/redpanda-connect/**'
-      - 'test/cgo-detection.test.js'
+      - '__tests__/tools/cgo-detection.test.js'
       - '.github/workflows/test-cgo-detection.yml'
   pull_request:
     branches: [main]
     paths:
       - 'tools/redpanda-connect/**'
-      - 'test/cgo-detection.test.js'
+      - '__tests__/tools/cgo-detection.test.js'
   workflow_dispatch:
 
 jobs:
@@ -33,7 +33,7 @@ jobs:
         run: npm ci
 
       - name: Run cgo detection test
-        run: node test/cgo-detection.test.js
+        run: node __tests__/tools/cgo-detection.test.js
 
       - name: Upload test artifacts on failure
         if: failure()

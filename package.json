@@ -28,7 +28,7 @@
     "test:mcp:integration": "jest __tests__/mcp/integration.test.js",
     "test:mcp:contract": "jest __tests__/mcp/cli-contract.test.js",
     "test:python": "./__tests__/tools/property-extractor/setup-and-test.sh",
-    "test:cgo": "node test/cgo-detection.test.js",
+    "test:cgo": "node __tests__/tools/cgo-detection.test.js",
     "test:all": "npm run test && npm run test:python && npm run test:cgo",
     "generate:cli-docs": "node tools/generate-cli-docs.js",
     "bundle:admin": "doc-tools generate bundle-openapi --surface admin",
