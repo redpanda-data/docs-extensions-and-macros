@@ -71,8 +71,8 @@ function getAntoraValue(keyPath) {
 
 /**
  * Safely sets a nested value in the Antora configuration, given a "dot path".
- * If the file or path does not exist, it will create intermediate objects as needed.
- * After setting the value, writes the updated YAML back to `antora.yml`.
+ * Uses surgical text replacement to preserve formatting, comments, and other content.
+ * Only works for asciidoc.attributes.* paths for now.
  *
  * @param {string} keyPath
  *   A dot-separated path to set (e.g. "asciidoc.attributes.latest-connect-version").
@@ -95,6 +95,57 @@ function setAntoraValue(keyPath, newValue) {
     console.error('Cannot update antora.yml or antora.yaml: file not found in project root.');
     return false;
   }
+
+  // For asciidoc.attributes.* paths, use surgical text replacement
+  if (keyPath.startsWith('asciidoc.attributes.')) {
+    const attributeName = keyPath.replace('asciidoc.attributes.', '');
+
+    try {
+      let fileContents = fs.readFileSync(antoraPath, 'utf8');
+
+      // Pattern to match the attribute line (handles various YAML formats)
+      // Matches: "  attribute-name: value" or "  attribute-name: 'value'" or "  attribute-name: \"value\""
+      const pattern = new RegExp(`^(\\s+${attributeName}:\\s*)(.*)$`, 'm');
+
+      // Format the new value (quote strings with special chars, leave numbers/booleans as-is)
+      let formattedValue = newValue;
+      if (typeof newValue === 'string') {
+        // Quote if it contains special characters or spaces
+        if (newValue.match(/[:\s#\[\]{},'"]|^[&*!|>@`]/) || newValue.startsWith('v')) {
+          formattedValue = `'${newValue}'`;
+        }
+      }
+
+      if (pattern.test(fileContents)) {
+        // Attribute exists - replace its value
+        fileContents = fileContents.replace(pattern, `$1${formattedValue}`);
+      } else {
+        // Attribute doesn't exist - add it in the attributes section
+        // Find the attributes: section and add it there
+        const attributesPattern = /^(\s+)attributes:\s*$/m;
+        const match = fileContents.match(attributesPattern);
+        if (match) {
+          const indent = match[1] + '  '; // Two more spaces for attribute items
+          const newLine = `${indent}${attributeName}: ${formattedValue}\n`;
+          // Insert after the "attributes:" line
+          const insertPos = match.index + match[0].length;
+          fileContents = fileContents.slice(0, insertPos) + '\n' + newLine + fileContents.slice(insertPos + 1);
+        } else {
+          console.error(`Could not find "attributes:" section in ${path.basename(antoraPath)}`);
+          return false;
+        }
+      }
+
+      fs.writeFileSync(antoraPath, fileContents, 'utf8');
+      return true;
+    } catch (err) {
+      console.error(`Error updating ${path.basename(antoraPath)}: ${err.message}`);
+      return false;
+    }
+  }
+
+  // For non-attribute paths, fall back to full YAML rewrite (legacy behavior)
+  console.warn(`Warning: ${keyPath} uses full YAML rewrite which may affect formatting`);
 
   let config;
   try {

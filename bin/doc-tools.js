@@ -9,7 +9,6 @@ const { determineDocsBranch } = require('../cli-utils/self-managed-docs-branch.j
 const fetchFromGithub = require('../tools/fetch-from-github.js');
 const { urlToXref } = require('../cli-utils/convert-doc-links.js');
 const { generateRpcnConnectorDocs } = require('../tools/redpanda-connect/generate-rpcn-connector-docs.js');
-const parseCSVConnectors = require('../tools/redpanda-connect/parse-csv-connectors.js');
 const { getAntoraValue, setAntoraValue } = require('../cli-utils/antora-utils');
 const {
   getRpkConnectVersion,
@@ -35,7 +34,7 @@ function findRepoRoot(start = process.cwd()) {
     }
     dir = path.dirname(dir);
   }
-  console.error('❌ Could not find repo root (no .git or package.json in any parent)');
+  console.error('Error: Could not find repo root (no .git or package.json in any parent)');
   process.exit(1);
 }
 
@@ -48,7 +47,7 @@ function findRepoRoot(start = process.cwd()) {
  * @param {string} msg - The error message to display before exiting.
  */
 function fail(msg) {
-  console.error(`❌ ${msg}`);
+  console.error(`Error: ${msg}`);
   process.exit(1);
 }
 
@@ -456,7 +455,7 @@ programCli
     try {
       await require('../tools/get-redpanda-version.js')(options);
     } catch (err) {
-      console.error(`❌ ${err.message}`);
+      console.error(`Error: ${err.message}`);
       process.exit(1);
     }
   });
@@ -504,7 +503,7 @@ programCli
     try {
       await require('../tools/get-console-version.js')(options);
     } catch (err) {
-      console.error(`❌ ${err.message}`);
+      console.error(`Error: ${err.message}`);
       process.exit(1);
     }
   });
@@ -559,11 +558,11 @@ programCli
     const destLink = path.join(pagesDir, options.target);
 
     if (!fs.existsSync(projectDir)) {
-      console.error(`❌ Project directory not found: ${projectDir}`);
+      console.error(`Error: Project directory not found: ${projectDir}`);
       process.exit(1);
     }
     if (!fs.existsSync(sourceFile)) {
-      console.error(`❌ README.adoc not found in ${projectDir}`);
+      console.error(`Error: README.adoc not found in ${projectDir}`);
       process.exit(1);
     }
 
@@ -577,7 +576,7 @@ programCli
         else fail(`Destination already exists and is not a symlink: ${destLink}`);
       }
       fs.symlinkSync(relPath, destLink);
-      console.log(`✅ Linked ${relPath} → ${destLink}`);
+      console.log(`Done: Linked ${relPath} → ${destLink}`);
     } catch (err) {
       fail(`Failed to create symlink: ${err.message}`);
     }
@@ -643,9 +642,9 @@ programCli
         options.saveDir,
         options.filename
       );
-      console.log(`✅ Fetched to ${options.saveDir}`);
+      console.log(`Done: Fetched to ${options.saveDir}`);
     } catch (err) {
-      console.error(`❌ ${err.message}`);
+      console.error(`Error: ${err.message}`);
       process.exit(1);
     }
   });
@@ -718,11 +717,11 @@ programCli
         printNextSteps(result);
         process.exit(0);
       } else {
-        console.error(`❌ Setup failed: ${result.error}`);
+        console.error(`Error: Setup failed: ${result.error}`);
         process.exit(1);
       }
     } catch (err) {
-      console.error(`❌ ${err.message}`);
+      console.error(`Error: ${err.message}`);
       process.exit(1);
     }
   });
@@ -759,7 +758,7 @@ const commonOptions = {
 function runClusterDocs(mode, tag, options) {
   const script = path.join(__dirname, '../cli-utils/generate-cluster-docs.sh');
   const args = [mode, tag, options.dockerRepo, options.consoleTag, options.consoleDockerRepo];
-  console.log(`⏳ Running ${script} with arguments: ${args.join(' ')}`);
+  console.log(`Running ${script} with arguments: ${args.join(' ')}`);
   const r = spawnSync('bash', [script, ...args], { stdio: 'inherit' });
   if (r.status !== 0) process.exit(r.status);
 }
@@ -818,7 +817,7 @@ function cleanupOldDiffs(diffDir) {
  */
 function generatePropertyComparisonReport(oldTag, newTag, outputDir) {
   try {
-    console.log(`\n📊 Generating detailed property comparison report...`);
+    console.log(`\nGenerating detailed property comparison report...`);
 
   // Look for the property JSON files in the standard location (modules/reference/attachments)
   // regardless of where we're saving the diff output
@@ -829,13 +828,13 @@ function generatePropertyComparisonReport(oldTag, newTag, outputDir) {
     
     // Check if JSON files exist
     if (!fs.existsSync(oldJsonPath)) {
-      console.log(`⚠️  Old properties JSON not found at: ${oldJsonPath}`);
+      console.log(`Warning: Old properties JSON not found at: ${oldJsonPath}`);
       console.log(`   Skipping detailed property comparison.`);
       return;
     }
     
     if (!fs.existsSync(newJsonPath)) {
-      console.log(`⚠️  New properties JSON not found at: ${newJsonPath}`);
+      console.log(`Warning: New properties JSON not found at: ${newJsonPath}`);
       console.log(`   Skipping detailed property comparison.`);
       return;
     }
@@ -857,14 +856,102 @@ function generatePropertyComparisonReport(oldTag, newTag, outputDir) {
     });
     
     if (result.error) {
-      console.error(`❌ Property comparison failed: ${result.error.message}`);
+      console.error(`Error: Property comparison failed: ${result.error.message}`);
     } else if (result.status !== 0) {
-      console.error(`❌ Property comparison exited with code: ${result.status}`);
+      console.error(`Error: Property comparison exited with code: ${result.status}`);
     } else {
-      console.log(`✅ Property comparison report saved to: ${reportPath}`);
+      console.log(`Done: Property comparison report saved to: ${reportPath}`);
     }
   } catch (error) {
-    console.error(`❌ Error generating property comparison: ${error.message}`);
+    console.error(`Error: Error generating property comparison: ${error.message}`);
+  }
+}
+
+/**
+ * Update property overrides file with version information for new properties
+ *
+ * For each new property in the diff, this function:
+ * - Creates a new override entry if it doesn't exist
+ * - Adds/updates the "version" field with the current version tag
+ * - Preserves any existing override data (description, etc.)
+ *
+ * @param {string} overridesPath - Path to property-overrides.json file
+ * @param {object} diffData - Diff data from property comparison
+ * @param {string} newTag - Version tag for new properties (e.g., "v25.3.3")
+ */
+function updatePropertyOverridesWithVersion(overridesPath, diffData, newTag) {
+  try {
+    console.log('\nUpdating property overrides with version information...');
+
+    // Load existing overrides
+    let overridesRoot = { properties: {} };
+    if (fs.existsSync(overridesPath)) {
+      const overridesContent = fs.readFileSync(overridesPath, 'utf8');
+      overridesRoot = JSON.parse(overridesContent);
+
+      // Ensure properties key exists
+      if (!overridesRoot.properties) {
+        overridesRoot.properties = {};
+      }
+    }
+
+    const overrides = overridesRoot.properties;
+
+    // Get list of new properties from diff
+    const newProperties = diffData.details?.newProperties || [];
+
+    if (newProperties.length === 0) {
+      console.log('   No new properties to update');
+      return;
+    }
+
+    let updatedCount = 0;
+    let createdCount = 0;
+
+    // Update or create override entries for new properties
+    newProperties.forEach(prop => {
+      const propertyName = prop.name;
+
+      if (overrides[propertyName]) {
+        // Entry exists - update version if not already set or different
+        if (overrides[propertyName].version !== newTag) {
+          overrides[propertyName].version = newTag;
+          updatedCount++;
+        }
+      } else {
+        // Entry doesn't exist - create new one with version
+        overrides[propertyName] = {
+          version: newTag
+        };
+        createdCount++;
+      }
+    });
+
+    // Save updated overrides back to file (sorted by property name)
+    const sortedOverrides = {};
+    Object.keys(overrides).sort().forEach(key => {
+      sortedOverrides[key] = overrides[key];
+    });
+
+    overridesRoot.properties = sortedOverrides;
+    fs.writeFileSync(overridesPath, JSON.stringify(overridesRoot, null, 2) + '\n', 'utf8');
+
+    if (updatedCount > 0 || createdCount > 0) {
+      console.log(`Done: Updated property overrides:`);
+      if (createdCount > 0) {
+        console.log(`   • Created ${createdCount} new override ${createdCount === 1 ? 'entry' : 'entries'}`);
+      }
+      if (updatedCount > 0) {
+        console.log(`   • Updated ${updatedCount} existing override ${updatedCount === 1 ? 'entry' : 'entries'}`);
+      }
+
+      // List the properties that were updated
+      newProperties.forEach(prop => {
+        console.log(`   • ${prop.name} → ${newTag}`);
+      });
+    }
+  } catch (error) {
+    console.error(`Warning: Failed to update property overrides: ${error.message}`);
   }
 }
 
@@ -894,11 +981,11 @@ function diffDirs(kind, oldTag, newTag, oldTempDir, newTempDir) {
   const diffDir = path.join('tmp', 'diffs', kind, `${oldTag}_to_${newTag}`);
 
   if (!fs.existsSync(oldTempDir)) {
-    console.error(`❌ Cannot diff: missing ${oldTempDir}`);
+    console.error(`Error: Cannot diff: missing ${oldTempDir}`);
     process.exit(1);
   }
   if (!fs.existsSync(newTempDir)) {
-    console.error(`❌ Cannot diff: missing ${newTempDir}`);
+    console.error(`Error: Cannot diff: missing ${newTempDir}`);
     process.exit(1);
   }
 
@@ -910,10 +997,10 @@ function diffDirs(kind, oldTag, newTag, oldTempDir, newTempDir) {
   const res = spawnSync(cmd, { stdio: 'inherit', shell: true });
 
   if (res.error) {
-    console.error(`❌ diff failed: ${res.error.message}`);
+    console.error(`Error: diff failed: ${res.error.message}`);
     process.exit(1);
   }
-  console.log(`✅ Wrote patch: ${patch}`);
+  console.log(`Done: Wrote patch: ${patch}`);
   
   // Safety guard: only clean up directories that are explicitly passed as temp directories
   // For backwards compatibility with autogenerated paths, don't clean up automatically
@@ -935,7 +1022,7 @@ function diffDirs(kind, oldTag, newTag, oldTempDir, newTempDir) {
           fs.rmSync(dirPath, { recursive: true, force: true });
           console.log(`🧹 Cleaned up temporary directory: ${dirPath}`);
         } catch (err) {
-          console.warn(`⚠️  Warning: Could not clean up directory ${dirPath}: ${err.message}`);
+          console.warn(`Warning: Warning: Could not clean up directory ${dirPath}: ${err.message}`);
         }
       } else {
         console.log(`ℹ️  Skipping cleanup of directory outside tmp/: ${dirPath}`);
@@ -1013,7 +1100,7 @@ automation
 
     // Validate that tag and branch are mutually exclusive
     if (options.tag && options.branch) {
-      console.error('❌ Error: Cannot specify both --tag and --branch');
+      console.error('Error: Error: Cannot specify both --tag and --branch');
       process.exit(1);
     }
 
@@ -1024,12 +1111,12 @@ automation
     if (oldTag) {
       const oldDir = path.join('autogenerated', oldTag, 'metrics');
       if (!fs.existsSync(oldDir)) {
-        console.log(`⏳ Generating metrics docs for old tag ${oldTag}…`);
+        console.log(`Generating metrics docs for old tag ${oldTag}…`);
         runClusterDocs('metrics', oldTag, options);
       }
     }
 
-    console.log(`⏳ Generating metrics docs for new tag ${newTag}…`);
+    console.log(`Generating metrics docs for new tag ${newTag}…`);
     runClusterDocs('metrics', newTag, options);
 
     if (oldTag) {
@@ -1066,10 +1153,6 @@ automation
  * # Include Bloblang function documentation
  * npx doc-tools generate rpcn-connector-docs --include-bloblang
  *
- * # Generate with custom metadata CSV
- * npx doc-tools generate rpcn-connector-docs \\
- *   --csv custom/connector-metadata.csv
- *
  * # Full workflow with diff and what's new update
  * npx doc-tools generate rpcn-connector-docs \\
  *   --update-whats-new \\
@@ -1088,8 +1171,8 @@ automation
   .option('--old-data <path>', 'Optional override for old data file (for diff)')
   .option('--update-whats-new', 'Update whats-new.adoc with new section from diff JSON')
   .option('-f, --fetch-connectors', 'Fetch latest connector data using rpk')
+  .option('--connect-version <version>', 'Connect version to fetch (requires --fetch-connectors, for example 4.73.0)')
   .option('-m, --draft-missing', 'Generate full-doc drafts for connectors missing in output')
-  .option('--csv <path>', 'Path to connector metadata CSV file', 'internal/plugins/info.csv')
   .option('--template-main <path>', 'Main Handlebars template', path.resolve(__dirname, '../tools/redpanda-connect/templates/connector.hbs'))
   .option('--template-intro <path>', 'Intro section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/intro.hbs'))
   .option('--template-fields <path>', 'Fields section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/fields-partials.hbs'))
@@ -1097,6 +1180,8 @@ automation
   .option('--template-bloblang <path>', 'Custom Handlebars template for bloblang function/method partials')
   .option('--overrides <path>', 'Optional JSON file with overrides', 'docs-data/overrides.json')
   .option('--include-bloblang', 'Include Bloblang functions and methods in generation')
+  .option('--cloud-version <version>', 'Cloud binary version (default: auto-detect latest)')
+  .option('--cgo-version <version>', 'cgo binary version (default: same as cloud-version)')
   .action(async (options) => {
     requireTool('rpk', {
       versionFlag: '--version',
@@ -1115,9 +1200,32 @@ automation
 
     let newVersion;
     let dataFile;
+    let binaryAnalysis = null;
+    let draftsWritten = 0;
+    let draftFiles = [];
+    let needsAugmentation = false; // Flag to augment data with cloud/cgo fields after binary analysis
+
     if (options.fetchConnectors) {
       try {
-        newVersion = getRpkConnectVersion();
+        // Install specific version if requested
+        if (options.connectVersion) {
+          console.log(`Installing Redpanda Connect version ${options.connectVersion}...`);
+          const installResult = spawnSync('rpk', ['connect', 'install', '--connect-version', options.connectVersion, '--force'], {
+            stdio: 'inherit'
+          });
+          if (installResult.status !== 0) {
+            throw new Error(`Failed to install Connect version ${options.connectVersion}`);
+          }
+          console.log(`Done: Installed Redpanda Connect version ${options.connectVersion}`);
+          // Use the specified version directly instead of calling getRpkConnectVersion
+          // (which would run 'rpk connect upgrade' and override our install)
+          newVersion = options.connectVersion;
+        } else {
+          // Only call getRpkConnectVersion (which upgrades) if no specific version requested
+          newVersion = getRpkConnectVersion();
+        }
+        console.log(`Fetching connector data from Connect ${newVersion}...`);
+
         const tmpFile = path.join(dataDir, `connect-${newVersion}.tmp.json`);
         const finalFile = path.join(dataDir, `connect-${newVersion}.json`);
 
@@ -1130,27 +1238,89 @@ automation
         fs.writeFileSync(finalFile, JSON.stringify(parsed, null, 2));
         fs.unlinkSync(tmpFile);
         dataFile = finalFile;
-        console.log(`✅ Fetched and saved: ${finalFile}`);
+        needsAugmentation = true; // Will augment after binary analysis
+        console.log(`Done: Fetched connector data for version ${newVersion}`);
 
-        // Keep only 2 most recent versions in docs-data
-        const dataFiles = fs.readdirSync(dataDir)
-          .filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
-          .sort();
+        // Fetch and save info.csv for this version
+        try {
+          console.log(`Fetching info.csv for Connect v${newVersion}...`);
+          const csvFile = path.join(dataDir, `connect-info-${newVersion}.csv`);
 
-        while (dataFiles.length > 2) {
-          const oldestFile = dataFiles.shift();
-          const oldestPath = path.join(dataDir, oldestFile);
-          fs.unlinkSync(oldestPath);
-          console.log(`🧹 Deleted old version from docs-data: ${oldestFile}`);
+          // Only fetch if we don't already have it
+          if (!fs.existsSync(csvFile)) {
+            await fetchFromGithub(
+              'redpanda-data',
+              'connect',
+              'internal/plugins/info.csv',
+              dataDir,
+              `connect-info-${newVersion}.csv`,
+              `v${newVersion}` // Use the version tag
+            );
+            console.log(`Done: Fetched info.csv for version ${newVersion}`);
+          } else {
+            console.log(`✓ CSV already exists: connect-info-${newVersion}.csv`);
+          }
+        } catch (csvErr) {
+          console.warn(`Warning: Failed to fetch info.csv: ${csvErr.message}`);
+          console.warn('  Continuing without CSV data. Extension will need to fetch dynamically.');
+        }
+
+        // Fetch and save Bloblang playground examples for this version
+        try {
+          console.log(`Fetching Bloblang playground examples for Connect v${newVersion}...`);
+          const examplesFile = path.join(dataDir, `bloblang-samples-${newVersion}.json`);
+
+          if (!fs.existsSync(examplesFile)) {
+            // Fetch the examples directory
+            const tempExamplesDir = path.join(dataDir, `temp-playground-${newVersion}`);
+            await fetchFromGithub(
+              'redpanda-data',
+              'connect',
+              'docs/guides/bloblang/playground',
+              tempExamplesDir,
+              null,
+              `v${newVersion}`
+            );
+
+            // Process YAML files into JSON
+            const yaml = require('js-yaml');
+            const bloblangSamples = {};
+            const files = fs.readdirSync(tempExamplesDir).filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
+
+            for (const file of files) {
+              try {
+                const content = fs.readFileSync(path.join(tempExamplesDir, file), 'utf8');
+                const parsed = yaml.load(content);
+                if (parsed.title && parsed.input && parsed.mapping) {
+                  bloblangSamples[file] = parsed;
+                }
+              } catch (err) {
+                console.warn(`Warning: Failed to parse ${file}: ${err.message}`);
+              }
+            }
+
+            // Save as JSON
+            fs.writeFileSync(examplesFile, JSON.stringify(bloblangSamples, null, 2));
+
+            // Clean up temp directory
+            fs.rmSync(tempExamplesDir, { recursive: true, force: true });
+
+            console.log(`Done: Fetched ${Object.keys(bloblangSamples).length} Bloblang examples`);
+          } else {
+            console.log(`✓ Bloblang samples already exist: bloblang-samples-${newVersion}.json`);
+          }
+        } catch (examplesErr) {
+          console.warn(`Warning: Failed to fetch Bloblang examples: ${examplesErr.message}`);
+          console.warn('  Continuing without Bloblang examples. Extension will need to fetch dynamically.');
         }
       } catch (err) {
-        console.error(`❌ Failed to fetch connectors: ${err.message}`);
+        console.error(`Error: Failed to fetch connectors: ${err.message}`);
         process.exit(1);
       }
     } else {
       const candidates = fs.readdirSync(dataDir).filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f));
       if (candidates.length === 0) {
-        console.error('❌ No connect-<version>.json found. Use --fetch-connectors.');
+        console.error('Error: No connect-<version>.json found. Use --fetch-connectors.');
         process.exit(1);
       }
       candidates.sort();
@@ -1158,8 +1328,8 @@ automation
       newVersion = candidates[candidates.length - 1].match(/connect-(\d+\.\d+\.\d+)\.json/)[1];
     }
 
-    console.log('⏳ Generating connector partials...');
-    let partialsWritten, partialFiles, draftsWritten, draftFiles;
+    console.log('Generating connector partials...');
+    let partialsWritten, partialFiles;
 
     try {
       const result = await generateRpcnConnectorDocs({
@@ -1176,118 +1346,51 @@ automation
       partialsWritten = result.partialsWritten;
       partialFiles    = result.partialFiles;
     } catch (err) {
-      console.error(`❌ Failed to generate partials: ${err.message}`);
+      console.error(`Error: Failed to generate partials: ${err.message}`);
       process.exit(1);
-    }
-
-    if (options.draftMissing) {
-      console.log('⏳ Drafting missing connectors…');
-      try {
-        const connectorList = await parseCSVConnectors(options.csv, console);
-        const validConnectors = connectorList.filter(r => r.name && r.type);
-
-        const roots = {
-          pages:   path.resolve(process.cwd(), 'modules/components/pages'),
-          partials:path.resolve(process.cwd(), 'modules/components/partials/components'),
-        };
-
-        // find any connector that has NO .adoc under pages/TYPEs or partials/TYPEs
-        const allMissing = validConnectors.filter(({ name, type }) => {
-          const relPath = path.join(`${type}s`, `${name}.adoc`);
-          const existsInAny = Object.values(roots).some(root =>
-            fs.existsSync(path.join(root, relPath))
-          );
-          return !existsInAny;
-        });
-
-        // still skip sql_driver
-        const missingConnectors = allMissing.filter(c => !c.name.includes('sql_driver'));
-
-        if (missingConnectors.length === 0) {
-          console.log('✅ All connectors (excluding sql_drivers) already have docs—nothing to draft.');
-        } else {
-          console.log(`⏳ Docs missing for ${missingConnectors.length} connectors:`);
-          missingConnectors.forEach(({ name, type }) => {
-            console.log(`   • ${type}/${name}`);
-          });
-          console.log('');
-
-          // build your filtered JSON as before…
-          const rawData = fs.readFileSync(dataFile, 'utf8');
-          const dataObj = JSON.parse(rawData);
-          const filteredDataObj = {};
-
-          for (const [key, arr] of Object.entries(dataObj)) {
-            if (!Array.isArray(arr)) {
-              filteredDataObj[key] = arr;
-              continue;
-            }
-            filteredDataObj[key] = arr.filter(component =>
-              missingConnectors.some(
-                m => m.name === component.name && `${m.type}s` === key
-              )
-            );
-          }
-
-          const tempDataPath = path.join(dataDir, '._filtered_connect_data.json');
-          fs.writeFileSync(tempDataPath, JSON.stringify(filteredDataObj, null, 2), 'utf8');
-
-          const draftResult = await generateRpcnConnectorDocs({
-            data:            tempDataPath,
-            overrides:       options.overrides,
-            template:        options.templateMain,
-            templateFields:  options.templateFields,
-            templateExamples:options.templateExamples,
-            templateIntro:   options.templateIntro,
-            writeFullDrafts: true
-          });
-
-          fs.unlinkSync(tempDataPath);
-          draftsWritten = draftResult.draftsWritten;
-          draftFiles   = draftResult.draftFiles;
-        }
-      } catch (err) {
-        console.error(`❌ Could not draft missing: ${err.message}`);
-        process.exit(1);
-      }
     }
 
     let oldIndex = {};
     let oldVersion = null;
     if (options.oldData && fs.existsSync(options.oldData)) {
+      // If --old-data is explicitly provided, use that
       oldIndex = JSON.parse(fs.readFileSync(options.oldData, 'utf8'));
       const m = options.oldData.match(/connect-([\d.]+)\.json$/);
       if (m) oldVersion = m[1];
     } else {
-      oldVersion = getAntoraValue('asciidoc.attributes.latest-connect-version');
-      if (oldVersion) {
-        const oldPath = path.join(dataDir, `connect-${oldVersion}.json`);
-        if (fs.existsSync(oldPath)) {
-          oldIndex = JSON.parse(fs.readFileSync(oldPath, 'utf8'));
+      // Find the previous version by looking at existing data files
+      // (excluding the one we just created/fetched)
+      const existingDataFiles = fs.readdirSync(dataDir)
+        .filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
+        .filter(f => f !== path.basename(dataFile)) // Exclude the new file
+        .sort();
+
+      if (existingDataFiles.length > 0) {
+        // Use the most recent existing file as oldVersion
+        const oldFile = existingDataFiles[existingDataFiles.length - 1];
+        oldVersion = oldFile.match(/connect-(\d+\.\d+\.\d+)\.json/)[1];
+        const oldPath = path.join(dataDir, oldFile);
+        oldIndex = JSON.parse(fs.readFileSync(oldPath, 'utf8'));
+        console.log(`📋 Using old version data: ${oldFile}`);
+      } else {
+        // Fallback to antora.yml if no previous data files exist
+        oldVersion = getAntoraValue('asciidoc.attributes.latest-connect-version');
+        if (oldVersion) {
+          const oldPath = path.join(dataDir, `connect-${oldVersion}.json`);
+          if (fs.existsSync(oldPath)) {
+            oldIndex = JSON.parse(fs.readFileSync(oldPath, 'utf8'));
+          }
         }
       }
     }
 
-    const newIndex = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    let newIndex = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
 
-    // Check if versions match - skip diff and updates if so
-    if (oldVersion && newVersion && oldVersion === newVersion) {
+    // Flag to track if we should skip diff/updates when versions match
+    const versionsMatch = oldVersion && newVersion && oldVersion === newVersion;
+    if (versionsMatch) {
       console.log(`\n✓ Already at version ${newVersion}`);
-      console.log('  No diff or version updates needed.\n');
-
-      console.log('📊 Generation Report:');
-      console.log(`   • Partial files: ${partialsWritten}`);
-      const fieldsPartials   = partialFiles.filter(fp => fp.includes('/fields/'));
-      const examplesPartials = partialFiles.filter(fp => fp.includes('/examples/'));
-
-      console.log(`   • Fields partials: ${fieldsPartials.length}`);
-      console.log(`   • Examples partials: ${examplesPartials.length}`);
-
-      if (options.draftMissing && draftsWritten) {
-        console.log(`   • Draft files: ${draftsWritten}`);
-      }
-
-      process.exit(0);
+      console.log('  Skipping diff generation, but will run binary analysis.\n');
     }
 
     // Publish merged version with overrides to modules/components/attachments
@@ -1322,28 +1425,501 @@ automation
         // Save merged version to modules/components/attachments
         const destFile = path.join(attachmentsRoot, `connect-${newVersion}.json`);
         fs.writeFileSync(destFile, JSON.stringify(mergedData, null, 2), 'utf8');
-        console.log(`✅ Published merged version to: ${path.relative(process.cwd(), destFile)}`);
+        console.log(`Done: Published merged version to: ${path.relative(process.cwd(), destFile)}`);
       } catch (err) {
-        console.error(`❌ Failed to publish merged version: ${err.message}`);
+        console.error(`Error: Failed to publish merged version: ${err.message}`);
       }
     }
 
     printDeltaReport(oldIndex, newIndex);
 
-    // Generate JSON diff file for whats-new.adoc
-    const { generateConnectorDiffJson } = require('../tools/redpanda-connect/report-delta.js');
-    const diffJson = generateConnectorDiffJson(
-      oldIndex,
-      newIndex,
-      {
-        oldVersion: oldVersion || '',
-        newVersion,
-        timestamp
+    // Binary analysis (Cloud + cgo) - always run to include in diff
+    let oldBinaryAnalysis = null;
+
+    // Try to load old binary analysis from previous diff file or standalone file
+    // Look for any diff file where oldVersion is the "to" version
+    if (oldVersion) {
+      // First, try standalone binary analysis file
+      const standalonePath = path.join(dataDir, `binary-analysis-${oldVersion}.json`);
+      if (fs.existsSync(standalonePath)) {
+        try {
+          oldBinaryAnalysis = JSON.parse(fs.readFileSync(standalonePath, 'utf8'));
+          console.log(`✓ Loaded old binary analysis from: binary-analysis-${oldVersion}.json`);
+        } catch (err) {
+          console.warn(`Warning: Failed to load ${standalonePath}: ${err.message}`);
+        }
       }
-    );
-    const diffPath = path.join(dataDir, `connect-diff-${(oldVersion || 'unknown')}_to_${newVersion}.json`);
-    fs.writeFileSync(diffPath, JSON.stringify(diffJson, null, 2), 'utf8');
-    console.log(`✅ Connector diff JSON written to: ${diffPath}`);
+
+      // If not found, try diff files
+      if (!oldBinaryAnalysis) {
+        const diffFiles = fs.readdirSync(dataDir)
+          .filter(f => f.startsWith('connect-diff-') && f.endsWith(`_to_${oldVersion}.json`))
+          .sort()
+          .reverse(); // Most recent first
+
+        for (const file of diffFiles) {
+          const diffPath = path.join(dataDir, file);
+          try {
+            const oldDiff = JSON.parse(fs.readFileSync(diffPath, 'utf8'));
+            if (oldDiff.binaryAnalysis) {
+              // Convert old format to new format for comparison
+              oldBinaryAnalysis = {
+                comparison: {
+                  inCloud: oldDiff.binaryAnalysis.details?.cloudSupported || [],
+                  notInCloud: oldDiff.binaryAnalysis.details?.selfHostedOnly || []
+                },
+                cgoOnly: oldDiff.binaryAnalysis.details?.cgoOnly || []
+              };
+              console.log(`✓ Loaded old binary analysis from: ${file}`);
+              break;
+            }
+          } catch (err) {
+            // Continue to next file
+          }
+        }
+      }
+    }
+
+    // Always run binary analysis
+    try {
+      console.log('\nAnalyzing connector binaries...');
+      const { analyzeAllBinaries } = require('../tools/redpanda-connect/connector-binary-analyzer.js');
+
+      const analysisOptions = {
+        skipCloud: false,
+        skipCgo: false,
+        cgoVersion: options.cgoVersion || null
+      };
+
+      binaryAnalysis = await analyzeAllBinaries(
+        newVersion,
+        options.cloudVersion || null,
+        dataDir,
+        analysisOptions
+      );
+
+      console.log(`Done: Binary analysis complete:`);
+      console.log(`   • OSS version: ${binaryAnalysis.ossVersion}`);
+
+      if (binaryAnalysis.cloudVersion) {
+        console.log(`   • Cloud version: ${binaryAnalysis.cloudVersion}`);
+      }
+
+      if (binaryAnalysis.comparison) {
+        console.log(`   • Connectors in cloud: ${binaryAnalysis.comparison.inCloud.length}`);
+        console.log(`   • Self-hosted only: ${binaryAnalysis.comparison.notInCloud.length}`);
+        if (binaryAnalysis.comparison.cloudOnly && binaryAnalysis.comparison.cloudOnly.length > 0) {
+          console.log(`   • Cloud-only connectors: ${binaryAnalysis.comparison.cloudOnly.length}`);
+        }
+      }
+
+      if (binaryAnalysis.cgoOnly && binaryAnalysis.cgoOnly.length > 0) {
+        console.log(`   • cgo-only connectors: ${binaryAnalysis.cgoOnly.length}`);
+      }
+    } catch (err) {
+      console.error(`Warning: Binary analysis failed: ${err.message}`);
+      console.error('   Continuing without binary analysis data...');
+    }
+
+    // Augment data file with cloud/cgo support fields
+    if (needsAugmentation && binaryAnalysis) {
+      try {
+        console.log('\nAugmenting connector data with cloud/cgo fields...');
+
+        // Load the data file
+        const connectorData = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+
+        // Build lookup sets for fast checking
+        const cloudSet = new Set(
+          (binaryAnalysis.comparison?.inCloud || []).map(c => `${c.type}:${c.name}`)
+        );
+        const cgoOnlySet = new Set(
+          (binaryAnalysis.cgoOnly || []).map(c => `${c.type}:${c.name}`)
+        );
+
+        let augmentedCount = 0;
+        let addedCgoCount = 0;
+        let addedCloudOnlyCount = 0;
+
+        // Augment each connector type
+        const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
+                                'buffers', 'metrics', 'scanners', 'tracers'];
+
+        for (const type of connectorTypes) {
+          if (!Array.isArray(connectorData[type])) {
+            connectorData[type] = [];
+          }
+
+          for (const connector of connectorData[type]) {
+            const key = `${type}:${connector.name}`;
+
+            // Add cloudSupported field
+            connector.cloudSupported = cloudSet.has(key);
+
+            // Add requiresCgo field
+            connector.requiresCgo = cgoOnlySet.has(key);
+
+            augmentedCount++;
+          }
+
+          // Add cgo-only connectors that aren't in OSS data
+          // Now includes full schema (fields, examples, etc.) from cgo binary
+          if (binaryAnalysis.cgoOnly) {
+            for (const cgoConn of binaryAnalysis.cgoOnly) {
+              if (cgoConn.type === type) {
+                // Check if already exists in OSS data
+                const exists = connectorData[type].some(c => c.name === cgoConn.name);
+                if (!exists) {
+                  // Add full cgo-only connector schema to data
+                  // This includes all fields, examples, and configuration
+                  connectorData[type].push({
+                    ...cgoConn,  // Spread all fields from cgo binary (config, examples, etc.)
+                    type: cgoConn.type.replace(/s$/, ''),  // Normalize type to singular
+                    cloudSupported: false,
+                    requiresCgo: true
+                  });
+                  addedCgoCount++;
+                }
+              }
+            }
+          }
+
+          // Add cloud-only connectors that aren't in OSS data
+          // Includes full schema (fields, examples, etc.) from cloud binary
+          if (binaryAnalysis.comparison?.cloudOnly) {
+            for (const cloudConn of binaryAnalysis.comparison.cloudOnly) {
+              if (cloudConn.type === type) {
+                // Check if already exists in OSS data or was added as cgo-only
+                const exists = connectorData[type].some(c => c.name === cloudConn.name);
+                if (!exists) {
+                  // Add full cloud-only connector schema to data
+                  // This includes all fields, examples, and configuration
+                  connectorData[type].push({
+                    ...cloudConn,  // Spread all fields from cloud binary (config, examples, etc.)
+                    type: cloudConn.type.replace(/s$/, ''),  // Normalize type to singular
+                    cloudSupported: true,
+                    requiresCgo: false,
+                    cloudOnly: true  // Mark as cloud-only for draft placement
+                  });
+                  addedCloudOnlyCount++;
+                }
+              }
+            }
+          }
+        }
+
+        // Save augmented data back to file
+        fs.writeFileSync(dataFile, JSON.stringify(connectorData, null, 2), 'utf8');
+        console.log(`Done: Augmented ${augmentedCount} connectors with cloud/cgo fields`);
+        if (addedCgoCount > 0) {
+          console.log(`   • Added ${addedCgoCount} cgo-only connector(s) to data file`);
+        }
+        if (addedCloudOnlyCount > 0) {
+          console.log(`   • Added ${addedCloudOnlyCount} cloud-only connector(s) to data file`);
+        }
+
+        // Keep only 2 most recent versions in docs-data
+        const dataFiles = fs.readdirSync(dataDir)
+          .filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
+          .sort();
+
+        while (dataFiles.length > 2) {
+          const oldestFile = dataFiles.shift();
+          const oldestPath = path.join(dataDir, oldestFile);
+          fs.unlinkSync(oldestPath);
+          console.log(`🧹 Deleted old version from docs-data: ${oldestFile}`);
+        }
+      } catch (err) {
+        console.error(`Warning: Failed to augment data file: ${err.message}`);
+        console.error('   Continuing with non-augmented data...');
+      }
+    }
+
+    // Note: Don't reload newIndex here - we'll add cgo components manually below
+    // to ensure they have proper summaries from the cgo binary
+
+    // Generate JSON diff file for whats-new.adoc (after binary analysis to include it)
+    let diffJson = null;
+    if (!oldVersion) {
+      console.warn(`Warning: Skipping diff generation: oldVersion not available`);
+      console.warn(`   To generate diffs, ensure 'latest-connect-version' is set in antora.yml or provide --old-data`);
+    } else if (versionsMatch) {
+      console.log(`⏭️  Skipping diff generation: versions match (${oldVersion} === ${newVersion})`);
+    } else {
+      const { generateConnectorDiffJson } = require('../tools/redpanda-connect/report-delta.js');
+      diffJson = generateConnectorDiffJson(
+        oldIndex,
+        newIndex,
+        {
+          oldVersion: oldVersion,
+          newVersion,
+          timestamp,
+          binaryAnalysis,
+          oldBinaryAnalysis
+        }
+      );
+
+      // Add new cgo-only components to newComponents
+      if (binaryAnalysis && binaryAnalysis.cgoOnly && binaryAnalysis.cgoOnly.length > 0) {
+        let newCgoComponents;
+
+        if (oldBinaryAnalysis) {
+          // Find cgo-only components that are new (compare against both old OSS and old cgo list)
+          const oldCgoSet = new Set((oldBinaryAnalysis.cgoOnly || []).map(c => `${c.type}:${c.name}`));
+          newCgoComponents = binaryAnalysis.cgoOnly.filter(cgoComp => {
+            const wasInOldOss = oldIndex[cgoComp.type]?.some(c => c.name === cgoComp.name);
+            const wasInOldCgo = oldCgoSet.has(`${cgoComp.type}:${cgoComp.name}`);
+            return !wasInOldOss && !wasInOldCgo;
+          });
+        } else {
+          // No old binary analysis - any cgo component not in old OSS data is considered new
+          newCgoComponents = binaryAnalysis.cgoOnly.filter(cgoComp => {
+            const wasInOldOss = oldIndex[cgoComp.type]?.some(c => c.name === cgoComp.name);
+            return !wasInOldOss;
+          });
+          if (newCgoComponents.length > 0) {
+            console.log(`   ℹ️  No old binary analysis found - treating ${newCgoComponents.length} cgo component(s) not in old OSS data as new`);
+          }
+        }
+
+        if (newCgoComponents && newCgoComponents.length > 0) {
+          console.log(`   • Found ${newCgoComponents.length} new cgo-only component(s)`);
+          newCgoComponents.forEach(cgoComp => {
+            const typeSingular = cgoComp.type.replace(/s$/, '');
+            diffJson.details.newComponents.push({
+              name: cgoComp.name,
+              type: typeSingular,
+              status: cgoComp.status || '',
+              version: '',
+              description: cgoComp.description || '',
+              summary: cgoComp.summary || ''
+            });
+          });
+        }
+      }
+
+      const diffPath = path.join(dataDir, `connect-diff-${oldVersion}_to_${newVersion}.json`);
+      fs.writeFileSync(diffPath, JSON.stringify(diffJson, null, 2), 'utf8');
+      console.log(`Done: Connector diff JSON written to: ${diffPath}`);
+      if (diffJson.binaryAnalysis) {
+        console.log(`   • Includes binary analysis: OSS ${diffJson.binaryAnalysis.versions.oss}, Cloud ${diffJson.binaryAnalysis.versions.cloud || 'N/A'}, cgo ${diffJson.binaryAnalysis.versions.cgo || 'N/A'}`);
+      }
+
+      // Delete all previous diff files to keep only the latest
+      try {
+        const diffFiles = fs.readdirSync(dataDir)
+          .filter(f => f.startsWith('connect-diff-') && f.endsWith('.json') && f !== path.basename(diffPath));
+
+        if (diffFiles.length > 0) {
+          console.log(`🧹 Cleaning up ${diffFiles.length} old diff file(s)...`);
+          diffFiles.forEach(f => {
+            const oldDiffPath = path.join(dataDir, f);
+            fs.unlinkSync(oldDiffPath);
+            console.log(`   • Deleted: ${f}`);
+          });
+        }
+      } catch (err) {
+        console.warn(`Warning: Failed to clean up old diff files: ${err.message}`);
+      }
+    }
+
+    // Draft missing connectors (must happen AFTER binary analysis to include cgo-only)
+    if (options.draftMissing) {
+      console.log('\nDrafting missing connectors…');
+      try {
+        // Get connector list from binary data instead of CSV
+        const rawData = fs.readFileSync(dataFile, 'utf8');
+        const dataObj = JSON.parse(rawData);
+
+        // Build list of all connectors from binary data (OSS + cgo-only)
+        const validConnectors = [];
+        ['inputs', 'outputs', 'processors', 'caches', 'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers'].forEach(type => {
+          if (Array.isArray(dataObj[type])) {
+            dataObj[type].forEach(connector => {
+              if (connector.name) {
+                validConnectors.push({
+                  name: connector.name,
+                  type: type.replace(/s$/, ''), // inputs -> input
+                  status: connector.status || connector.type || 'stable'
+                });
+              }
+            });
+          }
+        });
+
+        // Add cgo-only connectors (not in OSS binary)
+        if (binaryAnalysis && binaryAnalysis.cgoOnly) {
+          binaryAnalysis.cgoOnly.forEach(cgoConn => {
+            // Check if already in list (shouldn't be, but just in case)
+            const exists = validConnectors.some(c =>
+              c.name === cgoConn.name && c.type === cgoConn.type.replace(/s$/, '')
+            );
+            if (!exists) {
+              validConnectors.push({
+                name: cgoConn.name,
+                type: cgoConn.type.replace(/s$/, ''),
+                status: cgoConn.status || 'stable',
+                requiresCgo: true
+              });
+            }
+          });
+        }
+
+        // Add cloud-only connectors (not in OSS binary)
+        if (binaryAnalysis && binaryAnalysis.comparison?.cloudOnly) {
+          binaryAnalysis.comparison.cloudOnly.forEach(cloudConn => {
+            // Check if already in list
+            const exists = validConnectors.some(c =>
+              c.name === cloudConn.name && c.type === cloudConn.type.replace(/s$/, '')
+            );
+            if (!exists) {
+              validConnectors.push({
+                name: cloudConn.name,
+                type: cloudConn.type.replace(/s$/, ''),
+                status: cloudConn.status || 'stable',
+                cloudOnly: true
+              });
+            }
+          });
+        }
+
+        const roots = {
+          pages:   path.resolve(process.cwd(), 'modules/components/pages'),
+          partials:path.resolve(process.cwd(), 'modules/components/partials/components'),
+        };
+
+        // find any connector that has NO .adoc under pages/TYPEs or partials/TYPEs
+        const allMissing = validConnectors.filter(({ name, type }) => {
+          const relPath = path.join(`${type}s`, `${name}.adoc`);
+          const existsInAny = Object.values(roots).some(root =>
+            fs.existsSync(path.join(root, relPath))
+          );
+          return !existsInAny;
+        });
+
+        // skip sql_driver and deprecated connectors
+        const missingConnectors = allMissing.filter(c =>
+          !c.name.includes('sql_driver') &&
+          c.status !== 'deprecated'
+        );
+
+        if (missingConnectors.length === 0) {
+          console.log('Done: All connectors (excluding sql_drivers) already have docs—nothing to draft.');
+        } else {
+          console.log(`Docs missing for ${missingConnectors.length} connectors:`);
+          missingConnectors.forEach(({ name, type }) => {
+            console.log(`   • ${type}/${name}`);
+          });
+          console.log('');
+
+          // build filtered JSON with only missing connectors
+          const filteredDataObj = {};
+
+          for (const [key, arr] of Object.entries(dataObj)) {
+            if (!Array.isArray(arr)) {
+              filteredDataObj[key] = arr;
+              continue;
+            }
+            filteredDataObj[key] = arr.filter(component =>
+              missingConnectors.some(
+                m => m.name === component.name && `${m.type}s` === key
+              )
+            );
+          }
+
+          // Add cgo-only connectors if we have binary analysis data
+          const cgoMissing = missingConnectors.filter(m => m.requiresCgo);
+          if (cgoMissing.length > 0 && binaryAnalysis && binaryAnalysis.cgoIndex) {
+            console.log(`Fetching cgo-only connector schemas for drafting...`);
+            // Merge cgo-only connectors into filtered data
+            cgoMissing.forEach(cgo => {
+              const typeKey = `${cgo.type}s`;
+              if (binaryAnalysis.cgoIndex[typeKey]) {
+                const cgoConnector = binaryAnalysis.cgoIndex[typeKey].find(c => c.name === cgo.name);
+                if (cgoConnector) {
+                  if (!filteredDataObj[typeKey]) filteredDataObj[typeKey] = [];
+                  filteredDataObj[typeKey].push(cgoConnector);
+                  console.log(`   • Added cgo connector schema: ${cgo.type}/${cgo.name}`);
+                }
+              }
+            });
+          }
+
+          // Add cloud-only connectors if we have binary analysis data
+          const cloudMissing = missingConnectors.filter(m => m.cloudOnly);
+          if (cloudMissing.length > 0 && binaryAnalysis && binaryAnalysis.cloudIndex) {
+            console.log(`Fetching cloud-only connector schemas for drafting...`);
+            // Merge cloud-only connectors into filtered data
+            cloudMissing.forEach(cloud => {
+              const typeKey = `${cloud.type}s`;
+              if (binaryAnalysis.cloudIndex[typeKey]) {
+                const cloudConnector = binaryAnalysis.cloudIndex[typeKey].find(c => c.name === cloud.name);
+                if (cloudConnector) {
+                  if (!filteredDataObj[typeKey]) filteredDataObj[typeKey] = [];
+                  filteredDataObj[typeKey].push(cloudConnector);
+                  console.log(`   • Added cloud-only connector schema: ${cloud.type}/${cloud.name}`);
+                }
+              }
+            });
+          }
+
+          const tempDataPath = path.join(dataDir, '._filtered_connect_data.json');
+          fs.writeFileSync(tempDataPath, JSON.stringify(filteredDataObj, null, 2), 'utf8');
+
+          const draftResult = await generateRpcnConnectorDocs({
+            data:            tempDataPath,
+            overrides:       options.overrides,
+            template:        options.templateMain,
+            templateFields:  options.templateFields,
+            templateExamples:options.templateExamples,
+            templateIntro:   options.templateIntro,
+            writeFullDrafts: true,
+            cgoOnly:         binaryAnalysis?.cgoOnly || [],
+            cloudOnly:       binaryAnalysis?.comparison?.cloudOnly || []
+          });
+
+          fs.unlinkSync(tempDataPath);
+          draftsWritten = draftResult.draftsWritten;
+          draftFiles   = draftResult.draftFiles;
+        }
+      } catch (err) {
+        console.error(`Error: Could not draft missing: ${err.message}`);
+        process.exit(1);
+      }
+    }
+
+    // Update nav.adoc if drafts were generated
+    if (draftFiles && draftFiles.length > 0) {
+      try {
+        const { updateNavFromDrafts } = require('../tools/redpanda-connect/update-nav.js');
+        const navResult = updateNavFromDrafts(draftFiles);
+
+        if (navResult.updated > 0) {
+          console.log(`\nDone: Updated nav.adoc: added ${navResult.updated} connector${navResult.updated !== 1 ? 's' : ''}`);
+          navResult.updates.forEach(u => {
+            console.log(`   • ${u.type}/${u.name}`);
+          });
+        }
+
+        if (navResult.skippedCount > 0) {
+          console.log(`\nℹ️  Skipped ${navResult.skippedCount} connector${navResult.skippedCount !== 1 ? 's' : ''}:`);
+          navResult.skipped.forEach(s => {
+            console.log(`   • ${s.type}/${s.name} (${s.reason})`);
+          });
+        }
+      } catch (err) {
+        console.error(`Warning: Failed to update nav.adoc: ${err.message}`);
+        console.error('   You may need to manually add the connectors to nav.adoc');
+      }
+    }
+
+    // Generate PR-friendly summary
+    try {
+      const { printPRSummary } = require('../tools/redpanda-connect/pr-summary-formatter.js');
+      printPRSummary(diffJson, binaryAnalysis, draftFiles);
+    } catch (err) {
+      console.error(`Warning: Failed to generate PR summary: ${err.message}`);
+    }
 
     function logCollapsed(label, filesArray, maxToShow = 10) {
       console.log(`  • ${label}: ${filesArray.length} total`);
@@ -1358,10 +1934,10 @@ automation
 
     const wrote = setAntoraValue('asciidoc.attributes.latest-connect-version', newVersion);
     if (wrote) {
-      console.log(`✅ Updated Antora version: ${newVersion}`);
+      console.log(`Done: Updated Antora version: ${newVersion}`);
     }
 
-    console.log('📊 Generation Report:');
+    console.log('Generation Report:');
     console.log(`   • Partial files: ${partialsWritten}`);
     // Split “partials” into fields vs examples by checking the path substring.
     const fieldsPartials   = partialFiles.filter(fp => fp.includes('/fields/'));
@@ -1373,11 +1949,19 @@ automation
 
     if (options.draftMissing) {
       console.log(`   • Full drafts:   ${draftsWritten}`);
-      logCollapsed('Draft files', draftFiles, 5);
+      // Extract paths from draft file objects
+      const draftFilePaths = draftFiles.map(df => typeof df === 'string' ? df : df.path);
+      logCollapsed('Draft files', draftFilePaths, 5);
     }
 
     // Optionally update whats-new.adoc
     if (options.updateWhatsNew) {
+      if (!oldVersion) {
+        console.warn(`Warning: Skipping whats-new update: oldVersion not available`);
+        console.warn(`   To update whats-new, ensure 'latest-connect-version' is set in antora.yml or provide --old-data`);
+        return;
+      }
+
       // Helper function to cap description to two sentences
       const capToTwoSentences = (description) => {
         if (!description) return '';
@@ -1468,27 +2052,27 @@ automation
       try {
         const whatsNewPath = path.join(findRepoRoot(), 'modules/get-started/pages/whats-new.adoc');
         if (!fs.existsSync(whatsNewPath)) {
-          console.error(`❌ Unable to update release notes: 'whats-new.adoc' was not found at: ${whatsNewPath}\nPlease ensure this file exists and is tracked in your repository.`);
+          console.error(`Error: Unable to update release notes: 'whats-new.adoc' was not found at: ${whatsNewPath}\nPlease ensure this file exists and is tracked in your repository.`);
           return;
         }
         // Find the diff JSON file we just wrote
-        const diffPath = path.join(dataDir, `connect-diff-${(oldVersion || 'unknown')}_to_${newVersion}.json`);
+        const diffPath = path.join(dataDir, `connect-diff-${oldVersion}_to_${newVersion}.json`);
         if (!fs.existsSync(diffPath)) {
-          console.error(`❌ Unable to update release notes: The connector diff JSON was not found at: ${diffPath}\nPlease ensure the diff was generated successfully before updating release notes.`);
+          console.error(`Error: Unable to update release notes: The connector diff JSON was not found at: ${diffPath}\nPlease ensure the diff was generated successfully before updating release notes.`);
           return;
         }
         let diff;
         try {
           diff = JSON.parse(fs.readFileSync(diffPath, 'utf8'));
         } catch (jsonErr) {
-          console.error(`❌ Unable to parse connector diff JSON at ${diffPath}: ${jsonErr.message}\nPlease check the file for syntax errors or corruption.`);
+          console.error(`Error: Unable to parse connector diff JSON at ${diffPath}: ${jsonErr.message}\nPlease check the file for syntax errors or corruption.`);
           return;
         }
         let whatsNewContent;
         try {
           whatsNewContent = fs.readFileSync(whatsNewPath, 'utf8');
         } catch (readErr) {
-          console.error(`❌ Unable to read whats-new.adoc at ${whatsNewPath}: ${readErr.message}\nPlease check file permissions and try again.`);
+          console.error(`Error: Unable to read whats-new.adoc at ${whatsNewPath}: ${readErr.message}\nPlease check file permissions and try again.`);
           return;
         }
   const whatsNew = whatsNewContent;
@@ -1512,7 +2096,7 @@ automation
         }
         let section = `\n== Version ${diff.comparison.newVersion}\n\n${releaseNotesLink}`;
 
-        // Separate Bloblang components from regular components
+        // Separate Bloblang and regular components
         const bloblangComponents = [];
         const regularComponents = [];
 
@@ -1521,7 +2105,16 @@ automation
             if (comp.type === 'bloblang-functions' || comp.type === 'bloblang-methods') {
               bloblangComponents.push(comp);
             } else {
-              regularComponents.push(comp);
+              // Check if this component is cgo-only and mark it
+              const isCgoOnly = binaryAnalysis?.cgoOnly?.some(cgo => {
+                const typeSingular = cgo.type.replace(/s$/, '');
+                return cgo.name === comp.name && typeSingular === comp.type;
+              });
+
+              regularComponents.push({
+                ...comp,
+                requiresCgo: isCgoOnly
+              });
             }
           }
         }
@@ -1544,7 +2137,11 @@ automation
               for (const comp of comps) {
                 section += `** xref:guides:bloblang/functions.adoc#${comp.name}[\`${comp.name}\`]`;
                 if (comp.status && comp.status !== 'stable') section += ` (${comp.status})`;
-                if (comp.description) section += `: ${capToTwoSentences(comp.description)}`;
+                if (comp.description) {
+                  section += `: ${capToTwoSentences(comp.description)}`;
+                } else {
+                  section += `\n+\n// TODO: Add description for ${comp.name} function`;
+                }
                 section += '\n';
               }
             } else if (type === 'bloblang-methods') {
@@ -1552,7 +2149,11 @@ automation
               for (const comp of comps) {
                 section += `** xref:guides:bloblang/methods.adoc#${comp.name}[\`${comp.name}\`]`;
                 if (comp.status && comp.status !== 'stable') section += ` (${comp.status})`;
-                if (comp.description) section += `: ${capToTwoSentences(comp.description)}`;
+                if (comp.description) {
+                  section += `: ${capToTwoSentences(comp.description)}`;
+                } else {
+                  section += `\n+\n// TODO: Add description for ${comp.name} method`;
+                }
                 section += '\n';
               }
             }
@@ -1560,7 +2161,7 @@ automation
           section += '\n';
         }
 
-        // Regular component updates section
+        // Component updates section (includes both regular and cgo-only)
         if (regularComponents.length > 0) {
           section += '=== Component updates\n\n';
           section += 'This release adds the following new components:\n\n';
@@ -1572,9 +2173,18 @@ automation
           for (const comp of regularComponents) {
             const typeLabel = comp.type.charAt(0).toUpperCase() + comp.type.slice(1);
             const statusLabel = comp.status || '-';
-            const desc = comp.description ? capToTwoSentences(comp.description) : '-';
+            // Prefer summary (short, use-case focused) over full description for whats-new
+            let desc = comp.summary || (comp.description ? capToTwoSentences(comp.description) : '// TODO: Add description');
 
-            section += `|xref:components:${comp.type}/${comp.name}.adoc[${comp.name}]\n`;
+            // Add cgo note if this component requires cgo
+            if (comp.requiresCgo) {
+              const cgoNote = '\nNOTE: Requires a cgo-enabled binary. See the xref:install:index.adoc[installation guides] for details.';
+              desc = desc.startsWith('// TODO') ? cgoNote : `${desc}\n\n${cgoNote}`;
+            }
+
+            // Pluralize type for xref path (input -> inputs, output -> outputs, etc.)
+            const typePlural = comp.type.endsWith('s') ? comp.type : `${comp.type}s`;
+            section += `|xref:components:${typePlural}/${comp.name}.adoc[${comp.name}]\n`;
             section += `|${typeLabel}\n`;
             section += `|${statusLabel}\n`;
             section += `|${desc}\n\n`;
@@ -1635,7 +2245,7 @@ automation
                 });
               }
 
-              const desc = info.description ? capToTwoSentences(info.description) : '-';
+              const desc = info.description ? capToTwoSentences(info.description) : '// TODO: Add description';
 
               section += `|${fieldName}\n`;
               section += `|${desc}\n`;
@@ -1790,7 +2400,7 @@ automation
               const newVal = formatDefault(info.newDefault);
 
               // Get description
-              const desc = info.description ? capToTwoSentences(info.description) : '-';
+              const desc = info.description ? capToTwoSentences(info.description) : '// TODO: Add description';
 
               // Format component references - group by type
               const byType = {};
@@ -1827,22 +2437,28 @@ automation
           }
         }
 
-        let updated;
+        // Remove existing section if it exists (to avoid duplicates)
+        let contentWithoutOldSection = whatsNew;
         if (startIdx !== -1) {
-          // Replace the existing section
-          updated = whatsNew.slice(0, startIdx) + section + '\n' + whatsNew.slice(endIdx);
+          contentWithoutOldSection = whatsNew.slice(0, startIdx) + whatsNew.slice(endIdx);
+        }
+
+        // Always insert at the top (before first version heading)
+        const versionHeading = /^== Version /m;
+        const firstMatch = versionHeading.exec(contentWithoutOldSection);
+        let insertIdx = firstMatch ? firstMatch.index : contentWithoutOldSection.length;
+
+        const updated = contentWithoutOldSection.slice(0, insertIdx) + section + '\n' + contentWithoutOldSection.slice(insertIdx);
+
+        if (startIdx !== -1) {
           console.log(`♻️  whats-new.adoc: replaced section for Version ${diff.comparison.newVersion}`);
         } else {
-          // Insert above first version heading
-          const versionHeading = /^== Version /m;
-          const firstMatch = versionHeading.exec(whatsNew);
-          let insertIdx = firstMatch ? firstMatch.index : 0;
-          updated = whatsNew.slice(0, insertIdx) + section + '\n' + whatsNew.slice(insertIdx);
-          console.log(`✅ whats-new.adoc updated with Version ${diff.comparison.newVersion}`);
+          console.log(`Done: whats-new.adoc updated with Version ${diff.comparison.newVersion}`);
         }
+
         fs.writeFileSync(whatsNewPath, updated, 'utf8');
       } catch (err) {
-        console.error(`❌ Failed to update whats-new.adoc: ${err.message}`);
+        console.error(`Error: Failed to update whats-new.adoc: ${err.message}`);
       }
     }
 
@@ -1919,7 +2535,7 @@ automation
   .option('--diff <oldTag>', 'Also diff autogenerated properties from <oldTag> to current tag/branch')
   .option('--overrides <path>', 'Optional JSON file with property description overrides', 'docs-data/property-overrides.json')
   .option('--output-dir <dir>', 'Where to write all generated files', 'modules/reference')
-  .option('--cloud-support', 'Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. Set the token as an environment variable using GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN')
+  .option('--cloud-support', 'Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. Set the token as an environment variable using GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN. Enabled by default. Use --no-cloud-support to disable.', true)
   .option('--template-property <path>', 'Custom Handlebars template for individual property sections')
   .option('--template-topic-property <path>', 'Custom Handlebars template for individual topic property sections')
   .option('--template-topic-property-mappings <path>', 'Custom Handlebars template for topic property mappings table')
@@ -1932,34 +2548,37 @@ automation
 
     // Validate that tag and branch are mutually exclusive
     if (options.tag && options.branch) {
-      console.error('❌ Error: Cannot specify both --tag and --branch');
+      console.error('Error: Error: Cannot specify both --tag and --branch');
       process.exit(1);
     }
 
     // Default to 'dev' branch if neither specified
     const newTag = options.tag || options.branch || 'dev';
 
-    // Validate cloud support dependencies if requested
+    // Validate cloud support dependencies (enabled by default)
     if (options.cloudSupport) {
-      console.log('🔍 Validating cloud support dependencies...');
+      console.log('Validating cloud support dependencies...');
       const { getGitHubToken } = require('../cli-utils/github-token');
       const token = getGitHubToken();
       if (!token) {
-        console.error('❌ Cloud support requires a GitHub token');
+        console.error('Error: Cloud support requires a GitHub token');
         console.error('   Set up GitHub token:');
         console.error('   1. Go to https://github.com/settings/tokens');
         console.error('   2. Generate token with "repo" scope');
         console.error('   3. Set: export GITHUB_TOKEN=your_token_here');
         console.error('   Or: export GH_TOKEN=your_token_here');
         console.error('   Or: export REDPANDA_GITHUB_TOKEN=your_token_here');
+        console.error('   Or disable cloud support with: --no-cloud-support');
         process.exit(1);
       }
-      console.log('📦 Cloud support enabled - Python dependencies will be validated during execution');
+      console.log('Cloud support enabled - Python dependencies will be validated during execution');
       if (process.env.VIRTUAL_ENV) {
         console.log(`   Using virtual environment: ${process.env.VIRTUAL_ENV}`);
       }
       console.log('   Required packages: pyyaml, requests');
-      console.log('✅ GitHub token validated');
+      console.log('Done: GitHub token validated');
+    } else {
+      console.log('Warning: Cloud support disabled - property docs will not include cloud availability metadata');
     }
     let oldTag = options.diff;
     const overridesPath = options.overrides;
@@ -1977,7 +2596,7 @@ automation
     }
 
     const make = (tag, overrides, templates = {}, outDir = 'modules/reference/') => {
-      console.log(`⏳ Building property docs for ${tag}…`);
+      console.log(`Building property docs for ${tag}…`);
       const args = ['build', `TAG=${tag}`];
       const env = { ...process.env };
       if (overrides) {
@@ -2009,7 +2628,7 @@ automation
       }
       const r = spawnSync('make', args, { cwd, stdio: 'inherit', env });
       if (r.error) {
-        console.error(`❌ ${r.error.message}`);
+        console.error(`Error: ${r.error.message}`);
         process.exit(1);
       }
       if (r.status !== 0) process.exit(r.status);
@@ -2033,6 +2652,23 @@ automation
       const diffOutputDir = overridesPath ? path.dirname(path.resolve(overridesPath)) : outputDir;
       generatePropertyComparisonReport(oldTag, newTag, diffOutputDir);
 
+      // Print PR summary from the diff report
+      try {
+        const diffReportPath = path.join(diffOutputDir, `redpanda-property-changes-${oldTag}-to-${newTag}.json`);
+        if (fs.existsSync(diffReportPath)) {
+          const diffData = JSON.parse(fs.readFileSync(diffReportPath, 'utf8'));
+          const { printPRSummary } = require('../tools/property-extractor/pr-summary-formatter');
+          printPRSummary(diffData);
+
+          // Update overrides file with version information for new properties
+          if (overridesPath && fs.existsSync(overridesPath)) {
+            updatePropertyOverridesWithVersion(overridesPath, diffData, newTag);
+          }
+        }
+      } catch (err) {
+        console.warn(`Warning: Failed to generate PR summary: ${err.message}`);
+      }
+
       // Cleanup old diff files (keep only 2 most recent)
       cleanupOldDiffs(diffOutputDir);
     } else if (tagsAreSame) {
@@ -2041,9 +2677,40 @@ automation
 
     // If we used Antora's latest-redpanda-tag for diff, update it to the new tag
     if (!options.diff && !tagsAreSame) {
-      const success = setAntoraValue('asciidoc.attributes.latest-redpanda-tag', newTag);
-      if (success) {
-        console.log(`✅ Updated Antora latest-redpanda-tag to: ${newTag}`);
+      // Update latest-redpanda-tag (with 'v' prefix)
+      const tagSuccess = setAntoraValue('asciidoc.attributes.latest-redpanda-tag', newTag);
+      if (tagSuccess) {
+        console.log(`Done: Updated Antora latest-redpanda-tag to: ${newTag}`);
+      }
+
+      // Update full-version (without 'v' prefix)
+      const versionWithoutV = newTag.startsWith('v') ? newTag.slice(1) : newTag;
+      const versionSuccess = setAntoraValue('asciidoc.attributes.full-version', versionWithoutV);
+      if (versionSuccess) {
+        console.log(`Done: Updated Antora full-version to: ${versionWithoutV}`);
+      }
+
+      // Cleanup old property JSON files, keeping only the latest version
+      try {
+        const jsonDir = path.resolve(outputDir, 'attachments');
+        const propertyFiles = fs.readdirSync(jsonDir)
+          .filter(f => /^redpanda-properties-v[\d.]+\.json$/.test(f))
+          .sort();
+
+        // Keep only the file for newTag, delete all others
+        const keepFile = `redpanda-properties-${newTag}.json`;
+        const filesToDelete = propertyFiles.filter(f => f !== keepFile);
+
+        if (filesToDelete.length > 0) {
+          console.log('🧹 Cleaning up old property JSON files (keeping only latest version)…');
+          filesToDelete.forEach(file => {
+            const filePath = path.join(jsonDir, file);
+            fs.unlinkSync(filePath);
+            console.log(`   Deleted old version: ${file}`);
+          });
+        }
+      } catch (err) {
+        console.warn(`Warning: Failed to cleanup old property JSON files: ${err.message}`);
       }
     }
 
@@ -2116,7 +2783,7 @@ automation
 
     // Validate that tag and branch are mutually exclusive
     if (options.tag && options.branch) {
-      console.error('❌ Error: Cannot specify both --tag and --branch');
+      console.error('Error: Error: Cannot specify both --tag and --branch');
       process.exit(1);
     }
 
@@ -2127,12 +2794,12 @@ automation
     if (oldTag) {
       const oldDir = path.join('autogenerated', oldTag, 'rpk');
       if (!fs.existsSync(oldDir)) {
-        console.log(`⏳ Generating rpk docs for old tag ${oldTag}…`);
+        console.log(`Generating rpk docs for old tag ${oldTag}…`);
         runClusterDocs('rpk', oldTag, options);
       }
     }
 
-    console.log(`⏳ Generating rpk docs for new tag ${newTag}…`);
+    console.log(`Generating rpk docs for new tag ${newTag}…`);
     runClusterDocs('rpk', newTag, options);
 
     if (oldTag) {
@@ -2208,11 +2875,11 @@ automation
     if (/^https?:\/\/github\.com\//.test(root)) {
       // Validate tag/branch for GitHub URLs
       if (!opts.tag && !opts.branch) {
-        console.error('❌ When using a GitHub URL you must pass either --tag or --branch');
+        console.error('Error: When using a GitHub URL you must pass either --tag or --branch');
         process.exit(1);
       }
       if (opts.tag && opts.branch) {
-        console.error('❌ Cannot specify both --tag and --branch');
+        console.error('Error: Cannot specify both --tag and --branch');
         process.exit(1);
       }
 
@@ -2227,7 +2894,7 @@ automation
       const u = new URL(root);
       const parts = u.pathname.replace(/\.git$/, '').split('/').filter(Boolean);
       if (parts.length < 2) {
-        console.error(`❌ Invalid GitHub URL: ${root}`);
+        console.error(`Error: Invalid GitHub URL: ${root}`);
         process.exit(1);
       }
       const [owner, repo, ...sub] = parts;
@@ -2241,7 +2908,7 @@ automation
         }
       }
 
-      console.log(`⏳ Verifying ${repoUrl}@${gitRef}…`);
+      console.log(`Verifying ${repoUrl}@${gitRef}…`);
       const ok =
         spawnSync(
           'git',
@@ -2249,7 +2916,7 @@ automation
           { stdio: 'ignore' }
         ).status === 0;
       if (!ok) {
-        console.error(`❌ ${gitRef} not found on ${repoUrl}`);
+        console.error(`Error: ${gitRef} not found on ${repoUrl}`);
         process.exit(1);
       }
 
@@ -2261,9 +2928,9 @@ automation
       let cloneUrl = repoUrl;
       if (hasGitHubToken() && repoUrl.includes('github.com')) {
         cloneUrl = getAuthenticatedGitHubUrl(repoUrl);
-        console.log(`⏳ Cloning ${repoUrl}@${gitRef} → ${tmpClone} (authenticated)`);
+        console.log(`Cloning ${repoUrl}@${gitRef} → ${tmpClone} (authenticated)`);
       } else {
-        console.log(`⏳ Cloning ${repoUrl}@${gitRef} → ${tmpClone}`);
+        console.log(`Cloning ${repoUrl}@${gitRef} → ${tmpClone}`);
       }
 
       if (
@@ -2271,7 +2938,7 @@ automation
           stdio: 'inherit',
         }).status !== 0
       ) {
-        console.error('❌ git clone failed');
+        console.error('Error: git clone failed');
         process.exit(1);
       }
       root = sub.length ? path.join(tmpClone, sub.join('/')) : tmpClone;
@@ -2279,7 +2946,7 @@ automation
 
     // Discover charts
     if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
-      console.error(`❌ Chart root not found: ${root}`);
+      console.error(`Error: Chart root not found: ${root}`);
       process.exit(1);
     }
     let charts = [];
@@ -2292,7 +2959,7 @@ automation
         .filter((p) => fs.existsSync(path.join(p, 'Chart.yaml')));
     }
     if (charts.length === 0) {
-      console.error(`❌ No charts found under: ${root}`);
+      console.error(`Error: No charts found under: ${root}`);
       process.exit(1);
     }
 
@@ -2303,21 +2970,21 @@ automation
     // Process each chart
     for (const chartPath of charts) {
       const name = path.basename(chartPath);
-      console.log(`⏳ Processing chart "${name}"…`);
+      console.log(`Processing chart "${name}"…`);
 
       // Regenerate README.md
-      console.log(`⏳ helm-docs in ${chartPath}`);
+      console.log(`helm-docs in ${chartPath}`);
       let r = spawnSync('helm-docs', { cwd: chartPath, stdio: 'inherit' });
       if (r.status !== 0) process.exit(r.status);
 
       // Convert Markdown → AsciiDoc
       const md = path.join(chartPath, opts.readme);
       if (!fs.existsSync(md)) {
-        console.error(`❌ README not found: ${md}`);
+        console.error(`Error: README not found: ${md}`);
         process.exit(1);
       }
       const outFile = path.join(outDir, `k-${name}${opts.outputSuffix}`);
-      console.log(`⏳ pandoc ${md} → ${outFile}`);
+      console.log(`pandoc ${md} → ${outFile}`);
       fs.mkdirSync(path.dirname(outFile), { recursive: true });
       r = spawnSync('pandoc', [md, '-t', 'asciidoc', '-o', outFile], { stdio: 'inherit' });
       if (r.status !== 0) process.exit(r.status);
@@ -2352,7 +3019,7 @@ automation
         });
       fs.writeFileSync(outFile, doc, 'utf8');
 
-      console.log(`✅ Wrote ${outFile}`);
+      console.log(`Done: Wrote ${outFile}`);
     }
 
     // Cleanup
@@ -2446,17 +3113,17 @@ automation
       });
       if (options.dryRun) {
         process.stdout.write(out);
-        console.log(`\n✅ (dry-run) ${fmt === 'adoc' ? 'AsciiDoc' : 'Markdown'} output printed to stdout.`);
+        console.log(`\nDone: (dry-run) ${fmt === 'adoc' ? 'AsciiDoc' : 'Markdown'} output printed to stdout.`);
       } else {
         // Always resolve output relative to repo root
         const repoRoot = findRepoRoot();
         const absOutput = path.resolve(repoRoot, options.output);
         fs.mkdirSync(path.dirname(absOutput), { recursive: true });
         fs.writeFileSync(absOutput, out, 'utf8');
-        console.log(`✅ Wrote ${absOutput}`);
+        console.log(`Done: Wrote ${absOutput}`);
       }
     } catch (err) {
-      console.error(`❌ Failed to generate cloud regions: ${err.message}`);
+      console.error(`Error: Failed to generate cloud regions: ${err.message}`);
       process.exit(1);
     }
   });
@@ -2528,11 +3195,11 @@ automation
 
     // Validate that either --tag or --branch is provided (but not both)
     if (!opts.tag && !opts.branch) {
-      console.error('❌ Error: Either --tag or --branch must be specified');
+      console.error('Error: Error: Either --tag or --branch must be specified');
       process.exit(1);
     }
     if (opts.tag && opts.branch) {
-      console.error('❌ Error: Cannot specify both --tag and --branch');
+      console.error('Error: Error: Cannot specify both --tag and --branch');
       process.exit(1);
     }
 
@@ -2547,7 +3214,7 @@ automation
     }
 
     const configTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'crd-config-'));
-    console.log(`⏳ Fetching crd-ref-docs-config.yaml from redpanda-operator@${configRef}…`);
+    console.log(`Fetching crd-ref-docs-config.yaml from redpanda-operator@${configRef}…`);
     await fetchFromGithub(
       'redpanda-data',
       'redpanda-operator',
@@ -2571,16 +3238,16 @@ automation
     } else {
       try {
         docsBranch = await determineDocsBranch(configRef);
-        console.log(`✅ Detected docs repo; you should commit to branch '${docsBranch}'.`);
+        console.log(`Done: Detected docs repo; you should commit to branch '${docsBranch}'.`);
       } catch (err) {
-        console.error(`❌ Unable to determine docs branch: ${err.message}`);
+        console.error(`Error: Unable to determine docs branch: ${err.message}`);
         process.exit(1);
       }
     }
 
     // Validate templates
     if (!fs.existsSync(opts.templatesDir)) {
-      console.error(`❌ Templates directory not found: ${opts.templatesDir}`);
+      console.error(`Error: Templates directory not found: ${opts.templatesDir}`);
       process.exit(1);
     }
 
@@ -2591,19 +3258,19 @@ automation
       const u = new URL(opts.sourcePath);
       const parts = u.pathname.split('/').filter(Boolean);
       if (parts.length < 2) {
-        console.error(`❌ Invalid GitHub URL: ${opts.sourcePath}`);
+        console.error(`Error: Invalid GitHub URL: ${opts.sourcePath}`);
         process.exit(1);
       }
       const [owner, repo, ...subpathParts] = parts;
       const repoUrl = `https://${u.host}/${owner}/${repo}`;
       const subpath = subpathParts.join('/');
-      console.log(`⏳ Verifying "${configRef}" in ${repoUrl}…`);
+      console.log(`Verifying "${configRef}" in ${repoUrl}…`);
       const ok =
         spawnSync('git', ['ls-remote', '--exit-code', repoUrl, `refs/tags/${configRef}`, `refs/heads/${configRef}`], {
           stdio: 'ignore',
         }).status === 0;
       if (!ok) {
-        console.error(`❌ Tag or branch "${configRef}" not found on ${repoUrl}`);
+        console.error(`Error: Tag or branch "${configRef}" not found on ${repoUrl}`);
         process.exit(1);
       }
       const { getAuthenticatedGitHubUrl, hasGitHubToken } = require('../cli-utils/github-token');
@@ -2614,9 +3281,9 @@ automation
       let cloneUrl = repoUrl;
       if (hasGitHubToken() && repoUrl.includes('github.com')) {
         cloneUrl = getAuthenticatedGitHubUrl(repoUrl);
-        console.log(`⏳ Cloning ${repoUrl}@${configRef} → ${tmpSrc} (authenticated)`);
+        console.log(`Cloning ${repoUrl}@${configRef} → ${tmpSrc} (authenticated)`);
       } else {
-        console.log(`⏳ Cloning ${repoUrl}@${configRef} → ${tmpSrc}`);
+        console.log(`Cloning ${repoUrl}@${configRef} → ${tmpSrc}`);
       }
 
       if (
@@ -2624,12 +3291,12 @@ automation
           stdio: 'inherit',
         }).status !== 0
       ) {
-        console.error(`❌ git clone failed`);
+        console.error(`Error: git clone failed`);
         process.exit(1);
       }
       localSrc = subpath ? path.join(tmpSrc, subpath) : tmpSrc;
       if (!fs.existsSync(localSrc)) {
-        console.error(`❌ Subdirectory not found in repo: ${subpath}`);
+        console.error(`Error: Subdirectory not found in repo: ${subpath}`);
         process.exit(1);
       }
     }
@@ -2655,9 +3322,9 @@ automation
       '--output-path',
       opts.output,
     ];
-    console.log(`⏳ Running crd-ref-docs ${args.join(' ')}`);
+    console.log(`Running crd-ref-docs ${args.join(' ')}`);
     if (spawnSync('crd-ref-docs', args, { stdio: 'inherit' }).status !== 0) {
-      console.error(`❌ crd-ref-docs failed`);
+      console.error(`Error: crd-ref-docs failed`);
       process.exit(1);
     }
 
@@ -2688,7 +3355,7 @@ automation
     if (tmpSrc) fs.rmSync(tmpSrc, { recursive: true, force: true });
     fs.rmSync(configTmp, { recursive: true, force: true });
 
-    console.log(`✅ CRD docs generated at ${opts.output}`);
+    console.log(`Done: CRD docs generated at ${opts.output}`);
     if (inDocs) {
       console.log(`ℹ️ Don't forget to commit your changes on branch '${docsBranch}'.`);
     }
@@ -2763,11 +3430,11 @@ automation
   .action(async (options) => {
     // Validate that either tag or branch is provided (but not both)
     if (!options.tag && !options.branch) {
-      console.error('❌ Error: Either --tag or --branch must be specified');
+      console.error('Error: Error: Either --tag or --branch must be specified');
       process.exit(1);
     }
     if (options.tag && options.branch) {
-      console.error('❌ Error: Cannot specify both --tag and --branch');
+      console.error('Error: Error: Cannot specify both --tag and --branch');
       process.exit(1);
     }
 
@@ -2798,7 +3465,7 @@ automation
         quiet: options.quiet
       });
     } catch (err) {
-      console.error(`❌ ${err.message}`);
+      console.error(`Error: ${err.message}`);
       process.exit(err.message.includes('Validation failed') ? 2 : 1);
     }
   });
@@ -2871,7 +3538,7 @@ programCli
         process.exit(1);
       }
     } catch (err) {
-      console.error(`❌ Validation failed: ${err.message}`);
+      console.error(`Error: Validation failed: ${err.message}`);
       process.exit(1);
     }
   });
@@ -2910,7 +3577,7 @@ programCli
       // Get the requested prompt
       const prompt = promptCache.get(promptName);
       if (!prompt) {
-        console.error(`❌ Prompt not found: ${promptName}`);
+        console.error(`Error: Prompt not found: ${promptName}`);
         console.error(`\nAvailable prompts: ${promptCache.getNames().join(', ')}`);
         process.exit(1);
       }
@@ -2937,7 +3604,7 @@ programCli
       console.log('\n' + promptText);
       console.log('\n' + '='.repeat(70));
     } catch (err) {
-      console.error(`❌ Preview failed: ${err.message}`);
+      console.error(`Error: Preview failed: ${err.message}`);
       process.exit(1);
     }
   });
@@ -3004,32 +3671,53 @@ programCli
       // Resources
       console.log(`Resources (${resources.length} available):`);
       resources.forEach(resource => {
-        console.log(`  - ${resource.uri}`);
-        console.log(`    ${resource.name} (v${resource.version})`);
+        console.log(`  - ${resource.name} (v${resource.version})`);
+        console.log(`    URI: ${resource.uri}`);
         console.log(`    Last updated: ${resource.lastUpdated}`);
       });
       console.log('');
 
-      // Check for usage statistics
+      // Usage statistics (if --stats flag is provided)
       if (options.stats) {
-        const statsPath = path.join(baseDir, 'mcp-usage-stats.json');
+        const statsPath = path.join(os.tmpdir(), 'mcp-usage-stats.json');
         if (fs.existsSync(statsPath)) {
-          console.log('Usage Statistics:');
-          console.log('='.repeat(60));
-          const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
-          console.log(`Exported at: ${stats.exportedAt}`);
-          console.log(`Total prompt calls: ${stats.totalPromptCalls}`);
-          console.log(`Total resource calls: ${stats.totalResourceCalls}`);
-          console.log(`Total tool calls: ${stats.totalToolCalls}`);
+          try {
+            const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
+            console.log('Usage Statistics:');
+            console.log('='.repeat(60));
 
-          if (stats.totalPromptCalls > 0) {
-            console.log('\nMost used prompts:');
-            Object.entries(stats.prompts)
-              .sort((a, b) => b[1] - a[1])
-              .slice(0, 5)
-              .forEach(([name, count]) => {
-                console.log(`  ${name}: ${count} calls`);
-              });
+            if (stats.tools && Object.keys(stats.tools).length > 0) {
+              console.log('\nTool Usage:');
+              Object.entries(stats.tools)
+                .sort(([, a], [, b]) => b.count - a.count)
+                .forEach(([name, data]) => {
+                  console.log(`  ${name}:`);
+                  console.log(`    Invocations: ${data.count}`);
+                  if (data.errors > 0) {
+                    console.log(`    Errors: ${data.errors}`);
+                  }
+                });
+            }
+
+            if (stats.prompts && Object.keys(stats.prompts).length > 0) {
+              console.log('\nPrompt Usage:');
+              Object.entries(stats.prompts)
+                .sort(([, a], [, b]) => b - a)
+                .forEach(([name, count]) => {
+                  console.log(`  ${name}: ${count} invocations`);
+                });
+            }
+
+            if (stats.resources && Object.keys(stats.resources).length > 0) {
+              console.log('\nResource Access:');
+              Object.entries(stats.resources)
+                .sort(([, a], [, b]) => b - a)
+                .forEach(([uri, count]) => {
+                  console.log(`  ${uri}: ${count} reads`);
+                });
+            }
+          } catch (err) {
+            console.error('Failed to parse usage statistics:', err.message);
           }
         } else {
           console.log('No usage statistics available yet.');
@@ -3042,7 +3730,63 @@ programCli
       console.log('  mcp/WRITER_EXTENSION_GUIDE.adoc');
       console.log('  mcp/AI_CONSISTENCY_ARCHITECTURE.adoc');
     } catch (err) {
-      console.error(`❌ Failed to retrieve version information: ${err.message}`);
+      console.error(`Error: Failed to retrieve version information: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+/**
+ * update-connect-version
+ *
+ * @description
+ * Updates the Redpanda Connect version (latest-connect-tag) in antora.yml.
+ * This command provides explicit control over which Connect version the documentation references.
+ *
+ * @example
+ * # Update to the latest Connect version
+ * npx doc-tools update-connect-version
+ *
+ * # Update to a specific Connect version
+ * npx doc-tools update-connect-version --version 4.73.0
+ */
+automation
+  .command('update-connect-version')
+  .description('Update the Redpanda Connect version in antora.yml')
+  .option('-v, --connect-version <version>', 'Specific Connect version (default: fetch latest from GitHub)')
+  .action(async (options) => {
+    const GetLatestConnectTag = require('../extensions/version-fetcher/get-latest-connect');
+
+    try {
+      let version;
+
+      if (options.connectVersion) {
+        // Use specified version (strip 'v' prefix if present)
+        version = options.connectVersion.replace(/^v/, '');
+        console.log(`Updating to specified Connect version: ${version}`);
+      } else {
+        // Fetch latest version from GitHub
+        console.log('Fetching latest Connect version from GitHub...');
+        version = await GetLatestConnectTag();
+        console.log(`Latest Connect version: ${version}`);
+      }
+
+      // Read current version from antora.yml
+      const currentVersion = getAntoraValue('asciidoc.attributes.latest-connect-version');
+
+      if (currentVersion === version) {
+        console.log(`✓ Already at version ${version}`);
+        return;
+      }
+
+      // Update antora.yml
+      setAntoraValue('asciidoc.attributes.latest-connect-version', version);
+      console.log(`Done: Updated latest-connect-version from ${currentVersion} to ${version}`);
+      console.log('');
+      console.log('Next steps:');
+      console.log('  1. Run: npx doc-tools generate rpcn-connector-docs --fetch-connectors');
+      console.log('  2. Review and commit the changes');
+    } catch (err) {
+      console.error(`Error: Failed to update Connect version: ${err.message}`);
       process.exit(1);
     }
   });
