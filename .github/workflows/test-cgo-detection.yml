@@ -1,0 +1,44 @@
+name: Test cgo Detection
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/redpanda-connect/**'
+      - 'test/cgo-detection.test.js'
+      - '.github/workflows/test-cgo-detection.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/redpanda-connect/**'
+      - 'test/cgo-detection.test.js'
+  workflow_dispatch:
+
+jobs:
+  test-cgo-detection:
+    name: Cgo Detection E2E Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run cgo detection test
+        run: node test/cgo-detection.test.js
+
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cgo-test-output
+          path: .test-cgo-detection/
+          retention-days: 7
