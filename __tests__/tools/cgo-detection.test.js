@@ -285,20 +285,26 @@ function testPRSummary(cgoOnly, draftFiles) {
     }
   };
 
+  // Add test connector to cgoOnly for PR summary testing
+  const testCgoOnly = [
+    ...cgoOnly,
+    { type: 'inputs', name: 'test_cgo_input', status: 'beta' }
+  ];
+
   const cloudSupport = {
     cloudVersion: TEST_VERSION,
     comparison: {
       inCloud: [],
       notInCloud: [{ type: 'inputs', name: 'test_cgo_input', status: 'beta' }]
     },
-    cgoOnly: cgoOnly
+    cgoOnly: testCgoOnly
   };
 
   const summary = generatePRSummary(diffData, cloudSupport, draftFiles);
 
   // Verify CGO indicators in summary
   assert(summary.includes('🔧'), 'PR summary contains CGO indicator emoji');
-  assert(summary.includes('CGO Requirements'), 'PR summary contains CGO Requirements section');
+  assert(summary.includes('Cgo Requirements'), 'PR summary contains CGO Requirements section');
   assert(summary.includes('[NOTE]'), 'PR summary contains NOTE blocks');
   assert(summary.includes('xref:install:prebuilt-binary.adoc'), 'PR summary contains installation links');
 
