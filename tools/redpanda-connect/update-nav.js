@@ -171,8 +171,9 @@ function updateNavFromDrafts(draftFiles, navPath = null) {
     const possiblePaths = [
       path.resolve(process.cwd(), 'modules/ROOT/nav.adoc'),
       path.resolve(process.cwd(), '../rp-connect-docs/modules/ROOT/nav.adoc'),
-      '/Users/jakecahill/Documents/rp-connect-docs/modules/ROOT/nav.adoc'
-    ];
+      // Optional: Set RP_CONNECT_DOCS_PATH env var to specify custom location
+      process.env.RP_CONNECT_DOCS_PATH && path.resolve(process.env.RP_CONNECT_DOCS_PATH, 'modules/ROOT/nav.adoc')
+    ].filter(Boolean);
 
     for (const p of possiblePaths) {
       if (fs.existsSync(p)) {

@@ -20,7 +20,7 @@ const os = require('os');
 // Test configuration
 const TEST_VERSION = '4.75.1';
 const TEST_DIR = path.join(__dirname, '../.test-cgo-detection');
-const REPO_ROOT = path.dirname(__dirname);
+const REPO_ROOT = path.resolve(__dirname, '../..');
 
 // Test results
 const results = {
@@ -185,7 +185,7 @@ function findCgoOnlyConnectors(cloudIndex, cgoIndex) {
   return cgoOnly;
 }
 
-function testDraftGeneration(cgoOnly) {
+async function testDraftGeneration(cgoOnly) {
   log('Testing draft generation with CGO detection...');
 
   const { generateRpcnConnectorDocs } = require(path.join(REPO_ROOT, 'tools/redpanda-connect/generate-rpcn-connector-docs.js'));
@@ -222,7 +222,7 @@ function testDraftGeneration(cgoOnly) {
   process.chdir(outputRoot);
 
   try {
-    const result = generateRpcnConnectorDocs({
+    const result = await generateRpcnConnectorDocs({
       data: testDataPath,
       template: path.join(REPO_ROOT, 'tools/redpanda-connect/templates/connector.hbs'),
       templateIntro: path.join(REPO_ROOT, 'tools/redpanda-connect/templates/intro.hbs'),
@@ -364,7 +364,7 @@ async function runTests() {
 
     // Test 4: Draft generation
     log('\n📝 Test 4: Draft Generation');
-    const draftFiles = testDraftGeneration(cgoOnly);
+    const draftFiles = await testDraftGeneration(cgoOnly);
 
     // Test 5: PR summary
     log('\n📊 Test 5: PR Summary Generation');
@@ -387,7 +387,7 @@ async function runTests() {
       results.tests.filter(t => !t.passed).forEach(t => {
         console.error(`  - ${t.name}: ${t.details}`);
       });
-      process.exit(1);
+      throw new Error(`${results.failed} test(s) failed`);
     }
 
     console.log('✅ All tests passed!\n');
@@ -395,12 +395,20 @@ async function runTests() {
   } catch (err) {
     console.error('\n❌ Test suite failed:', err.message);
     console.error(err.stack);
-    process.exit(1);
+    throw err;
   }
 }
 
-// Run tests
-runTests().catch(err => {
-  console.error('Fatal error:', err);
-  process.exit(1);
-});
+// Jest test wrapper
+if (require.main !== module) {
+  // Running under Jest
+  test('CGO detection end-to-end workflow', async () => {
+    await runTests();
+  }, 300000); // 5 minute timeout for this integration test
+} else {
+  // Running as standalone script
+  runTests().catch(err => {
+    console.error('Fatal error:', err);
+    process.exit(1);
+  });
+}

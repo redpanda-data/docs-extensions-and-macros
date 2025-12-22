@@ -1022,7 +1022,7 @@ function diffDirs(kind, oldTag, newTag, oldTempDir, newTempDir) {
           fs.rmSync(dirPath, { recursive: true, force: true });
           console.log(`🧹 Cleaned up temporary directory: ${dirPath}`);
         } catch (err) {
-          console.warn(`Warning: Warning: Could not clean up directory ${dirPath}: ${err.message}`);
+          console.warn(`Warning: Could not clean up directory ${dirPath}: ${err.message}`);
         }
       } else {
         console.log(`ℹ️  Skipping cleanup of directory outside tmp/: ${dirPath}`);
@@ -1100,7 +1100,7 @@ automation
 
     // Validate that tag and branch are mutually exclusive
     if (options.tag && options.branch) {
-      console.error('Error: Error: Cannot specify both --tag and --branch');
+      console.error('Error: Cannot specify both --tag and --branch');
       process.exit(1);
     }
 
@@ -2548,7 +2548,7 @@ automation
 
     // Validate that tag and branch are mutually exclusive
     if (options.tag && options.branch) {
-      console.error('Error: Error: Cannot specify both --tag and --branch');
+      console.error('Error: Cannot specify both --tag and --branch');
       process.exit(1);
     }
 
@@ -2783,7 +2783,7 @@ automation
 
     // Validate that tag and branch are mutually exclusive
     if (options.tag && options.branch) {
-      console.error('Error: Error: Cannot specify both --tag and --branch');
+      console.error('Error: Cannot specify both --tag and --branch');
       process.exit(1);
     }
 
@@ -3195,11 +3195,11 @@ automation
 
     // Validate that either --tag or --branch is provided (but not both)
     if (!opts.tag && !opts.branch) {
-      console.error('Error: Error: Either --tag or --branch must be specified');
+      console.error('Error: Either --tag or --branch must be specified');
       process.exit(1);
     }
     if (opts.tag && opts.branch) {
-      console.error('Error: Error: Cannot specify both --tag and --branch');
+      console.error('Error: Cannot specify both --tag and --branch');
       process.exit(1);
     }
 
@@ -3430,11 +3430,11 @@ automation
   .action(async (options) => {
     // Validate that either tag or branch is provided (but not both)
     if (!options.tag && !options.branch) {
-      console.error('Error: Error: Either --tag or --branch must be specified');
+      console.error('Error: Either --tag or --branch must be specified');
       process.exit(1);
     }
     if (options.tag && options.branch) {
-      console.error('Error: Error: Cannot specify both --tag and --branch');
+      console.error('Error: Cannot specify both --tag and --branch');
       process.exit(1);
     }
 

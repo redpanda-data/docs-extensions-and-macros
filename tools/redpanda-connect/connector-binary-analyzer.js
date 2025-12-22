@@ -521,7 +521,7 @@ async function analyzeAllBinaries(ossVersion, cloudVersion = null, dataDir = nul
     fs.rmSync(binaryDir, { recursive: true, force: true });
     console.log(`🧹 Cleaned up temp binaries`);
   } catch (err) {
-    console.warn(`Warning: Warning: Could not clean up temp directory: ${err.message}`);
+    console.warn(`Warning: Could not clean up temp directory: ${err.message}`);
   }
 
   // IMPORTANT: cgoOnly contains connectors that exist ONLY in the cgo binary

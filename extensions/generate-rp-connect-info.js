@@ -71,8 +71,10 @@ module.exports.register = function ({ config }) {
   // Fetch CSV data from GitHub
   async function fetchCsvFromGitHub(connectVersion) {
     const octokit = await loadOctokit();
-    // Use version tag if available, otherwise use main branch
-    const ref = connectVersion ? `v${connectVersion}` : 'main';
+    // Normalize version: trim whitespace and remove leading 'v' if present
+    const normalizedVersion = connectVersion ? connectVersion.trim().replace(/^v/, '') : '';
+    // Use version tag if valid, otherwise fallback to main branch
+    const ref = normalizedVersion ? `v${normalizedVersion}` : 'main';
 
     try {
       const { data: fileContent } = await octokit.rest.repos.getContent({
@@ -83,8 +85,9 @@ module.exports.register = function ({ config }) {
       });
       return Buffer.from(fileContent.content, 'base64').toString('utf8');
     } catch (error) {
-      console.error(`Error fetching Redpanda Connect catalog from GitHub (ref: ${ref}):`, error.message);
-      return '';
+      logger.error(`Error fetching Redpanda Connect catalog from GitHub (ref: ${ref}): ${error.message}`);
+      logger.error(`Stack trace: ${error.stack}`);
+      throw error;
     }
   }
 

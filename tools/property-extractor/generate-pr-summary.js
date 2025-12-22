@@ -32,7 +32,7 @@ if (require.main === module) {
   const diffFilePath = path.resolve(args[0]);
 
   if (!fs.existsSync(diffFilePath)) {
-    console.error(`Error: Error: File not found: ${diffFilePath}`);
+    console.error(`Error: File not found: ${diffFilePath}`);
     process.exit(1);
   }
 

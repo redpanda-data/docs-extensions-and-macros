@@ -382,7 +382,7 @@ if (require.main === module) {
     generateAllDocs(inputFile, outputDir);
     console.log('Done: Documentation generation completed successfully');
   } catch (err) {
-    console.error(`Error: Error: ${err.message}`);
+    console.error(`Error: ${err.message}`);
     process.exit(1);
   }
 }
