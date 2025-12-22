@@ -38,6 +38,8 @@ antora:
   - require: './extensions/add-global-attributes'
   - './extensions/version-fetcher/set-latest-version'
   - './extensions/algolia-indexer/index'
+  - require: './extensions/generate-rp-connect-info'
+  - require: './extensions/collect-bloblang-samples'
   - require: './extensions/generate-rp-connect-categories'
   - require: './extensions/generate-index-data'
     data:
@@ -47,8 +49,6 @@ antora:
           filter: docker-compose
           env_type: Docker
           attribute_name: docker-labs-index
-  - require: './extensions/generate-rp-connect-info'
-  - require: './extensions/collect-bloblang-samples'
   - require: './extensions/add-pages-to-root'
   - require: './extensions/unlisted-pages'
   - require: './extensions/convert-to-markdown'
