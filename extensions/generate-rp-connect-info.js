@@ -1,284 +1,340 @@
 'use strict'
-const fs = require('fs');
-const path = require('path');
-const Papa = require('papaparse');
+const fs = require('fs')
+const path = require('path')
+const Papa = require('papaparse')
 
-const CSV_PATH = 'internal/plugins/info.csv'
-const GITHUB_OWNER = 'redpanda-data'
-const GITHUB_REPO = 'connect'
+// Default configuration - can be overridden via playbook config
+const DEFAULTS = {
+  csvPath: 'internal/plugins/info.csv',
+  githubOwner: 'redpanda-data',
+  githubRepo: 'connect'
+}
 
 module.exports.register = function ({ config }) {
-  const logger = this.getLogger('redpanda-connect-info-extension');
-  const { getAntoraValue } = require('../cli-utils/antora-utils');
+  const logger = this.getLogger('redpanda-connect-info-extension')
+  const { getAntoraValue } = require('../cli-utils/antora-utils')
 
-  async function loadOctokit() {
-    const { Octokit } = await import('@octokit/rest');
+  // Merge config with defaults
+  const {
+    csvpath,
+    csvPath = DEFAULTS.csvPath,
+    githubOwner = DEFAULTS.githubOwner,
+    githubRepo = DEFAULTS.githubRepo
+  } = config || {}
+
+  // Use csvpath (legacy) or csvPath
+  const localCsvPath = csvpath || null
+
+  async function loadOctokit () {
+    const { Octokit } = await import('@octokit/rest')
     const { getGitHubToken } = require('../cli-utils/github-token')
     const token = getGitHubToken()
-    return token ? new Octokit({ auth: token }) : new Octokit();
+    return token ? new Octokit({ auth: token }) : new Octokit()
   }
 
-  this.once('contentClassified', async ({ contentCatalog }) => {
-    const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'redpanda-connect');
-    const redpandaCloud = contentCatalog.getComponents().find(component => component.name === 'redpanda-cloud');
-    const preview = contentCatalog.getComponents().find(component => component.name === 'preview');
-    if (!redpandaConnect) return;
-    const pages = contentCatalog.getPages();
+  // Use 'on' and return the promise so Antora waits for async completion
+  this.on('contentClassified', ({ contentCatalog }) => {
+    return processContent(contentCatalog)
+  })
+
+  async function processContent (contentCatalog) {
+    const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'redpanda-connect')
+    const redpandaCloud = contentCatalog.getComponents().find(component => component.name === 'redpanda-cloud')
+    const preview = contentCatalog.getComponents().find(component => component.name === 'preview')
+
+    if (!redpandaConnect) {
+      logger.warn('redpanda-connect component not found, skipping CSV enrichment')
+      return
+    }
+
+    const pages = contentCatalog.getPages()
 
     try {
       // Get the Connect version from antora.yml
-      const connectVersion = getAntoraValue('asciidoc.attributes.latest-connect-version');
+      const connectVersion = getAntoraValue('asciidoc.attributes.latest-connect-version')
 
       // Fetch CSV data (from local file first, then GitHub as fallback)
-      const csvData = await fetchCSV(config.csvpath, connectVersion, logger);
-      const parsedData = Papa.parse(csvData, { header: true, skipEmptyLines: true });
-      const enrichedData = translateCsvData(parsedData, pages, logger);
-      parsedData.data = enrichedData;
+      const csvData = await fetchCSV(localCsvPath, connectVersion, logger)
+      const parsedData = Papa.parse(csvData, { header: true, skipEmptyLines: true })
+      const enrichedData = translateCsvData(parsedData, pages, logger)
+      parsedData.data = enrichedData
 
-      if (redpandaConnect) {
-        redpandaConnect.latest.asciidoc.attributes.csvData = parsedData;
-      }
-      if (redpandaCloud) {
-        redpandaCloud.latest.asciidoc.attributes.csvData = parsedData;
-      }
-      // For previewing the data on our extensions site
-      if (preview) {
-        preview.latest.asciidoc.attributes.csvData = parsedData;
+      // Set csvData on all relevant components
+      const componentsToEnrich = [redpandaConnect, redpandaCloud, preview].filter(Boolean)
+      for (const component of componentsToEnrich) {
+        if (component.latest?.asciidoc?.attributes) {
+          component.latest.asciidoc.attributes.csvData = parsedData
+        }
       }
 
       // Enrich component pages with commercial names from CSV + AsciiDoc
-      enrichPagesWithCommercialNames(pages, parsedData, logger);
+      const commercialNamesMap = enrichPagesWithCommercialNames(pages, parsedData, logger)
 
+      // Convert Map to plain object for serialization and macro access
+      const commercialNamesObj = {}
+      commercialNamesMap.forEach((names, connector) => {
+        commercialNamesObj[connector] = Array.from(names)
+      })
+
+      // Make commercial names available to macros
+      for (const component of componentsToEnrich) {
+        if (component.latest?.asciidoc?.attributes) {
+          component.latest.asciidoc.attributes.commercialNamesMap = commercialNamesObj
+        }
+      }
+
+      logger.info(`Successfully processed ${parsedData.data.length} connectors from CSV`)
     } catch (error) {
-      logger.error('Error fetching or parsing CSV data:', error.message);
-      logger.error(error.stack);
+      logger.error(`Error fetching or parsing CSV data: ${error.message}`)
+      logger.error(error.stack)
+      // Don't throw - allow build to continue with degraded functionality
     }
-  });
+  }
 
   // Fetch CSV from GitHub or local file (local file for testing/override only)
-  async function fetchCSV(localCsvPath, connectVersion, logger) {
+  async function fetchCSV (localPath, connectVersion, logger) {
     // Priority 1: Use explicitly provided CSV path (for testing/override)
-    if (localCsvPath && fs.existsSync(localCsvPath)) {
-      if (path.extname(localCsvPath).toLowerCase() !== '.csv') {
-        throw new Error(`Invalid file type: ${localCsvPath}. Expected a CSV file.`);
+    if (localPath && fs.existsSync(localPath)) {
+      if (path.extname(localPath).toLowerCase() !== '.csv') {
+        throw new Error(`Invalid file type: ${localPath}. Expected a CSV file.`)
       }
-      logger.info(`Loading CSV data from local file: ${localCsvPath}`);
-      return fs.readFileSync(localCsvPath, 'utf8');
+      logger.info(`Loading CSV data from local file: ${localPath}`)
+      return fs.readFileSync(localPath, 'utf8')
     }
 
     // Priority 2: Fetch from GitHub using the version tag
-    logger.info(`Fetching CSV from GitHub (version: ${connectVersion || 'main'})...`);
-    return await fetchCsvFromGitHub(connectVersion);
+    logger.info(`Fetching CSV from GitHub (version: ${connectVersion || 'main'})...`)
+    return fetchCsvFromGitHub(connectVersion)
   }
 
   // Fetch CSV data from GitHub
-  async function fetchCsvFromGitHub(connectVersion) {
-    const octokit = await loadOctokit();
+  async function fetchCsvFromGitHub (connectVersion) {
+    const octokit = await loadOctokit()
     // Normalize version: trim whitespace and remove leading 'v' if present
-    const normalizedVersion = connectVersion ? connectVersion.trim().replace(/^v/, '') : '';
+    const normalizedVersion = connectVersion ? connectVersion.trim().replace(/^v/, '') : ''
     // Use version tag if valid, otherwise fallback to main branch
-    const ref = normalizedVersion ? `v${normalizedVersion}` : 'main';
+    const ref = normalizedVersion ? `v${normalizedVersion}` : 'main'
 
     try {
       const { data: fileContent } = await octokit.rest.repos.getContent({
-        owner: GITHUB_OWNER,
-        repo: GITHUB_REPO,
-        path: CSV_PATH,
-        ref: ref,
-      });
-      return Buffer.from(fileContent.content, 'base64').toString('utf8');
+        owner: githubOwner,
+        repo: githubRepo,
+        path: csvPath,
+        ref: ref
+      })
+      return Buffer.from(fileContent.content, 'base64').toString('utf8')
     } catch (error) {
-      logger.error(`Error fetching Redpanda Connect catalog from GitHub (ref: ${ref}): ${error.message}`);
-      logger.error(`Stack trace: ${error.stack}`);
-      throw error;
+      logger.error(`Error fetching Redpanda Connect catalog from GitHub (ref: ${ref}): ${error.message}`)
+      throw error
     }
   }
 
   /**
    * Transforms and enriches parsed CSV connector data with normalized fields and documentation URLs.
-   *
-   * Each row is trimmed, mapped to expected output fields, and enriched with documentation URLs for Redpanda Connect and Cloud components if available. The `support` field is normalized, and licensing information is derived. Logs a warning if documentation URLs are missing for non-deprecated, non-SQL driver connectors that indicate cloud support.
-   *
-   * @param {object} parsedData - Parsed CSV data containing connector rows.
-   * @param {array} pages - Array of page objects used to resolve documentation URLs.
-   * @param {object} logger - Logger instance for warning about missing documentation.
-   * @returns {array} Array of enriched connector objects with normalized fields and URLs.
+   * Uses O(n) lookup maps for efficient page matching.
    */
-  function translateCsvData(parsedData, pages, logger) {
+  function translateCsvData (parsedData, pages, logger) {
+    // Build lookup maps once for O(1) access - much faster than O(n) iteration per row
+    const connectPages = new Map()
+    const cloudPages = new Map()
+
+    for (const file of pages) {
+      const { component } = file.src
+      const stem = file.src.stem
+      const filePath = file.path
+
+      if (component === 'redpanda-connect') {
+        // Store by stem, but only for connector doc paths
+        if (isConnectorDocPath(filePath, file)) {
+          const type = extractTypeFromPath(filePath)
+          if (type) {
+            const key = `${stem}:${type}`
+            connectPages.set(key, file)
+          }
+        }
+      } else if (component === 'redpanda-cloud') {
+        // Cloud docs have a specific path pattern
+        const cloudMatch = filePath.match(/connect\/components\/([^/]+)s\/([^/]+)\.adoc$/)
+        if (cloudMatch) {
+          const [, type, name] = cloudMatch
+          const key = `${name}:${type}`
+          cloudPages.set(key, file)
+        }
+      }
+    }
+
+    function isConnectorDocPath (filePath) {
+      const dirsToCheck = [
+        '/pages/inputs/',
+        '/pages/outputs/',
+        '/pages/processors/',
+        '/pages/caches/',
+        '/pages/rate_limits/',
+        '/pages/buffers/',
+        '/pages/metrics/',
+        '/pages/tracers/',
+        '/pages/scanners/',
+        '/partials/components/'
+      ]
+      return dirsToCheck.some(dir => filePath.includes(dir))
+    }
+
+    function extractTypeFromPath (filePath) {
+      const typeMatch = filePath.match(/\/(inputs|outputs|processors|caches|rate_limits|buffers|metrics|tracers|scanners)\//)
+      if (typeMatch) {
+        // Convert plural to singular
+        return typeMatch[1].replace(/s$/, '').replace('rate_limit', 'rate_limit')
+      }
+      return null
+    }
+
     return parsedData.data.map(row => {
       // Create a new object with trimmed keys and values
       const trimmedRow = Object.fromEntries(
-        Object.entries(row).map(([key, value]) => [key.trim(), value.trim()])
-      );
+        Object.entries(row).map(([key, value]) => [key.trim(), (value || '').trim()])
+      )
 
       // Map fields from the trimmed row to the desired output
-      const connector = trimmedRow.name;
-      const type = trimmedRow.type;
-      const commercial_name = trimmedRow.commercial_name;
-      const available_connect_version = trimmedRow.version;
-      const deprecated = trimmedRow.deprecated.toLowerCase() === 'y' ? 'y' : 'n';
-      const is_cloud_supported = trimmedRow.cloud.toLowerCase() === 'y' ? 'y' : 'n';
-      const cloud_ai = trimmedRow.cloud_with_gpu.toLowerCase() === 'y' ? 'y' : 'n';
+      const connector = trimmedRow.name
+      const type = trimmedRow.type
+      const commercialName = trimmedRow.commercial_name
+      const availableConnectVersion = trimmedRow.version
+      const deprecated = (trimmedRow.deprecated || '').toLowerCase() === 'y' ? 'y' : 'n'
+      const isCloudSupported = (trimmedRow.cloud || '').toLowerCase() === 'y' ? 'y' : 'n'
+      const cloudAi = (trimmedRow.cloud_with_gpu || '').toLowerCase() === 'y' ? 'y' : 'n'
+
       // Handle enterprise to certified conversion and set enterprise license flag
-      const originalSupport = trimmedRow.support.toLowerCase();
-      const support_level = originalSupport === 'enterprise' ? 'certified' : originalSupport;
-      const is_licensed = originalSupport === 'enterprise' ? 'Yes' : 'No';
+      const originalSupport = (trimmedRow.support || '').toLowerCase()
+      const supportLevel = originalSupport === 'enterprise' ? 'certified' : originalSupport
+      const isLicensed = originalSupport === 'enterprise' ? 'Yes' : 'No'
 
-      // Redpanda Connect and Cloud enrichment URLs
-      let redpandaConnectUrl = '';
-      let redpandaCloudUrl = '';
+      // O(1) lookup for URLs
+      const lookupKey = `${connector}:${type}`
+      const connectPage = connectPages.get(lookupKey)
+      const cloudPage = cloudPages.get(lookupKey)
 
-      function isConnectorDocPath (filePath, type) {
-        const dirsToCheck = [
-          `pages/${type}s/`,
-          `partials/components/${type}s/`
-        ];
-        return dirsToCheck.some(dir => filePath.includes(dir));
-      }
+      const redpandaConnectUrl = connectPage?.pub?.url || ''
+      const redpandaCloudUrl = cloudPage?.pub?.url || ''
 
-      function isCloudDoc(file, connector, type) {
-        return (
-          file.src.component === 'redpanda-cloud' &&
-          file.path.includes(`connect/components/${type}s/${connector}.adoc`)
-        );
-      }
-
-      // Look for both Redpanda Connect and Cloud URLs
-      for (const file of pages) {
-        const { component } = file.src;      // such as 'redpanda-connect'
-        const { path: filePath } = file;     // such as modules/.../pages/sinks/foo.adoc
-
-        if (
-          component === 'redpanda-connect' &&
-          filePath.endsWith(`/${connector}.adoc`) &&
-          isConnectorDocPath(filePath, type)
-        ) {
-          redpandaConnectUrl = file.pub.url;
+      // Warn about missing docs (but not for deprecated or SQL drivers)
+      if (deprecated !== 'y' && !connector.includes('sql_driver')) {
+        if (!redpandaConnectUrl) {
+          logger.warn(`Self-Managed docs missing for: ${connector} of type: ${type}`)
         }
-
-        // -------------------------------------------------
-        // Redpanda Cloud (only if cloud supported)
-        // -------------------------------------------------
-        if (is_cloud_supported === 'y' && isCloudDoc(file, connector, type)) {
-          redpandaCloudUrl = file.pub.url;
+        if (isCloudSupported === 'y' && !redpandaCloudUrl && redpandaConnectUrl) {
+          logger.warn(`Cloud docs missing for: ${connector} of type: ${type}`)
         }
       }
 
-      if (
-        deprecated !== 'y' &&
-        !connector.includes('sql_driver') &&
-        !redpandaConnectUrl &&
-        !(is_cloud_supported === 'y' && redpandaCloudUrl)
-      ) {
-        logger.warn(`Self-Managed docs missing for: ${connector} of type: ${type}`);
-      }
-
-      if (
-        is_cloud_supported === 'y' &&
-        !redpandaCloudUrl &&
-        redpandaConnectUrl
-      ) {
-        logger.warn(`Cloud docs missing for: ${connector} of type: ${type}`);
-      }
-
-      // Return the translated and enriched row
       return {
         connector,
         type,
-        commercial_name,
-        available_connect_version,
-        support_level,  // "enterprise" is replaced with "certified"
+        commercial_name: commercialName,
+        available_connect_version: availableConnectVersion,
+        support_level: supportLevel,
         deprecated,
-        is_cloud_supported,
-        cloud_ai,
-        is_licensed,  // "Yes" if the original support level was "enterprise"
+        is_cloud_supported: isCloudSupported,
+        cloud_ai: cloudAi,
+        is_licensed: isLicensed,
         redpandaConnectUrl,
-        redpandaCloudUrl,
-      };
-    });
+        redpandaCloudUrl
+      }
+    })
   }
 
   /**
    * Enriches component pages with commercial names from CSV data and existing AsciiDoc attributes.
-   *
-   * This function combines commercial names from two sources:
-   * 1. CSV data (commercial_name column from the Connect repository)
-   * 2. Existing page-commercial-names attribute in AsciiDoc pages (writer-added)
-   *
-   * The combined list is deduplicated and filtered to remove:
-   * - Self-references (commercial name matching connector name)
-   * - "N/A" values
-   * - Duplicates
-   *
-   * This enables search discoverability for both automatically populated and manually curated names.
-   *
-   * @param {array} pages - Array of all pages from the content catalog
-   * @param {object} parsedData - Parsed CSV data with enriched connector information
-   * @param {object} logger - Logger instance for debugging
    */
-  function enrichPagesWithCommercialNames(pages, parsedData, logger) {
+  function enrichPagesWithCommercialNames (pages, parsedData, logger) {
     // Build a lookup map: connector name -> Set of commercial names from CSV
-    const csvCommercialNames = new Map();
+    const csvCommercialNames = new Map()
 
-    parsedData.data.forEach(row => {
-      const { connector, commercial_name } = row;
-      if (!connector || !commercial_name) return;
+    for (const row of parsedData.data) {
+      const { connector, commercial_name: commercialName } = row
+      if (!connector || !commercialName) continue
 
       // Skip N/A and empty values
-      const trimmedName = commercial_name.trim();
-      if (trimmedName.toLowerCase() === 'n/a' || trimmedName === '') return;
+      const trimmedName = commercialName.trim()
+      if (trimmedName.toLowerCase() === 'n/a' || trimmedName === '') continue
 
       if (!csvCommercialNames.has(connector)) {
-        csvCommercialNames.set(connector, new Set());
+        csvCommercialNames.set(connector, new Set())
       }
 
       // Add the commercial name if it's different from the connector name
       if (trimmedName.toLowerCase() !== connector.toLowerCase()) {
-        csvCommercialNames.get(connector).add(trimmedName);
+        csvCommercialNames.get(connector).add(trimmedName)
       }
-    });
+    }
 
     // Enrich each component page with combined commercial names
-    let enrichedCount = 0;
-    pages.forEach(page => {
-      const { component, relative } = page.src;
+    let enrichedCount = 0
+
+    for (const page of pages) {
+      const { component, relative, module: moduleName } = page.src
 
       // Only process Redpanda Connect and Cloud component pages
-      if (component !== 'redpanda-connect' && component !== 'redpanda-cloud') return;
+      if (component !== 'redpanda-connect' && component !== 'redpanda-cloud') continue
 
-      // Skip if not a component documentation page
-      if (!relative.includes('/components/')) return;
+      // Match component documentation pages:
+      // 1. Cloud-style paths: connect/components/processors/archive.adoc
+      // 2. Connect module-based paths: module=components, relative=processors/archive.adoc
+      const isComponentsModule = moduleName === 'components'
+      const hasComponentsInPath = relative.includes('/components/')
 
-      // Extract connector name from path (e.g., "components/inputs/amqp_0_9.adoc" -> "amqp_0_9")
-      const pathMatch = relative.match(/\/components\/[^/]+\/([^/]+)\.adoc$/);
-      if (!pathMatch) return;
+      if (!isComponentsModule && !hasComponentsInPath) continue
 
-      const connectorName = pathMatch[1];
-      const csvNames = csvCommercialNames.get(connectorName) || new Set();
+      // Extract connector name from path
+      let connectorMatch
+      if (hasComponentsInPath) {
+        connectorMatch = relative.match(/\/components\/[^/]+\/([^/]+)\.adoc$/)
+      } else if (isComponentsModule) {
+        connectorMatch = relative.match(/^[^/]+\/([^/]+)\.adoc$/)
+      }
 
-      // Get existing commercial names from AsciiDoc attribute (if any)
-      const existingAttr = page.asciidoc?.attributes?.['page-commercial-names'];
-      const existingNames = existingAttr
-        ? existingAttr.split(',').map(n => n.trim()).filter(n => n)
-        : [];
+      if (!connectorMatch) continue
+
+      const connectorName = connectorMatch[1]
+      const csvNames = csvCommercialNames.get(connectorName) || new Set()
+
+      // Get existing commercial names from AsciiDoc page attribute
+      let existingNames = []
+      const existingAttr = page.asciidoc?.attributes?.['page-commercial-names']
+
+      if (existingAttr) {
+        existingNames = existingAttr.split(',').map(n => n.trim()).filter(n => n)
+      } else if (page.contents) {
+        // Fallback: parse from file contents if attribute not yet available
+        // Note: This regex handles single-line attributes only
+        const fileContents = page.contents.toString('utf8')
+        const attrMatch = fileContents.match(/:page-commercial-names:\s*(.+)/)
+        if (attrMatch) {
+          existingNames = attrMatch[1].split(',').map(n => n.trim()).filter(n => n)
+        }
+      }
 
       // Combine CSV names and existing names, deduplicate
-      const allNames = new Set([...csvNames, ...existingNames]);
+      const allNames = new Set([...csvNames, ...existingNames])
 
       if (allNames.size > 0) {
         // Ensure attributes object exists
-        if (!page.asciidoc) page.asciidoc = {};
-        if (!page.asciidoc.attributes) page.asciidoc.attributes = {};
+        if (!page.asciidoc) page.asciidoc = {}
+        if (!page.asciidoc.attributes) page.asciidoc.attributes = {}
 
         // Set the combined commercial names as a comma-separated list
-        const commercialNamesList = Array.from(allNames).join(', ');
-        page.asciidoc.attributes['page-commercial-names'] = commercialNamesList;
-        enrichedCount++;
+        const commercialNamesList = Array.from(allNames).join(', ')
+        page.asciidoc.attributes['page-commercial-names'] = commercialNamesList
+        enrichedCount++
 
-        logger.info(`Added commercial names to ${connectorName}: ${commercialNamesList}`);
+        // Update the mapping with the enriched names
+        csvCommercialNames.set(connectorName, allNames)
+
+        logger.debug(`Added commercial names to ${connectorName}: ${commercialNamesList}`)
       }
-    });
+    }
 
-    logger.info(`Enriched ${enrichedCount} component pages with commercial names`);
+    logger.info(`Enriched ${enrichedCount} component pages with commercial names`)
+
+    return csvCommercialNames
   }
 }
