@@ -468,12 +468,26 @@ module.exports.register = function (registry, context) {
 
         const firstUrl = getFirstUrlFromTypesArray(Array.from(types.entries()), isCloud);
 
+        // Collect all unique commercial names for search
+        const allCommercialNames = new Set();
+        Array.from(types.entries()).forEach(([type, commercialNames]) => {
+          Object.keys(commercialNames).forEach(commercialName => {
+            if (commercialName.toLowerCase() !== connector.toLowerCase() &&
+                commercialName.toLowerCase() !== 'n/a') {
+              allCommercialNames.add(commercialName);
+            }
+          });
+        });
+        const commercialNamesText = allCommercialNames.size > 0
+          ? `<span class="search-terms" style="position: absolute; left: -9999px;">${Array.from(allCommercialNames).join(' ')}</span>`
+          : '';
+
         // Logic for showAllInfo = true and isCloud = false
         if (showAllInfo && !isCloud) {
           return `
             <tr id="row-${id}">
               <td class="tableblock halign-left valign-top" id="componentName-${id}">
-                <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a></p>
+                <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a>${commercialNamesText}</p>
               </td>
               <td class="tableblock halign-left valign-top" id="componentType-${id}">
                 <p class="tableblock">${typesArray}</p> <!-- Display types linked to Connect URL only -->
@@ -494,7 +508,7 @@ module.exports.register = function (registry, context) {
           return `
             <tr id="row-${id}">
               <td class="tableblock halign-left valign-top" id="componentName-${id}">
-                <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a></p>
+                <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a>${commercialNamesText}</p>
               </td>
               <td class="tableblock halign-left valign-top" id="componentType-${id}">
                 ${typesArray} <!-- Display bulleted list for cloud types if commercial name differs -->
@@ -505,7 +519,7 @@ module.exports.register = function (registry, context) {
         return `
           <tr id="row-${id}">
             <td class="tableblock halign-left valign-top" id="componentName-${id}">
-              <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a></p>
+              <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a>${commercialNamesText}</p>
             </td>
             <td class="tableblock halign-left valign-top" id="componentType-${id}">
               <p class="tableblock">${typesArray}</p> <!-- Display types without commercial names -->

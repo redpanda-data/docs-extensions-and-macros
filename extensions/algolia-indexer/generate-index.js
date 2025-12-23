@@ -228,6 +228,10 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     ? page.asciidoc.attributes['page-categories'].split(',').map(category => category.trim())
     : []
 
+    const commercialNames = page.asciidoc?.attributes['page-commercial-names']
+    ? page.asciidoc.attributes['page-commercial-names'].split(',').map(name => name.trim())
+    : []
+
     var indexItem = {
       title: documentTitle,
       version: version,
@@ -236,6 +240,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       objectID: urlPath + page.pub.url,
       titles: titles,
       categories: categories,
+      commercialNames: commercialNames,
       unixTimestamp: unixTimestamp,
     }
 
