@@ -46,6 +46,9 @@ module.exports.register = function ({ config }) {
         preview.latest.asciidoc.attributes.csvData = parsedData;
       }
 
+      // Enrich component pages with commercial names from CSV + AsciiDoc
+      enrichPagesWithCommercialNames(pages, parsedData, logger);
+
     } catch (error) {
       logger.error('Error fetching or parsing CSV data:', error.message);
       logger.error(error.stack);
@@ -193,5 +196,89 @@ module.exports.register = function ({ config }) {
         redpandaCloudUrl,
       };
     });
+  }
+
+  /**
+   * Enriches component pages with commercial names from CSV data and existing AsciiDoc attributes.
+   *
+   * This function combines commercial names from two sources:
+   * 1. CSV data (commercial_name column from the Connect repository)
+   * 2. Existing page-commercial-names attribute in AsciiDoc pages (writer-added)
+   *
+   * The combined list is deduplicated and filtered to remove:
+   * - Self-references (commercial name matching connector name)
+   * - "N/A" values
+   * - Duplicates
+   *
+   * This enables search discoverability for both automatically populated and manually curated names.
+   *
+   * @param {array} pages - Array of all pages from the content catalog
+   * @param {object} parsedData - Parsed CSV data with enriched connector information
+   * @param {object} logger - Logger instance for debugging
+   */
+  function enrichPagesWithCommercialNames(pages, parsedData, logger) {
+    // Build a lookup map: connector name -> Set of commercial names from CSV
+    const csvCommercialNames = new Map();
+
+    parsedData.data.forEach(row => {
+      const { connector, commercial_name } = row;
+      if (!connector || !commercial_name) return;
+
+      // Skip N/A and empty values
+      const trimmedName = commercial_name.trim();
+      if (trimmedName.toLowerCase() === 'n/a' || trimmedName === '') return;
+
+      if (!csvCommercialNames.has(connector)) {
+        csvCommercialNames.set(connector, new Set());
+      }
+
+      // Add the commercial name if it's different from the connector name
+      if (trimmedName.toLowerCase() !== connector.toLowerCase()) {
+        csvCommercialNames.get(connector).add(trimmedName);
+      }
+    });
+
+    // Enrich each component page with combined commercial names
+    let enrichedCount = 0;
+    pages.forEach(page => {
+      const { component, relative } = page.src;
+
+      // Only process Redpanda Connect and Cloud component pages
+      if (component !== 'redpanda-connect' && component !== 'redpanda-cloud') return;
+
+      // Skip if not a component documentation page
+      if (!relative.includes('/components/')) return;
+
+      // Extract connector name from path (e.g., "components/inputs/amqp_0_9.adoc" -> "amqp_0_9")
+      const pathMatch = relative.match(/\/components\/[^/]+\/([^/]+)\.adoc$/);
+      if (!pathMatch) return;
+
+      const connectorName = pathMatch[1];
+      const csvNames = csvCommercialNames.get(connectorName) || new Set();
+
+      // Get existing commercial names from AsciiDoc attribute (if any)
+      const existingAttr = page.asciidoc?.attributes?.['page-commercial-names'];
+      const existingNames = existingAttr
+        ? existingAttr.split(',').map(n => n.trim()).filter(n => n)
+        : [];
+
+      // Combine CSV names and existing names, deduplicate
+      const allNames = new Set([...csvNames, ...existingNames]);
+
+      if (allNames.size > 0) {
+        // Ensure attributes object exists
+        if (!page.asciidoc) page.asciidoc = {};
+        if (!page.asciidoc.attributes) page.asciidoc.attributes = {};
+
+        // Set the combined commercial names as a comma-separated list
+        const commercialNamesList = Array.from(allNames).join(', ');
+        page.asciidoc.attributes['page-commercial-names'] = commercialNamesList;
+        enrichedCount++;
+
+        logger.info(`Added commercial names to ${connectorName}: ${commercialNamesList}`);
+      }
+    });
+
+    logger.info(`Enriched ${enrichedCount} component pages with commercial names`);
   }
 }
