@@ -9,8 +9,10 @@ gen/
 tree-sitter/
 test/
 test-results/
+__tests__/.test-cgo-detection/
 modules/
 cloud-controlplane/
 node_modules
 .env
 mcp-usage-stats.json
+*.tgz

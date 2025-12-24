@@ -8,13 +8,15 @@
 
 const { describe, test, expect } = require('@jest/globals');
 const { execSync } = require('child_process');
+const path = require('path');
 
 /**
  * Execute a CLI command and return the result
  */
 function executeCLI(command) {
   try {
-    const output = execSync(`npx doc-tools ${command}`, {
+    const cliPath = path.join(__dirname, '../../bin/doc-tools.js');
+    const output = execSync(`node "${cliPath}" ${command}`, {
       encoding: 'utf8',
       stdio: 'pipe',
       timeout: 10000
@@ -70,7 +72,7 @@ describe('CLI Contract Tests', () => {
       {
         name: 'rpcn-connector-docs',
         requiredFlags: [],
-        optionalFlags: ['--fetch-connectors', '--draft-missing', '--update-whats-new', '--include-bloblang', '--data-dir', '--old-data', '--csv', '--overrides']
+        optionalFlags: ['--fetch-connectors', '--draft-missing', '--update-whats-new', '--include-bloblang', '--data-dir', '--old-data', '--overrides', '--connect-version', '--cloud-version', '--cgo-version']
       },
       {
         name: 'helm-spec',

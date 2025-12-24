@@ -4,12 +4,13 @@ module.exports.register = function () {
   const logger = this.getLogger('collect-bloblang-samples');
 
   this.on('contentClassified', ({ contentCatalog }) => {
+
     const collectExamples = (examples, componentName) => {
       const bloblangSamples = [];
       const seenTitles = new Set();
 
       examples
-        .filter((example) => example.src.relative.startsWith('playground/')) // Only include files in the 'bloblang' subdirectory
+        .filter((example) => example.src.relative.startsWith('playground/')) // Only include files in the 'playground' subdirectory
         .forEach((example) => {
           try {
             const content = example.contents.toString('utf8');

@@ -4,7 +4,7 @@ const { execSync } = require('child_process');
  * Generate a JSON diff report between two connector index objects.
  * @param {object} oldIndex - Previous version connector index
  * @param {object} newIndex - Current version connector index
- * @param {object} opts - { oldVersion, newVersion, timestamp }
+ * @param {object} opts - { oldVersion, newVersion, timestamp, binaryAnalysis, oldBinaryAnalysis }
  * @returns {object} JSON diff report
  */
 function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
@@ -163,7 +163,7 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     });
   });
 
-  return {
+  const result = {
     comparison: {
       oldVersion: opts.oldVersion || '',
       newVersion: opts.newVersion || '',
@@ -188,6 +188,73 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       changedDefaults
     }
   };
+
+  // Include binary analysis data if provided
+  if (opts.binaryAnalysis) {
+    const ba = opts.binaryAnalysis;
+    const oldBa = opts.oldBinaryAnalysis || {};
+
+    result.binaryAnalysis = {
+      versions: {
+        oss: ba.ossVersion,
+        cloud: ba.cloudVersion || null,
+        cgo: ba.cgoVersion || null
+      },
+      current: {
+        cloudSupported: ba.comparison?.inCloud?.length || 0,
+        selfHostedOnly: ba.comparison?.notInCloud?.length || 0,
+        cgoOnly: ba.cgoOnly?.length || 0
+      },
+      changes: {}
+    };
+
+    // Calculate cloud support changes
+    if (oldBa.comparison && ba.comparison) {
+      const oldCloudSet = new Set(oldBa.comparison.inCloud?.map(c => `${c.type}:${c.name}`) || []);
+      const newCloudSet = new Set(ba.comparison.inCloud?.map(c => `${c.type}:${c.name}`) || []);
+
+      const addedToCloud = ba.comparison.inCloud?.filter(c =>
+        !oldCloudSet.has(`${c.type}:${c.name}`)
+      ) || [];
+
+      const removedFromCloud = oldBa.comparison.inCloud?.filter(c =>
+        !newCloudSet.has(`${c.type}:${c.name}`)
+      ) || [];
+
+      result.binaryAnalysis.changes.cloud = {
+        added: addedToCloud.map(c => ({ type: c.type, name: c.name, status: c.status })),
+        removed: removedFromCloud.map(c => ({ type: c.type, name: c.name, status: c.status }))
+      };
+    }
+
+    // Calculate cgo-only changes
+    if (oldBa.cgoOnly && ba.cgoOnly) {
+      const oldCgoSet = new Set(oldBa.cgoOnly.map(c => `${c.type}:${c.name}`));
+      const newCgoSet = new Set(ba.cgoOnly.map(c => `${c.type}:${c.name}`));
+
+      const newCgoOnly = ba.cgoOnly.filter(c =>
+        !oldCgoSet.has(`${c.type}:${c.name}`)
+      );
+
+      const removedCgoOnly = oldBa.cgoOnly.filter(c =>
+        !newCgoSet.has(`${c.type}:${c.name}`)
+      );
+
+      result.binaryAnalysis.changes.cgo = {
+        newCgoOnly: newCgoOnly.map(c => ({ type: c.type, name: c.name, status: c.status })),
+        removedCgoOnly: removedCgoOnly.map(c => ({ type: c.type, name: c.name, status: c.status }))
+      };
+    }
+
+    // Include full lists for reference
+    result.binaryAnalysis.details = {
+      cloudSupported: ba.comparison?.inCloud?.map(c => ({ type: c.type, name: c.name, status: c.status })) || [],
+      selfHostedOnly: ba.comparison?.notInCloud?.map(c => ({ type: c.type, name: c.name, status: c.status })) || [],
+      cgoOnly: ba.cgoOnly?.map(c => ({ type: c.type, name: c.name, status: c.status })) || []
+    };
+  }
+
+  return result;
 }
 
 function discoverComponentKeys(obj) {

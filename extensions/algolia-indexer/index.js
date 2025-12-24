@@ -5,14 +5,16 @@ const algoliasearch = require('algoliasearch')
 const http = require('http')
 const https = require('https')
 const _ = require('lodash')
-process.env.UV_THREADPOOL_SIZE=16
+
+// Increase thread pool size for better HTTP performance
+process.env.UV_THREADPOOL_SIZE = 16
 
 /**
  * Algolia indexing for an Antora documentation site.
  *
  * @module antora-algolia-indexer
  */
-function register({
+function register ({
   config: {
     indexLatestOnly,
     excludes,
@@ -21,29 +23,41 @@ function register({
 }) {
   const logger = this.getLogger('algolia-indexer-extension')
 
-  if (!process.env.ALGOLIA_ADMIN_API_KEY || !process.env.ALGOLIA_APP_ID || !process.env.ALGOLIA_INDEX_NAME) return
+  // Validate required environment variables
+  const requiredEnvVars = ['ALGOLIA_ADMIN_API_KEY', 'ALGOLIA_APP_ID', 'ALGOLIA_INDEX_NAME']
+  const missingVars = requiredEnvVars.filter(v => !process.env[v])
 
-  var client
-  var index
+  if (missingVars.length > 0) {
+    logger.info(`Algolia indexing disabled - missing environment variables: ${missingVars.join(', ')}`)
+    return
+  }
 
-  const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 100 });
-  const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100 });
-
-  // Connect and authenticate with Algolia using the custom agent
-  client = algoliasearch(process.env.ALGOLIA_APP_ID, process.env.ALGOLIA_ADMIN_API_KEY, {
-    httpAgent: httpAgent,
-    httpsAgent: httpsAgent
-  })
-  index = client.initIndex(process.env.ALGOLIA_INDEX_NAME)
-
+  // Validate unknown options
   if (Object.keys(unknownOptions).length) {
     const keys = Object.keys(unknownOptions)
     throw new Error(`Unrecognized option${keys.length > 1 ? 's' : ''} specified: ${keys.join(', ')}`)
   }
 
-  this.on('beforePublish', async ({ playbook, siteCatalog, contentCatalog }) => {
+  // Create HTTP agents with connection pooling
+  const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 100 })
+  const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100 })
+
+  // Connect and authenticate with Algolia
+  const client = algoliasearch(process.env.ALGOLIA_APP_ID, process.env.ALGOLIA_ADMIN_API_KEY, {
+    httpAgent: httpAgent,
+    httpsAgent: httpsAgent
+  })
+  const index = client.initIndex(process.env.ALGOLIA_INDEX_NAME)
+
+  this.on('beforePublish', async ({ playbook, contentCatalog }) => {
     const algolia = generateIndex(playbook, contentCatalog, { indexLatestOnly, excludes, logger })
-    let existingObjectsMap = new Map()
+
+    if (!algolia || Object.keys(algolia).length === 0) {
+      logger.warn('No content to index for Algolia')
+      return
+    }
+
+    const existingObjectsMap = new Map()
 
     // Save objects in a local cache to query later.
     // Avoids sending multiple requests.
@@ -58,8 +72,9 @@ function register({
           }
         }
       })
+      logger.info(`Loaded ${existingObjectsMap.size} existing objects from Algolia index`)
     } catch (err) {
-      logger.error(JSON.stringify(err))
+      logger.error(`Error browsing existing Algolia objects: ${JSON.stringify(err)}`)
     }
 
     let totalObjectsToUpdate = 0
@@ -90,46 +105,63 @@ function register({
           action: 'addObject',
           indexName: process.env.ALGOLIA_INDEX_NAME,
           body: object
-        }));
+        }))
 
         const updateObjectActions = objectsToUpdate.map(object => ({
           action: 'updateObject',
           indexName: process.env.ALGOLIA_INDEX_NAME,
           body: object
-        }));
+        }))
 
-        const batchActions = [...addObjectActions, ...updateObjectActions];
+        const batchActions = [...addObjectActions, ...updateObjectActions]
 
-        // Upload new records only if the objects have been updated or they are new.
-        // See https://www.algolia.com/doc/api-reference/api-methods/batch/?client=javascript
-        await client.multipleBatch(batchActions).then(() => {
-          logger.info('Batch operations completed successfully');
-        }).catch(error => {
-          logger.error(`Error uploading records to Algolia: ${error.message}`);
-        });
+        // FIXED: Only send batch if there are actions to perform
+        if (batchActions.length > 0) {
+          try {
+            await client.multipleBatch(batchActions)
+            logger.debug(`Batch completed: ${objectsToAdd.length} added, ${objectsToUpdate.length} updated for ${c}/${v}`)
+          } catch (error) {
+            logger.error(`Error uploading records to Algolia: ${error.message}`)
+          }
+        }
       }
     }
 
+    // Identify objects to delete (stale content)
     for (const [objectID, obj] of existingObjectsMap) {
-      if ((obj.type === 'Doc' && !obj.objectID.includes('/api/')) || (!obj.type) || (obj.type === 'Lab' && !obj.interactive)) {
+      // Only delete Doc pages (not API) and Labs that aren't interactive
+      const shouldDelete = (obj.type === 'Doc' && !obj.objectID.includes('/api/')) ||
+                          (!obj.type) ||
+                          (obj.type === 'Lab' && !obj.interactive)
+
+      if (shouldDelete) {
         objectsToDelete.push(objectID)
       }
     }
+
     if (objectsToDelete.length > 0) {
-      console.log(objectsToDelete)
-      await index.deleteObjects(objectsToDelete).then(() => {
-        console.log(`Deleted ${objectsToDelete.length} outdated records`);
-      }).catch(error => {
-        logger.error(`Error deleting records from Algolia: ${error.message}`);
-      });
+      logger.info(`Deleting ${objectsToDelete.length} outdated records...`)
+      logger.debug(`Objects to delete: ${JSON.stringify(objectsToDelete)}`)
+
+      try {
+        await index.deleteObjects(objectsToDelete)
+        logger.info(`Successfully deleted ${objectsToDelete.length} outdated records`)
+      } catch (error) {
+        logger.error(`Error deleting records from Algolia: ${error.message}`)
+      }
     }
 
-    logger.info('Updated records:' + totalObjectsToUpdate)
-    logger.info('New records:' + totalObjectsToAdd)
+    // Summary
+    logger.info(`Algolia sync complete: ${totalObjectsToAdd} added, ${totalObjectsToUpdate} updated, ${objectsToDelete.length} deleted`)
 
-    totalObjectsToAdd === 0 && totalObjectsToUpdate === 0 && logger.info('No new records uploaded or existing records updated')
+    if (totalObjectsToAdd === 0 && totalObjectsToUpdate === 0 && objectsToDelete.length === 0) {
+      logger.info('Index is up to date - no changes needed')
+    }
   })
 
+  // Cleanup HTTP agents on process exit
+  // NOTE: This registers a global handler. In watch mode, agents will persist
+  // between builds, which is generally fine for connection reuse.
   process.on('exit', () => {
     httpAgent.destroy()
     httpsAgent.destroy()

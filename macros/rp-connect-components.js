@@ -350,7 +350,7 @@ module.exports.register = function (registry, context) {
    *   - Enterprise licensing information
    *   - Cloud support status (Yes/No with a link if applicable)
    */
-  function generateConnectorsHTMLTable(connectors, sqlDrivers, isCloud, showAllInfo) {
+  function generateConnectorsHTMLTable(connectors, sqlDrivers, isCloud, showAllInfo, commercialNamesMap = {}) {
     return Object.entries(connectors)
       .filter(([_, details]) => {
         // If isCloud is true, filter out rows that do not support cloud
@@ -468,12 +468,38 @@ module.exports.register = function (registry, context) {
 
         const firstUrl = getFirstUrlFromTypesArray(Array.from(types.entries()), isCloud);
 
+        // Collect all unique commercial names for search
+        // First try to get enriched names from the map, then fall back to CSV
+        const allCommercialNames = new Set();
+        if (commercialNamesMap[connector]) {
+          // Use enriched names from the map (includes CSV + AsciiDoc)
+          commercialNamesMap[connector].forEach(name => {
+            if (name.toLowerCase() !== connector.toLowerCase() &&
+                name.toLowerCase() !== 'n/a') {
+              allCommercialNames.add(name);
+            }
+          });
+        } else {
+          // Fallback to CSV-only names
+          Array.from(types.entries()).forEach(([type, commercialNames]) => {
+            Object.keys(commercialNames).forEach(commercialName => {
+              if (commercialName.toLowerCase() !== connector.toLowerCase() &&
+                  commercialName.toLowerCase() !== 'n/a') {
+                allCommercialNames.add(commercialName);
+              }
+            });
+          });
+        }
+        const commercialNamesText = allCommercialNames.size > 0
+          ? `<span class="search-terms" style="position: absolute; left: -9999px;">${Array.from(allCommercialNames).join(' ')}</span>`
+          : '';
+
         // Logic for showAllInfo = true and isCloud = false
         if (showAllInfo && !isCloud) {
           return `
             <tr id="row-${id}">
               <td class="tableblock halign-left valign-top" id="componentName-${id}">
-                <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a></p>
+                <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a>${commercialNamesText}</p>
               </td>
               <td class="tableblock halign-left valign-top" id="componentType-${id}">
                 <p class="tableblock">${typesArray}</p> <!-- Display types linked to Connect URL only -->
@@ -494,7 +520,7 @@ module.exports.register = function (registry, context) {
           return `
             <tr id="row-${id}">
               <td class="tableblock halign-left valign-top" id="componentName-${id}">
-                <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a></p>
+                <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a>${commercialNamesText}</p>
               </td>
               <td class="tableblock halign-left valign-top" id="componentType-${id}">
                 ${typesArray} <!-- Display bulleted list for cloud types if commercial name differs -->
@@ -505,7 +531,7 @@ module.exports.register = function (registry, context) {
         return `
           <tr id="row-${id}">
             <td class="tableblock halign-left valign-top" id="componentName-${id}">
-              <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a></p>
+              <p class="tableblock"><a href="${firstUrl}"><code>${connector}</code></a>${commercialNamesText}</p>
             </td>
             <td class="tableblock halign-left valign-top" id="componentType-${id}">
               <p class="tableblock">${typesArray}</p> <!-- Display types without commercial names -->
@@ -575,6 +601,9 @@ module.exports.register = function (registry, context) {
 
       const csvData = context.config?.attributes?.csvData || null;
       if (!csvData) return console.error(`CSV data is not available for ${parent.getDocument().getAttributes()['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`)
+
+      // Get the enriched commercial names map (includes CSV + AsciiDoc names)
+      const commercialNamesMap = context.config?.attributes?.commercialNamesMap || {};
 
       const sqlDriversData = processSqlDrivers(csvData);
 
@@ -695,7 +724,7 @@ module.exports.register = function (registry, context) {
             </tr>
           </thead>
           <tbody>
-            ${generateConnectorsHTMLTable(processConnectors(csvData), sqlDriversData, isCloud, showAllInfo)}
+            ${generateConnectorsHTMLTable(processConnectors(csvData), sqlDriversData, isCloud, showAllInfo, commercialNamesMap)}
           </tbody>
         </table>
         <script>

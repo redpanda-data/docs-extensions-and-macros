@@ -274,7 +274,10 @@ IMPORTANT: This documentation is auto-generated. Do not edit manually. Run \`npm
     'get-console-version',
     'link-readme',
     'fetch',
-    'setup-mcp'
+    'setup-mcp',
+    'validate-mcp',
+    'preview-prompt',
+    'mcp-version'
   ];
 
   topLevelCommands.forEach(cmd => {
@@ -300,7 +303,8 @@ IMPORTANT: This documentation is auto-generated. Do not edit manually. Run \`npm
     'helm-spec',
     'cloud-regions',
     'crd-spec',
-    'bundle-openapi'
+    'bundle-openapi',
+    'update-connect-version'
   ];
 
   generateSubcommands.forEach(subcmd => {

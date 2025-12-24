@@ -53,7 +53,7 @@ async function parseCSVConnectors(localCsvPath, logger) {
       })
       .filter(Boolean);
 
-    logger.info(`✅ Parsed ${cleaned.length} connector records.`);
+    logger.info(`Done: Parsed ${cleaned.length} connector records.`);
     return cleaned;
   } catch (err) {
     throw new Error(`CSV parsing failed: ${err.message}`);

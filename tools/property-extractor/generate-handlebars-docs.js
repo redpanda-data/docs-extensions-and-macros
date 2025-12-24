@@ -25,7 +25,7 @@ const helpers = require('./helpers');
 // Register helpers
 Object.entries(helpers).forEach(([name, fn]) => {
   if (typeof fn !== 'function') {
-    console.error(`❌ Helper "${name}" is not a function`);
+    console.error(`Error: Helper "${name}" is not a function`);
     process.exit(1);
   }
   handlebars.registerHelper(name, fn);
@@ -96,9 +96,9 @@ function registerPartials() {
     }
     handlebars.registerPartial('deprecated-property', fs.readFileSync(deprecatedPropertyTemplatePath, 'utf8'));
 
-    console.log('✅ Registered all partials');
+    console.log('Done: Registered all partials');
   } catch (error) {
-    console.error('❌ Failed to register Handlebars templates:');
+    console.error('Error: Failed to register Handlebars templates:');
     console.error(`   ${error.message}`);
     throw error;
   }
@@ -140,7 +140,7 @@ function generatePropertyPartials(properties, partialsDir, onRender) {
 
     // Skip if we've already processed this key
     if (processedKeys.has(key)) {
-      console.warn(`⚠️ Duplicate key detected: ${key}`);
+      console.warn(`Warning: Duplicate key detected: ${key}`);
       return;
     }
     processedKeys.add(key);
@@ -164,7 +164,7 @@ function generatePropertyPartials(properties, partialsDir, onRender) {
         propertyGroups['object-storage'].push(prop);
         break;
       default:
-        console.warn(`⚠️ Unknown config_scope: ${prop.config_scope} for ${prop.name}`);
+        console.warn(`Warning: Unknown config_scope: ${prop.config_scope} for ${prop.name}`);
         break;
     }
   });
@@ -185,11 +185,11 @@ function generatePropertyPartials(properties, partialsDir, onRender) {
     const content = pieces.join('\n');
     const filename = `${type}-properties.adoc`;
     fs.writeFileSync(path.join(propertiesPartialsDir, filename), AUTOGEN_NOTICE + content, 'utf8');
-    console.log(`✅ Generated ${filename} (${props.length} properties)`);
+    console.log(`Done: Generated ${filename} (${props.length} properties)`);
     totalCount += props.length;
   });
 
-  console.log(`✅ Done. ${totalCount} total properties.`);
+  console.log(`Done: Done. ${totalCount} total properties.`);
   return totalCount;
 }
 
@@ -223,7 +223,7 @@ function generateDeprecatedDocs(properties, outputDir) {
 
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, AUTOGEN_NOTICE + template(data), 'utf8');
-  console.log(`✅ Generated ${outputPath}`);
+  console.log(`Done: Generated ${outputPath}`);
   return deprecatedProperties.length;
 }
 
@@ -253,7 +253,7 @@ function generateTopicPropertyMappings(properties, partialsDir) {
   fs.mkdirSync(propertiesPartialsDir, { recursive: true });
   const mappingsOut = path.join(propertiesPartialsDir, 'topic-property-mappings.adoc');
   fs.writeFileSync(mappingsOut, AUTOGEN_NOTICE + rendered, 'utf8');
-  console.log(`✅ Generated ${mappingsOut}`);
+  console.log(`Done: Generated ${mappingsOut}`);
   return topicProperties.length;
 }
 
@@ -324,7 +324,7 @@ function generateAllDocs(inputFile, outputDir) {
     try {
       generateTopicPropertyMappings(properties, process.env.OUTPUT_PARTIALS_DIR);
     } catch (err) {
-      console.error(`❌ Failed to generate topic-property-mappings.adoc: ${err.message}`);
+      console.error(`Error: Failed to generate topic-property-mappings.adoc: ${err.message}`);
     }
   } else {
     console.log('📄 Skipping partial generation (set GENERATE_PARTIALS=1 and OUTPUT_PARTIALS_DIR to enable)');
@@ -338,7 +338,7 @@ function generateAllDocs(inputFile, outputDir) {
     ? ((partialsCount / totalProperties) * 100).toFixed(2)
     : '0.00';
 
-  console.log('\n📊 Summary:');
+  console.log('\nSummary:');
   console.log(`   Total properties found:      ${totalProperties}`);
   console.log(`   Property partials generated: ${partialsCount} (${pctRendered}% of total)`);
   console.log(`   Not documented:              ${notRendered}`);
@@ -374,15 +374,15 @@ if (require.main === module) {
 
   const [inputFile, outputDir] = args;
   if (!fs.existsSync(inputFile)) {
-    console.error(`❌ Input file not found: ${inputFile}`);
+    console.error(`Error: Input file not found: ${inputFile}`);
     process.exit(1);
   }
 
   try {
     generateAllDocs(inputFile, outputDir);
-    console.log('✅ Documentation generation completed successfully');
+    console.log('Done: Documentation generation completed successfully');
   } catch (err) {
-    console.error(`❌ Error: ${err.message}`);
+    console.error(`Error: ${err.message}`);
     process.exit(1);
   }
 }

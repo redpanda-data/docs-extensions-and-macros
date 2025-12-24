@@ -12,6 +12,8 @@ const { execSync, spawnSync } = require('child_process');
 const { findRepoRoot, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 const cache = require('./cache');
+const fs = require('fs');
+const path = require('path');
 
 /**
  * Generate Redpanda Connect connector documentation
@@ -33,12 +35,16 @@ function generateRpConnectDocs(args = {}) {
   try {
     // Build command arguments array (no shell interpolation)
     const cmdArgs = ['doc-tools', 'generate', 'rpcn-connector-docs'];
-    
+
     // Add flags only when present, each as separate array entries
     if (args.fetch_connectors) cmdArgs.push('--fetch-connectors');
     if (args.draft_missing) cmdArgs.push('--draft-missing');
     if (args.update_whats_new) cmdArgs.push('--update-whats-new');
     if (args.include_bloblang) cmdArgs.push('--include-bloblang');
+    if (args.skip_cloud_detection) cmdArgs.push('--skip-cloud-detection');
+    if (args.skip_binary_analysis) cmdArgs.push('--skip-binary-analysis');
+    if (args.skip_cloud_analysis) cmdArgs.push('--skip-cloud-analysis');
+    if (args.skip_cgo_analysis) cmdArgs.push('--skip-cgo-analysis');
     if (args.data_dir) {
       cmdArgs.push('--data-dir');
       cmdArgs.push(args.data_dir);
@@ -51,9 +57,28 @@ function generateRpConnectDocs(args = {}) {
       cmdArgs.push('--csv');
       cmdArgs.push(args.csv);
     }
-    if (args.overrides) {
+
+    // Default to using overrides.json from docs-data if it exists
+    let overridesPath = args.overrides;
+    if (!overridesPath) {
+      // Try to find docs-data/overrides.json in current directory
+      const defaultOverrides = path.join(process.cwd(), 'docs-data', 'overrides.json');
+      if (fs.existsSync(defaultOverrides)) {
+        overridesPath = defaultOverrides;
+      }
+    }
+
+    if (overridesPath) {
       cmdArgs.push('--overrides');
-      cmdArgs.push(args.overrides);
+      cmdArgs.push(overridesPath);
+    }
+    if (args.cloud_version) {
+      cmdArgs.push('--cloud-version');
+      cmdArgs.push(args.cloud_version);
+    }
+    if (args.cgo_version) {
+      cmdArgs.push('--cgo-version');
+      cmdArgs.push(args.cgo_version);
     }
 
     const result = spawnSync('npx', cmdArgs, {

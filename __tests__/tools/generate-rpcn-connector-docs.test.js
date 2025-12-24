@@ -639,10 +639,10 @@ input:
         );
 
         // No full-doc files should exist when writeFullDrafts is false
-        const fullConnector = path.join(tmpDir, 'modules', 'components', 'partials', 'drafts', 'MyConnector.adoc');
+        const fullConnector = path.join(tmpDir, 'modules', 'components', 'pages', 'connectors', 'MyConnector.adoc');
         expect(fs.existsSync(fullConnector)).toBe(false);
 
-        const fullCache = path.join(tmpDir, 'modules', 'components', 'partials', 'drafts', 'memory.adoc');
+        const fullCache = path.join(tmpDir, 'modules', 'components', 'pages', 'caches', 'memory.adoc');
         expect(fs.existsSync(fullCache)).toBe(false);
       });
     });
@@ -654,9 +654,9 @@ input:
         templateIntro: templateFile,
         writeFullDrafts: true
       }).then(() => {
-        const draftsBase = path.join(tmpDir, 'modules', 'components', 'partials', 'drafts');
-        const fullConnector = path.join(draftsBase, 'MyConnector.adoc');
-        const fullCache    = path.join(draftsBase, 'memory.adoc');
+        const pagesBase = path.join(tmpDir, 'modules', 'components', 'pages');
+        const fullConnector = path.join(pagesBase, 'connectors', 'MyConnector.adoc');
+        const fullCache    = path.join(pagesBase, 'caches', 'memory.adoc');
 
         expect(fs.existsSync(fullConnector)).toBe(true);
         expect(fs.existsSync(fullCache)).toBe(true);

@@ -109,7 +109,7 @@ const tools = [
   },
   {
     name: 'generate_property_docs',
-    description: 'Generate Redpanda configuration property documentation for a specific version. Creates JSON and optionally AsciiDoc partials with all configuration properties. Writers use this when updating docs for a new Redpanda release. Can run in background with progress streaming.',
+    description: 'Generate Redpanda configuration property documentation for a specific version. Creates JSON and optionally AsciiDoc partials with all configuration properties. Writers use this when updating docs for a new Redpanda release. Automatically uses docs-data/property-overrides.json if present. Can run in background with progress streaming.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -124,6 +124,10 @@ const tools = [
         generate_partials: {
           type: 'boolean',
           description: 'Whether to generate AsciiDoc partials (cluster-properties.adoc, topic-properties.adoc, etc.). Default: false (only generates JSON)'
+        },
+        overrides: {
+          type: 'string',
+          description: 'Path to optional JSON file with property description overrides (defaults to docs-data/property-overrides.json if present)'
         },
         background: {
           type: 'boolean',
@@ -179,7 +183,7 @@ const tools = [
   },
   {
     name: 'generate_rpcn_connector_docs',
-    description: 'Generate Redpanda Connect connector documentation. Creates component documentation for all connectors. Writers use this when updating connector reference docs.',
+    description: 'Generate Redpanda Connect connector documentation. Creates component documentation for all connectors. Writers use this when updating connector reference docs. Automatically uses docs-data/overrides.json if present.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -213,7 +217,15 @@ const tools = [
         },
         overrides: {
           type: 'string',
-          description: 'Path to optional JSON file with overrides'
+          description: 'Path to optional JSON file with overrides (defaults to docs-data/overrides.json if present)'
+        },
+        cloud_version: {
+          type: 'string',
+          description: 'Specific cloud version to check (optional, auto-detects latest if not provided)'
+        },
+        cgo_version: {
+          type: 'string',
+          description: 'Cgo binary version (optional, defaults to same as cloud-version)'
         }
       },
       required: []

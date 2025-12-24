@@ -46,6 +46,11 @@ module.exports = async function getRedpandaVersion({ beta = false, fromAntora = 
   const rc = data.latestRcRelease;
   const version = useBeta && rc ? rc.version : stableVersion;
 
+  if (!version) {
+    console.error('Could not determine Redpanda version');
+    process.exit(1);
+  }
+
   // Determine the Docker repository
   const dockerRepo = (useBeta && rc) ? 'redpanda-unstable' : 'redpanda';
 
