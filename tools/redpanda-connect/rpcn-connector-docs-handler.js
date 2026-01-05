@@ -211,7 +211,7 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
       section += '=== Component updates\n\n'
       section += 'This release adds the following new components:\n\n'
 
-      section += '[cols="1m,1,1,3"]\n'
+      section += '[cols="1m,1a,1a,3a"]\n'
       section += '|===\n'
       section += '|Component |Type |Status |Description\n\n'
 
