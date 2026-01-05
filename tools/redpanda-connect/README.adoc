@@ -20,9 +20,9 @@ The Redpanda Connect automation is part of the https://github.com/redpanda-data/
 * *Version tracking* and change reports
 * *Category pages* organizing components by type
 
-== For documentation writers
+== For writers
 
-=== Quick start
+=== Quickstart
 
 The Redpanda Connect automation is installed as part of the `docs-extensions-and-macros` npm package. You interact with it through the `doc-tools` CLI from within your documentation repository.
 
@@ -86,7 +86,7 @@ asciidoc:
 npx doc-tools generate rpcn-connector-docs --fetch-connectors
 
 # Output:
-# ✓ Already at version 4.53.0
+# Already at version 4.53.0
 #   No diff or version updates needed.
 # (Still generates partials but skips diff/updates)
 
@@ -94,8 +94,8 @@ npx doc-tools generate rpcn-connector-docs --fetch-connectors
 npx doc-tools generate rpcn-connector-docs --fetch-connectors
 
 # Output:
-# ✅ Connector diff JSON written to: docs-data/connect-diff-4.53.0_to_4.54.0.json
-# ✅ Updated Antora version: 4.54.0
+# Done: Connector diff JSON written to: docs-data/connect-diff-4.53.0_to_4.54.0.json
+# Done: Updated Antora version: 4.54.0
 # (Generates diff, updates version, creates "what's new" data)
 ----
 
@@ -119,6 +119,12 @@ modules/components/
 │   │   ├── processors/
 │   │   ├── caches/
 │   │   └── ...
+│   ├── components/
+│   │   └── cloud-only/  # Cloud-only connector drafts
+│   │       ├── inputs/
+│   │       │   └── a2a_message.adoc
+│   │       ├── outputs/
+│   │       └── processors/
 │   ├── examples/
 │   │   ├── inputs/
 │   │   ├── outputs/
@@ -130,6 +136,11 @@ modules/components/
 └── pages/
     ├── connect-api-reference.adoc
     └── ...
+
+docs-data/  # Generated data and analysis
+├── connect-<version>.json           # Full connector schema
+├── connect-diff-X_to_Y.json         # Version comparison
+└── cloud-comparison-<version>.json  # Cloud support analysis
 ----
 
 === Common workflows
@@ -189,12 +200,120 @@ npx doc-tools generate rpcn-connector-docs \
 **Available options:**
 
 * `--fetch-connectors` - Fetch latest data using `rpk connect list`
+* `--connect-version <version>` - Specific Connect version to install and fetch (requires `--fetch-connectors`)
 * `--draft-missing` - Generate full draft pages for undocumented connectors
 * `--overrides <path>` - Apply custom descriptions/examples from JSON
 * `--data-dir <path>` - Directory containing versioned connect JSON files
 * `--old-data <path>` - Specific old version file for diff comparison
-* `--csv <path>` - Connector metadata CSV (default: `internal/plugins/info.csv`)
 * `--include-bloblang` - Include Bloblang functions/methods
+* `--cloud-version <version>` - Specific cloud binary version to analyze (auto-detects latest if not specified)
+* `--cgo-version <version>` - Specific CGO binary version to analyze (defaults to same as cloud-version)
+* `--skip-cloud-detection` - Skip cloud binary analysis for faster runs
+* `--update-whats-new` - Update whats-new.adoc with new section from diff JSON
+
+==== Understanding version options
+
+The automation works with three different version parameters, each controlling a different aspect of the documentation generation:
+
+**1. `--connect-version` (OSS/rpk version)**
+
+Controls which version of Redpanda Connect to install and fetch connector data from.
+
+* *Purpose:* Fetches connector schemas from a specific Connect version
+* *Requires:* `--fetch-connectors` flag
+* *Default:* Latest available version (if not specified)
+* *Example:* `--connect-version 4.75.1`
+
+[,bash]
+----
+# Generate docs for Connect 4.75.1 specifically
+npx doc-tools generate rpcn-connector-docs \
+  --fetch-connectors \
+  --connect-version 4.75.1
+----
+
+**When to use:**
+
+* Testing documentation for a specific release before it's published
+* Generating docs for a beta/RC version
+* Reproducing issues with a specific version
+
+**2. `--cloud-version` (Cloud binary version)**
+
+Controls which Redpanda Cloud binary to download and analyze for cloud connector availability.
+
+* *Purpose:* Analyzes which connectors are available in Redpanda Cloud
+* *Default:* Auto-detects latest cloud release from GitHub
+* *Example:* `--cloud-version 4.76.0`
+
+[,bash]
+----
+# Analyze cloud support using specific cloud version
+npx doc-tools generate rpcn-connector-docs \
+  --fetch-connectors \
+  --cloud-version 4.76.0
+----
+
+**When to use:**
+
+* Cloud binary version differs from OSS version
+* Testing cloud support for a specific release
+* Comparing cloud availability across versions
+
+**3. `--cgo-version` (CGO binary version)**
+
+Controls which CGO-enabled binary to download and analyze for CGO-only connectors.
+
+* *Purpose:* Identifies connectors requiring CGO builds (like `tigerbeetle_cdc`, `ffi`)
+* *Default:* Uses same version as `--cloud-version`
+* *Example:* `--cgo-version 4.76.0`
+
+[,bash]
+----
+# Use different CGO version than cloud version
+npx doc-tools generate rpcn-connector-docs \
+  --fetch-connectors \
+  --cloud-version 4.76.0 \
+  --cgo-version 4.75.1
+----
+
+**When to use:**
+
+* CGO binary version differs from cloud version
+* Testing CGO-only connector availability
+
+**Version matching and compatibility:**
+
+The three versions can be set independently, allowing you to mix and match:
+
+[,bash]
+----
+# Example: Generate docs for Connect 4.75.1 but check cloud support in 4.76.0
+npx doc-tools generate rpcn-connector-docs \
+  --fetch-connectors \
+  --connect-version 4.75.1 \
+  --cloud-version 4.76.0
+----
+
+This is useful when:
+
+* Cloud releases lag behind OSS releases
+* You want to document upcoming features while checking current cloud support
+* Testing compatibility between different versions
+
+**Auto-detection behavior:**
+
+If you don't specify versions:
+
+[,bash]
+----
+# Uses latest for everything
+npx doc-tools generate rpcn-connector-docs --fetch-connectors
+----
+
+* `--connect-version`: Uses latest available from `rpk connect`
+* `--cloud-version`: Auto-detects latest cloud release from GitHub
+* `--cgo-version`: Uses same as `--cloud-version`
 
 ==== Checking connector availability
 
@@ -213,6 +332,61 @@ This catalog includes:
 * Cloud availability
 * Deprecated status
 * Documentation URLs
+
+==== Analyzing cloud binary support
+
+The automation automatically analyzes cloud and CGO binaries to detect connector availability and generate PR-friendly summaries:
+
+[,bash]
+----
+# Generate with cloud analysis (default)
+npx doc-tools generate rpcn-connector-docs --fetch-connectors
+
+# Skip cloud detection for faster runs during development
+npx doc-tools generate rpcn-connector-docs \
+  --fetch-connectors \
+  --skip-cloud-detection
+
+# Analyze specific cloud version
+npx doc-tools generate rpcn-connector-docs \
+  --fetch-connectors \
+  --cloud-version 4.76.0
+----
+
+**What gets analyzed:**
+
+* *OSS connectors* - Available in standard `rpk` binary
+* *Cloud connectors* - Available in Redpanda Cloud binary
+* *CGO connectors* - Available only in cgo-enabled builds
+* *Cloud-only connectors* - In cloud binary but NOT in OSS
+* *Self-hosted only* - In OSS but NOT available in cloud
+
+**Cloud-only connector placement:**
+
+When a connector is detected as cloud-only, draft documentation is automatically placed in:
+
+[,text]
+----
+modules/components/partials/components/cloud-only/
+├── inputs/
+│   └── a2a_message.adoc
+├── outputs/
+│   └── cloud_specific_output.adoc
+└── processors/
+    └── cloud_processor.adoc
+----
+
+**PR summary generation:**
+
+The automation generates a comprehensive GitHub Action-parseable summary including:
+
+* Quick overview of connector changes
+* Action items checklist for writers (prioritized)
+* Breaking changes flagged (removed connectors, fields, default changes)
+* Cloud support analysis showing which connectors need cloud docs
+* Newly drafted connectors with file paths
+
+The summary is wrapped in `<!-- PR_SUMMARY_START -->` and `<!-- PR_SUMMARY_END -->` markers for easy extraction by GitHub Actions workflows.
 
 == How it works
 
@@ -238,18 +412,30 @@ This catalog includes:
 │     └─ Compare: rpk version vs latest-connect-version      │
 │     └─ Exit early if versions match                        │
 │                                                             │
-│  3. Generate AsciiDoc partials for each connector          │
+│  3. Analyze cloud and CGO binaries (unless --skip)         │
+│     ├─ Download cloud binary from GitHub releases          │
+│     ├─ Download CGO binary from GitHub releases            │
+│     ├─ Inspect connector availability in each binary       │
+│     ├─ Compare OSS vs Cloud vs CGO                         │
+│     ├─ Identify cloud-only and cgo-only connectors         │
+│     └─ Output: docs-data/cloud-comparison-<version>.json   │
+│                                                             │
+│  4. Generate AsciiDoc partials for each connector          │
 │     ├─ Apply overrides (custom descriptions/examples)      │
 │     ├─ Resolve $ref references                             │
+│     ├─ Mark cloud-only and cgo-only connectors             │
 │     ├─ Render fields using Handlebars templates            │
-│     └─ Output: modules/components/partials/fields/         │
+│     ├─ Output regular: modules/components/partials/fields/ │
+│     └─ Output cloud-only: partials/components/cloud-only/  │
 │                                                             │
-│  4. Generate diff report (if versions differ)              │
+│  5. Generate diff report (if versions differ)              │
 │     ├─ Compare old vs new connector schemas                │
 │     ├─ Identify new/removed connectors and fields          │
+│     ├─ Flag breaking changes (removed fields, defaults)    │
+│     ├─ Generate PR-friendly summary with cloud info        │
 │     └─ Output: docs-data/connect-diff-X_to_Y.json          │
 │                                                             │
-│  5. Update version in antora.yml (if versions differ)      │
+│  6. Update version in antora.yml (if versions differ)      │
 │     └─ Set: latest-connect-version attribute               │
 │                                                             │
 └─────────────────────┬───────────────────────────────────────┘
@@ -261,18 +447,20 @@ This catalog includes:
 │                                                             │
 │  Extensions:                                                │
 │  • generate-rp-connect-info                                 │
-│    └─ Fetches connector catalog CSV                        │
+│    └─ Fetches connector catalog CSV from GitHub            │
+│    └─ Uses latest-connect-version from antora.yml          │
 │    └─ Enriches with documentation URLs                     │
 │    └─ Attaches to component attributes                     │
 │                                                             │
+│  • collect-bloblang-samples                                 │
+│    └─ Collects Bloblang playground examples                │
+│    └─ Attaches to component attributes                     │
+│                                                             │
 │  • generate-rp-connect-categories                           │
+│    └─ Reads CSV data from generate-rp-connect-info         │
+│    └─ Reads commercial names from frontmatter              │
 │    └─ Generates category pages by type                     │
 │    └─ Sorts connectors by support level                    │
-│                                                             │
-│  • modify-connect-tag-playbook                              │
-│    └─ Manages version tracking                             │
-│    └─ Detects version changes                              │
-│    └─ Skips processing if version matches                  │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ----
@@ -313,12 +501,12 @@ A list of broker addresses to connect to.
 
 *Examples:*
 
-[source,yaml]
-----
+[,yaml]
+\----
 seed_brokers:
   - localhost:9092
   - broker1:9092
-----
+\----
 ----
 
 ==== 2. Connector catalog
@@ -404,6 +592,8 @@ tools/redpanda-connect/
 ├── generate-rpcn-connector-docs.js  # Main connector doc generator
 ├── parse-csv-connectors.js          # CSV catalog parser
 ├── report-delta.js                   # Version comparison
+├── connector-binary-analyzer.js     # Cloud/CGO binary analysis
+├── pr-summary-formatter.js          # PR-friendly summary generation
 ├── helpers/
 │   ├── renderConnectFields.js       # Renders field documentation
 │   ├── renderConnectExamples.js     # Renders examples
@@ -418,9 +608,9 @@ tools/redpanda-connect/
     └── bloblang-function.hbs         # Bloblang function template
 
 extensions/
-├── generate-rp-connect-info.js       # Fetches and enriches catalog
-├── generate-rp-connect-categories.js # Generates category pages
-└── modify-connect-tag-playbook.js    # Version tracking
+├── generate-rp-connect-info.js       # Fetches CSV from GitHub and enriches catalog
+├── collect-bloblang-samples.js       # Collects Bloblang playground examples
+└── generate-rp-connect-categories.js # Generates category pages from CSV data
 ----
 
 === Connector documentation generation
@@ -443,29 +633,160 @@ The `generateRpcnConnectorDocs()` function processes component schemas:
 * `templateExamples` - Examples partial template
 * `writeFullDrafts` - Generate full pages vs partials
 
-=== Version tracking
+=== Version tracking and management
 
-The `modify-connect-tag-playbook` extension manages version detection:
+Version updates are now managed through the CLI command `update-connect-version`:
+
+[,bash]
+----
+# Update to latest version from GitHub
+npx doc-tools automation update-connect-version
+
+# Update to specific version
+npx doc-tools automation update-connect-version -v 4.76.0
+----
+
+The command updates the `latest-connect-version` attribute in `antora.yml`:
+
+[,yaml]
+----
+asciidoc:
+  attributes:
+    latest-connect-version: 4.76.0
+----
+
+This version is then used by the `generate-rp-connect-info` extension to fetch the correct CSV data from GitHub during the Antora build process.
+
+=== Commercial names and display
+
+Connectors can have human-friendly commercial names that appear in catalogs and category pages. These are specified in the AsciiDoc frontmatter:
+
+[,asciidoc]
+----
+= kafka_franz
+:type: input
+:commercial-names: Franz-go, Apache Kafka
+:categories: ["Services"]
+----
+
+The `generate-rp-connect-categories` extension reads these commercial names and uses the first one as the primary display name. If multiple names are provided (comma-separated), only the first is used for display.
+
+*Default behavior:* If no `:commercial-names:` attribute is found, the connector key name is used (e.g., `kafka_franz`).
+
+*Adding commercial names to new connectors:*
+
+When generating documentation for new connectors with `--draft-missing`, writers are reminded via PR summaries to add commercial names:
+
+[,adoc]
+----
+### ✍️ Writer Action Required
+
+For each new connector, please add the `:commercial-names:` attribute to the frontmatter:
+
+```asciidoc
+= Connector Name
+:type: input
+:commercial-names: Commercial Name, Alternative Name
+```
+
+_This helps improve discoverability and ensures proper categorization._
+----
+
+=== Cloud binary analysis
+
+The `connector-binary-analyzer.js` module detects connector availability across different binaries:
 
 [,javascript]
 ----
-// Detect current version
-const currentVersion = contentCatalog
-  .getComponent('redpanda-connect')
-  .latest.asciidoc.attributes['latest-connect-version'];
+// Download and inspect cloud binary
+const cloudVersion = await getLatestCloudVersion();
+const cloudBinaryPath = await downloadCloudBinary(cloudVersion);
+const cloudIndex = await inspectBinary(cloudBinaryPath);
 
-// Fetch new version from repository
-const newVersion = await getRpkConnectVersion(tag);
+// Download and inspect CGO binary
+const cgoBinaryPath = await downloadCgoBinary(version);
+const cgoIndex = await inspectBinary(cgoBinaryPath);
 
-// Compare and skip if match
-if (currentVersion === newVersion) {
-  logger.info(`Already at version ${newVersion}`);
-  return; // Skip diff and updates
-}
+// Compare OSS vs Cloud
+const cloudComparison = compareOssWithCloud(ossIndex, cloudIndex);
+// Returns: { inCloud, notInCloud, cloudOnly }
 
-// Generate diff and update antora.yml
-const delta = compareVersions(currentVersion, newVersion);
-await updateAntoraVersion(newVersion);
+// Identify CGO-only connectors
+const cgoOnly = findCgoOnlyConnectors(ossIndex, cgoIndex);
+----
+
+**Key functions:**
+
+* `getLatestCloudVersion()` - Auto-detect latest cloud release from GitHub
+* `downloadCloudBinary()` - Download and extract cloud binary tarball
+* `inspectBinary()` - Run binary with `list --format json-full`
+* `compareOssWithCloud()` - Compare connector sets between OSS and cloud
+* `findCgoOnlyConnectors()` - Identify connectors requiring CGO builds
+
+**Cloud-only detection:**
+
+When a connector exists in the cloud binary but NOT in the OSS binary, it's marked as cloud-only and receives special handling:
+
+* Draft placement: `modules/components/partials/components/cloud-only/{type}s/{name}.adoc`
+* Metadata: Flagged with ☁️ in PR summaries
+* Priority: Listed separately in action items
+
+**Breaking changes detection:**
+
+The system automatically flags:
+
+* Removed connectors
+* Removed fields
+* Changed default values
+* Deprecated connectors and fields
+
+=== PR summary generation
+
+The `pr-summary-formatter.js` module generates GitHub Action-parseable summaries:
+
+[,javascript]
+----
+const summary = formatPrSummary({
+  oldVersion,
+  newVersion,
+  cloudVersion,
+  diffData,
+  cloudComparison,
+  drafts
+});
+
+// Output wrapped in markers for GitHub Actions
+console.log('<!-- PR_SUMMARY_START -->');
+console.log(summary);
+console.log('<!-- PR_SUMMARY_END -->');
+----
+
+**Summary sections:**
+
+* *Quick Overview* - Connector changes at a glance
+* *Breaking Changes* - Flagged removed connectors, fields, defaults
+* *Newly Drafted* - Auto-generated drafts with file paths
+* *Action Items* - Prioritized checklist for writers
+* *Cloud Support Gap Analysis* - OSS connectors not in cloud
+* *Detailed Changes* - Expandable section with full details
+
+**GitHub Actions integration:**
+
+[,yaml]
+----
+- name: Generate connector docs
+  id: generate
+  run: |
+    npx doc-tools generate rpcn-connector-docs --fetch-connectors > output.log
+
+- name: Extract PR summary
+  run: |
+    sed -n '/<!-- PR_SUMMARY_START -->/,/<!-- PR_SUMMARY_END -->/p' output.log > summary.txt
+
+- name: Create PR
+  uses: peter-evans/create-pull-request@v6
+  with:
+    body-path: summary.txt
 ----
 
 === Override system
@@ -688,6 +1009,50 @@ cat antora.yml | grep latest-connect-version
 ----
 
 3. Ensure modify-connect-tag-playbook extension is registered
+
+=== Cloud binary analysis issues
+
+**Cloud download fails:**
+
+If cloud binary download fails, the script continues without cloud support data:
++
+[,text]
+----
+Warning: Cloud analysis failed: Failed to download binary
+   Continuing without cloud support data...
+----
++
+Check:
+
+* Network connectivity to GitHub
+* GitHub API rate limits
+* Binary availability for the specified version
+
+**Binary permission errors:**
+
+If you get permission errors when running binaries:
++
+[,bash]
+----
+chmod +x docs-data/cloud-binaries/redpanda-connect-*
+----
+
+**Version mismatch:**
+
+If OSS and cloud versions don't match:
+
+* The script compares latest OSS with latest cloud by default
+* Use `--cloud-version` to specify a matching version
+* Gap analysis will show differences between versions
+
+**Skip cloud detection for faster runs:**
++
+[,bash]
+----
+npx doc-tools generate rpcn-connector-docs \
+  --fetch-connectors \
+  --skip-cloud-detection
+----
 
 === Template rendering issues
 

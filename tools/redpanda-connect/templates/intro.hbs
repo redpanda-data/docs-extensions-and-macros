@@ -6,26 +6,6 @@ Introduced in version {{version}}.
 endif::[]
 {{/if}}
 
-{{#if this.config.children}}
-[tabs]
-======
-Common::
-+
---
-```yaml
-{{{commonConfig this.type this.name this.config.children}}}
-```
---
-Advanced::
-+
---
-```yaml
-{{{advancedConfig this.type this.name this.config.children}}}
-```
---
-======
-{{/if}}
-
 {{#if description}}
 {{{description}}}
 {{else}}

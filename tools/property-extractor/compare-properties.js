@@ -296,7 +296,7 @@ function generateConsoleReport(report, oldVersion, newVersion) {
   }
 
   if (report.emptyDescriptions.length > 0) {
-    console.log(`\n⚠️  Properties with empty descriptions (${report.emptyDescriptions.length}):`);
+    console.log(`\nWarning: Properties with empty descriptions (${report.emptyDescriptions.length}):`);
     report.emptyDescriptions.forEach(prop => {
       console.log(`   • ${prop.name} (${prop.type})`);
     });
@@ -362,7 +362,7 @@ function generateJsonReport(report, oldVersion, newVersion, outputPath) {
  */
 function comparePropertyFiles(oldFilePath, newFilePath, oldVersion, newVersion, outputDir, filename = 'property-changes.json') {
   try {
-    console.log(`📊 Comparing property files:`);
+    console.log(`Comparing property files:`);
     console.log(`   Old: ${oldFilePath}`);
     console.log(`   New: ${newFilePath}`);
     
@@ -383,7 +383,7 @@ function comparePropertyFiles(oldFilePath, newFilePath, oldVersion, newVersion, 
     
     return report;
   } catch (error) {
-    console.error(`❌ Error comparing properties: ${error.message}`);
+    console.error(`Error: Error comparing properties: ${error.message}`);
     process.exit(1);
   }
 }

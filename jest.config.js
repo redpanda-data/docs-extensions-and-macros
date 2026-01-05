@@ -7,6 +7,12 @@ module.exports = {
     '**/__tests__/**/*.test.js'
   ],
 
+  // Exclude CGO test from normal runs (use npm run test:cgo for CI/CD)
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '__tests__/tools/cgo-detection.test.js'
+  ],
+
   // Coverage configuration
   collectCoverageFrom: [
     'bin/**/*.js',

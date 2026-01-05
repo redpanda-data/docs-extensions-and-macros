@@ -1,0 +1,59 @@
+name: Update CLI Reference Docs
+
+on:
+  pull_request:
+    paths:
+      - 'bin/doc-tools.js'
+      - 'cli-utils/**'
+      - 'tools/generate-cli-docs.js'
+      - 'tools/redpanda-connect/rpcn-connector-docs-handler.js'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update_cli_docs:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          persist-credentials: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate CLI reference docs
+        run: npm run generate:cli-docs
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet -- CLI_REFERENCE.adoc; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes to CLI_REFERENCE.adoc"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "CLI_REFERENCE.adoc has changes:"
+            git diff --stat -- CLI_REFERENCE.adoc
+          fi
+
+      - name: Commit and push changes
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CLI_REFERENCE.adoc
+          git commit -m "docs: Auto-update CLI reference documentation (PR #${{ github.event.number }})"
+          git push
+          echo "CLI reference docs updated and committed"

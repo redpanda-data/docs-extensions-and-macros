@@ -50,6 +50,11 @@ module.exports = async function getConsoleVersion({ beta = false, fromAntora = f
     ? (data.latestBetaRelease || data.latestStableRelease)
     : data.latestStableRelease;
 
+  if (!version) {
+    console.error('Could not determine Console version');
+    process.exit(1);
+  }
+
   console.log(`CONSOLE_VERSION=${version}`);
   console.log(`CONSOLE_DOCKER_REPO=${CONSOLE_DOCKER_REPO}`);
 };

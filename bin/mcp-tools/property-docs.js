@@ -10,6 +10,8 @@ const { spawnSync } = require('child_process');
 const { findRepoRoot, getDocToolsCommand, MAX_EXEC_BUFFER_SIZE, DEFAULT_COMMAND_TIMEOUT } = require('./utils');
 const { getAntoraStructure } = require('./antora');
 const { createJob } = require('./job-queue');
+const fs = require('fs');
+const path = require('path');
 
 /**
  * Generate Redpanda property documentation
@@ -59,6 +61,7 @@ function generatePropertyDocs(args) {
   const docTools = getDocToolsCommand(repoRoot);
 
   // Build command arguments
+  // Note: --cloud-support is enabled by default in the CLI, so we don't need to add it explicitly
   const baseArgs = ['generate', 'property-docs'];
 
   if (args.tag) {
@@ -71,6 +74,21 @@ function generatePropertyDocs(args) {
 
   if (args.generate_partials) {
     baseArgs.push('--generate-partials');
+  }
+
+  // Default to using property-overrides.json from docs-data if it exists
+  let overridesPath = args.overrides;
+  if (!overridesPath) {
+    // Try to find docs-data/property-overrides.json in current directory
+    const defaultOverrides = path.join(process.cwd(), 'docs-data', 'property-overrides.json');
+    if (fs.existsSync(defaultOverrides)) {
+      overridesPath = defaultOverrides;
+    }
+  }
+
+  if (overridesPath) {
+    baseArgs.push('--overrides');
+    baseArgs.push(overridesPath);
   }
 
   // If background mode, create job and return immediately
