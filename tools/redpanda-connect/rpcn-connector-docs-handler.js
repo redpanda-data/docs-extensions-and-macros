@@ -254,7 +254,7 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
       section += '\n=== Deprecations\n\n'
       section += 'The following components are now deprecated:\n\n'
 
-      section += '[cols="1m,1,3"]\n'
+      section += '[cols="1m,1a,3a"]\n'
       section += '|===\n'
       section += '|Component |Type |Description\n\n'
 
