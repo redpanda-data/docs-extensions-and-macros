@@ -82,7 +82,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       ? page.src.origin.descriptor.displayVersion
       : page.src.version
 
-    // Handle the page keywords - FIXED: now added to index
+    // Handle the page keywords
     const kwElement = root.querySelector('meta[name=keywords]')
     let keywords = []
     if (kwElement) {
