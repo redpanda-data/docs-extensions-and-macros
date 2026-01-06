@@ -1630,7 +1630,7 @@ automation
   .option('-t, --tag <tag>', 'Git tag for released content')
   .option('-b, --branch <branch>', 'Branch name for in-progress content')
   .option('--repo <url>', 'Repository URL', 'https://github.com/redpanda-data/redpanda.git')
-  .addOption(new Option('-s, --surface <surface>', 'Which API surface(s) to bundle').choices(['admin', 'connect', 'both']).makeOptionMandatory())
+  .addOption(new Option('-s, --surface <surface>', 'Which API surfaces to bundle').choices(['admin', 'connect', 'both']).makeOptionMandatory())
   .option('--out-admin <path>', 'Output path for admin API', 'admin/redpanda-admin-api.yaml')
   .option('--out-connect <path>', 'Output path for connect API', 'connect/redpanda-connect-api.yaml')
   .option('--admin-major <string>', 'Admin API major version', 'v2.0.0')

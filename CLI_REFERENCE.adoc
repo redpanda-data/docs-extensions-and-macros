@@ -1074,7 +1074,7 @@ Branch name for in-progress content
 Repository URL (default: "https://github.com/redpanda-data/redpanda.git")
 
 `-s, --surface <surface>`::
-Which API surface(s) to bundle (choices: "admin", "connect", "both")
+Which API surfaces to bundle (choices: "admin", "connect", "both")
 
 `--out-admin <path>`::
 Output path for admin API (default: "admin/redpanda-admin-api.yaml")

@@ -362,7 +362,7 @@ const tools = [
         },
         surface: {
           type: 'string',
-          description: 'Which API surface(s) to bundle (optional, defaults to "both")',
+          description: 'Which API surfaces to bundle (optional, defaults to "both")',
           enum: ['admin', 'connect', 'both']
         },
         out_admin: {

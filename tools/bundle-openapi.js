@@ -551,7 +551,7 @@ function postProcessBundle(filePath, options, quiet = false) {
 }
 
 /**
- * Bundle OpenAPI fragments for the specified API surface(s) from a repository tag and write the resulting bundled YAML files to disk.
+ * Bundle OpenAPI fragments for the specified API surfaces from a repository tag and write the resulting bundled YAML files to disk.
  *
  * @param {Object} options - Configuration options.
  * @param {string} options.tag - Git tag to checkout (for example, 'v25.1.1').

@@ -148,13 +148,20 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
     const regularComponents = []
 
     if (diff.details.newComponents && diff.details.newComponents.length) {
-      for (const comp of diff.details.newComponents) {
+      // Filter out cloud-only connectors - they don't go in whats-new.adoc
+      const nonCloudOnlyComponents = diff.details.newComponents.filter(comp => {
+        const isCloudOnly = diff.binaryAnalysis?.details?.cloudOnly?.some(cloudComp => {
+          return cloudComp.name === comp.name && cloudComp.type === comp.type
+        })
+        return !isCloudOnly
+      })
+
+      for (const comp of nonCloudOnlyComponents) {
         if (comp.type === 'bloblang-functions' || comp.type === 'bloblang-methods') {
           bloblangComponents.push(comp)
         } else {
-          const isCgoOnly = binaryAnalysis?.cgoOnly?.some(cgo => {
-            const typeSingular = cgo.type.replace(/s$/, '')
-            return cgo.name === comp.name && typeSingular === comp.type
+          const isCgoOnly = diff.binaryAnalysis?.details?.cgoOnly?.some(cgo => {
+            return cgo.name === comp.name && cgo.type === comp.type
           })
 
           regularComponents.push({
@@ -654,6 +661,27 @@ async function handleRpcnConnectorDocs (options) {
 
   let newIndex = JSON.parse(fs.readFileSync(dataFile, 'utf8'))
 
+  // Save a clean copy of OSS data for binary analysis (before augmentation)
+  // This ensures the binary analyzer compares actual binaries, not augmented data
+  const cleanOssDataPath = path.join(dataDir, `._connect-${newVersion}-clean.json`)
+
+  // Strip augmentation fields to create clean data for comparison
+  const cleanData = JSON.parse(JSON.stringify(newIndex))
+  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers']
+
+  for (const type of connectorTypes) {
+    if (Array.isArray(cleanData[type])) {
+      cleanData[type] = cleanData[type].filter(c => !c.cloudOnly) // Remove cloud-only connectors added by augmentation
+      cleanData[type].forEach(c => {
+        delete c.cloudSupported
+        delete c.requiresCgo
+        delete c.cloudOnly
+      })
+    }
+  }
+
+  fs.writeFileSync(cleanOssDataPath, JSON.stringify(cleanData, null, 2), 'utf8')
+
   const versionsMatch = oldVersion && newVersion && oldVersion === newVersion
   if (versionsMatch) {
     console.log(`\n✓ Already at version ${newVersion}`)
@@ -740,6 +768,19 @@ async function handleRpcnConnectorDocs (options) {
     console.log('\nAnalyzing connector binaries...')
     const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
 
+    // Always use clean OSS data for comparison
+    // Temporarily rename the file so the analyzer finds it
+    const expectedPath = path.join(dataDir, `connect-${newVersion}.json`)
+    let tempRenamed = false
+
+    if (fs.existsSync(cleanOssDataPath)) {
+      if (fs.existsSync(expectedPath)) {
+        fs.renameSync(expectedPath, path.join(dataDir, `._connect-${newVersion}-augmented.json.tmp`))
+        tempRenamed = true
+      }
+      fs.copyFileSync(cleanOssDataPath, expectedPath)
+    }
+
     const analysisOptions = {
       skipCloud: false,
       skipCgo: false,
@@ -752,6 +793,13 @@ async function handleRpcnConnectorDocs (options) {
       dataDir,
       analysisOptions
     )
+
+    // Restore the augmented file
+    if (tempRenamed) {
+      const expectedPath = path.join(dataDir, `connect-${newVersion}.json`)
+      fs.unlinkSync(expectedPath)
+      fs.renameSync(path.join(dataDir, `._connect-${newVersion}-augmented.json.tmp`), expectedPath)
+    }
 
     console.log('Done: Binary analysis complete:')
     console.log(`   • OSS version: ${binaryAnalysis.ossVersion}`)
@@ -848,10 +896,10 @@ async function handleRpcnConnectorDocs (options) {
       fs.writeFileSync(dataFile, JSON.stringify(connectorData, null, 2), 'utf8')
       console.log(`Done: Augmented ${augmentedCount} connectors with cloud/cgo fields`)
       if (addedCgoCount > 0) {
-        console.log(`   • Added ${addedCgoCount} cgo-only connector(s) to data file`)
+        console.log(`   • Added ${addedCgoCount} cgo-only connectors to data file`)
       }
       if (addedCloudOnlyCount > 0) {
-        console.log(`   • Added ${addedCloudOnlyCount} cloud-only connector(s) to data file`)
+        console.log(`   • Added ${addedCloudOnlyCount} cloud-only connectors to data file`)
       }
 
       // Keep only 2 most recent versions
@@ -890,8 +938,42 @@ async function handleRpcnConnectorDocs (options) {
       }
     )
 
+    // Filter out components that already have documentation
+    const docRoots = {
+      pages: path.resolve(process.cwd(), 'modules/components/pages'),
+      partials: path.resolve(process.cwd(), 'modules/components/partials/components'),
+      cloudOnly: path.resolve(process.cwd(), 'modules/components/partials/components/cloud-only')
+    }
+
+    if (diffJson.details && diffJson.details.newComponents) {
+      const originalCount = diffJson.details.newComponents.length
+      diffJson.details.newComponents = diffJson.details.newComponents.filter(comp => {
+        const typePlural = comp.type.endsWith('s') ? comp.type : `${comp.type}s`
+        const relPath = path.join(typePlural, `${comp.name}.adoc`)
+        const docsExist = Object.values(docRoots).some(root =>
+          fs.existsSync(path.join(root, relPath))
+        )
+        return !docsExist
+      })
+      const filteredCount = originalCount - diffJson.details.newComponents.length
+      if (filteredCount > 0) {
+        console.log(`   ℹ️  Filtered out ${filteredCount} components that already have documentation`)
+      }
+      // Update summary count
+      if (diffJson.summary) {
+        diffJson.summary.newComponents = diffJson.details.newComponents.length
+      }
+    }
+
     // Add new cgo-only components
     if (binaryAnalysis && binaryAnalysis.cgoOnly && binaryAnalysis.cgoOnly.length > 0) {
+      // Define roots for checking if docs already exist
+      const docRoots = {
+        pages: path.resolve(process.cwd(), 'modules/components/pages'),
+        partials: path.resolve(process.cwd(), 'modules/components/partials/components'),
+        cloudOnly: path.resolve(process.cwd(), 'modules/components/partials/components/cloud-only')
+      }
+
       let newCgoComponents
 
       if (oldBinaryAnalysis) {
@@ -899,20 +981,36 @@ async function handleRpcnConnectorDocs (options) {
         newCgoComponents = binaryAnalysis.cgoOnly.filter(cgoComp => {
           const wasInOldOss = oldIndex[cgoComp.type]?.some(c => c.name === cgoComp.name)
           const wasInOldCgo = oldCgoSet.has(`${cgoComp.type}:${cgoComp.name}`)
-          return !wasInOldOss && !wasInOldCgo
+
+          // Check if docs already exist
+          const typePlural = cgoComp.type.endsWith('s') ? cgoComp.type : `${cgoComp.type}s`
+          const relPath = path.join(typePlural, `${cgoComp.name}.adoc`)
+          const docsExist = Object.values(docRoots).some(root =>
+            fs.existsSync(path.join(root, relPath))
+          )
+
+          return !wasInOldOss && !wasInOldCgo && !docsExist
         })
       } else {
         newCgoComponents = binaryAnalysis.cgoOnly.filter(cgoComp => {
           const wasInOldOss = oldIndex[cgoComp.type]?.some(c => c.name === cgoComp.name)
-          return !wasInOldOss
+
+          // Check if docs already exist
+          const typePlural = cgoComp.type.endsWith('s') ? cgoComp.type : `${cgoComp.type}s`
+          const relPath = path.join(typePlural, `${cgoComp.name}.adoc`)
+          const docsExist = Object.values(docRoots).some(root =>
+            fs.existsSync(path.join(root, relPath))
+          )
+
+          return !wasInOldOss && !docsExist
         })
         if (newCgoComponents.length > 0) {
-          console.log(`   ℹ️  No old binary analysis found - treating ${newCgoComponents.length} cgo component(s) not in old OSS data as new`)
+          console.log(`   ℹ️  No old binary analysis found - treating ${newCgoComponents.length} cgo components not in old OSS data as new`)
         }
       }
 
       if (newCgoComponents && newCgoComponents.length > 0) {
-        console.log(`   • Found ${newCgoComponents.length} new cgo-only component(s)`)
+        console.log(`   • Found ${newCgoComponents.length} new cgo-only components`)
         newCgoComponents.forEach(cgoComp => {
           const typeSingular = cgoComp.type.replace(/s$/, '')
           diffJson.details.newComponents.push({
@@ -940,7 +1038,7 @@ async function handleRpcnConnectorDocs (options) {
         .filter(f => f.startsWith('connect-diff-') && f.endsWith('.json') && f !== path.basename(diffPath))
 
       if (oldDiffFiles.length > 0) {
-        console.log(`🧹 Cleaning up ${oldDiffFiles.length} old diff file(s)...`)
+        console.log(`🧹 Cleaning up ${oldDiffFiles.length} old diff files...`)
         oldDiffFiles.forEach(f => {
           const oldDiffPath = path.join(dataDir, f)
           fs.unlinkSync(oldDiffPath)
@@ -1011,7 +1109,8 @@ async function handleRpcnConnectorDocs (options) {
 
       const roots = {
         pages: path.resolve(process.cwd(), 'modules/components/pages'),
-        partials: path.resolve(process.cwd(), 'modules/components/partials/components')
+        partials: path.resolve(process.cwd(), 'modules/components/partials/components'),
+        cloudOnly: path.resolve(process.cwd(), 'modules/components/partials/components/cloud-only')
       }
 
       const allMissing = validConnectors.filter(({ name, type }) => {

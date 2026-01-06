@@ -16,7 +16,7 @@ const { getAntoraStructure } = require('./antora');
  * @param {string} [args.tag] - Git tag for released content (for example, "v24.3.2" or "24.3.2")
  * @param {string} [args.branch] - Branch name for in-progress content (for example, "dev", "main")
  * @param {string} [args.repo] - Repository URL
- * @param {string} [args.surface] - Which API surface(s) to bundle: 'admin', 'connect', or 'both'
+ * @param {string} [args.surface] - Which API surfaces to bundle: 'admin', 'connect', or 'both'
  * @param {string} [args.out_admin] - Output path for admin API
  * @param {string} [args.out_connect] - Output path for connect API
  * @param {string} [args.admin_major] - Admin API major version
@@ -155,7 +155,7 @@ function generateBundleOpenApi(args) {
       surface,
       files_generated: filesGenerated,
       output: output.trim(),
-      summary: `Bundled OpenAPI documentation for ${surface} API(s) at ${refType} ${version}`
+      summary: `Bundled OpenAPI documentation for ${surface} APIs at ${refType} ${version}`
     };
   } catch (err) {
     return {

@@ -503,7 +503,7 @@ async function analyzeAllBinaries(ossVersion, cloudVersion = null, dataDir = nul
       // These are connectors that require cgo-enabled builds
       cgoOnly = findCgoOnlyConnectors(ossIndex, cgoIndex);
 
-      console.log(`Done: Cgo analysis complete: ${cgoOnly.length} cgo-only connector(s) found`);
+      console.log(`Done: Cgo analysis complete: ${cgoOnly.length} cgo-only connectors found`);
       if (cgoOnly.length > 0) {
         console.log('   cgo-only connectors:');
         cgoOnly.forEach(c => console.log(`   • ${c.type}/${c.name} (${c.status})`));

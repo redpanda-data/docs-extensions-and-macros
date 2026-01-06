@@ -250,6 +250,7 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     result.binaryAnalysis.details = {
       cloudSupported: ba.comparison?.inCloud?.map(c => ({ type: c.type, name: c.name, status: c.status })) || [],
       selfHostedOnly: ba.comparison?.notInCloud?.map(c => ({ type: c.type, name: c.name, status: c.status })) || [],
+      cloudOnly: ba.comparison?.cloudOnly?.map(c => ({ type: c.type, name: c.name, status: c.status })) || [],
       cgoOnly: ba.cgoOnly?.map(c => ({ type: c.type, name: c.name, status: c.status })) || []
     };
   }

@@ -190,7 +190,18 @@ function updateNavFromDrafts(draftFiles, navPath = null) {
 
   console.log(`📝 Updating navigation: ${navPath}`);
 
-  const connectors = draftFiles.map(draft => ({
+  // Filter out cloud-only connectors (they go in partials, not nav)
+  const nonCloudOnlyFiles = draftFiles.filter(draft => !draft.cloudOnly);
+  const cloudOnlyFiles = draftFiles.filter(draft => draft.cloudOnly);
+
+  if (cloudOnlyFiles.length > 0) {
+    console.log(`   ℹ️  Skipping ${cloudOnlyFiles.length} cloud-only connectors (partials don't need nav entries):`);
+    cloudOnlyFiles.forEach(draft => {
+      console.log(`      • ${draft.type}/${draft.name}`);
+    });
+  }
+
+  const connectors = nonCloudOnlyFiles.map(draft => ({
     type: draft.type,
     name: draft.name
   }));
