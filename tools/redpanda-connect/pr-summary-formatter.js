@@ -30,7 +30,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // High-level stats
   const stats = diffData.summary;
-  const hasChanges = Object.values(stats).some(v => v > 0);
+  const hasChanges = Object.values(stats).some(v => v > 0) || (draftedConnectors && draftedConnectors.length > 0);
 
   if (!hasChanges) {
     lines.push('✅ **No changes detected** - Documentation is up to date');
@@ -91,16 +91,78 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   if (stats.newComponents > 0) {
     lines.push('### ✍️ Writer Action Required');
     lines.push('');
-    lines.push('For each new connector, please add the `:commercial-names:` attribute to the frontmatter:');
+    lines.push('For each new connector, add the `:page-commercial-names:` attribute to the frontmatter:');
     lines.push('');
     lines.push('```asciidoc');
     lines.push('= Connector Name');
     lines.push(':type: input');
-    lines.push(':commercial-names: Commercial Name, Alternative Name');
+    lines.push(':page-commercial-names: Commercial Name, Alternative Name');
     lines.push('```');
     lines.push('');
     lines.push('_This helps improve discoverability and ensures proper categorization._');
     lines.push('');
+
+    // Check if any new connectors are cloud-supported
+    if (binaryAnalysis && binaryAnalysis.comparison) {
+      const newConnectorKeys = diffData.details.newComponents.map(c => ({
+        key: `${c.type}:${c.name}`,
+        type: c.type,
+        name: c.name
+      }));
+
+      const cloudSupported = newConnectorKeys.filter(item => {
+        // Check both inCloud (OSS+Cloud) and cloudOnly (Cloud-only)
+        const inCloud = binaryAnalysis.comparison.inCloud.some(c => `${c.type}:${c.name}` === item.key);
+        const cloudOnly = binaryAnalysis.comparison.cloudOnly &&
+          binaryAnalysis.comparison.cloudOnly.some(c => `${c.type}:${c.name}` === item.key);
+        return inCloud || cloudOnly;
+      });
+
+      if (cloudSupported.length > 0) {
+        lines.push('### ☁️ Cloud Docs Update Required');
+        lines.push('');
+        lines.push(`**${cloudSupported.length}** new connector${cloudSupported.length !== 1 ? 's are' : ' is'} available in Redpanda Cloud.`);
+        lines.push('');
+        lines.push('**Action:** Submit a separate PR to https://github.com/redpanda-data/cloud-docs to add the connector pages using include syntax:');
+        lines.push('');
+
+        // Check if any are cloud-only (need partial syntax)
+        const cloudOnly = cloudSupported.filter(item =>
+          binaryAnalysis.comparison.cloudOnly &&
+          binaryAnalysis.comparison.cloudOnly.some(c => `${c.type}:${c.name}` === item.key)
+        );
+        const regularCloud = cloudSupported.filter(item =>
+          !binaryAnalysis.comparison.cloudOnly ||
+          !binaryAnalysis.comparison.cloudOnly.some(c => `${c.type}:${c.name}` === item.key)
+        );
+
+        if (regularCloud.length > 0) {
+          lines.push('**For connectors in pages:**');
+          lines.push('```asciidoc');
+          lines.push('= Connector Name');
+          lines.push('');
+          lines.push('include::redpanda-connect:components:page$type/connector-name.adoc[tag=single-source]');
+          lines.push('```');
+          lines.push('');
+        }
+
+        if (cloudOnly.length > 0) {
+          lines.push('**For cloud-only connectors (in partials):**');
+          lines.push('```asciidoc');
+          lines.push('= Connector Name');
+          lines.push('');
+          lines.push('include::redpanda-connect:components:partial$components/cloud-only/type/connector-name.adoc[tag=single-source]');
+          lines.push('```');
+          lines.push('');
+        }
+
+        // Add instruction to update cloud whats-new
+        lines.push('**Also update the cloud whats-new file:**');
+        lines.push('');
+        lines.push('Add entries for the new cloud-supported connectors to the Redpanda Cloud whats-new file in the cloud-docs repository.');
+        lines.push('');
+      }
+    }
   }
 
   // Breaking Changes Section

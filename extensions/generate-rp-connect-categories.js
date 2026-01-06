@@ -73,7 +73,6 @@ module.exports.register = function ({ config }) {
         const status = attrs.status || extractAttribute(file, 'status')
         const driverSupport = attrs['driver-support'] || extractAttribute(file, 'driver-support')
         const cacheSupport = attrs['cache-support'] || extractAttribute(file, 'cache-support')
-        // FIXED: Use correct attribute name (page-commercial-names, not commercial-names)
         const commercialNames = attrs['page-commercial-names'] || extractAttribute(file, 'page-commercial-names')
 
         const pubUrl = file.pub.url

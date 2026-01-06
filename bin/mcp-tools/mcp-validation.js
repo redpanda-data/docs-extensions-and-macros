@@ -250,7 +250,7 @@ function formatValidationResults(results, config) {
     lines.push('✓ Validation passed');
   } else {
     lines.push('✗ Validation failed');
-    lines.push(`  ${results.errors.length} error(s) must be fixed`);
+    lines.push(`  ${results.errors.length} errors must be fixed`);
   }
 
   return lines.join('\n');

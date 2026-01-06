@@ -393,7 +393,7 @@ async function runTests() {
       results.tests.filter(t => !t.passed).forEach(t => {
         console.error(`  - ${t.name}: ${t.details}`);
       });
-      throw new Error(`${results.failed} test(s) failed`);
+      throw new Error(`${results.failed} tests failed`);
     }
 
     console.log('✅ All tests passed!\n');

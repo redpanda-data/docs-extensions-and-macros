@@ -306,10 +306,10 @@ function generateReviewReport(results, outputPath) {
   // Next steps
   report += `== Next Steps\n\n`;
   if (errorIssues.length > 0) {
-    report += `. *Fix errors first* - Address the ${errorIssues.length} error(s) above\n`;
+    report += `. *Fix errors first* - Address the ${errorIssues.length} errors above\n`;
   }
   if (warningIssues.length > 0) {
-    report += `${errorIssues.length > 0 ? '. ' : '. '}*Review warnings* - Prioritize the ${warningIssues.length} warning(s)\n`;
+    report += `${errorIssues.length > 0 ? '. ' : '. '}*Review warnings* - Prioritize the ${warningIssues.length} warnings\n`;
   }
   const step = errorIssues.length > 0 && warningIssues.length > 0 ? 3 : errorIssues.length > 0 || warningIssues.length > 0 ? 2 : 1;
   report += `${step > 1 ? '. ' : '. '}*Regenerate documentation* - After making changes, regenerate the docs\n`;

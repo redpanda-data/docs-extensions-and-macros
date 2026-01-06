@@ -665,13 +665,13 @@ Connectors can have human-friendly commercial names that appear in catalogs and 
 ----
 = kafka_franz
 :type: input
-:commercial-names: Franz-go, Apache Kafka
+:page-commercial-names: Franz-go, Apache Kafka
 :categories: ["Services"]
 ----
 
 The `generate-rp-connect-categories` extension reads these commercial names and uses the first one as the primary display name. If multiple names are provided (comma-separated), only the first is used for display.
 
-*Default behavior:* If no `:commercial-names:` attribute is found, the connector key name is used (e.g., `kafka_franz`).
+*Default behavior:* If no `:page-commercial-names:` attribute is found, the connector key name is used (such as `kafka_franz`).
 
 *Adding commercial names to new connectors:*
 
@@ -681,12 +681,12 @@ When generating documentation for new connectors with `--draft-missing`, writers
 ----
 ### ✍️ Writer Action Required
 
-For each new connector, please add the `:commercial-names:` attribute to the frontmatter:
+For each new connector, please add the `:page-commercial-names:` attribute to the frontmatter:
 
 ```asciidoc
 = Connector Name
 :type: input
-:commercial-names: Commercial Name, Alternative Name
+:page-commercial-names: Commercial Name, Alternative Name
 ```
 
 _This helps improve discoverability and ensures proper categorization._
