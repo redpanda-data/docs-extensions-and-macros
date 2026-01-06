@@ -189,8 +189,9 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
           for (const comp of comps) {
             section += `** xref:guides:bloblang/functions.adoc#${comp.name}[\`${comp.name}\`]`
             if (comp.status && comp.status !== 'stable') section += ` (${comp.status})`
-            if (comp.description) {
-              section += `: ${capToTwoSentences(comp.description)}`
+            const desc = comp.summary || comp.description
+            if (desc) {
+              section += `: ${capToTwoSentences(desc)}`
             } else {
               section += `\n+\n// TODO: Add description for ${comp.name} function`
             }
@@ -201,8 +202,9 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
           for (const comp of comps) {
             section += `** xref:guides:bloblang/methods.adoc#${comp.name}[\`${comp.name}\`]`
             if (comp.status && comp.status !== 'stable') section += ` (${comp.status})`
-            if (comp.description) {
-              section += `: ${capToTwoSentences(comp.description)}`
+            const desc = comp.summary || comp.description
+            if (desc) {
+              section += `: ${capToTwoSentences(desc)}`
             } else {
               section += `\n+\n// TODO: Add description for ${comp.name} method`
             }
@@ -267,7 +269,8 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
 
       for (const comp of diff.details.deprecatedComponents) {
         const typeLabel = comp.type.charAt(0).toUpperCase() + comp.type.slice(1)
-        const desc = comp.description ? capToTwoSentences(comp.description) : '-'
+        const descText = comp.summary || comp.description
+        const desc = descText ? capToTwoSentences(descText) : '-'
 
         if (comp.type === 'bloblang-functions') {
           section += `|xref:guides:bloblang/functions.adoc#${comp.name}[${comp.name}]\n`
@@ -913,6 +916,9 @@ async function handleRpcnConnectorDocs (options) {
         fs.unlinkSync(oldestPath)
         console.log(`🧹 Deleted old version from docs-data: ${oldestFile}`)
       }
+
+      // Reload newIndex after augmentation so diff generation uses augmented data
+      newIndex = JSON.parse(fs.readFileSync(dataFile, 'utf8'))
     } catch (err) {
       console.error(`Warning: Failed to augment data file: ${err.message}`)
     }
