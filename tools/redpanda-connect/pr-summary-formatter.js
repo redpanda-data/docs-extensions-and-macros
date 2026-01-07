@@ -397,8 +397,9 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
         lines.push('');
         cloudSupportedNew.forEach(c => {
           lines.push(`- **${c.name}** (${c.type}, ${c.status})`);
-          if (c.description) {
-            const shortDesc = truncateToSentence(c.description, 2);
+          const desc = c.summary || c.description;
+          if (desc) {
+            const shortDesc = truncateToSentence(desc, 2);
             lines.push(`  - ${shortDesc}`);
           }
         });
@@ -410,8 +411,9 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
         lines.push('');
         selfHostedOnlyNew.forEach(c => {
           lines.push(`- **${c.name}** (${c.type}, ${c.status})`);
-          if (c.description) {
-            const shortDesc = truncateToSentence(c.description, 2);
+          const desc = c.summary || c.description;
+          if (desc) {
+            const shortDesc = truncateToSentence(desc, 2);
             lines.push(`  - ${shortDesc}`);
           }
         });
@@ -421,8 +423,9 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
       // No cloud support info, just list all
       diffData.details.newComponents.forEach(c => {
         lines.push(`- **${c.name}** (${c.type}, ${c.status})`);
-        if (c.description) {
-          const shortDesc = truncateToSentence(c.description, 2);
+        const desc = c.summary || c.description;
+        if (desc) {
+          const shortDesc = truncateToSentence(desc, 2);
           lines.push(`  - ${shortDesc}`);
         }
       });
