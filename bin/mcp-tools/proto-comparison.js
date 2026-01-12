@@ -792,7 +792,7 @@ function formatDetailedReport(differences, formatIssues, metadata, skipped = [],
       report += `   - Regenerate: \`tools/regenerate_ducktape_protos.sh\`\n`;
       report += `   - Buf generate: \`buf generate --path proto\`\n\n`;
     } else if (metadata.sourceRepo === 'cloudv2') {
-      report += `   - Generate: \`./taskw generate\`\n\n`;
+      report += `   - Generate: \`./taskw proto:generate\`\n\n`;
     }
     report += `4. **YOU** verify changes:\n`;
     report += `   \`git diff\`\n\n`;

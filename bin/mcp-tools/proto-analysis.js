@@ -125,10 +125,32 @@ function findRpcLineNumber(protoFile, rpcName) {
  * @returns {string|null} Description text or null
  */
 function extractCurrentDescription(rpcDefinition) {
-  // Look for openapiv2_operation.description (Control Plane API)
-  const match = rpcDefinition.match(/description:\s*"([^"]+)"/);
-  if (match) {
-    return match[1];
+  // Try Pattern A: Quoted multi-line string (supports embedded newlines)
+  // Matches description: "text with\npossible newlines"
+  // This works for both openapiv2_operation and options blocks
+  const quotedMatch = rpcDefinition.match(/description:\s*"([\s\S]*?)"/);
+  if (quotedMatch) {
+    // Normalize: trim and collapse internal newlines to spaces
+    return quotedMatch[1]
+      .replace(/\\n/g, ' ')  // Handle escaped newlines
+      .replace(/\n/g, ' ')   // Handle literal newlines
+      .replace(/\s+/g, ' ')  // Collapse multiple spaces
+      .trim();
+  }
+
+  // Try Pattern B: YAML block scalar (| or >)
+  // Matches description: | or description: >
+  //   followed by indented lines
+  const blockMatch = rpcDefinition.match(/description:\s*[|>][-+]?\s*\n((?:\s+.+(?:\n|$))*)/);
+  if (blockMatch) {
+    // Normalize: extract indented lines, trim, collapse newlines
+    return blockMatch[1]
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .filter(line => !/^[};]+$/.test(line))  // Filter out lines with only braces/semicolons
+      .join(' ')
+      .trim();
   }
 
   // Fallback: look for comment-based description (Admin API)
