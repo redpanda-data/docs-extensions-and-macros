@@ -183,6 +183,44 @@ The MCP server provides *writer-friendly tools* designed for natural language in
 * Returns: Review report with issues found, suggestions, and quality score
 * Writers use this after generating documentation to ensure quality before committing
 
+*compare_proto_descriptions*:: Compare API documentation in api-docs with proto-generated versions
++
+* **Prerequisites**: Requires source repositories cloned locally and up-to-date with upstream
+** For Admin API: `redpanda` repo on latest `dev` branch
+** For Control Plane API: `cloudv2` repo on latest `main` branch
+** **Repository Setup** (choose one method):
+*** *Sibling Layout* (automatic): Clone repos side-by-side:
++
+[,bash]
+----
+parent/
+├── docs-extensions-and-macros/  # Current repo
+├── redpanda/                     # Auto-detected
+├── cloudv2/                      # Auto-detected
+└── api-docs/                     # Auto-detected
+----
++
+*** *Environment Variables* (recommended for teams):
++
+[,bash]
+----
+export REDPANDA_REPO_PATH=/path/to/redpanda
+export CLOUDV2_REPO_PATH=/path/to/cloudv2
+export API_DOCS_REPO_PATH=/path/to/api-docs
+----
++
+*** *Explicit Paths* (per-use): Pass repo paths directly to the tool
+** If auto-detection fails, the tool will show clear instructions
+* **Best practice**: Run comparison soon after improving api-docs descriptions to backport while changes are fresh
+* Input: OpenAPI spec path (for example, "admin/redpanda-admin-api.yaml", "controlplane/redpanda-controlplane-api.yaml")
+* Compares descriptions in api-docs specs with proto file comments from source repositories
+* Auto-detects API surface (admin or controlplane) and finds source repository automatically
+* Validates proto comment format for Admin API (ConnectRPC)
+* Returns: Structured report of discrepancies, format issues, and backporting instructions
+* Supports output formats: `report` (human-readable), `detailed` (with instructions), `json` (structured data)
+* Writers use this to identify when API description improvements need to be backported to proto files
+* Ensures proto files remain the source of truth for API documentation
+
 === Structure and discovery tools
 
 *get_antora_structure*:: Analyze and understand the Antora component/module structure
@@ -316,6 +354,22 @@ The MCP server provides *AI consistency prompts* that help Claude follow your te
 * Rules: Update `docs-data/overrides.json`, use `$ref` for deduplication
 * Use when: Claude is helping with connector documentation
 * Claude automatically retrieves this prompt when working with connectors
+
+*proto-comment-format-guide*:: Proto comment format standards for RPC method documentation
++
+* Explains: Required three-line format for Admin API (ConnectRPC), flexible format for Control Plane API (gRPC)
+* Rules: Admin API requires strict format (RPC name, blank line, description); Control Plane allows options to override
+* Includes: Field documentation guidelines, PR review checklist, validation commands
+* Use when: Writing proto files, reviewing proto PRs, or backporting API descriptions
+* Ensures proto comments generate proper OpenAPI documentation
+
+*backport-api-descriptions*:: Guide for backporting API description improvements from api-docs to proto files
++
+* Explains: How to detect discrepancies, update proto files, regenerate specs, and create PRs
+* Workflow: Compare → Edit protos → Format → Regenerate → Validate → PR
+* Supports: Admin API (redpanda repo) and Control Plane API (cloudv2 repo) with auto-discovery
+* Rules: Never edit OpenAPI YAML directly, always update proto files (source of truth)
+* Use when: API descriptions have been improved in api-docs and need to be backported
 
 === How to use prompts
 

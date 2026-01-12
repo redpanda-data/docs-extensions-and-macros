@@ -117,15 +117,209 @@ function formatDate(date = new Date()) {
   return date.toISOString().split('T')[0];
 }
 
+/**
+ * Repository configuration for multi-repo detection
+ * Used for proto comparison and API documentation workflows
+ */
+const REPO_CONFIG = {
+  redpanda: {
+    envVar: 'REDPANDA_REPO_PATH',
+    siblingNames: ['redpanda'],
+    validator: (dir) => {
+      try {
+        return fs.existsSync(path.join(dir, 'proto', 'redpanda', 'core'));
+      } catch {
+        return false;
+      }
+    },
+    protoRoot: 'proto',
+    repoUrl: 'https://github.com/redpanda-data/redpanda',
+    description: 'Redpanda core repository (for Admin and Connect APIs)'
+  },
+
+  cloudv2: {
+    envVar: 'CLOUDV2_REPO_PATH',
+    siblingNames: ['cloudv2', 'cloud-v2', 'cloudv2-infra'],
+    validator: (dir) => {
+      try {
+        return fs.existsSync(path.join(dir, 'proto', 'public', 'cloud')) ||
+               fs.existsSync(path.join(dir, 'proto', 'redpanda'));
+      } catch {
+        return false;
+      }
+    },
+    protoRoot: 'proto',
+    repoUrl: 'https://github.com/redpanda-data/cloudv2-infra',
+    description: 'Control Plane repository (for Cloud API)'
+  },
+
+  'api-docs': {
+    envVar: 'API_DOCS_REPO_PATH',
+    siblingNames: ['api-docs'],
+    validator: (dir) => {
+      try {
+        // Check for typical api-docs directory structure
+        const hasAdmin = fs.existsSync(path.join(dir, 'admin'));
+        const hasControlPlane = fs.existsSync(path.join(dir, 'cloud-controlplane'));
+        return hasAdmin || hasControlPlane;
+      } catch {
+        return false;
+      }
+    },
+    repoUrl: 'https://github.com/redpanda-data/api-docs',
+    description: 'API documentation repository (OpenAPI specs)'
+  }
+};
+
+/**
+ * Find a repository using multi-strategy auto-detection
+ * @param {string} repoKey - Key from REPO_CONFIG (e.g., 'redpanda', 'cloudv2')
+ * @param {string} [explicitPath] - Optional explicit path override
+ * @param {boolean} [silent=false] - Suppress console output
+ * @returns {string} Path to repository
+ * @throws {Error} If repository cannot be found
+ */
+function findRepository(repoKey, explicitPath, silent = false) {
+  const config = REPO_CONFIG[repoKey];
+  if (!config) {
+    throw new Error(`Unknown repository: ${repoKey}. Valid options: ${Object.keys(REPO_CONFIG).join(', ')}`);
+  }
+
+  const log = (msg) => {
+    if (!silent) console.error(msg);
+  };
+
+  // Strategy 1: Explicit path (tool parameter)
+  if (explicitPath) {
+    if (!config.validator(explicitPath)) {
+      throw new Error(
+        `Not a valid ${repoKey} repository: ${explicitPath}\n` +
+        `${config.description}\n` +
+        `Expected to find proto files at the location.`
+      );
+    }
+    log(`Using ${repoKey} from explicit path: ${explicitPath}`);
+    return explicitPath;
+  }
+
+  // Strategy 2: Environment variable
+  if (process.env[config.envVar]) {
+    const envPath = process.env[config.envVar];
+    if (config.validator(envPath)) {
+      log(`Using ${repoKey} from ${config.envVar}: ${envPath}`);
+      return envPath;
+    }
+    log(`Warning: ${config.envVar} set but invalid: ${envPath}`);
+  }
+
+  // Get parent directory for sibling/workspace detection
+  const repoRoot = findRepoRoot();
+  const parent = path.dirname(repoRoot.root);
+
+  // Strategy 3: Sibling directories
+  for (const siblingName of config.siblingNames) {
+    const candidate = path.join(parent, siblingName);
+    if (config.validator(candidate)) {
+      log(`Auto-detected ${repoKey} as sibling: ${candidate}`);
+      return candidate;
+    }
+  }
+
+  // Strategy 4: Fail with helpful message
+  throw new Error(
+    `❌ Could not find ${repoKey} repository.\n\n` +
+    `Description: ${config.description}\n\n` +
+    `Options:\n` +
+    `1. Clone as sibling directory:\n` +
+    `   cd ${parent}\n` +
+    `   git clone ${config.repoUrl} ${config.siblingNames[0]}\n\n` +
+    `2. Set environment variable:\n` +
+    `   export ${config.envVar}=/path/to/${repoKey}\n\n` +
+    `3. Pass repo path to tool:\n` +
+    `   { ${repoKey}_repo_path: "/path/to/repo" }`
+  );
+}
+
+/**
+ * Get all configured repository paths (for tools that need multiple repos)
+ * @param {Object} explicitPaths - Object with repo keys and explicit paths
+ * @returns {Object} Object mapping repo keys to paths
+ */
+function findAllRepositories(explicitPaths = {}) {
+  const repos = {};
+  for (const repoKey of Object.keys(REPO_CONFIG)) {
+    try {
+      repos[repoKey] = findRepository(repoKey, explicitPaths[repoKey], true);
+    } catch (err) {
+      // Repository not found - that's ok, not all tools need all repos
+      repos[repoKey] = null;
+    }
+  }
+  return repos;
+}
+
+/**
+ * Get current git branch for a repository
+ * @param {string} repoPath - Path to git repository
+ * @returns {string} Current branch name
+ * @throws {Error} If branch cannot be detected or repo is in detached HEAD state
+ */
+function getCurrentBranch(repoPath) {
+  try {
+    const result = executeCommand('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: repoPath
+    });
+    const branch = result.trim();
+
+    if (branch === 'HEAD') {
+      throw new Error('Repository is in detached HEAD state');
+    }
+
+    return branch;
+  } catch (err) {
+    throw new Error(
+      `Could not detect git branch in ${repoPath}: ${err.message}\n` +
+      `Please specify source_branch parameter explicitly, or ensure repo is on a valid branch.`
+    );
+  }
+}
+
+/**
+ * Validate repository state and warn about uncommitted changes
+ * @param {string} repoPath - Path to git repository
+ * @returns {Object} Repository state information
+ */
+function validateRepoState(repoPath) {
+  try {
+    const status = executeCommand('git', ['status', '--porcelain'], { cwd: repoPath });
+    const hasChanges = status.trim().length > 0;
+
+    if (hasChanges) {
+      console.error(`⚠️  Warning: ${repoPath} has uncommitted changes`);
+      console.error(`   Comparison will use working directory state, not committed state.`);
+    }
+
+    return { hasUncommittedChanges: hasChanges };
+  } catch (err) {
+    console.error(`Warning: Could not check repo state: ${err.message}`);
+    return { hasUncommittedChanges: false };
+  }
+}
+
 module.exports = {
   MAX_RECURSION_DEPTH,
   MAX_EXEC_BUFFER_SIZE,
   DEFAULT_COMMAND_TIMEOUT,
   DEFAULT_SKIP_DIRS,
   PLAYBOOK_NAMES,
+  REPO_CONFIG,
   findRepoRoot,
   getDocToolsCommand,
   executeCommand,
   normalizeVersion,
-  formatDate
+  formatDate,
+  findRepository,
+  findAllRepositories,
+  getCurrentBranch,
+  validateRepoState
 };

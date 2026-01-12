@@ -477,6 +477,50 @@ const tools = [
       },
       required: []
     }
+  },
+  {
+    name: 'compare_proto_descriptions',
+    description: 'Compare OpenAPI descriptions in api-docs with proto-generated descriptions from source repositories. Identifies discrepancies that need to be backported to proto files. Validates proto comment format. Supports Admin API (redpanda repo) and Control Plane API (cloudv2 repo). Returns a structured report of differences.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        api_docs_spec: {
+          type: 'string',
+          description: 'Path to OpenAPI spec in api-docs repo (e.g., "admin/redpanda-admin-api.yaml"). Can be relative (resolved in api-docs repo) or absolute path.'
+        },
+        api_docs_repo_path: {
+          type: 'string',
+          description: 'Path to api-docs repository root (optional, auto-detects from sibling directories or uses API_DOCS_REPO_PATH env var)'
+        },
+        api_surface: {
+          type: 'string',
+          description: 'API surface to compare: "admin" (Admin API), "controlplane" (Control Plane API), or "connect" (Connect API). Optional - auto-detects from spec path if not provided.',
+          enum: ['admin', 'controlplane', 'connect']
+        },
+        redpanda_repo_path: {
+          type: 'string',
+          description: 'Path to redpanda repository root (optional, auto-detects if in workspace). Required for Admin and Connect APIs.'
+        },
+        cloudv2_repo_path: {
+          type: 'string',
+          description: 'Path to cloudv2 repository root (optional, auto-detects if in workspace). Required for Control Plane API.'
+        },
+        source_branch: {
+          type: 'string',
+          description: 'Branch/tag in source repo to compare against (optional, defaults to "dev")'
+        },
+        output_format: {
+          type: 'string',
+          description: 'Output format: "report" (human-readable summary), "detailed" (includes backporting instructions), "json" (structured data). Default: "report"',
+          enum: ['report', 'detailed', 'json']
+        },
+        validate_format: {
+          type: 'boolean',
+          description: 'Check if proto comments follow required format (RPC name, blank line, description). Default: true'
+        }
+      },
+      required: ['api_docs_spec']
+    }
   }
 ];
 

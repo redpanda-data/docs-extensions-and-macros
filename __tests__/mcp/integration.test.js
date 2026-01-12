@@ -174,6 +174,185 @@ describe('MCP Tools Integration Tests', () => {
     });
   });
 
+  describe('Proto Comparison Tool', () => {
+    test('compare_proto_descriptions requires api_docs_spec parameter', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {});
+
+      expect(result).toBeDefined();
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      // Error message varies based on what fails first (path validation, etc.)
+    });
+
+    test('compare_proto_descriptions validates api_docs_spec is non-empty', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: ''
+      });
+
+      expect(result).toBeDefined();
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+
+    test('compare_proto_descriptions validates api_surface enum', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'admin/admin.yaml',  // Use actual file that exists
+        api_surface: 'invalid'
+      });
+
+      expect(result).toBeDefined();
+      expect(result.success).toBe(false);
+      // Should fail with either spec not found or unsupported api_surface
+      expect(
+        result.error.match(/unsupported|invalid|not found/i)
+      ).toBeTruthy();
+    });
+
+    test('compare_proto_descriptions auto-detects admin API from spec path', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'admin/redpanda-admin-api.yaml'
+      });
+
+      expect(result).toBeDefined();
+      // Should attempt to run (may fail due to missing repos, but parameter validation passes)
+      if (result.success === false && result.error) {
+        expect(result.error.toLowerCase()).not.toContain('api_surface');
+      }
+    });
+
+    test('compare_proto_descriptions auto-detects controlplane API from spec path', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'controlplane/redpanda-controlplane-api.yaml'
+      });
+
+      expect(result).toBeDefined();
+      // Should attempt to run (may fail due to missing repos, but parameter validation passes)
+      if (result.success === false && result.error) {
+        expect(result.error.toLowerCase()).not.toContain('api_surface');
+      }
+    });
+
+    test('compare_proto_descriptions handles missing spec file gracefully', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'nonexistent/spec.yaml'
+      });
+
+      expect(result).toBeDefined();
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+
+    test('compare_proto_descriptions accepts valid output_format values', () => {
+      const formats = ['report', 'detailed', 'json'];
+
+      formats.forEach(format => {
+        const result = mcpTools.executeTool('compare_proto_descriptions', {
+          api_docs_spec: 'admin/redpanda-admin-api.yaml',
+          output_format: format
+        });
+
+        expect(result).toBeDefined();
+        // Should not fail on format validation (may fail for other reasons)
+        if (result.success === false && result.error) {
+          expect(result.error.toLowerCase()).not.toContain('output_format');
+          expect(result.error.toLowerCase()).not.toContain('invalid format');
+        }
+      });
+    });
+
+    test('compare_proto_descriptions returns expected structure for json format', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'admin/redpanda-admin-api.yaml',
+        output_format: 'json'
+      });
+
+      expect(result).toBeDefined();
+      if (result.success) {
+        expect(result).toHaveProperty('differences');
+        expect(Array.isArray(result.differences)).toBe(true);
+      }
+    });
+
+    test('compare_proto_descriptions returns report for report format', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'admin/redpanda-admin-api.yaml',
+        output_format: 'report'
+      });
+
+      expect(result).toBeDefined();
+      if (result.success) {
+        expect(result).toHaveProperty('report');
+        expect(typeof result.report).toBe('string');
+      }
+    });
+  });
+
+  describe('Proto Comparison Tool - Path Resolution', () => {
+    test('compare_proto_descriptions auto-detects api-docs from sibling directory', () => {
+      // This test assumes api-docs is cloned as sibling
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'admin/redpanda-admin-api.yaml'
+      });
+
+      // Should either succeed or fail with helpful error (not repo detection error)
+      expect(result).toBeDefined();
+      if (result.success === false && result.error) {
+        expect(result.error).not.toContain('Could not locate api-docs repository');
+      }
+    });
+
+    test('compare_proto_descriptions respects explicit api_docs_repo_path', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'admin/redpanda-admin-api.yaml',
+        api_docs_repo_path: '/nonexistent/path/to/api-docs'
+      });
+
+      expect(result).toBeDefined();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('api-docs');
+    });
+
+    test('compare_proto_descriptions handles absolute spec paths', () => {
+      const absolutePath = path.join('/tmp', 'test-spec.yaml');
+
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: absolutePath
+      });
+
+      expect(result).toBeDefined();
+      // Should fail on file not found, not repo detection
+      if (result.success === false && result.error) {
+        expect(result.error).not.toContain('Could not locate api-docs');
+      }
+    });
+
+    test('compare_proto_descriptions provides helpful error when api-docs not found', () => {
+      // Save current env var
+      const originalPath = process.env.API_DOCS_REPO_PATH;
+
+      // Set to invalid path to force detection failure
+      process.env.API_DOCS_REPO_PATH = '/definitely/does/not/exist';
+
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'admin/redpanda-admin-api.yaml',
+        api_docs_repo_path: '/also/invalid'
+      });
+
+      // Restore env var
+      if (originalPath !== undefined) {
+        process.env.API_DOCS_REPO_PATH = originalPath;
+      } else {
+        delete process.env.API_DOCS_REPO_PATH;
+      }
+
+      expect(result).toBeDefined();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Could not locate api-docs');
+      expect(result.suggestion).toBeDefined();
+      expect(result.suggestion).toContain('API_DOCS_REPO_PATH');
+    });
+  });
+
   describe('Error Handling', () => {
     test('unknown tool returns error', () => {
       const result = mcpTools.executeTool('nonexistent_tool', {});
@@ -221,6 +400,99 @@ describe('MCP Tools Integration Tests', () => {
     });
   });
 
+  describe('Proto Comparison Tool - Refactored Features', () => {
+    test('validates API surface only accepts admin or controlplane', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'test/test.yaml',
+        api_surface: 'connect'  // Should be rejected
+      });
+
+      expect(result).toBeDefined();
+      // Tool should fail when trying to find proto mappings for unsupported surface
+      expect(result.success).toBe(false);
+    });
+
+    test('handles fallback instructions on generation errors', () => {
+      // This test verifies the error handling provides fallback instructions
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'nonexistent/spec.yaml',
+        api_surface: 'admin'
+      });
+
+      expect(result).toBeDefined();
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+
+    test('inlined API surface detection works for admin', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'admin/test-spec.yaml'
+        // No api_surface parameter - should auto-detect as 'admin'
+      });
+
+      expect(result).toBeDefined();
+      // Even if it fails due to missing files, it should detect admin surface
+      if (!result.success) {
+        expect(result.error).not.toContain('Could not detect API surface');
+      }
+    });
+
+    test('inlined API surface detection works for controlplane', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'cloud-controlplane/test-spec.yaml'
+        // No api_surface parameter - should auto-detect as 'controlplane'
+      });
+
+      expect(result).toBeDefined();
+      // Even if it fails due to missing files, it should detect controlplane surface
+      if (!result.success) {
+        expect(result.error).not.toContain('Could not detect API surface');
+      }
+    });
+
+    test('returns structured output with metadata', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'admin/admin.yaml',
+        api_surface: 'admin',
+        output_format: 'json'
+      });
+
+      expect(result).toBeDefined();
+      // Should have structure even on error
+      if (result.success) {
+        expect(result.metadata).toBeDefined();
+        expect(result.differences_found).toBeDefined();
+      }
+    });
+  });
+
+  describe('Proto Comparison Tool - PREVIEW Filtering', () => {
+    test('accepts validate_format parameter', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'admin/admin.yaml',
+        api_surface: 'admin',
+        validate_format: false
+      });
+
+      expect(result).toBeDefined();
+      // Should not fail due to parameter validation
+    });
+
+    test('returns skipped_preview_count when PREVIEW items filtered', () => {
+      const result = mcpTools.executeTool('compare_proto_descriptions', {
+        api_docs_spec: 'admin/admin.yaml',
+        api_surface: 'admin',
+        output_format: 'json'
+      });
+
+      expect(result).toBeDefined();
+      if (result.success) {
+        // Should have preview-related fields in metadata or output
+        expect(result.skipped_preview_count !== undefined || result.preview_items_skipped !== undefined).toBeTruthy();
+      }
+    });
+  });
+
   describe('File System Expectations', () => {
     test('doc-tools expects docs-extensions-and-macros structure', () => {
       const packageJsonPath = path.join(repoRoot.root, 'package.json');
@@ -236,6 +508,26 @@ describe('MCP Tools Integration Tests', () => {
 
       expect(fs.existsSync(docsDataDir)).toBe(true);
       // File may or may not exist depending on repo state, but dir should exist
+    });
+
+    test('proto-analysis module exists and is loadable', () => {
+      const protoAnalysisPath = path.join(repoRoot.root, 'bin', 'mcp-tools', 'proto-analysis.js');
+
+      expect(fs.existsSync(protoAnalysisPath)).toBe(true);
+
+      // Verify it can be required
+      expect(() => {
+        require('../../bin/mcp-tools/proto-analysis');
+      }).not.toThrow();
+    });
+
+    test('utils module exports git utilities', () => {
+      const utils = require('../../bin/mcp-tools/utils');
+
+      expect(utils.getCurrentBranch).toBeDefined();
+      expect(typeof utils.getCurrentBranch).toBe('function');
+      expect(utils.validateRepoState).toBeDefined();
+      expect(typeof utils.validateRepoState).toBe('function');
     });
   });
 });

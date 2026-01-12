@@ -454,9 +454,10 @@ function cleanupOldJobs(maxAge = 60 * 60 * 1000) {
 }
 
 // Clean up old jobs every 10 minutes
+// Use .unref() to allow Node.js to exit if this is the only remaining timer
 setInterval(() => {
   cleanupOldJobs();
-}, 10 * 60 * 1000);
+}, 10 * 60 * 1000).unref();
 
 module.exports = {
   JobStatus,

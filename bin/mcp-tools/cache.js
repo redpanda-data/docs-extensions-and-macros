@@ -78,7 +78,8 @@ async function getOrCompute(key, compute, ttl = 60 * 60 * 1000) {
 }
 
 // Prune expired entries every 5 minutes
-setInterval(prune, 5 * 60 * 1000);
+// Use .unref() to allow Node.js to exit if this is the only remaining timer
+setInterval(prune, 5 * 60 * 1000).unref();
 
 module.exports = {
   get,

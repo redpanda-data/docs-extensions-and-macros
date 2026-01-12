@@ -27,6 +27,9 @@ const { generateBundleOpenApi } = require('./openapi');
 const { reviewGeneratedDocs, generateReviewReport } = require('./generated-docs-review');
 const { reviewContent } = require('./content-review');
 
+// Proto comparison tools
+const { compareProtoDescriptions } = require('./proto-comparison');
+
 // Job queue
 const { initializeJobQueue, createJob, getJob, listJobs, cleanupOldJobs } = require('./job-queue');
 
@@ -79,6 +82,9 @@ function executeTool(toolName, args = {}) {
 
       case 'review_content':
         return reviewContent(args, repoRoot.root);
+
+      case 'compare_proto_descriptions':
+        return compareProtoDescriptions(args);
 
       case 'run_doc_tools_command': {
         // Validate and execute raw doc-tools command
@@ -235,6 +241,7 @@ module.exports = {
   generateBundleOpenApi,
   reviewGeneratedDocs,
   generateReviewReport,
+  compareProtoDescriptions,
 
   // Job queue
   initializeJobQueue,
