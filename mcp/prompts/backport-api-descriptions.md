@@ -118,52 +118,21 @@ The comparison tool validates Admin API format automatically. Control Plane API 
 
 ## Detection: Finding Discrepancies
 
-### Step 1: Use the comparison tool
-
-Run the `compare_proto_descriptions` MCP tool:
+Run `compare_proto_descriptions` MCP tool:
 
 ```
 Parameters:
   api_docs_spec: "admin/admin.yaml"  # or "cloud-controlplane/cloud-controlplane.yaml"
-  # api_surface is auto-detected, but can be explicitly set
-  api_surface: "admin"  # or "controlplane"
-  # source_branch defaults to "dev"
-  source_branch: "dev"
-  output_format: "detailed"
+  source_branch: "dev"  # optional, defaults to "dev"
+  output_format: "detailed"  # or "report" for summary
   validate_format: true
 ```
 
-**The tool will automatically:**
-- Detect which API surface (admin or controlplane)
-- Find the appropriate source repository (redpanda or cloudv2)
-- Generate spec from proto files
-- Compare with api-docs spec
-- Validate proto comment format
-- Provide structured report
-
-### Step 2: Review the report
-
-The tool will show:
-- Which RPCs have description discrepancies
-- Current descriptions (in api-docs)
-- Generated descriptions (from protos)
+Tool auto-detects API surface, finds repos, generates/compares specs, validates format, and reports:
+- Which RPCs have discrepancies
+- Current vs. generated descriptions
 - Format validation issues
-- Proto file locations
-
-### Step 3: Identify proto files to update
-
-**Admin API files:**
-- `proto/redpanda/core/admin/v2/broker.proto`
-- `proto/redpanda/core/admin/v2/cluster.proto`
-- `proto/redpanda/core/admin/v2/shadow_link.proto`
-- `proto/redpanda/core/admin/v2/topic.proto`
-- And others as identified in the report
-
-**Control Plane API files:**
-- `proto/public/cloud/redpanda/api/controlplane/v1/cluster.proto`
-- `proto/public/cloud/redpanda/api/controlplane/v1/network.proto`
-- `proto/public/cloud/redpanda/api/controlplane/v1/resource_group.proto`
-- And others as identified in the report
+- Proto file locations to update
 
 ## Backporting: Applying Changes
 
@@ -195,57 +164,26 @@ Read each proto file identified in the comparison report using the Read tool.
 
 For each RPC method with a description difference:
 
-**Admin API (Strict Format):**
+**Admin API:** Use Edit tool to apply three-line format (see Proto Comment Format Rules above).
 
-Use the Edit tool to update comments following the three-line format:
-
+**Example:**
 ```protobuf
-// [RpcName]
-//
-// [Improved description from api-docs]
+Old:  // Gets information about a specific shadow link.
+      rpc GetShadowLink(...)
+
+New:  // GetShadowLink
+      //
+      // Gets information about a specific shadow link.
+      rpc GetShadowLink(...)
 ```
 
-**Example edit (Admin API):**
-
-Old:
-```protobuf
-    // Gets information about a specific shadow link.
-    rpc GetShadowLink(...)
-```
-
-New:
-```protobuf
-    // GetShadowLink
-    //
-    // Gets information about a specific shadow link.
-    rpc GetShadowLink(...)
-```
-
-**Control Plane API (Flexible Format):**
-
-For Control Plane API, you may:
-- Update comments using flexible format (multi-line without blank separator is acceptable)
-- Update or add `openapiv2_operation` options for summary/description
-- Update field-level `openapiv2_field` options for schema descriptions
-
-Options take precedence over comments when both are present.
+**Control Plane API:** Update comments (flexible format) or `openapiv2_operation` options (see format rules above).
 
 ### Step 3: Quality checks before regeneration
 
-**For Admin API:**
-- ✅ Only description/summary comments changed
-- ✅ Format is correct (RPC name, blank line, description)
-- ✅ No structural changes (method names, parameters, types)
-- ✅ Comments are clear and concise
-- ✅ Consistent style across all updates
-- ✅ Follows Google Style Guide
-
-**For Control Plane API:**
-- ✅ Only description/summary comments or options changed
-- ✅ Format follows Control Plane standards (flexible format or options)
-- ✅ No structural changes (method names, parameters, types)
-- ✅ Comments/options are clear and complete
-- ✅ Consistent style across all updates
+- ✅ Only description/summary changed (no structural changes)
+- ✅ Format correct (see Proto Comment Format Rules)
+- ✅ Clear, concise, consistent style
 - ✅ Follows Google Style Guide
 
 ### Step 4: Regenerate derived files
@@ -320,10 +258,10 @@ npx doc-tools generate bundle-openapi \
 
 **Step 2: Verify descriptions**
 
-Check the generated spec in the api-docs repo:
+Check the generated spec in the redpanda repo:
 
 ```bash
-grep -A 5 "operationId.*GetBroker" admin/admin.yaml
+grep -A 5 "operationId.*GetBroker" admin/redpanda-admin-api.yaml
 ```
 
 The `summary` and `description` fields should match your proto comment improvements.
@@ -374,84 +312,39 @@ Should show: "✅ No description discrepancies found."
 
 ## User Creates Commit and PR
 
-**⚠️ IMPORTANT: Manual User Action Required**
+**⚠️ Manual user action required - AI agents must not execute these commands.**
 
-**This section describes commands that YOU (the user) must run manually.**
-**AI agents MUST NOT execute these commands automatically.**
+### Review and Commit
 
-The workflow stops here and hands control back to you. You must:
-1. Review all suggested changes
-2. Verify proto files are correct
-3. Test generated output
-4. Create commit only when satisfied
-
-### Step 1: Review all changes
-
-**YOU run this command:**
 ```bash
-git diff
-```
+# Review changes
+git diff  # Verify: only proto/generated files changed, descriptions correct, format correct
 
-Verify:
-- Only proto files and generated files changed
-- Descriptions are correct
-- Format is correct
-- No unintended changes
+# Add proto files (and generated files if changed)
+git add proto/.../*.proto
 
-### Step 2: Create commit
-
-**YOU run these commands (after reviewing changes):**
-
-**For redpanda repository:**
-```bash
-git add proto/redpanda/core/admin/v2/*.proto
-# Add any generated files if they changed
+# Commit with message
 git commit
 ```
 
 **Commit message format:**
 ```
-docs/proto: improve Admin API descriptions
+docs[/proto]: improve [API name] API descriptions
 
-- Add proper format (RPC name, blank line, description)
+- Add proper format (RPC name, blank line, description) [if Admin API]
 - Backport improvements from api-docs
-- Update GetBroker, ListBrokers, and Shadow Link operations
+- Update [specific operations changed]
 
-These changes ensure proto files remain the source of truth for
-API documentation and follow the required comment format.
+Ensures proto files remain source of truth for API documentation.
 ```
 
-**For cloudv2 repository:**
-```bash
-git add proto/public/cloud/redpanda/api/controlplane/v1/*.proto
-# Add any generated files if they changed
-git commit
-```
+### Push and PR
 
-**Commit message format:**
-```
-docs: improve Control Plane API descriptions
-
-- Enhance proto comments and options for better OpenAPI documentation
-- Backport description improvements from api-docs
-- Update CreateCluster, DeleteCluster, and related operations
-
-These changes ensure proto files remain the source of truth for
-API documentation.
-```
-
-### Step 3: Push and create PR
-
-**YOU run this command:**
 ```bash
 git push origin docs/update-proto-descriptions
 ```
 
-Create PR:
-- **redpanda repo**: Target branch `dev` (not `main`)
-- **cloudv2 repo**: Follow repository-specific PR guidelines
-- Link to related api-docs work if applicable
-- Note this is a documentation-only change
+**PR targets:** `dev` branch (redpanda), repo-specific guidelines (cloudv2). Note: docs-only change.
 
 ## Workflow Summary
 
@@ -493,55 +386,33 @@ Create PR:
 **Issue**: API surface auto-detection fails
 **Fix**: Explicitly specify `api_surface` parameter ("admin" or "controlplane")
 
-## Multi-Repository Detection
+## Repository Detection
 
-The comparison tool finds source repositories automatically using three strategies:
+The tool auto-detects all required repositories (redpanda, cloudv2, api-docs) using three strategies:
 
-1. **Explicit path parameter** - Pass repo path directly to the tool
-2. **Environment variable** - `REDPANDA_REPO_PATH`, `CLOUDV2_REPO_PATH`, or `API_DOCS_REPO_PATH`
-3. **Sibling directory** - Auto-detects repos like `../redpanda`, `../cloudv2`, `../api-docs`
+1. **Explicit path parameters** - Pass directly to tool (`redpanda_repo_path`, `cloudv2_repo_path`, `api_docs_repo_path`)
+2. **Environment variables** - `REDPANDA_REPO_PATH`, `CLOUDV2_REPO_PATH`, `API_DOCS_REPO_PATH`
+3. **Sibling directories** - Auto-detects `../redpanda`, `../cloudv2`, `../api-docs` relative to MCP server
 
-If detection fails, you'll get an error with clear setup instructions.
-
-## API Docs Repository Detection
-
-The comparison tool automatically finds the api-docs repository using three strategies:
-
-1. **Explicit path parameter**: `api_docs_repo_path`
-2. **Environment variable**: `API_DOCS_REPO_PATH`
-3. **Sibling directory**: Looks for `../api-docs` relative to MCP server
-
-### Recommended Setup
-
-Clone api-docs as a sibling directory to docs-extensions-and-macros:
+**Recommended Setup:** Clone all repos as siblings to docs-extensions-and-macros:
 
 ```bash
-cd /Users/kat/Documents/rp/rp-docs/
+cd <parent-directory-of-docs-extensions-and-macros>
+git clone https://github.com/redpanda-data/redpanda.git
+git clone https://github.com/redpanda-data/cloudv2.git
 git clone https://github.com/redpanda-data/api-docs.git
 ```
 
-This enables automatic detection without any configuration.
-
-### Alternative Configurations
-
-**Environment Variable:**
+**Alternative:** Set environment variables:
 ```bash
+export REDPANDA_REPO_PATH="$HOME/workspace/redpanda"
+export CLOUDV2_REPO_PATH="$HOME/workspace/cloudv2"
 export API_DOCS_REPO_PATH="$HOME/workspace/api-docs"
 ```
 
-**Explicit Parameter:**
-```
-Parameters:
-  api_docs_spec: "admin/admin.yaml"
-  api_docs_repo_path: "/custom/path/to/api-docs"
-```
+**Path Resolution:** Relative paths in `api_docs_spec` (e.g., `"admin/admin.yaml"`) resolve within api-docs repo; absolute paths used as-is.
 
-### Path Resolution
-
-- **Relative paths** (e.g., `"admin/admin.yaml"` or `"cloud-controlplane/cloud-controlplane.yaml"`) are resolved within the api-docs repository
-- **Absolute paths** (e.g., `"/tmp/custom-spec.yaml"`) are used as-is
-
-If the api-docs repository cannot be found, you'll receive an error with specific instructions on how to configure it.
+If detection fails, you'll receive an error with setup instructions.
 
 ## Related Resources
 

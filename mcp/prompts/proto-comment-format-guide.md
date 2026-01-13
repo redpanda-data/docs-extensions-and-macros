@@ -82,7 +82,7 @@ message Broker {
 - Help developers understand what each parameter/property does
 - Appear in generated API documentation and SDK comments
 
-**Incorrect format** = Malformed OpenAPI docs = Confused developers using the API
+**Incorrect format** = Malformed OpenAPI docs
 
 ## Examples
 
@@ -225,67 +225,27 @@ When reviewing Control Plane proto comments:
 
 ### Example - Control Plane API (Flexible Format)
 
-**Example from actual cloudv2 cluster.proto:**
-
+**RPC with options (from cloudv2 cluster.proto):**
 ```protobuf
 service ClusterService {
   // CreateCluster create a Redpanda cluster. The input contains the spec, that describes the cluster.
   // A Operation is returned. This task allows the caller to find out when the long-running operation of creating a cluster has finished.
   rpc CreateCluster(CreateClusterRequest) returns (CreateClusterOperation) {
-    option (google.api.http) = {
-      post: "/v1/clusters"
-      body: "*"
-    };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Create cluster"
-      description: "Create a Redpanda cluster. Returns a long-running operation. For more information, see [Use the Control Plane API](https://docs.redpanda.com/redpanda-cloud/manage/api/controlplane/). To check operation state, call `GET /v1/operations/{id}`. Refer to [Regions](https://docs.redpanda.com/api/doc/cloud-controlplane/topic/topic-regions-and-usage-tiers) for the list of available regions, zones, and tiers combinations for each cloud provider. For BYOC clusters, follow additional steps to [create a BYOC cluster](https://docs.redpanda.com/redpanda-cloud/manage/api/cloud-byoc-controlplane-api/#additional-steps-to-create-a-byoc-cluster)."
-      responses: {
-        key: "202"
-        value: {
-          description: "Accepted"
-          schema: {
-            json_schema: {ref: ".redpanda.api.controlplane.v1.CreateClusterOperation"}
-          }
-        }
-      }
-      responses: {
-        key: "400"
-        value: {
-          description: "Bad Request"
-          schema: {
-            json_schema: {ref: ".google.rpc.Status"}
-          }
-        }
-      }
-      responses: {
-        key: "409"
-        value: {
-          description: "Conflict"
-          schema: {
-            json_schema: {ref: ".google.rpc.Status"}
-          }
-        }
-      }
-      responses: {
-        key: "500"
-        value: {
-          description: "Internal Server Error. Please reach out to support."
-          schema: {
-            json_schema: {ref: ".google.rpc.Status"}
-          }
-        }
-      }
+      description: "Create a Redpanda cluster. Returns a long-running operation..."
+      // responses, examples, etc. can also be defined here
     };
   }
 }
 ```
 
-**Field-level option examples from actual cloudv2 cluster.proto:**
-
+**Field-level options:**
 ```protobuf
-// mTLS configuration.
 message MTLSSpec {
-  bool enabled = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Whether mTLS is enabled."}];
+  bool enabled = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    description: "Whether mTLS is enabled."
+  }];
   repeated string ca_certificates_pem = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
     description: "CA certificate in PEM format."
     example: "[\"-----BEGIN CERTIFICATE-----\\nMII........\\n-----END CERTIFICATE-----\"]"
@@ -311,37 +271,11 @@ If RPC includes OpenAPI options like `openapiv2_operation`, you can skip reviewi
 - ✅ Ensure comments match current behavior if code changed
 - ❌ Skip review if comprehensive options are present
 
-## How to Validate Your Protos
+## Validation and PR Workflow
 
-**Note:** The steps below apply to Admin API (Redpanda repo). For Control Plane API validation steps, see the "As a PR Author" section.
+### Using the MCP Tool
 
-### Admin API - Before Committing
-
-1. **Visual check**: Look at each RPC comment
-   - Is the method name on line 1?
-   - Is line 2 blank?
-   - Does the description start on line 3?
-
-2. **Format code**: Run the formatter
-   ```bash
-   # Redpanda repo
-   bazel run //tools:clang_format
-   ```
-
-3. **Generate OpenAPI**: Check the output
-   ```bash
-   # From api-docs repo
-   npx doc-tools generate bundle-openapi --branch your-branch
-   ```
-
-4. **Review OpenAPI spec**: Check that summary/description fields look correct
-   ```bash
-   grep -A 5 "operationId.*YourMethod" admin/admin.yaml
-   ```
-
-### Admin API - During PR Review
-
-Use the `compare_proto_descriptions` MCP tool to validate:
+**Admin API (validate format):**
 ```javascript
 compare_proto_descriptions({
   api_docs_spec: "admin/admin.yaml",
@@ -350,179 +284,55 @@ compare_proto_descriptions({
 })
 ```
 
-This will report any format violations.
-
-### Control Plane API - During PR Review
-
-Use the `compare_proto_descriptions` MCP tool to compare descriptions:
+**Control Plane API (compare descriptions):**
 ```javascript
 compare_proto_descriptions({
   api_docs_spec: "cloud-controlplane/cloud-controlplane.yaml",
   source_branch: "your-pr-branch",
-  validate_format: false  // No strict format enforcement for Control Plane
+  validate_format: false
 })
 ```
 
-This will identify description discrepancies between api-docs and proto-generated specs.
+### Before Submitting PR
+
+⚠️ **Manual execution required** - AI agents provide analysis only; YOU must run all commands.
+
+**Admin API (Redpanda):**
+```bash
+bazel run //tools:clang_format
+tools/regenerate_ducktape_protos.sh
+buf generate --path proto
+# Self-review: Check three-line format (method name, blank, description)
+# Optional: bump preview <path-to-admin-api-spec>
+```
+
+**Control Plane API (CloudV2):**
+```bash
+./taskw proto:format
+./taskw proto:lint
+./taskw proto:generate  # Re-run after rebase
+# Self-review: Check RPCs have clear descriptions (comments or options)
+# Optional: bump preview proto/gen/openapi/openapi.controlplane.prod.yaml
+```
 
 ## PR Review Checklist
 
-### Admin API (ConnectRPC - Strict Format)
+**Admin API** (`proto/redpanda/core/admin/v2/**/*.proto`):
+- [ ] RPCs follow three-line format: name, blank line, description
+- [ ] Descriptions: clear (1-3 sentences), present tense, end with period, no implementation details
+- [ ] Fields: recommend docs where appropriate, verify clarity, explain purpose/behavior (not format)
 
-When reviewing `proto/redpanda/core/admin/v2/**/*.proto`:
+**Control Plane API** (`proto/public/cloud/redpanda/api/controlplane/v1/**/*.proto`):
+- [ ] RPCs have comments OR options with descriptions
+- [ ] If options present, verify accuracy; if not, ensure comments are clear
+- [ ] Field options: verify descriptions and examples are clear, accurate, helpful
+- [ ] Follow Google style guide, present tense, period at end
 
-**RPC Methods:**
-- [ ] Each RPC has a comment
-- [ ] First line is method name only (no description)
-- [ ] Second line is blank (`//`)
-- [ ] Description starts on third line
-- [ ] Description is clear and concise (1-3 sentences)
-- [ ] Description uses present tense
-- [ ] Description ends with a period
-- [ ] No implementation details in description
+## FAQ
 
-**Message Fields:**
-- [ ] Identify fields missing documentation and recommend additions where appropriate
-- [ ] For documented fields, verify descriptions are clear and specific
-- [ ] Check that behavior and purpose are explained, not just format/constraints
-- [ ] Confirm documented fields use present tense and end with period
-
-### Control Plane API (gRPC - Flexible Format)
-
-When reviewing `proto/public/cloud/redpanda/api/controlplane/v1/**/*.proto`:
-
-**RPC Methods:**
-- [ ] Each RPC has comments OR options with OpenAPI descriptions
-- [ ] If options present, verify summary/description are accurate
-- [ ] If no options, ensure comments are clear and complete
-- [ ] Comments follow Google style guide
-- [ ] Descriptions use present tense and end with period
-- [ ] Only review lines that were added/modified (or all if HEAD unchanged)
-- [ ] Suggest comments for new RPCs without descriptions
-
-**Message Fields:**
-- [ ] Review openapiv2_field options - these generate schema descriptions in OpenAPI spec
-- [ ] Verify field option descriptions are clear, accurate, and complete
-- [ ] Check that examples in field options are realistic and helpful
-- [ ] Identify fields missing options/documentation and recommend additions where appropriate
-- [ ] For fields with standard comments (no options), verify descriptions explain purpose and behavior
-- [ ] Confirm all field descriptions use present tense and end with period
-- [ ] Ensure field descriptions focus on purpose/behavior, not format constraints (buf validation handles that)
-
-## Common Mistakes and Fixes
-
-### Admin API Format Errors
-
-These apply to `proto/redpanda/core/admin/v2/**/*.proto`:
-
-```protobuf
-// ❌ Combined name and description on one line
-// GetBroker returns broker information
-rpc GetBroker(...)
-
-// ❌ Missing blank line separator
-// GetBroker
-// Returns information about a single broker in the cluster.
-rpc GetBroker(...)
-
-// ✅ Correct: Name, blank line, description
-// GetBroker
-//
-// Returns information about a single broker in the cluster.
-rpc GetBroker(...)
-```
-
-## Using in PR Reviews
-
-### As a Reviewer
-
-**When you see incorrect format, leave a comment like:**
-
-> The proto comment format doesn't match our standards. Please update to:
-> ```protobuf
-> // MethodName
-> //
-> // Description here.
-> ```
->
-> See the [proto comment format guide](link-to-this-prompt) for details.
-
-**Or use the MCP tool to generate a validation report:**
-
-Request: "Can you validate the proto comment format for the changes in this PR?"
-
-The tool will generate a report of all format issues.
-
-### As a PR Author
-
-⚠️ **Note:** If you're using an AI agent or the MCP tool for assistance, remember that these tools only provide analysis and suggestions. YOU must manually execute all commands, verify changes, and create commits.
-
-**Admin API (Redpanda Repo) - Before requesting review:**
-
-1. **YOU** run formatter: `bazel run //tools:clang_format`
-2. **YOU** regenerate files for ducktape tests: `tools/regenerate_ducktape_protos.sh`
-3. **YOU** run buf generate: `buf generate --path proto`
-4. **YOU** self-review: Check each RPC comment follows three-line format (method name, blank, description)
-5. **YOU** test locally: Generate OpenAPI spec and verify output
-6. (Optional) Preview documentation rendering with Bump CLI:
-   - First generate the OpenAPI spec
-   - Run `bump preview <path-to-admin-api-spec-yaml>`
-
-**Control Plane API (CloudV2 Repo) - Before requesting review:**
-
-1. **YOU** run formatter and linter:
-   ```bash
-   ./taskw proto:format
-   ./taskw proto:lint
-   ```
-2. **YOU** regenerate OpenAPI specification:
-   ```bash
-   ./taskw proto:generate
-   ```
-   Note: If you have rebased from upstream, remember to run proto:generate again
-3. **YOU** self-review: Check that RPCs have clear descriptions (comments or options)
-4. **YOU** verify field options are accurate and complete
-5. (Optional) Preview documentation rendering with Bump CLI:
-   ```bash
-   bump preview proto/gen/openapi/openapi.controlplane.prod.yaml
-   ```
-
-## Quick Reference Card
-
-**Admin API Three-Line Format:**
-
-```
-✅ Correct Format:
-
-// MethodName
-//
-// Clear description of what it does.
-rpc MethodName(...) { }
-
-❌ Wrong - No blank line:
-// MethodName
-// Description.
-rpc MethodName(...) { }
-
-❌ Wrong - Combined:
-// MethodName does something.
-rpc MethodName(...) { }
-
-❌ Wrong - No method name:
-// Description of method.
-rpc MethodName(...) { }
-```
-
-## Questions?
-
-- **"Why is the Admin API format so strict?"** → ConnectRPC's OpenAPI generation relies on this exact format for proper summary/description separation
-- **"Why is Control Plane API format flexible?"** → gRPC with protoc-gen-openapi supports options that override comments, giving more flexibility
-- **"Can I use multiple lines for description?"** →
-  - Admin API: Yes! Just keep blank line after method name
-  - Control Plane API: Yes, freely use multi-line comments
-- **"What if I have both comments and options?"** → Options take precedence in Control Plane API; comments are used as fallback
-- **"What about message/enum comments?"** → Those follow standard proto comment style (`//` above field) in both APIs
-- **"Does this apply to internal services?"** → Strict format required for API-facing protos; recommended for consistency elsewhere
+- **Why is Admin API format strict?** ConnectRPC requires this for proper OpenAPI summary/description separation
+- **Can descriptions be multi-line?** Yes for both APIs (Admin: keep blank line after name; Control Plane: flexible)
+- **Comments vs. options?** In Control Plane API, options take precedence over comments
 
 ## Related Resources
 
