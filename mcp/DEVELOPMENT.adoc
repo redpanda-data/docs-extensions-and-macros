@@ -21,10 +21,6 @@ The MCP server consists of several key components:
 * `generate.js` - Documentation generation commands
 * `cli.js` - Raw CLI command execution
 
-*Prompt system* (`prompts/`):: Pre-defined instructions for specific documentation workflows
-+
-See link:prompts/README.adoc[Prompts documentation]
-
 *Setup automation* (`cli-utils/setup-mcp.js`):: Automated MCP server configuration for Claude Code/Desktop
 
 === How it works
@@ -101,13 +97,13 @@ docs-extensions-and-macros/
 │       ├── antora.js              # Antora structure analysis
 │       ├── cloud-regions.js       # Cloud regions table generation
 │       ├── crd-docs.js            # Kubernetes CRD docs generation
+│       ├── generated-docs-review.js # Generated docs quality review
 │       ├── helm-docs.js           # Helm chart docs generation
 │       ├── index.js               # Main tool orchestrator
 │       ├── job-queue.js           # Background job management
 │       ├── metrics-docs.js        # Metrics docs generation
 │       ├── openapi.js             # OpenAPI bundle generation
 │       ├── property-docs.js       # Property docs generation
-│       ├── review.js              # Documentation quality review
 │       ├── rpcn-docs.js           # Redpanda Connect docs generation
 │       ├── rpk-docs.js            # RPK CLI docs generation
 │       ├── utils.js               # Shared utilities
@@ -245,175 +241,6 @@ Update link:USER_GUIDE.adoc[USER_GUIDE.adoc] to document:
 * Usage examples
 
 Update link:CLI_INTERFACE.adoc[CLI_INTERFACE.adoc] if you added a new CLI command.
-
-== Adding a new prompt
-
-Prompts provide contextual guidance to Claude when working on specific documentation tasks.
-
-NOTE: This section is for *developers* adding prompts programmatically. *Technical writers* should use link:WRITER_EXTENSION_GUIDE.adoc[Writer Extension Guide] which provides step-by-step instructions with no code required.
-
-=== How the prompt system works
-
-The MCP server uses *automatic discovery* of prompts:
-
-. Prompts are Markdown files in `mcp/prompts/` directory
-. Each prompt has YAML frontmatter defining metadata (description, version, arguments)
-. At startup, the server scans the directory and loads all `.md` files
-. Prompts are cached in memory for performance
-. Changes are automatically reloaded in development mode (`MCP_DEV_MODE=true`)
-
-*No code changes needed!* Just drop a `.md` file with valid frontmatter and restart.
-
-=== Step 1: Create the prompt file with frontmatter
-
-Create a new Markdown file in `mcp/prompts/` with YAML frontmatter:
-
-[,bash]
-----
-mcp/prompts/my-docs-guide.md
-----
-
-[,markdown]
-----
----
-description: Guide for working with specific documentation type
-version: 1.0.0
-arguments:
-  - name: content
-    description: The documentation content to process
-    required: true
-argumentFormat: content-append
----
-
-# My Documentation Guide
-
-This guide explains how to work with [specific documentation type].
-
-## Overview
-
-[Explanation of the documentation system]
-
-## Workflow
-
-1. First step
-2. Second step
-3. Third step
-
-## Important rules
-
-- Rule 1
-- Rule 2
-- Rule 3
-
-## Common tasks
-
-### Task 1: Do something
-
-[Detailed instructions]
-
-### Task 2: Do something else
-
-[Detailed instructions]
-
-## Validation
-
-Before committing, check:
-
-- [ ] Checklist item 1
-- [ ] Checklist item 2
-----
-
-*Required frontmatter fields:*
-
-description:: Clear explanation of what the prompt does (min 10 characters)
-version:: Semantic version (for example, "1.0.0")
-arguments:: (Optional) Array of argument definitions
-* `name`: Argument name (lowercase, underscores only)
-* `description`: What this argument is for
-* `required`: Boolean indicating if required
-argumentFormat:: (Optional) How to append arguments:
-* `content-append`: Append content with separator (default)
-* `structured`: Insert arguments as structured sections
-
-*Best practices for prompts:*
-
-* Write for technical writers, not developers
-* Include concrete examples
-* Explain the "why" behind rules
-* Provide validation checklists
-* Use clear, scannable structure
-* Keep version updated when making significant changes
-
-=== Step 2: Validate the prompt
-
-Run validation to check frontmatter and metadata:
-
-[,bash]
-----
-npx doc-tools validate-mcp
-----
-
-This checks:
-
-* YAML frontmatter is valid
-* Required fields are present (description, version)
-* Argument names use only lowercase and underscores
-* Version follows semantic versioning
-* No naming conflicts with existing prompts
-
-=== Step 3: Preview the prompt
-
-Test the prompt before deploying:
-
-[,bash]
-----
-# Preview with content argument
-npx doc-tools preview-prompt my-docs-guide --content "Test content"
-
-# See how it appears to Claude
-----
-
-=== Step 4: Deploy and test
-
-. Restart Claude Code to load the new prompt
-. Test with Claude:
-+
-----
-You: "List available prompts"
-Claude: *shows your new prompt in the list*
-
-You: "Use the my-docs-guide prompt with this content: [...]"
-Claude: *retrieves and applies your prompt*
-----
-
-=== Auto-discovery details
-
-The prompt discovery system (`bin/mcp-tools/prompt-discovery.js`):
-
-. Scans `mcp/prompts/*.md` files
-. Parses YAML frontmatter using `js-yaml`
-. Validates against JSON schema using `ajv`
-. Extracts prompt name from filename (for example, `my-docs-guide.md` → `my-docs-guide`)
-. Caches content and metadata in memory
-. Provides generic handler that works for all prompts
-
-*Development mode:*
-
-Enable file watching to automatically reload changes:
-
-[,bash]
-----
-export MCP_DEV_MODE=true
-# Restart Claude Code
-# Now changes to prompts are automatically reloaded
-----
-
-=== For more information
-
-* link:WRITER_EXTENSION_GUIDE.adoc[Writer Extension Guide] - Complete guide for writers adding prompts (no code)
-* link:TEAM_ROLLOUT_GUIDE.adoc#operational-playbook[Operational Playbook] - Managing prompts in production
-* `bin/mcp-tools/prompt-discovery.js` - Auto-discovery implementation
-* `bin/mcp-tools/frontmatter.js` - Frontmatter parsing and validation
 
 == Testing
 
@@ -688,7 +515,7 @@ All CLI commands have:
 
 * link:../__tests__/mcp/README.adoc[Test documentation] - How to run and write tests
 * link:CLI_INTERFACE.adoc[CLI interface contract] - CLI interface that the MCP server depends on
-* link:prompts/README.adoc[Prompts documentation] - How the prompt system works
+* link:WRITER_EXTENSION_GUIDE.adoc[Writer extension guide] - When to add MCP tools vs skills
 
 *External documentation*
 
