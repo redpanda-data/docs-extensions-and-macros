@@ -33,8 +33,7 @@ display help for command
 * `link-readme` - Symlink a README.adoc into docs/modules/<module>/pages/
 * `fetch` - Fetch a file or directory from GitHub and save it locally
 * `setup-mcp` - Configure the Redpanda Docs MCP server for Claude Code/Desktop
-* `validate-mcp` - Validate MCP server configuration (prompts, resources, metadata)
-* `preview-prompt` - Preview a prompt with arguments to see the final output
+* `validate-mcp` - Validate MCP server configuration (tools, resources)
 * `mcp-version` - Show MCP server version and configuration information
 * `generate` - Run docs automations
 * `help` - display help for command
@@ -364,11 +363,11 @@ npx doc-tools setup-mcp --status
 
 == validate-mcp
 
-Validate the MCP server configuration including prompts, resources, and metadata. Reports any issues with prompt definitions or missing files.
+Validate the MCP server configuration including tools and resources.
 
 *Why use it:*
 
-Use this command to verify that all MCP prompts and resources are properly configured before deploying or after making changes to prompt files.
+Use this command to verify the MCP server is properly configured.
 
 *Usage:*
 
@@ -396,55 +395,43 @@ None.
 
 == preview-prompt
 
-Preview an MCP prompt with sample arguments to see the final rendered output. Useful for testing and debugging prompt templates.
-
-*Why use it:*
-
-Use this command when developing or modifying MCP prompts to verify the output format and argument substitution works correctly.
+Redpanda Document Automation CLI
 
 *Usage:*
 
 [,bash]
 ----
-doc-tools preview-prompt [options] <prompt-name>
+doc-tools [options] [command]
 ----
 
 *Options:*
 
-`--content <text>`::
-Content argument (for review/check prompts)
-
-`--topic <text>`::
-Topic argument (for write prompts)
-
-`--audience <text>`::
-Audience argument (for write prompts)
+`-V, --version`::
+output the version number
 
 `-h, --help`::
 display help for command
 
-*Examples:*
+*Commands:*
 
-[,bash]
-----
-# Preview a prompt with content argument
-npx doc-tools preview-prompt review-content --content "Sample text"
-
-# Preview a prompt with topic and audience
-npx doc-tools preview-prompt write-docs --topic "Kafka" --audience "developers"
-----
-
-*Requirements:*
-
-None.
+* `install-test-dependencies` - Install packages for doc test workflows
+* `get-redpanda-version` - Print the latest Redpanda version
+* `get-console-version` - Print the latest Console version
+* `link-readme` - Symlink a README.adoc into docs/modules/<module>/pages/
+* `fetch` - Fetch a file or directory from GitHub and save it locally
+* `setup-mcp` - Configure the Redpanda Docs MCP server for Claude Code/Desktop
+* `validate-mcp` - Validate MCP server configuration (tools, resources)
+* `mcp-version` - Show MCP server version and configuration information
+* `generate` - Run docs automations
+* `help` - display help for command
 
 == mcp-version
 
-Show MCP server version information including available prompts, resources, and optionally usage statistics from previous sessions.
+Show MCP server version information including available tools and optionally usage statistics from previous sessions.
 
 *Why use it:*
 
-Use this command to see what MCP capabilities are available and to review usage patterns for optimization.
+Use this command to see what MCP capabilities are available.
 
 *Usage:*
 
