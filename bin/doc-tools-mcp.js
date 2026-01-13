@@ -22,26 +22,14 @@ const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio
 const {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-  ListPromptsRequestSchema,
-  GetPromptRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } = require('@modelcontextprotocol/sdk/types.js');
 const { findRepoRoot, executeTool } = require('./mcp-tools');
 const { initializeJobQueue, getJob, listJobs } = require('./mcp-tools/job-queue');
 
-// New modules for improved architecture
-const {
-  PromptCache,
-  loadAllPrompts,
-  watchPrompts,
-  buildPromptWithArguments,
-  promptsToMcpFormat
-} = require('./mcp-tools/prompt-discovery');
-const {
-  validatePromptArguments,
-  validateMcpConfiguration
-} = require('./mcp-tools/mcp-validation');
+// Prompts and most resources migrated to docs-team-standards plugin
+// This MCP server now focuses on execution tools only
 const {
   UsageStats,
   createPeriodicReporter,
@@ -54,8 +42,7 @@ const packageJson = require('../package.json');
 // Base directory
 const baseDir = path.join(__dirname, '..');
 
-// Initialize prompt cache and usage stats
-const promptCache = new PromptCache();
+// Initialize usage stats (prompt cache removed - prompts migrated to docs-team-standards)
 const usageStats = new UsageStats();
 
 // Create the MCP server
@@ -67,8 +54,8 @@ const server = new Server(
   {
     capabilities: {
       tools: {},
-      prompts: {},
       resources: {},
+      // prompts: {} - Removed, prompts migrated to docs-team-standards plugin
     },
   }
 );
@@ -391,7 +378,7 @@ const tools = [
   },
   {
     name: 'review_generated_docs',
-    description: 'Review recently generated documentation for quality issues. Checks for missing descriptions, invalid formatting, DRY violations, and other quality problems. Uses the quality criteria from the property-docs-guide and rpcn-connector-docs-guide prompts. Can generate a formatted markdown report for easy review.',
+    description: 'Validate auto-generated documentation for structural issues. Checks for missing descriptions, invalid $refs, DRY violations, invalid xrefs, and calculates quality scores. For style and tone review, use the content-reviewer agent from docs-team-standards.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -410,25 +397,6 @@ const tools = [
         }
       },
       required: ['doc_type']
-    }
-  },
-  {
-    name: 'review_content',
-    description: 'Review documentation content with automatic style guide context. This tool bundles the style guide and review instructions in a single call, ensuring the LLM has all necessary context. Use this instead of manually fetching resources when you need a quick, comprehensive review.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        content: {
-          type: 'string',
-          description: 'The documentation content to review (can be a file path or raw content)'
-        },
-        focus: {
-          type: 'string',
-          description: 'What aspect to focus on (optional, defaults to comprehensive)',
-          enum: ['comprehensive', 'style', 'terminology', 'clarity']
-        }
-      },
-      required: ['content']
     }
   },
   {
@@ -480,21 +448,21 @@ const tools = [
   }
 ];
 
-// Resource definitions - Team standards and guidelines
+// Resource definitions - Only personas remains (other standards migrated to docs-team-standards plugin)
 const resources = [
   {
-    uri: 'redpanda://style-guide',
-    name: 'Redpanda Documentation Style Guide',
-    description: 'Complete style guide based on Google Developer Documentation Style Guide with Redpanda-specific guidelines, voice/tone standards, and formatting preferences. Includes references to official glossary sources.',
-    mimeType: 'text/markdown',
+    uri: 'redpanda://personas',
+    name: 'Repository Personas',
+    description: 'Target audience personas for this repository. Loaded from docs-data/personas.yaml in the current working directory. Defines reader types, goals, pain points, and content preferences.',
+    mimeType: 'text/yaml',
     version: '1.0.0',
-    lastUpdated: '2025-12-11'
+    lastUpdated: '2025-01-07'
   }
 ];
 
-// Resource file mappings
+// Resource file mappings (most resources migrated to docs-team-standards plugin)
 const resourceMap = {
-  'redpanda://style-guide': { file: 'style-guide.md', mimeType: 'text/markdown' }
+  // Only personas remains - it's loaded dynamically from cwd, not from team-standards/
 };
 
 /**
@@ -503,12 +471,17 @@ const resourceMap = {
  * @returns {Object} Resource content
  */
 function getResourceContent(uri) {
+  // Special handling for personas - load from current working directory
+  if (uri === 'redpanda://personas') {
+    return getPersonasResource();
+  }
+
   const resource = resourceMap[uri];
   if (!resource) {
     throw new Error(`Unknown resource: ${uri}`);
   }
 
-  const resourcePath = path.join(baseDir, 'mcp', 'team-standards', resource.file);
+  const resourcePath = path.join(baseDir, 'team-standards', resource.file);
   try {
     const content = fs.readFileSync(resourcePath, 'utf8');
     return {
@@ -524,16 +497,71 @@ function getResourceContent(uri) {
   }
 }
 
+/**
+ * Load personas from current repository's docs-data/personas.yaml
+ * Falls back to a helpful message if not found
+ * @returns {Object} Resource content
+ */
+function getPersonasResource() {
+  const cwd = process.cwd();
+  const personasPath = path.join(cwd, 'docs-data', 'personas.yaml');
+
+  try {
+    if (fs.existsSync(personasPath)) {
+      const content = fs.readFileSync(personasPath, 'utf8');
+      return {
+        contents: [{
+          uri: 'redpanda://personas',
+          mimeType: 'text/yaml',
+          text: content
+        }]
+      };
+    } else {
+      // Return helpful message when no personas file exists
+      const fallbackContent = `# No personas defined for this repository
+#
+# To define personas, create: docs-data/personas.yaml
+#
+# Example:
+# personas:
+#   - id: developer
+#     name: Application Developer
+#     description: Builds applications using this product
+#     goals:
+#       - Integrate quickly
+#       - Find working examples
+#     pain_points:
+#       - Complex configuration
+#       - Missing examples
+#     content_preferences:
+#       - Code-first explanations
+#       - Copy-paste examples
+#
+# For the full template, see:
+# https://github.com/redpanda-data/docs-extensions-and-macros/blob/main/team-standards/personas-template.yaml
+#
+# Current working directory: ${cwd}
+`;
+      return {
+        contents: [{
+          uri: 'redpanda://personas',
+          mimeType: 'text/yaml',
+          text: fallbackContent
+        }]
+      };
+    }
+  } catch (err) {
+    console.error(`Error loading personas: ${err.message}`);
+    throw new Error(`Failed to load personas: ${err.message}`);
+  }
+}
+
 // Handle list tools request
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools };
 });
 
-// Handle list prompts request
-server.setRequestHandler(ListPromptsRequestSchema, async () => {
-  const allPrompts = promptCache.getAll();
-  return { prompts: promptsToMcpFormat(allPrompts) };
-});
+// Prompts handler removed - prompts migrated to docs-team-standards plugin
 
 // Handle list resources request
 server.setRequestHandler(ListResourcesRequestSchema, async () => {
@@ -550,49 +578,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   return getResourceContent(uri);
 });
 
-// Handle get prompt request
-server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-
-  // Record usage
-  usageStats.recordPrompt(name);
-
-  // Get prompt from cache
-  const prompt = promptCache.get(name);
-  if (!prompt) {
-    throw new Error(`Unknown prompt: ${name}`);
-  }
-
-  // Validate arguments if schema exists
-  if (prompt.arguments && prompt.arguments.length > 0) {
-    try {
-      validatePromptArguments(name, args, prompt.arguments);
-    } catch (err) {
-      return {
-        messages: [{
-          role: 'user',
-          content: {
-            type: 'text',
-            text: `Error: ${err.message}`
-          }
-        }]
-      };
-    }
-  }
-
-  // Build prompt with arguments
-  const promptText = buildPromptWithArguments(prompt, args);
-
-  return {
-    messages: [{
-      role: 'user',
-      content: {
-        type: 'text',
-        text: promptText
-      }
-    }]
-  };
-});
+// Get prompt handler removed - prompts migrated to docs-team-standards plugin
 
 // Handle tool execution
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -663,40 +649,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Start the server
 async function main() {
-  // Load and validate prompts
-  console.error('Loading prompts...');
-  const prompts = loadAllPrompts(baseDir, promptCache);
-  console.error(`Loaded ${prompts.length} prompts`);
-
-  // Validate configuration at startup
-  console.error('Validating MCP configuration...');
-  const validation = validateMcpConfiguration({
-    resources,
-    resourceMap,
-    prompts,
-    baseDir
-  });
-
-  if (!validation.valid) {
-    console.error('\nMCP Configuration validation FAILED:');
-    validation.errors.forEach(err => console.error(`  ${err}`));
-    console.error('\nServer cannot start with invalid configuration.');
-    process.exit(1);
-  }
-
-  if (validation.warnings.length > 0) {
-    console.error('\nWarnings:');
-    validation.warnings.forEach(warn => console.error(`  ⚠ ${warn}`));
-  }
-
-  console.error('Configuration valid');
-
-  // Enable file watching in dev mode
-  if (process.env.MCP_DEV_MODE === 'true') {
-    watchPrompts(baseDir, promptCache, (reloadedPrompts) => {
-      console.error(`Prompts reloaded: ${reloadedPrompts.length} available`);
-    });
-  }
+  // Prompts have been migrated to docs-team-standards plugin (skills/agents)
+  // No prompts to load from this MCP server
+  console.error('Prompts: migrated to docs-team-standards plugin');
 
   // Initialize usage tracking
   createShutdownHandler(usageStats, baseDir);
@@ -719,11 +674,9 @@ async function main() {
   console.error(`Server version: ${packageJson.version}`);
   console.error(`Working directory: ${process.cwd()}`);
   console.error(`Repository root: ${repoInfo.root} (${repoInfo.detected ? repoInfo.type : 'not detected'})`);
+  console.error('Mode: execution tools only (prompts/resources migrated to docs-team-standards)');
   console.error('Background job queue: enabled');
   console.error('Command timeout: 10 minutes');
-  console.error('Auto-discovery: enabled');
-  console.error('Startup validation: enabled');
-  console.error('Usage telemetry: enabled');
 }
 
 main().catch((error) => {
