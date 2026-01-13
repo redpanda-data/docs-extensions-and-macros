@@ -393,6 +393,38 @@ npx doc-tools validate-mcp
 
 None.
 
+== preview-prompt
+
+Redpanda Document Automation CLI
+
+*Usage:*
+
+[,bash]
+----
+doc-tools [options] [command]
+----
+
+*Options:*
+
+`-V, --version`::
+output the version number
+
+`-h, --help`::
+display help for command
+
+*Commands:*
+
+* `install-test-dependencies` - Install packages for doc test workflows
+* `get-redpanda-version` - Print the latest Redpanda version
+* `get-console-version` - Print the latest Console version
+* `link-readme` - Symlink a README.adoc into docs/modules/<module>/pages/
+* `fetch` - Fetch a file or directory from GitHub and save it locally
+* `setup-mcp` - Configure the Redpanda Docs MCP server for Claude Code/Desktop
+* `validate-mcp` - Validate MCP server configuration (tools, resources)
+* `mcp-version` - Show MCP server version and configuration information
+* `generate` - Run docs automations
+* `help` - display help for command
+
 == mcp-version
 
 Show MCP server version information including available tools and optionally usage statistics from previous sessions.
