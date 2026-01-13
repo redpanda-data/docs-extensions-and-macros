@@ -167,7 +167,7 @@ This stays in MCP because it's repository-specific and loaded at runtime.
 
 == Migration reference
 
-The following were migrated to docs-team-standards in January 2025:
+The following were migrated to docs-team-standards in January 2026:
 
 [cols="2,2"]
 |===
