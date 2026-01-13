@@ -397,10 +397,8 @@ programCli
   })
 
 /**
- * @description Validate the MCP server configuration including prompts, resources,
- * and metadata. Reports any issues with prompt definitions or missing files.
- * @why Use this command to verify that all MCP prompts and resources are properly
- * configured before deploying or after making changes to prompt files.
+ * @description Validate the MCP server configuration including tools and resources.
+ * @why Use this command to verify the MCP server is properly configured.
  * @example
  * # Validate MCP configuration
  * npx doc-tools validate-mcp
@@ -408,49 +406,44 @@ programCli
  */
 programCli
   .command('validate-mcp')
-  .description('Validate MCP server configuration (prompts, resources, metadata)')
+  .description('Validate MCP server configuration (tools, resources)')
   .action(() => {
-    const {
-      PromptCache,
-      loadAllPrompts
-    } = require('./mcp-tools/prompt-discovery')
     const {
       validateMcpConfiguration,
       formatValidationResults
     } = require('./mcp-tools/mcp-validation')
 
-    const baseDir = findRepoRoot()
-    const promptCache = new PromptCache()
+    // Tools are defined in doc-tools-mcp.js - we validate the structure
+    const tools = [
+      { name: 'get_antora_structure', description: 'Get Antora documentation structure' },
+      { name: 'get_redpanda_version', description: 'Get latest Redpanda version' },
+      { name: 'get_console_version', description: 'Get latest Console version' },
+      { name: 'generate_property_docs', description: 'Generate property documentation' },
+      { name: 'generate_metrics_docs', description: 'Generate metrics documentation' },
+      { name: 'generate_rpk_docs', description: 'Generate rpk CLI documentation' },
+      { name: 'generate_rpcn_connector_docs', description: 'Generate connector documentation' },
+      { name: 'generate_helm_docs', description: 'Generate Helm chart documentation' },
+      { name: 'generate_crd_docs', description: 'Generate CRD documentation' },
+      { name: 'generate_cloud_regions', description: 'Generate cloud regions documentation' },
+      { name: 'generate_bundle_openapi', description: 'Bundle OpenAPI specifications' },
+      { name: 'review_generated_docs', description: 'Review generated documentation' },
+      { name: 'run_doc_tools_command', description: 'Run raw doc-tools command' },
+      { name: 'get_job_status', description: 'Get background job status' },
+      { name: 'list_jobs', description: 'List background jobs' }
+    ]
 
     const resources = [
       {
-        uri: 'redpanda://style-guide',
-        name: 'Redpanda Documentation Style Guide',
-        description: 'Complete style guide based on Google Developer Documentation Style Guide with Redpanda-specific guidelines',
-        mimeType: 'text/markdown',
-        version: '1.0.0',
-        lastUpdated: '2025-12-11'
+        uri: 'redpanda://personas',
+        name: 'Repository Personas',
+        description: 'Target audience personas loaded from docs-data/personas.yaml'
       }
     ]
 
-    const resourceMap = {
-      'redpanda://style-guide': { file: 'style-guide.md', mimeType: 'text/markdown' }
-    }
-
     try {
-      console.log('Loading prompts...')
-      const prompts = loadAllPrompts(baseDir, promptCache)
-      console.log(`Found ${prompts.length} prompts`)
-
-      console.log('\nValidating configuration...')
-      const validation = validateMcpConfiguration({
-        resources,
-        resourceMap,
-        prompts,
-        baseDir
-      })
-
-      const output = formatValidationResults(validation, { resources, prompts })
+      console.log('Validating MCP configuration...')
+      const validation = validateMcpConfiguration({ tools, resources })
+      const output = formatValidationResults(validation, { tools, resources })
       console.log('\n' + output)
 
       if (!validation.valid) {
@@ -463,74 +456,9 @@ programCli
   })
 
 /**
- * @description Preview an MCP prompt with sample arguments to see the final rendered
- * output. Useful for testing and debugging prompt templates.
- * @why Use this command when developing or modifying MCP prompts to verify the
- * output format and argument substitution works correctly.
- * @example
- * # Preview a prompt with content argument
- * npx doc-tools preview-prompt review-content --content "Sample text"
- *
- * # Preview a prompt with topic and audience
- * npx doc-tools preview-prompt write-docs --topic "Kafka" --audience "developers"
- * @requirements None.
- */
-programCli
-  .command('preview-prompt')
-  .description('Preview a prompt with arguments to see the final output')
-  .argument('<prompt-name>', 'Name of the prompt to preview')
-  .option('--content <text>', 'Content argument (for review/check prompts)')
-  .option('--topic <text>', 'Topic argument (for write prompts)')
-  .option('--audience <text>', 'Audience argument (for write prompts)')
-  .action((promptName, options) => {
-    const {
-      PromptCache,
-      loadAllPrompts,
-      buildPromptWithArguments
-    } = require('./mcp-tools/prompt-discovery')
-
-    const baseDir = findRepoRoot()
-    const promptCache = new PromptCache()
-
-    try {
-      loadAllPrompts(baseDir, promptCache)
-
-      const prompt = promptCache.get(promptName)
-      if (!prompt) {
-        console.error(`Error: Prompt not found: ${promptName}`)
-        console.error(`\nAvailable prompts: ${promptCache.getNames().join(', ')}`)
-        process.exit(1)
-      }
-
-      const args = {}
-      if (options.content) args.content = options.content
-      if (options.topic) args.topic = options.topic
-      if (options.audience) args.audience = options.audience
-
-      const promptText = buildPromptWithArguments(prompt, args)
-
-      console.log('='.repeat(70))
-      console.log(`PROMPT PREVIEW: ${promptName}`)
-      console.log('='.repeat(70))
-      console.log(`Description: ${prompt.description}`)
-      console.log(`Version: ${prompt.version}`)
-      if (prompt.arguments.length > 0) {
-        console.log(`Arguments: ${prompt.arguments.map(a => a.name).join(', ')}`)
-      }
-      console.log('='.repeat(70))
-      console.log('\n' + promptText)
-      console.log('\n' + '='.repeat(70))
-    } catch (err) {
-      console.error(`Error: Preview failed: ${err.message}`)
-      process.exit(1)
-    }
-  })
-
-/**
- * @description Show MCP server version information including available prompts,
- * resources, and optionally usage statistics from previous sessions.
- * @why Use this command to see what MCP capabilities are available and to review
- * usage patterns for optimization.
+ * @description Show MCP server version information including available tools
+ * and optionally usage statistics from previous sessions.
+ * @why Use this command to see what MCP capabilities are available.
  * @example
  * # Show version and capabilities
  * npx doc-tools mcp-version
@@ -545,105 +473,90 @@ programCli
   .option('--stats', 'Show usage statistics if available', false)
   .action((options) => {
     const packageJson = require('../package.json')
-    const {
-      PromptCache,
-      loadAllPrompts
-    } = require('./mcp-tools/prompt-discovery')
 
-    const baseDir = findRepoRoot()
-    const promptCache = new PromptCache()
+    const tools = [
+      { name: 'get_antora_structure', description: 'Get Antora documentation structure' },
+      { name: 'get_redpanda_version', description: 'Get latest Redpanda version' },
+      { name: 'get_console_version', description: 'Get latest Console version' },
+      { name: 'generate_property_docs', description: 'Generate property documentation' },
+      { name: 'generate_metrics_docs', description: 'Generate metrics documentation' },
+      { name: 'generate_rpk_docs', description: 'Generate rpk CLI documentation' },
+      { name: 'generate_rpcn_connector_docs', description: 'Generate connector documentation' },
+      { name: 'generate_helm_docs', description: 'Generate Helm chart documentation' },
+      { name: 'generate_crd_docs', description: 'Generate CRD documentation' },
+      { name: 'generate_cloud_regions', description: 'Generate cloud regions documentation' },
+      { name: 'generate_bundle_openapi', description: 'Bundle OpenAPI specifications' },
+      { name: 'review_generated_docs', description: 'Structural validation of generated docs' },
+      { name: 'run_doc_tools_command', description: 'Run raw doc-tools command' },
+      { name: 'get_job_status', description: 'Get background job status' },
+      { name: 'list_jobs', description: 'List background jobs' }
+    ]
 
-    try {
-      const prompts = loadAllPrompts(baseDir, promptCache)
-
-      const resources = [
-        {
-          uri: 'redpanda://style-guide',
-          name: 'Redpanda Documentation Style Guide',
-          version: '1.0.0',
-          lastUpdated: '2025-12-11'
-        }
-      ]
-
-      console.log('Redpanda Doc Tools MCP Server')
-      console.log('='.repeat(60))
-      console.log(`Server version: ${packageJson.version}`)
-      console.log(`Base directory: ${baseDir}`)
-      console.log('')
-
-      console.log(`Prompts (${prompts.length} available):`)
-      prompts.forEach(prompt => {
-        const args = prompt.arguments.length > 0
-          ? ` [${prompt.arguments.map(a => a.name).join(', ')}]`
-          : ''
-        console.log(`  - ${prompt.name} (v${prompt.version})${args}`)
-        console.log(`    ${prompt.description}`)
-      })
-      console.log('')
-
-      console.log(`Resources (${resources.length} available):`)
-      resources.forEach(resource => {
-        console.log(`  - ${resource.name} (v${resource.version})`)
-        console.log(`    URI: ${resource.uri}`)
-        console.log(`    Last updated: ${resource.lastUpdated}`)
-      })
-      console.log('')
-
-      if (options.stats) {
-        const statsPath = path.join(os.tmpdir(), 'mcp-usage-stats.json')
-        if (fs.existsSync(statsPath)) {
-          try {
-            const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'))
-            console.log('Usage Statistics:')
-            console.log('='.repeat(60))
-
-            if (stats.tools && Object.keys(stats.tools).length > 0) {
-              console.log('\nTool Usage:')
-              Object.entries(stats.tools)
-                .sort(([, a], [, b]) => b.count - a.count)
-                .forEach(([name, data]) => {
-                  console.log(`  ${name}:`)
-                  console.log(`    Invocations: ${data.count}`)
-                  if (data.errors > 0) {
-                    console.log(`    Errors: ${data.errors}`)
-                  }
-                })
-            }
-
-            if (stats.prompts && Object.keys(stats.prompts).length > 0) {
-              console.log('\nPrompt Usage:')
-              Object.entries(stats.prompts)
-                .sort(([, a], [, b]) => b - a)
-                .forEach(([name, count]) => {
-                  console.log(`  ${name}: ${count} invocations`)
-                })
-            }
-
-            if (stats.resources && Object.keys(stats.resources).length > 0) {
-              console.log('\nResource Access:')
-              Object.entries(stats.resources)
-                .sort(([, a], [, b]) => b - a)
-                .forEach(([uri, count]) => {
-                  console.log(`  ${uri}: ${count} reads`)
-                })
-            }
-          } catch (err) {
-            console.error('Failed to parse usage statistics:', err.message)
-          }
-        } else {
-          console.log('No usage statistics available yet.')
-          console.log('Statistics are exported when the MCP server shuts down.')
-        }
+    const resources = [
+      {
+        uri: 'redpanda://personas',
+        name: 'Repository Personas',
+        description: 'Loaded from docs-data/personas.yaml'
       }
+    ]
 
-      console.log('')
-      console.log('For more information, see:')
-      console.log('  mcp/WRITER_EXTENSION_GUIDE.adoc')
-      console.log('  mcp/AI_CONSISTENCY_ARCHITECTURE.adoc')
-    } catch (err) {
-      console.error(`Error: Failed to retrieve version information: ${err.message}`)
-      process.exit(1)
+    console.log('Redpanda Doc Tools MCP Server')
+    console.log('='.repeat(60))
+    console.log(`Server version: ${packageJson.version}`)
+    console.log('')
+
+    console.log(`Tools (${tools.length} available):`)
+    tools.forEach(tool => {
+      console.log(`  - ${tool.name}`)
+      console.log(`    ${tool.description}`)
+    })
+    console.log('')
+
+    console.log(`Resources (${resources.length} available):`)
+    resources.forEach(resource => {
+      console.log(`  - ${resource.name}`)
+      console.log(`    URI: ${resource.uri}`)
+      console.log(`    ${resource.description}`)
+    })
+    console.log('')
+
+    console.log('Note: Prompts and most resources have been migrated to')
+    console.log('the docs-team-standards Claude Code plugin.')
+    console.log('')
+
+    if (options.stats) {
+      const statsPath = path.join(os.tmpdir(), 'mcp-usage-stats.json')
+      if (fs.existsSync(statsPath)) {
+        try {
+          const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'))
+          console.log('Usage Statistics:')
+          console.log('='.repeat(60))
+
+          if (stats.tools && Object.keys(stats.tools).length > 0) {
+            console.log('\nTool Usage:')
+            Object.entries(stats.tools)
+              .sort(([, a], [, b]) => b.count - a.count)
+              .forEach(([name, data]) => {
+                console.log(`  ${name}:`)
+                console.log(`    Invocations: ${data.count}`)
+                if (data.errors > 0) {
+                  console.log(`    Errors: ${data.errors}`)
+                }
+              })
+          }
+        } catch (err) {
+          console.error('Failed to parse usage statistics:', err.message)
+        }
+      } else {
+        console.log('No usage statistics available yet.')
+        console.log('Statistics are exported when the MCP server shuts down.')
+      }
     }
+
+    console.log('')
+    console.log('For more information, see:')
+    console.log('  mcp/WRITER_EXTENSION_GUIDE.adoc')
+    console.log('  mcp/README.adoc')
   })
 
 // ====================================================================

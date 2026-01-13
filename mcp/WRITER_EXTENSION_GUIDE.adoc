@@ -1,814 +1,204 @@
-= How to Extend the MCP Server (For Technical Writers)
+= Extending MCP Tools
 :toc:
 :toc-title: Contents
 
 == Overview
 
-This guide shows technical writers how to add new prompts, resources, and tools to the doc-tools MCP server. Most extensions require only creating or editing simple files.
+This guide covers extending the MCP server in `docs-extensions-and-macros`. For creating skills, agents, and other Claude Code extensions, see the https://github.com/redpanda-data/docs-team-standards[docs-team-standards] repository.
 
-== What you can add
-
-[cols="1,2,1"]
+[cols="1,2,2"]
 |===
-|Type |What It Does
+|Repository |Purpose |What to add there
 
-|Prompts
-|Pre-configured instructions for common tasks (review, write, check, etc.)
+|**docs-team-standards**
+|Knowledge, guidance, orchestration
+|Skills, agents, commands, rules, hooks
 
-
-|Resources
-|Reference materials (style guides, templates, terminology) that AI can read
-
-
-|Tools
-|Custom commands that execute doc-tools operations (programming knowledge required)
-
+|**docs-extensions-and-macros**
+|Execution tools
+|MCP tools that need CLI/web access
 |===
 
-== Adding new prompts
+== Decision guide
 
-=== When to add a new prompt
+=== Add to docs-team-standards when:
 
-Create a new prompt when you have a repeated task that would benefit from standardized instructions:
+* You have **knowledge or guidance** to share (style rules, best practices)
+* You want to create a **reusable workflow** (review process, content planning)
+* The extension is **text-based** and doesn't need code execution
 
-* Review content for a specific doc type (API reference, tutorial, troubleshooting)
-* Generate content following a specific template
-* Check for specific quality issues
-* Refactor content in a consistent way
+See the `skill-authoring` skill in docs-team-standards for detailed guidance on creating skills, agents, commands, and rules.
 
-=== How auto-discovery works
+=== Add to docs-extensions-and-macros when:
 
-The MCP server uses automatic prompt discovery, no code editing required.
+* You need to **execute CLI commands** (doc-tools, git, npm)
+* You need to **fetch data from the web** (GitHub API, version info)
+* You need to **parse files programmatically** (JSON validation)
+* The extension requires **Node.js code**
 
-* Save a `.md` file with YAML frontmatter in `mcp/prompts/`.
-* The server automatically loads it at startup.
-* No need to edit `bin/doc-tools-mcp.js` or any JavaScript files.
-* Just validate, restart Claude Code, and use it!
+== Adding MCP tools
 
-=== Add a new prompt
+Only add MCP tools when you need code execution. Most extensions should go in docs-team-standards.
 
-==== Create the prompt file
+=== When to add an MCP tool
 
-Create a new `.md` file in `mcp/prompts/`:
+Add an MCP tool when you need to:
 
-[source,bash]
-----
-cd mcp/prompts
-touch review-api-docs.md
-----
+* Execute `doc-tools` CLI commands
+* Make HTTP requests to external APIs
+* Parse or validate files programmatically
+* Run background jobs with progress tracking
 
-==== Add YAML frontmatter
+=== Tool implementation
 
-At the very top of your file, add metadata using YAML frontmatter:
+See link:DEVELOPMENT.adoc[DEVELOPMENT.adoc] for detailed implementation guidance.
 
-[source,markdown]
-----
----
-description: "Review API documentation for completeness, clarity, and consistency with team standards"
-version: "1.0.0"
-arguments:
-  content:
-    description: "The API documentation content to review"
-    required: true
----
+**Location**: `bin/mcp-tools/<tool-name>.js`
 
-# Review API Documentation
-
-You are reviewing API documentation for the Redpanda documentation team.
-
-## Your Task
-
-Review API documentation and check for:
-1. [Specific thing to check]
-2. [Another thing to check]
-3. [etc.]
-
-## Resources Available
-
-Read these resources first:
-- `redpanda://style-guide` - Complete style guide
-- `redpanda://terminology` - Approved terminology
-
-## API Documentation Standards
-
-[Explain what makes good API docs for your team]
-
-### Required Sections
-
-All API documentation must include:
-- Overview (what the API does)
-- Authentication requirements
-- Request format (with example)
-- Response format (with example)
-- Error responses
-- Code examples
-
-### Format Requirements
-
-[Your specific formatting rules]
-
-## Output Format
-
-Provide feedback in this structure:
-
-### Critical Issues
-[Format for issues]
-
-### Suggestions
-[Format for suggestions]
-
----
-
-Please provide the API documentation you'd like me to review.
-----
-
-==== Validate your prompt
-
-Run the validation command to check for errors:
-
-[source,bash]
-----
-doc-tools validate-mcp
-----
-
-If validation passes, you're ready to use it!
-
-==== Test it
-
-Restart Claude Code and test your prompt:
-
-[source,text]
-----
-Use the review-api-docs prompt with this content:
-[paste some API docs]
-----
-
-=== Prompt template library
-
-Copy and customize these templates for common prompt types:
-
-==== Review prompt template
-
-[source,markdown]
-----
----
-description: "Review [content type] for [specific aspects]"
-version: "1.0.0"
-arguments:
-  content:
-    description: "The content to review"
-    required: true
----
-
-# [Type] Review Prompt
-
-You are reviewing [content type] for the Redpanda documentation team.
-
-## Your Task
-
-Review the provided content and check for:
-1. [Check 1]
-2. [Check 2]
-3. [Check 3]
-
-## Resources
-
-- `redpanda://style-guide`
-- `redpanda://terminology`
-
-## Standards for [Content Type]
-
-[Specific standards]
-
-## Output Format
-
-### Critical Issues
-[Format]
-
-### Suggestions
-[Format]
-
----
-
-Please provide the content to review.
-----
-
-==== Writing prompt template
-
-[source,markdown]
-----
----
-description: "Generate [content type] following team standards"
-version: "1.0.0"
-arguments:
-  topic:
-    description: "The topic to write about"
-    required: true
-  context:
-    description: "Additional context or requirements"
-    required: false
----
-
-# Write [Content Type] Prompt
-
-You are writing [content type] for the Redpanda documentation team.
-
-## Your Task
-
-Create [content type] that follows our standards.
-
-## Resources
-
-- `redpanda://style-guide`
-- `redpanda://terminology`
-- `redpanda://[content-type]-template` (if you have one)
-
-## Standards
-
-[Specific standards for this content type]
-
-## Structure
-
-[Required sections and format]
-
-## Quality Checklist
-
-- [Requirement 1]
-- [Requirement 2]
-- [Requirement 3]
-
----
-
-Please provide:
-1. **Topic**: [What to write about]
-2. **[Other context]**: [Additional info needed]
-----
-
-== Adding new resources
-
-=== When to add a new resource
-
-Add a resource when you have reference material that AI should access:
-
-* Templates for specific doc types
-* Checklists for quality reviews
-* Reference tables or lists
-* Code style guides
-* Workflow documentation
-
-=== How auto-discovery works for resources
-
-Resources are automatically discovered too!
-
-* Add `.md` or `.json` files to `mcp/team-standards/`
-* The server automatically makes them available
-* No code editing required
-* The filename becomes the resource URI (e.g., `api-template.md` → `redpanda://api-template`)
-
-=== Step-by-step: add a new resource
-
-Step 1: Create the resource file**
-
-Add your file to `mcp/team-standards/`:
-
-[source,bash]
-----
-cd mcp/team-standards
-touch api-template.md
-----
-
-Step 2: Write the content**
-
-Use Markdown or JSON format:
-
-[source,markdown]
-----
-# API Documentation Template
-
-Use this template when documenting API endpoints.
-
-## Structure
-
-= API Endpoint Name
-:description: Brief description
-
-Overview paragraph explaining what this endpoint does.
-
-== Authentication
-
-[Authentication requirements]
-
-== Request
-
-[Request format with example]
-
-== Response
-
-[Response format with example]
-
-== Examples
-
-[Code examples]
-
-== Error responses
-
-[Common errors]
-----
-
-Step 3: Validate the resource**
-
-Run validation to ensure the file is accessible:
-
-[source,bash]
-----
-npx doc-tools validate-mcp
-----
-
-Step 4: Reference it in prompts**
-
-Update relevant prompts to reference your new resource. The URI is `redpanda://[filename-without-extension]`:
-
-[source,markdown]
-----
-## Resources Available
-
-- `redpanda://style-guide`
-- `redpanda://terminology`
-- `redpanda://api-template` - Use this template for structure
-----
-
-Step 5: Test it**
-
-Restart Claude Code and verify:
-
-[source,text]
-----
-List available resources
-----
-
-Your new resource should appear in the list.
-
-=== Resource types and formats
-
-==== Markdown resources (.md)
-
-Best for:
-- Templates
-- Guidelines
-- Instructions
-- Examples
-
-[source,markdown]
-----
-# Resource Title
-
-## Section
-
-Content here with examples.
-
-## Another Section
-
-More content.
-----
-
-==== JSON resources (.json)
-
-Best for:
-- Structured data
-- Terminology lists
-- Configuration examples
-- Reference tables
-
-[source,json]
-----
-{
-  "category": {
-    "item1": {
-      "description": "Description here",
-      "example": "Example here"
-    },
-    "item2": {
-      "description": "Description here",
-      "example": "Example here"
-    }
-  }
-}
-----
-
-== Updating existing resources
-
-=== Update style guide
-
-Edit `mcp/team-standards/style-guide.md`:
-
-[source,bash]
-----
-# Add new section or update existing content
-vi mcp/team-standards/style-guide.md
-----
-
-Changes take effect immediately - just restart Claude Code.
-
-=== Update terminology
-
-Terminology is maintained in the official glossary sources:
-
-- GitHub: https://github.com/redpanda-data/docs/tree/shared/modules/terms/partials (each term is a separate file)
-- Published glossary: https://docs.redpanda.com/current/reference/glossary/
-
-The style guide (`mcp/team-standards/style-guide.md`) includes a quick reference to common terms that points to the official glossary.
-
-To add or update terms, update the glossary source files in the docs repository.
-
-=== Update templates
-
-Edit template files in `mcp/team-standards/`:
-
-[source,bash]
-----
-# Example: Update a template resource
-vi mcp/team-standards/api-template.md
-----
-
-Changes are immediately available to AI after restarting Claude Code.
-
-== Adding new tools
-
-Tools require JavaScript knowledge, but the pattern is straightforward.
-
-=== When to add a new tool
-
-Add a tool when you need to:
-- Execute a doc-tools command that isn't covered
-- Automate a multi-step process
-- Integrate with external systems
-- Perform custom validation
-
-=== Tool template
-
-Create a new file in `bin/mcp-tools/my-new-tool.js`:
+**Basic structure**:
 
 [source,javascript]
 ----
-const { executeCommand, findRepoRoot } = require('./utils');
+/**
+ * My Tool
+ *
+ * Brief description of what this tool does.
+ */
+
+const { findRepoRoot, executeCommand } = require('./utils');
 
 /**
- * Execute my new tool
+ * Execute the tool
  * @param {Object} args - Tool arguments
- * @returns {Object} Result with success flag and data
+ * @returns {Object} Result object
  */
-function myNewTool(args) {
+function myTool(args) {
+  const repoRoot = findRepoRoot();
+
   try {
-    // Validate arguments
-    if (!args.required_param) {
-      return {
-        success: false,
-        error: 'Missing required parameter: required_param'
-      };
-    }
-
-    // Build command
-    const command = ['my-command', args.required_param];
-
-    if (args.optional_param) {
-      command.push('--flag', args.optional_param);
-    }
-
-    // Execute
-    const result = executeCommand(command);
-
-    if (result.code === 0) {
-      return {
-        success: true,
-        message: 'Operation completed successfully',
-        output: result.stdout
-      };
-    } else {
-      return {
-        success: false,
-        error: result.stderr,
-        suggestion: 'Check the parameters and try again'
-      };
-    }
-  } catch (error) {
+    // Tool implementation
+    return {
+      success: true,
+      result: 'output'
+    };
+  } catch (err) {
     return {
       success: false,
-      error: error.message
+      error: err.message
     };
   }
 }
 
-module.exports = { myNewTool };
+module.exports = { myTool };
 ----
 
-Then register it in `bin/mcp-tools/index.js` and `bin/doc-tools-mcp.js`.
+**Registration steps**:
 
-For tools, consider asking a developer for help or use this guide as a starting point.
+1. Create tool module in `bin/mcp-tools/`
+2. Export from `bin/mcp-tools/index.js`
+3. Add tool definition to `bin/doc-tools-mcp.js`
 
-== Testing your changes
+=== Tool definition format
 
-=== Validation command
+Add to the `tools` array in `bin/doc-tools-mcp.js`:
 
-Before committing changes, **always run validation**:
+[source,javascript]
+----
+{
+  name: 'my_tool',
+  description: 'What this tool does. Include when writers should use it.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      required_arg: {
+        type: 'string',
+        description: 'Description of this argument'
+      },
+      optional_arg: {
+        type: 'boolean',
+        description: 'Optional argument (default: false)'
+      }
+    },
+    required: ['required_arg']
+  }
+}
+----
+
+=== What NOT to add as MCP tools
+
+Do NOT add MCP tools for:
+
+* Style guidelines → use a skill in docs-team-standards
+* Style/content review → use an agent (applies guidelines, no code needed)
+* Decision criteria → use a skill or rule in docs-team-standards
+* Templates → use templates in docs-team-standards
+
+NOTE: Structural validation that requires code (JSON parsing, file analysis) belongs in MCP. Style review that applies guidelines belongs in an agent.
+
+== Current MCP tools
+
+=== Generation tools
+
+* `generate_property_docs` - Configuration property documentation
+* `generate_metrics_docs` - Metrics reference documentation
+* `generate_rpk_docs` - RPK CLI documentation
+* `generate_rpcn_connector_docs` - Connector reference documentation
+* `generate_helm_docs` - Helm chart documentation
+* `generate_crd_docs` - Kubernetes CRD documentation
+* `generate_cloud_regions` - Cloud regions documentation
+* `generate_bundle_openapi` - OpenAPI specification bundling
+
+=== Utility tools
+
+* `get_redpanda_version` - Latest Redpanda version info
+* `get_console_version` - Latest Console version info
+* `get_antora_structure` - Repository structure analysis
+* `review_generated_docs` - Structural validation (JSON parsing, $ref checking, quality scores). For style review, use the content-reviewer agent.
+* `run_doc_tools_command` - Raw doc-tools CLI execution
+* `get_job_status` / `list_jobs` - Background job management
+
+=== Resources
+
+Only one resource remains in MCP:
+
+* `redpanda://personas` - Loaded from the current repository's `docs-data/personas.yaml`
+
+This stays in MCP because it's repository-specific and loaded at runtime.
+
+== Migration reference
+
+The following were migrated to docs-team-standards in January 2025:
+
+[cols="2,2"]
+|===
+|Was (MCP) |Is now (docs-team-standards)
+
+|`mcp/prompts/*`
+|`agents/` directory
+
+|`team-standards/*`
+|`skills/` directory
+
+|`review_content` tool
+|`content-reviewer` agent
+
+|`mcp/templates/*`
+|`skill-authoring` skill
+|===
+
+== Testing
+
+Run MCP tests:
 
 [source,bash]
 ----
-npx doc-tools validate-mcp
+npm test -- --testPathPattern=mcp
 ----
 
-This command checks:
+See link:../__tests__/mcp/README.adoc[Test documentation] for details.
 
-* All prompts load correctly and have valid frontmatter
-* All resources are accessible
-* Metadata is complete (descriptions, versions)
-* No syntax errors in YAML or JSON
-* No naming conflicts
+== Getting help
 
-Expected output:
-
-[source,text]
-----
-Loading prompts...
-Found 6 prompts
-
-Validating configuration...
-
-MCP Configuration Validation
-============================================================
-
-Prompts found: 6
-Resources found: 1
-
-✓ Validation passed
-----
-
-If validation fails, fix the errors before proceeding.
-
-=== Preview command
-
-Test a prompt without Claude Code:
-
-[source,bash]
-----
-# Preview a review prompt
-npx doc-tools preview-prompt review-for-style --content "Test content"
-
-# Preview a write prompt
-npx doc-tools preview-prompt write-new-guide --topic "Deploy cluster"
-----
-
-This shows exactly how your prompt will appear with arguments.
-
-=== Test checklist
-
-After adding or updating anything:
-
-. Run validation:
-+
-[source,bash]
-----
-npx doc-tools validate-mcp
-----
-
-. Preview your prompt (if you added/changed one):
-+
-[source,bash]
-----
-npx doc-tools preview-prompt [prompt-name] --content "Sample text"
-----
-
-. Restart Claude Code to load changes
-
-. List available items in Claude Code:
-+
-[source,text]
-----
-List available prompts
-List available resources
-List available tools
-----
-
-. Test the new item:
-+
-[source,text]
-----
-Use the [prompt-name] prompt
-Read resource redpanda://[resource-name]
-Use the [tool-name] tool
-----
-
-. Verify output is what you expected
-. Check for errors in Claude Code console
-
-=== Common issues
-
-Validation fails with "Invalid frontmatter":
-- Check YAML syntax in the frontmatter block
-- Ensure required fields are present (description)
-- Verify argument names use only lowercase and underscores
-- Check that version follows semantic versioning (for example, "1.0.0")
-
-Prompt not appearing:
-- Run `npx doc-tools validate-mcp` to check for errors
-- Verify file is in `mcp/prompts/` directory and ends with `.md`
-- Check that frontmatter is valid YAML
-- Restart Claude Code
-
-Resource not loading:
-- Run `npx doc-tools validate-mcp` to check for errors
-- Verify file is in `mcp/team-standards/` directory
-- Check for JSON syntax errors (if JSON file)
-- Restart Claude Code
-
-Prompt content not updating:
-- Files are cached - restart Claude Code
-- Check for syntax errors in Markdown or frontmatter
-- Run validation to catch issues
-
-== Best practices
-
-=== For prompts
-
-. Be specific - Tell AI exactly what to check or create
-. Provide examples - Show good vs bad
-. Reference resources - Point to style guide and terminology
-. Define output format - Specify structure for consistency
-. Include context - Explain why rules matter
-
-=== For resources
-
-. Keep them current - Update when standards change
-. Make them scannable - Use clear headings and examples
-. Show, don't just tell - Include examples
-. Link to sources - Reference official docs when relevant
-. Version control - Commit changes with clear descriptions
-
-=== For the team
-
-. Document changes - Update this guide when you learn something
-. Share examples - Add good prompts to examples gallery
-. Test thoroughly - Don't skip the testing checklist
-. Ask for help - Reach out when you need developer support
-. Iterate - Improve prompts based on usage and feedback
-
-== Quick reference
-
-=== File locations
-
-[source,text]
-----
-mcp/
-├── prompts/              # Prompt files (.md) - Auto-discovered!
-│   ├── review-for-style.md
-│   ├── write-new-guide.md
-│   └── [your-prompt].md
-├── team-standards/       # Resource files (.md) - Auto-discovered!
-│   ├── style-guide.md
-│   └── [your-resource].md
-└── WRITER_EXTENSION_GUIDE.adoc  # This file!
-
-bin/
-├── doc-tools-mcp.js      # MCP server (no editing needed!)
-└── mcp-tools/            # Tool implementations (advanced)
-----
-
-=== Common edits
-
-Add a prompt:
-. Create `mcp/prompts/my-prompt.md` with YAML frontmatter
-. Run `npx doc-tools validate-mcp` to check for errors
-. Restart Claude Code
-. Test it!
-
-Add a resource:
-. Create `mcp/team-standards/my-resource.md`
-. Run `npx doc-tools validate-mcp` to verify it's accessible
-. Restart Claude Code
-. Reference it in prompts using `redpanda://my-resource`
-
-Update content:
-. Edit the file in `mcp/prompts/` or `mcp/team-standards/`
-. Run `npx doc-tools validate-mcp` to catch any errors
-. Restart Claude Code
-. Test the changes
-
-=== Getting help
-
-For writers:
-- Review examples in existing prompts
-- Check the showcase document for patterns
-- Ask team lead for guidance
-
-For developers:
-- See `mcp/DEVELOPMENT.adoc` for technical details
-- Check MCP SDK documentation
-- Review tool implementation examples
-
-== Examples gallery
-
-=== Example 1: Simple review prompt
-
-File: `mcp/prompts/review-troubleshooting.md`
-
-[source,markdown]
-----
----
-description: "Review troubleshooting guides for required elements and clarity"
-version: "1.0.0"
-arguments:
-  content:
-    description: "Troubleshooting content to review"
-    required: true
----
-
-# Review Troubleshooting Guide
-
-Review troubleshooting documentation for clarity and completeness.
-
-## Required Elements
-
-Every troubleshooting guide must have:
-1. Clear problem statement
-2. Symptoms users would see
-3. Root cause explanation
-4. Step-by-step solution
-5. Verification steps
-
-## Check For
-
-- Problem statement is specific (not vague)
-- Symptoms are observable by users
-- Solution steps are sequential and complete
-- Commands include expected output
-- Uses glossterm macro for technical terms
-
-## Output Format
-
-List missing elements and unclear sections.
-
----
-
-Provide the troubleshooting content to review.
-----
-
-That's it! Save the file, run `npx doc-tools validate-mcp`, restart Claude Code, and it's ready to use.
-
-=== Example 2: Reference resource
-
-File: `mcp/team-standards/code-examples-guide.md`
-
-[source,markdown]
-----
-# Code Examples Guide
-
-## General Rules
-
-- Always include context before code
-- Show expected output after commands
-- Use realistic examples (not foo/bar)
-- Test all code before publishing
-
-## AsciiDoc Format
-
-Use appropriate roles:
-
-[source,bash]
-----
-rpk topic create orders --partitions 3
-----
-
-[source,bash,role=no-copy]
-----
-TOPIC    STATUS
-orders   OK
-----
-
-## Language-Specific Rules
-
-### Bash
-- Include comments for non-obvious commands
-- Show full command with all flags
-- Use long-form flags when clearer
-
-### Python
-- Follow PEP 8 style
-- Include import statements
-- Show complete, runnable examples
-
-### YAML
-- Use 2-space indentation
-- Include comments for complex sections
-- Validate syntax before publishing
-----
-
-That's it! Save the file, run `npx doc-tools validate-mcp`, restart Claude Code, and it's available as `redpanda://code-examples-guide`.
-
-== What's next?
-
-. Try adding a simple prompt using the templates above
-. Update existing resources to match your current standards
-. Share your additions with the team
-. Document new patterns you discover
-. Iterate and improve based on team feedback
-
-Remember: The goal is to make AI work consistently for your entire docs team. Every prompt and resource you add makes that easier!
+* **MCP tools**: See link:DEVELOPMENT.adoc[DEVELOPMENT.adoc]
+* **Skills/agents**: See https://github.com/redpanda-data/docs-team-standards[docs-team-standards]
+* **Questions**: Ask in the docs team channel

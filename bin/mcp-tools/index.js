@@ -25,7 +25,6 @@ const { generateBundleOpenApi } = require('./openapi');
 
 // Review tools
 const { reviewGeneratedDocs, generateReviewReport } = require('./generated-docs-review');
-const { reviewContent } = require('./content-review');
 
 // Job queue
 const { initializeJobQueue, createJob, getJob, listJobs, cleanupOldJobs } = require('./job-queue');
@@ -76,9 +75,6 @@ function executeTool(toolName, args = {}) {
 
       case 'review_generated_docs':
         return reviewGeneratedDocs(args);
-
-      case 'review_content':
-        return reviewContent(args, repoRoot.root);
 
       case 'run_doc_tools_command': {
         // Validate and execute raw doc-tools command
