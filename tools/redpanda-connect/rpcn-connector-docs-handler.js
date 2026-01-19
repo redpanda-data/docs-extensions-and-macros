@@ -1150,6 +1150,7 @@ async function handleRpcnConnectorDocs (options) {
 
       // Check for cloud-supported connectors missing from cloud-docs repo (via GitHub API)
       const missingFromCloudDocs = []
+      const cloudDocsErrors = []
       if (cloudSupportedSet.size > 0 && options.checkCloudDocs !== false) {
         console.log('\n   ℹ️  Checking cloud-docs repository for missing connector pages...')
         try {
@@ -1175,11 +1176,33 @@ async function handleRpcnConnectorDocs (options) {
               if (error.status === 404) {
                 // File doesn't exist in cloud-docs
                 missingFromCloudDocs.push({ type, name, path: cloudDocsPath })
+              } else {
+                // Non-404 error (auth, rate-limit, network, etc.)
+                cloudDocsErrors.push({
+                  type,
+                  name,
+                  path: cloudDocsPath,
+                  status: error.status || 'unknown',
+                  message: error.message
+                })
               }
             }
           }
 
-          if (missingFromCloudDocs.length > 0) {
+          // Report results
+          if (cloudDocsErrors.length > 0) {
+            console.log(`   ⚠️  Encountered ${cloudDocsErrors.length} error(s) while checking cloud-docs (check inconclusive):`)
+            cloudDocsErrors.forEach(({ type, name, status, message }) => {
+              console.log(`      • ${type}/${name} - Status ${status}: ${message}`)
+            })
+            console.log(`   ℹ️  Please resolve these errors (e.g., check GITHUB_TOKEN or VBOT_GITHUB_API_TOKEN, API rate limits, network connectivity)`)
+            if (missingFromCloudDocs.length > 0) {
+              console.log(`   ℹ️  Additionally, ${missingFromCloudDocs.length} connector(s) confirmed missing from cloud-docs:`)
+              missingFromCloudDocs.forEach(({ type, name }) => {
+                console.log(`      • ${type}/${name}`)
+              })
+            }
+          } else if (missingFromCloudDocs.length > 0) {
             console.log(`   ⚠️  Found ${missingFromCloudDocs.length} cloud-supported connector(s) missing from cloud-docs:`)
             missingFromCloudDocs.forEach(({ type, name }) => {
               console.log(`      • ${type}/${name}`)
