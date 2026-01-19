@@ -1072,7 +1072,9 @@ async function handleRpcnConnectorDocs (options) {
               validConnectors.push({
                 name: connector.name,
                 type: type.replace(/s$/, ''),
-                status: connector.status || connector.type || 'stable'
+                status: connector.status || connector.type || 'stable',
+                cloudOnly: connector.cloudOnly === true,
+                requiresCgo: connector.requiresCgo === true
               })
             }
           })
@@ -1153,12 +1155,14 @@ async function handleRpcnConnectorDocs (options) {
       const cloudDocsErrors = []
       if (cloudSupportedSet.size > 0 && options.checkCloudDocs !== false) {
         console.log('\n   ℹ️  Checking cloud-docs repository for missing connector pages...')
-        try {
-          const { Octokit } = require('@octokit/rest')
-          const octokit = new Octokit({
-            auth: process.env.VBOT_GITHUB_API_TOKEN || process.env.GITHUB_TOKEN
-          })
 
+        // Initialize Octokit once outside the loop
+        const { Octokit } = require('@octokit/rest')
+        const octokit = new Octokit({
+          auth: process.env.VBOT_GITHUB_API_TOKEN || process.env.GITHUB_TOKEN
+        })
+
+        try {
           // Check each cloud-supported connector
           for (const connectorKey of cloudSupportedSet) {
             const [type, name] = connectorKey.split(':')
