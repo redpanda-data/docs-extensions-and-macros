@@ -1119,13 +1119,79 @@ async function handleRpcnConnectorDocs (options) {
         cloudOnly: path.resolve(process.cwd(), 'modules/components/partials/components/cloud-only')
       }
 
-      const allMissing = validConnectors.filter(({ name, type }) => {
+      // Build a set of cloud-supported connectors (inCloud + cloudOnly, excluding self-hosted-only)
+      const cloudSupportedSet = new Set()
+      if (binaryAnalysis?.comparison) {
+        // inCloud = available in both OSS and Cloud
+        binaryAnalysis.comparison.inCloud?.forEach(c => {
+          cloudSupportedSet.add(`${c.type}:${c.name}`)
+        })
+        // cloudOnly = only available in Cloud (not in OSS)
+        binaryAnalysis.comparison.cloudOnly?.forEach(c => {
+          cloudSupportedSet.add(`${c.type}:${c.name}`)
+        })
+      }
+
+      // Check for missing connector documentation in rp-connect-docs
+      const allMissing = validConnectors.filter(({ name, type, cloudOnly }) => {
         const relPath = path.join(`${type}s`, `${name}.adoc`)
-        const existsInAny = Object.values(roots).some(root =>
+
+        // For cloud-only connectors, ONLY check the cloud-only directory
+        if (cloudOnly) {
+          return !fs.existsSync(path.join(roots.cloudOnly, relPath))
+        }
+
+        // For regular connectors, check pages and partials (not cloud-only)
+        const existsInAny = [roots.pages, roots.partials].some(root =>
           fs.existsSync(path.join(root, relPath))
         )
         return !existsInAny
       })
+
+      // Check for cloud-supported connectors missing from cloud-docs repo (via GitHub API)
+      const missingFromCloudDocs = []
+      if (cloudSupportedSet.size > 0 && options.checkCloudDocs !== false) {
+        console.log('\n   ℹ️  Checking cloud-docs repository for missing connector pages...')
+        try {
+          const { Octokit } = require('@octokit/rest')
+          const octokit = new Octokit({
+            auth: process.env.VBOT_GITHUB_API_TOKEN || process.env.GITHUB_TOKEN
+          })
+
+          // Check each cloud-supported connector
+          for (const connectorKey of cloudSupportedSet) {
+            const [type, name] = connectorKey.split(':')
+            const cloudDocsPath = `modules/components/pages/${type}/${name}.adoc`
+
+            try {
+              await octokit.repos.getContent({
+                owner: 'redpanda-data',
+                repo: 'cloud-docs',
+                path: cloudDocsPath,
+                ref: 'main'
+              })
+              // File exists, no action needed
+            } catch (error) {
+              if (error.status === 404) {
+                // File doesn't exist in cloud-docs
+                missingFromCloudDocs.push({ type, name, path: cloudDocsPath })
+              }
+            }
+          }
+
+          if (missingFromCloudDocs.length > 0) {
+            console.log(`   ⚠️  Found ${missingFromCloudDocs.length} cloud-supported connector(s) missing from cloud-docs:`)
+            missingFromCloudDocs.forEach(({ type, name }) => {
+              console.log(`      • ${type}/${name}`)
+            })
+            console.log(`   ℹ️  These connectors need pages added to https://github.com/redpanda-data/cloud-docs`)
+          } else {
+            console.log(`   ✓  All cloud-supported connectors have pages in cloud-docs`)
+          }
+        } catch (error) {
+          console.log(`   ⚠️  Could not check cloud-docs: ${error.message}`)
+        }
+      }
 
       const missingConnectors = allMissing.filter(c =>
         !c.name.includes('sql_driver') &&
