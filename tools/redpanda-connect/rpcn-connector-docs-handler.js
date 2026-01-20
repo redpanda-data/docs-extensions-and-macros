@@ -1182,8 +1182,17 @@ async function handleRpcnConnectorDocs (options) {
 
         try {
           // Check each cloud-supported connector
+          // Filter to only check actual connector/component types that need individual pages
+          const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'buffers', 'scanners', 'metrics', 'tracers']
+
           for (const connectorKey of cloudSupportedSet) {
             const [type, name] = connectorKey.split(':')
+
+            // Skip non-connector types (config, bloblang-functions, bloblang-methods, rate-limits)
+            if (!connectorTypes.includes(type)) {
+              continue
+            }
+
             const cloudDocsPath = `modules/develop/pages/connect/components/${type}/${name}.adoc`
 
             try {
