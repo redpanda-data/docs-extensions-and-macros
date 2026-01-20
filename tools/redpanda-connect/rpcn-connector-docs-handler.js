@@ -1132,6 +1132,24 @@ async function handleRpcnConnectorDocs (options) {
         binaryAnalysis.comparison.cloudOnly?.forEach(c => {
           cloudSupportedSet.add(`${c.type}:${c.name}`)
         })
+      } else {
+        // Fallback when binary analysis is unavailable:
+        // Check all connectors that have cloudSupported flag or assume all non-deprecated are cloud-supported
+        console.log('   ℹ️  Binary analysis unavailable - checking all non-deprecated connectors for cloud-docs')
+        const types = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers']
+        types.forEach(type => {
+          if (Array.isArray(dataObj[type])) {
+            dataObj[type].forEach(connector => {
+              // Include if cloudSupported is explicitly true, or if it's null/undefined and not deprecated
+              const isCloudSupported = connector.cloudSupported === true ||
+                (connector.cloudSupported == null && connector.status !== 'deprecated')
+              if (isCloudSupported && connector.name) {
+                // Store type as plural to match binary analysis format
+                cloudSupportedSet.add(`${type}:${connector.name}`)
+              }
+            })
+          }
+        })
       }
 
       // Check for missing connector documentation in rp-connect-docs
@@ -1166,7 +1184,7 @@ async function handleRpcnConnectorDocs (options) {
           // Check each cloud-supported connector
           for (const connectorKey of cloudSupportedSet) {
             const [type, name] = connectorKey.split(':')
-            const cloudDocsPath = `modules/components/pages/${type}/${name}.adoc`
+            const cloudDocsPath = `modules/develop/pages/connect/components/${type}/${name}.adoc`
 
             try {
               await octokit.repos.getContent({
