@@ -8,7 +8,7 @@ IMPORTANT: This documentation is auto-generated. Do not edit manually. Run `npm 
 
 == doc-tools
 
-[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
 
 *Usage:*
 
@@ -478,7 +478,7 @@ None.
 
 == generate
 
-[dotenv@17.2.3] injecting env (0) from .env -- tip: 📡 add observability to secrets: https://dotenvx.com/ops
+[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  override existing env vars with { override: true }
 
 *Usage:*
 
