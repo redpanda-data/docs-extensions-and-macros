@@ -15,6 +15,9 @@
  * - Telemetry: Usage tracking for adoption metrics
  */
 
+// Load environment variables from .env file if it exists
+require('dotenv').config();
+
 const fs = require('fs');
 const path = require('path');
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');

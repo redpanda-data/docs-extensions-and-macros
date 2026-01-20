@@ -1,23 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 
-let octokitInstance = null;
-async function loadOctokit() {
-  if (!octokitInstance) {
-    const { Octokit } = await import('@octokit/rest');
-    octokitInstance = process.env.VBOT_GITHUB_API_TOKEN
-      ? new Octokit({
-          auth: process.env.VBOT_GITHUB_API_TOKEN,
-        })
-      : new Octokit();
-
-    if (!process.env.VBOT_GITHUB_API_TOKEN) {
-      console.info(
-        'No GitHub token found (VBOT_GITHUB_API_TOKEN).'
-      );
-    }
-  }
-  return octokitInstance;
+// Use shared Octokit client
+function loadOctokit() {
+  const octokit = require('../cli-utils/octokit-client');
+  return octokit;
 }
 
 async function saveFile(content, saveDir, filename) {

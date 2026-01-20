@@ -2,6 +2,9 @@
 
 'use strict'
 
+// Load environment variables from .env file if it exists
+require('dotenv').config()
+
 const { spawnSync } = require('child_process')
 const os = require('os')
 const { Command, Option } = require('commander')

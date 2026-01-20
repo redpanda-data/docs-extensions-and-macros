@@ -36,11 +36,16 @@ module.exports = function buildConfigYaml(type, connectorName, children, include
       return; // skip deprecated fields
     }
     if (!includeAdvanced && field.is_advanced) {
-      return; // skip advanced fields in “common” mode
+      return; // skip advanced fields in "common" mode
     }
 
-    if (field.type === 'object' && Array.isArray(field.children)) {
-      // Render nested object
+    // Check if this is an array-of-objects (e.g., client_certs[])
+    // These should render as empty arrays, not expanded object structures
+    if (field.kind === 'array' && field.type === 'object' && Array.isArray(field.children)) {
+      // Render as array leaf (e.g., "client_certs: []")
+      lines.push(renderLeafField(field, baseIndent));
+    } else if (field.type === 'object' && Array.isArray(field.children)) {
+      // Render nested object (plain object, not array)
       const nestedLines = renderObjectField(field, baseIndent);
       lines.push(...nestedLines);
     } else {

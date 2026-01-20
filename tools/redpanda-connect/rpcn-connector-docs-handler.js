@@ -1072,7 +1072,9 @@ async function handleRpcnConnectorDocs (options) {
               validConnectors.push({
                 name: connector.name,
                 type: type.replace(/s$/, ''),
-                status: connector.status || connector.type || 'stable'
+                status: connector.status || connector.type || 'stable',
+                cloudOnly: connector.cloudOnly === true,
+                requiresCgo: connector.requiresCgo === true
               })
             }
           })
@@ -1119,13 +1121,174 @@ async function handleRpcnConnectorDocs (options) {
         cloudOnly: path.resolve(process.cwd(), 'modules/components/partials/components/cloud-only')
       }
 
-      const allMissing = validConnectors.filter(({ name, type }) => {
+      // Build a set of cloud-supported connectors (inCloud + cloudOnly, excluding self-hosted-only)
+      const cloudSupportedSet = new Set()
+      if (binaryAnalysis?.comparison) {
+        // inCloud = available in both OSS and Cloud
+        binaryAnalysis.comparison.inCloud?.forEach(c => {
+          cloudSupportedSet.add(`${c.type}:${c.name}`)
+        })
+        // cloudOnly = only available in Cloud (not in OSS)
+        binaryAnalysis.comparison.cloudOnly?.forEach(c => {
+          cloudSupportedSet.add(`${c.type}:${c.name}`)
+        })
+      } else {
+        // Fallback when binary analysis is unavailable:
+        // Check all connectors that have cloudSupported flag or assume all non-deprecated are cloud-supported
+        console.log('   ℹ️  Binary analysis unavailable - checking all non-deprecated connectors for cloud-docs')
+        const types = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers']
+        types.forEach(type => {
+          if (Array.isArray(dataObj[type])) {
+            dataObj[type].forEach(connector => {
+              // Include if cloudSupported is explicitly true, or if it's null/undefined and not deprecated
+              const isCloudSupported = connector.cloudSupported === true ||
+                (connector.cloudSupported == null && connector.status !== 'deprecated')
+              if (isCloudSupported && connector.name) {
+                // Store type as plural to match binary analysis format
+                cloudSupportedSet.add(`${type}:${connector.name}`)
+              }
+            })
+          }
+        })
+      }
+
+      // Check for missing connector documentation in rp-connect-docs
+      const allMissing = validConnectors.filter(({ name, type, cloudOnly }) => {
         const relPath = path.join(`${type}s`, `${name}.adoc`)
-        const existsInAny = Object.values(roots).some(root =>
+
+        // For cloud-only connectors, ONLY check the cloud-only directory
+        if (cloudOnly) {
+          return !fs.existsSync(path.join(roots.cloudOnly, relPath))
+        }
+
+        // For regular connectors, check pages and partials (not cloud-only)
+        const existsInAny = [roots.pages, roots.partials].some(root =>
           fs.existsSync(path.join(root, relPath))
         )
         return !existsInAny
       })
+
+      // Check for cloud-supported connectors missing from cloud-docs repo (via GitHub API)
+      const missingFromCloudDocs = []
+      const cloudDocsErrors = []
+      if (cloudSupportedSet.size > 0 && options.checkCloudDocs !== false) {
+        console.log('\n   ℹ️  Checking cloud-docs repository for missing connector pages...')
+
+        // Use shared Octokit instance
+        const octokit = require('../../cli-utils/octokit-client')
+
+        try {
+          // Check each cloud-supported connector
+          // Filter to only check actual connector/component types that need individual pages
+          const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'buffers', 'scanners', 'metrics', 'tracers']
+
+          for (const connectorKey of cloudSupportedSet) {
+            const [type, name] = connectorKey.split(':')
+
+            // Skip non-connector types (config, bloblang-functions, bloblang-methods, rate-limits)
+            if (!connectorTypes.includes(type)) {
+              continue
+            }
+
+            // Skip deprecated connectors - they don't need cloud-docs pages
+            if (Array.isArray(dataObj[type])) {
+              const connector = dataObj[type].find(c => c.name === name)
+              if (connector && connector.status === 'deprecated') {
+                continue
+              }
+            }
+
+            const cloudDocsPath = `modules/develop/pages/connect/components/${type}/${name}.adoc`
+
+            try {
+              await octokit.repos.getContent({
+                owner: 'redpanda-data',
+                repo: 'cloud-docs',
+                path: cloudDocsPath,
+                ref: 'main'
+              })
+              // File exists, no action needed
+            } catch (error) {
+              if (error.status === 404) {
+                // File doesn't exist in cloud-docs
+                missingFromCloudDocs.push({ type, name, path: cloudDocsPath })
+              } else {
+                // Non-404 error (auth, rate-limit, network, etc.)
+                // Try fallback: check raw URL without authentication
+                const rawUrl = `https://raw.githubusercontent.com/redpanda-data/cloud-docs/main/${cloudDocsPath}`
+                try {
+                  const https = require('https')
+                  const { URL } = require('url')
+                  const parsedUrl = new URL(rawUrl)
+
+                  await new Promise((resolve, reject) => {
+                    const req = https.request({
+                      hostname: parsedUrl.hostname,
+                      path: parsedUrl.pathname,
+                      method: 'HEAD',
+                      timeout: 5000
+                    }, (res) => {
+                      if (res.statusCode === 200) {
+                        resolve() // File exists
+                      } else if (res.statusCode === 404) {
+                        reject(new Error('404'))
+                      } else {
+                        reject(new Error(`Status ${res.statusCode}`))
+                      }
+                    })
+                    req.on('error', reject)
+                    req.on('timeout', () => {
+                      req.destroy()
+                      reject(new Error('Timeout'))
+                    })
+                    req.end()
+                  })
+                  // Fallback succeeded - file exists, no action needed
+                } catch (fallbackError) {
+                  if (fallbackError.message === '404') {
+                    // Confirmed missing via fallback
+                    missingFromCloudDocs.push({ type, name, path: cloudDocsPath })
+                  } else {
+                    // Both API and fallback failed
+                    cloudDocsErrors.push({
+                      type,
+                      name,
+                      path: cloudDocsPath,
+                      status: error.status || 'unknown',
+                      message: `API: ${error.message}; Fallback: ${fallbackError.message}`
+                    })
+                  }
+                }
+              }
+            }
+          }
+
+          // Report results
+          if (cloudDocsErrors.length > 0) {
+            console.log(`   ⚠️  Encountered ${cloudDocsErrors.length} error(s) while checking cloud-docs (check inconclusive):`)
+            cloudDocsErrors.forEach(({ type, name, status, message }) => {
+              console.log(`      • ${type}/${name} - Status ${status}: ${message}`)
+            })
+            console.log(`   ℹ️  Please resolve these errors (e.g., check GITHUB_TOKEN or VBOT_GITHUB_API_TOKEN, API rate limits, network connectivity)`)
+            if (missingFromCloudDocs.length > 0) {
+              console.log(`   ℹ️  Additionally, ${missingFromCloudDocs.length} connector(s) confirmed missing from cloud-docs:`)
+              missingFromCloudDocs.forEach(({ type, name }) => {
+                console.log(`      • ${type}/${name}`)
+              })
+            }
+          } else if (missingFromCloudDocs.length > 0) {
+            console.log(`   ⚠️  Found ${missingFromCloudDocs.length} cloud-supported connector(s) missing from cloud-docs:`)
+            missingFromCloudDocs.forEach(({ type, name }) => {
+              console.log(`      • ${type}/${name}`)
+            })
+            console.log(`   ℹ️  These connectors need pages added to https://github.com/redpanda-data/cloud-docs`)
+          } else {
+            console.log(`   ✓  All cloud-supported connectors have pages in cloud-docs`)
+          }
+        } catch (error) {
+          console.log(`   ⚠️  Could not check cloud-docs: ${error.message}`)
+        }
+      }
 
       const missingConnectors = allMissing.filter(c =>
         !c.name.includes('sql_driver') &&

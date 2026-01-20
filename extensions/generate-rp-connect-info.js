@@ -25,11 +25,9 @@ module.exports.register = function ({ config }) {
   // Use csvpath (legacy) or csvPath
   const localCsvPath = csvpath || null
 
-  async function loadOctokit () {
-    const { Octokit } = await import('@octokit/rest')
-    const { getGitHubToken } = require('../cli-utils/github-token')
-    const token = getGitHubToken()
-    return token ? new Octokit({ auth: token }) : new Octokit()
+  function loadOctokit () {
+    // Use shared Octokit client
+    return require('../cli-utils/octokit-client')
   }
 
   // Use 'on' and return the promise so Antora waits for async completion
