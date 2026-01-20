@@ -8,7 +8,7 @@ IMPORTANT: This documentation is auto-generated. Do not edit manually. Run `npm 
 
 == doc-tools
 
-Redpanda Document Automation CLI
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
 
 *Usage:*
 
@@ -478,7 +478,7 @@ None.
 
 == generate
 
-Run docs automations
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 📡 add observability to secrets: https://dotenvx.com/ops
 
 *Usage:*
 
