@@ -1193,6 +1193,14 @@ async function handleRpcnConnectorDocs (options) {
               continue
             }
 
+            // Skip deprecated connectors - they don't need cloud-docs pages
+            if (Array.isArray(dataObj[type])) {
+              const connector = dataObj[type].find(c => c.name === name)
+              if (connector && connector.status === 'deprecated') {
+                continue
+              }
+            }
+
             const cloudDocsPath = `modules/develop/pages/connect/components/${type}/${name}.adoc`
 
             try {
