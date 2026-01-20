@@ -1,4 +1,4 @@
-const { Octokit } = require('@octokit/rest');
+const octokit = require('../../cli-utils/octokit-client');
 const { execSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -12,16 +12,6 @@ const https = require('https');
  * - Which connectors require cgo builds (cgo-only)
  * - Which connectors are self-hosted only
  */
-
-// Initialize Octokit with optional authentication
-const octokit = new Octokit({
-  auth: process.env.GITHUB_TOKEN,
-  userAgent: 'redpanda-docs-tools',
-  retry: {
-    enabled: true,
-    retries: 3
-  }
-});
 
 const REPO_OWNER = 'redpanda-data';
 const REPO_NAME = 'connect';

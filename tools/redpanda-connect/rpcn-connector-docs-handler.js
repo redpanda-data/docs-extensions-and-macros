@@ -1174,11 +1174,8 @@ async function handleRpcnConnectorDocs (options) {
       if (cloudSupportedSet.size > 0 && options.checkCloudDocs !== false) {
         console.log('\n   ℹ️  Checking cloud-docs repository for missing connector pages...')
 
-        // Initialize Octokit once outside the loop
-        const { Octokit } = require('@octokit/rest')
-        const octokit = new Octokit({
-          auth: process.env.VBOT_GITHUB_API_TOKEN || process.env.GITHUB_TOKEN
-        })
+        // Use shared Octokit instance
+        const octokit = require('../../cli-utils/octokit-client')
 
         try {
           // Check each cloud-supported connector
