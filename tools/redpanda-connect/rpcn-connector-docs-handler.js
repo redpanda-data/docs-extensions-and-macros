@@ -1172,14 +1172,14 @@ async function handleRpcnConnectorDocs (options) {
       const missingFromCloudDocs = []
       const cloudDocsErrors = []
       if (cloudSupportedSet.size > 0 && options.checkCloudDocs !== false) {
-        console.log('\n   ℹ️  Checking cloud-docs repository for missing connector pages...')
+        console.log('\n   INFO: Checking cloud-docs repository for missing connector pages...')
 
         // Use shared Octokit instance
         const octokit = require('../../cli-utils/octokit-client')
 
         try {
           // Optimization: Fetch entire directory tree in 1 API call instead of 471 individual calls
-          console.log('   📥 Fetching cloud-docs directory tree (1 API call)...')
+          console.log('   Fetching cloud-docs directory tree (1 API call)...')
 
           let existingFiles = new Set()
 
@@ -1199,9 +1199,9 @@ async function handleRpcnConnectorDocs (options) {
               }
             })
 
-            console.log(`   ✓ Loaded ${existingFiles.size} existing connector pages from cloud-docs`)
+            console.log(`   Loaded ${existingFiles.size} existing connector pages from cloud-docs`)
           } catch (treeError) {
-            console.log(`   ⚠️  Could not fetch tree (${treeError.status}), falling back to individual checks`)
+            console.log(`   WARNING: Could not fetch tree (${treeError.status}), falling back to individual checks`)
             // If tree API fails, fall back to individual checks (old behavior)
             existingFiles = null
           }
@@ -1265,28 +1265,28 @@ async function handleRpcnConnectorDocs (options) {
 
           // Report results
           if (cloudDocsErrors.length > 0) {
-            console.log(`   ⚠️  Encountered ${cloudDocsErrors.length} error(s) while checking cloud-docs (check inconclusive):`)
+            console.log(`   WARNING: Encountered ${cloudDocsErrors.length} error(s) while checking cloud-docs (check inconclusive):`)
             cloudDocsErrors.forEach(({ type, name, status, message }) => {
-              console.log(`      • ${type}/${name} - Status ${status}: ${message}`)
+              console.log(`      - ${type}/${name} - Status ${status}: ${message}`)
             })
-            console.log(`   ℹ️  Please resolve these errors (e.g., check GITHUB_TOKEN or VBOT_GITHUB_API_TOKEN, API rate limits, network connectivity)`)
+            console.log(`   INFO: Please resolve these errors (e.g., check GITHUB_TOKEN or VBOT_GITHUB_API_TOKEN, API rate limits, network connectivity)`)
             if (missingFromCloudDocs.length > 0) {
-              console.log(`   ℹ️  Additionally, ${missingFromCloudDocs.length} connector(s) confirmed missing from cloud-docs:`)
+              console.log(`   INFO: Additionally, ${missingFromCloudDocs.length} connector(s) confirmed missing from cloud-docs:`)
               missingFromCloudDocs.forEach(({ type, name }) => {
-                console.log(`      • ${type}/${name}`)
+                console.log(`      - ${type}/${name}`)
               })
             }
           } else if (missingFromCloudDocs.length > 0) {
-            console.log(`   ⚠️  Found ${missingFromCloudDocs.length} cloud-supported connector(s) missing from cloud-docs:`)
+            console.log(`   WARNING: Found ${missingFromCloudDocs.length} cloud-supported connector(s) missing from cloud-docs:`)
             missingFromCloudDocs.forEach(({ type, name }) => {
-              console.log(`      • ${type}/${name}`)
+              console.log(`      - ${type}/${name}`)
             })
-            console.log(`   ℹ️  These connectors need pages added to https://github.com/redpanda-data/cloud-docs`)
+            console.log(`   INFO: These connectors need pages added to https://github.com/redpanda-data/cloud-docs`)
           } else {
-            console.log(`   ✓  All cloud-supported connectors have pages in cloud-docs`)
+            console.log(`   All cloud-supported connectors have pages in cloud-docs`)
           }
         } catch (error) {
-          console.log(`   ⚠️  Could not check cloud-docs: ${error.message}`)
+          console.log(`   WARNING: Could not check cloud-docs: ${error.message}`)
         }
       }
 
