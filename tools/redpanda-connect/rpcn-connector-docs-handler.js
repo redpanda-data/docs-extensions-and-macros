@@ -1178,6 +1178,34 @@ async function handleRpcnConnectorDocs (options) {
         const octokit = require('../../cli-utils/octokit-client')
 
         try {
+          // Optimization: Fetch entire directory tree in 1 API call instead of 471 individual calls
+          console.log('   📥 Fetching cloud-docs directory tree (1 API call)...')
+
+          let existingFiles = new Set()
+
+          try {
+            // Get the tree for the components directory
+            const { data: tree } = await octokit.git.getTree({
+              owner: 'redpanda-data',
+              repo: 'cloud-docs',
+              tree_sha: 'main:modules/develop/pages/connect/components',
+              recursive: true
+            })
+
+            // Build a set of existing file paths for O(1) lookup
+            tree.tree.forEach(item => {
+              if (item.type === 'blob' && item.path.endsWith('.adoc')) {
+                existingFiles.add(item.path)
+              }
+            })
+
+            console.log(`   ✓ Loaded ${existingFiles.size} existing connector pages from cloud-docs`)
+          } catch (treeError) {
+            console.log(`   ⚠️  Could not fetch tree (${treeError.status}), falling back to individual checks`)
+            // If tree API fails, fall back to individual checks (old behavior)
+            existingFiles = null
+          }
+
           // Check each cloud-supported connector
           // Filter to only check actual connector/component types that need individual pages
           const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'buffers', 'scanners', 'metrics', 'tracers']
@@ -1198,67 +1226,39 @@ async function handleRpcnConnectorDocs (options) {
               }
             }
 
-            const cloudDocsPath = `modules/develop/pages/connect/components/${type}/${name}.adoc`
+            const relativePath = `${type}/${name}.adoc`
+            const fullPath = `modules/develop/pages/connect/components/${relativePath}`
 
+            // Fast path: Check against tree if we have it
+            if (existingFiles !== null) {
+              if (!existingFiles.has(relativePath)) {
+                missingFromCloudDocs.push({ type, name, path: fullPath })
+              }
+              continue
+            }
+
+            // Fallback path: Individual API calls (only if tree fetch failed)
             try {
               await octokit.repos.getContent({
                 owner: 'redpanda-data',
                 repo: 'cloud-docs',
-                path: cloudDocsPath,
+                path: fullPath,
                 ref: 'main'
               })
               // File exists, no action needed
             } catch (error) {
               if (error.status === 404) {
                 // File doesn't exist in cloud-docs
-                missingFromCloudDocs.push({ type, name, path: cloudDocsPath })
+                missingFromCloudDocs.push({ type, name, path: fullPath })
               } else {
-                // Non-404 error (auth, rate-limit, network, etc.)
-                // Try fallback: check raw URL without authentication
-                const rawUrl = `https://raw.githubusercontent.com/redpanda-data/cloud-docs/main/${cloudDocsPath}`
-                try {
-                  const https = require('https')
-                  const { URL } = require('url')
-                  const parsedUrl = new URL(rawUrl)
-
-                  await new Promise((resolve, reject) => {
-                    const req = https.request({
-                      hostname: parsedUrl.hostname,
-                      path: parsedUrl.pathname,
-                      method: 'HEAD',
-                      timeout: 5000
-                    }, (res) => {
-                      if (res.statusCode === 200) {
-                        resolve() // File exists
-                      } else if (res.statusCode === 404) {
-                        reject(new Error('404'))
-                      } else {
-                        reject(new Error(`Status ${res.statusCode}`))
-                      }
-                    })
-                    req.on('error', reject)
-                    req.on('timeout', () => {
-                      req.destroy()
-                      reject(new Error('Timeout'))
-                    })
-                    req.end()
-                  })
-                  // Fallback succeeded - file exists, no action needed
-                } catch (fallbackError) {
-                  if (fallbackError.message === '404') {
-                    // Confirmed missing via fallback
-                    missingFromCloudDocs.push({ type, name, path: cloudDocsPath })
-                  } else {
-                    // Both API and fallback failed
-                    cloudDocsErrors.push({
-                      type,
-                      name,
-                      path: cloudDocsPath,
-                      status: error.status || 'unknown',
-                      message: `API: ${error.message}; Fallback: ${fallbackError.message}`
-                    })
-                  }
-                }
+                // Non-404 error - record as error
+                cloudDocsErrors.push({
+                  type,
+                  name,
+                  path: fullPath,
+                  status: error.status || 'unknown',
+                  message: error.message
+                })
               }
             }
           }
