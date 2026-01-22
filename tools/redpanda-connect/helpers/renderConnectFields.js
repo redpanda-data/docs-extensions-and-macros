@@ -105,7 +105,7 @@ module.exports = function renderConnectFields(children, prefix = '') {
       // Complex object/array
       else if (typeof child.default === 'object') {
         const defYaml = yaml.stringify(child.default, {
-          defaultStringType: 'PLAIN',
+          defaultStringType: 'QUOTE_DOUBLE',
           defaultKeyType: 'PLAIN',
           lineWidth: 0,
           simpleKeys: false
