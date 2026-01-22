@@ -50,7 +50,7 @@ module.exports = function renderLeafField(field, indentLevel) {
       try {
         // Force block style for all arrays and nested structures
         const rawYaml = yaml.stringify(field.default, {
-          defaultStringType: 'PLAIN',
+          defaultStringType: 'QUOTE_DOUBLE',
           defaultKeyType: 'PLAIN',
           lineWidth: 0,  // Disable line wrapping to prevent flow style
           simpleKeys: false

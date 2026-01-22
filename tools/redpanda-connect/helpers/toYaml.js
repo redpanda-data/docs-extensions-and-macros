@@ -8,7 +8,7 @@ const yaml = require('yaml');
  */
 module.exports = function toYaml(obj) {
   return yaml.stringify(obj, {
-    defaultStringType: 'PLAIN',
+    defaultStringType: 'QUOTE_DOUBLE',
     defaultKeyType: 'PLAIN',
     lineWidth: 0,  // Disable line wrapping to prevent flow style
     simpleKeys: false
