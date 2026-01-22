@@ -9,14 +9,18 @@
  * Get GitHub token from environment variables
  * Checks multiple common variable names in priority order:
  * 1. REDPANDA_GITHUB_TOKEN - Custom Redpanda token
- * 2. GITHUB_TOKEN - GitHub Actions default
- * 3. GH_TOKEN - GitHub CLI default
+ * 2. ACTIONS_BOT_TOKEN - GitHub Actions bot token
+ * 3. GITHUB_TOKEN - GitHub Actions default
+ * 4. VBOT_GITHUB_API_TOKEN - Legacy bot token
+ * 5. GH_TOKEN - GitHub CLI default
  *
  * @returns {string|null} GitHub token or null if not found
  */
 function getGitHubToken() {
   return process.env.REDPANDA_GITHUB_TOKEN ||
+         process.env.ACTIONS_BOT_TOKEN ||
          process.env.GITHUB_TOKEN ||
+         process.env.VBOT_GITHUB_API_TOKEN ||
          process.env.GH_TOKEN ||
          null;
 }

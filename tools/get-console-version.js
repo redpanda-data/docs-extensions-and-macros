@@ -23,13 +23,8 @@ module.exports = async function getConsoleVersion({ beta = false, fromAntora = f
     useBeta = getPrereleaseFromAntora();
   }
 
-  // Initialize GitHub client
-  const { getGitHubToken } = require('../cli-utils/github-token');
-  const { Octokit } = await import('@octokit/rest');
-  const token = getGitHubToken();
-  const octokit = token
-    ? new Octokit({ auth: token })
-    : new Octokit();
+  // Use shared Octokit client
+  const octokit = require('../cli-utils/octokit-client');
 
   // Fetch latest release info
   let data;

@@ -28,7 +28,12 @@ module.exports = function renderObjectField(field, indentLevel) {
     if (child.is_deprecated) {
       return; // skip entirely
     }
-    if (Array.isArray(child.children) && child.children.length > 0) {
+    // Check if this is an array-of-objects (e.g., client_certs[])
+    // These should render as empty arrays, not expanded object structures
+    if (child.kind === 'array' && child.type === 'object' && Array.isArray(child.children)) {
+      // Render as array leaf (e.g., "client_certs: []")
+      lines.push(renderLeafField(child, childIndent));
+    } else if (Array.isArray(child.children) && child.children.length > 0) {
       // Nested object → recurse
       lines.push(...renderObjectField(child, childIndent));
     } else {
