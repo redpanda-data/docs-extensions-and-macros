@@ -4,7 +4,9 @@
 
 Documentation for the Redpanda Doc Tools MCP (Model Context Protocol) server.
 
-The MCP server exposes `doc-tools` functionality to Claude Code, allowing technical writers to automate documentation tasks through natural conversation. No CLI knowledge required.
+The MCP server exposes `doc-tools` execution functionality to Claude Code, allowing technical writers to automate documentation generation tasks through natural conversation.
+
+NOTE: Team standards (style guide, content architecture, etc.) have been migrated to the https://github.com/redpanda-data/docs-team-standards[docs-team-standards] Claude Code plugin. This MCP server now focuses on execution tools only.
 
 == Documentation
 
@@ -13,22 +15,9 @@ The MCP server exposes `doc-tools` functionality to Claude Code, allowing techni
 link:USER_GUIDE.adoc[**User guide**]:: Complete guide to using the MCP server with Claude Code
 +
 * Setup and installation
-* Available tools, prompts, and resources
+* Available tools
 * Usage examples and workflows
 * Troubleshooting
-
-link:WRITER_EXTENSION_GUIDE.adoc[**Writer extension guide**]:: How to extend the MCP server (no coding required)
-+
-* Adding new prompts for common tasks
-* Adding new resources (style guides, templates)
-* Validation and preview commands
-* Best practices and examples
-
-link:templates/README.adoc[**Extension templates**]:: Ready-to-use templates for extending the MCP server
-+
-* Templates for review prompts, writing prompts, and resources
-* Step-by-step customization guide
-* No coding required. Just copy and customize
 
 link:COSTS.adoc[**Cost reference**]:: Understanding and optimizing MCP tool costs
 +
@@ -42,7 +31,6 @@ link:DEVELOPMENT.adoc[**Development guide**]:: Guide for working on the MCP serv
 +
 * Architecture overview
 * Adding new tools programmatically
-* Auto-discovery system details
 * Testing guidelines
 * Security and best practices
 
@@ -59,19 +47,11 @@ link:../CLI_REFERENCE.adoc[**CLI reference**]:: Complete command reference for `
 * Options and usage examples
 * Auto-generated from CLI help
 
-link:../\__tests__/mcp/README.adoc[**Test documentation**]:: How to run and write MCP tests
+link:../__tests__/mcp/README.adoc[**Test documentation**]:: How to run and write MCP tests
 +
 * Test types (integration, contract, unit)
 * Running tests
 * Understanding failures
-
-=== Advanced
-
-link:prompts/README.adoc[**Prompts documentation**]:: Guide to the MCP prompt system
-+
-* What prompts are and how they work
-* Available prompts
-* Adding new prompts
 
 == Quickstart
 
@@ -109,47 +89,24 @@ Claude: *uses generate_property_docs tool*
 * **Metrics docs**: Generate metrics reference documentation
 * **RPK docs**: Generate RPK CLI documentation
 * **Connector docs**: Generate Redpanda Connect connector documentation
+* **Helm docs**: Generate Helm chart documentation
+* **CRD docs**: Generate Kubernetes CRD documentation
+* **OpenAPI bundling**: Bundle OpenAPI fragments
+* **Cloud regions**: Generate cloud regions documentation
+
+=== Utility tools
+
 * **Antora structure**: Analyze documentation repository structure
-
-=== AI consistency prompts
-
-Pre-configured instructions that help Claude follow your team standards:
-
-**Review prompts:**
-
-* **review-for-style**: Review content for style guide compliance
-* **check-terminology**: Validate terminology against approved terms
-* **improve-clarity**: Refactor content for better readability
-
-**Content creation:**
-
-* **write-new-guide**: Generate new guides following team standards
-
-**Workflow guides:**
-
-* **property-docs-guide**: Workflow for updating property documentation
-* **rpcn-connector-docs-guide**: Workflow for updating connector documentation
+* **Review generated docs**: Quality check generated documentation
+* **Job management**: Background job status and listing
 
 === Resources
 
-Reference materials that Claude can read:
+The only resource provided by this MCP server is:
 
-* **redpanda://style-guide**: Complete team style guide with formatting rules
+* **redpanda://personas**: Target audience personas (loaded from current repo's `docs-data/personas.yaml`)
 
-=== CLI validation commands
-
-For writers extending the MCP server:
-
-* **npx doc-tools validate-mcp**: Validate prompts and resources configuration
-* **npx doc-tools preview-prompt**: Preview prompts with test arguments
-* **npx doc-tools mcp-version**: Show versions and usage statistics
-
-=== Automation
-
-* **setup-mcp**: Automated MCP server configuration for Claude Code/Desktop
-* **Auto-discovery**: Prompts automatically loaded from `mcp/prompts/` directory
-* **Context detection**: Automatic repository and Antora structure detection
-* **Usage telemetry**: Track prompt/resource/tool usage for adoption metrics
+All other resources (style guide, content architecture, etc.) have been migrated to the https://github.com/redpanda-data/docs-team-standards[docs-team-standards] Claude Code plugin.
 
 == Architecture
 
@@ -157,16 +114,25 @@ The MCP server consists of:
 
 * **Server** (`bin/doc-tools-mcp.js`): Main MCP protocol handler
 * **Tool modules** (`bin/mcp-tools/`): Individual tool implementations
-* **Prompts** (`mcp/prompts/`): Contextual documentation guides
 * **Tests** (`__tests__/mcp/`): Integration, contract, and unit tests
+
+== Migration notice
+
+As of January 2025, the following have been migrated to the https://github.com/redpanda-data/docs-team-standards[docs-team-standards] Claude Code plugin:
+
+* **Prompts**: All MCP prompts are now Claude Code skills and agents
+* **Resources**: Style guide, content architecture, learning objectives, etc. are now Claude Code skills
+
+The MCP server now focuses exclusively on execution tools that require CLI or web access.
 
 == Support
 
 * link:USER_GUIDE.adoc#troubleshooting[Troubleshooting guide]
-* link:../\__tests__/mcp/README.adoc#understanding-test-failures[Test failures]
+* link:../__tests__/mcp/README.adoc#understanding-test-failures[Test failures]
 * https://github.com/redpanda-data/docs-extensions-and-macros/issues[Report issues]
 
 == External resources
 
 * https://modelcontextprotocol.io/[MCP Protocol Specification]
 * https://docs.anthropic.com/claude[Claude Code Documentation]
+* https://github.com/redpanda-data/docs-team-standards[docs-team-standards Plugin]

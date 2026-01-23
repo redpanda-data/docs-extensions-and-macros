@@ -1,114 +1,41 @@
 /**
  * MCP Configuration Validation
  *
- * Validates prompts, resources, and overall MCP server configuration.
- * Used at startup and by the validate-mcp CLI command.
+ * Validates MCP server configuration.
+ * Note: Prompts and most resources have been migrated to docs-team-standards plugin.
+ * This now only validates the personas resource and tools configuration.
  */
 
 const fs = require('fs');
 const path = require('path');
-const { parsePromptFile } = require('./frontmatter');
 
 /**
- * Validate that a prompt name is safe (no path traversal)
- * @param {string} name - Prompt name to validate
- * @throws {Error} If name is invalid
+ * Resources that are loaded dynamically (from current working directory)
  */
-function validatePromptName(name) {
-  if (!name || typeof name !== 'string') {
-    throw new Error('Prompt name must be a non-empty string');
-  }
-
-  // Only allow alphanumeric, hyphens, and underscores
-  if (!/^[a-z0-9_-]+$/i.test(name)) {
-    throw new Error(
-      `Invalid prompt name: ${name}. Use only letters, numbers, hyphens, and underscores.`
-    );
-  }
-
-  return name;
-}
+const DYNAMIC_RESOURCES = ['redpanda://personas'];
 
 /**
- * Validate that required arguments are provided
- * @param {string} promptName - Name of the prompt
- * @param {Object} providedArgs - Arguments provided by user
- * @param {Array} schema - Argument schema from prompt metadata
- * @throws {Error} If validation fails
- */
-function validatePromptArguments(promptName, providedArgs, schema) {
-  if (!schema || schema.length === 0) {
-    return; // No validation needed
-  }
-
-  const errors = [];
-
-  // Check required arguments
-  schema
-    .filter(arg => arg.required)
-    .forEach(arg => {
-      if (!providedArgs || !providedArgs[arg.name]) {
-        errors.push(`Missing required argument: ${arg.name}`);
-      }
-    });
-
-  if (errors.length > 0) {
-    throw new Error(
-      `Invalid arguments for prompt "${promptName}":\n${errors.join('\n')}`
-    );
-  }
-}
-
-/**
- * Validate all resources are accessible
+ * Validate resources configuration
  * @param {Array} resources - Resource definitions
- * @param {Object} resourceMap - Resource file mappings
- * @param {string} baseDir - Base directory for resources
  * @returns {{ errors: string[], warnings: string[] }}
  */
-function validateResources(resources, resourceMap, baseDir) {
+function validateResources(resources) {
   const errors = [];
   const warnings = [];
 
   for (const resource of resources) {
-    // Check mapping exists
-    const mapping = resourceMap[resource.uri];
-    if (!mapping) {
-      errors.push(`Resource ${resource.uri} has no file mapping in resourceMap`);
+    // All remaining resources should be dynamic (loaded from cwd)
+    if (!DYNAMIC_RESOURCES.includes(resource.uri)) {
+      warnings.push(`Unexpected resource: ${resource.uri} - static resources should be in docs-team-standards plugin`);
       continue;
     }
 
-    // Check file exists
-    const filePath = path.join(baseDir, 'mcp', 'team-standards', mapping.file);
-    if (!fs.existsSync(filePath)) {
-      errors.push(`Resource file missing: ${mapping.file} for ${resource.uri}`);
-      continue;
-    }
-
-    // Check file is readable
-    try {
-      fs.readFileSync(filePath, 'utf8');
-    } catch (err) {
-      errors.push(`Resource file not readable: ${mapping.file} - ${err.message}`);
-      continue;
-    }
-
-    // Validate resource metadata
+    // Validate metadata for dynamic resources
     if (!resource.name || resource.name.length < 3) {
       warnings.push(`Resource ${resource.uri} has a very short name`);
     }
-
     if (!resource.description || resource.description.length < 10) {
       warnings.push(`Resource ${resource.uri} has a very short description`);
-    }
-
-    // Check for versioning
-    if (!resource.version) {
-      warnings.push(`Resource ${resource.uri} missing version metadata`);
-    }
-
-    if (!resource.lastUpdated) {
-      warnings.push(`Resource ${resource.uri} missing lastUpdated metadata`);
     }
   }
 
@@ -116,56 +43,36 @@ function validateResources(resources, resourceMap, baseDir) {
 }
 
 /**
- * Validate all prompts are loadable
- * @param {Array} prompts - Discovered prompts
+ * Validate tools configuration
+ * @param {Array} tools - Tool definitions
  * @returns {{ errors: string[], warnings: string[] }}
  */
-function validatePrompts(prompts) {
+function validateTools(tools) {
   const errors = [];
   const warnings = [];
 
-  for (const prompt of prompts) {
-    // Check basic metadata
-    if (!prompt.description || prompt.description.length < 10) {
-      warnings.push(`Prompt "${prompt.name}" has a very short description`);
+  for (const tool of tools) {
+    if (!tool.name) {
+      errors.push('Tool missing name');
+      continue;
     }
 
-    if (!prompt.content || prompt.content.trim().length < 100) {
-      warnings.push(`Prompt "${prompt.name}" has very little content (< 100 chars)`);
+    if (!tool.description || tool.description.length < 10) {
+      warnings.push(`Tool "${tool.name}" has a very short description`);
     }
 
-    // Check for version
-    if (!prompt.version) {
-      warnings.push(`Prompt "${prompt.name}" missing version metadata`);
+    if (!tool.inputSchema) {
+      warnings.push(`Tool "${tool.name}" missing inputSchema`);
     }
+  }
 
-    // Validate argument format if specified
-    if (prompt.argumentFormat) {
-      const validFormats = ['content-append', 'structured'];
-      if (!validFormats.includes(prompt.argumentFormat)) {
-        errors.push(
-          `Prompt "${prompt.name}" has invalid argumentFormat: ${prompt.argumentFormat}`
-        );
-      }
+  // Check for duplicate names
+  const toolNames = new Set();
+  for (const tool of tools) {
+    if (tool.name && toolNames.has(tool.name)) {
+      errors.push(`Duplicate tool name: ${tool.name}`);
     }
-
-    // Check for argument schema consistency
-    if (prompt.arguments && prompt.arguments.length > 0) {
-      if (!prompt.argumentFormat) {
-        warnings.push(
-          `Prompt "${prompt.name}" has arguments but no argumentFormat specified`
-        );
-      }
-
-      // Check for duplicate argument names
-      const argNames = new Set();
-      for (const arg of prompt.arguments) {
-        if (argNames.has(arg.name)) {
-          errors.push(`Prompt "${prompt.name}" has duplicate argument: ${arg.name}`);
-        }
-        argNames.add(arg.name);
-      }
-    }
+    toolNames.add(tool.name);
   }
 
   return { errors, warnings };
@@ -175,9 +82,7 @@ function validatePrompts(prompts) {
  * Validate entire MCP configuration
  * @param {Object} config - Configuration object
  * @param {Array} config.resources - Resources
- * @param {Object} config.resourceMap - Resource mappings
- * @param {Array} config.prompts - Prompts
- * @param {string} config.baseDir - Base directory
+ * @param {Array} config.tools - Tools
  * @returns {{ valid: boolean, errors: string[], warnings: string[] }}
  */
 function validateMcpConfiguration(config) {
@@ -185,26 +90,17 @@ function validateMcpConfiguration(config) {
   const allWarnings = [];
 
   // Validate resources
-  const resourceValidation = validateResources(
-    config.resources,
-    config.resourceMap,
-    config.baseDir
-  );
-  allErrors.push(...resourceValidation.errors);
-  allWarnings.push(...resourceValidation.warnings);
+  if (config.resources) {
+    const resourceValidation = validateResources(config.resources);
+    allErrors.push(...resourceValidation.errors);
+    allWarnings.push(...resourceValidation.warnings);
+  }
 
-  // Validate prompts
-  const promptValidation = validatePrompts(config.prompts);
-  allErrors.push(...promptValidation.errors);
-  allWarnings.push(...promptValidation.warnings);
-
-  // Check for name collisions
-  const promptNames = new Set();
-  for (const prompt of config.prompts) {
-    if (promptNames.has(prompt.name)) {
-      allErrors.push(`Duplicate prompt name: ${prompt.name}`);
-    }
-    promptNames.add(prompt.name);
+  // Validate tools
+  if (config.tools) {
+    const toolValidation = validateTools(config.tools);
+    allErrors.push(...toolValidation.errors);
+    allWarnings.push(...toolValidation.warnings);
   }
 
   return {
@@ -217,6 +113,7 @@ function validateMcpConfiguration(config) {
 /**
  * Format validation results for display
  * @param {{ valid: boolean, errors: string[], warnings: string[] }} results
+ * @param {Object} config - Configuration object
  * @returns {string} Formatted output
  */
 function formatValidationResults(results, config) {
@@ -227,8 +124,8 @@ function formatValidationResults(results, config) {
   lines.push('');
 
   // Summary
-  lines.push(`Prompts found: ${config.prompts.length}`);
-  lines.push(`Resources found: ${config.resources.length}`);
+  lines.push(`Tools found: ${config.tools?.length || 0}`);
+  lines.push(`Resources found: ${config.resources?.length || 0}`);
   lines.push('');
 
   // Warnings
@@ -257,10 +154,8 @@ function formatValidationResults(results, config) {
 }
 
 module.exports = {
-  validatePromptName,
-  validatePromptArguments,
   validateResources,
-  validatePrompts,
+  validateTools,
   validateMcpConfiguration,
   formatValidationResults
 };
