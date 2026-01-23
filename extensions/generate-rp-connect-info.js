@@ -216,7 +216,15 @@ module.exports.register = function ({ config }) {
 
       // Warn about missing docs (but not for deprecated or SQL drivers)
       if (deprecated !== 'y' && !connector.includes('sql_driver')) {
-        if (!redpandaConnectUrl) {
+        // Check if this is a cloud-only connector (plugin)
+        // Cloud-only connectors (like 'gateway' and 'a2a_message') are plugins that:
+        // - Only run in Redpanda Cloud (not in self-managed rpk connect)
+        // - Have docs in cloud-docs repo but not in rp-connect-docs pages
+        // - Are marked with cloud: y in CSV but don't ship with OSS binary
+        const isCloudOnly = isCloudSupported === 'y' && !redpandaConnectUrl && redpandaCloudUrl
+
+        // Only warn about missing self-managed docs if it's NOT cloud-only
+        if (!redpandaConnectUrl && !isCloudOnly) {
           logger.warn(`Self-Managed docs missing for: ${connector} of type: ${type}`)
         }
         if (isCloudSupported === 'y' && !redpandaCloudUrl && redpandaConnectUrl) {
