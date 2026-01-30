@@ -330,17 +330,11 @@ module.exports.register = function (registry, context) {
    * @param {string} connector - The connector name
    * @param {Map} types - Map of component types (optional, used for generic type-based fallback icons)
    */
-  function getConnectorIcon(connector, types = null) {
-    // Load extracted console logos (base64-encoded SVG data URIs)
-    // Use Iconify API for Simple Icons
-    const iconifyAPI = 'https://api.iconify.design/simple-icons';
-    let consoleLogo = null;
-
+  function getConnectorIcon(connector, types, uiRootPath) {
     /**
      * Smart logo lookup with fallbacks:
      * 1. Try exact match (e.g., elasticsearch_v9)
      * 2. Try without version suffix (e.g., elasticsearch)
-     * 3. Try without vendor prefix for cloud services
      */
     function findLogo(componentName, logoMap) {
       // Try exact match first
@@ -357,130 +351,122 @@ module.exports.register = function (registry, context) {
       return null;
     }
 
-    try {
-      const logosPath = path.join(__dirname, '../extracted-console-logos.json');
-      if (fs.existsSync(logosPath)) {
-        const consoleLogos = JSON.parse(fs.readFileSync(logosPath, 'utf8'));
-
-        // Mapping based on console's component-logo-map.tsx
-        const consoleLogoMap = {
-          amqp_0_9: consoleLogos.RabbitMQLogo,
-          amqp_1: consoleLogos.RabbitMQLogo,
-          // Use Simple Icons AWS logo for generic AWS services (better visual)
-          aws_bedrock_chat: `${iconifyAPI}/amazonaws.svg?color=%23FF9900`,
-          aws_bedrock_embeddings: `${iconifyAPI}/amazonaws.svg?color=%23FF9900`,
-          aws_cloudwatch: consoleLogos.AWSCloudWatchLogo,
-          aws_dynamodb: consoleLogos.AWSDynamoDbLogo,
-          aws_dynamodb_partiql: consoleLogos.AWSDynamoDbLogo,
-          aws_kinesis: consoleLogos.AWSKinesisLogo,
-          aws_kinesis_firehose: consoleLogos.AWSKinesisLogo,
-          aws_lambda: consoleLogos.AWSLambdaLogo,
-          aws_s3: consoleLogos.AWSS3Logo,
-          aws_sns: consoleLogos.AWSSNSLogo,
-          aws_sqs: consoleLogos.AWSSQSLogo,
-          azure_blob_storage: consoleLogos.MicrosoftazureLogo,
-          azure_cosmosdb: consoleLogos.MicrosoftazureLogo,
-          azure_data_lake_gen2: consoleLogos.MicrosoftazureLogo,
-          azure_queue_storage: consoleLogos.MicrosoftazureLogo,
-          azure_table_storage: consoleLogos.MicrosoftazureLogo,
-          beanstalkd: consoleLogos.BeanstalkdLogo,
-          cassandra: consoleLogos.CassandraLogo,
-          cohere_chat: consoleLogos.CohereLogo,
-          cohere_embeddings: consoleLogos.CohereLogo,
-          cohere_rerank: consoleLogos.CohereLogo,
-          couchbase: consoleLogos.CouchbaseLogo,
-          discord: consoleLogos.DiscordLogo,
-          elasticsearch_v8: consoleLogos.ElasticsearchLogo,
-          elasticsearch: consoleLogos.ElasticsearchLogo,
-          gcp_bigquery: consoleLogos.GoogleCloudLogo,
-          gcp_bigquery_select: consoleLogos.GoogleCloudLogo,
-          gcp_cloud_storage: consoleLogos.GoogleCloudLogo,
-          gcp_cloudtrace: consoleLogos.GoogleCloudLogo,
-          gcp_pubsub: consoleLogos.GoogleCloudLogo,
-          gcp_spanner_cdc: consoleLogos.GoogleCloudLogo,
-          gcp_vertex_ai_chat: consoleLogos.GoogleCloudLogo,
-          gcp_vertex_ai_embeddings: consoleLogos.GoogleCloudLogo,
-          google_drive_download: consoleLogos.GoogleDriveLogo,
-          google_drive_list_labels: consoleLogos.GoogleDriveLogo,
-          google_drive_search: consoleLogos.GoogleDriveLogo,
-          grok: consoleLogos.ElasticsearchLogo,
-          hdfs: consoleLogos.HadoopLogo,
-          influxdb: consoleLogos.InfluxDBLogo,
-          javascript: consoleLogos.JavaScriptLogo,
-          jq: consoleLogos.JqLogo,
-          json_api: consoleLogos.JSONLogo,
-          json_array: consoleLogos.JSONLogo,
-          json_documents: consoleLogos.JSONLogo,
-          json_schema: consoleLogos.JSONLogo,
-          memcached: consoleLogos.MemcachedLogo,
-          microsoft_sql_server_cdc: consoleLogos.MicrosoftsqlserverLogo,
-          mongodb: consoleLogos.MongoDBLogo,
-          mongodb_cdc: consoleLogos.MongoDBLogo,
-          mysql_cdc: consoleLogos.MySQLLogo,
-          mysql: consoleLogos.MySQLLogo,
-          nanomsg: consoleLogos.NanomsgLogo,
-          nats: consoleLogos.NatsLogo,
-          nats_jetstream: consoleLogos.NatsLogo,
-          nats_kv: consoleLogos.NatsLogo,
-          nats_request_reply: consoleLogos.NatsLogo,
-          nats_stream: consoleLogos.NatsLogo,
-          nsq: consoleLogos.NsqLogo,
-          openai_chat_completion: consoleLogos.OpenAILogo,
-          openai_embeddings: consoleLogos.OpenAILogo,
-          openai_image_generation: consoleLogos.OpenAILogo,
-          openai_speech: consoleLogos.OpenAILogo,
-          openai_transcription: consoleLogos.OpenAILogo,
-          openai_translation: consoleLogos.OpenAILogo,
-          opensearch: consoleLogos.OpenSearchLogo,
-          open_telemetry_collector: consoleLogos.OpenTelemetryLogo,
-          pg_stream: consoleLogos.PostgreSQLLogo,
-          postgres_cdc: consoleLogos.PostgreSQLLogo,
-          postgres: consoleLogos.PostgreSQLLogo,
-          pinecone: consoleLogos.PineconeLogo,
-          prometheus: consoleLogos.PrometheusLogo,
-          protobuf: consoleLogos.GoogleProtocolBuffersLogo,
-          pusher: consoleLogos.PusherLogo,
-          qdrant: consoleLogos.QdrantLogo,
-          redis: consoleLogos.RedisLogo,
-          redis_hash: consoleLogos.RedisLogo,
-          redis_list: consoleLogos.RedisLogo,
-          redis_pubsub: consoleLogos.RedisLogo,
-          redis_scan: consoleLogos.RedisLogo,
-          redis_sorted_set: consoleLogos.RedisLogo,
-          redis_streams: consoleLogos.RedisLogo,
-          sentry: consoleLogos.SentryLogo,
-          slack: consoleLogos.SlackLogo,
-          snowflake: consoleLogos.SnowflakeLogo,
-          websocket: consoleLogos.WebSocketLogo,
-        };
-
-        // Use smart lookup with version fallback
-        consoleLogo = findLogo(connector, consoleLogoMap);
-      }
-    } catch (err) {
-      // Ignore file read errors - will fallback to Simple Icons
+    // Helper function to build logo map with correct UI root path
+    function buildLogoMap(uiRootPath) {
+      return {
+      amqp_0_9: `${uiRootPath}/img/logos/rabbit-mq.svg`,
+      amqp_1: `${uiRootPath}/img/logos/rabbit-mq.svg`,
+      aws_bedrock_chat: `${uiRootPath}/img/logos/awslambda.svg`,
+      aws_bedrock_embeddings: `${uiRootPath}/img/logos/awslambda.svg`,
+      aws_cloudwatch: `${uiRootPath}/img/logos/awscloud-watch.svg`,
+      aws_dynamodb: `${uiRootPath}/img/logos/awsdynamo-db.svg`,
+      aws_dynamodb_partiql: `${uiRootPath}/img/logos/awsdynamo-db.svg`,
+      aws_kinesis: `${uiRootPath}/img/logos/awskinesis.svg`,
+      aws_kinesis_firehose: `${uiRootPath}/img/logos/awskinesis.svg`,
+      aws_lambda: `${uiRootPath}/img/logos/awslambda.svg`,
+      aws_s3: `${uiRootPath}/img/logos/awss3.svg`,
+      aws_sns: `${uiRootPath}/img/logos/awssns.svg`,
+      aws_sqs: `${uiRootPath}/img/logos/awssqs.svg`,
+      azure_blob_storage: `${uiRootPath}/img/logos/microsoftazure.svg`,
+      azure_cosmosdb: `${uiRootPath}/img/logos/microsoftazure.svg`,
+      azure_data_lake_gen2: `${uiRootPath}/img/logos/microsoftazure.svg`,
+      azure_queue_storage: `${uiRootPath}/img/logos/microsoftazure.svg`,
+      azure_table_storage: `${uiRootPath}/img/logos/microsoftazure.svg`,
+      beanstalkd: `${uiRootPath}/img/logos/beanstalkd.svg`,
+      cassandra: `${uiRootPath}/img/logos/cassandra.svg`,
+      cohere_chat: `${uiRootPath}/img/logos/cohere.svg`,
+      cohere_embeddings: `${uiRootPath}/img/logos/cohere.svg`,
+      cohere_rerank: `${uiRootPath}/img/logos/cohere.svg`,
+      couchbase: `${uiRootPath}/img/logos/couchbase.svg`,
+      discord: `${uiRootPath}/img/logos/discord.svg`,
+      elasticsearch_v8: `${uiRootPath}/img/logos/elasticsearch.svg`,
+      elasticsearch: `${uiRootPath}/img/logos/elasticsearch.svg`,
+      gcp_bigquery: `${uiRootPath}/img/logos/google-cloud.svg`,
+      gcp_bigquery_select: `${uiRootPath}/img/logos/google-cloud.svg`,
+      gcp_cloud_storage: `${uiRootPath}/img/logos/google-cloud.svg`,
+      gcp_cloudtrace: `${uiRootPath}/img/logos/google-cloud.svg`,
+      gcp_pubsub: `${uiRootPath}/img/logos/google-cloud.svg`,
+      gcp_spanner_cdc: `${uiRootPath}/img/logos/google-cloud.svg`,
+      gcp_vertex_ai_chat: `${uiRootPath}/img/logos/google-cloud.svg`,
+      gcp_vertex_ai_embeddings: `${uiRootPath}/img/logos/google-cloud.svg`,
+      google_drive_download: `${uiRootPath}/img/logos/google-drive.svg`,
+      google_drive_list_labels: `${uiRootPath}/img/logos/google-drive.svg`,
+      google_drive_search: `${uiRootPath}/img/logos/google-drive.svg`,
+      grok: `${uiRootPath}/img/logos/elasticsearch.svg`,
+      hdfs: `${uiRootPath}/img/logos/hadoop.svg`,
+      influxdb: `${uiRootPath}/img/logos/influx-db.svg`,
+      javascript: `${uiRootPath}/img/logos/java-script.svg`,
+      jq: `${uiRootPath}/img/logos/jq.svg`,
+      json_api: `${uiRootPath}/img/logos/json.svg`,
+      json_array: `${uiRootPath}/img/logos/json.svg`,
+      json_documents: `${uiRootPath}/img/logos/json.svg`,
+      json_schema: `${uiRootPath}/img/logos/json.svg`,
+      memcached: `${uiRootPath}/img/logos/memcached.svg`,
+      microsoft_sql_server_cdc: `${uiRootPath}/img/logos/microsoftsqlserver.svg`,
+      mongodb: `${uiRootPath}/img/logos/mongo-db.svg`,
+      mongodb_cdc: `${uiRootPath}/img/logos/mongo-db.svg`,
+      mysql_cdc: `${uiRootPath}/img/logos/my-sql.svg`,
+      mysql: `${uiRootPath}/img/logos/my-sql.svg`,
+      nanomsg: `${uiRootPath}/img/logos/nanomsg.svg`,
+      nats: `${uiRootPath}/img/logos/nats.svg`,
+      nats_jetstream: `${uiRootPath}/img/logos/nats.svg`,
+      nats_kv: `${uiRootPath}/img/logos/nats.svg`,
+      nats_request_reply: `${uiRootPath}/img/logos/nats.svg`,
+      nats_stream: `${uiRootPath}/img/logos/nats.svg`,
+      nsq: `${uiRootPath}/img/logos/nsq.svg`,
+      openai_chat_completion: `${uiRootPath}/img/logos/open-ai.svg`,
+      openai_embeddings: `${uiRootPath}/img/logos/open-ai.svg`,
+      openai_image_generation: `${uiRootPath}/img/logos/open-ai.svg`,
+      openai_speech: `${uiRootPath}/img/logos/open-ai.svg`,
+      openai_transcription: `${uiRootPath}/img/logos/open-ai.svg`,
+      openai_translation: `${uiRootPath}/img/logos/open-ai.svg`,
+      opensearch: `${uiRootPath}/img/logos/open-search.svg`,
+      open_telemetry_collector: `${uiRootPath}/img/logos/open-telemetry.svg`,
+      pg_stream: `${uiRootPath}/img/logos/postgre-sql.svg`,
+      postgres_cdc: `${uiRootPath}/img/logos/postgre-sql.svg`,
+      postgres: `${uiRootPath}/img/logos/postgre-sql.svg`,
+      pinecone: `${uiRootPath}/img/logos/pinecone.svg`,
+      prometheus: `${uiRootPath}/img/logos/prometheus.svg`,
+      protobuf: `${uiRootPath}/img/logos/google-protocol-buffers.svg`,
+      pusher: `${uiRootPath}/img/logos/pusher.svg`,
+      qdrant: `${uiRootPath}/img/logos/qdrant.svg`,
+      redis: `${uiRootPath}/img/logos/redis.svg`,
+      redis_hash: `${uiRootPath}/img/logos/redis.svg`,
+      redis_list: `${uiRootPath}/img/logos/redis.svg`,
+      redis_pubsub: `${uiRootPath}/img/logos/redis.svg`,
+      redis_scan: `${uiRootPath}/img/logos/redis.svg`,
+      redis_sorted_set: `${uiRootPath}/img/logos/redis.svg`,
+      redis_streams: `${uiRootPath}/img/logos/redis.svg`,
+      sentry: `${uiRootPath}/img/logos/sentry.svg`,
+      slack: `${uiRootPath}/img/logos/slack.svg`,
+      snowflake: `${uiRootPath}/img/logos/snowflake.svg`,
+      websocket: `${uiRootPath}/img/logos/web-socket.svg`,
+      };
     }
 
+    // Use smart lookup with version fallback
+    const consoleLogo = findLogo(connector, buildLogoMap(uiRootPath));
     if (consoleLogo) {
       return consoleLogo;
     }
 
-    // Fallback to Simple Icons CDN for services not in console logos
-    const simpleIconMap = {
-      kafka: `${iconifyAPI}/apachekafka.svg?color=%23231F20`,
-      pulsar: `${iconifyAPI}/apachepulsar.svg?color=%23188FFF`,
-      mqtt: `${iconifyAPI}/mqtt.svg?color=%23660066`,
-      splunk: `${iconifyAPI}/splunk.svg?color=%23000000`,
-      clickhouse: `${iconifyAPI}/clickhouse.svg?color=%23000000`,
+    // Local logo files from docs-ui
+    const localLogos = {
+      kafka_franz: `${uiRootPath}/img/logos/apache-kafka.svg`,
+      pulsar: `${uiRootPath}/img/logos/apache-pulsar.svg`,
+      mqtt: `${uiRootPath}/img/logos/mqtt.svg`,
+      splunk: `${uiRootPath}/img/logos/splunk.svg`,
+      splunk_hec: `${uiRootPath}/img/logos/splunk.svg`,
+      sql_driver_clickhouse: `${uiRootPath}/img/logos/clickhouse.svg`,
     };
 
-    if (simpleIconMap[connector]) {
-      return simpleIconMap[connector];
+    if (localLogos[connector]) {
+      return localLogos[connector];
     }
 
     // Emoji fallbacks for generic types
     const emojiFallback = {
-      redpanda: 'https://cdn.prod.website-files.com/68ed36e99e31581dedf5dc7c/68ed91d74b9cd10c98cb8e6e_footer-logo.svg',
+      redpanda: 'https://cdn.prod.website-files.com/68ed36e99e31581dedf5dc7c/68ed91d74b9cd10c98cb8e6e_footer-logo.svg`,
       http_server: '🌐',
       http_client: '🌐',
       tcp: '🔌',
@@ -632,7 +618,7 @@ module.exports.register = function (registry, context) {
    *   - Enterprise licensing badge
    *   - Cloud support badge
    */
-  function generateConnectorsHTMLCards(connectors, sqlDrivers, isCloud, showAllInfo, commercialNamesMap = {}) {
+  function generateConnectorsHTMLCards(connectors, sqlDrivers, isCloud, showAllInfo, commercialNamesMap, uiRootPath) {
     return Object.entries(connectors)
       .filter(([_, details]) => {
         // If isCloud is true, filter out rows that do not support cloud
@@ -773,9 +759,12 @@ module.exports.register = function (registry, context) {
                 <p class="card-description">${details.description || generateDescription(connector, types)}</p>
               </div>
               <div class="card-icon">
-                ${(getConnectorIcon(connector, types).startsWith('http') || getConnectorIcon(connector, types).startsWith('data:image'))
-                  ? `<img src="${getConnectorIcon(connector, types)}" alt="${connector} logo" />`
-                  : `<span class="card-icon-emoji">${getConnectorIcon(connector, types)}</span>`}
+                ${(() => {
+                  const icon = getConnectorIcon(connector, types, uiRootPath);
+                  return (icon.startsWith('http') || icon.startsWith('data:image') || icon.startsWith('/') || icon.startsWith('..'))
+                    ? `<img src="${icon}" alt="${connector} logo" />`
+                    : `<span class="card-icon-emoji">${icon}</span>`;
+                })()}
               </div>
             </div>
             <div class="card-body">
@@ -858,11 +847,15 @@ module.exports.register = function (registry, context) {
     self.named('component_table');
     self.positionalAttributes(['all']); // Allows for displaying all data
     self.process((parent, target, attributes) => {
-      const isCloud = parent.getDocument().getAttributes()['env-cloud'] !== undefined;
+      const docAttributes = parent.getDocument().getAttributes();
+      const isCloud = docAttributes['env-cloud'] !== undefined;
       const showAllInfo = attributes?.all
 
       const csvData = context.config?.attributes?.csvData || null;
-      if (!csvData) return console.error(`CSV data is not available for ${parent.getDocument().getAttributes()['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`)
+      if (!csvData) return console.error(`CSV data is not available for ${docAttributes['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`)
+
+      // Get the UI root path for this page (works at any depth)
+      const uiRootPath = docAttributes['page-ui-root-path'] || '../../_';
 
       // Get the enriched commercial names map (includes CSV + AsciiDoc names)
       const commercialNamesMap = context.config?.attributes?.commercialNamesMap || {};
@@ -880,24 +873,27 @@ module.exports.register = function (registry, context) {
         Array.from(values)
           .map(value => `
             <label class="dropdown-checkbox-option">
-              <input type="checkbox" value="${value}" checked onchange="filterComponentTable()">
+              <input type="checkbox" value="${value}" checked>
               <span>${capitalize(value).replace("_", " ")}</span>
             </label>`)
           .join('');
 
       let tableHtml = `
         <script>
-          // Define all functions early so inline handlers can use them
-          window.getQueryParams = function() {
-            const params = {};
-            const searchParams = new URLSearchParams(window.location.search);
-            searchParams.forEach((value, key) => {
-              params[key] = value.toLowerCase();
-            });
-            return params;
-          };
+          // Wrap everything to avoid breaking page scripts
+          (function() {
+            try {
+              // Define all functions early so inline handlers can use them
+              window.getQueryParams = function() {
+                const params = {};
+                const searchParams = new URLSearchParams(window.location.search);
+                searchParams.forEach((value, key) => {
+                  params[key] = value.toLowerCase();
+                });
+                return params;
+              };
 
-          window.filterComponentTable = ${filterComponentTable.toString()};
+              window.filterComponentTable = ${filterComponentTable.toString()};
           window.updateURLParameters = ${updateURLParameters.toString()};
 
           // Helper to close a specific dropdown
@@ -943,23 +939,31 @@ module.exports.register = function (registry, context) {
               toggle.classList.add('open');
               toggle.setAttribute('aria-expanded', 'true');
 
+              // TEMPORARILY DISABLED FOR NAV TOGGLE DEBUGGING
               // Add click outside handler (only once)
-              if (!window.dropdownClickOutsideHandler) {
-                window.dropdownClickOutsideHandler = function(event) {
-                  // Check if click is outside all dropdown wrappers
-                  if (!event.target.closest('.dropdown-checkbox-wrapper')) {
-                    // Close all open dropdowns
-                    document.querySelectorAll('.dropdown-checkbox-menu.show').forEach(window.closeDropdown);
-                    // Remove this handler
-                    document.removeEventListener('click', window.dropdownClickOutsideHandler);
-                    window.dropdownClickOutsideHandler = null;
-                  }
-                };
-                // Add on next tick so this click doesn't trigger it
-                setTimeout(() => {
-                  document.addEventListener('click', window.dropdownClickOutsideHandler);
-                }, 0);
-              }
+              // if (!window.dropdownClickOutsideHandler) {
+              //   window.dropdownClickOutsideHandler = function(event) {
+              //     // Only handle clicks outside dropdown wrappers - ignore everything else
+              //     if (!event.target.closest('.component-catalog-section')) {
+              //       // Click is completely outside component catalog, do nothing
+              //       return;
+              //     }
+              //     // Check if click is inside a dropdown wrapper
+              //     if (event.target.closest('.dropdown-checkbox-wrapper')) {
+              //       // Click is inside dropdown, do nothing
+              //       return;
+              //     }
+              //     // Click is outside dropdowns but inside catalog - close dropdowns
+              //     document.querySelectorAll('.dropdown-checkbox-menu.show').forEach(window.closeDropdown);
+              //     // Remove this handler
+              //     document.removeEventListener('click', window.dropdownClickOutsideHandler);
+              //     window.dropdownClickOutsideHandler = null;
+              //   };
+              //   // Add on next tick so this click doesn't trigger it
+              //   setTimeout(() => {
+              //     document.addEventListener('click', window.dropdownClickOutsideHandler, { capture: false, passive: true });
+              //   }, 0);
+              // }
             }
           };
 
@@ -1019,15 +1023,19 @@ module.exports.register = function (registry, context) {
             }
           };
 
-          // Ensure no interference with other scripts
-          if (typeof window !== 'undefined') {
-            console.log('Component catalog functions loaded');
-          }
+              // Ensure no interference with other scripts
+              if (typeof window !== 'undefined') {
+                console.log('[Component Catalog] Functions loaded successfully');
+              }
+            } catch (error) {
+              console.error('[Component Catalog] Error loading functions:', error);
+            }
+          })();
         </script>
         <div class="table-filters">
           <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1;">
-            <input class="table-search" type="text" id="componentTableSearch" onkeyup="filterComponentTable()" placeholder="Search for components..." style="flex: 1;">
-            <button type="button" class="badge-legend-button" onclick="openBadgeLegend()" title="View badge legend" aria-label="View badge legend">
+            <input class="table-search" type="text" id="componentTableSearch" placeholder="Search for components..." style="flex: 1;">
+            <button type="button" class="badge-legend-button" title="View badge legend" aria-label="View badge legend">
               <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M10 0C4.48 0 0 4.48 0 10s4.48 10 10 10 10-4.48 10-10S15.52 0 10 0zm1 15H9v-2h2v2zm0-4H9V5h2v6z"/>
               </svg>
@@ -1036,7 +1044,7 @@ module.exports.register = function (registry, context) {
           <div class="filter-group">
             <label for="typeFilterToggle">Type:</label>
             <div class="dropdown-checkbox-wrapper">
-              <button type="button" class="dropdown-checkbox-toggle" id="typeFilterToggle" onclick="toggleDropdownCheckbox('typeFilter')" aria-expanded="false" aria-haspopup="true" aria-controls="typeFilterMenu">
+              <button type="button" class="dropdown-checkbox-toggle" id="typeFilterToggle" aria-expanded="false" aria-haspopup="true" aria-controls="typeFilterMenu">
                 <span class="dropdown-text">All Types Selected</span>
                 <span class="dropdown-arrow">▼</span>
               </button>
@@ -1052,7 +1060,7 @@ module.exports.register = function (registry, context) {
           <div class="filter-group">
             <label for="supportFilterToggle" id="labelForSupportFilter">Support:</label>
             <div class="dropdown-checkbox-wrapper">
-              <button type="button" class="dropdown-checkbox-toggle" id="supportFilterToggle" onclick="toggleDropdownCheckbox('supportFilter')" aria-expanded="false" aria-haspopup="true" aria-controls="supportFilterMenu">
+              <button type="button" class="dropdown-checkbox-toggle" id="supportFilterToggle"  aria-expanded="false" aria-haspopup="true" aria-controls="supportFilterMenu">
                 <span class="dropdown-text">All Support Levels Selected</span>
                 <span class="dropdown-arrow">▼</span>
               </button>
@@ -1069,17 +1077,17 @@ module.exports.register = function (registry, context) {
           <div class="filter-group">
             <label for="cloudSupportFilterToggle">Available in Cloud:</label>
             <div class="dropdown-checkbox-wrapper">
-              <button type="button" class="dropdown-checkbox-toggle" id="cloudSupportFilterToggle" onclick="toggleDropdownCheckbox('cloudSupportFilter')" aria-expanded="false" aria-haspopup="true" aria-controls="cloudSupportFilterMenu">
+              <button type="button" class="dropdown-checkbox-toggle" id="cloudSupportFilterToggle"  aria-expanded="false" aria-haspopup="true" aria-controls="cloudSupportFilterMenu">
                 <span class="dropdown-text">All Options Selected</span>
                 <span class="dropdown-arrow">▼</span>
               </button>
               <div class="dropdown-checkbox-menu" id="cloudSupportFilterMenu" role="menu" aria-labelledby="cloudSupportFilterToggle">
                 <label class="dropdown-checkbox-option">
-                  <input type="checkbox" value="yes" checked onchange="filterComponentTable()">
+                  <input type="checkbox" value="yes" checked>
                   <span>Yes</span>
                 </label>
                 <label class="dropdown-checkbox-option">
-                  <input type="checkbox" value="no" checked onchange="filterComponentTable()">
+                  <input type="checkbox" value="no" checked>
                   <span>No</span>
                 </label>
               </div>
@@ -1088,17 +1096,17 @@ module.exports.register = function (registry, context) {
           <div class="filter-group">
             <label for="enterpriseFilterToggle">Enterprise License:</label>
             <div class="dropdown-checkbox-wrapper">
-              <button type="button" class="dropdown-checkbox-toggle" id="enterpriseFilterToggle" onclick="toggleDropdownCheckbox('enterpriseFilter')" aria-expanded="false" aria-haspopup="true" aria-controls="enterpriseFilterMenu">
+              <button type="button" class="dropdown-checkbox-toggle" id="enterpriseFilterToggle"  aria-expanded="false" aria-haspopup="true" aria-controls="enterpriseFilterMenu">
                 <span class="dropdown-text">All Options Selected</span>
                 <span class="dropdown-arrow">▼</span>
               </button>
               <div class="dropdown-checkbox-menu" id="enterpriseFilterMenu" role="menu" aria-labelledby="enterpriseFilterToggle">
                 <label class="dropdown-checkbox-option">
-                  <input type="checkbox" value="yes" checked onchange="filterComponentTable()">
+                  <input type="checkbox" value="yes" checked>
                   <span>Yes</span>
                 </label>
                 <label class="dropdown-checkbox-option">
-                  <input type="checkbox" value="no" checked onchange="filterComponentTable()">
+                  <input type="checkbox" value="no" checked>
                   <span>No</span>
                 </label>
               </div>
@@ -1639,6 +1647,16 @@ module.exports.register = function (registry, context) {
             color: #d0d5dd;
           }
 
+          /* Invert dark/black logos for visibility in dark mode */
+          html[data-theme="dark"] .card-icon img[src*="apache-kafka.svg"],
+          html[data-theme="dark"] .card-icon img[src*="cassandra.svg"],
+          html[data-theme="dark"] .card-icon img[src*="java-script.svg"],
+          html[data-theme="dark"] .card-icon img[src*="pinecone.svg"],
+          html[data-theme="dark"] .card-icon img[src*="postgre-sql.svg"],
+          html[data-theme="dark"] .card-icon img[src*="splunk.svg"] {
+            filter: brightness(0) invert(1);
+          }
+
           @media (max-width: 768px) {
             .component-cards-container {
               grid-template-columns: 1fr;
@@ -1656,17 +1674,18 @@ module.exports.register = function (registry, context) {
           }
         </style>
         <div class="component-cards-container" id="componentCardsContainer">
-          ${generateConnectorsHTMLCards(processConnectors(csvData), sqlDriversData, isCloud, showAllInfo, commercialNamesMap)}
+          ${generateConnectorsHTMLCards(processConnectors(csvData), sqlDriversData, isCloud, showAllInfo, commercialNamesMap, uiRootPath)}
         </div>
         <script>
           // Badge legend modal functions
           (function() {
-            // Create modal HTML
-            const modalHTML = \`<div id="badgeLegendModal" class="badge-legend-modal" role="dialog" aria-labelledby="badgeLegendTitle" aria-modal="true">
+            try {
+              // Create modal HTML
+              const modalHTML = \`<div id="badgeLegendModal" class="badge-legend-modal" role="dialog" aria-labelledby="badgeLegendTitle" aria-modal="true">
           <div class="badge-legend-content">
             <div class="badge-legend-header">
               <h3 id="badgeLegendTitle">Component Badge Legend</h3>
-              <button type="button" class="badge-legend-close" onclick="closeBadgeLegend()" aria-label="Close">&times;</button>
+              <button type="button" class="badge-legend-close"  aria-label="Close">&times;</button>
             </div>
             <div class="badge-legend-body">
               <div class="badge-legend-section">
@@ -1747,6 +1766,9 @@ module.exports.register = function (registry, context) {
               const modalContainer = document.createElement('div');
               modalContainer.innerHTML = modalHTML;
               document.body.appendChild(modalContainer.firstElementChild);
+            }
+            } catch (error) {
+              console.error('[Component Catalog] Error loading badge legend modal:', error);
             }
           })();
         </script>
@@ -2061,25 +2083,34 @@ module.exports.register = function (registry, context) {
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
             animation: slideIn 0.3s ease;
           }
+        </style>
 
         <script>
-          // Close modal when clicking outside
-          document.addEventListener('click', function(event) {
-            const modal = document.getElementById('badgeLegendModal');
-            if (modal && event.target === modal) {
-              closeBadgeLegend();
-            }
-          });
+          (function() {
+            try {
+              console.log('[Component Catalog] Loading dropdown and filter functions...');
 
-          // Close modal with Escape key
-          document.addEventListener('keydown', function(event) {
-            if (event.key === 'Escape') {
-              closeBadgeLegend();
-            }
-          });
+              // TEMPORARILY DISABLED FOR NAV TOGGLE DEBUGGING
+              // Close modal when clicking outside
+              // document.addEventListener('click', function(event) {
+              //   const modal = document.getElementById('badgeLegendModal');
+              //   // Only handle clicks on the modal backdrop itself, nothing else
+              //   if (modal && modal.classList.contains('show') && event.target === modal) {
+              //     closeBadgeLegend();
+              //   }
+              // }, { capture: false, passive: true });
 
-          // Define global dropdown functions (shared between macros)
-          window.initializeDropdownFunctions = window.initializeDropdownFunctions || function() {
+              // Close modal with Escape key
+              // document.addEventListener('keydown', function(event) {
+              //   const modal = document.getElementById('badgeLegendModal');
+              //   // Only handle Escape if modal is actually open
+              //   if (event.key === 'Escape' && modal && modal.classList.contains('show')) {
+              //     closeBadgeLegend();
+              //   }
+              // }, { capture: false, passive: true });
+
+              // Define global dropdown functions (shared between macros)
+              window.initializeDropdownFunctions = window.initializeDropdownFunctions || function() {
             // Component type dropdown toggle function
             window.toggleComponentTypeDropdown = function() {
               const toggle = document.getElementById('componentTypeDropdownToggle');
@@ -2119,69 +2150,152 @@ module.exports.register = function (registry, context) {
           };
           
           // Initialize the functions
-          window.initializeDropdownFunctions();
+          try {
+            window.initializeDropdownFunctions();
+          } catch (e) {
+            console.error('[Component Catalog] Error initializing dropdown functions:', e);
+          }
 
           // TEMPORARILY DISABLED ALL EVENT LISTENERS TO TEST NAV BUTTON
 
           // Initialize filters from URL parameters
-          document.addEventListener('DOMContentLoaded', function() {
-            const params = getQueryParams();
-            const search = document.getElementById('componentTableSearch');
-            const typeFilterMenu = document.getElementById('typeFilterMenu');
-            const supportFilterMenu = document.getElementById('supportFilterMenu');
-            const cloudSupportFilterMenu = document.getElementById('cloudSupportFilterMenu');
-            const enterpriseFilterMenu = document.getElementById('enterpriseFilterMenu');
-            
-            if (params.search && search) {
-              search.value = params.search;
+          function initializeFilters() {
+            try {
+              const params = getQueryParams();
+              const search = document.getElementById('componentTableSearch');
+              const typeFilterMenu = document.getElementById('typeFilterMenu');
+              const supportFilterMenu = document.getElementById('supportFilterMenu');
+              const cloudSupportFilterMenu = document.getElementById('cloudSupportFilterMenu');
+              const enterpriseFilterMenu = document.getElementById('enterpriseFilterMenu');
+
+              if (params.search && search) {
+                search.value = params.search;
+              }
+
+              if (params.type && typeFilterMenu) {
+                const types = params.type.split(',');
+                // First uncheck all checkboxes
+                typeFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+                // Then check only the ones in the URL
+                types.forEach(type => {
+                  const checkbox = typeFilterMenu.querySelector('input[value="' + type + '"]');
+                  if (checkbox) checkbox.checked = true;
+                });
+              }
+
+              if (params.support && supportFilterMenu) {
+                const supports = params.support.split(',');
+                // First uncheck all checkboxes
+                supportFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+                // Then check only the ones in the URL
+                supports.forEach(support => {
+                  const checkbox = supportFilterMenu.querySelector('input[value="' + support + '"]');
+                  if (checkbox) checkbox.checked = true;
+                });
+              }
+
+              if (params.cloud && cloudSupportFilterMenu) {
+                const cloudOptions = params.cloud.split(',');
+                // First uncheck all checkboxes
+                cloudSupportFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+                // Then check only the ones in the URL
+                cloudOptions.forEach(option => {
+                  const checkbox = cloudSupportFilterMenu.querySelector('input[value="' + option + '"]');
+                  if (checkbox) checkbox.checked = true;
+                });
+              }
+
+              if (params.enterprise && enterpriseFilterMenu) {
+                const enterpriseOptions = params.enterprise.split(',');
+                // First uncheck all checkboxes
+                enterpriseFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+                // Then check only the ones in the URL
+                enterpriseOptions.forEach(option => {
+                  const checkbox = enterpriseFilterMenu.querySelector('input[value="' + option + '"]');
+                  if (checkbox) checkbox.checked = true;
+                });
+              }
+
+              filterComponentTable();
+            } catch (e) {
+              console.error('[Component Catalog] Error initializing filters:', e);
             }
-            
-            if (params.type && typeFilterMenu) {
-              const types = params.type.split(',');
-              // First uncheck all checkboxes
-              typeFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-              // Then check only the ones in the URL
-              types.forEach(type => {
-                const checkbox = typeFilterMenu.querySelector(\`input[value="\${type}"]\`);
-                if (checkbox) checkbox.checked = true;
-              });
+          }
+
+              // Attach event listeners programmatically (no inline handlers)
+              function attachEventListeners() {
+                try {
+                  // Search input
+                  const searchInput = document.getElementById('componentTableSearch');
+                  if (searchInput) {
+                    searchInput.addEventListener('keyup', window.filterComponentTable);
+                  }
+
+                  // Badge legend button
+                  const badgeButton = document.querySelector('.badge-legend-button');
+                  if (badgeButton) {
+                    badgeButton.addEventListener('click', window.openBadgeLegend);
+                  }
+
+                  // Badge legend close button
+                  const closeButton = document.querySelector('.badge-legend-close');
+                  if (closeButton) {
+                    closeButton.addEventListener('click', window.closeBadgeLegend);
+                  }
+
+                  // Dropdown toggles
+                  const typeFilterToggle = document.getElementById('typeFilterToggle');
+                  if (typeFilterToggle) {
+                    typeFilterToggle.addEventListener('click', () => window.toggleDropdownCheckbox('typeFilter'));
+                  }
+
+                  const supportFilterToggle = document.getElementById('supportFilterToggle');
+                  if (supportFilterToggle) {
+                    supportFilterToggle.addEventListener('click', () => window.toggleDropdownCheckbox('supportFilter'));
+                  }
+
+                  const cloudSupportFilterToggle = document.getElementById('cloudSupportFilterToggle');
+                  if (cloudSupportFilterToggle) {
+                    cloudSupportFilterToggle.addEventListener('click', () => window.toggleDropdownCheckbox('cloudSupportFilter'));
+                  }
+
+                  const enterpriseFilterToggle = document.getElementById('enterpriseFilterToggle');
+                  if (enterpriseFilterToggle) {
+                    enterpriseFilterToggle.addEventListener('click', () => window.toggleDropdownCheckbox('enterpriseFilter'));
+                  }
+
+                  const componentTypeToggle = document.getElementById('componentTypeDropdownToggle');
+                  if (componentTypeToggle) {
+                    componentTypeToggle.addEventListener('click', window.toggleComponentTypeDropdown);
+                  }
+
+                  // All filter checkboxes
+                  document.querySelectorAll('.dropdown-checkbox-menu input[type="checkbox"]').forEach(checkbox => {
+                    checkbox.addEventListener('change', window.filterComponentTable);
+                  });
+
+                  console.log('[Component Catalog] Event listeners attached successfully');
+                } catch (error) {
+                  console.error('[Component Catalog] Error attaching event listeners:', error);
+                }
+              }
+
+              // Run initialization when DOM is ready
+              if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', function() {
+                  initializeFilters();
+                  attachEventListeners();
+                });
+              } else {
+                initializeFilters();
+                attachEventListeners();
+              }
+
+              console.log('[Component Catalog] All functions loaded successfully');
+            } catch (error) {
+              console.error('[Component Catalog] Error loading dropdown/filter functions:', error);
             }
-            
-            if (params.support && supportFilterMenu) {
-              const supports = params.support.split(',');
-              // First uncheck all checkboxes
-              supportFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-              // Then check only the ones in the URL
-              supports.forEach(support => {
-                const checkbox = supportFilterMenu.querySelector(\`input[value="\${support}"]\`);
-                if (checkbox) checkbox.checked = true;
-              });
-            }
-            
-            if (params.cloud && cloudSupportFilterMenu) {
-              const cloudOptions = params.cloud.split(',');
-              // First uncheck all checkboxes
-              cloudSupportFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-              // Then check only the ones in the URL
-              cloudOptions.forEach(option => {
-                const checkbox = cloudSupportFilterMenu.querySelector(\`input[value="\${option}"]\`);
-                if (checkbox) checkbox.checked = true;
-              });
-            }
-            
-            if (params.enterprise && enterpriseFilterMenu) {
-              const enterpriseOptions = params.enterprise.split(',');
-              // First uncheck all checkboxes
-              enterpriseFilterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-              // Then check only the ones in the URL
-              enterpriseOptions.forEach(option => {
-                const checkbox = enterpriseFilterMenu.querySelector(\`input[value="\${option}"]\`);
-                if (checkbox) checkbox.checked = true;
-              });
-            }
-            
-            filterComponentTable();
-          });
+          })();
         </script>
       `;
       return self.createBlock(parent, 'pass', tableHtml);
@@ -2312,7 +2426,7 @@ module.exports.register = function (registry, context) {
         typeDropdown = `
           <div class="dropdown-wrapper">
             <p class="type-dropdown-container"><strong>Type:</strong>
-              <button type="button" class="dropdown-toggle" id="componentTypeDropdownToggle" onclick="toggleComponentTypeDropdown()" aria-expanded="false" aria-haspopup="true" aria-controls="componentTypeDropdownMenu">
+              <button type="button" class="dropdown-toggle" id="componentTypeDropdownToggle"  aria-expanded="false" aria-haspopup="true" aria-controls="componentTypeDropdownMenu">
                 <span class="dropdown-text">${capitalize(sortedTypes[0].type)}</span>
                 <span class="dropdown-arrow">▼</span>
               </button>
