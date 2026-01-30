@@ -466,7 +466,7 @@ module.exports.register = function (registry, context) {
 
     // Emoji fallbacks for generic types
     const emojiFallback = {
-      redpanda: 'https://cdn.prod.website-files.com/68ed36e99e31581dedf5dc7c/68ed91d74b9cd10c98cb8e6e_footer-logo.svg`,
+      redpanda: 'https://cdn.prod.website-files.com/68ed36e99e31581dedf5dc7c/68ed91d74b9cd10c98cb8e6e_footer-logo.svg',
       http_server: '🌐',
       http_client: '🌐',
       tcp: '🔌',
