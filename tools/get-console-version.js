@@ -24,7 +24,8 @@ module.exports = async function getConsoleVersion({ beta = false, fromAntora = f
   }
 
   // Use shared Octokit client
-  const octokit = require('../cli-utils/octokit-client');
+  const { getOctokit } = require('../cli-utils/octokit-client');
+  const octokit = await getOctokit();
 
   // Fetch latest release info
   let data;

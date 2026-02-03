@@ -1,4 +1,4 @@
-const octokit = require('../../cli-utils/octokit-client');
+const { getOctokit } = require('../../cli-utils/octokit-client');
 const { execSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -51,6 +51,7 @@ function getPlatformInfo() {
  */
 async function getLatestVersion(binaryType = 'cloud') {
   try {
+    const octokit = await getOctokit();
     const { data: releases } = await octokit.repos.listReleases({
       owner: REPO_OWNER,
       repo: REPO_NAME,
@@ -149,6 +150,7 @@ async function downloadBinary(binaryType, version, destDir) {
   console.log(`Downloading ${binaryType.toUpperCase()} binary v${version} for ${platformInfo.platform}/${platformInfo.arch}...`);
 
   try {
+    const octokit = await getOctokit();
     // Get release information
     const { data: release } = await octokit.repos.getReleaseByTag({
       owner: REPO_OWNER,
@@ -547,6 +549,7 @@ async function getCloudSupport(ossVersion, cloudVersion = null, dataDir = null) 
  */
 async function checkRateLimit() {
   try {
+    const octokit = await getOctokit();
     const { data } = await octokit.rateLimit.get();
     return {
       remaining: data.rate.remaining,

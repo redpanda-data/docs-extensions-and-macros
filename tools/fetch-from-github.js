@@ -2,9 +2,9 @@ const fs = require('fs');
 const path = require('path');
 
 // Use shared Octokit client
-function loadOctokit() {
-  const octokit = require('../cli-utils/octokit-client');
-  return octokit;
+async function loadOctokit() {
+  const { getOctokit } = require('../cli-utils/octokit-client');
+  return await getOctokit();
 }
 
 async function saveFile(content, saveDir, filename) {

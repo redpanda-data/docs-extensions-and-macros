@@ -1175,7 +1175,8 @@ async function handleRpcnConnectorDocs (options) {
         console.log('\n   INFO: Checking cloud-docs repository for missing connector pages...')
 
         // Use shared Octokit instance
-        const octokit = require('../../cli-utils/octokit-client')
+        const { getOctokit } = require('../../cli-utils/octokit-client')
+        const octokit = await getOctokit()
 
         try {
           // Optimization: Fetch entire directory tree in 1 API call instead of 471 individual calls

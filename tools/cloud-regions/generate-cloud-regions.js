@@ -71,7 +71,8 @@ function displayClusterType(ct) {
 async function fetchYaml({ owner, repo, path, ref = 'main', token }) {
   try {
     // Use shared Octokit client
-    const octokit = require('../../cli-utils/octokit-client');
+    const { getOctokit } = require('../../cli-utils/octokit-client');
+    const octokit = await getOctokit();
 
     console.log(`[cloud-regions] INFO: Fetching ${owner}/${repo}/${path}@${ref} via GitHub API`);
 

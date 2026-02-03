@@ -20,7 +20,8 @@ module.exports = async function getRedpandaVersion({ beta = false, fromAntora = 
   }
 
   // Use shared Octokit client
-  const octokit = require('../cli-utils/octokit-client');
+  const { getOctokit } = require('../cli-utils/octokit-client');
+  const octokit = await getOctokit();
 
   // Fetch version data
   let data;

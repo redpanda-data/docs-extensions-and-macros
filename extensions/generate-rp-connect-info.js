@@ -25,9 +25,10 @@ module.exports.register = function ({ config }) {
   // Use csvpath (legacy) or csvPath
   const localCsvPath = csvpath || null
 
-  function loadOctokit () {
+  async function loadOctokit () {
     // Use shared Octokit client
-    return require('../cli-utils/octokit-client')
+    const { getOctokit } = require('../cli-utils/octokit-client')
+    return await getOctokit()
   }
 
   // Use 'on' and return the promise so Antora waits for async completion
