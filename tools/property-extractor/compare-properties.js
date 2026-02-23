@@ -9,12 +9,46 @@
  * - Properties with changed descriptions
  * - Properties with changed types
  * - Deprecated properties
+ * - Removed deprecated properties (deprecated in old version, deleted from source in new)
  * - Removed properties
  * - Properties with empty descriptions (excluding deprecated)
  */
 
 const fs = require('fs');
 const path = require('path');
+const semver = require('semver');
+
+/**
+ * The minimum version where Redpanda removes deprecated properties from the
+ * C++ source code instead of keeping them tagged as deprecated_property.
+ */
+const DEPRECATED_REMOVAL_MIN_VERSION = '26.1.0';
+
+/**
+ * Check if the new version deletes deprecated properties from source.
+ *
+ * Before v26.1, deprecated properties were kept in the C++ source tagged as
+ * deprecated_property. Starting from v26.1, they are deleted entirely. When
+ * a property exists in the old version but is absent in the new version, and
+ * the new version is >= v26.1, we treat it as a deprecation (the property was
+ * removed because it was deprecated).
+ *
+ * Returns false only when the new version is explicitly below v26.1.
+ * For unparseable versions (e.g. "dev", "main"), assumes the latest behavior.
+ *
+ * @param {string} newVersion - The new version string.
+ * @returns {boolean} True if the new version deletes deprecated properties.
+ */
+function isCrossDeprecatedRemovalBoundary(newVersion) {
+  // Only skip if the new version is explicitly below the boundary
+  const newCleaned = semver.coerce(newVersion);
+  if (newCleaned && semver.lt(newCleaned, DEPRECATED_REMOVAL_MIN_VERSION)) {
+    return false;
+  }
+  // New version is either >= 26.1 or unparseable (e.g. "dev", "main").
+  // In both cases, assume the new version has the removal behavior.
+  return true;
+}
 
 /**
  * Recursively compares two values for structural deep equality.
@@ -134,12 +168,15 @@ function compareProperties(oldData, newData, oldVersion, newVersion) {
   const oldProps = extractProperties(oldData);
   const newProps = extractProperties(newData);
 
+  const removesDeprecated = isCrossDeprecatedRemovalBoundary(newVersion);
+
   const report = {
     newProperties: [],
     changedDefaults: [],
     changedDescriptions: [],
     changedTypes: [],
     deprecatedProperties: [],
+    removedDeprecatedProperties: [],
     removedProperties: [],
     emptyDescriptions: []
   };
@@ -206,11 +243,22 @@ function compareProperties(oldData, newData, oldVersion, newVersion) {
       // Check both the is_experimental_property field and development_ prefix
       const isExperimental = oldProp.is_experimental_property || name.startsWith('development_');
       if (!isExperimental) {
-        report.removedProperties.push({
-          name,
-          type: oldProp.type,
-          description: oldProp.description || 'No description'
-        });
+        // In v26.1+, deprecated properties are deleted from source instead of
+        // being tagged. If a property existed before and is gone now, it was
+        // deprecated.
+        if (removesDeprecated) {
+          report.removedDeprecatedProperties.push({
+            name,
+            type: oldProp.type,
+            description: oldProp.description || 'No description'
+          });
+        } else {
+          report.removedProperties.push({
+            name,
+            type: oldProp.type,
+            description: oldProp.description || 'No description'
+          });
+        }
       }
     }
   }
@@ -288,6 +336,14 @@ function generateConsoleReport(report, oldVersion, newVersion) {
     });
   }
   
+  if (report.removedDeprecatedProperties.length > 0) {
+    console.log(`\n➤ Removed deprecated properties (${report.removedDeprecatedProperties.length}):`);
+    console.log(`   These were deprecated in ${oldVersion} and removed from source in ${newVersion}.`);
+    report.removedDeprecatedProperties.forEach(prop => {
+      console.log(`   • ${prop.name} (${prop.type})`);
+    });
+  }
+
   if (report.removedProperties.length > 0) {
     console.log(`\n➤ Removed properties (${report.removedProperties.length}):`);
     report.removedProperties.forEach(prop => {
@@ -329,6 +385,7 @@ function generateJsonReport(report, oldVersion, newVersion, outputPath) {
       changedDescriptions: report.changedDescriptions.length,
       changedTypes: report.changedTypes.length,
       deprecatedProperties: report.deprecatedProperties.length,
+      removedDeprecatedProperties: report.removedDeprecatedProperties.length,
       removedProperties: report.removedProperties.length,
       emptyDescriptions: report.emptyDescriptions.length
     },
