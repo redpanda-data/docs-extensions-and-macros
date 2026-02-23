@@ -427,17 +427,39 @@ function comparePropertyFiles(oldFilePath, newFilePath, oldVersion, newVersion, 
     const newData = JSON.parse(fs.readFileSync(newFilePath, 'utf8'));
     
     const report = compareProperties(oldData, newData, oldVersion, newVersion);
-    
+
+    // Merge removed deprecated properties back into the new JSON so they
+    // remain in generated documentation with is_deprecated + removed_deprecated flags
+    if (report.removedDeprecatedProperties.length > 0) {
+      const oldProps = extractProperties(oldData);
+      const newProps = extractProperties(newData);
+
+      report.removedDeprecatedProperties.forEach(({ name }) => {
+        if (oldProps[name] && !newProps[name]) {
+          newProps[name] = {
+            ...oldProps[name],
+            is_deprecated: true,
+            removed_deprecated: true,
+            visibility: 'deprecated'
+          };
+        }
+      });
+
+      newData.properties = newProps;
+      fs.writeFileSync(newFilePath, JSON.stringify(newData, null, 2), 'utf8');
+      console.log(`\nMerged ${report.removedDeprecatedProperties.length} removed deprecated properties back into ${newVersion} JSON`);
+    }
+
     // Generate console report
     generateConsoleReport(report, oldVersion, newVersion);
-    
+
     // Generate JSON report if output directory provided
     if (outputDir) {
       fs.mkdirSync(outputDir, { recursive: true });
       const jsonReportPath = path.join(outputDir, filename);
       generateJsonReport(report, oldVersion, newVersion, jsonReportPath);
     }
-    
+
     return report;
   } catch (error) {
     console.error(`Error: Error comparing properties: ${error.message}`);
