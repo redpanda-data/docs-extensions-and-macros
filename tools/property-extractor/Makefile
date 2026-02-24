@@ -86,7 +86,11 @@ redpanda-git:
 	    git clone -q https://github.com/redpanda-data/redpanda.git "$(REDPANDA_SRC)"; \
 	  fi; \
 	fi; \
-	if git -C "$(REDPANDA_SRC)" rev-parse --verify -q "$(TAG)" >/dev/null; then \
+	if git -C "$(REDPANDA_SRC)" rev-parse --verify -q "origin/$(TAG)" >/dev/null 2>&1; then \
+	  echo "🔖 Checking out remote branch 'origin/$(TAG)'"; \
+	  git -C "$(REDPANDA_SRC)" checkout -q "$(TAG)" 2>/dev/null || git -C "$(REDPANDA_SRC)" checkout -q -b "$(TAG)" "origin/$(TAG)"; \
+	  git -C "$(REDPANDA_SRC)" reset --hard "origin/$(TAG)" -q; \
+	elif git -C "$(REDPANDA_SRC)" rev-parse --verify -q "$(TAG)" >/dev/null 2>&1; then \
 	  echo "🔖 Checking out '$(TAG)'"; \
 	  git -C "$(REDPANDA_SRC)" checkout -q "$(TAG)"; \
 	else \
