@@ -10,7 +10,7 @@ content:
   sources:
   - url: .
     branches: HEAD
-    start_paths: [preview/extensions-and-macros, preview/shared]
+    start_paths: [preview/extensions-and-macros, preview/shared, preview/home]
   - url: https://github.com/redpanda-data/docs
     branches: [main, v/*, api, 'site-search', '!v-end-of-life/*']
   - url: https://github.com/redpanda-data/redpanda-labs
@@ -61,6 +61,11 @@ antora:
           file_patterns:
             - '**/docker-compose.yaml'
             - '**/docker-compose.yml'
+        - components:
+            - 'home'
+          file_patterns:
+            - '**/llms.adoc'
+  - require: './extensions/convert-llms-to-txt.js'
   - require: './extensions/archive-attachments'
     data:
       archives:
