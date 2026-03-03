@@ -214,6 +214,127 @@ module.exports.register = function ({ config }) {
       const redpandaConnectUrl = connectPage?.pub?.url || ''
       const redpandaCloudUrl = cloudPage?.pub?.url || ''
 
+      // Extract description from page attributes or body content
+      const pageSrc = connectPage || cloudPage
+      let description = ''
+      if (pageSrc) {
+        // Try to get from asciidoc attributes first
+        description = pageSrc.asciidoc?.attributes?.description || ''
+
+        // Fallback: extract first paragraph from page body
+        if (!description && pageSrc.contents) {
+          const fileContents = pageSrc.contents.toString('utf8')
+
+          // First try explicit :description: attribute
+          const descAttrMatch = fileContents.match(/:description:\s*(.+)/)
+          if (descAttrMatch) {
+            description = descAttrMatch[1].trim()
+          } else {
+            // Extract first paragraph after component_type_dropdown or after header
+            // Pattern: Find text after component_type_dropdown::[] or after attributes block
+            const afterDropdown = fileContents.split('component_type_dropdown::[]')[1]
+            if (afterDropdown) {
+              // Remove various AsciiDoc blocks and markup that shouldn't be in descriptions
+              let cleanContent = afterDropdown
+                // Remove admonition blocks: [WARNING]\n.Title\n====\nContent\n====
+                .replace(/\[(WARNING|NOTE|TIP|CAUTION|IMPORTANT)\][^\n]*\n(?:\..*?\n)?====[\s\S]*?====\n*/g, '')
+                // Remove AsciiDoc conditionals: ifndef::env-cloud[] ... endif::[]
+                .replace(/^(ifndef|ifdef|ifeval|endif)::[^\n]*\n?/gm, '')
+                // Remove code blocks: ```yml ... ``` or ---- ... ----
+                .replace(/```[\s\S]*?```/g, '')
+                .replace(/^----[\s\S]*?^----/gm, '')
+                // Remove include directives
+                .replace(/^include::[^\n]+\n?/gm, '')
+                // Remove comments
+                .replace(/\/\/ .*$/gm, '')
+                // Remove tabs section and everything after
+                .replace(/\[tabs\][\s\S]*$/, '')
+                // Remove tag directives
+                .replace(/^\/\/ (tag|end)::[^\n]+\n?/gm, '')
+
+              // Join continuation lines (lines that don't end with punctuation or blank line)
+              // This handles links and text that span multiple lines
+              cleanContent = cleanContent
+                .split('\n')
+                .reduce((acc, line) => {
+                  const trimmed = line.trim()
+                  if (trimmed === '') {
+                    acc.push('') // Keep paragraph breaks
+                  } else if (acc.length > 0 && acc[acc.length - 1] !== '' &&
+                             !acc[acc.length - 1].match(/[.!?:]$/) &&
+                             !trimmed.match(/^[=\[\-`]/) &&
+                             !trimmed.startsWith('//')) {
+                    // Continue previous line
+                    acc[acc.length - 1] += ' ' + trimmed
+                  } else {
+                    acc.push(trimmed)
+                  }
+                  return acc
+                }, [])
+                .join('\n')
+
+              // Get first non-empty paragraph
+              const paragraphs = cleanContent.split('\n\n')
+              for (const para of paragraphs) {
+                let cleaned = para.trim()
+
+                // Stop at first heading (cut off everything after ==)
+                const headingMatch = cleaned.match(/^(.*?)\s*==/)
+                if (headingMatch) {
+                  cleaned = headingMatch[1].trim()
+                }
+
+                if (cleaned &&
+                    !cleaned.startsWith('[') &&
+                    !cleaned.startsWith('```') &&
+                    !cleaned.startsWith('=') &&
+                    !cleaned.startsWith('--') &&
+                    !cleaned.startsWith('tag::') &&
+                    !cleaned.startsWith('endif::') &&
+                    !cleaned.startsWith('ifdef::') &&
+                    !cleaned.startsWith('ifndef::') &&
+                    !cleaned.startsWith('yml') &&
+                    !cleaned.startsWith('include::') &&
+                    !cleaned.match(/^(TIP|NOTE|WARNING|CAUTION|IMPORTANT):/) &&
+                    cleaned.length > 20) {
+                  // Clean up remaining markup
+                  description = cleaned
+                    // Convert xref links: xref:path[text] -> text
+                    .replace(/xref:[^\[]+\[(.*?)\]/g, '$1')
+                    // Convert HTTP links: https://url[text^] -> text
+                    .replace(/https?:\/\/[^\[]+\[(.*?)(?:\^)?\]/g, '$1')
+                    // Remove "Introduced in version X.X.X" suffix
+                    .replace(/\.\s*Introduced in version[\s\d.]+\.?$/i, '')
+                    // Remove attributes: {attr}
+                    .replace(/\{[^}]+\}/g, '')
+                    // Remove bold: **text** or *text*
+                    .replace(/\*\*([^*]+)\*\*/g, '$1')
+                    .replace(/\*([^*]+)\*/g, '$1')
+                    // Remove emphasis: _text_
+                    .replace(/_([^_]+)_/g, '$1')
+                    // Remove code backticks: `code`
+                    .replace(/`([^`]+)`/g, '$1')
+                    // Normalize whitespace
+                    .replace(/\s+/g, ' ')
+                    .trim()
+
+                  // Truncate at sentence boundary if too long (max ~150 chars)
+                  if (description.length > 150) {
+                    const sentences = description.match(/[^.!?]+[.!?]+/g)
+                    if (sentences && sentences.length > 0) {
+                      description = sentences[0].trim()
+                    } else {
+                      description = description.substring(0, 150).trim() + '...'
+                    }
+                  }
+                  break
+                }
+              }
+            }
+          }
+        }
+      }
+
       // Warn about missing docs (but not for deprecated or SQL drivers)
       if (deprecated !== 'y' && !connector.includes('sql_driver')) {
         // Check if this is a cloud-only connector (plugin)
@@ -243,7 +364,8 @@ module.exports.register = function ({ config }) {
         cloud_ai: cloudAi,
         is_licensed: isLicensed,
         redpandaConnectUrl,
-        redpandaCloudUrl
+        redpandaCloudUrl,
+        description
       }
     })
   }
