@@ -73,13 +73,16 @@ module.exports.register = function () {
         content = content.replace(/^<!--[\s\S]*?-->\s*/gm, '').trim();
         logger.debug(`Stripped HTML comments, now ${content.length} bytes`);
 
-        // Fix URLs: convert em dashes back to double hyphens
+        // Fix URLs: convert em dashes back to double hyphens and remove invisible characters
         // The markdown converter applies smart typography that turns -- into — (em dash)
+        // and inserts zero-width spaces (U+200B) and other invisible Unicode characters
         // This breaks URLs like deploy-preview-159--redpanda-documentation.netlify.app
-        content = content.replace(/\(https?:\/\/[^)]*—[^)]*\)/g, (match) => {
-          return match.replace(/—/g, '--');
+        content = content.replace(/\(https?:\/\/[^)]*[—\u200B-\u200D\uFEFF][^)]*\)/g, (match) => {
+          return match
+            .replace(/—/g, '--')
+            .replace(/[\u200B-\u200D\uFEFF]/g, '');
         });
-        logger.debug('Fixed em dashes in URLs');
+        logger.debug('Fixed em dashes and invisible characters in URLs');
 
         // Unpublish the HTML page FIRST (following unpublish-pages pattern)
         if (llmsPage.out) {
