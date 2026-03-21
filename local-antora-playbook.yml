@@ -48,8 +48,6 @@ site:
     User-agent: FacebookBot
     Allow: /
 
-    Sitemap: /sitemap.xml
-
     Crawl-delay: 1
 urls:
   html_extension_style: indexify
