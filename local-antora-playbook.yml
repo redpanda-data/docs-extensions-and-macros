@@ -5,6 +5,7 @@ site:
   robots: |
     User-agent: *
     Allow: /
+    Crawl-delay: 1
 
     # OpenAI GPT
     User-agent: GPTBot
@@ -47,8 +48,6 @@ site:
 
     User-agent: FacebookBot
     Allow: /
-
-    Crawl-delay: 1
 urls:
   html_extension_style: indexify
 output:

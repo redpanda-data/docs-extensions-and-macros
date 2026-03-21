@@ -25,33 +25,39 @@ function generateFrontmatter(page) {
   // Get all page attributes
   const attrs = page.asciidoc?.attributes || {}
 
-  // List of attributes to include in frontmatter
-  // Skip internal Antora attributes that aren't useful for AI consumption
-  const skipAttributes = [
-    'page-has-markdown', // our own internal marker
-    'page-origin-type',
-    'page-origin-url',
-    'page-origin-start-path',
-    'page-origin-worktree',
-    'page-origin-refname',
-    'page-module',
-    'page-partial',
-    'idprefix',
-    'idseparator',
-    'site-url', // this is site-level, not page-level
+  // Allowlist of attributes to include in frontmatter
+  // Explicitly opt-in to attributes that are useful for AI consumption
+  const allowedAttributes = [
+    'title',
+    'navtitle',
+    'description',
+    'categories',
+    'page-component-name',
+    'page-component-title',
+    'page-component-version',
+    'page-version',
+    'page-relative-src-path',
+    'page-edit-url',
+    'page-role',
+    'docname',
+    'doctitle',
+    'page-beta-text',
+    'page-is-nearing-eol',
+    'page-is-past-eol',
+    'page-eol-date',
   ]
 
-  // Add useful page attributes to frontmatter
+  // Add allowed page attributes to frontmatter
   Object.keys(attrs).forEach(key => {
     const value = attrs[key]
 
-    // Skip attributes in our skip list
-    if (skipAttributes.includes(key)) return
+    // Only include attributes in our allowlist
+    if (!allowedAttributes.includes(key)) return
 
     // Skip empty attributes (AsciiDoc boolean flags)
     if (value === '') {
-      // But preserve some important boolean flags
-      if (key.startsWith('page-') || key.startsWith('env-')) {
+      // Preserve important boolean flags
+      if (key.startsWith('page-')) {
         frontmatter[key] = true
       }
       return
@@ -424,14 +430,14 @@ module.exports.register = function () {
             logger.debug(`Generated frontmatter for ${page.src?.path}`)
           }
 
-          // Prepend Markdown source reference and AI-friendly note
+          // Prepend frontmatter first, then source reference and AI-friendly note
           if (canonicalUrl) {
             const componentName = page.src?.component || '';
             const urlHint = componentName
               ? `<!-- Note for AI: This is a Markdown export. For aggregated content, see /llms.txt (curated overview), /${componentName}-full.txt (this component only), or /llms-full.txt (complete documentation). -->`
               : `<!-- Note for AI: This is a Markdown export. For aggregated content, see /llms.txt (curated overview) or /llms-full.txt (complete documentation). -->`;
 
-            markdown = `<!-- Source: ${canonicalUrl} -->\n${urlHint}\n\n${frontmatter}${markdown}`
+            markdown = `${frontmatter}<!-- Source: ${canonicalUrl} -->\n${urlHint}\n\n${markdown}`
           } else if (frontmatter) {
             // If no canonical URL but we have frontmatter, still add it
             markdown = `${frontmatter}${markdown}`

@@ -16,6 +16,36 @@
  *
  * Must run after convert-to-markdown extension to access page.markdownContents.
  */
+/**
+ * Convert HTML URL to markdown URL
+ * @param {string} htmlUrl - The HTML URL (e.g., '/path/to/page/' or '/path/to/page/index.html')
+ * @returns {string} - The markdown URL (e.g., '/path/to/page.md')
+ */
+function toMarkdownUrl(htmlUrl) {
+  if (!htmlUrl) return '';
+
+  // Handle root path
+  if (htmlUrl === '/' || htmlUrl === '/index.html') {
+    return '/index.md';
+  }
+
+  // Remove trailing slash
+  let mdUrl = htmlUrl.replace(/\/$/, '');
+
+  // Replace /index.html with .md
+  mdUrl = mdUrl.replace(/\/index\.html$/, '.md');
+
+  // Replace .html with .md
+  mdUrl = mdUrl.replace(/\.html$/, '.md');
+
+  // If it doesn't end with .md yet, add it
+  if (!mdUrl.endsWith('.md')) {
+    mdUrl += '.md';
+  }
+
+  return mdUrl;
+}
+
 module.exports.register = function () {
   const logger = this.getLogger('convert-llms-to-txt-extension');
   let siteUrl = '';
@@ -171,7 +201,8 @@ module.exports.register = function () {
     });
 
     pages.forEach((page, index) => {
-      const pageUrl = page.pub?.url ? `${siteUrl}${page.pub.url}` : 'unknown';
+      const mdUrl = page.pub?.url ? toMarkdownUrl(page.pub.url) : '';
+      const pageUrl = mdUrl ? `${siteUrl}${mdUrl}` : 'unknown';
       const pageTitle = page.asciidoc?.doctitle || page.src?.stem || 'Untitled';
 
       fullContent += `# Page ${index + 1}: ${pageTitle}\n\n`;
@@ -241,7 +272,8 @@ module.exports.register = function () {
 
       // Add all pages
       componentPages.forEach((page, index) => {
-        const pageUrl = page.pub?.url ? `${siteUrl}${page.pub.url}` : 'unknown';
+        const mdUrl = page.pub?.url ? toMarkdownUrl(page.pub.url) : '';
+        const pageUrl = mdUrl ? `${siteUrl}${mdUrl}` : 'unknown';
         const pageTitle = page.asciidoc?.doctitle || page.src?.stem || 'Untitled';
 
         componentContent += `# Page ${index + 1}: ${pageTitle}\n\n`;
