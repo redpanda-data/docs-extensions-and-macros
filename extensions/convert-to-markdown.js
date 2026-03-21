@@ -4,6 +4,92 @@ const TurndownService = require('turndown')
 const turndownPluginGfm = require('turndown-plugin-gfm')
 const { gfm } = turndownPluginGfm
 
+/**
+ * Converts AsciiDoc page attributes to YAML frontmatter
+ * @param {Object} page - The page object with asciidoc attributes
+ * @returns {string} YAML frontmatter string or empty string if no attributes
+ */
+function generateFrontmatter(page) {
+  const frontmatter = {}
+
+  // Add title
+  if (page.asciidoc?.doctitle) {
+    frontmatter.title = page.asciidoc.doctitle
+  }
+
+  // Add navigation title if different from doctitle
+  if (page.asciidoc?.navtitle && page.asciidoc.navtitle !== page.asciidoc?.doctitle) {
+    frontmatter.navtitle = page.asciidoc.navtitle
+  }
+
+  // Get all page attributes
+  const attrs = page.asciidoc?.attributes || {}
+
+  // List of attributes to include in frontmatter
+  // Skip internal Antora attributes that aren't useful for AI consumption
+  const skipAttributes = [
+    'page-has-markdown', // our own internal marker
+    'page-origin-type',
+    'page-origin-url',
+    'page-origin-start-path',
+    'page-origin-worktree',
+    'page-origin-refname',
+    'page-module',
+    'page-partial',
+    'idprefix',
+    'idseparator',
+    'site-url', // this is site-level, not page-level
+  ]
+
+  // Add useful page attributes to frontmatter
+  Object.keys(attrs).forEach(key => {
+    const value = attrs[key]
+
+    // Skip attributes in our skip list
+    if (skipAttributes.includes(key)) return
+
+    // Skip empty attributes (AsciiDoc boolean flags)
+    if (value === '') {
+      // But preserve some important boolean flags
+      if (key.startsWith('page-') || key.startsWith('env-')) {
+        frontmatter[key] = true
+      }
+      return
+    }
+
+    // Include the attribute
+    frontmatter[key] = value
+  })
+
+  // Return empty string if no frontmatter
+  if (Object.keys(frontmatter).length === 0) return ''
+
+  // Convert to YAML format
+  let yaml = '---\n'
+  Object.entries(frontmatter).forEach(([key, value]) => {
+    // Handle different value types
+    if (typeof value === 'boolean') {
+      yaml += `${key}: ${value}\n`
+    } else if (typeof value === 'number') {
+      yaml += `${key}: ${value}\n`
+    } else if (typeof value === 'string') {
+      // Escape strings that need quoting
+      const needsQuotes = value.includes(':') || value.includes('#') || value.includes('\n') ||
+                          value.startsWith('[') || value.startsWith('{')
+      if (needsQuotes) {
+        // Use double quotes and escape internal quotes
+        const escaped = value.replace(/"/g, '\\"')
+        yaml += `${key}: "${escaped}"\n`
+      } else {
+        yaml += `${key}: ${value}\n`
+      }
+    }
+  })
+  yaml += '---\n\n'
+
+  return yaml
+}
+
 module.exports.register = function () {
   const logger = this.getLogger('convert-to-markdown-extension')
   let playbook
@@ -308,19 +394,19 @@ module.exports.register = function () {
           let canonicalUrl = ''
           try {
             if (siteUrl && page.pub?.url) {
-              const htmlStyle = playbook?.urls?.htmlExtensionStyle
-              const isIndexify = htmlStyle === 'indexify'
               const baseUrl = new URL(page.pub.url, siteUrl)
               let pathname = baseUrl.pathname
 
-              if (isIndexify) {
-                const looksLikeDir =
-                  pathname.endsWith('/') ||
-                  !path.basename(pathname).includes('.')
-                baseUrl.pathname = looksLikeDir
-                  ? pathname.replace(/\/?$/, '/index.md')
-                  : pathname.replace(/\.html$/, '.md')
+              // Convert paths like /docs/getting-started/ or /docs/getting-started/index.html
+              // to /docs/getting-started.md for better AI tool compatibility
+              if (pathname.endsWith('/')) {
+                // Remove trailing slash and add .md
+                baseUrl.pathname = pathname.replace(/\/$/, '.md')
+              } else if (pathname.endsWith('/index.html')) {
+                // Replace /index.html with .md
+                baseUrl.pathname = pathname.replace(/\/index\.html$/, '.md')
               } else {
+                // Replace .html with .md
                 baseUrl.pathname = pathname.replace(/\.html$/, '.md')
               }
 
@@ -332,11 +418,23 @@ module.exports.register = function () {
             )
           }
 
-          // Prepend Markdown source reference and URL construction hint
+          // Generate YAML frontmatter from AsciiDoc attributes
+          const frontmatter = generateFrontmatter(page)
+          if (frontmatter) {
+            logger.debug(`Generated frontmatter for ${page.src?.path}`)
+          }
+
+          // Prepend Markdown source reference and AI-friendly note
           if (canonicalUrl) {
-            const urlHint = `<!-- Note for AI: Links in this doc are relative to the current page and use indexify format. Add /index.md to directory-style links for the Markdown version. -->`
-            
-            markdown = `<!-- Source: ${canonicalUrl} -->\n${urlHint}\n\n${markdown}`
+            const componentName = page.src?.component || '';
+            const urlHint = componentName
+              ? `<!-- Note for AI: This is a Markdown export. For aggregated content, see /llms.txt (curated overview), /${componentName}-full.txt (this component only), or /llms-full.txt (complete documentation). -->`
+              : `<!-- Note for AI: This is a Markdown export. For aggregated content, see /llms.txt (curated overview) or /llms-full.txt (complete documentation). -->`;
+
+            markdown = `<!-- Source: ${canonicalUrl} -->\n${urlHint}\n\n${frontmatter}${markdown}`
+          } else if (frontmatter) {
+            // If no canonical URL but we have frontmatter, still add it
+            markdown = `${frontmatter}${markdown}`
           }
 
           // Clean up unnecessary whitespace
@@ -378,7 +476,16 @@ module.exports.register = function () {
     for (const page of pages) {
       const htmlOut = page.out?.path
       if (!htmlOut) continue
-      const mdOutPath = htmlOut.replace(/\.html$/, '.md')
+
+      // Convert paths like /docs/getting-started/index.html to /docs/getting-started.md
+      // for better AI tool compatibility (avoids all files being named index.md)
+      let mdOutPath
+      if (htmlOut.endsWith('/index.html')) {
+        mdOutPath = htmlOut.replace(/\/index\.html$/, '.md')
+      } else {
+        mdOutPath = htmlOut.replace(/\.html$/, '.md')
+      }
+
       siteCatalog.addFile({
         contents: page.markdownContents,
         out: { path: mdOutPath },
