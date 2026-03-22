@@ -1,0 +1,81 @@
+'use strict'
+
+/**
+ * Adds Git commit dates to pages as attributes.
+ *
+ * This extension:
+ * 1. Gets the first commit date (when file was created) -> git-created-date
+ * 2. Gets the last commit date (when file was modified) -> git-modified-date
+ * 3. Adds these as page attributes for use in templates
+ *
+ * Performance note: Uses git log with file paths to minimize overhead.
+ * Only runs on pages that have origin info (skips virtual/generated pages).
+ */
+
+const { execSync } = require('child_process')
+const path = require('path')
+
+module.exports.register = function () {
+  const logger = this.getLogger('add-git-dates-extension')
+
+  this.on('pagesComposed', ({ contentCatalog }) => {
+    const startTime = Date.now()
+    let processedCount = 0
+    let skippedCount = 0
+    let errorCount = 0
+
+    contentCatalog.getPages().forEach((page) => {
+      // Skip pages without origin (virtual/generated pages)
+      if (!page.src?.origin?.url || !page.src?.origin?.worktree) {
+        skippedCount++
+        return
+      }
+
+      // Skip if not a Git repository
+      if (page.src.origin.url.startsWith('http') && !page.src.origin.gitdir) {
+        skippedCount++
+        return
+      }
+
+      try {
+        // Ensure asciidoc.attributes exists
+        if (!page.asciidoc) page.asciidoc = {}
+        if (!page.asciidoc.attributes) page.asciidoc.attributes = {}
+
+        const worktree = page.src.origin.worktree
+        const startPath = page.src.origin.startPath || ''
+        const relativeFilePath = startPath ? path.join(startPath, page.src.path) : page.src.path
+
+        // Get first commit date (when file was created)
+        // --follow tracks file renames
+        // --diff-filter=A finds the commit where file was added
+        const createdDateCmd = `git -C "${worktree}" log --follow --diff-filter=A --format=%aI -- "${relativeFilePath}" | tail -1`
+        const createdDateOutput = execSync(createdDateCmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+
+        // Get last commit date (when file was last modified)
+        const modifiedDateCmd = `git -C "${worktree}" log -1 --format=%aI -- "${relativeFilePath}"`
+        const modifiedDateOutput = execSync(modifiedDateCmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+
+        if (createdDateOutput) {
+          // Convert to YYYY-MM-DD format for consistency with other dates
+          const createdDate = new Date(createdDateOutput).toISOString().substring(0, 10)
+          page.asciidoc.attributes['git-created-date'] = createdDate
+        }
+
+        if (modifiedDateOutput) {
+          // Convert to YYYY-MM-DD format
+          const modifiedDate = new Date(modifiedDateOutput).toISOString().substring(0, 10)
+          page.asciidoc.attributes['git-modified-date'] = modifiedDate
+        }
+
+        processedCount++
+      } catch (error) {
+        errorCount++
+        logger.debug(`Failed to get Git dates for ${page.src.path}: ${error.message}`)
+      }
+    })
+
+    const duration = Date.now() - startTime
+    logger.info(`Git dates added: processed=${processedCount}, skipped=${skippedCount}, errors=${errorCount}, duration=${duration}ms`)
+  })
+}

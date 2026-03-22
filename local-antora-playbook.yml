@@ -51,6 +51,7 @@ antora:
           attribute_name: docker-labs-index
   - require: './extensions/add-pages-to-root'
   - require: './extensions/unlisted-pages'
+  - require: './extensions/add-git-dates'
   - require: './extensions/convert-to-markdown'
   - require: './extensions/replace-attributes-in-attachments'
     data:
