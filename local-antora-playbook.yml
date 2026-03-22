@@ -2,52 +2,6 @@ site:
   title: Redpanda Docs Extensions and Macros
   start_page: preview:ROOT:test.adoc
   url: https://docs-extensions-and-macros.netlify.app
-  robots: |
-    User-agent: *
-    Allow: /
-    Crawl-delay: 1
-
-    # OpenAI GPT
-    User-agent: GPTBot
-    Allow: /
-
-    User-agent: ChatGPT-User
-    Allow: /
-
-    # Anthropic Claude
-    User-agent: Claude-Web
-    Allow: /
-
-    User-agent: anthropic-ai
-    Allow: /
-
-    # Perplexity
-    User-agent: Perplexity
-    Allow: /
-
-    User-agent: PerplexityBot
-    Allow: /
-
-    # Google AI
-    User-agent: Google-Extended
-    Allow: /
-
-    User-agent: GoogleOther
-    Allow: /
-
-    # Common Crawl
-    User-agent: CCBot
-    Allow: /
-
-    # Additional AI platforms
-    User-agent: cohere-ai
-    Allow: /
-
-    User-agent: Omgilibot
-    Allow: /
-
-    User-agent: FacebookBot
-    Allow: /
 urls:
   html_extension_style: indexify
 output:
