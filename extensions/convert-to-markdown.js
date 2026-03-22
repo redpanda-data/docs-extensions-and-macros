@@ -41,7 +41,6 @@ function generateFrontmatter(page) {
     'page-role',
     'docname',
     'doctitle',
-    'page-beta-text',
     'page-is-nearing-eol',
     'page-is-past-eol',
     'page-eol-date',
