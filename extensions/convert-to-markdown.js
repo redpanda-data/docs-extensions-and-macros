@@ -41,9 +41,13 @@ function generateFrontmatter(page) {
     'page-role',
     'docname',
     'doctitle',
+    'page-beta',
+    'page-beta-text',
     'page-is-nearing-eol',
     'page-is-past-eol',
     'page-eol-date',
+    'git-created-date',
+    'git-modified-date',
   ]
 
   // Add allowed page attributes to frontmatter
@@ -52,6 +56,11 @@ function generateFrontmatter(page) {
 
     // Only include attributes in our allowlist
     if (!allowedAttributes.includes(key)) return
+
+    // Only include page-beta-text if page-beta is true
+    if (key === 'page-beta-text' && !attrs['page-beta']) {
+      return
+    }
 
     // Skip empty attributes (AsciiDoc boolean flags)
     if (value === '') {
