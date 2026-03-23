@@ -6,12 +6,13 @@
  * This extension:
  * 1. Gets the first commit date (when file was created) -> git-created-date
  * 2. Gets the last commit date (when file was modified) -> git-modified-date
- * 3. Adds these as page attributes for use in templates
+ * 3. Adds these to page.asciidoc.attributes for use in templates and Markdown export
  *
- * IMPORTANT: This extension listens to 'documentsConverted' (not 'pagesComposed')
- * because the dates must be available BEFORE templates are rendered. The UI
- * Handlebars helpers query contentCatalog during template rendering to access
- * these attributes for structured data (JSON-LD datePublished/dateModified).
+ * IMPORTANT: This extension listens to 'documentsConverted' (before template rendering)
+ * so that the dates are available to Handlebars helpers that query contentCatalog during
+ * template rendering. The dates are used in:
+ * - Structured data (JSON-LD datePublished/dateModified)
+ * - Markdown frontmatter export (git-created-date, git-modified-date)
  *
  * Performance note: Uses git log with file paths to minimize overhead.
  * Only runs on pages that have origin info (skips virtual/generated pages).
