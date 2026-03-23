@@ -3,6 +3,21 @@
 
 This page is a preview of extensions and macros.
 
+== Git Dates Extension Test
+
+The `add-git-dates` extension extracts accurate file creation and modification dates from Git history and makes them available to templates.
+
+The extension automatically adds these dates by querying `git log`:
+
+* File created: 2023-07-06 (from first commit)
+* Last modified: 2025-08-08 (from most recent commit)
+
+These dates are:
+
+* Exported to Markdown frontmatter (`git-created-date`, `git-modified-date`)
+* Used in structured data (JSON-LD) for `datePublished` and `dateModified`
+* Available to Handlebars templates as `page.attributes.git-created-date`
+
 == Terms
 
 Terms must be defined in the `terms` module of the `shared` component (`shared/modules/terms/partials`).

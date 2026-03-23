@@ -8,6 +8,11 @@
  * 2. Gets the last commit date (when file was modified) -> git-modified-date
  * 3. Adds these as page attributes for use in templates
  *
+ * IMPORTANT: This extension listens to 'documentsConverted' (not 'pagesComposed')
+ * because the dates must be available BEFORE templates are rendered. The UI
+ * Handlebars helpers query contentCatalog during template rendering to access
+ * these attributes for structured data (JSON-LD datePublished/dateModified).
+ *
  * Performance note: Uses git log with file paths to minimize overhead.
  * Only runs on pages that have origin info (skips virtual/generated pages).
  */
@@ -18,7 +23,7 @@ const path = require('path')
 module.exports.register = function () {
   const logger = this.getLogger('add-git-dates-extension')
 
-  this.on('pagesComposed', ({ contentCatalog }) => {
+  this.on('documentsConverted', ({ contentCatalog }) => {
     const startTime = Date.now()
     let processedCount = 0
     let skippedCount = 0
