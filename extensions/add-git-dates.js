@@ -18,7 +18,7 @@
  * Only runs on pages that have origin info (skips virtual/generated pages).
  */
 
-const { execSync } = require('child_process')
+const { execFileSync } = require('child_process')
 const path = require('path')
 
 module.exports.register = function () {
@@ -55,12 +55,19 @@ module.exports.register = function () {
         // Get first commit date (when file was created)
         // --follow tracks file renames
         // --diff-filter=A finds the commit where file was added
-        const createdDateCmd = `git -C "${worktree}" log --follow --diff-filter=A --format=%aI -- "${relativeFilePath}" | tail -1`
-        const createdDateOutput = execSync(createdDateCmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+        // --reverse shows oldest commits first
+        const createdDateOutput = execFileSync(
+          'git',
+          ['-C', worktree, 'log', '--follow', '--diff-filter=A', '--format=%aI', '--reverse', '--', relativeFilePath],
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }
+        ).split('\n')[0].trim()
 
         // Get last commit date (when file was last modified)
-        const modifiedDateCmd = `git -C "${worktree}" log -1 --format=%aI -- "${relativeFilePath}"`
-        const modifiedDateOutput = execSync(modifiedDateCmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+        const modifiedDateOutput = execFileSync(
+          'git',
+          ['-C', worktree, 'log', '-1', '--format=%aI', '--', relativeFilePath],
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }
+        ).trim()
 
         if (createdDateOutput) {
           // Convert to YYYY-MM-DD format for consistency with other dates

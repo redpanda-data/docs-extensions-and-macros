@@ -1,5 +1,7 @@
 const path = require('path')
 const os = require('os')
+const yaml = require('js-yaml')
+const { toMarkdownUrl } = require('../extension-utils/url-utils')
 const TurndownService = require('turndown')
 const turndownPluginGfm = require('turndown-plugin-gfm')
 const { gfm } = turndownPluginGfm
@@ -40,7 +42,6 @@ function generateFrontmatter(page) {
     'page-edit-url',
     'page-role',
     'docname',
-    'doctitle',
     'page-beta',
     'page-beta-text',
     'page-is-nearing-eol',
@@ -78,30 +79,15 @@ function generateFrontmatter(page) {
   // Return empty string if no frontmatter
   if (Object.keys(frontmatter).length === 0) return ''
 
-  // Convert to YAML format
-  let yaml = '---\n'
-  Object.entries(frontmatter).forEach(([key, value]) => {
-    // Handle different value types
-    if (typeof value === 'boolean') {
-      yaml += `${key}: ${value}\n`
-    } else if (typeof value === 'number') {
-      yaml += `${key}: ${value}\n`
-    } else if (typeof value === 'string') {
-      // Escape strings that need quoting
-      const needsQuotes = value.includes(':') || value.includes('#') || value.includes('\n') ||
-                          value.startsWith('[') || value.startsWith('{')
-      if (needsQuotes) {
-        // Use double quotes and escape internal quotes
-        const escaped = value.replace(/"/g, '\\"')
-        yaml += `${key}: "${escaped}"\n`
-      } else {
-        yaml += `${key}: ${value}\n`
-      }
-    }
+  // Convert to YAML format using js-yaml library for proper escaping
+  const yamlContent = yaml.dump(frontmatter, {
+    lineWidth: -1, // Disable line wrapping
+    noRefs: true, // Disable anchors/aliases
+    quotingType: '"', // Use double quotes
+    forceQuotes: false, // Only quote when necessary
   })
-  yaml += '---\n\n'
 
-  return yaml
+  return `---\n${yamlContent}---\n\n`
 }
 
 module.exports.register = function () {
@@ -409,21 +395,8 @@ module.exports.register = function () {
           try {
             if (siteUrl && page.pub?.url) {
               const baseUrl = new URL(page.pub.url, siteUrl)
-              let pathname = baseUrl.pathname
-
-              // Convert paths like /docs/getting-started/ or /docs/getting-started/index.html
-              // to /docs/getting-started.md for better AI tool compatibility
-              if (pathname.endsWith('/')) {
-                // Remove trailing slash and add .md
-                baseUrl.pathname = pathname.replace(/\/$/, '.md')
-              } else if (pathname.endsWith('/index.html')) {
-                // Replace /index.html with .md
-                baseUrl.pathname = pathname.replace(/\/index\.html$/, '.md')
-              } else {
-                // Replace .html with .md
-                baseUrl.pathname = pathname.replace(/\.html$/, '.md')
-              }
-
+              // Convert HTML URL to markdown URL using shared utility
+              baseUrl.pathname = toMarkdownUrl(baseUrl.pathname)
               canonicalUrl = baseUrl.toString()
             }
           } catch (e) {
@@ -491,14 +464,8 @@ module.exports.register = function () {
       const htmlOut = page.out?.path
       if (!htmlOut) continue
 
-      // Convert paths like /docs/getting-started/index.html to /docs/getting-started.md
-      // for better AI tool compatibility (avoids all files being named index.md)
-      let mdOutPath
-      if (htmlOut.endsWith('/index.html')) {
-        mdOutPath = htmlOut.replace(/\/index\.html$/, '.md')
-      } else {
-        mdOutPath = htmlOut.replace(/\.html$/, '.md')
-      }
+      // Convert HTML path to markdown path using shared utility
+      const mdOutPath = toMarkdownUrl(htmlOut)
 
       siteCatalog.addFile({
         contents: page.markdownContents,
