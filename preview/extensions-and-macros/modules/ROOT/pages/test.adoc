@@ -1,5 +1,9 @@
 = Extensions and Macros Preview
+:description: This is a test description for structured data
+:keywords: testing, structured data, json-ld
 :page-categories: some-invalid-category
+:page-topic-type: tutorial
+:page-prerequisites: Basic knowledge of Antora
 
 This page is a preview of extensions and macros.
 

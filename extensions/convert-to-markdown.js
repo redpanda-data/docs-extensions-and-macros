@@ -40,7 +40,8 @@ function generateFrontmatter(page) {
     'page-version',
     'page-relative-src-path',
     'page-edit-url',
-    'page-role',
+    'page-topic-type',
+    'personas',
     'docname',
     'page-beta',
     'page-beta-text',
@@ -55,8 +56,11 @@ function generateFrontmatter(page) {
   Object.keys(attrs).forEach(key => {
     const value = attrs[key]
 
-    // Only include attributes in our allowlist
-    if (!allowedAttributes.includes(key)) return
+    // Allow all learning-objective-* attributes (learning-objective-1, -2, -3, etc.)
+    const isLearningObjective = key.startsWith('learning-objective-')
+
+    // Only include attributes in our allowlist or learning objectives
+    if (!allowedAttributes.includes(key) && !isLearningObjective) return
 
     // Only include page-beta-text if page-beta is true
     if (key === 'page-beta-text' && !attrs['page-beta']) {
@@ -65,6 +69,15 @@ function generateFrontmatter(page) {
 
     // Skip empty attributes (AsciiDoc boolean flags)
     if (value === '') {
+      // Special handling for version fields - use actual version from page source
+      if (key === 'page-version') {
+        frontmatter[key] = page.src?.version || 'master'
+        return
+      }
+      if (key === 'page-component-version') {
+        frontmatter[key] = page.src?.version || 'master'
+        return
+      }
       // Preserve important boolean flags
       if (key.startsWith('page-')) {
         frontmatter[key] = true
@@ -76,16 +89,60 @@ function generateFrontmatter(page) {
     frontmatter[key] = value
   })
 
+  // Transform EOL fields to be more user-friendly
+  if (frontmatter['page-is-nearing-eol'] || frontmatter['page-is-past-eol']) {
+    let eolStatus = 'supported'
+    if (frontmatter['page-is-past-eol'] === 'true' || frontmatter['page-is-past-eol'] === true) {
+      eolStatus = 'past end-of-life'
+    } else if (frontmatter['page-is-nearing-eol'] === 'true' || frontmatter['page-is-nearing-eol'] === true) {
+      eolStatus = 'nearing end-of-life'
+    }
+    frontmatter['support-status'] = eolStatus
+    // Keep original fields for compatibility
+  }
+
+  // Transform beta fields to be more user-friendly
+  if (frontmatter['page-beta'] === 'true' || frontmatter['page-beta'] === true) {
+    let betaStatus = 'beta'
+    if (frontmatter['page-beta-text']) {
+      betaStatus = `beta - ${frontmatter['page-beta-text']}`
+    }
+    frontmatter['release-status'] = betaStatus
+  }
+
   // Return empty string if no frontmatter
   if (Object.keys(frontmatter).length === 0) return ''
 
   // Convert to YAML format using js-yaml library for proper escaping
-  const yamlContent = yaml.dump(frontmatter, {
+  let yamlContent = yaml.dump(frontmatter, {
     lineWidth: -1, // Disable line wrapping
     noRefs: true, // Disable anchors/aliases
     quotingType: '"', // Use double quotes
     forceQuotes: false, // Only quote when necessary
   })
+
+  // Add helpful comments for EOL (end-of-life) fields
+  // Find the first EOL-related field and add comment before it
+  if (frontmatter['page-is-nearing-eol'] || frontmatter['page-is-past-eol'] || frontmatter['support-status']) {
+    const eolFieldRegex = /^(page-is-nearing-eol:|page-is-past-eol:|support-status:)/m
+    if (!yamlContent.includes('# EOL =')) {
+      yamlContent = yamlContent.replace(
+        eolFieldRegex,
+        '# EOL = End-of-Life (support lifecycle status)\n$1'
+      )
+    }
+  }
+
+  // Add helpful comments for beta fields
+  if (frontmatter['page-beta'] || frontmatter['release-status']) {
+    const betaFieldRegex = /^(page-beta:|release-status:)/m
+    if (!yamlContent.includes('# Beta release')) {
+      yamlContent = yamlContent.replace(
+        betaFieldRegex,
+        '# Beta release status\n$1'
+      )
+    }
+  }
 
   return `---\n${yamlContent}---\n\n`
 }
