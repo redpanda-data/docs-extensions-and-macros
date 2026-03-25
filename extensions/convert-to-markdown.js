@@ -48,8 +48,8 @@ function generateFrontmatter(page) {
     'page-is-nearing-eol',
     'page-is-past-eol',
     'page-eol-date',
-    'git-created-date',
-    'git-modified-date',
+    'page-git-created-date',
+    'page-git-modified-date',
   ]
 
   // Add allowed page attributes to frontmatter
