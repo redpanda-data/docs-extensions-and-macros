@@ -50,7 +50,24 @@ function generateFrontmatter(page) {
     'page-eol-date',
     'page-git-created-date',
     'page-git-modified-date',
+    // Component-specific version attributes (from antora.yml)
+    // ROOT component (Self-Managed Redpanda)
+    'full-version', // Redpanda version (e.g., 25.3.5) - excluded for redpanda-connect
+    'latest-redpanda-tag',
+    'latest-console-tag',
+    'latest-operator-version',
+    // redpanda-connect component
+    'latest-connect-version',
   ]
+
+  // Attributes to exclude for specific components
+  const componentExclusions = {
+    'redpanda-connect': ['full-version'], // Connect uses latest-connect-version instead
+  }
+
+  // Get component name for conditional exclusions
+  const componentName = page.src?.component || attrs['page-component-name'] || ''
+  const excludedForComponent = componentExclusions[componentName] || []
 
   // Add allowed page attributes to frontmatter
   Object.keys(attrs).forEach(key => {
@@ -61,6 +78,9 @@ function generateFrontmatter(page) {
 
     // Only include attributes in our allowlist or learning objectives
     if (!allowedAttributes.includes(key) && !isLearningObjective) return
+
+    // Skip attributes excluded for this specific component
+    if (excludedForComponent.includes(key)) return
 
     // Only include page-beta-text if page-beta is true
     if (key === 'page-beta-text' && !attrs['page-beta']) {
