@@ -22,7 +22,7 @@ content:
     branches: main
 ui:
   bundle:
-    url: /Users/jakecahill/Documents/docs-ui/build/ui-bundle.zip
+    url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip
     snapshot: true
 asciidoc:
   attributes:
@@ -35,6 +35,7 @@ asciidoc:
   - './asciidoc-extensions/add-line-numbers-highlights'
 antora:
   extensions:
+  - require: './extensions/configure-cache-dir'
   - require: './extensions/git-full-clone'
   - require: './extensions/add-global-attributes'
   - './extensions/version-fetcher/set-latest-version'
