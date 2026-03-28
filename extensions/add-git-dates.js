@@ -48,7 +48,10 @@ function formatDate (timestamp) {
 
 /**
  * Build a map of filepath -> {created, modified} dates from git log
- * Walks the entire log once, tracking first and last commit for each file
+ * Walks the entire log once, tracking first and last commit for each MODIFIED file
+ *
+ * This compares each commit's tree with its parent to find which files actually changed,
+ * rather than just looking at all files in the tree (which would give incorrect dates).
  *
  * @param {Object} git - isomorphic-git module
  * @param {string} gitdir - Path to .git directory
@@ -71,27 +74,45 @@ async function buildFileDateMap (git, gitdir, ref, logger) {
 
     logger.info(`Walking ${commits.length} commits for ${path.basename(gitdir)} (ref: ${ref})`)
 
+    // Build tree cache to avoid re-reading trees
+    const treeCache = new Map()
+
     // Process commits from newest to oldest
     // First occurrence = modified date, last occurrence = created date
-    for (const commit of commits) {
+    for (let i = 0; i < commits.length; i++) {
+      const commit = commits[i]
       const timestamp = commit.commit.committer.timestamp
       const date = formatDate(timestamp)
 
       try {
-        // The commit object has the tree OID directly on commit.commit.tree
-        const treeOid = commit.commit.tree
+        const currentTreeOid = commit.commit.tree
+        const parentCommits = commit.commit.parent || []
 
-        // Walk the tree to get all files
-        const files = await walkTree(git, gitdir, treeOid, '', cache)
+        // Get files in current commit's tree
+        const currentFiles = await getTreeFiles(git, gitdir, currentTreeOid, '', cache, treeCache)
 
-        for (const filepath of files) {
-          if (!fileDates.has(filepath)) {
-            // First time seeing this file (from newest commit)
-            fileDates.set(filepath, { created: date, modified: date })
-          } else {
-            // Update created date (older commit)
-            const entry = fileDates.get(filepath)
-            entry.created = date
+        // Get files in parent commit's tree (if parent exists)
+        let parentFiles = new Map()
+        if (parentCommits.length > 0) {
+          const parentCommit = await git.readCommit({ fs, gitdir, oid: parentCommits[0], cache })
+          const parentTreeOid = parentCommit.commit.tree
+          parentFiles = await getTreeFiles(git, gitdir, parentTreeOid, '', cache, treeCache)
+        }
+
+        // Find files that were added or modified (different OID from parent)
+        for (const [filepath, oid] of currentFiles) {
+          const parentOid = parentFiles.get(filepath)
+          const isModified = !parentOid || parentOid !== oid
+
+          if (isModified) {
+            if (!fileDates.has(filepath)) {
+              // First time seeing this file modified (from newest commit)
+              fileDates.set(filepath, { created: date, modified: date })
+            } else {
+              // Update created date (older commit where file was modified)
+              const entry = fileDates.get(filepath)
+              entry.created = date
+            }
           }
         }
       } catch (err) {
@@ -107,16 +128,24 @@ async function buildFileDateMap (git, gitdir, ref, logger) {
 }
 
 /**
- * Recursively walk a git tree to get all file paths
+ * Recursively walk a git tree to get all file paths with their OIDs
+ * Returns a Map of filepath → OID for comparison between commits
+ *
  * @param {Object} git - isomorphic-git module
  * @param {string} gitdir - Path to .git directory
  * @param {string} oid - Tree object ID
  * @param {string} prefix - Current path prefix
  * @param {Object} cache - Git object cache
- * @returns {Promise<string[]>} Array of file paths
+ * @param {Map} treeCache - Cache of tree OID → files map
+ * @returns {Promise<Map<string, string>>} Map of filepath → blob OID
  */
-async function walkTree (git, gitdir, oid, prefix, cache) {
-  const files = []
+async function getTreeFiles (git, gitdir, oid, prefix, cache, treeCache) {
+  // Check tree cache first
+  if (treeCache.has(oid)) {
+    return treeCache.get(oid)
+  }
+
+  const files = new Map()
 
   try {
     const { tree } = await git.readTree({
@@ -130,13 +159,18 @@ async function walkTree (git, gitdir, oid, prefix, cache) {
       const filepath = prefix ? `${prefix}/${entry.path}` : entry.path
 
       if (entry.type === 'blob') {
-        files.push(filepath)
+        files.set(filepath, entry.oid)
       } else if (entry.type === 'tree') {
         // Recurse into subdirectory
-        const subfiles = await walkTree(git, gitdir, entry.oid, filepath, cache)
-        files.push(...subfiles)
+        const subfiles = await getTreeFiles(git, gitdir, entry.oid, filepath, cache, treeCache)
+        for (const [subpath, suboid] of subfiles) {
+          files.set(subpath, suboid)
+        }
       }
     }
+
+    // Cache this tree's files
+    treeCache.set(oid, files)
   } catch (err) {
     // Skip trees that can't be read
   }
@@ -163,8 +197,8 @@ module.exports.register = function () {
       return
     }
 
-    // Group pages by gitdir to process each repo only once
-    const pagesByRepo = new Map()
+    // Group pages by BOTH gitdir AND ref (since same repo can have multiple branches/versions)
+    const pagesByRepoAndRef = new Map()
 
     contentCatalog.getPages().forEach((page) => {
       const origin = page.src?.origin
@@ -186,26 +220,32 @@ module.exports.register = function () {
 
       const startPath = origin.startPath || ''
       const relativeFilePath = startPath ? path.join(startPath, page.src.path) : page.src.path
+      const ref = origin.refhash || origin.refname || 'HEAD'
 
-      // Group by repo
-      if (!pagesByRepo.has(gitdir)) {
-        pagesByRepo.set(gitdir, {
-          ref: origin.refhash || origin.refname || 'HEAD',
+      // Create composite key: gitdir + ref to handle multiple branches per repo
+      const repoRefKey = `${gitdir}::${ref}`
+
+      // Group by repo AND ref
+      if (!pagesByRepoAndRef.has(repoRefKey)) {
+        pagesByRepoAndRef.set(repoRefKey, {
+          gitdir,
+          ref,
           pages: []
         })
       }
-      pagesByRepo.get(gitdir).pages.push({ page, relativeFilePath })
+      pagesByRepoAndRef.get(repoRefKey).pages.push({ page, relativeFilePath })
     })
 
-    const totalPages = Array.from(pagesByRepo.values()).reduce((sum, r) => sum + r.pages.length, 0)
-    logger.info(`Processing ${totalPages} pages across ${pagesByRepo.size} repos for git dates (skipped ${skippedCount} virtual/generated)`)
+    const totalPages = Array.from(pagesByRepoAndRef.values()).reduce((sum, r) => sum + r.pages.length, 0)
+    const repoCount = new Set(Array.from(pagesByRepoAndRef.values()).map(r => r.gitdir)).size
+    logger.info(`Processing ${totalPages} pages across ${repoCount} repos (${pagesByRepoAndRef.size} branches) for git dates (skipped ${skippedCount} virtual/generated)`)
 
-    // Process each repository
-    for (const [gitdir, { ref, pages }] of pagesByRepo) {
+    // Process each repository + ref combination
+    for (const [repoRefKey, { gitdir, ref, pages }] of pagesByRepoAndRef) {
       const repoStartTime = Date.now()
 
       try {
-        // Build the filepath -> dates map for this repo
+        // Build the filepath -> dates map for this repo + ref
         const fileDateMap = await buildFileDateMap(git, gitdir, ref, logger)
 
         // Apply dates to pages
@@ -219,9 +259,9 @@ module.exports.register = function () {
         }
 
         const repoTime = Date.now() - repoStartTime
-        logger.debug(`Processed ${pages.length} pages from ${gitdir} in ${repoTime}ms (map size: ${fileDateMap.size})`)
+        logger.debug(`Processed ${pages.length} pages from ${path.basename(gitdir)}@${ref.substring(0,8)} in ${repoTime}ms (map size: ${fileDateMap.size})`)
       } catch (err) {
-        logger.warn(`Failed to process repo ${gitdir}: ${err.message}`)
+        logger.warn(`Failed to process repo ${gitdir}@${ref}: ${err.message}`)
       }
     }
 
