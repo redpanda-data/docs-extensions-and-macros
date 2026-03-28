@@ -7,6 +7,23 @@ const turndownPluginGfm = require('turndown-plugin-gfm')
 const { gfm } = turndownPluginGfm
 
 /**
+ * Decode HTML entities in a string
+ * @param {string} str - String with potential HTML entities
+ * @returns {string} Decoded string
+ */
+function decodeHtmlEntities (str) {
+  if (!str || typeof str !== 'string') return str
+  return str
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&apos;/g, "'")
+}
+
+/**
  * Converts AsciiDoc page attributes to YAML frontmatter
  * @param {Object} page - The page object with asciidoc attributes
  * @returns {string} YAML frontmatter string or empty string if no attributes
@@ -14,14 +31,14 @@ const { gfm } = turndownPluginGfm
 function generateFrontmatter(page) {
   const frontmatter = {}
 
-  // Add title
+  // Add title (decode HTML entities from AsciiDoc processing)
   if (page.asciidoc?.doctitle) {
-    frontmatter.title = page.asciidoc.doctitle
+    frontmatter.title = decodeHtmlEntities(page.asciidoc.doctitle)
   }
 
   // Add navigation title if different from doctitle
   if (page.asciidoc?.navtitle && page.asciidoc.navtitle !== page.asciidoc?.doctitle) {
-    frontmatter.navtitle = page.asciidoc.navtitle
+    frontmatter.navtitle = decodeHtmlEntities(page.asciidoc.navtitle)
   }
 
   // Get all page attributes

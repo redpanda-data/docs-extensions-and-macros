@@ -1,0 +1,91 @@
+site:
+  title: Redpanda Docs Extensions and Macros
+  start_page: preview:ROOT:test.adoc
+  url: https://docs-extensions-and-macros.netlify.app
+urls:
+  html_extension_style: indexify
+output:
+  clean: true
+content:
+  sources:
+  - url: .
+    branches: HEAD
+    start_paths: [preview/extensions-and-macros, preview/shared, preview/home]
+  - url: https://github.com/redpanda-data/docs
+    branches: [main, v/*, api, 'site-search', '!v-end-of-life/*']
+  - url: https://github.com/redpanda-data/redpanda-labs
+    branches: main
+    start_paths: [docs,'*/docs']
+  - url: https://github.com/redpanda-data/rp-connect-docs
+    branches: main
+  - url: https://github.com/redpanda-data/cloud-docs
+    branches: main
+ui:
+  bundle:
+    url: /Users/jakecahill/Documents/docs-ui/build/ui-bundle.zip
+    snapshot: true
+asciidoc:
+  attributes:
+  extensions:
+  - '@asciidoctor/tabs'
+  - './macros/glossary'
+  - './macros/config-ref'
+  - './macros/helm-ref'
+  - './macros/rp-connect-components'
+  - './asciidoc-extensions/add-line-numbers-highlights'
+antora:
+  extensions:
+  - require: './extensions/git-full-clone'
+  - require: './extensions/add-global-attributes'
+  - './extensions/version-fetcher/set-latest-version'
+  - './extensions/algolia-indexer/index'
+  - require: './extensions/generate-rp-connect-info'
+  - require: './extensions/collect-bloblang-samples'
+  - require: './extensions/generate-rp-connect-categories'
+  - require: './extensions/generate-index-data'
+    data:
+      sets:
+        docker_labs:
+          component: redpanda-labs
+          filter: docker-compose
+          env_type: Docker
+          attribute_name: docker-labs-index
+  - require: './extensions/add-pages-to-root'
+  - require: './extensions/unlisted-pages'
+  - require: './extensions/add-git-dates'
+  - require: './extensions/convert-to-markdown'
+  - require: './extensions/replace-attributes-in-attachments'
+    data:
+      replacements:
+        - components:
+          - 'ROOT'
+          - 'redpanda-labs'
+          file_patterns:
+            - '**/docker-compose.yaml'
+            - '**/docker-compose.yml'
+        - components:
+            - 'home'
+          file_patterns:
+            - '**/llms.adoc'
+  - require: './extensions/convert-llms-to-txt.js'
+  - require: './extensions/archive-attachments'
+    data:
+      archives:
+        - component: 'preview'
+          output_archive: 'test.tar.gz'
+          file_patterns:
+            - '**/test.yaml'
+  - require: './extensions/compute-end-of-life'
+    data:
+      eol_settings:
+        - component: 'preview'
+          supported_months: 12
+          warning_weeks: 8
+          eol_doc: https://support.redpanda.com/hc/en-us/articles/20617574366743-Redpanda-Supported-Versions
+          upgrade_doc: ROOT:upgrade:index.adoc
+  - require: './extensions/unpublish-pages'
+  - require: './extensions/validate-attributes'
+  - require: './extensions/find-related-docs'
+  - require: './extensions/find-related-labs'
+  - require: './extensions/aggregate-terms'
+
