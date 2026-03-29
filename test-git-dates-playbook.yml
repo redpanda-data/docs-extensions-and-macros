@@ -28,5 +28,6 @@ antora:
   - require: './extensions/add-global-attributes'
   - './extensions/version-fetcher/set-latest-version'
   - require: './extensions/add-git-dates'
+  - require: './extensions/add-faq-structured-data'
   - require: './extensions/convert-to-markdown'
   - require: './extensions/unlisted-pages'
