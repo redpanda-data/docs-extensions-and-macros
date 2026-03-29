@@ -208,7 +208,11 @@ function convertSitemapIndexToMarkdown(sitemaps) {
     const lastmod = sitemap.lastmod ? sitemap.lastmod[0] : ''
 
     if (loc) {
-      markdown += `- [${path.basename(loc)}](${loc})`
+      // Convert .xml URL to .md for markdown version
+      const mdUrl = loc.replace(/\.xml$/, '.md')
+      const basename = path.basename(loc)
+
+      markdown += `- [${basename}](${mdUrl})`
       if (lastmod) {
         markdown += ` (modified: ${lastmod})`
       }
