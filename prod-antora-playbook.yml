@@ -35,6 +35,8 @@ asciidoc:
   - './asciidoc-extensions/add-line-numbers-highlights'
 antora:
   extensions:
+  - require: './extensions/configure-cache-dir'
+  - require: './extensions/git-full-clone'
   - require: './extensions/add-global-attributes'
   - './extensions/version-fetcher/set-latest-version'
   - './extensions/algolia-indexer/index'
@@ -67,7 +69,6 @@ antora:
           file_patterns:
             - '**/llms.adoc'
   - require: './extensions/convert-llms-to-txt.js'
-  - require: './extensions/convert-sitemap-to-markdown'
   - require: './extensions/archive-attachments'
     data:
       archives:

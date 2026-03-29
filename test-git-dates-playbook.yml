@@ -1,0 +1,33 @@
+site:
+  title: Git Dates Test Build
+  start_page: preview:ROOT:test.adoc
+  url: https://docs-extensions-and-macros.netlify.app
+urls:
+  html_extension_style: indexify
+output:
+  dir: ./docs
+  clean: true
+content:
+  sources:
+  - url: .
+    branches: HEAD
+    start_paths: [preview/extensions-and-macros]
+  - url: https://github.com/redpanda-data/docs
+    branches: [main]  # Test main branch
+ui:
+  bundle:
+    url: /Users/jakecahill/Documents/docs-ui/build/ui-bundle.zip
+    snapshot: true
+asciidoc:
+  attributes:
+  extensions:
+  - '@asciidoctor/tabs'
+antora:
+  extensions:
+  - require: './extensions/git-full-clone'
+  - require: './extensions/add-global-attributes'
+  - './extensions/version-fetcher/set-latest-version'
+  - require: './extensions/add-git-dates'
+  - require: './extensions/add-faq-structured-data'
+  - require: './extensions/convert-to-markdown'
+  - require: './extensions/unlisted-pages'
