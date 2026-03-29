@@ -21,15 +21,17 @@ antora:
 
 ## What It Does
 
-For each `sitemap.xml` in your published site, the extension:
+For each sitemap XML file in your published site, the extension:
 
-1. **Parses the XML** using xml2js
-2. **Organizes URLs** by path/component
-3. **Generates markdown** with:
+1. **Finds all sitemaps**: Detects `sitemap.xml`, `sitemap-0.xml`, `sitemap-1.xml`, etc.
+2. **Parses the XML** using xml2js
+3. **Organizes URLs** by path/component
+4. **Generates individual markdown files** for each sitemap:
    - Grouped sections by component
    - Human-readable page titles
    - Metadata (last modified, change frequency, priority)
    - Direct links to pages
+5. **Creates master sitemap** (`sitemap-all.md`): When multiple sitemaps exist, generates a combined view of all pages
 
 ## Generated Format
 
@@ -88,7 +90,42 @@ This sitemap index contains 5 sub-sitemap(s):
 
 ## Example Output
 
-Given a sitemap.xml at `/docs/sitemap.xml`, the extension creates `/docs/sitemap.md`:
+### Individual Sitemap Files
+
+Given multiple sitemaps:
+- `/docs/sitemap.xml` → `/docs/sitemap.md` (sitemap index)
+- `/docs/sitemap-0.xml` → `/docs/sitemap-0.md` (first 1000 pages)
+- `/docs/sitemap-1.xml` → `/docs/sitemap-1.md` (next 1000 pages)
+- etc.
+
+### Master Combined Sitemap
+
+The extension also creates `/docs/sitemap-all.md` combining all pages:
+
+```markdown
+# Complete Documentation Sitemap
+
+> Combined view of all 2145 documentation pages from 3 sitemap(s)
+
+## Source Sitemaps
+
+- [sitemap.xml](sitemap.md)
+- [sitemap-0.xml](sitemap-0.md)
+- [sitemap-1.xml](sitemap-1.md)
+
+## Pages
+
+Total pages: 2145
+
+### Current
+- [Home](https://docs.redpanda.com/current/) (modified: 2026-03-29)
+- [Get Started](https://docs.redpanda.com/current/get-started/) (modified: 2026-03-29)
+...
+```
+
+### Individual Sitemap Example
+
+Each individual sitemap markdown file (e.g., `sitemap-0.md`):
 
 ```markdown
 # Sitemap

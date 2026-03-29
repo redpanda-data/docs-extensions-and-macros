@@ -35,9 +35,18 @@ module.exports.register = function ({ config }) {
 
         logger.info(`Found ${sitemapFiles.length} sitemap file(s)`)
 
-        // Convert each sitemap
+        // Convert each sitemap and collect all URLs
+        const allUrls = []
         for (const sitemapPath of sitemapFiles) {
-          await convertSitemapToMarkdown(sitemapPath, logger)
+          const urls = await convertSitemapToMarkdown(sitemapPath, logger)
+          if (urls) {
+            allUrls.push(...urls)
+          }
+        }
+
+        // Create combined master sitemap if we have multiple sitemaps
+        if (sitemapFiles.length > 1 && allUrls.length > 0) {
+          await createMasterSitemap(outputDir, sitemapFiles, allUrls, logger)
         }
 
         const duration = ((Date.now() - startTime) / 1000).toFixed(2)
@@ -50,7 +59,8 @@ module.exports.register = function ({ config }) {
 }
 
 /**
- * Recursively find all sitemap.xml files in a directory
+ * Recursively find all sitemap XML files in a directory
+ * Matches: sitemap.xml, sitemap-0.xml, sitemap-1.xml, etc.
  */
 function findSitemapFiles(dir) {
   const sitemaps = []
@@ -64,7 +74,7 @@ function findSitemapFiles(dir) {
 
         if (entry.isDirectory()) {
           search(fullPath)
-        } else if (entry.name === 'sitemap.xml') {
+        } else if (entry.name === 'sitemap.xml' || /^sitemap-\d+\.xml$/.test(entry.name)) {
           sitemaps.push(fullPath)
         }
       }
@@ -74,11 +84,39 @@ function findSitemapFiles(dir) {
   }
 
   search(dir)
-  return sitemaps
+  return sitemaps.sort() // Sort to ensure consistent order
+}
+
+/**
+ * Create a master combined sitemap from all individual sitemaps
+ */
+async function createMasterSitemap(outputDir, sitemapFiles, allUrls, logger) {
+  const masterPath = path.join(outputDir, 'sitemap-all.md')
+
+  let markdown = '# Complete Documentation Sitemap\n\n'
+  markdown += `> Combined view of all ${allUrls.length} documentation pages from ${sitemapFiles.length} sitemap(s)\n\n`
+
+  // Add overview of source sitemaps
+  markdown += '## Source Sitemaps\n\n'
+  for (const sitemapPath of sitemapFiles) {
+    const basename = path.basename(sitemapPath)
+    const mdName = basename.replace(/\.xml$/, '.md')
+    markdown += `- [${basename}](${mdName})\n`
+  }
+  markdown += '\n'
+
+  // Add all URLs grouped by component
+  if (allUrls.length > 0) {
+    markdown += convertUrlsetToMarkdown(allUrls)
+  }
+
+  fs.writeFileSync(masterPath, markdown, 'utf8')
+  logger.info(`Generated master sitemap: sitemap-all.md (${allUrls.length} pages)`)
 }
 
 /**
  * Convert a sitemap.xml file to sitemap.md
+ * Returns the URLs found in this sitemap for aggregation
  */
 async function convertSitemapToMarkdown(sitemapPath, logger) {
   const xmlContent = fs.readFileSync(sitemapPath, 'utf8')
@@ -90,9 +128,12 @@ async function convertSitemapToMarkdown(sitemapPath, logger) {
     let markdown = '# Sitemap\n\n'
     markdown += `> Documentation sitemap generated from ${path.basename(sitemapPath)}\n\n`
 
+    let urls = []
+
     // Handle standard sitemap
     if (parsed.urlset && parsed.urlset.url) {
-      markdown += convertUrlsetToMarkdown(parsed.urlset.url)
+      urls = parsed.urlset.url
+      markdown += convertUrlsetToMarkdown(urls)
     }
 
     // Handle sitemap index
@@ -102,8 +143,11 @@ async function convertSitemapToMarkdown(sitemapPath, logger) {
 
     fs.writeFileSync(outputPath, markdown, 'utf8')
     logger.debug(`Generated ${path.basename(outputPath)}`)
+
+    return urls
   } catch (error) {
     logger.warn(`Failed to parse ${sitemapPath}: ${error.message}`)
+    return []
   }
 }
 
