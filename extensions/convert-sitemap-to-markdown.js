@@ -97,11 +97,14 @@ function findSitemapFiles(dir) {
 async function createMasterSitemap(outputDir, sitemapFiles, allUrls, logger) {
   const masterPath = path.join(outputDir, 'sitemap-all.md')
 
-  let markdown = '# Complete Documentation Sitemap\n\n'
-  markdown += `> Combined view of all ${allUrls.length} documentation pages from ${sitemapFiles.length} sitemap(s)\n\n`
+  const sitemapCount = sitemapFiles.length
+  const sitemapWord = sitemapCount === 1 ? 'sitemap' : 'sitemaps'
+
+  let markdown = '# Complete documentation sitemap\n\n'
+  markdown += `> Combined view of all ${allUrls.length.toLocaleString()} documentation pages from ${sitemapCount} ${sitemapWord}\n\n`
 
   // Add overview of source sitemaps
-  markdown += '## Source Sitemaps\n\n'
+  markdown += '## Source sitemaps\n\n'
   for (const sitemapPath of sitemapFiles) {
     const basename = path.basename(sitemapPath)
     const mdName = basename.replace(/\.xml$/, '.md')
@@ -160,7 +163,7 @@ async function convertSitemapToMarkdown(sitemapPath, logger) {
  */
 function convertUrlsetToMarkdown(urls) {
   let markdown = '## Pages\n\n'
-  markdown += `Total pages: ${urls.length}\n\n`
+  markdown += `Total pages: ${urls.length.toLocaleString()}\n\n`
 
   // Group URLs by component/path
   const groups = groupUrlsByPath(urls)
@@ -200,8 +203,11 @@ function convertUrlsetToMarkdown(urls) {
  * Convert sitemap index to markdown
  */
 function convertSitemapIndexToMarkdown(sitemaps) {
-  let markdown = '## Sitemap Index\n\n'
-  markdown += `This sitemap index contains ${sitemaps.length} sub-sitemap(s):\n\n`
+  const count = sitemaps.length
+  const sitemapWord = count === 1 ? 'sub-sitemap' : 'sub-sitemaps'
+
+  let markdown = '## Sitemap index\n\n'
+  markdown += `This sitemap index contains ${count} ${sitemapWord}:\n\n`
 
   for (const sitemap of sitemaps) {
     const loc = sitemap.loc ? sitemap.loc[0] : ''
