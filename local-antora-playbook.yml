@@ -67,6 +67,7 @@ antora:
           file_patterns:
             - '**/llms.adoc'
   - require: './extensions/convert-llms-to-txt.js'
+  - require: './extensions/convert-sitemap-to-markdown'
   - require: './extensions/archive-attachments'
     data:
       archives:

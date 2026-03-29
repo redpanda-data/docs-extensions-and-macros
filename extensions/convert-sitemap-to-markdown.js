@@ -20,9 +20,12 @@ module.exports.register = function ({ config }) {
   const logger = this.getLogger('convert-sitemap-to-markdown')
 
   this
-    .on('beforePublish', async ({ playbook, siteCatalog }) => {
+    .on('sitePublished', async ({ playbook, siteCatalog }) => {
       const startTime = Date.now()
       const outputDir = playbook.output.dir
+
+      logger.info('Sitemap to markdown converter starting...')
+      logger.info(`Output directory: ${outputDir}`)
 
       try {
         // Find all sitemap.xml files
@@ -60,7 +63,7 @@ module.exports.register = function ({ config }) {
 
 /**
  * Recursively find all sitemap XML files in a directory
- * Matches: sitemap.xml, sitemap-0.xml, sitemap-1.xml, etc.
+ * Matches: sitemap.xml, sitemap-0.xml, sitemap-ROOT.xml, sitemap-home.xml, etc.
  */
 function findSitemapFiles(dir) {
   const sitemaps = []
@@ -74,7 +77,8 @@ function findSitemapFiles(dir) {
 
         if (entry.isDirectory()) {
           search(fullPath)
-        } else if (entry.name === 'sitemap.xml' || /^sitemap-\d+\.xml$/.test(entry.name)) {
+        } else if (/^sitemap(-[^/]+)?\.xml$/.test(entry.name)) {
+          // Matches sitemap.xml, sitemap-*.xml (any suffix)
           sitemaps.push(fullPath)
         }
       }
