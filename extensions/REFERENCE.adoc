@@ -766,3 +766,146 @@ The processed attribute can be used in Handlebars templates:
   {{/each}}
 </div>
 ```
+
+== Add Git dates
+
+This extension adds accurate git-based created and modified dates to documentation pages by analyzing commit history. It uses isomorphic-git (bundled with Antora) to walk the commit history of each repository and detects actual file modifications by comparing tree objects between commits.
+
+The extension adds the following attributes to each page:
+
+- `page-git-created-date`: The date when the file was first committed (YYYY-MM-DD format)
+- `page-git-modified-date`: The date when the file was last modified (YYYY-MM-DD format)
+
+These attributes are available for use in UI templates (for metadata, display banners, etc.) and are exported to markdown files for AI consumption.
+
+=== How it works
+
+. Groups pages by repository AND branch (same repo can have multiple branches: v/23.3, v/24.1, main)
+. Walks git log once per repo+branch using isomorphic-git
+. Compares tree objects between commits to detect actual file modifications (not just file existence)
+. Builds a filepath → {created, modified} map for each repo+branch
+. Applies dates to pages based on their source file path
+
+This approach is **O(commits)** instead of **O(files × commits)**, making it efficient for large repositories.
+
+=== Performance
+
+- **Full clone** (depth=0): ~15s for 4128 pages across 12 branches (14.5s git processing)
+- **Per-page overhead**: ~3-5ms per page
+
+=== Environment variables
+
+This extension does not require any environment variables.
+
+=== Configuration options
+
+This extension does not require configuration options. However, it works best with **full git clones** rather than shallow clones.
+
+To enable full clones for remote repositories, use the `git-full-clone` extension:
+
+```yaml
+antora:
+  extensions:
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/git-full-clone'
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/add-git-dates'
+```
+
+=== Registration
+
+```yaml
+antora:
+  extensions:
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/add-git-dates'
+```
+
+=== UI integration
+
+The git dates are available in Handlebars templates via `page.attributes`:
+
+```html
+{{#with page.attributes.git-created-date}}
+  <meta name="datePublished" content="{{this}}">
+{{/with}}
+{{#with page.attributes.git-modified-date}}
+  <meta name="dateModified" content="{{this}}">
+{{/with}}
+```
+
+They are also included in schema.org structured data for SEO.
+
+== FAQ structured data
+
+This extension generates schema.org FAQPage JSON-LD for better SEO and Google rich results. Writers define FAQs using page attributes, and the extension generates compliant structured data in the page `<head>`.
+
+=== Environment variables
+
+This extension does not require any environment variables.
+
+=== Configuration options
+
+This extension does not require configuration options.
+
+=== Registration
+
+```yaml
+antora:
+  extensions:
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/add-faq-structured-data'
+```
+
+=== Usage
+
+Add FAQ attributes to your AsciiDoc page header:
+
+```asciidoc
+= My Documentation Page
+:page-faq-1-question: How do I install Redpanda?
+:page-faq-1-answer: Download from redpanda.com and run the installer. See our installation guide for details.
+:page-faq-1-anchor: #installation
+
+:page-faq-2-question: What are the system requirements?
+:page-faq-2-answer: You need at least 2GB of RAM and 2 CPU cores for development.
+:page-faq-2-anchor: #requirements
+
+:page-faq-3-question: Does Redpanda support Kafka APIs?
+:page-faq-3-answer: Yes! Redpanda is fully compatible with Kafka APIs.
+```
+
+**Required attributes per FAQ:**
+
+- `page-faq-N-question` - The FAQ question
+- `page-faq-N-answer` - The FAQ answer
+
+**Optional:**
+
+- `page-faq-N-anchor` - Link to page section (e.g., `#installation`)
+
+**Tips:**
+
+- FAQs must be numbered sequentially (1, 2, 3...)
+- Answers can reference prose content: "See our installation guide for details"
+- Anchors create deep links to related content on the page
+- Keep answers concise (Google truncates after ~300 characters)
+
+=== Generated output
+
+The extension generates schema.org FAQPage JSON-LD in the page `<head>`:
+
+```json
+{
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "How do I install Redpanda?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Download from redpanda.com and run the installer."
+      },
+      "url": "https://docs.redpanda.com/page#installation"
+    }
+  ]
+}
+```
+
+This structured data appears in Google search results as rich snippets, improving SEO and click-through rates.

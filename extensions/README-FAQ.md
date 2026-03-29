@@ -2,50 +2,36 @@
 
 Generates schema.org FAQPage JSON-LD for better SEO and Google rich results.
 
-## Simple Usage (Recommended)
+## Usage
 
-Writers just provide anchors - the extension auto-extracts questions and answers from page sections:
+Add FAQ attributes to your AsciiDoc page header:
 
 ```asciidoc
 = My Documentation Page
+:page-faq-1-question: How do I install Redpanda?
+:page-faq-1-answer: Download from redpanda.com and run the installer. See our installation guide for details.
 :page-faq-1-anchor: #installation
+
+:page-faq-2-question: What are the system requirements?
+:page-faq-2-answer: You need at least 2GB of RAM and 2 CPU cores for development. Production deployments require 16GB RAM and 8 CPU cores.
 :page-faq-2-anchor: #requirements
 
-[#installation]
-== How do I install Redpanda?
-
-You can install Redpanda using Docker, Kubernetes, or as a native binary.
-
-[#requirements]
-== What are the system requirements?
-
-Redpanda requires at least 2GB of RAM and 2 CPU cores.
+:page-faq-3-question: Does Redpanda support Kafka APIs?
+:page-faq-3-answer: Yes! Redpanda is fully compatible with Kafka APIs including producers, consumers, and Kafka Connect.
 ```
 
-**What gets extracted:**
-- **Question**: Heading text (`How do I install Redpanda?`)
-- **Answer**: Section content (everything between this heading and the next)
-- **URL**: Page URL + anchor (`https://docs.redpanda.com/page#installation`)
+**Required attributes per FAQ:**
+- `page-faq-N-question` - The FAQ question
+- `page-faq-N-answer` - The FAQ answer
 
-## Manual Override
+**Optional:**
+- `page-faq-N-anchor` - Link to page section (e.g., `#installation`)
 
-Provide custom question/answer text when section content isn't suitable:
-
-```asciidoc
-:page-faq-1-question: Does Redpanda support Kafka APIs?
-:page-faq-1-answer: Yes! Redpanda is fully compatible with Kafka APIs including producers, consumers, and Kafka Connect.
-```
-
-## Mixed Usage
-
-Combine auto-extraction and manual FAQs:
-
-```asciidoc
-:page-faq-1-anchor: #installation              ← Auto-extracted
-:page-faq-2-question: Is Redpanda free?         ← Manual
-:page-faq-2-answer: Yes, Redpanda is open source.
-:page-faq-3-anchor: #requirements              ← Auto-extracted
-```
+**Tips:**
+- FAQs must be numbered sequentially (1, 2, 3...)
+- Answers can reference prose content: "See our installation guide for details"
+- Anchors create deep links to related content on the page
+- Keep answers concise (Google truncates after ~300 characters)
 
 ## Generated Output
 
@@ -60,7 +46,7 @@ The extension generates schema.org FAQPage JSON-LD in the page `<head>`:
       "name": "How do I install Redpanda?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "You can install Redpanda using Docker, Kubernetes, or as a native binary."
+        "text": "Download from redpanda.com and run the installer."
       },
       "url": "https://docs.redpanda.com/page#installation"
     }
@@ -70,19 +56,13 @@ The extension generates schema.org FAQPage JSON-LD in the page `<head>`:
 
 ## Benefits
 
-✅ **Zero duplication** - Questions and answers already exist in your content
-✅ **Google rich results** - FAQPage structured data shows in search
-✅ **Flexible** - Auto-extract or override with custom text
-✅ **SEO friendly** - Proper schema.org markup
-
-## Requirements
-
-- FAQs must be numbered sequentially (1, 2, 3...)
-- For auto-extraction, anchor must point to a heading or section
-- Both question and answer required (auto or manual)
+✅ **Simple** - Just question + answer attributes
+✅ **Flexible** - Reference existing content in answers
+✅ **SEO** - Google rich results in search
+✅ **Deep linking** - Optional anchors to page sections
 
 ## Implementation
 
-**Extension**: `extensions/add-faq-structured-data.js`
-**UI Template**: Updated `head-structured-data.hbs` to include FAQ JSON-LD
-**Playbook**: Add to your playbook's extensions list
+- **Extension**: `extensions/add-faq-structured-data.js`
+- **UI Template**: Updated `head-structured-data.hbs`
+- **Dependencies**: None (uses built-in Antora)

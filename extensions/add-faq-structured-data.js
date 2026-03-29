@@ -3,66 +3,35 @@
 /**
  * Generates FAQPage JSON-LD structured data for SEO.
  *
- * SIMPLE USAGE (auto-extract from sections):
- *   :page-faq-1-anchor: #installation
+ * USAGE:
+ *   :page-faq-1-question: How do I install Redpanda?
+ *   :page-faq-1-answer: Download from redpanda.com and run the installer.
+ *   :page-faq-1-anchor: #installation (optional - links to section)
+ *
+ *   :page-faq-2-question: What are the system requirements?
+ *   :page-faq-2-answer: You need at least 2GB RAM and 2 CPU cores.
  *   :page-faq-2-anchor: #requirements
  *
- *   [#installation]
- *   == How do I install Redpanda?
- *   Download from...
- *
- * The extension automatically extracts:
- *   - Question: Heading text
- *   - Answer: Section content
- *
- * OVERRIDE USAGE (manual question/answer):
- *   :page-faq-1-question: Custom question text
- *   :page-faq-1-answer: Custom answer text
- *   :page-faq-1-anchor: #section (optional)
- *
- * MIXED USAGE:
- *   :page-faq-1-anchor: #auto-extracted
- *   :page-faq-2-question: Manual FAQ
- *   :page-faq-2-answer: With custom text
- *
  * The extension:
+ * - Generates schema.org FAQPage JSON-LD in <head>
  * - Supports multiple FAQs numbered sequentially (1, 2, 3...)
- * - Creates schema.org FAQPage JSON-LD in <head>
- * - Uses manual question/answer if provided, otherwise auto-extracts
+ * - Anchor is optional and adds URL to the FAQ question
+ * - Writers can reference existing page content in answers
  */
 
-const cheerio = require('cheerio')
-
 /**
- * Strip HTML tags and clean up text
- * @param {string} html - HTML string
- * @returns {string} Plain text
- */
-function stripHtml(html) {
-  if (!html) return ''
-  const $ = cheerio.load(html)
-  return $.text().trim().replace(/\s+/g, ' ')
-}
-
-/**
- * Extract FAQ entries from page attributes and content
- *
- * Priority:
- * 1. If question/answer provided manually, use those
- * 2. If only anchor provided, extract from HTML section
- *
+ * Extract FAQ entries from page attributes
  * @param {Object} attributes - Page attributes object
- * @param {Buffer} contents - Page HTML content
  * @param {Object} logger - Logger instance
  * @returns {Array<{question: string, answer: string, anchor?: string}>}
  */
-function extractFaqs(attributes, contents, logger) {
+function extractFaqs(attributes, logger) {
   const faqs = []
   const faqNumbers = new Set()
 
-  // Find all FAQ numbers by scanning for any FAQ attribute
+  // Find all FAQ numbers by scanning for -question attributes
   Object.keys(attributes).forEach(key => {
-    const match = key.match(/^page-faq-(\d+)-(anchor|question|answer)$/)
+    const match = key.match(/^page-faq-(\d+)-question$/)
     if (match) {
       faqNumbers.add(parseInt(match[1], 10))
     }
@@ -70,78 +39,22 @@ function extractFaqs(attributes, contents, logger) {
 
   if (faqNumbers.size === 0) return faqs
 
-  // Parse HTML content (lazy - only if needed)
-  let $ = null
-
   // Extract FAQs in numerical order
   const sortedNumbers = Array.from(faqNumbers).sort((a, b) => a - b)
 
   sortedNumbers.forEach(num => {
-    const manualQuestion = attributes[`page-faq-${num}-question`]
-    const manualAnswer = attributes[`page-faq-${num}-answer`]
+    const question = attributes[`page-faq-${num}-question`]
+    const answer = attributes[`page-faq-${num}-answer`]
     const anchor = attributes[`page-faq-${num}-anchor`]
 
-    let question = manualQuestion
-    let answer = manualAnswer
-
-    // If question or answer missing, try to extract from HTML section
-    if ((!question || !answer) && anchor) {
-      // Lazy load cheerio only if we need to extract from HTML
-      if (!$) {
-        $ = cheerio.load(contents.toString())
-      }
-
-      // Remove leading # if present
-      const anchorId = anchor.startsWith('#') ? anchor.substring(1) : anchor
-
-      // Find the section with this ID
-      const $section = $(`#${anchorId}, [id="${anchorId}"]`).first()
-
-      if (!$section.length) {
-        logger.warn(`FAQ anchor not found: ${anchor}`)
-        return
-      }
-
-      // Extract question from heading if not provided
-      if (!question) {
-        if ($section.is('h1, h2, h3, h4, h5, h6')) {
-          question = stripHtml($section.html())
-        } else {
-          const $heading = $section.find('h1, h2, h3, h4, h5, h6').first()
-          if ($heading.length) {
-            question = stripHtml($heading.html())
-          } else {
-            const $prevHeading = $section.prevAll('h1, h2, h3, h4, h5, h6').first()
-            if ($prevHeading.length) {
-              question = stripHtml($prevHeading.html())
-            }
-          }
-        }
-      }
-
-      // Extract answer from section content if not provided
-      if (!answer) {
-        let $content
-        if ($section.is('h1, h2, h3, h4, h5, h6')) {
-          // Get content between this heading and next heading of same/higher level
-          const headingLevel = parseInt($section.prop('tagName').substring(1))
-          const selector = Array.from({ length: headingLevel }, (_, i) => `h${i + 1}`).join(', ')
-          $content = $section.nextUntil(selector).not('h1, h2, h3, h4, h5, h6')
-        } else {
-          $content = $section.children().not('h1, h2, h3, h4, h5, h6')
-        }
-        answer = stripHtml($content.html())
-      }
-    }
-
-    // Validate we have both question and answer
+    // Both question and answer are required
     if (!question) {
-      logger.warn(`FAQ ${num}: question not found (provide manually or ensure section heading exists)`)
+      logger.warn(`FAQ ${num}: question missing`)
       return
     }
 
     if (!answer) {
-      logger.warn(`FAQ ${num}: answer not found (provide manually or ensure section content exists)`)
+      logger.warn(`FAQ ${num}: answer missing`)
       return
     }
 
@@ -208,10 +121,10 @@ module.exports.register = function () {
 
     pages.forEach(page => {
       const attributes = page.asciidoc?.attributes
-      if (!attributes || !page.contents) return
+      if (!attributes) return
 
-      // Extract FAQs from attributes and HTML content
-      const faqs = extractFaqs(attributes, page.contents, logger)
+      // Extract FAQs from attributes
+      const faqs = extractFaqs(attributes, logger)
 
       if (faqs.length === 0) return
 
