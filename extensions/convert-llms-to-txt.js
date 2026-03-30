@@ -273,9 +273,33 @@ module.exports.register = function () {
       });
       logger.info('Successfully added llms.txt');
 
-      // Add llms.txt to sitemap
+      // Add llms.txt to sitemap with git dates
       try {
-        addToSitemap(siteCatalog, siteUrl, logger);
+        // Build a map of filename -> most recent git modified date
+        const gitDates = new Map();
+
+        // llms.txt uses the llms page's git modified date
+        if (llmsPage.asciidoc?.attributes?.['page-git-modified-date']) {
+          gitDates.set('llms.txt', llmsPage.asciidoc.attributes['page-git-modified-date']);
+        }
+
+        // llms-full.txt uses the most recent modified date from all pages
+        if (pages.length > 0) {
+          const mostRecent = getMostRecentGitDate(pages);
+          if (mostRecent) {
+            gitDates.set('llms-full.txt', mostRecent);
+          }
+        }
+
+        // Component-specific files use most recent from that component
+        componentGroups.forEach((componentPages, componentName) => {
+          const mostRecent = getMostRecentGitDate(componentPages);
+          if (mostRecent) {
+            gitDates.set(`${componentName}-full.txt`, mostRecent);
+          }
+        });
+
+        addToSitemap(contentCatalog, siteCatalog, siteUrl, gitDates, logger);
       } catch (err) {
         logger.warn(`Failed to add llms.txt to sitemap: ${err.message}`);
       }
@@ -286,10 +310,35 @@ module.exports.register = function () {
 };
 
 /**
+ * Get the most recent git modified date from a collection of pages
+ */
+function getMostRecentGitDate(pages) {
+  let mostRecent = null;
+
+  for (const page of pages) {
+    const gitDate = page.asciidoc?.attributes?.['page-git-modified-date'];
+    if (gitDate) {
+      const date = new Date(gitDate);
+      if (!mostRecent || date > mostRecent) {
+        mostRecent = date;
+      }
+    }
+  }
+
+  return mostRecent ? mostRecent.toISOString() : null;
+}
+
+/**
  * Add llms.txt and all -full.txt files to sitemap by creating a separate sitemap-llms.xml
  * and adding it to the main sitemap index
+ *
+ * @param {Object} contentCatalog - Antora content catalog (source pages)
+ * @param {Object} siteCatalog - Antora site catalog (output files)
+ * @param {string} siteUrl - Base site URL
+ * @param {Map<string, string>} gitDates - Map of filename -> ISO date string from git history
+ * @param {Object} logger - Logger instance
  */
-function addToSitemap(siteCatalog, siteUrl, logger) {
+function addToSitemap(contentCatalog, siteCatalog, siteUrl, gitDates, logger) {
   const now = new Date().toISOString();
 
   // Find all llms .txt files in the site catalog
@@ -306,12 +355,16 @@ function addToSitemap(siteCatalog, siteUrl, logger) {
   logger.info(`Found ${llmsFiles.length} llms files to add to sitemap: ${llmsFiles.join(', ')}`);
 
   // Create sitemap-llms.xml with all llms files
-  const urlEntries = llmsFiles.map(filename => `  <url>
+  const urlEntries = llmsFiles.map(filename => {
+    // Use git date if available, otherwise fall back to build time
+    const lastmod = gitDates.get(filename) || now;
+    return `  <url>
     <loc>${siteUrl}/${filename}</loc>
-    <lastmod>${now}</lastmod>
+    <lastmod>${lastmod}</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
-  </url>`).join('\n');
+  </url>`;
+  }).join('\n');
 
   const llmsSitemapXml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -337,16 +390,29 @@ ${urlEntries}
   // Parse and update the sitemap index
   let sitemapIndexXml = sitemapIndex.contents.toString('utf8');
 
+  // Add lastmod to all existing component sitemaps for consistency
+  sitemapIndexXml = addLastmodToComponentSitemaps(contentCatalog, siteCatalog, sitemapIndexXml, siteUrl, logger);
+
   // Check if sitemap-llms.xml is already in the index
   if (sitemapIndexXml.includes('sitemap-llms.xml')) {
     logger.debug('sitemap-llms.xml already in sitemap index');
+    // Update the index with modified component sitemaps even if llms sitemap exists
+    sitemapIndex.contents = Buffer.from(sitemapIndexXml, 'utf8');
     return;
+  }
+
+  // Find the most recent date from all llms files for the sitemap-llms.xml lastmod
+  let sitemapLastmod = now;
+  if (gitDates.size > 0) {
+    const dates = Array.from(gitDates.values()).map(d => new Date(d));
+    const mostRecent = new Date(Math.max(...dates));
+    sitemapLastmod = mostRecent.toISOString();
   }
 
   // Add sitemap-llms.xml entry before the closing </sitemapindex> tag
   const llmsSitemapEntry = `  <sitemap>
     <loc>${siteUrl}/sitemap-llms.xml</loc>
-    <lastmod>${now}</lastmod>
+    <lastmod>${sitemapLastmod}</lastmod>
   </sitemap>
 </sitemapindex>`;
 
@@ -355,4 +421,104 @@ ${urlEntries}
   // Update the sitemap index in the catalog
   sitemapIndex.contents = Buffer.from(sitemapIndexXml, 'utf8');
   logger.info('Added sitemap-llms.xml to main sitemap index');
+}
+
+/**
+ * Add lastmod to all component sitemaps in the sitemap index for consistency
+ * Also updates the component sitemaps themselves to use git dates instead of build time
+ *
+ * @param {Object} contentCatalog - Antora content catalog (source pages with git dates)
+ * @param {Object} siteCatalog - Antora site catalog (output files including sitemaps)
+ * @param {string} sitemapIndexXml - The sitemap index XML content
+ * @param {string} siteUrl - Base site URL for matching URLs
+ * @param {Object} logger - Logger instance
+ */
+function addLastmodToComponentSitemaps(contentCatalog, siteCatalog, sitemapIndexXml, siteUrl, logger) {
+  // Build a map of URL -> git date from all pages
+  const urlToGitDate = new Map();
+  const allPages = contentCatalog.getPages();
+
+  allPages.forEach(page => {
+    if (page.pub?.url && page.asciidoc?.attributes?.['page-git-modified-date']) {
+      const gitDate = page.asciidoc.attributes['page-git-modified-date'];
+      const url = `${siteUrl}${page.pub.url}`;
+      urlToGitDate.set(url, gitDate);
+    }
+  });
+
+  logger.info(`Built URL -> git date map with ${urlToGitDate.size} entries`);
+  if (urlToGitDate.size > 0 && urlToGitDate.size < 20) {
+    urlToGitDate.forEach((date, url) => {
+      logger.debug(`  ${url} -> ${date}`);
+    });
+  }
+
+  // Find all component sitemap XML files
+  const componentSitemaps = siteCatalog.getFiles()
+    .filter(file => {
+      const path = file.out.path;
+      return path.startsWith('sitemap-') &&
+             path.endsWith('.xml') &&
+             path !== 'sitemap-llms.xml';
+    });
+
+  logger.debug(`Found ${componentSitemaps.length} component sitemaps to update with git dates`);
+
+  // For each component sitemap, update URLs with git dates and find the most recent
+  componentSitemaps.forEach(sitemapFile => {
+    const filename = sitemapFile.out.path;
+    let xml = sitemapFile.contents.toString('utf8');
+    const dates = [];
+    let updatedCount = 0;
+
+    // Update each URL in the sitemap with its git date if available
+    xml = xml.replace(
+      /<url>\s*<loc>([^<]+)<\/loc>\s*<lastmod>([^<]+)<\/lastmod>\s*<\/url>/g,
+      (match, url, oldDate) => {
+        const gitDate = urlToGitDate.get(url);
+        if (gitDate) {
+          updatedCount++;
+          dates.push(new Date(gitDate));
+          return `<url>\n<loc>${url}</loc>\n<lastmod>${gitDate}</lastmod>\n</url>`;
+        } else {
+          // Keep original date
+          try {
+            dates.push(new Date(oldDate));
+          } catch (e) {
+            // Skip invalid dates
+          }
+          return match;
+        }
+      }
+    );
+
+    // Update the sitemap file in the catalog
+    sitemapFile.contents = Buffer.from(xml, 'utf8');
+    logger.info(`Updated sitemap ${filename}: ${updatedCount} URLs with git dates, ${dates.length} total dates`);
+
+    if (dates.length === 0) {
+      logger.debug(`No dates found in ${filename}`);
+      return;
+    }
+
+    // Find the most recent date
+    const mostRecent = new Date(Math.max(...dates));
+    const lastmod = mostRecent.toISOString();
+
+    // Update the sitemap index entry to include/update lastmod
+    // Match various patterns since Antora might have different formatting
+    const locPattern = new RegExp(
+      `(<loc>[^<]*/${filename.replace(/\./g, '\\.')}</loc>)(?:\\s*<lastmod>[^<]*</lastmod>)?\\s*</sitemap>`,
+      'g'
+    );
+
+    sitemapIndexXml = sitemapIndexXml.replace(
+      locPattern,
+      `$1\n    <lastmod>${lastmod}</lastmod>\n  </sitemap>`
+    );
+
+    logger.debug(`Updated lastmod to ${lastmod} for ${filename} in index`);
+  });
+
+  return sitemapIndexXml;
 }
