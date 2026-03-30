@@ -94,6 +94,25 @@ module.exports.register = function () {
         });
         logger.debug('Fixed em dashes and invisible characters in URLs');
 
+        // Move YAML frontmatter after H1 for better llms.txt parsing
+        // Extract frontmatter (everything between --- markers)
+        const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n/);
+        if (frontmatterMatch) {
+          const frontmatter = frontmatterMatch[0];
+          const contentAfterFrontmatter = content.substring(frontmatter.length);
+
+          // Find the first H1 (# Heading)
+          const h1Match = contentAfterFrontmatter.match(/^(# .+?\n)/m);
+          if (h1Match) {
+            const h1 = h1Match[0];
+            const contentAfterH1 = contentAfterFrontmatter.substring(h1.length);
+
+            // Reorder: H1, then frontmatter, then rest of content
+            content = h1 + '\n' + frontmatter + '\n' + contentAfterH1;
+            logger.debug('Moved frontmatter after H1 for better llms.txt parsing');
+          }
+        }
+
         // Unpublish the HTML page FIRST (following unpublish-pages pattern)
         if (llmsPage.out) {
           if (!siteCatalog.unpublishedPages) siteCatalog.unpublishedPages = [];
