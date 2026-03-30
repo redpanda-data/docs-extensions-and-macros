@@ -12,7 +12,6 @@
  * ```
  */
 
-const fs = require('fs')
 const path = require('path')
 const { parseStringPromise } = require('xml2js')
 
@@ -20,19 +19,19 @@ module.exports.register = function ({ config }) {
   const logger = this.getLogger('convert-sitemap-to-markdown')
 
   this
-    .on('sitePublished', async ({ playbook, siteCatalog }) => {
+    .on('beforePublish', async ({ playbook, siteCatalog }) => {
       const startTime = Date.now()
-      const outputDir = playbook.output.dir
 
       logger.info('Sitemap to markdown converter starting...')
-      logger.info(`Output directory: ${outputDir}`)
 
       try {
-        // Find all sitemap.xml files
-        const sitemapFiles = findSitemapFiles(outputDir)
+        // Find all sitemap files in the site catalog
+        const sitemapFiles = siteCatalog.getFiles().filter(file =>
+          /^sitemap(-[^/]+)?\.xml$/.test(path.basename(file.out.path))
+        )
 
         if (sitemapFiles.length === 0) {
-          logger.info('No sitemap.xml files found')
+          logger.info('No sitemap files found in site catalog')
           return
         }
 
@@ -40,8 +39,8 @@ module.exports.register = function ({ config }) {
 
         // Convert each sitemap and collect all URLs
         const allUrls = []
-        for (const sitemapPath of sitemapFiles) {
-          const urls = await convertSitemapToMarkdown(sitemapPath, logger)
+        for (const sitemapFile of sitemapFiles) {
+          const urls = await convertSitemapToMarkdown(sitemapFile, siteCatalog, logger)
           if (urls) {
             allUrls.push(...urls)
           }
@@ -49,7 +48,7 @@ module.exports.register = function ({ config }) {
 
         // Create combined master sitemap if we have multiple sitemaps
         if (sitemapFiles.length > 1 && allUrls.length > 0) {
-          await createMasterSitemap(outputDir, sitemapFiles, allUrls, logger)
+          await createMasterSitemap(sitemapFiles, allUrls, siteCatalog, logger)
         }
 
         const duration = ((Date.now() - startTime) / 1000).toFixed(2)
@@ -62,41 +61,9 @@ module.exports.register = function ({ config }) {
 }
 
 /**
- * Recursively find all sitemap XML files in a directory
- * Matches: sitemap.xml, sitemap-0.xml, sitemap-ROOT.xml, sitemap-home.xml, etc.
- */
-function findSitemapFiles(dir) {
-  const sitemaps = []
-
-  function search(currentDir) {
-    try {
-      const entries = fs.readdirSync(currentDir, { withFileTypes: true })
-
-      for (const entry of entries) {
-        const fullPath = path.join(currentDir, entry.name)
-
-        if (entry.isDirectory()) {
-          search(fullPath)
-        } else if (/^sitemap(-[^/]+)?\.xml$/.test(entry.name)) {
-          // Matches sitemap.xml, sitemap-*.xml (any suffix)
-          sitemaps.push(fullPath)
-        }
-      }
-    } catch (error) {
-      // Ignore directories we can't read
-    }
-  }
-
-  search(dir)
-  return sitemaps.sort() // Sort to ensure consistent order
-}
-
-/**
  * Create a master combined sitemap from all individual sitemaps
  */
-async function createMasterSitemap(outputDir, sitemapFiles, allUrls, logger) {
-  const masterPath = path.join(outputDir, 'sitemap-all.md')
-
+async function createMasterSitemap(sitemapFiles, allUrls, siteCatalog, logger) {
   const sitemapCount = sitemapFiles.length
   const sitemapWord = sitemapCount === 1 ? 'sitemap' : 'sitemaps'
 
@@ -105,8 +72,8 @@ async function createMasterSitemap(outputDir, sitemapFiles, allUrls, logger) {
 
   // Add overview of source sitemaps
   markdown += '## Source sitemaps\n\n'
-  for (const sitemapPath of sitemapFiles) {
-    const basename = path.basename(sitemapPath)
+  for (const sitemapFile of sitemapFiles) {
+    const basename = path.basename(sitemapFile.out.path)
     const mdName = basename.replace(/\.xml$/, '.md')
     markdown += `- [${basename}](${mdName})\n`
   }
@@ -117,23 +84,29 @@ async function createMasterSitemap(outputDir, sitemapFiles, allUrls, logger) {
     markdown += convertUrlsetToMarkdown(allUrls)
   }
 
-  fs.writeFileSync(masterPath, markdown, 'utf8')
+  // Add to site catalog
+  siteCatalog.addFile({
+    contents: Buffer.from(markdown, 'utf8'),
+    out: { path: 'sitemap-all.md' },
+  })
+
   logger.info(`Generated master sitemap: sitemap-all.md (${allUrls.length} pages)`)
 }
 
 /**
- * Convert a sitemap.xml file to sitemap.md
+ * Convert a sitemap file to markdown
  * Returns the URLs found in this sitemap for aggregation
  */
-async function convertSitemapToMarkdown(sitemapPath, logger) {
-  const xmlContent = fs.readFileSync(sitemapPath, 'utf8')
-  const outputPath = sitemapPath.replace(/\.xml$/, '.md')
+async function convertSitemapToMarkdown(sitemapFile, siteCatalog, logger) {
+  const xmlContent = sitemapFile.contents.toString('utf8')
+  const basename = path.basename(sitemapFile.out.path)
+  const outputPath = basename.replace(/\.xml$/, '.md')
 
   try {
     const parsed = await parseStringPromise(xmlContent)
 
     let markdown = '# Sitemap\n\n'
-    markdown += `> Documentation sitemap generated from ${path.basename(sitemapPath)}\n\n`
+    markdown += `> Documentation sitemap generated from ${basename}\n\n`
 
     let urls = []
 
@@ -148,12 +121,17 @@ async function convertSitemapToMarkdown(sitemapPath, logger) {
       markdown += convertSitemapIndexToMarkdown(parsed.sitemapindex.sitemap)
     }
 
-    fs.writeFileSync(outputPath, markdown, 'utf8')
-    logger.debug(`Generated ${path.basename(outputPath)}`)
+    // Add to site catalog
+    siteCatalog.addFile({
+      contents: Buffer.from(markdown, 'utf8'),
+      out: { path: outputPath },
+    })
+
+    logger.debug(`Generated ${outputPath}`)
 
     return urls
   } catch (error) {
-    logger.warn(`Failed to parse ${sitemapPath}: ${error.message}`)
+    logger.warn(`Failed to parse ${basename}: ${error.message}`)
     return []
   }
 }
