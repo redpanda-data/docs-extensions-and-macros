@@ -6,6 +6,9 @@ urls:
   html_extension_style: indexify
 output:
   clean: true
+runtime:
+  log:
+    level: warning
 content:
   sources:
   - url: .
