@@ -59,6 +59,7 @@
     "./extensions/generate-index-data": "./extensions/generate-index-data.js",
     "./extensions/generate-rp-connect-info": "./extensions/generate-rp-connect-info.js",
     "./extensions/add-global-attributes": "./extensions/add-global-attributes.js",
+    "./extensions/git-full-clone": "./extensions/git-full-clone.js",
     "./extensions/version-fetcher/set-latest-version": "./extensions/version-fetcher/set-latest-version.js",
     "./extensions/modify-connect-tag-playbook": "./extensions/modify-connect-tag-playbook.js",
     "./extensions/validate-attributes": "./extensions/validate-attributes.js",
