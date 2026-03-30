@@ -272,8 +272,87 @@ module.exports.register = function () {
         out: { path: 'llms.txt' },
       });
       logger.info('Successfully added llms.txt');
+
+      // Add llms.txt to sitemap
+      try {
+        addToSitemap(siteCatalog, siteUrl, logger);
+      } catch (err) {
+        logger.warn(`Failed to add llms.txt to sitemap: ${err.message}`);
+      }
     } else {
       logger.warn('llms.txt not generated - page not found or no content extracted');
     }
   });
 };
+
+/**
+ * Add llms.txt and all -full.txt files to sitemap by creating a separate sitemap-llms.xml
+ * and adding it to the main sitemap index
+ */
+function addToSitemap(siteCatalog, siteUrl, logger) {
+  const now = new Date().toISOString();
+
+  // Find all llms .txt files in the site catalog
+  const llmsFiles = siteCatalog.getFiles()
+    .filter(file => {
+      const filename = file.out.path;
+      return filename === 'llms.txt' ||
+             filename === 'llms-full.txt' ||
+             filename.endsWith('-full.txt');
+    })
+    .map(file => file.out.path)
+    .sort(); // Sort for consistent ordering
+
+  logger.info(`Found ${llmsFiles.length} llms files to add to sitemap: ${llmsFiles.join(', ')}`);
+
+  // Create sitemap-llms.xml with all llms files
+  const urlEntries = llmsFiles.map(filename => `  <url>
+    <loc>${siteUrl}/${filename}</loc>
+    <lastmod>${now}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>`).join('\n');
+
+  const llmsSitemapXml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urlEntries}
+</urlset>`;
+
+  siteCatalog.addFile({
+    contents: Buffer.from(llmsSitemapXml, 'utf8'),
+    out: { path: 'sitemap-llms.xml' },
+  });
+  logger.info(`Created sitemap-llms.xml with ${llmsFiles.length} entries`);
+
+  // Find and update the main sitemap index
+  const sitemapIndex = siteCatalog.getFiles().find(file =>
+    file.out.path === 'sitemap.xml'
+  );
+
+  if (!sitemapIndex) {
+    logger.warn('Main sitemap.xml not found, cannot add llms sitemap to index');
+    return;
+  }
+
+  // Parse and update the sitemap index
+  let sitemapIndexXml = sitemapIndex.contents.toString('utf8');
+
+  // Check if sitemap-llms.xml is already in the index
+  if (sitemapIndexXml.includes('sitemap-llms.xml')) {
+    logger.debug('sitemap-llms.xml already in sitemap index');
+    return;
+  }
+
+  // Add sitemap-llms.xml entry before the closing </sitemapindex> tag
+  const llmsSitemapEntry = `  <sitemap>
+    <loc>${siteUrl}/sitemap-llms.xml</loc>
+    <lastmod>${now}</lastmod>
+  </sitemap>
+</sitemapindex>`;
+
+  sitemapIndexXml = sitemapIndexXml.replace('</sitemapindex>', llmsSitemapEntry);
+
+  // Update the sitemap index in the catalog
+  sitemapIndex.contents = Buffer.from(sitemapIndexXml, 'utf8');
+  logger.info('Added sitemap-llms.xml to main sitemap index');
+}
