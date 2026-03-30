@@ -80,7 +80,14 @@ module.exports.register = function () {
         // The markdown converter applies smart typography that turns -- into — (em dash)
         // and inserts zero-width spaces (U+200B) and other invisible Unicode characters
         // This breaks URLs like deploy-preview-159--redpanda-documentation.netlify.app
+        // Fix URLs in parentheses (actual hrefs)
         content = content.replace(/\(https?:\/\/[^)]*[—\u200B-\u200D\uFEFF][^)]*\)/g, (match) => {
+          return match
+            .replace(/—/g, '--')
+            .replace(/[\u200B-\u200D\uFEFF]/g, '');
+        });
+        // Fix URLs in square brackets (link text)
+        content = content.replace(/\[https?:\/\/[^\]]*[—\u200B-\u200D\uFEFF][^\]]*\]/g, (match) => {
           return match
             .replace(/—/g, '--')
             .replace(/[\u200B-\u200D\uFEFF]/g, '');
