@@ -8,7 +8,7 @@ output:
   clean: true
 runtime:
   log:
-    level: warning
+    level: warn
 content:
   sources:
   - url: .
