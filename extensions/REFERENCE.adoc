@@ -767,6 +767,113 @@ The processed attribute can be used in Handlebars templates:
 </div>
 ```
 
+== Git full clone
+
+This extension ensures Antora uses full git clones instead of shallow clones for remote repositories. Full git history is required for accurate git date extraction by the `add-git-dates` extension.
+
+The extension uses a two-phase approach:
+
+1. **Phase 1**: Sets `git.depth = 0` in playbook during registration (best effort)
+2. **Phase 2**: After content aggregation, detects repos with a `shallow` file and runs `git fetch --unshallow` to convert them to full clones
+
+This two-phase approach works around Antora's default shallow clone behavior, which can't always be overridden via playbook configuration alone.
+
+=== How it works
+
+. During extension registration, modifies playbook to request `depth=0` for all remote repos
+. After Antora aggregates content, checks each repo's git directory for a `shallow` file
+. For any shallow repos found, runs `git fetch --unshallow` with timeout protection
+. On subsequent builds with warm cache, repos are already full clones (no unshallow needed)
+
+=== Performance
+
+**First build** (cold cache):
+
+- Unshallow: ~1-5 seconds per remote repo
+- Total overhead: ~5-20 seconds depending on repo count
+
+**Subsequent builds** (warm cache):
+
+- Unshallow: 0 seconds (repos already full clones)
+- Total overhead: minimal
+
+**Scalability:**
+
+- 1k commits: ~1-2s unshallow time
+- 5k commits: ~3-5s unshallow time
+- 10k commits: ~5-10s unshallow time
+- 50k+ commits: Consider increasing timeout or pre-populating cache
+
+=== Environment variables
+
+This extension does not require any environment variables.
+
+=== Configuration options
+
+The extension accepts the following configuration options:
+
+skipUnshallow (optional, default: false):: Set to `true` to skip the unshallow phase entirely. Useful for air-gapped CI/CD environments or when git dates are not needed.
+
+unshallowTimeout (optional, default: 60000):: Timeout in milliseconds for the unshallow operation per repository. Increase this for very large repositories (50k+ commits).
+
+=== Registration
+
+Basic configuration (recommended):
+
+[,yaml]
+----
+antora:
+  extensions:
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/git-full-clone'
+----
+
+With custom timeout for large repos:
+
+[,yaml]
+----
+antora:
+  extensions:
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/git-full-clone'
+    unshallowTimeout: 120000  # 2 minutes for very large repos
+----
+
+For air-gapped environments:
+
+[,yaml]
+----
+antora:
+  extensions:
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/git-full-clone'
+    skipUnshallow: true  # Skip network-dependent unshallow
+----
+
+=== Production considerations
+
+**Netlify/CI builds:**
+
+- First build or cache clear: Pays unshallow cost (~5-20s)
+- Subsequent builds with warm cache: No unshallow needed
+- Consider pre-populating Antora cache in CI for faster cold builds
+
+**Timeout protection:**
+
+- Default 60-second timeout prevents hanging on slow networks
+- Graceful failure: Build continues even if unshallow times out
+- Git dates may be incomplete for timed-out repos (warning logged)
+
+**Error handling:**
+
+- Network failures don't break the build
+- Timeout failures are logged with guidance to increase timeout
+- Falls back to available git history if unshallow fails
+
+**Optimization for very large repos (50k+ commits):**
+
+1. Increase `unshallowTimeout` to 120000ms or higher
+2. Pre-populate Antora cache with full clones in CI/CD
+3. Use persistent cache in Netlify to avoid repeated unshallows
+4. Consider implementing Neon KV caching for git dates (future optimization)
+
 == Add Git dates
 
 This extension adds accurate git-based created and modified dates to documentation pages by analyzing commit history. It uses isomorphic-git (bundled with Antora) to walk the commit history of each repository and detects actual file modifications by comparing tree objects between commits.
