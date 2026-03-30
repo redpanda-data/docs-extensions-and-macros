@@ -213,7 +213,7 @@ module.exports.register = function () {
       if (!gitdir) {
         // Debug: Log which repos don't have gitdir
         if (!skipLoggedRepos.has(origin.url)) {
-          logger.debug(`Skipping repo without gitdir: ${origin.url} (has gitdir: ${!!origin.gitdir}, has worktree: ${!!origin.worktree})`)
+          logger.info(`⚠️  Skipping repo without gitdir: ${origin.url} (has gitdir: ${!!origin.gitdir}, has worktree: ${!!origin.worktree})`)
           skipLoggedRepos.add(origin.url)
         }
         skippedCount++
@@ -250,7 +250,7 @@ module.exports.register = function () {
     const reposBeingProcessed = new Set()
     pagesByRepoAndRef.forEach(({ gitdir }) => {
       if (!reposBeingProcessed.has(gitdir)) {
-        logger.debug(`Will process git dates for: ${gitdir}`)
+        logger.info(`✓ Will process git dates for: ${gitdir}`)
         reposBeingProcessed.add(gitdir)
       }
     })
