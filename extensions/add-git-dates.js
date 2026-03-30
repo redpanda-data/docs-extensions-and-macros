@@ -199,6 +199,7 @@ module.exports.register = function () {
 
     // Group pages by BOTH gitdir AND ref (since same repo can have multiple branches/versions)
     const pagesByRepoAndRef = new Map()
+    const skipLoggedRepos = new Set()
 
     contentCatalog.getPages().forEach((page) => {
       const origin = page.src?.origin
@@ -210,6 +211,11 @@ module.exports.register = function () {
       // Need gitdir for isomorphic-git (works for both local and bare repos)
       const gitdir = origin.gitdir || (origin.worktree ? path.join(origin.worktree, '.git') : null)
       if (!gitdir) {
+        // Debug: Log which repos don't have gitdir
+        if (!skipLoggedRepos.has(origin.url)) {
+          logger.debug(`Skipping repo without gitdir: ${origin.url} (has gitdir: ${!!origin.gitdir}, has worktree: ${!!origin.worktree})`)
+          skipLoggedRepos.add(origin.url)
+        }
         skippedCount++
         return
       }
@@ -239,6 +245,15 @@ module.exports.register = function () {
     const totalPages = Array.from(pagesByRepoAndRef.values()).reduce((sum, r) => sum + r.pages.length, 0)
     const repoCount = new Set(Array.from(pagesByRepoAndRef.values()).map(r => r.gitdir)).size
     logger.info(`Processing ${totalPages} pages across ${repoCount} repos (${pagesByRepoAndRef.size} branches) for git dates (skipped ${skippedCount} virtual/generated)`)
+
+    // Log which repos are being processed
+    const reposBeingProcessed = new Set()
+    pagesByRepoAndRef.forEach(({ gitdir }) => {
+      if (!reposBeingProcessed.has(gitdir)) {
+        logger.debug(`Will process git dates for: ${gitdir}`)
+        reposBeingProcessed.add(gitdir)
+      }
+    })
 
     // Process each repository + ref combination
     for (const [repoRefKey, { gitdir, ref, pages }] of pagesByRepoAndRef) {
