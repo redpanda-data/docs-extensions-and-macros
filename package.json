@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "4.15.2",
+  "version": "4.15.3",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -59,6 +59,8 @@
     "./extensions/generate-index-data": "./extensions/generate-index-data.js",
     "./extensions/generate-rp-connect-info": "./extensions/generate-rp-connect-info.js",
     "./extensions/add-global-attributes": "./extensions/add-global-attributes.js",
+    "./extensions/add-git-dates": "./extensions/add-git-dates.js",
+    "./extensions/add-faq-structured-data": "./extensions/add-faq-structured-data.js",
     "./extensions/version-fetcher/set-latest-version": "./extensions/version-fetcher/set-latest-version.js",
     "./extensions/modify-connect-tag-playbook": "./extensions/modify-connect-tag-playbook.js",
     "./extensions/validate-attributes": "./extensions/validate-attributes.js",
@@ -66,6 +68,7 @@
     "./extensions/unpublish-pages": "./extensions/unpublish-pages.js",
     "./extensions/find-related-labs": "./extensions/find-related-labs.js",
     "./extensions/convert-llms-to-txt": "./extensions/convert-llms-to-txt.js",
+    "./extensions/convert-sitemap-to-markdown": "./extensions/convert-sitemap-to-markdown.js",
     "./extensions/modify-redirects": "./extensions/produce-redirects.js",
     "./extensions/algolia-indexer/index": "./extensions/algolia-indexer/index.js",
     "./extensions/aggregate-terms": "./extensions/aggregate-terms.js",
@@ -123,6 +126,7 @@
     "tree-sitter": "^0.22.4",
     "turndown": "^7.2.2",
     "turndown-plugin-gfm": "^1.0.2",
+    "xml2js": "^0.6.2",
     "yaml": "^2.8.2",
     "yargs": "^17.7.2"
   },

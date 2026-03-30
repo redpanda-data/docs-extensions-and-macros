@@ -1,8 +1,173 @@
 const path = require('path')
 const os = require('os')
+const yaml = require('js-yaml')
+const { toMarkdownUrl } = require('../extension-utils/url-utils')
 const TurndownService = require('turndown')
 const turndownPluginGfm = require('turndown-plugin-gfm')
 const { gfm } = turndownPluginGfm
+
+/**
+ * Decode HTML entities in a string
+ * @param {string} str - String with potential HTML entities
+ * @returns {string} Decoded string
+ */
+function decodeHtmlEntities (str) {
+  if (!str || typeof str !== 'string') return str
+  return str
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&apos;/g, "'")
+}
+
+/**
+ * Converts AsciiDoc page attributes to YAML frontmatter
+ * @param {Object} page - The page object with asciidoc attributes
+ * @returns {string} YAML frontmatter string or empty string if no attributes
+ */
+function generateFrontmatter(page) {
+  const frontmatter = {}
+
+  // Add title (decode HTML entities from AsciiDoc processing)
+  if (page.asciidoc?.doctitle) {
+    frontmatter.title = decodeHtmlEntities(page.asciidoc.doctitle)
+  }
+
+  // Add navigation title if different from doctitle
+  if (page.asciidoc?.navtitle && page.asciidoc.navtitle !== page.asciidoc?.doctitle) {
+    frontmatter.navtitle = decodeHtmlEntities(page.asciidoc.navtitle)
+  }
+
+  // Get all page attributes
+  const attrs = page.asciidoc?.attributes || {}
+
+  // Allowlist of attributes to include in frontmatter
+  // Explicitly opt-in to attributes that are useful for AI consumption
+  const allowedAttributes = [
+    'title',
+    'navtitle',
+    'description',
+    'categories',
+    'page-component-name',
+    'page-component-title',
+    'page-component-version',
+    'page-version',
+    'page-relative-src-path',
+    'page-edit-url',
+    'page-topic-type',
+    'personas',
+    'docname',
+    'page-beta',
+    'page-beta-text',
+    'page-is-nearing-eol',
+    'page-is-past-eol',
+    'page-eol-date',
+    'page-git-created-date',
+    'page-git-modified-date',
+    // Component-specific version attributes (from antora.yml)
+    'latest-redpanda-tag', // Redpanda docker tag (e.g., v25.3.5)
+    'latest-console-tag',
+    'latest-operator-version',
+    'latest-connect-version',
+  ]
+
+  // Add allowed page attributes to frontmatter
+  Object.keys(attrs).forEach(key => {
+    const value = attrs[key]
+
+    // Allow all learning-objective-* attributes (learning-objective-1, -2, -3, etc.)
+    const isLearningObjective = key.startsWith('learning-objective-')
+
+    // Only include attributes in our allowlist or learning objectives
+    if (!allowedAttributes.includes(key) && !isLearningObjective) return
+
+    // Only include page-beta-text if page-beta is true
+    if (key === 'page-beta-text' && !attrs['page-beta']) {
+      return
+    }
+
+    // Skip empty attributes (AsciiDoc boolean flags)
+    if (value === '') {
+      // Special handling for version fields - use actual version from page source
+      if (key === 'page-version') {
+        frontmatter[key] = page.src?.version || 'master'
+        return
+      }
+      if (key === 'page-component-version') {
+        frontmatter[key] = page.src?.version || 'master'
+        return
+      }
+      // Preserve important boolean flags
+      if (key.startsWith('page-')) {
+        frontmatter[key] = true
+      }
+      return
+    }
+
+    // Include the attribute
+    frontmatter[key] = value
+  })
+
+  // Transform EOL fields to be more user-friendly
+  if (frontmatter['page-is-nearing-eol'] || frontmatter['page-is-past-eol']) {
+    let eolStatus = 'supported'
+    if (frontmatter['page-is-past-eol'] === 'true' || frontmatter['page-is-past-eol'] === true) {
+      eolStatus = 'past end-of-life'
+    } else if (frontmatter['page-is-nearing-eol'] === 'true' || frontmatter['page-is-nearing-eol'] === true) {
+      eolStatus = 'nearing end-of-life'
+    }
+    frontmatter['support-status'] = eolStatus
+    // Keep original fields for compatibility
+  }
+
+  // Transform beta fields to be more user-friendly
+  if (frontmatter['page-beta'] === 'true' || frontmatter['page-beta'] === true) {
+    let betaStatus = 'beta'
+    if (frontmatter['page-beta-text']) {
+      betaStatus = `beta - ${frontmatter['page-beta-text']}`
+    }
+    frontmatter['release-status'] = betaStatus
+  }
+
+  // Return empty string if no frontmatter
+  if (Object.keys(frontmatter).length === 0) return ''
+
+  // Convert to YAML format using js-yaml library for proper escaping
+  let yamlContent = yaml.dump(frontmatter, {
+    lineWidth: -1, // Disable line wrapping
+    noRefs: true, // Disable anchors/aliases
+    quotingType: '"', // Use double quotes
+    forceQuotes: false, // Only quote when necessary
+  })
+
+  // Add helpful comments for EOL (end-of-life) fields
+  // Find the first EOL-related field and add comment before it
+  if (frontmatter['page-is-nearing-eol'] || frontmatter['page-is-past-eol'] || frontmatter['support-status']) {
+    const eolFieldRegex = /^(page-is-nearing-eol:|page-is-past-eol:|support-status:)/m
+    if (!yamlContent.includes('# EOL =')) {
+      yamlContent = yamlContent.replace(
+        eolFieldRegex,
+        '# EOL = End-of-Life (support lifecycle status)\n$1'
+      )
+    }
+  }
+
+  // Add helpful comments for beta fields
+  if (frontmatter['page-beta'] || frontmatter['release-status']) {
+    const betaFieldRegex = /^(page-beta:|release-status:)/m
+    if (!yamlContent.includes('# Beta release')) {
+      yamlContent = yamlContent.replace(
+        betaFieldRegex,
+        '# Beta release status\n$1'
+      )
+    }
+  }
+
+  return `---\n${yamlContent}---\n\n`
+}
 
 module.exports.register = function () {
   const logger = this.getLogger('convert-to-markdown-extension')
@@ -308,22 +473,9 @@ module.exports.register = function () {
           let canonicalUrl = ''
           try {
             if (siteUrl && page.pub?.url) {
-              const htmlStyle = playbook?.urls?.htmlExtensionStyle
-              const isIndexify = htmlStyle === 'indexify'
               const baseUrl = new URL(page.pub.url, siteUrl)
-              let pathname = baseUrl.pathname
-
-              if (isIndexify) {
-                const looksLikeDir =
-                  pathname.endsWith('/') ||
-                  !path.basename(pathname).includes('.')
-                baseUrl.pathname = looksLikeDir
-                  ? pathname.replace(/\/?$/, '/index.md')
-                  : pathname.replace(/\.html$/, '.md')
-              } else {
-                baseUrl.pathname = pathname.replace(/\.html$/, '.md')
-              }
-
+              // Convert HTML URL to markdown URL using shared utility
+              baseUrl.pathname = toMarkdownUrl(baseUrl.pathname)
               canonicalUrl = baseUrl.toString()
             }
           } catch (e) {
@@ -332,11 +484,23 @@ module.exports.register = function () {
             )
           }
 
-          // Prepend Markdown source reference and URL construction hint
+          // Generate YAML frontmatter from AsciiDoc attributes
+          const frontmatter = generateFrontmatter(page)
+          if (frontmatter) {
+            logger.debug(`Generated frontmatter for ${page.src?.path}`)
+          }
+
+          // Prepend frontmatter first, then source reference and AI-friendly note
           if (canonicalUrl) {
-            const urlHint = `<!-- Note for AI: Links in this doc are relative to the current page and use indexify format. Add /index.md to directory-style links for the Markdown version. -->`
-            
-            markdown = `<!-- Source: ${canonicalUrl} -->\n${urlHint}\n\n${markdown}`
+            const componentName = page.src?.component || '';
+            const urlHint = componentName
+              ? `<!-- Note for AI: This is a Markdown export. For aggregated content, see /llms.txt (curated overview), /${componentName}-full.txt (this component only), or /llms-full.txt (complete documentation). -->`
+              : `<!-- Note for AI: This is a Markdown export. For aggregated content, see /llms.txt (curated overview) or /llms-full.txt (complete documentation). -->`;
+
+            markdown = `${frontmatter}<!-- Source: ${canonicalUrl} -->\n${urlHint}\n\n${markdown}`
+          } else if (frontmatter) {
+            // If no canonical URL but we have frontmatter, still add it
+            markdown = `${frontmatter}${markdown}`
           }
 
           // Clean up unnecessary whitespace
@@ -378,7 +542,10 @@ module.exports.register = function () {
     for (const page of pages) {
       const htmlOut = page.out?.path
       if (!htmlOut) continue
-      const mdOutPath = htmlOut.replace(/\.html$/, '.md')
+
+      // Convert HTML path to markdown path using shared utility
+      const mdOutPath = toMarkdownUrl(htmlOut)
+
       siteCatalog.addFile({
         contents: page.markdownContents,
         out: { path: mdOutPath },

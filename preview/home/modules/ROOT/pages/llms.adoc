@@ -1,16 +1,124 @@
-# Test Documentation
+# Redpanda Documentation
 
-> This is a test llms.adoc file for validating the convert-llms-to-txt extension.
+> Redpanda is a streaming data platform for developers. Build real-time applications without the complexity of Apache Kafka.
 
-## Test Links
+## About This Documentation
 
-- {site-url}/test-page[Test Page]: A test page link
-- {site-url}/another-page[Another Page]: Another test link
+Redpanda documentation is available at {site-url} and provides comprehensive guides for:
 
-## Test Attributes
+- **Self-Managed Redpanda**: Deploy and manage Redpanda on your own infrastructure (Kubernetes, Linux, Docker)
+- **Redpanda Cloud**: Fully-managed serverless streaming platform
+- **Redpanda Connect**: High-performance data pipeline tool (formerly Benthos)
+- **Redpanda Console**: Web UI for managing and monitoring Redpanda clusters
 
-The test attribute is: {test-attribute}
+## AI-Optimized Documentation Access
 
-## Test Formatting
+We provide multiple formats optimized for AI agent consumption:
 
-This has **bold text** and *italic text* and `monospace text`.
+### Interactive MCP Server
+
+**https://docs.redpanda.com/mcp** - Model Context Protocol server for Claude Code
+
+The Redpanda Documentation MCP server provides AI agents with tools to:
+
+- Generate reference documentation (property docs, metrics, CLI commands, connectors)
+- Access versioned content and API specifications
+- Query documentation structure and navigate components
+- Validate configurations and check compatibility
+
+**Setup for Claude Code:**
+```bash
+npx doc-tools setup-mcp
+```
+
+After setup, restart Claude Code to load the server. You can then ask Claude to generate docs, check versions, or access any part of the documentation.
+
+### Static Exports
+
+- **{site-url}/llms.txt**: This curated overview (llms.txt standard)
+- **{site-url}/llms-full.txt**: Complete documentation export with all pages
+- **{site-url}/ROOT-full.txt**: Self-Managed documentation only
+- **{site-url}/cloud-full.txt**: Cloud documentation only
+- **{site-url}/redpanda-connect-full.txt**: Connect documentation only
+- **Individual markdown pages**: Each HTML page has a .md equivalent (e.g., `/page.html` → `/page.md`)
+
+## Documentation Structure
+
+### Components
+
+**ROOT** (Self-Managed):: Installation, deployment, configuration, and operations for self-managed Redpanda
+**cloud**:: Redpanda Cloud serverless platform documentation
+**redpanda-connect**:: Data pipeline documentation (inputs, outputs, processors)
+**redpanda-labs**:: Hands-on tutorials and example projects
+**api**:: REST API reference (Admin API, HTTP Proxy, Schema Registry)
+**home**:: Documentation home and cross-product resources
+
+### Versioning
+
+Self-managed documentation is versioned (24.3, 25.1, 25.2, etc.). Access specific versions:
+
+- Latest: `{site-url}/current/page-path`
+- Specific: `{site-url}/24.3/page-path`, `{site-url}/25.1/page-path`
+
+Cloud and Connect documentation uses `current` for the latest version.
+
+## Key Topics
+
+### Getting Started
+
+- **{site-url}/current/get-started/intro-to-events/**: Introduction to event streaming
+- **{site-url}/current/get-started/quick-start/**: Quick start with Docker
+- **{site-url}/current/get-started/**: Installation guides for all platforms
+
+### Deployment
+
+- **{site-url}/current/deploy/deployment-option/self-hosted/**: Deploy on your infrastructure
+- **{site-url}/current/deploy/deployment-option/cloud/**: Redpanda Cloud setup
+- **{site-url}/current/deploy/deployment-option/kubernetes/**: Kubernetes deployment
+
+### Configuration
+
+- **{site-url}/current/reference/properties/cluster-properties/**: Cluster configuration reference
+- **{site-url}/current/reference/properties/broker-properties/**: Broker configuration reference
+- **{site-url}/current/reference/rpk/**: CLI reference
+
+### Monitoring & Operations
+
+- **{site-url}/current/manage/monitoring/**: Monitoring with Prometheus and Grafana
+- **{site-url}/current/reference/public-metrics-reference/**: Metrics reference
+- **{site-url}/current/manage/**: Cluster management guides
+
+### Data Pipelines
+
+- **{site-url}/redpanda-connect/current/**: Redpanda Connect documentation
+- **{site-url}/redpanda-connect/current/components/inputs/about/**: Available inputs
+- **{site-url}/redpanda-connect/current/components/outputs/about/**: Available outputs
+- **{site-url}/redpanda-connect/current/components/processors/about/**: Available processors
+
+## Metadata
+
+Each documentation page includes structured metadata:
+
+- **Git dates**: `page-git-created-date`, `page-git-modified-date` (accurate commit history)
+- **Version info**: Component version, Redpanda version, Console version, Operator version
+- **Content type**: Tutorial, how-to, concept, reference (topic-type)
+- **Learning objectives**: Measurable learning outcomes for tutorials
+- **Personas**: Target audience (developers, operators, architects)
+- **Categories**: Content categorization for filtering
+- **FAQ structured data**: Schema.org FAQPage for search engines
+
+## Contributing
+
+Documentation source: https://github.com/redpanda-data/docs
+
+Report issues or suggest improvements through GitHub issues or our community Slack.
+
+## Support
+
+- **Community Slack**: https://redpanda.com/slack
+- **GitHub Discussions**: https://github.com/redpanda-data/redpanda/discussions
+- **Support Portal**: https://support.redpanda.com
+
+## License
+
+Documentation is licensed under Apache License 2.0.
