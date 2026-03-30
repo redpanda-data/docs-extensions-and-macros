@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "4.15.3",
+  "version": "4.15.4",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -59,6 +59,7 @@
     "./extensions/generate-index-data": "./extensions/generate-index-data.js",
     "./extensions/generate-rp-connect-info": "./extensions/generate-rp-connect-info.js",
     "./extensions/add-global-attributes": "./extensions/add-global-attributes.js",
+    "./extensions/git-full-clone": "./extensions/git-full-clone.js",
     "./extensions/add-git-dates": "./extensions/add-git-dates.js",
     "./extensions/add-faq-structured-data": "./extensions/add-faq-structured-data.js",
     "./extensions/version-fetcher/set-latest-version": "./extensions/version-fetcher/set-latest-version.js",

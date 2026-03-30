@@ -6,6 +6,9 @@ urls:
   html_extension_style: indexify
 output:
   clean: true
+runtime:
+  log:
+    level: warning
 content:
   sources:
   - url: .
@@ -51,7 +54,9 @@ antora:
           attribute_name: docker-labs-index
   - require: './extensions/add-pages-to-root'
   - require: './extensions/unlisted-pages'
+  - require: './extensions/git-full-clone'
   - require: './extensions/add-git-dates'
+  - require: './extensions/add-faq-structured-data'
   - require: './extensions/convert-to-markdown'
   - require: './extensions/replace-attributes-in-attachments'
     data:
