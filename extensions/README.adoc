@@ -77,6 +77,10 @@ IMPORTANT: Extensions must be registered under the `antora.extensions` key in yo
 * **replace-attributes-in-attachments** - Replace AsciiDoc attributes in attached files
 * **collect-bloblang-samples** - Collect Bloblang code samples
 
+=== Git integration
+* **git-full-clone** - Ensure full git clones for accurate git dates
+* **add-git-dates** - Add git-based created and modified dates to pages
+
 === Content enhancement
 * **add-global-attributes** - Add attributes globally to all pages
 * **add-pages-to-root** - Add pages to the root navigation
