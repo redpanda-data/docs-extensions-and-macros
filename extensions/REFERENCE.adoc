@@ -909,3 +909,177 @@ The extension generates schema.org FAQPage JSON-LD in the page `<head>`:
 ```
 
 This structured data appears in Google search results as rich snippets, improving SEO and click-through rates.
+
+== Convert pages to markdown
+
+The `convert-to-markdown` extension converts all HTML pages to markdown format and exports them as `.md` files alongside the HTML. This creates AI-friendly markdown versions of the documentation with proper frontmatter.
+
+=== Features
+
+- Converts all HTML pages to GitHub-Flavored Markdown
+- Exports as `.md` files (e.g., `/page.html` → `/page.md`)
+- Adds YAML frontmatter with page metadata
+- Decodes HTML entities in titles
+- Supports content negotiation via `Accept: text/markdown` header
+- Stores markdown in `page.markdownContents` for other extensions
+
+=== Configuration
+
+Add to your Antora playbook:
+
+[,yaml]
+----
+antora:
+  extensions:
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/convert-to-markdown'
+----
+
+=== Frontmatter attributes
+
+The extension exports these attributes to YAML frontmatter:
+
+- `page-title`: Page title
+- `page-description`: Page description
+- `page-component-name`, `page-component-version`: Component info
+- `page-git-created-date`, `page-git-modified-date`: Git dates (if git-dates extension enabled)
+- `page-categories`: Categories
+- `page-topic-type`: Topic type (tutorial, how-to, concept, reference)
+- `page-personas`: Target audience
+- Custom attributes from allowlist
+
+=== Example output
+
+[,yaml]
+----
+---
+title: "Get started with Redpanda"
+description: "Quick start guide for Redpanda"
+component: ROOT
+version: current
+created: 2024-01-15
+modified: 2024-03-29
+categories:
+  - Getting Started
+topic-type: tutorial
+personas:
+  - developer
+---
+
+# Get started with Redpanda
+
+Your markdown content here...
+----
+
+== Generate llms.txt exports
+
+The `convert-llms-to-txt` extension generates AI-optimized documentation exports in plain text format following the llms.txt standard.
+
+=== Features
+
+- Generates `llms.txt` from a curated `llms.adoc` page in the home component
+- Creates `llms-full.txt` with all documentation pages
+- Generates component-specific exports (e.g., `ROOT-full.txt`, `cloud-full.txt`)
+- Unpublishes the HTML version of llms.adoc
+- Replaces site-url attribute dynamically for preview builds
+
+=== Configuration
+
+Add to your Antora playbook after `convert-to-markdown`:
+
+[,yaml]
+----
+antora:
+  extensions:
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/convert-to-markdown'
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/convert-llms-to-txt'
+----
+
+=== Setup
+
+Create `modules/home/pages/llms.adoc` in your docs repository with curated documentation overview content. The extension will:
+
+1. Convert it to markdown
+2. Place `llms.txt` at site root
+3. Generate `llms-full.txt` with all pages
+4. Generate component-specific full.txt files
+5. Unpublish the HTML version
+
+=== Generated files
+
+- `{site-url}/llms.txt` - Curated overview
+- `{site-url}/llms-full.txt` - Complete documentation
+- `{site-url}/ROOT-full.txt` - Self-Managed docs only
+- `{site-url}/cloud-full.txt` - Cloud docs only
+- `{site-url}/redpanda-connect-full.txt` - Connect docs only
+
+=== Attributes
+
+The extension replaces `{site-url}` attribute with:
+
+- `playbook.site.url` in production builds
+- `DEPLOY_PRIME_URL` environment variable in preview builds (when `PREVIEW=true`)
+
+== Convert sitemaps to markdown
+
+The `convert-sitemap-to-markdown` extension generates human-readable markdown versions of XML sitemap files.
+
+=== Features
+
+- Converts all sitemap XML files to markdown
+- Generates individual `.md` files for each sitemap
+- Creates master `sitemap-all.md` combining all pages
+- Organizes URLs by component/version
+- Includes page metadata (modified dates, priority)
+- Uses Antora content catalog (no filesystem operations)
+
+=== Configuration
+
+Add to your Antora playbook:
+
+[,yaml]
+----
+antora:
+  extensions:
+  - require: '@redpanda-data/docs-extensions-and-macros/extensions/convert-sitemap-to-markdown'
+----
+
+=== Generated files
+
+For a site with component-specific sitemaps:
+
+- `sitemap.md` - Sitemap index with links to sub-sitemaps
+- `sitemap-ROOT.md` - Self-Managed pages
+- `sitemap-home.md` - Home component pages
+- `sitemap-redpanda-cloud.md` - Cloud pages
+- `sitemap-redpanda-connect.md` - Connect pages
+- `sitemap-all.md` - Master combined sitemap with all pages
+
+=== Output format
+
+[,markdown]
+----
+# Complete documentation sitemap
+
+> Combined view of all 4,126 documentation pages from 8 sitemaps
+
+## Source sitemaps
+
+- [sitemap-ROOT.xml](sitemap-ROOT.md)
+- [sitemap-home.xml](sitemap-home.md)
+
+## Pages
+
+Total pages: 4,126
+
+### Current
+
+- [Get Started](https://docs.redpanda.com/current/get-started/) (modified: 2024-03-29)
+- [Deploy](https://docs.redpanda.com/current/deploy/) (modified: 2024-03-28)
+----
+
+=== Use cases
+
+- AI agents: Provide sitemap-all.md for quick site navigation
+- Documentation planning: Review complete site structure
+- Content audits: Identify gaps or outdated content by date
+- User discovery: Help users find content through browseable map
