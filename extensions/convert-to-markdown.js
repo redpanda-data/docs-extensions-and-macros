@@ -490,17 +490,27 @@ module.exports.register = function () {
             logger.debug(`Generated frontmatter for ${page.src?.path}`)
           }
 
-          // Prepend frontmatter first, then source reference and AI-friendly note
+          // Extract H1 heading if present
+          const h1Match = markdown.match(/^(#\s+.+?)(\n|$)/m)
+          let h1Heading = ''
+          let restOfMarkdown = markdown
+
+          if (h1Match) {
+            h1Heading = h1Match[0]
+            restOfMarkdown = markdown.substring(h1Match[0].length).trimStart()
+          }
+
+          // Add frontmatter AFTER H1 heading, then source reference and AI-friendly note
           if (canonicalUrl) {
             const componentName = page.src?.component || '';
             const urlHint = componentName
               ? `<!-- Note for AI: This is a Markdown export. For aggregated content, see /llms.txt (curated overview), /${componentName}-full.txt (this component only), or /llms-full.txt (complete documentation). -->`
               : `<!-- Note for AI: This is a Markdown export. For aggregated content, see /llms.txt (curated overview) or /llms-full.txt (complete documentation). -->`;
 
-            markdown = `${frontmatter}<!-- Source: ${canonicalUrl} -->\n${urlHint}\n\n${markdown}`
+            markdown = `${h1Heading}\n${frontmatter}<!-- Source: ${canonicalUrl} -->\n${urlHint}\n\n${restOfMarkdown}`
           } else if (frontmatter) {
-            // If no canonical URL but we have frontmatter, still add it
-            markdown = `${frontmatter}${markdown}`
+            // If no canonical URL but we have frontmatter, still add it after H1
+            markdown = `${h1Heading}\n${frontmatter}${restOfMarkdown}`
           }
 
           // Clean up unnecessary whitespace
