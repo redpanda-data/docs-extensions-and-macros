@@ -490,8 +490,8 @@ module.exports.register = function () {
             logger.debug(`Generated frontmatter for ${page.src?.path}`)
           }
 
-          // Extract H1 heading if present
-          const h1Match = markdown.match(/^(#\s+.+?)(\n|$)/m)
+          // Extract H1 heading if present (only at document start)
+          const h1Match = markdown.match(/^(#\s+.+?)(\n|$)/)
           let h1Heading = ''
           let restOfMarkdown = markdown
 
