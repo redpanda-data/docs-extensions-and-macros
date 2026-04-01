@@ -789,6 +789,12 @@ Cloud binary version (default: auto-detect latest)
 `--cgo-version <version>`::
 cgo binary version (default: same as cloud-version)
 
+`--skip-intermediate`::
+Skip intermediate release processing (legacy mode - only compare latest vs last documented)
+
+`--from-version <version>`::
+Override starting version instead of using antora.yml (useful for backfilling)
+
 `-h, --help`::
 display help for command
 

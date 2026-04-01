@@ -1,11 +1,14 @@
 const renderLeafField = require('./renderLeafField');
 const renderObjectField = require('./renderObjectField');
 
+// Component types that support the 'label' field
+const TYPES_WITH_LABEL = new Set(['inputs', 'outputs', 'processors']);
+
 /**
- * Builds either “Common” or “Advanced” YAML for one connector.
+ * Builds either "Common" or "Advanced" YAML for one connector.
  *
- * - type            = “input” or “output” (or whatever type)
- * - connectorName   = such as “amqp_1”
+ * - type            = "input" or "output" (or whatever type)
+ * - connectorName   = such as "amqp_1"
  * - children        = the array of field‐definitions (entry.config.children)
  * - includeAdvanced = if false → only fields where is_advanced !== true
  *                      if true  → all fields (except deprecated)
@@ -13,18 +16,20 @@ const renderObjectField = require('./renderObjectField');
  * Structure produced:
  *
  *   type:
- *     label: ""
+ *     label: ""          (only for inputs, outputs, processors)
  *     connectorName:
- *       ...child fields (with comments for “no default”)
+ *       ...child fields (with comments for "no default")
  */
 module.exports = function buildConfigYaml(type, connectorName, children, includeAdvanced) {
   const lines = [];
 
-  // “type:” top‐level
+  // "type:" top‐level
   lines.push(`${type}:`);
 
-  // Two‐space indent for “label”
-  lines.push(`  label: ""`);
+  // Two‐space indent for "label" (only for types that support it)
+  if (TYPES_WITH_LABEL.has(type)) {
+    lines.push(`  label: ""`);
+  }
 
   // Two‐space indent for connectorName heading
   lines.push(`  ${connectorName}:`);
