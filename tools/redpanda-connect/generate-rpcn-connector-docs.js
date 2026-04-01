@@ -406,8 +406,8 @@ async function generateRpcnConnectorDocs(options) {
         }
 
         // Check if this connector is cgo-only or cloud-only and mark it
-        // Use item.type (singular) not type (plural) for CSV lookup
-        const connectorKey = `${item.type}:${name}`;
+        // Use plural type for CGO/cloud detection (matches test expectations)
+        const connectorKey = `${type}:${name}`;
         const isCloudOnly = cloudOnlySet.has(connectorKey);
         const isCgoOnly = cgoOnlySet.has(connectorKey);
 
@@ -423,8 +423,9 @@ async function generateRpcnConnectorDocs(options) {
           item.cloudOnly = true;
         }
 
-        // Lookup support level from CSV metadata
-        const csvData = csvMetadataMap.get(connectorKey);
+        // Lookup support level from CSV metadata using singular type
+        const csvKey = `${item.type}:${name}`;
+        const csvData = csvMetadataMap.get(csvKey);
         if (csvData && csvData.support) {
           item.support = csvData.support;
         }
