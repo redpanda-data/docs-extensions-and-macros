@@ -43,17 +43,22 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
   if (total.newFields > 0) {
     lines.push(`- **${total.newFields}** new fields across ${total.releaseCount || 0} release(s)`);
   }
+  if (total.removedComponents > 0) {
+    lines.push(`- **${total.removedComponents}** removed connectors ⚠️`);
+  }
   if (total.removedFields > 0) {
     lines.push(`- **${total.removedFields}** removed fields ⚠️`);
+  }
+  if (total.deprecatedComponents > 0) {
+    lines.push(`- **${total.deprecatedComponents}** deprecated connectors`);
   }
   if (total.deprecatedFields > 0) {
     lines.push(`- **${total.deprecatedFields}** deprecated fields`);
   }
+  if (total.changedDefaults > 0) {
+    lines.push(`- **${total.changedDefaults}** changed default values ⚠️`);
+  }
 
-  lines.push('');
-
-  // Per-release breakdown
-  lines.push('### Changes Per Release');
   lines.push('');
 
   // Guard: ensure releases array exists
@@ -65,65 +70,145 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     return lines.join('\n');
   }
 
+  // Per-release detailed breakdown
+  lines.push('### Changes Per Release');
+  lines.push('');
+
   for (const release of releases) {
+    const releaseNotesUrl = `https://github.com/redpanda-data/connect/releases/tag/v${release.toVersion}`;
     lines.push(`#### 🔖 Version ${release.toVersion}`);
+    lines.push(`> [Release notes](${releaseNotesUrl})`);
     lines.push('');
 
     const summary = release.summary || {};
+    const details = release.details || {};
     const hasChanges = Object.values(summary).some(v => v > 0);
 
     if (!hasChanges) {
-      lines.push('_No changes in this release_');
+      lines.push('_No documentation changes in this release_');
       lines.push('');
       continue;
     }
 
-    // Show what changed in this specific release
-    const newComponents = release.details?.newComponents || [];
+    // New connectors with descriptions
+    const newComponents = details.newComponents || [];
     if (summary.newComponents > 0 && newComponents.length > 0) {
       lines.push(`**New Connectors (${summary.newComponents}):**`);
       lines.push('');
       const inCloud = release.binaryAnalysis?.comparison?.inCloud || [];
       const cloudOnly = release.binaryAnalysis?.comparison?.cloudOnly || [];
+      const notInCloud = release.binaryAnalysis?.comparison?.notInCloud || [];
       const cgoOnly = release.binaryAnalysis?.cgoOnly || [];
+
       newComponents.forEach(comp => {
-        const cloudIndicator = inCloud.some(c => c.type === comp.type && c.name === comp.name) ||
-          cloudOnly.some(c => c.type === comp.type && c.name === comp.name) ? ' ☁️' : '';
-        const cgoIndicator = cgoOnly.some(c => c.type === comp.type && c.name === comp.name) ? ' 🔧' : '';
-        lines.push(`- \`${comp.name}\` (${comp.type}, ${comp.status})${cloudIndicator}${cgoIndicator}`);
+        const isInCloud = inCloud.some(c => c.type === comp.type && c.name === comp.name) ||
+          cloudOnly.some(c => c.type === comp.type && c.name === comp.name);
+        const isSelfHostedOnly = notInCloud.some(c => c.type === comp.type && c.name === comp.name);
+        const isCgoOnly = cgoOnly.some(c => c.type === comp.type && c.name === comp.name);
+
+        let platformIndicator = '';
+        if (isInCloud) platformIndicator = ' ☁️';
+        else if (isSelfHostedOnly) platformIndicator = ' 🖥️';
+        if (isCgoOnly) platformIndicator += ' 🔧';
+
+        lines.push(`##### \`${comp.name}\` (${comp.type}, ${comp.status})${platformIndicator}`);
+
+        // Add description (truncated to 2 sentences)
+        if (comp.description) {
+          const shortDesc = truncateToSentence(comp.description, 2);
+          lines.push(`> ${shortDesc}`);
+        }
+        lines.push('');
+      });
+    }
+
+    // New fields with details
+    const newFields = details.newFields || [];
+    if (summary.newFields > 0 && newFields.length > 0) {
+      lines.push(`**New Fields (${summary.newFields}):**`);
+      lines.push('');
+      lines.push('| Component | Field | Description |');
+      lines.push('|-----------|-------|-------------|');
+
+      newFields.forEach(field => {
+        const desc = field.description ? truncateToSentence(field.description, 1).replace(/\|/g, '\\|') : '_No description_';
+        lines.push(`| \`${field.component}\` | \`${field.field}\` | ${desc} |`);
       });
       lines.push('');
     }
 
-    if (summary.newFields > 0) {
-      lines.push(`**New Fields:** ${summary.newFields} added`);
+    // Removed components
+    const removedComponents = details.removedComponents || [];
+    if (summary.removedComponents > 0 && removedComponents.length > 0) {
+      lines.push(`**⚠️ Removed Connectors (${summary.removedComponents}):**`);
+      lines.push('');
+      removedComponents.forEach(comp => {
+        lines.push(`- \`${comp.name}\` (${comp.type})`);
+      });
       lines.push('');
     }
 
-    if (summary.removedFields > 0) {
-      lines.push(`**⚠️ Removed Fields:** ${summary.removedFields}`);
+    // Removed fields
+    const removedFields = details.removedFields || [];
+    if (summary.removedFields > 0 && removedFields.length > 0) {
+      lines.push(`**⚠️ Removed Fields (${summary.removedFields}):**`);
+      lines.push('');
+      lines.push('| Component | Field |');
+      lines.push('|-----------|-------|');
+      removedFields.forEach(field => {
+        lines.push(`| \`${field.component}\` | \`${field.field}\` |`);
+      });
       lines.push('');
     }
 
-    if (summary.deprecatedFields > 0) {
-      lines.push(`**Deprecated Fields:** ${summary.deprecatedFields}`);
+    // Deprecated fields with migration guidance
+    const deprecatedFields = details.deprecatedFields || [];
+    if (summary.deprecatedFields > 0 && deprecatedFields.length > 0) {
+      lines.push(`**Deprecated Fields (${summary.deprecatedFields}):**`);
+      lines.push('');
+      deprecatedFields.forEach(field => {
+        const guidance = field.description ? ` — ${truncateToSentence(field.description, 1)}` : '';
+        lines.push(`- \`${field.component}.${field.field}\`${guidance}`);
+      });
+      lines.push('');
+    }
+
+    // Changed defaults
+    const changedDefaults = details.changedDefaults || [];
+    if (summary.changedDefaults > 0 && changedDefaults.length > 0) {
+      lines.push(`**⚠️ Changed Defaults (${summary.changedDefaults}):**`);
+      lines.push('');
+      lines.push('| Component | Field | Old Default | New Default |');
+      lines.push('|-----------|-------|-------------|-------------|');
+      changedDefaults.forEach(change => {
+        const oldVal = change.oldDefault !== undefined ? `\`${JSON.stringify(change.oldDefault)}\`` : '_none_';
+        const newVal = change.newDefault !== undefined ? `\`${JSON.stringify(change.newDefault)}\`` : '_none_';
+        lines.push(`| \`${change.component}\` | \`${change.field}\` | ${oldVal} | ${newVal} |`);
+      });
       lines.push('');
     }
   }
 
   // Writer action items (aggregate)
+  lines.push('---');
+  lines.push('');
   lines.push('### ✍️ Writer Action Items');
   lines.push('');
 
-  // Collect all new connectors across all releases
+  // Collect all new connectors across all releases with full details
   const allNewConnectors = [];
+  const allRemovedConnectors = [];
+  const allDeprecatedFields = [];
+  const allChangedDefaults = [];
+
   releases.forEach(release => {
-    const releaseNewComponents = release.details?.newComponents || [];
+    const details = release.details || {};
     const releaseInCloud = release.binaryAnalysis?.comparison?.inCloud || [];
     const releaseCloudOnly = release.binaryAnalysis?.comparison?.cloudOnly || [];
     const releaseNotInCloud = release.binaryAnalysis?.comparison?.notInCloud || [];
 
-    releaseNewComponents.forEach(comp => {
+    // New connectors
+    (details.newComponents || []).forEach(comp => {
       const isCloud = releaseInCloud.some(c => c.type === comp.type && c.name === comp.name) ||
         releaseCloudOnly.some(c => c.type === comp.type && c.name === comp.name);
       const isSelfHostedOnly = releaseNotInCloud.some(c => c.type === comp.type && c.name === comp.name);
@@ -132,20 +217,122 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
         name: comp.name,
         type: comp.type,
         status: comp.status,
+        description: comp.description,
         version: release.toVersion,
         isCloud,
         isSelfHostedOnly
       });
     });
+
+    // Removed connectors
+    (details.removedComponents || []).forEach(comp => {
+      allRemovedConnectors.push({
+        name: comp.name,
+        type: comp.type,
+        version: release.toVersion
+      });
+    });
+
+    // Deprecated fields
+    (details.deprecatedFields || []).forEach(field => {
+      allDeprecatedFields.push({
+        component: field.component,
+        field: field.field,
+        description: field.description,
+        version: release.toVersion
+      });
+    });
+
+    // Changed defaults
+    (details.changedDefaults || []).forEach(change => {
+      allChangedDefaults.push({
+        component: change.component,
+        field: change.field,
+        oldDefault: change.oldDefault,
+        newDefault: change.newDefault,
+        version: release.toVersion
+      });
+    });
   });
 
+  // Priority 1: New connectors needing documentation
   if (allNewConnectors.length > 0) {
-    lines.push('**Document New Connectors:**');
+    lines.push('**📝 Document New Connectors:**');
     lines.push('');
-    allNewConnectors.forEach(conn => {
-      const cloudLabel = conn.isSelfHostedOnly ? ' (self-hosted only)' : conn.isCloud ? ' ☁️' : '';
-      lines.push(`- [ ] Document new \`${conn.name}\` ${conn.type} from **${conn.version}**${cloudLabel}`);
+
+    // Group by cloud vs self-hosted
+    const cloudConnectors = allNewConnectors.filter(c => c.isCloud);
+    const selfHostedConnectors = allNewConnectors.filter(c => c.isSelfHostedOnly);
+    const otherConnectors = allNewConnectors.filter(c => !c.isCloud && !c.isSelfHostedOnly);
+
+    if (cloudConnectors.length > 0) {
+      lines.push('_Cloud-supported (higher priority):_');
+      cloudConnectors.forEach(conn => {
+        lines.push(`- [ ] \`${conn.name}\` ${conn.type} ☁️ — introduced in **${conn.version}**`);
+      });
+      lines.push('');
+    }
+
+    if (selfHostedConnectors.length > 0) {
+      lines.push('_Self-hosted only:_');
+      selfHostedConnectors.forEach(conn => {
+        lines.push(`- [ ] \`${conn.name}\` ${conn.type} 🖥️ — introduced in **${conn.version}**`);
+      });
+      lines.push('');
+    }
+
+    if (otherConnectors.length > 0 && cloudConnectors.length === 0 && selfHostedConnectors.length === 0) {
+      otherConnectors.forEach(conn => {
+        lines.push(`- [ ] \`${conn.name}\` ${conn.type} — introduced in **${conn.version}**`);
+      });
+      lines.push('');
+    }
+  }
+
+  // Priority 2: Removed connectors needing migration docs
+  if (allRemovedConnectors.length > 0) {
+    lines.push('**⚠️ Update Migration Guide for Removed Connectors:**');
+    lines.push('');
+    allRemovedConnectors.forEach(conn => {
+      lines.push(`- [ ] \`${conn.name}\` ${conn.type} — removed in **${conn.version}**`);
     });
+    lines.push('');
+  }
+
+  // Priority 3: Deprecated fields needing docs update
+  if (allDeprecatedFields.length > 0) {
+    lines.push('**📋 Update Docs for Deprecated Fields:**');
+    lines.push('');
+    allDeprecatedFields.forEach(field => {
+      const guidance = field.description ? ` (${truncateToSentence(field.description, 1)})` : '';
+      lines.push(`- [ ] \`${field.component}.${field.field}\`${guidance} — deprecated in **${field.version}**`);
+    });
+    lines.push('');
+  }
+
+  // Priority 4: Changed defaults that may affect users
+  if (allChangedDefaults.length > 0) {
+    lines.push('**⚠️ Review Changed Defaults for Breaking Changes:**');
+    lines.push('');
+    allChangedDefaults.forEach(change => {
+      const oldVal = change.oldDefault !== undefined ? JSON.stringify(change.oldDefault) : 'none';
+      const newVal = change.newDefault !== undefined ? JSON.stringify(change.newDefault) : 'none';
+      lines.push(`- [ ] \`${change.component}.${change.field}\`: \`${oldVal}\` → \`${newVal}\` — changed in **${change.version}**`);
+    });
+    lines.push('');
+  }
+
+  // Add commercial name reminder if there are new connectors
+  if (allNewConnectors.length > 0) {
+    lines.push('---');
+    lines.push('');
+    lines.push('**💡 Reminder:** For each new connector, add the `:page-commercial-names:` attribute:');
+    lines.push('');
+    lines.push('```asciidoc');
+    lines.push('= Connector Name');
+    lines.push(':type: input');
+    lines.push(':page-commercial-names: Commercial Name, Alternative Name');
+    lines.push('```');
     lines.push('');
   }
 

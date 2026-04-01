@@ -489,7 +489,7 @@ describe('Multi-Version PR Summary', () => {
 
       const summary = generateMultiVersionPRSummary(masterDiff);
 
-      expect(summary).toContain('No changes in this release');
+      expect(summary).toContain('No documentation changes in this release');
     });
 
     it('should handle missing metadata gracefully', () => {
@@ -593,8 +593,9 @@ describe('Multi-Version PR Summary', () => {
 
       const summary = generateMultiVersionPRSummary(masterDiff);
 
-      expect(summary).toContain('Document new `postgres_cdc` inputs from **4.51.0**');
-      expect(summary).toContain('Document new `elasticsearch_v9` outputs from **4.52.0**');
+      // New format: `connector` type — introduced in **version**
+      expect(summary).toContain('`postgres_cdc` inputs — introduced in **4.51.0**');
+      expect(summary).toContain('`elasticsearch_v9` outputs — introduced in **4.52.0**');
     });
 
     it('should label self-hosted-only connectors in action items', () => {
@@ -614,7 +615,9 @@ describe('Multi-Version PR Summary', () => {
 
       const summary = generateMultiVersionPRSummary(masterDiff);
 
-      expect(summary).toContain('Document new `file` inputs from **4.51.0** (self-hosted only)');
+      // New format: grouped under "Self-hosted only:" with 🖥️ indicator
+      expect(summary).toContain('Self-hosted only:');
+      expect(summary).toContain('`file` inputs 🖥️ — introduced in **4.51.0**');
     });
 
     it('should show cloud indicator in action items for cloud connectors', () => {
@@ -634,7 +637,9 @@ describe('Multi-Version PR Summary', () => {
 
       const summary = generateMultiVersionPRSummary(masterDiff);
 
-      expect(summary).toContain('Document new `kafka` inputs from **4.51.0** ☁️');
+      // New format: grouped under "Cloud-supported (higher priority):" with ☁️
+      expect(summary).toContain('Cloud-supported (higher priority):');
+      expect(summary).toContain('`kafka` inputs ☁️ — introduced in **4.51.0**');
     });
   });
 
