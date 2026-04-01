@@ -501,9 +501,9 @@ function stripAugmentationFields(data) {
     if (Array.isArray(cleanData[type])) {
       // Remove connectors that were added by augmentation (cloudOnly or requiresCgo without OSS data)
       cleanData[type] = cleanData[type].filter(c => {
-        // Keep if it's not marked as cloudOnly
+        // Keep if it's not marked as cloudOnly or requiresCgo
         // OR if it has a config/fields (meaning it came from OSS, not just binary analysis)
-        return !c.cloudOnly || c.config || c.fields;
+        return (!(c.cloudOnly || c.requiresCgo) || c.config || c.fields);
       });
 
       // Remove augmentation fields
@@ -702,19 +702,22 @@ async function handleRpcnConnectorDocs (options) {
       process.exit(1)
     }
   } else {
-    const candidates = fs.readdirSync(dataDir).filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
+    const candidates = fs.readdirSync(dataDir)
+      .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
+      .map(f => {
+        const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
+        return match ? match[1] : null
+      })
+      .filter(v => v && semver.valid(v))
+
     if (candidates.length === 0) {
-      console.error('Error: No connect-<version>.json found. Use --fetch-connectors.')
+      console.error('Error: No valid connect-<version>.json found. Use --fetch-connectors.')
       process.exit(1)
     }
-    candidates.sort()
-    dataFile = path.join(dataDir, candidates[candidates.length - 1])
-    const versionMatch = candidates[candidates.length - 1].match(/connect-(\d+\.\d+\.\d+)\.json/)
-    if (!versionMatch || !semver.valid(versionMatch[1])) {
-      console.error(`Error: Invalid version format in filename: ${candidates[candidates.length - 1]}`)
-      process.exit(1)
-    }
-    newVersion = versionMatch[1]
+
+    const sortedVersions = semver.rsort(candidates)
+    newVersion = sortedVersions[0]
+    dataFile = path.join(dataDir, `connect-${newVersion}.json`)
   }
 
   // ========================================================================
@@ -741,14 +744,18 @@ async function handleRpcnConnectorDocs (options) {
 
       // Fallback: check existing data files
       if (!startVersion) {
-        const existingDataFiles = fs.readdirSync(dataDir)
-          .filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
+        const existingVersions = fs.readdirSync(dataDir)
+          .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
           .filter(f => f !== path.basename(dataFile))
-          .sort()
+          .map(f => {
+            const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
+            return match ? match[1] : null
+          })
+          .filter(v => v && semver.valid(v))
 
-        if (existingDataFiles.length > 0) {
-          const oldFile = existingDataFiles[existingDataFiles.length - 1]
-          startVersion = oldFile.match(/connect-(\d+\.\d+\.\d+)\.json/)[1]
+        if (existingVersions.length > 0) {
+          const sortedVersions = semver.rsort(existingVersions)
+          startVersion = sortedVersions[0]
         }
       }
     }
@@ -920,20 +927,27 @@ async function handleRpcnConnectorDocs (options) {
   let oldIndex = {}
   let oldVersion = null
   if (options.oldData && fs.existsSync(options.oldData)) {
-    oldIndex = JSON.parse(fs.readFileSync(options.oldData, 'utf8'))
+    // Strip augmentation fields to ensure clean comparisons
+    oldIndex = stripAugmentationFields(JSON.parse(fs.readFileSync(options.oldData, 'utf8')))
     const m = options.oldData.match(/connect-([\d.]+)\.json$/)
     if (m) oldVersion = m[1]
   } else {
-    const existingDataFiles = fs.readdirSync(dataDir)
-      .filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
+    const existingVersions = fs.readdirSync(dataDir)
+      .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
       .filter(f => f !== path.basename(dataFile))
-      .sort()
+      .map(f => {
+        const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
+        return match ? match[1] : null
+      })
+      .filter(v => v && semver.valid(v))
 
-    if (existingDataFiles.length > 0) {
-      const oldFile = existingDataFiles[existingDataFiles.length - 1]
-      oldVersion = oldFile.match(/connect-(\d+\.\d+\.\d+)\.json/)[1]
+    if (existingVersions.length > 0) {
+      const sortedVersions = semver.rsort(existingVersions)
+      oldVersion = sortedVersions[0]
+      const oldFile = `connect-${oldVersion}.json`
       const oldPath = path.join(dataDir, oldFile)
-      oldIndex = JSON.parse(fs.readFileSync(oldPath, 'utf8'))
+      // Strip augmentation fields to ensure clean comparisons
+      oldIndex = stripAugmentationFields(JSON.parse(fs.readFileSync(oldPath, 'utf8')))
       console.log(`📋 Using old version data: ${oldFile}`)
     } else {
       oldVersion = getAntoraValue('asciidoc.attributes.latest-connect-version')
@@ -979,11 +993,18 @@ async function handleRpcnConnectorDocs (options) {
       const attachmentsRoot = path.resolve(process.cwd(), 'modules/components/attachments')
       fs.mkdirSync(attachmentsRoot, { recursive: true })
 
-      const existingFiles = fs.readdirSync(attachmentsRoot)
-        .filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
-        .sort()
+      const existingVersions = fs.readdirSync(attachmentsRoot)
+        .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
+        .map(f => {
+          const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
+          return match ? match[1] : null
+        })
+        .filter(v => v && semver.valid(v))
 
-      for (const oldFile of existingFiles) {
+      const sortedVersions = semver.sort(existingVersions) // ascending order
+
+      for (const version of sortedVersions) {
+        const oldFile = `connect-${version}.json`
         const oldFilePath = path.join(attachmentsRoot, oldFile)
         fs.unlinkSync(oldFilePath)
         console.log(`🧹 Deleted old version: ${oldFile}`)
@@ -1041,14 +1062,14 @@ async function handleRpcnConnectorDocs (options) {
     }
   }
 
+  // Always use clean OSS data for comparison
+  // Temporarily rename the file so the analyzer finds it
+  const expectedPath = path.join(dataDir, `connect-${newVersion}.json`)
+  let tempRenamed = false
+
   try {
     console.log('\nAnalyzing connector binaries...')
     const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
-
-    // Always use clean OSS data for comparison
-    // Temporarily rename the file so the analyzer finds it
-    const expectedPath = path.join(dataDir, `connect-${newVersion}.json`)
-    let tempRenamed = false
 
     if (fs.existsSync(cleanOssDataPath)) {
       if (fs.existsSync(expectedPath)) {
@@ -1071,13 +1092,6 @@ async function handleRpcnConnectorDocs (options) {
       analysisOptions
     )
 
-    // Restore the augmented file
-    if (tempRenamed) {
-      const expectedPath = path.join(dataDir, `connect-${newVersion}.json`)
-      fs.unlinkSync(expectedPath)
-      fs.renameSync(path.join(dataDir, `._connect-${newVersion}-augmented.json.tmp`), expectedPath)
-    }
-
     console.log('Done: Binary analysis complete:')
     console.log(`   • OSS version: ${binaryAnalysis.ossVersion}`)
 
@@ -1099,6 +1113,17 @@ async function handleRpcnConnectorDocs (options) {
   } catch (err) {
     console.error(`Warning: Binary analysis failed: ${err.message}`)
     console.error('   Continuing without binary analysis data...')
+  } finally {
+    // Restore the augmented file regardless of success or failure
+    if (tempRenamed) {
+      if (fs.existsSync(expectedPath)) {
+        fs.unlinkSync(expectedPath)
+      }
+      const tmpPath = path.join(dataDir, `._connect-${newVersion}-augmented.json.tmp`)
+      if (fs.existsSync(tmpPath)) {
+        fs.renameSync(tmpPath, expectedPath)
+      }
+    }
   }
 
   // Augment data file
@@ -1181,9 +1206,13 @@ async function handleRpcnConnectorDocs (options) {
 
       // Keep only the latest version (delete all older versions)
       // BUT preserve any files from intermediate processing during this run
-      const dataFiles = fs.readdirSync(dataDir)
-        .filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
-        .sort()
+      const dataVersions = fs.readdirSync(dataDir)
+        .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
+        .map(f => {
+          const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
+          return match ? match[1] : null
+        })
+        .filter(v => v && semver.valid(v))
 
       // Build list of versions we need to keep for this run
       const versionsToKeep = new Set([newVersion]); // Always keep the latest
@@ -1199,9 +1228,9 @@ async function handleRpcnConnectorDocs (options) {
       }
 
       // Delete only files that are NOT needed for this run
-      for (const dataFile of dataFiles) {
-        const versionMatch = dataFile.match(/connect-(\d+\.\d+\.\d+)\.json/);
-        if (versionMatch && !versionsToKeep.has(versionMatch[1])) {
+      for (const version of dataVersions) {
+        if (!versionsToKeep.has(version)) {
+          const dataFile = `connect-${version}.json`
           const dataPath = path.join(dataDir, dataFile);
           fs.unlinkSync(dataPath);
           console.log(`🧹 Deleted old version from docs-data: ${dataFile}`);
@@ -1730,6 +1759,18 @@ async function handleRpcnConnectorDocs (options) {
     printPRSummary(masterDiff || diffJson, binaryAnalysis, draftFiles, masterDiff ? true : false)
   } catch (err) {
     console.error(`Warning: Failed to generate PR summary: ${err.message}`)
+  }
+
+  // Check for failures in intermediate processing before updating Antora version
+  if (intermediateProcessingResults.length > 0) {
+    const failures = intermediateProcessingResults.filter(r => !r.success)
+    if (failures.length > 0) {
+      console.error(`\n❌ Cannot update Antora version: ${failures.length} intermediate release(s) failed to process`)
+      failures.forEach(f => {
+        console.error(`   • ${f.fromVersion} → ${f.toVersion}: ${f.error}`)
+      })
+      process.exit(1)
+    }
   }
 
   const wrote = setAntoraValue('asciidoc.attributes.latest-connect-version', newVersion)

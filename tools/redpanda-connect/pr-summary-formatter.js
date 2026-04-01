@@ -281,7 +281,8 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
       lines.push('');
     }
 
-    if (otherConnectors.length > 0 && cloudConnectors.length === 0 && selfHostedConnectors.length === 0) {
+    if (otherConnectors.length > 0) {
+      lines.push('_Other connectors:_');
       otherConnectors.forEach(conn => {
         lines.push(`- [ ] \`${conn.name}\` ${conn.type} — introduced in **${conn.version}**`);
       });
@@ -394,11 +395,13 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   if (stats.newComponents > 0) {
     lines.push(`- **${stats.newComponents}** new connector${stats.newComponents !== 1 ? 's' : ''}`);
 
-    if (binaryAnalysis) {
+    if (binaryAnalysis && binaryAnalysis.comparison) {
       const newConnectorKeys = diffData.details.newComponents.map(c => `${c.type}:${c.name}`);
       const cloudSupported = newConnectorKeys.filter(key => {
         const inCloud = binaryAnalysis.comparison.inCloud.some(c => `${c.type}:${c.name}` === key);
-        return inCloud;
+        const cloudOnly = binaryAnalysis.comparison.cloudOnly &&
+                         binaryAnalysis.comparison.cloudOnly.some(c => `${c.type}:${c.name}` === key);
+        return inCloud || cloudOnly;
       }).length;
 
       const needsCloudDocs = cloudSupported;

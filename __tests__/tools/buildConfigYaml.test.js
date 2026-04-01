@@ -221,5 +221,38 @@ describe('buildConfigYaml', () => {
       const result = buildConfigYaml('inputs', 'kafka', fieldsWithArray, false);
       expect(result).toContain('addresses:');
     });
+
+    it('should handle empty children array for object map', () => {
+      const fieldsWithEmptyChildren = [
+        {
+          name: 'metadata',
+          type: 'object',
+          kind: 'map',
+          description: 'Metadata with no fields.',
+          children: []
+        }
+      ];
+
+      const result = buildConfigYaml('inputs', 'kafka', fieldsWithEmptyChildren, false);
+      expect(result).toContain('metadata:');
+      // Should not contain any child keys since children is empty
+      expect(result.split('\n').filter(line => line.includes('metadata:')).length).toBe(1);
+    });
+
+    it('should handle empty children array for object array', () => {
+      const fieldsWithEmptyChildren = [
+        {
+          name: 'items',
+          type: 'object',
+          kind: 'array',
+          description: 'Array of items with no fields.',
+          children: []
+        }
+      ];
+
+      const result = buildConfigYaml('inputs', 'kafka', fieldsWithEmptyChildren, false);
+      // Array-of-objects with empty children should render as empty array
+      expect(result).toContain('items: []');
+    });
   });
 });

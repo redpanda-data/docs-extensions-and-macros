@@ -513,9 +513,11 @@ describe('Multi-Version PR Summary', () => {
 
       const summary = generateMultiVersionPRSummary(masterDiff);
 
-      // Should not crash and should not show cloud indicator
+      // Should not crash and connector line should not show cloud indicator
       expect(summary).toContain('`test_connector`');
-      expect(summary).not.toContain('☁️');
+      const connectorLine = summary.split('\n').find(line => line.includes('`test_connector`'));
+      expect(connectorLine).toBeDefined();
+      expect(connectorLine).not.toContain('☁️');
     });
 
     it('should handle missing details gracefully', () => {

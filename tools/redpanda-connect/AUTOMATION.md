@@ -38,7 +38,7 @@ The automation handles **multi-release attribution**, automatically detecting an
 
 ### Architecture Overview
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │ 1. Version Detection                                            │
 │    • Read current version from antora.yml                       │
@@ -82,14 +82,14 @@ The automation handles **multi-release attribution**, automatically detecting an
 **Scenario**: antora.yml has version `4.50.0`, latest release is `4.54.0`
 
 **Without Multi-Release (OLD behavior)**:
-```
+```text
 4.50.0 ─────────────────────────► 4.54.0
          (all changes lumped)
 ```
 Result: All changes from 4.51.0, 4.52.0, 4.53.0, and 4.54.0 are attributed to 4.54.0 ❌
 
 **With Multi-Release (NEW behavior)**:
-```
+```text
 4.50.0 ──► 4.51.0 ──► 4.52.0 ──► 4.53.0 ──► 4.54.0
    │          │          │          │          │
    diff1      diff2      diff3      diff4      │

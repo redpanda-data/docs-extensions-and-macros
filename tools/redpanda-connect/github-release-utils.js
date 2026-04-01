@@ -141,6 +141,14 @@ async function discoverIntermediateReleases(fromVersion, toVersion, options = {}
     useCache = true
   } = options;
 
+  // Validate versions are strings
+  if (typeof fromVersion !== 'string') {
+    throw new Error(`Invalid starting version: ${fromVersion}`);
+  }
+  if (typeof toVersion !== 'string') {
+    throw new Error(`Invalid ending version: ${toVersion}`);
+  }
+
   // Normalize versions (remove 'v' prefix if present)
   const normalizedFrom = fromVersion.startsWith('v') ? fromVersion.slice(1) : fromVersion;
   const normalizedTo = toVersion.startsWith('v') ? toVersion.slice(1) : toVersion;

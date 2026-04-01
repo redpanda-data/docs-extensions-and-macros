@@ -139,7 +139,7 @@ Redpanda's API documentation is split into many small OpenAPI files. This tool c
 Run it like this:
 
 ```bash
-npx doc-tools generate bundle-openapi --tag v25.3.1
+npx doc-tools generate bundle-openapi --tag v25.3.1 --surface both
 ```
 
 ## Command-line tools
@@ -160,15 +160,15 @@ npx doc-tools get-console-version
 
 ### Download files from GitHub
 
-Sometimes you need files from a specific version of Redpanda. This command downloads them for you.
+Sometimes you need files from GitHub repositories. This command downloads them for you.
 
 ```bash
 # Download a specific directory from GitHub
 npx doc-tools fetch \
-  --repo redpanda-data/redpanda \
-  --path src/v/config \
-  --tag v25.3.1 \
-  --output ./fetched
+  --owner redpanda-data \
+  --repo redpanda \
+  --remote-path src/v/config \
+  --save-dir ./fetched
 ```
 
 ### Set up AI assistant integration
