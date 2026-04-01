@@ -4,19 +4,181 @@
  */
 
 /**
- * Generate a PR-friendly summary for connector changes
- * @param {object} diffData - Diff data from generateConnectorDiffJson
- * @param {object} binaryAnalysis - Cloud support data from getCloudSupport
+ * Generate PR summary for multiple releases
+ * @param {object} masterDiff - Master diff with releases array
+ * @param {object} binaryAnalysis - Cloud support data (from latest release)
  * @param {array} draftedConnectors - Array of newly drafted connectors
  * @returns {string} Formatted summary
  */
-function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = null) {
+function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, draftedConnectors = null) {
+  const lines = [];
+
+  // Defensive: ensure metadata exists
+  const metadata = masterDiff?.metadata || {};
+  const startVersion = metadata.startVersion || 'unknown';
+  const endVersion = metadata.endVersion || 'unknown';
+  const processedReleases = metadata.processedReleases || 0;
+
+  lines.push('<!-- PR_SUMMARY_START -->');
+  lines.push('');
+  lines.push('## 📊 Redpanda Connect Documentation Update');
+  lines.push('');
+  lines.push(`**📦 Multi-Release Update:** ${startVersion} → ${endVersion}`);
+  lines.push(`**Releases Processed:** ${processedReleases}`);
+
+  if (binaryAnalysis) {
+    lines.push(`**Cloud Version:** ${binaryAnalysis.cloudVersion}`);
+  }
+
+  lines.push('');
+
+  // Total summary across all releases
+  lines.push('### Total Changes Across All Releases');
+  lines.push('');
+  const total = masterDiff?.totalSummary || {};
+
+  if (total.newComponents > 0) {
+    lines.push(`- **${total.newComponents}** new connectors`);
+  }
+  if (total.newFields > 0) {
+    lines.push(`- **${total.newFields}** new fields across ${total.releaseCount || 0} release(s)`);
+  }
+  if (total.removedFields > 0) {
+    lines.push(`- **${total.removedFields}** removed fields ⚠️`);
+  }
+  if (total.deprecatedFields > 0) {
+    lines.push(`- **${total.deprecatedFields}** deprecated fields`);
+  }
+
+  lines.push('');
+
+  // Per-release breakdown
+  lines.push('### Changes Per Release');
+  lines.push('');
+
+  // Guard: ensure releases array exists
+  const releases = masterDiff?.releases || [];
+  if (releases.length === 0) {
+    lines.push('_No releases to process_');
+    lines.push('');
+    lines.push('<!-- PR_SUMMARY_END -->');
+    return lines.join('\n');
+  }
+
+  for (const release of releases) {
+    lines.push(`#### 🔖 Version ${release.toVersion}`);
+    lines.push('');
+
+    const summary = release.summary || {};
+    const hasChanges = Object.values(summary).some(v => v > 0);
+
+    if (!hasChanges) {
+      lines.push('_No changes in this release_');
+      lines.push('');
+      continue;
+    }
+
+    // Show what changed in this specific release
+    const newComponents = release.details?.newComponents || [];
+    if (summary.newComponents > 0 && newComponents.length > 0) {
+      lines.push(`**New Connectors (${summary.newComponents}):**`);
+      lines.push('');
+      const inCloud = release.binaryAnalysis?.comparison?.inCloud || [];
+      const cloudOnly = release.binaryAnalysis?.comparison?.cloudOnly || [];
+      const cgoOnly = release.binaryAnalysis?.cgoOnly || [];
+      newComponents.forEach(comp => {
+        const cloudIndicator = inCloud.some(c => c.type === comp.type && c.name === comp.name) ||
+          cloudOnly.some(c => c.type === comp.type && c.name === comp.name) ? ' ☁️' : '';
+        const cgoIndicator = cgoOnly.some(c => c.type === comp.type && c.name === comp.name) ? ' 🔧' : '';
+        lines.push(`- \`${comp.name}\` (${comp.type}, ${comp.status})${cloudIndicator}${cgoIndicator}`);
+      });
+      lines.push('');
+    }
+
+    if (summary.newFields > 0) {
+      lines.push(`**New Fields:** ${summary.newFields} added`);
+      lines.push('');
+    }
+
+    if (summary.removedFields > 0) {
+      lines.push(`**⚠️ Removed Fields:** ${summary.removedFields}`);
+      lines.push('');
+    }
+
+    if (summary.deprecatedFields > 0) {
+      lines.push(`**Deprecated Fields:** ${summary.deprecatedFields}`);
+      lines.push('');
+    }
+  }
+
+  // Writer action items (aggregate)
+  lines.push('### ✍️ Writer Action Items');
+  lines.push('');
+
+  // Collect all new connectors across all releases
+  const allNewConnectors = [];
+  releases.forEach(release => {
+    const releaseNewComponents = release.details?.newComponents || [];
+    const releaseInCloud = release.binaryAnalysis?.comparison?.inCloud || [];
+    const releaseCloudOnly = release.binaryAnalysis?.comparison?.cloudOnly || [];
+    const releaseNotInCloud = release.binaryAnalysis?.comparison?.notInCloud || [];
+
+    releaseNewComponents.forEach(comp => {
+      const isCloud = releaseInCloud.some(c => c.type === comp.type && c.name === comp.name) ||
+        releaseCloudOnly.some(c => c.type === comp.type && c.name === comp.name);
+      const isSelfHostedOnly = releaseNotInCloud.some(c => c.type === comp.type && c.name === comp.name);
+
+      allNewConnectors.push({
+        name: comp.name,
+        type: comp.type,
+        status: comp.status,
+        version: release.toVersion,
+        isCloud,
+        isSelfHostedOnly
+      });
+    });
+  });
+
+  if (allNewConnectors.length > 0) {
+    lines.push('**Document New Connectors:**');
+    lines.push('');
+    allNewConnectors.forEach(conn => {
+      const cloudLabel = conn.isSelfHostedOnly ? ' (self-hosted only)' : conn.isCloud ? ' ☁️' : '';
+      lines.push(`- [ ] Document new \`${conn.name}\` ${conn.type} from **${conn.version}**${cloudLabel}`);
+    });
+    lines.push('');
+  }
+
+  lines.push('<!-- PR_SUMMARY_END -->');
+  return lines.join('\n');
+}
+
+/**
+ * Generate a PR-friendly summary for connector changes
+ * @param {object} diffData - Diff data from generateConnectorDiffJson OR master diff with multiple releases
+ * @param {object} binaryAnalysis - Cloud support data from getCloudSupport
+ * @param {array} draftedConnectors - Array of newly drafted connectors
+ * @param {boolean} isMultiVersion - Whether diffData is a master diff with multiple releases
+ * @returns {string} Formatted summary
+ */
+function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = null, isMultiVersion = false) {
   const lines = [];
 
   // Header with delimiters for GitHub Action parsing
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
 
+  // Detect if this is a master diff
+  if (!isMultiVersion && diffData.releases && diffData.totalSummary) {
+    isMultiVersion = true;
+  }
+
+  if (isMultiVersion) {
+    // Multi-version format
+    return generateMultiVersionPRSummary(diffData, binaryAnalysis, draftedConnectors);
+  }
+
+  // Single version format (original logic)
   // Quick Summary Section
   lines.push('## 📊 Redpanda Connect Documentation Update');
   lines.push('');
@@ -199,9 +361,15 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
     Object.entries(draftsByType).forEach(([type, drafts]) => {
       lines.push(`**${type}:**`);
       drafts.forEach(draft => {
-        const cloudIndicator = binaryAnalysis?.comparison.inCloud.some(c =>
+        // Check both inCloud (OSS+Cloud) and cloudOnly (Cloud-only)
+        const isInCloud = binaryAnalysis?.comparison.inCloud.some(c =>
           c.type === type && c.name === draft.name
-        ) ? ' ☁️' : '';
+        );
+        const isCloudOnly = binaryAnalysis?.comparison.cloudOnly &&
+          binaryAnalysis.comparison.cloudOnly.some(c =>
+            c.type === type && c.name === draft.name
+          );
+        const cloudIndicator = (isInCloud || isCloudOnly) ? ' ☁️' : '';
         const cgoIndicator = draft.requiresCgo ? ' 🔧' : '';
         const statusBadge = draft.status && draft.status !== 'stable' ? ` (${draft.status})` : '';
         lines.push(`- \`${draft.name}\`${statusBadge}${cloudIndicator}${cgoIndicator} → \`${draft.path}\``);
@@ -304,13 +472,16 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
     });
   }
 
-  // New connectors without cloud support
-  if (stats.newComponents > 0) {
+  // New connectors without cloud support (self-hosted only)
+  if (binaryAnalysis && stats.newComponents > 0) {
     diffData.details.newComponents.forEach(connector => {
       const key = `${connector.type}:${connector.name}`;
-      const inCloud = binaryAnalysis?.comparison.inCloud.some(c => `${c.type}:${c.name}` === key);
 
-      if (!inCloud) {
+      // Check if it's explicitly in the self-hosted only list
+      const isSelfHostedOnly = binaryAnalysis.comparison.notInCloud &&
+        binaryAnalysis.comparison.notInCloud.some(c => `${c.type}:${c.name}` === key);
+
+      if (isSelfHostedOnly) {
         actionItems.push({
           priority: 2,
           text: `Document new \`${connector.name}\` ${connector.type} (self-hosted only)`
@@ -376,7 +547,13 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
       diffData.details.newComponents.forEach(connector => {
         const key = `${connector.type}:${connector.name}`;
+
+        // Check explicit categories
         const inCloud = binaryAnalysis.comparison.inCloud.some(c => `${c.type}:${c.name}` === key);
+        const isSelfHostedOnly = binaryAnalysis.comparison.notInCloud &&
+          binaryAnalysis.comparison.notInCloud.some(c => `${c.type}:${c.name}` === key);
+        const isCloudOnly = binaryAnalysis.comparison.cloudOnly &&
+          binaryAnalysis.comparison.cloudOnly.some(c => `${c.type}:${c.name}` === key);
 
         const entry = {
           name: connector.name,
@@ -385,9 +562,10 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
           description: connector.description
         };
 
-        if (inCloud) {
+        // Use explicit positive checks instead of !inCloud
+        if (inCloud || isCloudOnly) {
           cloudSupportedNew.push(entry);
-        } else {
+        } else if (isSelfHostedOnly) {
           selfHostedOnlyNew.push(entry);
         }
       });
@@ -661,6 +839,7 @@ function printPRSummary(diffData, binaryAnalysis = null, draftedConnectors = nul
 
 module.exports = {
   generatePRSummary,
+  generateMultiVersionPRSummary,
   printPRSummary,
   truncateToSentence
 };
