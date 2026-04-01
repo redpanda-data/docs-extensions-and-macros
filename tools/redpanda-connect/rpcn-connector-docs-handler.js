@@ -487,6 +487,38 @@ function logCollapsed (label, filesArray, maxToShow = 10) {
 }
 
 /**
+ * Strip augmentation fields from connector data to ensure clean comparisons
+ * Removes cloudSupported, requiresCgo, cloudOnly fields and filters out cloud-only connectors
+ * @param {object} data - Connector index data
+ * @returns {object} Clean connector data without augmentation
+ */
+function stripAugmentationFields(data) {
+  const cleanData = JSON.parse(JSON.stringify(data));
+  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
+    'buffers', 'metrics', 'scanners', 'tracers', 'config', 'bloblang-methods'];
+
+  for (const type of connectorTypes) {
+    if (Array.isArray(cleanData[type])) {
+      // Remove connectors that were added by augmentation (cloudOnly or requiresCgo without OSS data)
+      cleanData[type] = cleanData[type].filter(c => {
+        // Keep if it's not marked as cloudOnly
+        // OR if it has a config/fields (meaning it came from OSS, not just binary analysis)
+        return !c.cloudOnly || c.config || c.fields;
+      });
+
+      // Remove augmentation fields
+      cleanData[type].forEach(c => {
+        delete c.cloudSupported;
+        delete c.requiresCgo;
+        delete c.cloudOnly;
+      });
+    }
+  }
+
+  return cleanData;
+}
+
+/**
  * Load or fetch connector data for a specific version
  * @param {string} version - Version to load (e.g., "4.50.0")
  * @param {string} dataDir - Directory where JSON files are stored
@@ -499,7 +531,12 @@ async function loadConnectorDataForVersion(version, dataDir, options = {}) {
   // If file exists, load it
   if (fs.existsSync(dataFile)) {
     console.log(`✓ Using existing data file: connect-${version}.json`);
-    return JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    const data = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+
+    // Strip augmentation fields to ensure clean comparisons
+    // Augmentation adds CGO/cloud-only components that shouldn't affect version diffs
+    const cleanData = stripAugmentationFields(data);
+    return cleanData;
   }
 
   // If not, fetch it
@@ -903,32 +940,22 @@ async function handleRpcnConnectorDocs (options) {
       if (oldVersion) {
         const oldPath = path.join(dataDir, `connect-${oldVersion}.json`)
         if (fs.existsSync(oldPath)) {
-          oldIndex = JSON.parse(fs.readFileSync(oldPath, 'utf8'))
+          // Strip augmentation fields to ensure clean comparisons
+          oldIndex = stripAugmentationFields(JSON.parse(fs.readFileSync(oldPath, 'utf8')))
         }
       }
     }
   }
 
-  let newIndex = JSON.parse(fs.readFileSync(dataFile, 'utf8'))
+  // Load and strip augmentation fields for clean comparisons
+  let newIndex = stripAugmentationFields(JSON.parse(fs.readFileSync(dataFile, 'utf8')))
 
   // Save a clean copy of OSS data for binary analysis (before augmentation)
   // This ensures the binary analyzer compares actual binaries, not augmented data
   const cleanOssDataPath = path.join(dataDir, `._connect-${newVersion}-clean.json`)
 
-  // Strip augmentation fields to create clean data for comparison
+  // Use the already-stripped newIndex for clean data
   const cleanData = JSON.parse(JSON.stringify(newIndex))
-  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers']
-
-  for (const type of connectorTypes) {
-    if (Array.isArray(cleanData[type])) {
-      cleanData[type] = cleanData[type].filter(c => !c.cloudOnly) // Remove cloud-only connectors added by augmentation
-      cleanData[type].forEach(c => {
-        delete c.cloudSupported
-        delete c.requiresCgo
-        delete c.cloudOnly
-      })
-    }
-  }
 
   fs.writeFileSync(cleanOssDataPath, JSON.stringify(cleanData, null, 2), 'utf8')
 
@@ -1181,8 +1208,9 @@ async function handleRpcnConnectorDocs (options) {
         }
       }
 
-      // Reload newIndex after augmentation so diff generation uses augmented data
-      newIndex = JSON.parse(fs.readFileSync(dataFile, 'utf8'))
+      // NOTE: We do NOT reload newIndex after augmentation
+      // Diff generation should use clean OSS data to avoid false positives from CGO/cloud-only components
+      // The augmented data is saved to disk but not used for version comparisons
     } catch (err) {
       console.error(`Warning: Failed to augment data file: ${err.message}`)
     }

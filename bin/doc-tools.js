@@ -705,6 +705,8 @@ automation
   .option('--include-bloblang', 'Include Bloblang functions and methods in generation')
   .option('--cloud-version <version>', 'Cloud binary version (default: auto-detect latest)')
   .option('--cgo-version <version>', 'cgo binary version (default: same as cloud-version)')
+  .option('--skip-intermediate', 'Skip intermediate release processing (legacy mode - only compare latest vs last documented)')
+  .option('--from-version <version>', 'Override starting version instead of using antora.yml (useful for backfilling)')
   .action(async (options) => {
     requireTool('rpk', {
       versionFlag: '--version',
