@@ -9,6 +9,7 @@ const fetchFromGithub = require('../fetch-from-github.js')
 const { generateRpcnConnectorDocs } = require('./generate-rpcn-connector-docs.js')
 const { getRpkConnectVersion, printDeltaReport } = require('./report-delta')
 const { discoverIntermediateReleases } = require('./github-release-utils')
+const parseCSVConnectors = require('./parse-csv-connectors.js')
 const semver = require('semver')
 
 /**
@@ -596,6 +597,7 @@ async function handleRpcnConnectorDocs (options) {
   let draftsWritten = 0
   let draftFiles = []
   let needsAugmentation = false
+  let csvMetadata = []
 
   if (options.fetchConnectors) {
     try {
@@ -654,6 +656,16 @@ async function handleRpcnConnectorDocs (options) {
         }
       } catch (csvErr) {
         console.warn(`Warning: Failed to fetch info.csv: ${csvErr.message}`)
+      }
+
+      // Parse CSV metadata
+      try {
+        const csvFile = path.join(dataDir, `connect-info-${newVersion}.csv`)
+        if (fs.existsSync(csvFile)) {
+          csvMetadata = await parseCSVConnectors(csvFile, console)
+        }
+      } catch (csvParseErr) {
+        console.warn(`Warning: Failed to parse info.csv: ${csvParseErr.message}`)
       }
 
       // Fetch Bloblang examples
@@ -915,7 +927,8 @@ async function handleRpcnConnectorDocs (options) {
       templateExamples: options.templateExamples,
       templateBloblang: options.templateBloblang,
       writeFullDrafts: false,
-      includeBloblang: !!options.includeBloblang
+      includeBloblang: !!options.includeBloblang,
+      csvMetadata
     })
     partialsWritten = result.partialsWritten
     partialFiles = result.partialFiles
@@ -1702,7 +1715,8 @@ async function handleRpcnConnectorDocs (options) {
           templateIntro: options.templateIntro,
           writeFullDrafts: true,
           cgoOnly: binaryAnalysis?.cgoOnly || [],
-          cloudOnly: binaryAnalysis?.comparison?.cloudOnly || []
+          cloudOnly: binaryAnalysis?.comparison?.cloudOnly || [],
+          csvMetadata
         })
 
         fs.unlinkSync(tempDataPath)
