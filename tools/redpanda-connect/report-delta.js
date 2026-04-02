@@ -163,6 +163,50 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     });
   });
 
+  // Detect new/removed Bloblang methods and functions
+  const oldMethods = new Set((oldIndex['bloblang-methods'] || []).filter(Boolean).map(m => m.name).filter(Boolean));
+  const newMethods = new Set((newIndex['bloblang-methods'] || []).filter(Boolean).map(m => m.name).filter(Boolean));
+  const oldFunctions = new Set((oldIndex['bloblang-functions'] || []).filter(Boolean).map(f => f.name).filter(Boolean));
+  const newFunctions = new Set((newIndex['bloblang-functions'] || []).filter(Boolean).map(f => f.name).filter(Boolean));
+
+  const newBloblangMethods = Array.from(newMethods).filter(m => !oldMethods.has(m)).sort();
+  const removedBloblangMethods = Array.from(oldMethods).filter(m => !newMethods.has(m)).sort();
+  const newBloblangFunctions = Array.from(newFunctions).filter(f => !oldFunctions.has(f)).sort();
+  const removedBloblangFunctions = Array.from(oldFunctions).filter(f => !newFunctions.has(f)).sort();
+
+  // Detect deprecated Bloblang methods and functions
+  const deprecatedBloblangMethods = [];
+  const deprecatedBloblangFunctions = [];
+
+  const oldMethodsMap = new Map((oldIndex['bloblang-methods'] || []).filter(Boolean).filter(m => m.name).map(m => [m.name, m]));
+  const newMethodsMap = new Map((newIndex['bloblang-methods'] || []).filter(Boolean).filter(m => m.name).map(m => [m.name, m]));
+  const oldFunctionsMap = new Map((oldIndex['bloblang-functions'] || []).filter(Boolean).filter(f => f.name).map(f => [f.name, f]));
+  const newFunctionsMap = new Map((newIndex['bloblang-functions'] || []).filter(Boolean).filter(f => f.name).map(f => [f.name, f]));
+
+  // Check methods for newly deprecated status
+  newMethodsMap.forEach((newMethod, name) => {
+    const oldMethod = oldMethodsMap.get(name);
+    if (oldMethod) {
+      const oldStatus = (oldMethod.status || '').toLowerCase();
+      const newStatus = (newMethod.status || '').toLowerCase();
+      if (oldStatus !== 'deprecated' && newStatus === 'deprecated') {
+        deprecatedBloblangMethods.push(name);
+      }
+    }
+  });
+
+  // Check functions for newly deprecated status
+  newFunctionsMap.forEach((newFunction, name) => {
+    const oldFunction = oldFunctionsMap.get(name);
+    if (oldFunction) {
+      const oldStatus = (oldFunction.status || '').toLowerCase();
+      const newStatus = (newFunction.status || '').toLowerCase();
+      if (oldStatus !== 'deprecated' && newStatus === 'deprecated') {
+        deprecatedBloblangFunctions.push(name);
+      }
+    }
+  });
+
   const result = {
     comparison: {
       oldVersion: opts.oldVersion || '',
@@ -176,7 +220,13 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       removedFields: removedFields.length,
       deprecatedComponents: deprecatedComponents.length,
       deprecatedFields: deprecatedFields.length,
-      changedDefaults: changedDefaults.length
+      changedDefaults: changedDefaults.length,
+      newBloblangMethods: newBloblangMethods.length,
+      removedBloblangMethods: removedBloblangMethods.length,
+      newBloblangFunctions: newBloblangFunctions.length,
+      removedBloblangFunctions: removedBloblangFunctions.length,
+      deprecatedBloblangMethods: deprecatedBloblangMethods.length,
+      deprecatedBloblangFunctions: deprecatedBloblangFunctions.length
     },
     details: {
       newComponents,
@@ -185,7 +235,13 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       removedFields,
       deprecatedComponents,
       deprecatedFields,
-      changedDefaults
+      changedDefaults,
+      newBloblangMethods,
+      removedBloblangMethods,
+      newBloblangFunctions,
+      removedBloblangFunctions,
+      deprecatedBloblangMethods,
+      deprecatedBloblangFunctions
     }
   };
 

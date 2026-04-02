@@ -1,10 +1,9 @@
 = {{{name}}}
 // tag::single-source[]
 :type: {{type}}
-:status: {{status}}
 {{#if support}}:support: {{support}}{{/if}}
 :categories: [{{join categories ", "}}]
-:description: {{#if summary}}{{{summary}}}{{else if description}}{{description}}{{else}}TODO: Missing description. Add a description in the overrides file or source data.{{/if}}
+:description: {{#if summary}}{{{summary}}}{{else if description}}{{description}}{{else}}// TODO: Missing description. Add a description in the overrides file or source data.{{/if}}
 
 component_type_dropdown::[]
 

@@ -472,6 +472,28 @@ async function generateRpcnConnectorDocs(options) {
       if (!Array.isArray(items)) continue;
       const outRoot = path.join(outputRoot, folder);
       fs.mkdirSync(outRoot, { recursive: true });
+
+      // Get current item names
+      const currentNames = new Set(items.filter(fn => fn.name).map(fn => fn.name));
+
+      // Delete partials that no longer exist in the data
+      if (fs.existsSync(outRoot)) {
+        const existingFiles = fs.readdirSync(outRoot).filter(f => f.endsWith('.adoc'));
+        for (const file of existingFiles) {
+          const name = file.replace('.adoc', '');
+          // Skip hand-authored files (by convention, start with underscore)
+          if (name.startsWith('_')) {
+            console.log(`Skipping hand-authored file: ${file}`);
+            continue;
+          }
+          if (!currentNames.has(name)) {
+            const filePath = path.join(outRoot, file);
+            fs.unlinkSync(filePath);
+            console.log(`Deleted removed ${folder} partial: ${file}`);
+          }
+        }
+      }
+
       // Use custom or default template
       const bloblangTemplatePath = templateBloblang || path.resolve(__dirname, './templates/bloblang-function.hbs');
       const bloblangTemplate = handlebars.compile(fs.readFileSync(bloblangTemplatePath, 'utf8'));
@@ -483,6 +505,71 @@ async function generateRpcnConnectorDocs(options) {
         partialsWritten++;
         partialFiles.push(path.relative(process.cwd(), outPath));
       }
+    }
+
+    // Generate overview pages for Bloblang methods and functions
+    const guidesRoot = path.join(process.cwd(), 'modules/guides/pages/bloblang');
+    fs.mkdirSync(guidesRoot, { recursive: true });
+
+    // Generate methods.adoc with categorized methods
+    if (dataObj['bloblang-methods']) {
+      const methodsData = dataObj['bloblang-methods'];
+      const categoriesMap = new Map();
+
+      // Extract categories and their methods
+      for (const method of methodsData) {
+        if (!method.name || !method.categories || !Array.isArray(method.categories)) continue;
+
+        for (const cat of method.categories) {
+          const categoryName = cat.Category;
+          if (!categoryName) continue;
+
+          if (!categoriesMap.has(categoryName)) {
+            categoriesMap.set(categoryName, []);
+          }
+          categoriesMap.get(categoryName).push(method.name);
+        }
+      }
+
+      // Sort categories and prepare data for template
+      const categories = Array.from(categoriesMap.entries())
+        .map(([name, methods]) => ({
+          name,
+          methods: methods.sort()
+        }))
+        .sort((a, b) => {
+          // Special ordering: General first, Deprecated last
+          if (a.name === 'General') return -1;
+          if (b.name === 'General') return 1;
+          if (a.name === 'Deprecated') return 1;
+          if (b.name === 'Deprecated') return -1;
+          return a.name.localeCompare(b.name);
+        });
+
+      const methodsTemplatePath = path.resolve(__dirname, './templates/bloblang-methods-overview.hbs');
+      const methodsTemplate = handlebars.compile(fs.readFileSync(methodsTemplatePath, 'utf8'));
+      const methodsAdoc = methodsTemplate({ categories });
+      const methodsOutPath = path.join(guidesRoot, 'methods.adoc');
+      fs.writeFileSync(methodsOutPath, methodsAdoc, 'utf8');
+      console.log('Generated methods.adoc overview page');
+      partialFiles.push(path.relative(process.cwd(), methodsOutPath));
+    }
+
+    // Generate functions.adoc with all functions
+    if (dataObj['bloblang-functions']) {
+      const functionsData = dataObj['bloblang-functions'];
+      const functionNames = functionsData
+        .filter(fn => fn.name)
+        .map(fn => fn.name)
+        .sort();
+
+      const functionsTemplatePath = path.resolve(__dirname, './templates/bloblang-functions-overview.hbs');
+      const functionsTemplate = handlebars.compile(fs.readFileSync(functionsTemplatePath, 'utf8'));
+      const functionsAdoc = functionsTemplate({ functions: functionNames });
+      const functionsOutPath = path.join(guidesRoot, 'functions.adoc');
+      fs.writeFileSync(functionsOutPath, functionsAdoc, 'utf8');
+      console.log('Generated functions.adoc overview page');
+      partialFiles.push(path.relative(process.cwd(), functionsOutPath));
     }
   }
 

@@ -4,6 +4,118 @@
  */
 
 /**
+ * Render Bloblang changes section for PR summary
+ * @param {object} data - Bloblang change data
+ * @param {array} data.newMethods - Array of new methods (with .name and optional .version)
+ * @param {array} data.newFunctions - Array of new functions (with .name and optional .version)
+ * @param {array} data.removedMethods - Array of removed methods
+ * @param {array} data.removedFunctions - Array of removed functions
+ * @param {array} data.deprecatedMethods - Array of deprecated methods
+ * @param {array} data.deprecatedFunctions - Array of deprecated functions
+ * @param {boolean} includeVersion - Whether to include version info in output
+ * @returns {array} Array of lines to add to the summary
+ */
+function renderBloblangChanges(data, includeVersion = false) {
+  const lines = [];
+  const {
+    newMethods = [],
+    newFunctions = [],
+    removedMethods = [],
+    removedFunctions = [],
+    deprecatedMethods = [],
+    deprecatedFunctions = []
+  } = data;
+
+  const hasChanges = newMethods.length > 0 || newFunctions.length > 0 ||
+                     removedMethods.length > 0 || removedFunctions.length > 0 ||
+                     deprecatedMethods.length > 0 || deprecatedFunctions.length > 0;
+
+  if (!hasChanges) {
+    return lines;
+  }
+
+  lines.push('**Update Bloblang Guide Pages:**');
+  lines.push('');
+
+  if (newMethods.length > 0) {
+    lines.push(`New methods to add to \`modules/guides/pages/bloblang/methods.adoc\` (${newMethods.length}):`);
+    newMethods.forEach(method => {
+      const versionInfo = includeVersion && method.version ? ` — introduced in **${method.version}**` : '';
+      const name = typeof method === 'string' ? method : method.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (newFunctions.length > 0) {
+    lines.push(`New functions to add to \`modules/guides/pages/bloblang/functions.adoc\` (${newFunctions.length}):`);
+    newFunctions.forEach(func => {
+      const versionInfo = includeVersion && func.version ? ` — introduced in **${func.version}**` : '';
+      const name = typeof func === 'string' ? func : func.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (removedMethods.length > 0) {
+    lines.push(`Removed methods to delete from \`modules/guides/pages/bloblang/methods.adoc\` (${removedMethods.length}):`);
+    removedMethods.forEach(method => {
+      const versionInfo = includeVersion && method.version ? ` — removed in **${method.version}**` : '';
+      const name = typeof method === 'string' ? method : method.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (removedFunctions.length > 0) {
+    lines.push(`Removed functions to delete from \`modules/guides/pages/bloblang/functions.adoc\` (${removedFunctions.length}):`);
+    removedFunctions.forEach(func => {
+      const versionInfo = includeVersion && func.version ? ` — removed in **${func.version}**` : '';
+      const name = typeof func === 'string' ? func : func.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (deprecatedMethods.length > 0) {
+    lines.push(`Deprecated methods - add deprecation notice to \`modules/guides/pages/bloblang/methods.adoc\` (${deprecatedMethods.length}):`);
+    deprecatedMethods.forEach(method => {
+      const versionInfo = includeVersion && method.version ? ` — deprecated in **${method.version}**` : '';
+      const name = typeof method === 'string' ? method : method.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (deprecatedFunctions.length > 0) {
+    lines.push(`Deprecated functions - add deprecation notice to \`modules/guides/pages/bloblang/functions.adoc\` (${deprecatedFunctions.length}):`);
+    deprecatedFunctions.forEach(func => {
+      const versionInfo = includeVersion && func.version ? ` — deprecated in **${func.version}**` : '';
+      const name = typeof func === 'string' ? func : func.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  lines.push('**How to add includes:**');
+  lines.push('');
+  lines.push('For methods, find the appropriate category section in `methods.adoc` and add:');
+  lines.push('```asciidoc');
+  lines.push('include::redpanda-connect:partial$bloblang-methods/method_name.adoc[leveloffset=+2]');
+  lines.push('```');
+  lines.push('');
+  lines.push('For functions, add to the Functions section in `functions.adoc`:');
+  lines.push('```asciidoc');
+  lines.push('include::redpanda-connect:partial$bloblang-functions/function_name.adoc[leveloffset=+2]');
+  lines.push('```');
+  lines.push('');
+  lines.push('**Note:** Partials are auto-generated. Includes must be added manually in alphabetical order within their section.');
+  lines.push('');
+
+  return lines;
+}
+
+/**
  * Generate PR summary for multiple releases
  * @param {object} masterDiff - Master diff with releases array
  * @param {object} binaryAnalysis - Cloud support data (from latest release)
@@ -21,9 +133,9 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
 
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
-  lines.push('## 📊 Redpanda Connect Documentation Update');
+  lines.push('## Redpanda Connect Documentation Update');
   lines.push('');
-  lines.push(`**📦 Multi-Release Update:** ${startVersion} → ${endVersion}`);
+  lines.push(`**Multi-Release Update:** ${startVersion} → ${endVersion}`);
   lines.push(`**Releases Processed:** ${processedReleases}`);
 
   if (binaryAnalysis) {
@@ -44,10 +156,10 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     lines.push(`- **${total.newFields}** new fields across ${total.releaseCount || 0} release(s)`);
   }
   if (total.removedComponents > 0) {
-    lines.push(`- **${total.removedComponents}** removed connectors ⚠️`);
+    lines.push(`- **${total.removedComponents}** removed connectors`);
   }
   if (total.removedFields > 0) {
-    lines.push(`- **${total.removedFields}** removed fields ⚠️`);
+    lines.push(`- **${total.removedFields}** removed fields`);
   }
   if (total.deprecatedComponents > 0) {
     lines.push(`- **${total.deprecatedComponents}** deprecated connectors`);
@@ -56,7 +168,19 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     lines.push(`- **${total.deprecatedFields}** deprecated fields`);
   }
   if (total.changedDefaults > 0) {
-    lines.push(`- **${total.changedDefaults}** changed default values ⚠️`);
+    lines.push(`- **${total.changedDefaults}** changed default values`);
+  }
+  if (total.newBloblangMethods > 0) {
+    lines.push(`- **${total.newBloblangMethods}** new Bloblang methods`);
+  }
+  if (total.removedBloblangMethods > 0) {
+    lines.push(`- **${total.removedBloblangMethods}** removed Bloblang methods`);
+  }
+  if (total.newBloblangFunctions > 0) {
+    lines.push(`- **${total.newBloblangFunctions}** new Bloblang functions`);
+  }
+  if (total.removedBloblangFunctions > 0) {
+    lines.push(`- **${total.removedBloblangFunctions}** removed Bloblang functions`);
   }
 
   lines.push('');
@@ -76,7 +200,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
 
   for (const release of releases) {
     const releaseNotesUrl = `https://github.com/redpanda-data/connect/releases/tag/v${release.toVersion}`;
-    lines.push(`#### 🔖 Version ${release.toVersion}`);
+    lines.push(`#### Version ${release.toVersion}`);
     lines.push(`> [Release notes](${releaseNotesUrl})`);
     lines.push('');
 
@@ -140,7 +264,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     // Removed components
     const removedComponents = details.removedComponents || [];
     if (summary.removedComponents > 0 && removedComponents.length > 0) {
-      lines.push(`**⚠️ Removed Connectors (${summary.removedComponents}):**`);
+      lines.push(`**Removed Connectors (${summary.removedComponents}):**`);
       lines.push('');
       removedComponents.forEach(comp => {
         lines.push(`- \`${comp.name}\` (${comp.type})`);
@@ -151,7 +275,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     // Removed fields
     const removedFields = details.removedFields || [];
     if (summary.removedFields > 0 && removedFields.length > 0) {
-      lines.push(`**⚠️ Removed Fields (${summary.removedFields}):**`);
+      lines.push(`**Removed Fields (${summary.removedFields}):**`);
       lines.push('');
       lines.push('| Component | Field |');
       lines.push('|-----------|-------|');
@@ -176,7 +300,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     // Changed defaults
     const changedDefaults = details.changedDefaults || [];
     if (summary.changedDefaults > 0 && changedDefaults.length > 0) {
-      lines.push(`**⚠️ Changed Defaults (${summary.changedDefaults}):**`);
+      lines.push(`**Changed Defaults (${summary.changedDefaults}):**`);
       lines.push('');
       lines.push('| Component | Field | Old Default | New Default |');
       lines.push('|-----------|-------|-------------|-------------|');
@@ -192,7 +316,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
   // Writer action items (aggregate)
   lines.push('---');
   lines.push('');
-  lines.push('### ✍️ Writer Action Items');
+  lines.push('### Writer Action Items');
   lines.push('');
 
   // Collect all new connectors across all releases with full details
@@ -200,6 +324,12 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
   const allRemovedConnectors = [];
   const allDeprecatedFields = [];
   const allChangedDefaults = [];
+  const allNewBloblangMethods = [];
+  const allRemovedBloblangMethods = [];
+  const allNewBloblangFunctions = [];
+  const allRemovedBloblangFunctions = [];
+  const allDeprecatedBloblangMethods = [];
+  const allDeprecatedBloblangFunctions = [];
 
   releases.forEach(release => {
     const details = release.details || {};
@@ -253,6 +383,48 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
         version: release.toVersion
       });
     });
+
+    // New/removed Bloblang methods
+    (details.newBloblangMethods || []).forEach(methodName => {
+      allNewBloblangMethods.push({
+        name: methodName,
+        version: release.toVersion
+      });
+    });
+    (details.removedBloblangMethods || []).forEach(methodName => {
+      allRemovedBloblangMethods.push({
+        name: methodName,
+        version: release.toVersion
+      });
+    });
+
+    // New/removed Bloblang functions
+    (details.newBloblangFunctions || []).forEach(funcName => {
+      allNewBloblangFunctions.push({
+        name: funcName,
+        version: release.toVersion
+      });
+    });
+    (details.removedBloblangFunctions || []).forEach(funcName => {
+      allRemovedBloblangFunctions.push({
+        name: funcName,
+        version: release.toVersion
+      });
+    });
+
+    // Deprecated Bloblang methods/functions
+    (details.deprecatedBloblangMethods || []).forEach(methodName => {
+      allDeprecatedBloblangMethods.push({
+        name: methodName,
+        version: release.toVersion
+      });
+    });
+    (details.deprecatedBloblangFunctions || []).forEach(funcName => {
+      allDeprecatedBloblangFunctions.push({
+        name: funcName,
+        version: release.toVersion
+      });
+    });
   });
 
   // Priority 1: New connectors needing documentation
@@ -292,7 +464,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
 
   // Priority 2: Removed connectors needing migration docs
   if (allRemovedConnectors.length > 0) {
-    lines.push('**⚠️ Update Migration Guide for Removed Connectors:**');
+    lines.push('**Update Migration Guide for Removed Connectors:**');
     lines.push('');
     allRemovedConnectors.forEach(conn => {
       lines.push(`- [ ] \`${conn.name}\` ${conn.type} — removed in **${conn.version}**`);
@@ -302,7 +474,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
 
   // Priority 3: Deprecated fields needing docs update
   if (allDeprecatedFields.length > 0) {
-    lines.push('**📋 Update Docs for Deprecated Fields:**');
+    lines.push('**Update Docs for Deprecated Fields:**');
     lines.push('');
     allDeprecatedFields.forEach(field => {
       const guidance = field.description ? ` (${truncateToSentence(field.description, 1)})` : '';
@@ -313,7 +485,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
 
   // Priority 4: Changed defaults that may affect users
   if (allChangedDefaults.length > 0) {
-    lines.push('**⚠️ Review Changed Defaults for Breaking Changes:**');
+    lines.push('**Review Changed Defaults for Breaking Changes:**');
     lines.push('');
     allChangedDefaults.forEach(change => {
       const oldVal = change.oldDefault !== undefined ? JSON.stringify(change.oldDefault) : 'none';
@@ -322,6 +494,17 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     });
     lines.push('');
   }
+
+  // Bloblang methods and functions
+  const bloblangLines = renderBloblangChanges({
+    newMethods: allNewBloblangMethods,
+    newFunctions: allNewBloblangFunctions,
+    removedMethods: allRemovedBloblangMethods,
+    removedFunctions: allRemovedBloblangFunctions,
+    deprecatedMethods: allDeprecatedBloblangMethods,
+    deprecatedFunctions: allDeprecatedBloblangFunctions
+  }, true); // includeVersion = true for multi-version summaries
+  lines.push(...bloblangLines);
 
   // Add commercial name reminder if there are new connectors
   if (allNewConnectors.length > 0) {
@@ -368,7 +551,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // Single version format (original logic)
   // Quick Summary Section
-  lines.push('## 📊 Redpanda Connect Documentation Update');
+  lines.push('## Redpanda Connect Documentation Update');
   lines.push('');
   lines.push(`**OSS Version:** ${diffData.comparison.oldVersion} → ${diffData.comparison.newVersion}`);
 
@@ -383,7 +566,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   const hasChanges = Object.values(stats).some(v => v > 0) || (draftedConnectors && draftedConnectors.length > 0);
 
   if (!hasChanges) {
-    lines.push('✅ **No changes detected** - Documentation is up to date');
+    lines.push('**No changes detected** - Documentation is up to date');
     lines.push('');
     lines.push('<!-- PR_SUMMARY_END -->');
     return lines.join('\n');
@@ -418,11 +601,11 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   }
 
   if (stats.removedComponents > 0) {
-    lines.push(`- **${stats.removedComponents}** removed connector${stats.removedComponents !== 1 ? 's' : ''} ⚠️`);
+    lines.push(`- **${stats.removedComponents}** removed connector${stats.removedComponents !== 1 ? 's' : ''}`);
   }
 
   if (stats.removedFields > 0) {
-    lines.push(`- **${stats.removedFields}** removed field${stats.removedFields !== 1 ? 's' : ''} ⚠️`);
+    lines.push(`- **${stats.removedFields}** removed field${stats.removedFields !== 1 ? 's' : ''}`);
   }
 
   if (stats.deprecatedComponents > 0) {
@@ -433,15 +616,39 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
     lines.push(`- **${stats.deprecatedFields}** deprecated field${stats.deprecatedFields !== 1 ? 's' : ''}`);
   }
 
+  if (stats.newBloblangMethods > 0) {
+    lines.push(`- **${stats.newBloblangMethods}** new Bloblang method${stats.newBloblangMethods !== 1 ? 's' : ''}`);
+  }
+
+  if (stats.newBloblangFunctions > 0) {
+    lines.push(`- **${stats.newBloblangFunctions}** new Bloblang function${stats.newBloblangFunctions !== 1 ? 's' : ''}`);
+  }
+
+  if (stats.removedBloblangMethods > 0) {
+    lines.push(`- **${stats.removedBloblangMethods}** removed Bloblang method${stats.removedBloblangMethods !== 1 ? 's' : ''}`);
+  }
+
+  if (stats.removedBloblangFunctions > 0) {
+    lines.push(`- **${stats.removedBloblangFunctions}** removed Bloblang function${stats.removedBloblangFunctions !== 1 ? 's' : ''}`);
+  }
+
+  if (stats.deprecatedBloblangMethods > 0) {
+    lines.push(`- **${stats.deprecatedBloblangMethods}** deprecated Bloblang method${stats.deprecatedBloblangMethods !== 1 ? 's' : ''}`);
+  }
+
+  if (stats.deprecatedBloblangFunctions > 0) {
+    lines.push(`- **${stats.deprecatedBloblangFunctions}** deprecated Bloblang function${stats.deprecatedBloblangFunctions !== 1 ? 's' : ''}`);
+  }
+
   if (stats.changedDefaults > 0) {
-    lines.push(`- **${stats.changedDefaults}** default value change${stats.changedDefaults !== 1 ? 's' : ''} ⚠️`);
+    lines.push(`- **${stats.changedDefaults}** default value change${stats.changedDefaults !== 1 ? 's' : ''}`);
   }
 
   lines.push('');
 
   // Writer Reminder for Commercial Names
   if (stats.newComponents > 0) {
-    lines.push('### ✍️ Writer Action Required');
+    lines.push('### Writer Action Required');
     lines.push('');
     lines.push('For each new connector, add the `:page-commercial-names:` attribute to the frontmatter:');
     lines.push('');
@@ -524,7 +731,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   if (stats.changedDefaults > 0) breakingChanges.push('changed defaults');
 
   if (breakingChanges.length > 0) {
-    lines.push('### ⚠️ Breaking Changes Detected');
+    lines.push('### Breaking Changes Detected');
     lines.push('');
     lines.push(`This update includes **${breakingChanges.join(', ')}** that may affect existing configurations.`);
     lines.push('');
@@ -598,7 +805,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   }
 
   if (missingDescriptions.length > 0) {
-    lines.push('### ⚠️ Missing Descriptions');
+    lines.push('### Missing Descriptions');
     lines.push('');
     lines.push(`**${missingDescriptions.length}** item${missingDescriptions.length !== 1 ? 's' : ''} missing descriptions - these need writer attention:`);
     lines.push('');
@@ -643,7 +850,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   if (missingDescriptions.length > 0) {
     actionItems.push({
       priority: 0,
-      text: `⚠️ Add descriptions for ${missingDescriptions.length} component${missingDescriptions.length !== 1 ? 's' : ''}/field${missingDescriptions.length !== 1 ? 's' : ''} (see Missing Descriptions section)`
+      text: `Add descriptions for ${missingDescriptions.length} component${missingDescriptions.length !== 1 ? 's' : ''}/field${missingDescriptions.length !== 1 ? 's' : ''} (see Missing Descriptions section)`
     });
   }
 
@@ -721,9 +928,20 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   lines.push('');
 
+  // Bloblang methods and functions
+  const bloblangLines = renderBloblangChanges({
+    newMethods: diffData.details.newBloblangMethods || [],
+    newFunctions: diffData.details.newBloblangFunctions || [],
+    removedMethods: diffData.details.removedBloblangMethods || [],
+    removedFunctions: diffData.details.removedBloblangFunctions || [],
+    deprecatedMethods: diffData.details.deprecatedBloblangMethods || [],
+    deprecatedFunctions: diffData.details.deprecatedBloblangFunctions || []
+  }, false); // includeVersion = false for single-version summaries
+  lines.push(...bloblangLines);
+
   // Detailed breakdown (expandable)
   lines.push('<details>');
-  lines.push('<summary><strong>📋 Detailed Changes</strong> (click to expand)</summary>');
+  lines.push('<summary><strong>Detailed Changes</strong> (click to expand)</summary>');
   lines.push('');
 
   // New Connectors
@@ -861,7 +1079,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // Removed Connectors
   if (stats.removedComponents > 0) {
-    lines.push('#### ⚠️ Removed Connectors');
+    lines.push('#### Removed Connectors');
     lines.push('');
     diffData.details.removedComponents.forEach(c => {
       lines.push(`- **${c.name}** (${c.type})`);
@@ -871,7 +1089,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // Removed Fields
   if (stats.removedFields > 0) {
-    lines.push('#### ⚠️ Removed Fields');
+    lines.push('#### Removed Fields');
     lines.push('');
 
     const fieldsByComponent = {};
@@ -927,7 +1145,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // Changed Defaults
   if (stats.changedDefaults > 0) {
-    lines.push('#### ⚠️ Changed Default Values');
+    lines.push('#### Changed Default Values');
     lines.push('');
 
     const changesByComponent = {};
@@ -948,6 +1166,66 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
       });
       lines.push('');
     });
+  }
+
+  // New Bloblang Methods
+  if (stats.newBloblangMethods > 0 && diffData.details.newBloblangMethods) {
+    lines.push('#### New Bloblang Methods');
+    lines.push('');
+    diffData.details.newBloblangMethods.forEach(methodName => {
+      lines.push(`- \`${methodName}\``);
+    });
+    lines.push('');
+  }
+
+  // New Bloblang Functions
+  if (stats.newBloblangFunctions > 0 && diffData.details.newBloblangFunctions) {
+    lines.push('#### New Bloblang Functions');
+    lines.push('');
+    diffData.details.newBloblangFunctions.forEach(funcName => {
+      lines.push(`- \`${funcName}\``);
+    });
+    lines.push('');
+  }
+
+  // Removed Bloblang Methods
+  if (stats.removedBloblangMethods > 0 && diffData.details.removedBloblangMethods) {
+    lines.push('#### Removed Bloblang Methods');
+    lines.push('');
+    diffData.details.removedBloblangMethods.forEach(methodName => {
+      lines.push(`- \`${methodName}\``);
+    });
+    lines.push('');
+  }
+
+  // Removed Bloblang Functions
+  if (stats.removedBloblangFunctions > 0 && diffData.details.removedBloblangFunctions) {
+    lines.push('#### Removed Bloblang Functions');
+    lines.push('');
+    diffData.details.removedBloblangFunctions.forEach(funcName => {
+      lines.push(`- \`${funcName}\``);
+    });
+    lines.push('');
+  }
+
+  // Deprecated Bloblang Methods
+  if (stats.deprecatedBloblangMethods > 0 && diffData.details.deprecatedBloblangMethods) {
+    lines.push('#### Deprecated Bloblang Methods');
+    lines.push('');
+    diffData.details.deprecatedBloblangMethods.forEach(methodName => {
+      lines.push(`- \`${methodName}\``);
+    });
+    lines.push('');
+  }
+
+  // Deprecated Bloblang Functions
+  if (stats.deprecatedBloblangFunctions > 0 && diffData.details.deprecatedBloblangFunctions) {
+    lines.push('#### Deprecated Bloblang Functions');
+    lines.push('');
+    diffData.details.deprecatedBloblangFunctions.forEach(funcName => {
+      lines.push(`- \`${funcName}\``);
+    });
+    lines.push('');
   }
 
   // Cloud Support Gap Analysis

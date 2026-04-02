@@ -1,10 +1,30 @@
 // Bloblang example formatting helper for Handlebars
 function bloblangExample(example) {
   if (typeof example === 'object' && example !== null && example.mapping) {
+    let leadIn = '';
     let codeBlock = '';
+
+    // Extract summary as lead-in prose (not a comment in code)
     if (example.summary && example.summary.trim()) {
-      codeBlock += `# ${example.summary.trim().replace(/\n/g, '\n# ')}\n\n`;
+      let summary = example.summary.trim();
+
+      // Convert Markdown headings to AsciiDoc
+      // ##### Heading -> ==== Heading (H5 -> H4 in AsciiDoc)
+      summary = summary.replace(/^#####\s+(.+)$/gm, '==== $1');
+      // #### Heading -> === Heading (H4 -> H3 in AsciiDoc)
+      summary = summary.replace(/^####\s+(.+)$/gm, '=== $1');
+      // ### Heading -> == Heading (H3 -> H2 in AsciiDoc)
+      summary = summary.replace(/^###\s+(.+)$/gm, '== $1');
+
+      // Ensure lead-in ends with a colon (replace period/exclamation/question mark if present)
+      if (summary.endsWith('.') || summary.endsWith('!') || summary.endsWith('?')) {
+        summary = summary.slice(0, -1) + ':';
+      } else if (!summary.endsWith(':')) {
+        summary += ':';
+      }
+      leadIn = summary + '\n\n';
     }
+
     if (typeof example.mapping === 'string') {
       codeBlock += example.mapping.trim() + '\n';
     }
@@ -15,7 +35,7 @@ function bloblangExample(example) {
         }
       }
     }
-    return `[,coffeescript]\n----\n${codeBlock.trim()}\n----\n`;
+    return `${leadIn}[,bloblang]\n----\n${codeBlock.trim()}\n----\n`;
   } else {
     let exStr = '';
     if (typeof example === 'string') {
@@ -35,7 +55,7 @@ function bloblangExample(example) {
     } else {
       exStr = String(example);
     }
-    return `[source,coffeescript]\n----\n${exStr}\n----\n`;
+    return `[source,bloblang]\n----\n${exStr}\n----\n`;
   }
 }
 
