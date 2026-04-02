@@ -1,0 +1,29 @@
+= Bloblang Functions
+// tag::single-source[]
+:description: A list of Bloblang functions
+
+// © 2024 Redpanda Data Inc.
+
+
+Functions can be placed anywhere and allow you to extract information from your environment, generate values, or access data from the underlying message being mapped:
+
+```bloblang
+root.doc.id = uuid_v4()
+root.doc.received_at = now()
+root.doc.host = hostname()
+```
+
+Functions support both named and nameless style arguments:
+
+```bloblang
+root.values_one = range(start: 0, stop: this.max, step: 2)
+root.values_two = range(0, this.max, 2)
+
+# In:  {"max":10}
+```
+{{#each functions}}
+
+include::redpanda-connect:components:partial$bloblang-functions/{{this}}.adoc[leveloffset=+1]
+{{/each}}
+
+// end::single-source[]

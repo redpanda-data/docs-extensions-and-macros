@@ -1,0 +1,39 @@
+= Bloblang Methods
+// tag::single-source[]
+:description: A list of Bloblang methods
+
+// © 2024 Redpanda Data Inc.
+
+
+Methods provide most of the power in Bloblang as they allow you to augment values and can be added to any expression (including other methods):
+
+```bloblang
+root.doc.id = this.thing.id.string().catch(uuid_v4())
+root.doc.reduced_nums = this.thing.nums.map_each(num -> if num < 10 {
+  deleted()
+} else {
+  num - 10
+})
+root.has_good_taste = ["pikachu","mewtwo","magmar"].contains(this.user.fav_pokemon)
+
+# In:  {"thing":{"id":123,"nums":[5,12,18,7,25]},"user":{"fav_pokemon":"pikachu"}}
+```
+
+Methods support both named and nameless style arguments:
+
+```bloblang
+root.foo_one = this.(bar | baz).trim().replace_all(old: "dog", new: "cat")
+root.foo_two = this.(bar | baz).trim().replace_all("dog", "cat")
+
+# In:  {"bar":"  I love my dog  "}
+```
+{{#each categories}}
+
+== {{{toSentenceCase this.name}}}
+{{#each this.methods}}
+
+include::redpanda-connect:components:partial$bloblang-methods/{{this}}.adoc[leveloffset=+2]
+{{/each}}
+{{/each}}
+
+// end::single-source[]
