@@ -164,10 +164,10 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
   });
 
   // Detect new/removed Bloblang methods and functions
-  const oldMethods = new Set((oldIndex['bloblang-methods'] || []).map(m => m.name).filter(Boolean));
-  const newMethods = new Set((newIndex['bloblang-methods'] || []).map(m => m.name).filter(Boolean));
-  const oldFunctions = new Set((oldIndex['bloblang-functions'] || []).map(f => f.name).filter(Boolean));
-  const newFunctions = new Set((newIndex['bloblang-functions'] || []).map(f => f.name).filter(Boolean));
+  const oldMethods = new Set((oldIndex['bloblang-methods'] || []).filter(Boolean).map(m => m.name).filter(Boolean));
+  const newMethods = new Set((newIndex['bloblang-methods'] || []).filter(Boolean).map(m => m.name).filter(Boolean));
+  const oldFunctions = new Set((oldIndex['bloblang-functions'] || []).filter(Boolean).map(f => f.name).filter(Boolean));
+  const newFunctions = new Set((newIndex['bloblang-functions'] || []).filter(Boolean).map(f => f.name).filter(Boolean));
 
   const newBloblangMethods = Array.from(newMethods).filter(m => !oldMethods.has(m)).sort();
   const removedBloblangMethods = Array.from(oldMethods).filter(m => !newMethods.has(m)).sort();
@@ -178,10 +178,10 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
   const deprecatedBloblangMethods = [];
   const deprecatedBloblangFunctions = [];
 
-  const oldMethodsMap = new Map((oldIndex['bloblang-methods'] || []).map(m => [m.name, m]));
-  const newMethodsMap = new Map((newIndex['bloblang-methods'] || []).map(m => [m.name, m]));
-  const oldFunctionsMap = new Map((oldIndex['bloblang-functions'] || []).map(f => [f.name, f]));
-  const newFunctionsMap = new Map((newIndex['bloblang-functions'] || []).map(f => [f.name, f]));
+  const oldMethodsMap = new Map((oldIndex['bloblang-methods'] || []).filter(Boolean).filter(m => m.name).map(m => [m.name, m]));
+  const newMethodsMap = new Map((newIndex['bloblang-methods'] || []).filter(Boolean).filter(m => m.name).map(m => [m.name, m]));
+  const oldFunctionsMap = new Map((oldIndex['bloblang-functions'] || []).filter(Boolean).filter(f => f.name).map(f => [f.name, f]));
+  const newFunctionsMap = new Map((newIndex['bloblang-functions'] || []).filter(Boolean).filter(f => f.name).map(f => [f.name, f]));
 
   // Check methods for newly deprecated status
   newMethodsMap.forEach((newMethod, name) => {

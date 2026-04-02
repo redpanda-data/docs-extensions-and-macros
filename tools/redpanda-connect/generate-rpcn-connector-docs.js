@@ -481,6 +481,11 @@ async function generateRpcnConnectorDocs(options) {
         const existingFiles = fs.readdirSync(outRoot).filter(f => f.endsWith('.adoc'));
         for (const file of existingFiles) {
           const name = file.replace('.adoc', '');
+          // Skip hand-authored files (by convention, start with underscore)
+          if (name.startsWith('_')) {
+            console.log(`Skipping hand-authored file: ${file}`);
+            continue;
+          }
           if (!currentNames.has(name)) {
             const filePath = path.join(outRoot, file);
             fs.unlinkSync(filePath);

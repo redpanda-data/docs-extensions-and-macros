@@ -4,6 +4,118 @@
  */
 
 /**
+ * Render Bloblang changes section for PR summary
+ * @param {object} data - Bloblang change data
+ * @param {array} data.newMethods - Array of new methods (with .name and optional .version)
+ * @param {array} data.newFunctions - Array of new functions (with .name and optional .version)
+ * @param {array} data.removedMethods - Array of removed methods
+ * @param {array} data.removedFunctions - Array of removed functions
+ * @param {array} data.deprecatedMethods - Array of deprecated methods
+ * @param {array} data.deprecatedFunctions - Array of deprecated functions
+ * @param {boolean} includeVersion - Whether to include version info in output
+ * @returns {array} Array of lines to add to the summary
+ */
+function renderBloblangChanges(data, includeVersion = false) {
+  const lines = [];
+  const {
+    newMethods = [],
+    newFunctions = [],
+    removedMethods = [],
+    removedFunctions = [],
+    deprecatedMethods = [],
+    deprecatedFunctions = []
+  } = data;
+
+  const hasChanges = newMethods.length > 0 || newFunctions.length > 0 ||
+                     removedMethods.length > 0 || removedFunctions.length > 0 ||
+                     deprecatedMethods.length > 0 || deprecatedFunctions.length > 0;
+
+  if (!hasChanges) {
+    return lines;
+  }
+
+  lines.push('**Update Bloblang Guide Pages:**');
+  lines.push('');
+
+  if (newMethods.length > 0) {
+    lines.push(`New methods to add to \`modules/guides/pages/bloblang/methods.adoc\` (${newMethods.length}):`);
+    newMethods.forEach(method => {
+      const versionInfo = includeVersion && method.version ? ` — introduced in **${method.version}**` : '';
+      const name = typeof method === 'string' ? method : method.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (newFunctions.length > 0) {
+    lines.push(`New functions to add to \`modules/guides/pages/bloblang/functions.adoc\` (${newFunctions.length}):`);
+    newFunctions.forEach(func => {
+      const versionInfo = includeVersion && func.version ? ` — introduced in **${func.version}**` : '';
+      const name = typeof func === 'string' ? func : func.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (removedMethods.length > 0) {
+    lines.push(`Removed methods to delete from \`modules/guides/pages/bloblang/methods.adoc\` (${removedMethods.length}):`);
+    removedMethods.forEach(method => {
+      const versionInfo = includeVersion && method.version ? ` — removed in **${method.version}**` : '';
+      const name = typeof method === 'string' ? method : method.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (removedFunctions.length > 0) {
+    lines.push(`Removed functions to delete from \`modules/guides/pages/bloblang/functions.adoc\` (${removedFunctions.length}):`);
+    removedFunctions.forEach(func => {
+      const versionInfo = includeVersion && func.version ? ` — removed in **${func.version}**` : '';
+      const name = typeof func === 'string' ? func : func.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (deprecatedMethods.length > 0) {
+    lines.push(`Deprecated methods - add deprecation notice to \`modules/guides/pages/bloblang/methods.adoc\` (${deprecatedMethods.length}):`);
+    deprecatedMethods.forEach(method => {
+      const versionInfo = includeVersion && method.version ? ` — deprecated in **${method.version}**` : '';
+      const name = typeof method === 'string' ? method : method.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (deprecatedFunctions.length > 0) {
+    lines.push(`Deprecated functions - add deprecation notice to \`modules/guides/pages/bloblang/functions.adoc\` (${deprecatedFunctions.length}):`);
+    deprecatedFunctions.forEach(func => {
+      const versionInfo = includeVersion && func.version ? ` — deprecated in **${func.version}**` : '';
+      const name = typeof func === 'string' ? func : func.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  lines.push('**How to add includes:**');
+  lines.push('');
+  lines.push('For methods, find the appropriate category section in `methods.adoc` and add:');
+  lines.push('```asciidoc');
+  lines.push('include::redpanda-connect:partial$bloblang-methods/method_name.adoc[leveloffset=+2]');
+  lines.push('```');
+  lines.push('');
+  lines.push('For functions, add to the Functions section in `functions.adoc`:');
+  lines.push('```asciidoc');
+  lines.push('include::redpanda-connect:partial$bloblang-functions/function_name.adoc[leveloffset=+2]');
+  lines.push('```');
+  lines.push('');
+  lines.push('**Note:** Partials are auto-generated. Includes must be added manually in alphabetical order within their section.');
+  lines.push('');
+
+  return lines;
+}
+
+/**
  * Generate PR summary for multiple releases
  * @param {object} masterDiff - Master diff with releases array
  * @param {object} binaryAnalysis - Cloud support data (from latest release)
@@ -384,75 +496,15 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
   }
 
   // Bloblang methods and functions
-  if (allNewBloblangMethods.length > 0 || allNewBloblangFunctions.length > 0 ||
-      allRemovedBloblangMethods.length > 0 || allRemovedBloblangFunctions.length > 0 ||
-      allDeprecatedBloblangMethods.length > 0 || allDeprecatedBloblangFunctions.length > 0) {
-    lines.push('**Update Bloblang Guide Pages:**');
-    lines.push('');
-
-    if (allNewBloblangMethods.length > 0) {
-      lines.push(`New methods to add to \`modules/guides/pages/bloblang/methods.adoc\` (${allNewBloblangMethods.length}):`);
-      allNewBloblangMethods.forEach(method => {
-        lines.push(`- [ ] \`${method.name}\` — introduced in **${method.version}**`);
-      });
-      lines.push('');
-    }
-
-    if (allNewBloblangFunctions.length > 0) {
-      lines.push(`New functions to add to \`modules/guides/pages/bloblang/functions.adoc\` (${allNewBloblangFunctions.length}):`);
-      allNewBloblangFunctions.forEach(func => {
-        lines.push(`- [ ] \`${func.name}\` — introduced in **${func.version}**`);
-      });
-      lines.push('');
-    }
-
-    if (allRemovedBloblangMethods.length > 0) {
-      lines.push(`Removed methods to delete from \`modules/guides/pages/bloblang/methods.adoc\` (${allRemovedBloblangMethods.length}):`);
-      allRemovedBloblangMethods.forEach(method => {
-        lines.push(`- [ ] \`${method.name}\` — removed in **${method.version}**`);
-      });
-      lines.push('');
-    }
-
-    if (allRemovedBloblangFunctions.length > 0) {
-      lines.push(`Removed functions to delete from \`modules/guides/pages/bloblang/functions.adoc\` (${allRemovedBloblangFunctions.length}):`);
-      allRemovedBloblangFunctions.forEach(func => {
-        lines.push(`- [ ] \`${func.name}\` — removed in **${func.version}**`);
-      });
-      lines.push('');
-    }
-
-    if (allDeprecatedBloblangMethods.length > 0) {
-      lines.push(`Deprecated methods - add deprecation notice to \`modules/guides/pages/bloblang/methods.adoc\` (${allDeprecatedBloblangMethods.length}):`);
-      allDeprecatedBloblangMethods.forEach(method => {
-        lines.push(`- [ ] \`${method.name}\` — deprecated in **${method.version}**`);
-      });
-      lines.push('');
-    }
-
-    if (allDeprecatedBloblangFunctions.length > 0) {
-      lines.push(`Deprecated functions - add deprecation notice to \`modules/guides/pages/bloblang/functions.adoc\` (${allDeprecatedBloblangFunctions.length}):`);
-      allDeprecatedBloblangFunctions.forEach(func => {
-        lines.push(`- [ ] \`${func.name}\` — deprecated in **${func.version}**`);
-      });
-      lines.push('');
-    }
-
-    lines.push('**How to add includes:**');
-    lines.push('');
-    lines.push('For methods, find the appropriate category section in `methods.adoc` and add:');
-    lines.push('```asciidoc');
-    lines.push('include::redpanda-connect:partial$bloblang-methods/method_name.adoc[leveloffset=+2]');
-    lines.push('```');
-    lines.push('');
-    lines.push('For functions, add to the Functions section in `functions.adoc`:');
-    lines.push('```asciidoc');
-    lines.push('include::redpanda-connect:partial$bloblang-functions/function_name.adoc[leveloffset=+2]');
-    lines.push('```');
-    lines.push('');
-    lines.push('**Note:** Partials are auto-generated. Includes must be added manually in alphabetical order within their section.');
-    lines.push('');
-  }
+  const bloblangLines = renderBloblangChanges({
+    newMethods: allNewBloblangMethods,
+    newFunctions: allNewBloblangFunctions,
+    removedMethods: allRemovedBloblangMethods,
+    removedFunctions: allRemovedBloblangFunctions,
+    deprecatedMethods: allDeprecatedBloblangMethods,
+    deprecatedFunctions: allDeprecatedBloblangFunctions
+  }, true); // includeVersion = true for multi-version summaries
+  lines.push(...bloblangLines);
 
   // Add commercial name reminder if there are new connectors
   if (allNewConnectors.length > 0) {
@@ -877,82 +929,15 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   lines.push('');
 
   // Bloblang methods and functions
-  const hasBloblangChanges = (
-    (stats.newBloblangMethods > 0) ||
-    (stats.newBloblangFunctions > 0) ||
-    (stats.removedBloblangMethods > 0) ||
-    (stats.removedBloblangFunctions > 0) ||
-    (stats.deprecatedBloblangMethods > 0) ||
-    (stats.deprecatedBloblangFunctions > 0)
-  );
-
-  if (hasBloblangChanges) {
-    lines.push('**Update Bloblang Guide Pages:**');
-    lines.push('');
-
-    if (stats.newBloblangMethods > 0 && diffData.details.newBloblangMethods) {
-      lines.push(`New methods to add to \`modules/guides/pages/bloblang/methods.adoc\` (${stats.newBloblangMethods}):`);
-      diffData.details.newBloblangMethods.forEach(methodName => {
-        lines.push(`- [ ] \`${methodName}\``);
-      });
-      lines.push('');
-    }
-
-    if (stats.newBloblangFunctions > 0 && diffData.details.newBloblangFunctions) {
-      lines.push(`New functions to add to \`modules/guides/pages/bloblang/functions.adoc\` (${stats.newBloblangFunctions}):`);
-      diffData.details.newBloblangFunctions.forEach(funcName => {
-        lines.push(`- [ ] \`${funcName}\``);
-      });
-      lines.push('');
-    }
-
-    if (stats.removedBloblangMethods > 0 && diffData.details.removedBloblangMethods) {
-      lines.push(`Removed methods to delete from \`modules/guides/pages/bloblang/methods.adoc\` (${stats.removedBloblangMethods}):`);
-      diffData.details.removedBloblangMethods.forEach(methodName => {
-        lines.push(`- [ ] \`${methodName}\``);
-      });
-      lines.push('');
-    }
-
-    if (stats.removedBloblangFunctions > 0 && diffData.details.removedBloblangFunctions) {
-      lines.push(`Removed functions to delete from \`modules/guides/pages/bloblang/functions.adoc\` (${stats.removedBloblangFunctions}):`);
-      diffData.details.removedBloblangFunctions.forEach(funcName => {
-        lines.push(`- [ ] \`${funcName}\``);
-      });
-      lines.push('');
-    }
-
-    if (stats.deprecatedBloblangMethods > 0 && diffData.details.deprecatedBloblangMethods) {
-      lines.push(`Deprecated methods - add deprecation notice to \`modules/guides/pages/bloblang/methods.adoc\` (${stats.deprecatedBloblangMethods}):`);
-      diffData.details.deprecatedBloblangMethods.forEach(methodName => {
-        lines.push(`- [ ] \`${methodName}\``);
-      });
-      lines.push('');
-    }
-
-    if (stats.deprecatedBloblangFunctions > 0 && diffData.details.deprecatedBloblangFunctions) {
-      lines.push(`Deprecated functions - add deprecation notice to \`modules/guides/pages/bloblang/functions.adoc\` (${stats.deprecatedBloblangFunctions}):`);
-      diffData.details.deprecatedBloblangFunctions.forEach(funcName => {
-        lines.push(`- [ ] \`${funcName}\``);
-      });
-      lines.push('');
-    }
-
-    lines.push('**How to add includes:**');
-    lines.push('');
-    lines.push('For methods, find the appropriate category section in `methods.adoc` and add:');
-    lines.push('```asciidoc');
-    lines.push('include::redpanda-connect:partial$bloblang-methods/method_name.adoc[leveloffset=+2]');
-    lines.push('```');
-    lines.push('');
-    lines.push('For functions, add to the Functions section in `functions.adoc`:');
-    lines.push('```asciidoc');
-    lines.push('include::redpanda-connect:partial$bloblang-functions/function_name.adoc[leveloffset=+2]');
-    lines.push('```');
-    lines.push('');
-    lines.push('**Note:** Partials are auto-generated. Includes must be added manually in alphabetical order within their section.');
-    lines.push('');
-  }
+  const bloblangLines = renderBloblangChanges({
+    newMethods: diffData.details.newBloblangMethods || [],
+    newFunctions: diffData.details.newBloblangFunctions || [],
+    removedMethods: diffData.details.removedBloblangMethods || [],
+    removedFunctions: diffData.details.removedBloblangFunctions || [],
+    deprecatedMethods: diffData.details.deprecatedBloblangMethods || [],
+    deprecatedFunctions: diffData.details.deprecatedBloblangFunctions || []
+  }, false); // includeVersion = false for single-version summaries
+  lines.push(...bloblangLines);
 
   // Detailed breakdown (expandable)
   lines.push('<details>');
