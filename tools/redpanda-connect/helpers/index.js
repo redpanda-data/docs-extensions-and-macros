@@ -17,4 +17,5 @@ module.exports = {
   commonConfig:           require('./commonConfig.js'),
   advancedConfig:         require('./advancedConfig.js'),
   bloblangExample:        require('./bloblangExample.js'),
+  hasOptionalParams:      require('./hasOptionalParams.js'),
 };

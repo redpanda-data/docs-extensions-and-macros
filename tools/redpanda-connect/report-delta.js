@@ -163,6 +163,17 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     });
   });
 
+  // Detect new/removed Bloblang methods and functions
+  const oldMethods = new Set((oldIndex['bloblang-methods'] || []).map(m => m.name).filter(Boolean));
+  const newMethods = new Set((newIndex['bloblang-methods'] || []).map(m => m.name).filter(Boolean));
+  const oldFunctions = new Set((oldIndex['bloblang-functions'] || []).map(f => f.name).filter(Boolean));
+  const newFunctions = new Set((newIndex['bloblang-functions'] || []).map(f => f.name).filter(Boolean));
+
+  const newBloblangMethods = Array.from(newMethods).filter(m => !oldMethods.has(m)).sort();
+  const removedBloblangMethods = Array.from(oldMethods).filter(m => !newMethods.has(m)).sort();
+  const newBloblangFunctions = Array.from(newFunctions).filter(f => !oldFunctions.has(f)).sort();
+  const removedBloblangFunctions = Array.from(oldFunctions).filter(f => !newFunctions.has(f)).sort();
+
   const result = {
     comparison: {
       oldVersion: opts.oldVersion || '',
@@ -176,7 +187,11 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       removedFields: removedFields.length,
       deprecatedComponents: deprecatedComponents.length,
       deprecatedFields: deprecatedFields.length,
-      changedDefaults: changedDefaults.length
+      changedDefaults: changedDefaults.length,
+      newBloblangMethods: newBloblangMethods.length,
+      removedBloblangMethods: removedBloblangMethods.length,
+      newBloblangFunctions: newBloblangFunctions.length,
+      removedBloblangFunctions: removedBloblangFunctions.length
     },
     details: {
       newComponents,
@@ -185,7 +200,11 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       removedFields,
       deprecatedComponents,
       deprecatedFields,
-      changedDefaults
+      changedDefaults,
+      newBloblangMethods,
+      removedBloblangMethods,
+      newBloblangFunctions,
+      removedBloblangFunctions
     }
   };
 
