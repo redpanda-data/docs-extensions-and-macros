@@ -539,7 +539,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // Writer Reminder for Commercial Names
   if (stats.newComponents > 0) {
-    lines.push('### ✍️ Writer Action Required');
+    lines.push('### Writer Action Required');
     lines.push('');
     lines.push('For each new connector, add the `:page-commercial-names:` attribute to the frontmatter:');
     lines.push('');
@@ -622,7 +622,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   if (stats.changedDefaults > 0) breakingChanges.push('changed defaults');
 
   if (breakingChanges.length > 0) {
-    lines.push('### ⚠️ Breaking Changes Detected');
+    lines.push('### Breaking Changes Detected');
     lines.push('');
     lines.push(`This update includes **${breakingChanges.join(', ')}** that may affect existing configurations.`);
     lines.push('');
@@ -696,7 +696,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   }
 
   if (missingDescriptions.length > 0) {
-    lines.push('### ⚠️ Missing Descriptions');
+    lines.push('### Missing Descriptions');
     lines.push('');
     lines.push(`**${missingDescriptions.length}** item${missingDescriptions.length !== 1 ? 's' : ''} missing descriptions - these need writer attention:`);
     lines.push('');
@@ -959,7 +959,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // Removed Connectors
   if (stats.removedComponents > 0) {
-    lines.push('#### ⚠️ Removed Connectors');
+    lines.push('#### Removed Connectors');
     lines.push('');
     diffData.details.removedComponents.forEach(c => {
       lines.push(`- **${c.name}** (${c.type})`);
@@ -969,7 +969,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // Removed Fields
   if (stats.removedFields > 0) {
-    lines.push('#### ⚠️ Removed Fields');
+    lines.push('#### Removed Fields');
     lines.push('');
 
     const fieldsByComponent = {};
@@ -1025,7 +1025,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // Changed Defaults
   if (stats.changedDefaults > 0) {
-    lines.push('#### ⚠️ Changed Default Values');
+    lines.push('#### Changed Default Values');
     lines.push('');
 
     const changesByComponent = {};

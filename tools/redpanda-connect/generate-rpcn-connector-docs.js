@@ -472,6 +472,23 @@ async function generateRpcnConnectorDocs(options) {
       if (!Array.isArray(items)) continue;
       const outRoot = path.join(outputRoot, folder);
       fs.mkdirSync(outRoot, { recursive: true });
+
+      // Get current item names
+      const currentNames = new Set(items.filter(fn => fn.name).map(fn => fn.name));
+
+      // Delete partials that no longer exist in the data
+      if (fs.existsSync(outRoot)) {
+        const existingFiles = fs.readdirSync(outRoot).filter(f => f.endsWith('.adoc'));
+        for (const file of existingFiles) {
+          const name = file.replace('.adoc', '');
+          if (!currentNames.has(name)) {
+            const filePath = path.join(outRoot, file);
+            fs.unlinkSync(filePath);
+            console.log(`Deleted removed ${folder} partial: ${file}`);
+          }
+        }
+      }
+
       // Use custom or default template
       const bloblangTemplatePath = templateBloblang || path.resolve(__dirname, './templates/bloblang-function.hbs');
       const bloblangTemplate = handlebars.compile(fs.readFileSync(bloblangTemplatePath, 'utf8'));
