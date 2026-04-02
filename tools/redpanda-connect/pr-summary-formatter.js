@@ -21,9 +21,9 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
 
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
-  lines.push('## 📊 Redpanda Connect Documentation Update');
+  lines.push('## Redpanda Connect Documentation Update');
   lines.push('');
-  lines.push(`**📦 Multi-Release Update:** ${startVersion} → ${endVersion}`);
+  lines.push(`**Multi-Release Update:** ${startVersion} → ${endVersion}`);
   lines.push(`**Releases Processed:** ${processedReleases}`);
 
   if (binaryAnalysis) {
@@ -44,10 +44,10 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     lines.push(`- **${total.newFields}** new fields across ${total.releaseCount || 0} release(s)`);
   }
   if (total.removedComponents > 0) {
-    lines.push(`- **${total.removedComponents}** removed connectors ⚠️`);
+    lines.push(`- **${total.removedComponents}** removed connectors`);
   }
   if (total.removedFields > 0) {
-    lines.push(`- **${total.removedFields}** removed fields ⚠️`);
+    lines.push(`- **${total.removedFields}** removed fields`);
   }
   if (total.deprecatedComponents > 0) {
     lines.push(`- **${total.deprecatedComponents}** deprecated connectors`);
@@ -56,19 +56,19 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     lines.push(`- **${total.deprecatedFields}** deprecated fields`);
   }
   if (total.changedDefaults > 0) {
-    lines.push(`- **${total.changedDefaults}** changed default values ⚠️`);
+    lines.push(`- **${total.changedDefaults}** changed default values`);
   }
   if (total.newBloblangMethods > 0) {
     lines.push(`- **${total.newBloblangMethods}** new Bloblang methods`);
   }
   if (total.removedBloblangMethods > 0) {
-    lines.push(`- **${total.removedBloblangMethods}** removed Bloblang methods ⚠️`);
+    lines.push(`- **${total.removedBloblangMethods}** removed Bloblang methods`);
   }
   if (total.newBloblangFunctions > 0) {
     lines.push(`- **${total.newBloblangFunctions}** new Bloblang functions`);
   }
   if (total.removedBloblangFunctions > 0) {
-    lines.push(`- **${total.removedBloblangFunctions}** removed Bloblang functions ⚠️`);
+    lines.push(`- **${total.removedBloblangFunctions}** removed Bloblang functions`);
   }
 
   lines.push('');
@@ -88,7 +88,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
 
   for (const release of releases) {
     const releaseNotesUrl = `https://github.com/redpanda-data/connect/releases/tag/v${release.toVersion}`;
-    lines.push(`#### 🔖 Version ${release.toVersion}`);
+    lines.push(`#### Version ${release.toVersion}`);
     lines.push(`> [Release notes](${releaseNotesUrl})`);
     lines.push('');
 
@@ -152,7 +152,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     // Removed components
     const removedComponents = details.removedComponents || [];
     if (summary.removedComponents > 0 && removedComponents.length > 0) {
-      lines.push(`**⚠️ Removed Connectors (${summary.removedComponents}):**`);
+      lines.push(`**Removed Connectors (${summary.removedComponents}):**`);
       lines.push('');
       removedComponents.forEach(comp => {
         lines.push(`- \`${comp.name}\` (${comp.type})`);
@@ -163,7 +163,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     // Removed fields
     const removedFields = details.removedFields || [];
     if (summary.removedFields > 0 && removedFields.length > 0) {
-      lines.push(`**⚠️ Removed Fields (${summary.removedFields}):**`);
+      lines.push(`**Removed Fields (${summary.removedFields}):**`);
       lines.push('');
       lines.push('| Component | Field |');
       lines.push('|-----------|-------|');
@@ -188,7 +188,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     // Changed defaults
     const changedDefaults = details.changedDefaults || [];
     if (summary.changedDefaults > 0 && changedDefaults.length > 0) {
-      lines.push(`**⚠️ Changed Defaults (${summary.changedDefaults}):**`);
+      lines.push(`**Changed Defaults (${summary.changedDefaults}):**`);
       lines.push('');
       lines.push('| Component | Field | Old Default | New Default |');
       lines.push('|-----------|-------|-------------|-------------|');
@@ -204,7 +204,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
   // Writer action items (aggregate)
   lines.push('---');
   lines.push('');
-  lines.push('### ✍️ Writer Action Items');
+  lines.push('### Writer Action Items');
   lines.push('');
 
   // Collect all new connectors across all releases with full details
@@ -336,7 +336,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
 
   // Priority 2: Removed connectors needing migration docs
   if (allRemovedConnectors.length > 0) {
-    lines.push('**⚠️ Update Migration Guide for Removed Connectors:**');
+    lines.push('**Update Migration Guide for Removed Connectors:**');
     lines.push('');
     allRemovedConnectors.forEach(conn => {
       lines.push(`- [ ] \`${conn.name}\` ${conn.type} — removed in **${conn.version}**`);
@@ -346,7 +346,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
 
   // Priority 3: Deprecated fields needing docs update
   if (allDeprecatedFields.length > 0) {
-    lines.push('**📋 Update Docs for Deprecated Fields:**');
+    lines.push('**Update Docs for Deprecated Fields:**');
     lines.push('');
     allDeprecatedFields.forEach(field => {
       const guidance = field.description ? ` (${truncateToSentence(field.description, 1)})` : '';
@@ -357,7 +357,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
 
   // Priority 4: Changed defaults that may affect users
   if (allChangedDefaults.length > 0) {
-    lines.push('**⚠️ Review Changed Defaults for Breaking Changes:**');
+    lines.push('**Review Changed Defaults for Breaking Changes:**');
     lines.push('');
     allChangedDefaults.forEach(change => {
       const oldVal = change.oldDefault !== undefined ? JSON.stringify(change.oldDefault) : 'none';
@@ -370,7 +370,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
   // Bloblang methods and functions
   if (allNewBloblangMethods.length > 0 || allNewBloblangFunctions.length > 0 ||
       allRemovedBloblangMethods.length > 0 || allRemovedBloblangFunctions.length > 0) {
-    lines.push('**📘 Update Bloblang Guide Pages:**');
+    lines.push('**Update Bloblang Guide Pages:**');
     lines.push('');
 
     if (allNewBloblangMethods.length > 0) {
@@ -390,7 +390,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     }
 
     if (allRemovedBloblangMethods.length > 0) {
-      lines.push(`⚠️ Removed methods to delete from \`modules/guides/pages/bloblang/methods.adoc\` (${allRemovedBloblangMethods.length}):`);
+      lines.push(`Removed methods to delete from \`modules/guides/pages/bloblang/methods.adoc\` (${allRemovedBloblangMethods.length}):`);
       allRemovedBloblangMethods.forEach(method => {
         lines.push(`- [ ] \`${method.name}\` — removed in **${method.version}**`);
       });
@@ -398,7 +398,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
     }
 
     if (allRemovedBloblangFunctions.length > 0) {
-      lines.push(`⚠️ Removed functions to delete from \`modules/guides/pages/bloblang/functions.adoc\` (${allRemovedBloblangFunctions.length}):`);
+      lines.push(`Removed functions to delete from \`modules/guides/pages/bloblang/functions.adoc\` (${allRemovedBloblangFunctions.length}):`);
       allRemovedBloblangFunctions.forEach(func => {
         lines.push(`- [ ] \`${func.name}\` — removed in **${func.version}**`);
       });
@@ -466,7 +466,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // Single version format (original logic)
   // Quick Summary Section
-  lines.push('## 📊 Redpanda Connect Documentation Update');
+  lines.push('## Redpanda Connect Documentation Update');
   lines.push('');
   lines.push(`**OSS Version:** ${diffData.comparison.oldVersion} → ${diffData.comparison.newVersion}`);
 
@@ -481,7 +481,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   const hasChanges = Object.values(stats).some(v => v > 0) || (draftedConnectors && draftedConnectors.length > 0);
 
   if (!hasChanges) {
-    lines.push('✅ **No changes detected** - Documentation is up to date');
+    lines.push('**No changes detected** - Documentation is up to date');
     lines.push('');
     lines.push('<!-- PR_SUMMARY_END -->');
     return lines.join('\n');
@@ -516,11 +516,11 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   }
 
   if (stats.removedComponents > 0) {
-    lines.push(`- **${stats.removedComponents}** removed connector${stats.removedComponents !== 1 ? 's' : ''} ⚠️`);
+    lines.push(`- **${stats.removedComponents}** removed connector${stats.removedComponents !== 1 ? 's' : ''}`);
   }
 
   if (stats.removedFields > 0) {
-    lines.push(`- **${stats.removedFields}** removed field${stats.removedFields !== 1 ? 's' : ''} ⚠️`);
+    lines.push(`- **${stats.removedFields}** removed field${stats.removedFields !== 1 ? 's' : ''}`);
   }
 
   if (stats.deprecatedComponents > 0) {
@@ -532,7 +532,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   }
 
   if (stats.changedDefaults > 0) {
-    lines.push(`- **${stats.changedDefaults}** default value change${stats.changedDefaults !== 1 ? 's' : ''} ⚠️`);
+    lines.push(`- **${stats.changedDefaults}** default value change${stats.changedDefaults !== 1 ? 's' : ''}`);
   }
 
   lines.push('');
@@ -741,7 +741,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   if (missingDescriptions.length > 0) {
     actionItems.push({
       priority: 0,
-      text: `⚠️ Add descriptions for ${missingDescriptions.length} component${missingDescriptions.length !== 1 ? 's' : ''}/field${missingDescriptions.length !== 1 ? 's' : ''} (see Missing Descriptions section)`
+      text: `Add descriptions for ${missingDescriptions.length} component${missingDescriptions.length !== 1 ? 's' : ''}/field${missingDescriptions.length !== 1 ? 's' : ''} (see Missing Descriptions section)`
     });
   }
 
@@ -821,7 +821,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // Detailed breakdown (expandable)
   lines.push('<details>');
-  lines.push('<summary><strong>📋 Detailed Changes</strong> (click to expand)</summary>');
+  lines.push('<summary><strong>Detailed Changes</strong> (click to expand)</summary>');
   lines.push('');
 
   // New Connectors
