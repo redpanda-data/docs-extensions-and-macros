@@ -174,6 +174,39 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
   const newBloblangFunctions = Array.from(newFunctions).filter(f => !oldFunctions.has(f)).sort();
   const removedBloblangFunctions = Array.from(oldFunctions).filter(f => !newFunctions.has(f)).sort();
 
+  // Detect deprecated Bloblang methods and functions
+  const deprecatedBloblangMethods = [];
+  const deprecatedBloblangFunctions = [];
+
+  const oldMethodsMap = new Map((oldIndex['bloblang-methods'] || []).map(m => [m.name, m]));
+  const newMethodsMap = new Map((newIndex['bloblang-methods'] || []).map(m => [m.name, m]));
+  const oldFunctionsMap = new Map((oldIndex['bloblang-functions'] || []).map(f => [f.name, f]));
+  const newFunctionsMap = new Map((newIndex['bloblang-functions'] || []).map(f => [f.name, f]));
+
+  // Check methods for newly deprecated status
+  newMethodsMap.forEach((newMethod, name) => {
+    const oldMethod = oldMethodsMap.get(name);
+    if (oldMethod) {
+      const oldStatus = (oldMethod.status || '').toLowerCase();
+      const newStatus = (newMethod.status || '').toLowerCase();
+      if (oldStatus !== 'deprecated' && newStatus === 'deprecated') {
+        deprecatedBloblangMethods.push(name);
+      }
+    }
+  });
+
+  // Check functions for newly deprecated status
+  newFunctionsMap.forEach((newFunction, name) => {
+    const oldFunction = oldFunctionsMap.get(name);
+    if (oldFunction) {
+      const oldStatus = (oldFunction.status || '').toLowerCase();
+      const newStatus = (newFunction.status || '').toLowerCase();
+      if (oldStatus !== 'deprecated' && newStatus === 'deprecated') {
+        deprecatedBloblangFunctions.push(name);
+      }
+    }
+  });
+
   const result = {
     comparison: {
       oldVersion: opts.oldVersion || '',
@@ -191,7 +224,9 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       newBloblangMethods: newBloblangMethods.length,
       removedBloblangMethods: removedBloblangMethods.length,
       newBloblangFunctions: newBloblangFunctions.length,
-      removedBloblangFunctions: removedBloblangFunctions.length
+      removedBloblangFunctions: removedBloblangFunctions.length,
+      deprecatedBloblangMethods: deprecatedBloblangMethods.length,
+      deprecatedBloblangFunctions: deprecatedBloblangFunctions.length
     },
     details: {
       newComponents,
@@ -204,7 +239,9 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       newBloblangMethods,
       removedBloblangMethods,
       newBloblangFunctions,
-      removedBloblangFunctions
+      removedBloblangFunctions,
+      deprecatedBloblangMethods,
+      deprecatedBloblangFunctions
     }
   };
 
