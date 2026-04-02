@@ -27,16 +27,13 @@ This {{#if signature}}function{{else}}method{{/if}} is deprecated and will be re
 | Name | Type | Description
 
 {{#each params.named}}
-| `{{name}}`{{#if is_optional}}^*^{{/if}}
+| `{{name}}`{{#if is_optional}} (optional){{/if}}
 | `{{type}}`
 | {{{description}}}
 
 {{/each}}
 |===
 
-{{#if (hasOptionalParams params.named)}}
-^*^ Optional parameter
-{{/if}}
 {{/if}}
 {{/if}}
 
