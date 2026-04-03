@@ -1168,10 +1168,8 @@ async function handleRpcnConnectorDocs (options) {
         for (const connector of connectorData[type]) {
           const key = `${type}:${connector.name}`
           connector.cloudSupported = cloudSet.has(key)
-          // Preserve existing requiresCgo from source data, only add if not already set
-          if (!connector.requiresCgo) {
-            connector.requiresCgo = cgoOnlySet.has(key)
-          }
+          // ONLY binary analysis determines requiresCgo (CGO binary vs OSS/rpk)
+          connector.requiresCgo = cgoOnlySet.has(key)
           augmentedCount++
         }
 
