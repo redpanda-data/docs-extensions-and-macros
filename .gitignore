@@ -9,6 +9,7 @@ gen/
 tree-sitter/
 test/
 test-results/
+coverage/
 __tests__/.test-cgo-detection/
 modules/
 cloud-controlplane/
