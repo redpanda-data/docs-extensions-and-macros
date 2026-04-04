@@ -487,37 +487,6 @@ function logCollapsed (label, filesArray, maxToShow = 10) {
   console.log('')
 }
 
-/**
- * Strip augmentation fields from connector data to ensure clean comparisons
- * Removes cloudSupported, requiresCgo, cloudOnly fields and filters out cloud-only connectors
- * @param {object} data - Connector index data
- * @returns {object} Clean connector data without augmentation
- */
-function stripAugmentationFields(data) {
-  const cleanData = JSON.parse(JSON.stringify(data));
-  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-    'buffers', 'metrics', 'scanners', 'tracers', 'config', 'bloblang-methods'];
-
-  for (const type of connectorTypes) {
-    if (Array.isArray(cleanData[type])) {
-      // Remove connectors that were added by augmentation (cloudOnly or requiresCgo without OSS data)
-      cleanData[type] = cleanData[type].filter(c => {
-        // Keep if it's not marked as cloudOnly or requiresCgo
-        // OR if it has a config/fields (meaning it came from OSS, not just binary analysis)
-        return (!(c.cloudOnly || c.requiresCgo) || c.config || c.fields);
-      });
-
-      // Remove augmentation fields
-      cleanData[type].forEach(c => {
-        delete c.cloudSupported;
-        delete c.requiresCgo;
-        delete c.cloudOnly;
-      });
-    }
-  }
-
-  return cleanData;
-}
 
 /**
  * Load or fetch connector data for a specific version
@@ -529,15 +498,11 @@ function stripAugmentationFields(data) {
 async function loadConnectorDataForVersion(version, dataDir, options = {}) {
   const dataFile = path.join(dataDir, `connect-${version}.json`);
 
-  // If file exists, load it
+  // If file exists, load it (with platform metadata intact)
   if (fs.existsSync(dataFile)) {
     console.log(`✓ Using existing data file: connect-${version}.json`);
     const data = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
-
-    // Strip augmentation fields to ensure clean comparisons
-    // Augmentation adds CGO/cloud-only components that shouldn't affect version diffs
-    const cleanData = stripAugmentationFields(data);
-    return cleanData;
+    return data;
   }
 
   // If not, fetch it
@@ -940,8 +905,8 @@ async function handleRpcnConnectorDocs (options) {
   let oldIndex = {}
   let oldVersion = null
   if (options.oldData && fs.existsSync(options.oldData)) {
-    // Strip augmentation fields to ensure clean comparisons
-    oldIndex = stripAugmentationFields(JSON.parse(fs.readFileSync(options.oldData, 'utf8')))
+    // Load with platform metadata intact for accurate diff
+    oldIndex = JSON.parse(fs.readFileSync(options.oldData, 'utf8'))
     const m = options.oldData.match(/connect-([\d.]+)\.json$/)
     if (m) oldVersion = m[1]
   } else {
@@ -959,30 +924,47 @@ async function handleRpcnConnectorDocs (options) {
       oldVersion = sortedVersions[0]
       const oldFile = `connect-${oldVersion}.json`
       const oldPath = path.join(dataDir, oldFile)
-      // Strip augmentation fields to ensure clean comparisons
-      oldIndex = stripAugmentationFields(JSON.parse(fs.readFileSync(oldPath, 'utf8')))
+      // Load with platform metadata intact for accurate diff
+      oldIndex = JSON.parse(fs.readFileSync(oldPath, 'utf8'))
       console.log(`📋 Using old version data: ${oldFile}`)
     } else {
       oldVersion = getAntoraValue('asciidoc.attributes.latest-connect-version')
       if (oldVersion) {
         const oldPath = path.join(dataDir, `connect-${oldVersion}.json`)
         if (fs.existsSync(oldPath)) {
-          // Strip augmentation fields to ensure clean comparisons
-          oldIndex = stripAugmentationFields(JSON.parse(fs.readFileSync(oldPath, 'utf8')))
+          // Load with platform metadata intact for accurate diff
+          oldIndex = JSON.parse(fs.readFileSync(oldPath, 'utf8'))
         }
       }
     }
   }
 
-  // Load and strip augmentation fields for clean comparisons
-  let newIndex = stripAugmentationFields(JSON.parse(fs.readFileSync(dataFile, 'utf8')))
+  // Load with platform metadata intact for accurate diff
+  let newIndex = JSON.parse(fs.readFileSync(dataFile, 'utf8'))
 
-  // Save a clean copy of OSS data for binary analysis (before augmentation)
-  // This ensures the binary analyzer compares actual binaries, not augmented data
+  // Save a clean copy of OSS data for binary analysis
+  // Binary analyzer needs pure OSS data without augmented CGO/cloud connectors
   const cleanOssDataPath = path.join(dataDir, `._connect-${newVersion}-clean.json`)
 
-  // Use the already-stripped newIndex for clean data
+  // Create clean version by removing augmented connectors
   const cleanData = JSON.parse(JSON.stringify(newIndex))
+  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
+    'buffers', 'metrics', 'scanners', 'tracers']
+
+  for (const type of connectorTypes) {
+    if (Array.isArray(cleanData[type])) {
+      // Keep only connectors from OSS rpk (have config/fields)
+      // Remove augmentation-only connectors (added by previous binary analysis)
+      cleanData[type] = cleanData[type].filter(c => c.config || c.fields)
+
+      // Remove platform metadata from remaining connectors
+      cleanData[type].forEach(c => {
+        delete c.cloudSupported
+        delete c.requiresCgo
+        delete c.cloudOnly
+      })
+    }
+  }
 
   fs.writeFileSync(cleanOssDataPath, JSON.stringify(cleanData, null, 2), 'utf8')
 
