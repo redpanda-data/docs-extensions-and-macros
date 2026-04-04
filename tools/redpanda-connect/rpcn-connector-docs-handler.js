@@ -1247,9 +1247,51 @@ async function handleRpcnConnectorDocs (options) {
   } else if (versionsMatch) {
     console.log(`⏭️  Skipping diff generation: versions match (${oldVersion} === ${newVersion})`)
   } else {
+    // FALLBACK: If binary analysis failed, strip CGO/cloud augmentation from old data
+    // to prevent false "removed" reports when comparing augmented old vs non-augmented new
+    let oldIndexForDiff = oldIndex
+    if (!binaryAnalysis || !binaryAnalysis.ossVersion) {
+      console.log('⚠️  Binary analysis unavailable - stripping CGO/cloud metadata from old data for clean comparison')
+
+      // Strip CGO/cloud-only connectors and metadata from old data
+      oldIndexForDiff = JSON.parse(JSON.stringify(oldIndex))
+      const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
+        'buffers', 'metrics', 'scanners', 'tracers']
+
+      let totalStripped = 0
+      for (const type of connectorTypes) {
+        if (Array.isArray(oldIndexForDiff[type])) {
+          const originalCount = oldIndexForDiff[type].length
+
+          // Remove connectors marked as CGO-only or cloud-only
+          // These shouldn't appear as "removed" when binary analysis is unavailable
+          oldIndexForDiff[type] = oldIndexForDiff[type].filter(c => {
+            return !(c.requiresCgo || c.cloudOnly)
+          })
+
+          const removed = originalCount - oldIndexForDiff[type].length
+          if (removed > 0) {
+            console.log(`   • Stripped ${removed} CGO/cloud connectors from ${type}`)
+            totalStripped += removed
+          }
+
+          // Remove platform metadata from remaining connectors
+          oldIndexForDiff[type].forEach(c => {
+            delete c.cloudSupported
+            delete c.requiresCgo
+            delete c.cloudOnly
+          })
+        }
+      }
+
+      if (totalStripped > 0) {
+        console.log(`   ✓ Total stripped: ${totalStripped} CGO/cloud connectors`)
+      }
+    }
+
     const { generateConnectorDiffJson } = require('./report-delta.js')
     diffJson = generateConnectorDiffJson(
-      oldIndex,
+      oldIndexForDiff,
       newIndex,
       {
         oldVersion: oldVersion,
