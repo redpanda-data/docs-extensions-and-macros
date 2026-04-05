@@ -1251,7 +1251,9 @@ async function handleRpcnConnectorDocs (options) {
     // FALLBACK: If binary analysis failed, strip CGO/cloud augmentation from old data
     // to prevent false "removed" reports when comparing augmented old vs non-augmented new
     let oldIndexForDiff = oldIndex
-    if (!binaryAnalysis || !binaryAnalysis.ossVersion) {
+    // Check if CGO analysis specifically failed (cgoIndex will be undefined if CGO binary couldn't be analyzed)
+    const cgoAnalysisFailed = !binaryAnalysis || !binaryAnalysis.ossVersion || !binaryAnalysis.cgoIndex
+    if (cgoAnalysisFailed) {
       console.log('⚠️  Binary analysis unavailable - stripping CGO/cloud metadata from old data for clean comparison')
 
       // Strip CGO/cloud-only connectors and metadata from old data
