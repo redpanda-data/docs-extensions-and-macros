@@ -1232,9 +1232,10 @@ async function handleRpcnConnectorDocs (options) {
         }
       }
 
-      // NOTE: We do NOT reload newIndex after augmentation
-      // Diff generation should use clean OSS data to avoid false positives from CGO/cloud-only components
-      // The augmented data is saved to disk but not used for version comparisons
+      // IMPORTANT: Reload newIndex with augmented data for unified diff
+      // The unified diff approach compares platform metadata to detect transitions
+      newIndex = connectorData
+      console.log(`✓ Reloaded newIndex with augmented data for diff comparison`)
     } catch (err) {
       console.error(`Warning: Failed to augment data file: ${err.message}`)
     }
