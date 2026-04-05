@@ -2,6 +2,7 @@ const { execSync } = require('child_process');
 
 /**
  * Generate a JSON diff report between two connector index objects.
+ * Includes platform metadata (CGO, cloud-only) to detect transitions.
  * @param {object} oldIndex - Previous version connector index
  * @param {object} newIndex - Current version connector index
  * @param {object} opts - { oldVersion, newVersion, timestamp, binaryAnalysis, oldBinaryAnalysis }
@@ -11,31 +12,39 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
   const oldMap = buildComponentMap(oldIndex);
   const newMap = buildComponentMap(newIndex);
 
-  // New components
+  // New components (include platform metadata)
   const newComponentKeys = Object.keys(newMap).filter(k => !(k in oldMap));
   const newComponents = newComponentKeys.map(key => {
     const [type, name] = key.split(':');
     const raw = newMap[key].raw;
+    const metadata = newMap[key].metadata || {};
     return {
       name,
       type,
       status: raw.status || raw.type || '',
       version: raw.version || raw.introducedInVersion || '',
-      description: raw.description || ''
+      description: raw.description || '',
+      requiresCgo: metadata.requiresCgo || false,
+      cloudOnly: metadata.cloudOnly || false,
+      cloudSupported: metadata.cloudSupported || false
     };
   });
 
-  // Removed components
+  // Removed components (include platform metadata to understand why removed)
   const removedComponentKeys = Object.keys(oldMap).filter(k => !(k in newMap));
   const removedComponents = removedComponentKeys.map(key => {
     const [type, name] = key.split(':');
     const raw = oldMap[key].raw;
+    const metadata = oldMap[key].metadata || {};
     return {
       name,
       type,
       status: raw.status || raw.type || '',
       version: raw.version || raw.introducedInVersion || '',
-      description: raw.description || ''
+      description: raw.description || '',
+      requiresCgo: metadata.requiresCgo || false,
+      cloudOnly: metadata.cloudOnly || false,
+      cloudSupported: metadata.cloudSupported || false
     };
   });
 
@@ -95,6 +104,57 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
         status: raw.status || raw.type || '',
         version: raw.version || raw.introducedInVersion || '',
         description: raw.description || ''
+      });
+    }
+  });
+
+  // Platform transitions (CGO, cloud support changes)
+  const platformTransitions = [];
+  Object.keys(newMap).forEach(cKey => {
+    if (!(cKey in oldMap)) return;
+
+    const oldMeta = oldMap[cKey].metadata || {};
+    const newMeta = newMap[cKey].metadata || {};
+    const [type, name] = cKey.split(':');
+
+    const transitions = [];
+
+    // CGO requirement changes
+    if (!oldMeta.requiresCgo && newMeta.requiresCgo) {
+      transitions.push('became_cgo_only');
+    } else if (oldMeta.requiresCgo && !newMeta.requiresCgo) {
+      transitions.push('no_longer_cgo_only');
+    }
+
+    // Cloud support changes
+    if (!oldMeta.cloudSupported && newMeta.cloudSupported) {
+      transitions.push('added_cloud_support');
+    } else if (oldMeta.cloudSupported && !newMeta.cloudSupported) {
+      transitions.push('removed_cloud_support');
+    }
+
+    // Cloud-only status changes
+    if (!oldMeta.cloudOnly && newMeta.cloudOnly) {
+      transitions.push('became_cloud_only');
+    } else if (oldMeta.cloudOnly && !newMeta.cloudOnly) {
+      transitions.push('no_longer_cloud_only');
+    }
+
+    if (transitions.length > 0) {
+      platformTransitions.push({
+        name,
+        type,
+        transitions,
+        oldPlatform: {
+          requiresCgo: oldMeta.requiresCgo || false,
+          cloudSupported: oldMeta.cloudSupported || false,
+          cloudOnly: oldMeta.cloudOnly || false
+        },
+        newPlatform: {
+          requiresCgo: newMeta.requiresCgo || false,
+          cloudSupported: newMeta.cloudSupported || false,
+          cloudOnly: newMeta.cloudOnly || false
+        }
       });
     }
   });
@@ -221,6 +281,7 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       deprecatedComponents: deprecatedComponents.length,
       deprecatedFields: deprecatedFields.length,
       changedDefaults: changedDefaults.length,
+      platformTransitions: platformTransitions.length,
       newBloblangMethods: newBloblangMethods.length,
       removedBloblangMethods: removedBloblangMethods.length,
       newBloblangFunctions: newBloblangFunctions.length,
@@ -236,6 +297,7 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       deprecatedComponents,
       deprecatedFields,
       changedDefaults,
+      platformTransitions,
       newBloblangMethods,
       removedBloblangMethods,
       newBloblangFunctions,
@@ -341,7 +403,19 @@ function buildComponentMap(indexObj) {
       }
 
       const fieldNames = childArray.map(f => f.name);
-      map[lookupKey] = { raw: component, fields: fieldNames };
+
+      // Preserve platform metadata for accurate diff comparison
+      const metadata = {
+        requiresCgo: component.requiresCgo || false,
+        cloudSupported: component.cloudSupported || false,
+        cloudOnly: component.cloudOnly || false
+      };
+
+      map[lookupKey] = {
+        raw: component,
+        fields: fieldNames,
+        metadata: metadata
+      };
     });
   });
 
