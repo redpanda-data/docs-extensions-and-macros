@@ -71,10 +71,13 @@ module.exports.register = function () {
         let content = llmsPage.markdownContents.toString('utf8');
         logger.info(`Extracted ${content.length} bytes of markdown content`);
 
-        // Strip HTML comments added by convert-to-markdown extension
+        // Strip metadata added by convert-to-markdown extension
         // These reference the unpublished /home/llms/ URL which doesn't make sense for llms.txt
+        // 1. Strip HTML comments (source URLs)
         content = content.replace(/^<!--[\s\S]*?-->\s*/gm, '').trim();
-        logger.debug(`Stripped HTML comments, now ${content.length} bytes`);
+        // 2. Strip llms.txt directive blockquotes (these point to this file, which is redundant)
+        content = content.replace(/^> For the complete documentation index, see \[llms\.txt\].*$/gm, '').trim();
+        logger.debug(`Stripped metadata, now ${content.length} bytes`);
 
         // Fix URLs: convert em dashes back to double hyphens and remove invisible characters
         // The markdown converter applies smart typography that turns -- into — (em dash)
@@ -274,8 +277,26 @@ module.exports.register = function () {
     if (llmsPage && llmsPage.llmsTxtContent) {
       logger.info('Adding llms.txt to site root');
 
+      // Inject comprehensive navigation section for better coverage
+      // Target: Stay under 50K chars (agent-friendly docs spec limit)
+      const MAX_LLMS_TXT_CHARS = 45000; // Leave buffer below 50K
+      let llmsTxtContent = llmsPage.llmsTxtContent;
+
+      // Generate navigation section with component sitemaps and key sections
+      const navSection = generateNavigationSection(components, siteUrl);
+
+      // Only inject if we're under the limit
+      if (llmsTxtContent.length + navSection.length < MAX_LLMS_TXT_CHARS) {
+        llmsTxtContent = llmsTxtContent + '\n\n' + navSection;
+        logger.info(`Injected navigation section (${navSection.length} chars)`);
+      } else {
+        logger.warn(`Skipping navigation injection - would exceed ${MAX_LLMS_TXT_CHARS} char limit`);
+      }
+
+      logger.info(`Final llms.txt size: ${llmsTxtContent.length} chars`);
+
       siteCatalog.addFile({
-        contents: Buffer.from(llmsPage.llmsTxtContent, 'utf8'),
+        contents: Buffer.from(llmsTxtContent, 'utf8'),
         out: { path: 'llms.txt' },
       });
       logger.info('Successfully added llms.txt');
@@ -528,4 +549,58 @@ function addLastmodToComponentSitemaps(contentCatalog, siteCatalog, sitemapIndex
   });
 
   return sitemapIndexXml;
+}
+
+/**
+ * Generate a comprehensive navigation section for llms.txt
+ * This improves llms-txt-freshness score by providing pathways to all documentation
+ *
+ * @param {Array} components - Antora components with their metadata
+ * @param {string} siteUrl - Base site URL
+ * @returns {string} Markdown navigation section
+ */
+function generateNavigationSection(components, siteUrl) {
+  let nav = `## Complete documentation index\n\n`;
+  nav += `For comprehensive page listings, use the sitemaps:\n\n`;
+  nav += `- [sitemap.md](${siteUrl}/sitemap.md) - Main sitemap index with all documentation\n`;
+  nav += `- [sitemap-all.md](${siteUrl}/sitemap-all.md) - Combined listing of all ${components.reduce((sum, c) => sum + (c.latest?.pages?.length || 0), 0).toLocaleString()}+ pages\n\n`;
+
+  nav += `### Component sitemaps\n\n`;
+
+  // Add component-specific sitemaps
+  const componentSitemaps = [
+    { name: 'ROOT', title: 'Redpanda Self-Managed', path: 'sitemap-ROOT.md' },
+    { name: 'redpanda-cloud', title: 'Redpanda Cloud', path: 'sitemap-redpanda-cloud.md' },
+    { name: 'redpanda-connect', title: 'Redpanda Connect', path: 'sitemap-redpanda-connect.md' },
+    { name: 'redpanda-labs', title: 'Redpanda Labs', path: 'sitemap-redpanda-labs.md' },
+  ];
+
+  for (const sitemap of componentSitemaps) {
+    const component = components.find(c => c.name === sitemap.name);
+    const pageCount = component?.latest?.pages?.length || 'many';
+    nav += `- [${sitemap.title}](${siteUrl}/${sitemap.path}) - ${pageCount} pages\n`;
+  }
+
+  nav += `\n### Key documentation sections\n\n`;
+  nav += `**Self-Managed:**\n`;
+  nav += `- [Deploy](${siteUrl}/current/deploy.md) - Installation and deployment guides\n`;
+  nav += `- [Manage](${siteUrl}/current/manage.md) - Cluster operations and administration\n`;
+  nav += `- [Develop](${siteUrl}/current/develop.md) - Application development guides\n`;
+  nav += `- [Reference](${siteUrl}/current/reference.md) - Configuration, CLI, and API references\n`;
+  nav += `- [Upgrade](${siteUrl}/current/upgrade.md) - Version upgrade procedures\n`;
+  nav += `- [Troubleshoot](${siteUrl}/current/troubleshoot.md) - Debugging and issue resolution\n`;
+
+  nav += `\n**Cloud:**\n`;
+  nav += `- [Get Started](${siteUrl}/redpanda-cloud/get-started.md) - Cloud quickstart and cluster types\n`;
+  nav += `- [Manage](${siteUrl}/redpanda-cloud/manage.md) - Cloud cluster management\n`;
+  nav += `- [Networking](${siteUrl}/redpanda-cloud/networking.md) - Network configuration\n`;
+  nav += `- [Security](${siteUrl}/redpanda-cloud/security.md) - Authentication and authorization\n`;
+  nav += `- [AI Agents](${siteUrl}/redpanda-cloud/ai-agents.md) - Agentic Data Plane documentation\n`;
+
+  nav += `\n**Connect:**\n`;
+  nav += `- [Components](${siteUrl}/redpanda-connect/components.md) - All connectors, processors, and more\n`;
+  nav += `- [Guides](${siteUrl}/redpanda-connect/guides.md) - Integration tutorials\n`;
+  nav += `- [Configuration](${siteUrl}/redpanda-connect/configuration.md) - YAML configuration reference\n`;
+
+  return nav;
 }
