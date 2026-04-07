@@ -93,6 +93,19 @@ function capToTwoSentences (description) {
 }
 
 /**
+ * Remove platform metadata fields from connectors
+ * @param {Array} connectors - Array of connector objects
+ */
+function stripPlatformMetadata (connectors) {
+  if (!Array.isArray(connectors)) return
+  connectors.forEach(c => {
+    delete c.cloudSupported
+    delete c.requiresCgo
+    delete c.cloudOnly
+  })
+}
+
+/**
  * Update whats-new.adoc with new release information
  * @param {Object} params - Parameters
  * @param {string} params.dataDir - Data directory path
@@ -958,11 +971,7 @@ async function handleRpcnConnectorDocs (options) {
       cleanData[type] = cleanData[type].filter(c => c.config || c.fields)
 
       // Remove platform metadata from remaining connectors
-      cleanData[type].forEach(c => {
-        delete c.cloudSupported
-        delete c.requiresCgo
-        delete c.cloudOnly
-      })
+      stripPlatformMetadata(cleanData[type])
     }
   }
 
@@ -1012,8 +1021,6 @@ async function handleRpcnConnectorDocs (options) {
       console.error(`Error: Failed to publish merged version: ${err.message}`)
     }
   }
-
-  printDeltaReport(oldIndex, newIndex)
 
   // Binary analysis
   let oldBinaryAnalysis = null
@@ -1279,11 +1286,7 @@ async function handleRpcnConnectorDocs (options) {
           }
 
           // Remove platform metadata from remaining connectors
-          oldIndexForDiff[type].forEach(c => {
-            delete c.cloudSupported
-            delete c.requiresCgo
-            delete c.cloudOnly
-          })
+          stripPlatformMetadata(oldIndexForDiff[type])
         }
       }
 
@@ -1291,6 +1294,8 @@ async function handleRpcnConnectorDocs (options) {
         console.log(`   ✓ Total stripped: ${totalStripped} CGO/cloud connectors`)
       }
     }
+
+    printDeltaReport(oldIndexForDiff, newIndex)
 
     const { generateConnectorDiffJson } = require('./report-delta.js')
     diffJson = generateConnectorDiffJson(
