@@ -2,6 +2,7 @@ const path = require('path')
 const os = require('os')
 const yaml = require('js-yaml')
 const { toMarkdownUrl } = require('../extension-utils/url-utils')
+const { formatLlmsDirective } = require('../extension-utils/llms-utils')
 const TurndownService = require('turndown')
 const turndownPluginGfm = require('turndown-plugin-gfm')
 const { gfm } = turndownPluginGfm
@@ -500,17 +501,18 @@ module.exports.register = function () {
             restOfMarkdown = markdown.substring(h1Match[0].length).trimStart()
           }
 
-          // Add frontmatter AFTER H1 heading, then source reference and AI-friendly note
+          // Structure: H1 → llms.txt directive (blockquote) → frontmatter → source → content
+          // The directive must appear near the top for agent-friendly docs spec compliance
           if (canonicalUrl) {
             const componentName = page.src?.component || '';
-            const urlHint = componentName
-              ? `<!-- Note for AI: This is a Markdown export. For aggregated content, see /llms.txt (curated overview), /${componentName}-full.txt (this component only), or /llms-full.txt (complete documentation). -->`
-              : `<!-- Note for AI: This is a Markdown export. For aggregated content, see /llms.txt (curated overview) or /llms-full.txt (complete documentation). -->`;
+            // Use markdown blockquote format for the directive (visible, can be hidden with CSS)
+            const llmsDirective = formatLlmsDirective(componentName);
 
-            markdown = `${h1Heading}\n${frontmatter}<!-- Source: ${canonicalUrl} -->\n${urlHint}\n\n${restOfMarkdown}`
+            markdown = `${h1Heading}\n${llmsDirective}\n\n${frontmatter}<!-- Source: ${canonicalUrl} -->\n\n${restOfMarkdown}`
           } else if (frontmatter) {
-            // If no canonical URL but we have frontmatter, still add it after H1
-            markdown = `${h1Heading}\n${frontmatter}${restOfMarkdown}`
+            // If no canonical URL but we have frontmatter, still add directive after H1
+            const llmsDirective = formatLlmsDirective();
+            markdown = `${h1Heading}\n${llmsDirective}\n\n${frontmatter}${restOfMarkdown}`
           }
 
           // Clean up unnecessary whitespace

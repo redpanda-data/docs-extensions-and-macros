@@ -2483,8 +2483,10 @@ class RuntimeValidationEnumExtractor:
         )
 
         if enum_results:
-            # Extract just the values for the enum field
-            property["enum"] = [result["value"] for result in enum_results]
+            # Skip if enum was already set by an override (accepted_values)
+            if "enum" not in property:
+                # Extract just the values for the enum field
+                property["enum"] = [result["value"] for result in enum_results]
 
             # Add metadata about which enum values are enterprise-only
             enum_metadata = {}

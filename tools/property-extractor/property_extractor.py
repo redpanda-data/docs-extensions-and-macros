@@ -2143,7 +2143,8 @@ def resolve_type_and_default(properties, definitions):
                 if resolved_type == "enum" or "enum" in resolved:
                     # Enums are represented as strings with an enum constraint in JSON Schema
                     prop["type"] = "string"
-                    if "enum" in resolved:
+                    # Only set enum if not already set by an override (accepted_values)
+                    if "enum" in resolved and "enum" not in prop:
                         prop["enum"] = resolved["enum"]
                 elif resolved_type in ("object", "string", "integer", "boolean", "array", "number"):
                     prop["type"] = resolved_type

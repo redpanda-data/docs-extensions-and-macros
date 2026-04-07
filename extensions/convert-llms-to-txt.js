@@ -1,6 +1,7 @@
 'use strict';
 
 const { toMarkdownUrl } = require('../extension-utils/url-utils');
+const { stripMarkdownMetadata } = require('../extension-utils/llms-utils');
 
 /**
  * Extracts markdown from llms.adoc page and generates AI-friendly documentation exports.
@@ -32,6 +33,8 @@ module.exports.register = function () {
       siteUrl = playbook.site?.url || 'https://docs.redpanda.com';
       logger.info(`Using site URL: ${siteUrl}`);
     }
+    // Normalize: strip trailing slashes to avoid double slashes in URL concatenation
+    siteUrl = siteUrl.replace(/\/+$/, '');
   });
 
   this.on('contentClassified', ({ contentCatalog }) => {
@@ -71,10 +74,10 @@ module.exports.register = function () {
         let content = llmsPage.markdownContents.toString('utf8');
         logger.info(`Extracted ${content.length} bytes of markdown content`);
 
-        // Strip HTML comments added by convert-to-markdown extension
+        // Strip metadata added by convert-to-markdown extension using shared helper
         // These reference the unpublished /home/llms/ URL which doesn't make sense for llms.txt
-        content = content.replace(/^<!--[\s\S]*?-->\s*/gm, '').trim();
-        logger.debug(`Stripped HTML comments, now ${content.length} bytes`);
+        content = stripMarkdownMetadata(content);
+        logger.debug(`Stripped metadata, now ${content.length} bytes`);
 
         // Fix URLs: convert em dashes back to double hyphens and remove invisible characters
         // The markdown converter applies smart typography that turns -- into — (em dash)
@@ -187,7 +190,8 @@ module.exports.register = function () {
       fullContent += `# Page ${index + 1}: ${pageTitle}\n\n`;
       fullContent += `**URL**: ${pageUrl}\n\n`;
       fullContent += `---\n\n`;
-      fullContent += page.markdownContents.toString('utf8');
+      // Strip metadata (directive, source comments) from page content
+      fullContent += stripMarkdownMetadata(page.markdownContents);
       fullContent += `\n\n---\n\n`;
     });
 
@@ -258,7 +262,8 @@ module.exports.register = function () {
         componentContent += `# Page ${index + 1}: ${pageTitle}\n\n`;
         componentContent += `**URL**: ${pageUrl}\n\n`;
         componentContent += `---\n\n`;
-        componentContent += page.markdownContents.toString('utf8');
+        // Strip metadata (directive, source comments) from page content
+        componentContent += stripMarkdownMetadata(page.markdownContents);
         componentContent += `\n\n---\n\n`;
       });
 
@@ -274,8 +279,40 @@ module.exports.register = function () {
     if (llmsPage && llmsPage.llmsTxtContent) {
       logger.info('Adding llms.txt to site root');
 
+      // Target: Stay under 50K chars (agent-friendly docs spec limit)
+      const MAX_LLMS_TXT_CHARS = 45000; // Leave buffer below 50K
+      let llmsTxtContent = llmsPage.llmsTxtContent;
+
+      // Check if base content already exceeds limit
+      if (llmsTxtContent.length >= MAX_LLMS_TXT_CHARS) {
+        logger.warn(`Base llms.txt content (${llmsTxtContent.length} chars) exceeds ${MAX_LLMS_TXT_CHARS} char limit, truncating`);
+        // Truncate at last newline before limit to avoid cutting mid-line or mid-URL
+        llmsTxtContent = truncateAtNewline(llmsTxtContent, MAX_LLMS_TXT_CHARS - 100) + '\n\n[Content truncated due to size limits]';
+      }
+
+      // Generate navigation section with component sitemaps and key sections
+      const navSection = generateNavigationSection(siteUrl);
+
+      // Calculate available space for navigation section
+      const availableSpace = MAX_LLMS_TXT_CHARS - llmsTxtContent.length - 2; // -2 for \n\n separator
+
+      if (availableSpace >= navSection.length) {
+        // Full navigation section fits
+        llmsTxtContent = llmsTxtContent + '\n\n' + navSection;
+        logger.info(`Injected full navigation section (${navSection.length} chars)`);
+      } else if (availableSpace > 500) {
+        // Partial navigation section - truncate at last newline to avoid cutting mid-line or mid-URL
+        const truncatedNav = truncateAtNewline(navSection, availableSpace - 50) + '\n\n[Navigation truncated due to size limits]';
+        llmsTxtContent = llmsTxtContent + '\n\n' + truncatedNav;
+        logger.warn(`Truncated navigation section from ${navSection.length} to ${truncatedNav.length} chars`);
+      } else {
+        logger.warn(`Skipping navigation injection - only ${availableSpace} chars available`);
+      }
+
+      logger.info(`Final llms.txt size: ${llmsTxtContent.length} chars`);
+
       siteCatalog.addFile({
-        contents: Buffer.from(llmsPage.llmsTxtContent, 'utf8'),
+        contents: Buffer.from(llmsTxtContent, 'utf8'),
         out: { path: 'llms.txt' },
       });
       logger.info('Successfully added llms.txt');
@@ -528,4 +565,72 @@ function addLastmodToComponentSitemaps(contentCatalog, siteCatalog, sitemapIndex
   });
 
   return sitemapIndexXml;
+}
+
+/**
+ * Truncate content at the last newline before the specified limit.
+ * This avoids cutting mid-line or mid-URL which would produce malformed output.
+ *
+ * @param {string} content - Content to truncate
+ * @param {number} maxLength - Maximum length
+ * @returns {string} Truncated content ending at a newline boundary
+ */
+function truncateAtNewline(content, maxLength) {
+  if (content.length <= maxLength) {
+    return content;
+  }
+  const truncated = content.slice(0, maxLength);
+  const lastNewline = truncated.lastIndexOf('\n');
+  if (lastNewline > 0) {
+    return truncated.slice(0, lastNewline);
+  }
+  // Fallback: no newline found, return as-is
+  return truncated;
+}
+
+/**
+ * Generate a comprehensive navigation section for llms.txt
+ * This improves llms-txt-freshness score by providing pathways to all documentation
+ *
+ * NOTE: The section URLs below are hardcoded. If pages are renamed, moved, or removed,
+ * these links will 404. When restructuring documentation, update these URLs accordingly.
+ * Future improvement: Generate these from the content catalog at build time.
+ *
+ * @param {string} siteUrl - Base site URL
+ * @returns {string} Markdown navigation section
+ */
+function generateNavigationSection(siteUrl) {
+  let nav = `## Complete documentation index\n\n`;
+  nav += `For comprehensive page listings, use the sitemaps:\n\n`;
+  nav += `- [sitemap.md](${siteUrl}/sitemap.md) - Main sitemap index with all documentation\n`;
+  nav += `- [sitemap-all.md](${siteUrl}/sitemap-all.md) - Combined listing of all documentation pages\n\n`;
+
+  nav += `### Component sitemaps\n\n`;
+  nav += `- [Redpanda Self-Managed](${siteUrl}/sitemap-ROOT.md)\n`;
+  nav += `- [Redpanda Cloud](${siteUrl}/sitemap-redpanda-cloud.md)\n`;
+  nav += `- [Redpanda Connect](${siteUrl}/sitemap-redpanda-connect.md)\n`;
+  nav += `- [Redpanda Labs](${siteUrl}/sitemap-redpanda-labs.md)\n`;
+
+  nav += `\n### Key documentation sections\n\n`;
+  nav += `**Self-Managed:**\n`;
+  nav += `- [Deploy](${siteUrl}/current/deploy.md) - Installation and deployment guides\n`;
+  nav += `- [Manage](${siteUrl}/current/manage.md) - Cluster operations and administration\n`;
+  nav += `- [Develop](${siteUrl}/current/develop.md) - Application development guides\n`;
+  nav += `- [Reference](${siteUrl}/current/reference.md) - Configuration, CLI, and API references\n`;
+  nav += `- [Upgrade](${siteUrl}/current/upgrade.md) - Version upgrade procedures\n`;
+  nav += `- [Troubleshoot](${siteUrl}/current/troubleshoot.md) - Debugging and issue resolution\n`;
+
+  nav += `\n**Cloud:**\n`;
+  nav += `- [Get Started](${siteUrl}/redpanda-cloud/get-started.md) - Cloud quickstart and cluster types\n`;
+  nav += `- [Manage](${siteUrl}/redpanda-cloud/manage.md) - Cloud cluster management\n`;
+  nav += `- [Networking](${siteUrl}/redpanda-cloud/networking.md) - Network configuration\n`;
+  nav += `- [Security](${siteUrl}/redpanda-cloud/security.md) - Authentication and authorization\n`;
+  nav += `- [AI Agents](${siteUrl}/redpanda-cloud/ai-agents.md) - Agentic Data Plane documentation\n`;
+
+  nav += `\n**Connect:**\n`;
+  nav += `- [Components](${siteUrl}/redpanda-connect/components.md) - All connectors, processors, and more\n`;
+  nav += `- [Guides](${siteUrl}/redpanda-connect/guides.md) - Integration tutorials\n`;
+  nav += `- [Configuration](${siteUrl}/redpanda-connect/configuration.md) - YAML configuration reference\n`;
+
+  return nav;
 }
