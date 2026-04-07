@@ -247,6 +247,7 @@ function getConnectorList(binaryPath) {
 
     let result;
     if (needsDocker) {
+      console.log(`   Using Docker to run Linux binary on ${os.platform()}`);
       // Use Docker to run Linux binaries on macOS/Windows
       const binaryDir = path.dirname(binaryPath);
       const binaryFile = path.basename(binaryPath);
@@ -268,6 +269,7 @@ function getConnectorList(binaryPath) {
         maxBuffer: 10 * 1024 * 1024 // 10MB buffer
       });
     } else {
+      console.log(`   Running natively on ${os.platform()}`);
       // Run natively
       result = spawnSync(binaryPath, ['list', '--format', 'json-full'], {
         stdio: ['ignore', 'pipe', 'ignore'],

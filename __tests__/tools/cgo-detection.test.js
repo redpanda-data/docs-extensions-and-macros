@@ -18,6 +18,9 @@ const { execSync, spawnSync } = require('child_process');
 const os = require('os');
 
 // Test configuration
+// Using 4.75.1 as a stable version for integration testing
+// Note: This test is run separately via `npm run test:cgo` (not in regular test suite)
+// because it downloads real binaries from GitHub releases
 const TEST_VERSION = '4.75.1';
 const TEST_DIR = path.join(__dirname, '../.test-cgo-detection');
 const REPO_ROOT = path.resolve(__dirname, '../..');
