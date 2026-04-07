@@ -991,6 +991,14 @@ def _apply_override_to_existing_property(property_dict, override, overrides_file
     if "category" in override:
         property_dict["category"] = override["category"]
 
+    # Apply accepted_values override - replaces enum field to filter displayed values
+    # Use case: Exclude internal-only enum values (e.g., greedy mode for leader_balancer_mode)
+    if "accepted_values" in override:
+        if isinstance(override["accepted_values"], list):
+            property_dict["enum"] = override["accepted_values"]
+        else:
+            logger.warning(f"accepted_values for property must be an array")
+
 
 def _create_property_from_override(prop_name, override, overrides_file_path):
     """Create a new property from override specification."""
@@ -1025,9 +1033,10 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
     
     # Add any other custom fields from override
     for key, value in override.items():
-        if key not in ["description", "type", "default", "config_scope", "version", 
-                       "example", "example_file", "example_yaml", "related_topics", 
-                       "is_deprecated", "visibility"]:
+        if key not in ["description", "type", "default", "config_scope", "version",
+                       "example", "example_file", "example_yaml", "related_topics",
+                       "is_deprecated", "visibility", "exclude_from_docs", "category",
+                       "accepted_values", "_comment"]:
             new_property[key] = value
 
     # Add exclude_from_docs if specified
@@ -1037,7 +1046,14 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
     # Add category if specified
     if "category" in override:
         new_property["category"] = override["category"]
-    
+
+    # Add accepted_values as enum field if specified
+    if "accepted_values" in override:
+        if isinstance(override["accepted_values"], list):
+            new_property["enum"] = override["accepted_values"]
+        else:
+            logger.warning(f"accepted_values for property '{prop_name}' must be an array")
+
     return new_property
 
 
