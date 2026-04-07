@@ -33,6 +33,8 @@ module.exports.register = function () {
       siteUrl = playbook.site?.url || 'https://docs.redpanda.com';
       logger.info(`Using site URL: ${siteUrl}`);
     }
+    // Normalize: strip trailing slashes to avoid double slashes in URL concatenation
+    siteUrl = siteUrl.replace(/\/+$/, '');
   });
 
   this.on('contentClassified', ({ contentCatalog }) => {
@@ -284,7 +286,8 @@ module.exports.register = function () {
       // Check if base content already exceeds limit
       if (llmsTxtContent.length >= MAX_LLMS_TXT_CHARS) {
         logger.warn(`Base llms.txt content (${llmsTxtContent.length} chars) exceeds ${MAX_LLMS_TXT_CHARS} char limit, truncating`);
-        llmsTxtContent = llmsTxtContent.slice(0, MAX_LLMS_TXT_CHARS - 100) + '\n\n[Content truncated due to size limits]';
+        // Truncate at last newline before limit to avoid cutting mid-line or mid-URL
+        llmsTxtContent = truncateAtNewline(llmsTxtContent, MAX_LLMS_TXT_CHARS - 100) + '\n\n[Content truncated due to size limits]';
       }
 
       // Generate navigation section with component sitemaps and key sections
@@ -298,8 +301,8 @@ module.exports.register = function () {
         llmsTxtContent = llmsTxtContent + '\n\n' + navSection;
         logger.info(`Injected full navigation section (${navSection.length} chars)`);
       } else if (availableSpace > 500) {
-        // Partial navigation section - truncate but include what we can
-        const truncatedNav = navSection.slice(0, availableSpace - 50) + '\n\n[Navigation truncated due to size limits]';
+        // Partial navigation section - truncate at last newline to avoid cutting mid-line or mid-URL
+        const truncatedNav = truncateAtNewline(navSection, availableSpace - 50) + '\n\n[Navigation truncated due to size limits]';
         llmsTxtContent = llmsTxtContent + '\n\n' + truncatedNav;
         logger.warn(`Truncated navigation section from ${navSection.length} to ${truncatedNav.length} chars`);
       } else {
@@ -565,8 +568,33 @@ function addLastmodToComponentSitemaps(contentCatalog, siteCatalog, sitemapIndex
 }
 
 /**
+ * Truncate content at the last newline before the specified limit.
+ * This avoids cutting mid-line or mid-URL which would produce malformed output.
+ *
+ * @param {string} content - Content to truncate
+ * @param {number} maxLength - Maximum length
+ * @returns {string} Truncated content ending at a newline boundary
+ */
+function truncateAtNewline(content, maxLength) {
+  if (content.length <= maxLength) {
+    return content;
+  }
+  const truncated = content.slice(0, maxLength);
+  const lastNewline = truncated.lastIndexOf('\n');
+  if (lastNewline > 0) {
+    return truncated.slice(0, lastNewline);
+  }
+  // Fallback: no newline found, return as-is
+  return truncated;
+}
+
+/**
  * Generate a comprehensive navigation section for llms.txt
  * This improves llms-txt-freshness score by providing pathways to all documentation
+ *
+ * NOTE: The section URLs below are hardcoded. If pages are renamed, moved, or removed,
+ * these links will 404. When restructuring documentation, update these URLs accordingly.
+ * Future improvement: Generate these from the content catalog at build time.
  *
  * @param {string} siteUrl - Base site URL
  * @returns {string} Markdown navigation section
