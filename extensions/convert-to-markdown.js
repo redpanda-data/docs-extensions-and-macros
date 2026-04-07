@@ -2,6 +2,7 @@ const path = require('path')
 const os = require('os')
 const yaml = require('js-yaml')
 const { toMarkdownUrl } = require('../extension-utils/url-utils')
+const { formatLlmsDirective } = require('../extension-utils/llms-utils')
 const TurndownService = require('turndown')
 const turndownPluginGfm = require('turndown-plugin-gfm')
 const { gfm } = turndownPluginGfm
@@ -505,14 +506,12 @@ module.exports.register = function () {
           if (canonicalUrl) {
             const componentName = page.src?.component || '';
             // Use markdown blockquote format for the directive (visible, can be hidden with CSS)
-            const llmsDirective = componentName
-              ? `> For the complete documentation index, see [llms.txt](/llms.txt). Component-specific: [${componentName}-full.txt](/${componentName}-full.txt)`
-              : `> For the complete documentation index, see [llms.txt](/llms.txt)`;
+            const llmsDirective = formatLlmsDirective(componentName);
 
             markdown = `${h1Heading}\n${llmsDirective}\n\n${frontmatter}<!-- Source: ${canonicalUrl} -->\n\n${restOfMarkdown}`
           } else if (frontmatter) {
             // If no canonical URL but we have frontmatter, still add directive after H1
-            const llmsDirective = `> For the complete documentation index, see [llms.txt](/llms.txt)`;
+            const llmsDirective = formatLlmsDirective();
             markdown = `${h1Heading}\n${llmsDirective}\n\n${frontmatter}${restOfMarkdown}`
           }
 

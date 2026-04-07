@@ -1,6 +1,7 @@
 'use strict';
 
 const { toMarkdownUrl } = require('../extension-utils/url-utils');
+const { stripMarkdownMetadata } = require('../extension-utils/llms-utils');
 
 /**
  * Extracts markdown from llms.adoc page and generates AI-friendly documentation exports.
@@ -71,12 +72,9 @@ module.exports.register = function () {
         let content = llmsPage.markdownContents.toString('utf8');
         logger.info(`Extracted ${content.length} bytes of markdown content`);
 
-        // Strip metadata added by convert-to-markdown extension
+        // Strip metadata added by convert-to-markdown extension using shared helper
         // These reference the unpublished /home/llms/ URL which doesn't make sense for llms.txt
-        // 1. Strip HTML comments (source URLs)
-        content = content.replace(/^<!--[\s\S]*?-->\s*/gm, '').trim();
-        // 2. Strip llms.txt directive blockquotes (these point to this file, which is redundant)
-        content = content.replace(/^> For the complete documentation index, see \[llms\.txt\].*$/gm, '').trim();
+        content = stripMarkdownMetadata(content);
         logger.debug(`Stripped metadata, now ${content.length} bytes`);
 
         // Fix URLs: convert em dashes back to double hyphens and remove invisible characters
@@ -190,7 +188,8 @@ module.exports.register = function () {
       fullContent += `# Page ${index + 1}: ${pageTitle}\n\n`;
       fullContent += `**URL**: ${pageUrl}\n\n`;
       fullContent += `---\n\n`;
-      fullContent += page.markdownContents.toString('utf8');
+      // Strip metadata (directive, source comments) from page content
+      fullContent += stripMarkdownMetadata(page.markdownContents);
       fullContent += `\n\n---\n\n`;
     });
 
@@ -261,7 +260,8 @@ module.exports.register = function () {
         componentContent += `# Page ${index + 1}: ${pageTitle}\n\n`;
         componentContent += `**URL**: ${pageUrl}\n\n`;
         componentContent += `---\n\n`;
-        componentContent += page.markdownContents.toString('utf8');
+        // Strip metadata (directive, source comments) from page content
+        componentContent += stripMarkdownMetadata(page.markdownContents);
         componentContent += `\n\n---\n\n`;
       });
 
@@ -277,20 +277,33 @@ module.exports.register = function () {
     if (llmsPage && llmsPage.llmsTxtContent) {
       logger.info('Adding llms.txt to site root');
 
-      // Inject comprehensive navigation section for better coverage
       // Target: Stay under 50K chars (agent-friendly docs spec limit)
       const MAX_LLMS_TXT_CHARS = 45000; // Leave buffer below 50K
       let llmsTxtContent = llmsPage.llmsTxtContent;
 
-      // Generate navigation section with component sitemaps and key sections
-      const navSection = generateNavigationSection(components, siteUrl);
+      // Check if base content already exceeds limit
+      if (llmsTxtContent.length >= MAX_LLMS_TXT_CHARS) {
+        logger.warn(`Base llms.txt content (${llmsTxtContent.length} chars) exceeds ${MAX_LLMS_TXT_CHARS} char limit, truncating`);
+        llmsTxtContent = llmsTxtContent.slice(0, MAX_LLMS_TXT_CHARS - 100) + '\n\n[Content truncated due to size limits]';
+      }
 
-      // Only inject if we're under the limit
-      if (llmsTxtContent.length + navSection.length < MAX_LLMS_TXT_CHARS) {
+      // Generate navigation section with component sitemaps and key sections
+      const navSection = generateNavigationSection(siteUrl);
+
+      // Calculate available space for navigation section
+      const availableSpace = MAX_LLMS_TXT_CHARS - llmsTxtContent.length - 2; // -2 for \n\n separator
+
+      if (availableSpace >= navSection.length) {
+        // Full navigation section fits
         llmsTxtContent = llmsTxtContent + '\n\n' + navSection;
-        logger.info(`Injected navigation section (${navSection.length} chars)`);
+        logger.info(`Injected full navigation section (${navSection.length} chars)`);
+      } else if (availableSpace > 500) {
+        // Partial navigation section - truncate but include what we can
+        const truncatedNav = navSection.slice(0, availableSpace - 50) + '\n\n[Navigation truncated due to size limits]';
+        llmsTxtContent = llmsTxtContent + '\n\n' + truncatedNav;
+        logger.warn(`Truncated navigation section from ${navSection.length} to ${truncatedNav.length} chars`);
       } else {
-        logger.warn(`Skipping navigation injection - would exceed ${MAX_LLMS_TXT_CHARS} char limit`);
+        logger.warn(`Skipping navigation injection - only ${availableSpace} chars available`);
       }
 
       logger.info(`Final llms.txt size: ${llmsTxtContent.length} chars`);
@@ -555,31 +568,20 @@ function addLastmodToComponentSitemaps(contentCatalog, siteCatalog, sitemapIndex
  * Generate a comprehensive navigation section for llms.txt
  * This improves llms-txt-freshness score by providing pathways to all documentation
  *
- * @param {Array} components - Antora components with their metadata
  * @param {string} siteUrl - Base site URL
  * @returns {string} Markdown navigation section
  */
-function generateNavigationSection(components, siteUrl) {
+function generateNavigationSection(siteUrl) {
   let nav = `## Complete documentation index\n\n`;
   nav += `For comprehensive page listings, use the sitemaps:\n\n`;
   nav += `- [sitemap.md](${siteUrl}/sitemap.md) - Main sitemap index with all documentation\n`;
-  nav += `- [sitemap-all.md](${siteUrl}/sitemap-all.md) - Combined listing of all ${components.reduce((sum, c) => sum + (c.latest?.pages?.length || 0), 0).toLocaleString()}+ pages\n\n`;
+  nav += `- [sitemap-all.md](${siteUrl}/sitemap-all.md) - Combined listing of all documentation pages\n\n`;
 
   nav += `### Component sitemaps\n\n`;
-
-  // Add component-specific sitemaps
-  const componentSitemaps = [
-    { name: 'ROOT', title: 'Redpanda Self-Managed', path: 'sitemap-ROOT.md' },
-    { name: 'redpanda-cloud', title: 'Redpanda Cloud', path: 'sitemap-redpanda-cloud.md' },
-    { name: 'redpanda-connect', title: 'Redpanda Connect', path: 'sitemap-redpanda-connect.md' },
-    { name: 'redpanda-labs', title: 'Redpanda Labs', path: 'sitemap-redpanda-labs.md' },
-  ];
-
-  for (const sitemap of componentSitemaps) {
-    const component = components.find(c => c.name === sitemap.name);
-    const pageCount = component?.latest?.pages?.length || 'many';
-    nav += `- [${sitemap.title}](${siteUrl}/${sitemap.path}) - ${pageCount} pages\n`;
-  }
+  nav += `- [Redpanda Self-Managed](${siteUrl}/sitemap-ROOT.md)\n`;
+  nav += `- [Redpanda Cloud](${siteUrl}/sitemap-redpanda-cloud.md)\n`;
+  nav += `- [Redpanda Connect](${siteUrl}/sitemap-redpanda-connect.md)\n`;
+  nav += `- [Redpanda Labs](${siteUrl}/sitemap-redpanda-labs.md)\n`;
 
   nav += `\n### Key documentation sections\n\n`;
   nav += `**Self-Managed:**\n`;
