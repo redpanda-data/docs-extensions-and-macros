@@ -279,7 +279,8 @@ function wrapRefSiblings(node) {
     const hasSiblings = keys.length > 1;
 
     if (hasSiblings) {
-      // Don't double-wrap if allOf already exists
+      // Skip if allOf already exists — assumes a pre-existing structure
+      // from the source spec that should not be modified.
       if (!node.allOf) {
         const ref = node['$ref'];
         delete node['$ref'];
@@ -578,7 +579,7 @@ function postProcessBundle(filePath, options, quiet = false) {
     bundle.info['x-generator'] = 'redpanda-docs-openapi-bundler';
 
     // Wrap $ref siblings into allOf so renderers display field descriptions
-    wrapRefSiblings(bundle);
+    bundle = wrapRefSiblings(bundle);
 
     // Sort keys for deterministic output
     const sortedBundle = sortObjectKeys(bundle);
