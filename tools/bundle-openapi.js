@@ -251,8 +251,9 @@ function createEntrypoint(tempDir, apiSurface) {
 /**
  * Wrap $ref siblings into allOf to preserve field-level descriptions.
  *
- * OpenAPI 3.1 renderers (e.g. Bump.sh) ignore sibling properties next to $ref
- * and instead display the generic description from the referenced schema.
+ * In OpenAPI 3.0, sibling properties next to $ref are ignored per spec.
+ * Some renderers (e.g. Bump.sh) follow this behavior, displaying the generic
+ * description from the referenced schema instead of field-level overrides.
  * This function transforms { $ref, description, ... } into
  * { allOf: [{ $ref }], description, ... } so renderers pick up field-level
  * descriptions correctly.
