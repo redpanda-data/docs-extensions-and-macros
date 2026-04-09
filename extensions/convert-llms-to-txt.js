@@ -291,7 +291,7 @@ module.exports.register = function () {
       }
 
       // Generate navigation section with component sitemaps and key sections
-      const navSection = generateNavigationSection(siteUrl);
+      const navSection = generateNavigationSection(siteUrl, contentCatalog, components);
 
       // Calculate available space for navigation section
       const availableSpace = MAX_LLMS_TXT_CHARS - llmsTxtContent.length - 2; // -2 for \n\n separator
@@ -592,45 +592,100 @@ function truncateAtNewline(content, maxLength) {
  * Generate a comprehensive navigation section for llms.txt
  * This improves llms-txt-freshness score by providing pathways to all documentation
  *
- * NOTE: The section URLs below are hardcoded. If pages are renamed, moved, or removed,
- * these links will 404. When restructuring documentation, update these URLs accordingly.
- * Future improvement: Generate these from the content catalog at build time.
+ * Dynamically generates navigation from the content catalog at build time, ensuring
+ * links are always valid even if pages are renamed, moved, or removed.
  *
  * @param {string} siteUrl - Base site URL
+ * @param {Object} contentCatalog - Antora content catalog for querying pages
+ * @param {Array} components - Array of component objects
  * @returns {string} Markdown navigation section
  */
-function generateNavigationSection(siteUrl) {
+function generateNavigationSection(siteUrl, contentCatalog, components) {
   let nav = `## Complete documentation index\n\n`;
   nav += `For comprehensive page listings, use the sitemaps:\n\n`;
   nav += `- [sitemap.md](${siteUrl}/sitemap.md) - Main sitemap index with all documentation\n`;
   nav += `- [sitemap-all.md](${siteUrl}/sitemap-all.md) - Combined listing of all documentation pages\n\n`;
 
+  // Generate component sitemaps section - only for main documentation components
   nav += `### Component sitemaps\n\n`;
-  nav += `- [Redpanda Self-Managed](${siteUrl}/sitemap-ROOT.md)\n`;
-  nav += `- [Redpanda Cloud](${siteUrl}/sitemap-redpanda-cloud.md)\n`;
-  nav += `- [Redpanda Connect](${siteUrl}/sitemap-redpanda-connect.md)\n`;
-  nav += `- [Redpanda Labs](${siteUrl}/sitemap-redpanda-labs.md)\n`;
+  const mainComponents = ['ROOT', 'redpanda-cloud', 'redpanda-connect', 'redpanda-labs'];
+  components.forEach(component => {
+    if (!mainComponents.includes(component.name)) return;
+    const sitemapName = component.name === 'ROOT' ? 'Redpanda Self-Managed' : component.title;
+    nav += `- [${sitemapName}](${siteUrl}/sitemap-${component.name}.md)\n`;
+  });
 
+  // Define key pages to find for each component
+  // Maps to common landing pages we want to highlight
+  const keyPages = {
+    'ROOT': [
+      { paths: ['modules/ROOT/pages/deploy.adoc', 'pages/deploy.adoc'], title: 'Deploy', description: 'Installation and deployment guides' },
+      { paths: ['modules/ROOT/pages/manage.adoc', 'pages/manage.adoc'], title: 'Manage', description: 'Cluster operations and administration' },
+      { paths: ['modules/ROOT/pages/develop.adoc', 'pages/develop.adoc'], title: 'Develop', description: 'Application development guides' },
+      { paths: ['modules/ROOT/pages/reference.adoc', 'pages/reference.adoc'], title: 'Reference', description: 'Configuration, CLI, and API references' },
+      { paths: ['modules/ROOT/pages/upgrade.adoc', 'pages/upgrade.adoc'], title: 'Upgrade', description: 'Version upgrade procedures' },
+      { paths: ['modules/ROOT/pages/troubleshoot.adoc', 'pages/troubleshoot.adoc'], title: 'Troubleshoot', description: 'Debugging and issue resolution' },
+    ],
+    'redpanda-cloud': [
+      { paths: ['modules/ROOT/pages/get-started.adoc', 'pages/get-started.adoc'], title: 'Get Started', description: 'Cloud quickstart and cluster types' },
+      { paths: ['modules/ROOT/pages/manage.adoc', 'pages/manage.adoc'], title: 'Manage', description: 'Cloud cluster management' },
+      { paths: ['modules/ROOT/pages/networking.adoc', 'pages/networking.adoc'], title: 'Networking', description: 'Network configuration' },
+      { paths: ['modules/ROOT/pages/security.adoc', 'pages/security.adoc'], title: 'Security', description: 'Authentication and authorization' },
+      { paths: ['modules/ROOT/pages/ai-agents.adoc', 'pages/ai-agents.adoc'], title: 'AI Agents', description: 'Agentic Data Plane documentation' },
+    ],
+    'redpanda-connect': [
+      { paths: ['modules/ROOT/pages/components/about.adoc', 'pages/components/about.adoc', 'modules/ROOT/pages/components.adoc'], title: 'Components', description: 'All connectors, processors, and more' },
+      { paths: ['modules/ROOT/pages/guides.adoc', 'pages/guides.adoc'], title: 'Guides', description: 'Integration tutorials' },
+      { paths: ['modules/ROOT/pages/configuration/about.adoc', 'pages/configuration/about.adoc', 'modules/ROOT/pages/configuration.adoc'], title: 'Configuration', description: 'YAML configuration reference' },
+    ],
+  };
+
+  // Generate key sections for each component
   nav += `\n### Key documentation sections\n\n`;
-  nav += `**Self-Managed:**\n`;
-  nav += `- [Deploy](${siteUrl}/current/deploy.md) - Installation and deployment guides\n`;
-  nav += `- [Manage](${siteUrl}/current/manage.md) - Cluster operations and administration\n`;
-  nav += `- [Develop](${siteUrl}/current/develop.md) - Application development guides\n`;
-  nav += `- [Reference](${siteUrl}/current/reference.md) - Configuration, CLI, and API references\n`;
-  nav += `- [Upgrade](${siteUrl}/current/upgrade.md) - Version upgrade procedures\n`;
-  nav += `- [Troubleshoot](${siteUrl}/current/troubleshoot.md) - Debugging and issue resolution\n`;
 
-  nav += `\n**Cloud:**\n`;
-  nav += `- [Get Started](${siteUrl}/redpanda-cloud/get-started.md) - Cloud quickstart and cluster types\n`;
-  nav += `- [Manage](${siteUrl}/redpanda-cloud/manage.md) - Cloud cluster management\n`;
-  nav += `- [Networking](${siteUrl}/redpanda-cloud/networking.md) - Network configuration\n`;
-  nav += `- [Security](${siteUrl}/redpanda-cloud/security.md) - Authentication and authorization\n`;
-  nav += `- [AI Agents](${siteUrl}/redpanda-cloud/ai-agents.md) - Agentic Data Plane documentation\n`;
+  Object.keys(keyPages).forEach(componentName => {
+    const component = components.find(c => c.name === componentName);
+    if (!component) return;
 
-  nav += `\n**Connect:**\n`;
-  nav += `- [Components](${siteUrl}/redpanda-connect/components/about.md) - All connectors, processors, and more\n`;
-  nav += `- [Guides](${siteUrl}/redpanda-connect/guides.md) - Integration tutorials\n`;
-  nav += `- [Configuration](${siteUrl}/redpanda-connect/configuration/about.md) - YAML configuration reference\n`;
+    const latest = component.latest || component.versions[0];
+    if (!latest) return;
 
-  return nav;
+    const sectionTitle = componentName === 'ROOT' ? 'Self-Managed' :
+                        componentName === 'redpanda-cloud' ? 'Cloud' :
+                        componentName === 'redpanda-connect' ? 'Connect' : component.title;
+
+    nav += `**${sectionTitle}:**\n`;
+
+    keyPages[componentName].forEach(pageSpec => {
+      // Try each possible path for this page
+      let foundPage = null;
+
+      // Get all pages for this component/version
+      const allPages = contentCatalog.findBy({
+        component: componentName,
+        version: latest.version,
+        family: 'page',
+      });
+
+      // Search for matching relative paths
+      for (const relativePath of pageSpec.paths) {
+        foundPage = allPages.find(page => page.src?.relative === relativePath);
+
+        if (foundPage && foundPage.pub?.url) {
+          break;
+        }
+      }
+
+      if (foundPage && foundPage.pub?.url) {
+        const mdUrl = toMarkdownUrl(foundPage.pub.url);
+        const fullUrl = `${siteUrl}${mdUrl}`;
+        nav += `- [${pageSpec.title}](${fullUrl}) - ${pageSpec.description}\n`;
+      }
+      // Skip pages that don't exist rather than adding broken links
+    });
+
+    nav += `\n`;
+  });
+
+  return nav.trimEnd();
 }
