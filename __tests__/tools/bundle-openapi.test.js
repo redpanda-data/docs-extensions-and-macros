@@ -11,6 +11,7 @@ const {
   normalizeTag,
   getMajorMinor,
   sortObjectKeys,
+  wrapRefSiblings,
   detectBundler,
   createEntrypoint,
   runBundler,
@@ -157,6 +158,124 @@ describe('OpenAPI Bundle Tool - Production Test Suite', () => {
         expect(sortObjectKeys({})).toEqual({});
         expect(sortObjectKeys([])).toEqual([]);
         expect(sortObjectKeys({ a: {}, b: [] })).toEqual({ a: {}, b: [] });
+      });
+    });
+
+    describe('wrapRefSiblings', () => {
+      test('should wrap $ref with sibling description into allOf', () => {
+        const input = {
+          '$ref': '#/components/schemas/Timestamp',
+          description: 'When the password was set.',
+          readOnly: true
+        };
+        const result = wrapRefSiblings(input);
+        expect(result.allOf).toEqual([{ '$ref': '#/components/schemas/Timestamp' }]);
+        expect(result.description).toBe('When the password was set.');
+        expect(result.readOnly).toBe(true);
+        expect(result['$ref']).toBeUndefined();
+      });
+
+      test('should not wrap $ref when it is the only property', () => {
+        const input = { '$ref': '#/components/schemas/Timestamp' };
+        const result = wrapRefSiblings(input);
+        expect(result['$ref']).toBe('#/components/schemas/Timestamp');
+        expect(result.allOf).toBeUndefined();
+      });
+
+      test('should not double-wrap if allOf already exists', () => {
+        const input = {
+          allOf: [{ '$ref': '#/components/schemas/Timestamp' }],
+          '$ref': '#/components/schemas/Other',
+          description: 'Already wrapped.'
+        };
+        const result = wrapRefSiblings(input);
+        // allOf should still have exactly one entry (the original)
+        expect(result.allOf).toEqual([{ '$ref': '#/components/schemas/Timestamp' }]);
+        // $ref stays because allOf already existed
+        expect(result['$ref']).toBe('#/components/schemas/Other');
+      });
+
+      test('should recurse into nested properties', () => {
+        const input = {
+          type: 'object',
+          properties: {
+            passwordSetAt: {
+              '$ref': '#/components/schemas/Timestamp',
+              description: 'When password was set.',
+              title: 'password_set_at'
+            },
+            name: {
+              type: 'string',
+              description: 'User name'
+            }
+          }
+        };
+        const result = wrapRefSiblings(input);
+        expect(result.properties.passwordSetAt.allOf).toEqual([
+          { '$ref': '#/components/schemas/Timestamp' }
+        ]);
+        expect(result.properties.passwordSetAt.description).toBe('When password was set.');
+        expect(result.properties.passwordSetAt.title).toBe('password_set_at');
+        expect(result.properties.passwordSetAt['$ref']).toBeUndefined();
+        // Non-$ref properties should be unchanged
+        expect(result.properties.name.type).toBe('string');
+      });
+
+      test('should recurse into arrays (oneOf, anyOf, items)', () => {
+        const input = {
+          oneOf: [
+            {
+              '$ref': '#/components/schemas/Role',
+              description: 'A role reference.'
+            },
+            { type: 'string' }
+          ]
+        };
+        const result = wrapRefSiblings(input);
+        expect(result.oneOf[0].allOf).toEqual([
+          { '$ref': '#/components/schemas/Role' }
+        ]);
+        expect(result.oneOf[0].description).toBe('A role reference.');
+        expect(result.oneOf[1].type).toBe('string');
+      });
+
+      test('should handle primitives and null', () => {
+        expect(wrapRefSiblings(null)).toBe(null);
+        expect(wrapRefSiblings('string')).toBe('string');
+        expect(wrapRefSiblings(42)).toBe(42);
+        expect(wrapRefSiblings(undefined)).toBe(undefined);
+      });
+
+      test('should handle deeply nested structures', () => {
+        const input = {
+          paths: {
+            '/users': {
+              get: {
+                responses: {
+                  '200': {
+                    content: {
+                      'application/json': {
+                        schema: {
+                          properties: {
+                            expire: {
+                              '$ref': '#/components/schemas/Timestamp',
+                              description: 'Expiry time.'
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        };
+        const result = wrapRefSiblings(input);
+        const expire = result.paths['/users'].get.responses['200'].content['application/json'].schema.properties.expire;
+        expect(expire.allOf).toEqual([{ '$ref': '#/components/schemas/Timestamp' }]);
+        expect(expire.description).toBe('Expiry time.');
+        expect(expire['$ref']).toBeUndefined();
       });
     });
   });
@@ -382,6 +501,57 @@ components:
         const result = postProcessBundle(testBundleFile, options);
         
         expect(result.info.title).toBe('Redpanda Connect RPCs');
+      });
+
+      test('should wrap $ref siblings into allOf during post-processing', () => {
+        const bundleWithRefs = path.join(mockTempDir, 'ref-bundle.yaml');
+        const content = `
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /test:
+    get:
+      summary: Test endpoint
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        passwordSetAt:
+          $ref: "#/components/schemas/google.protobuf.Timestamp"
+          description: "When the password was last set."
+          readOnly: true
+        name:
+          type: string
+    google.protobuf.Timestamp:
+      type: object
+      description: A generic timestamp.
+`.trim();
+        fs.writeFileSync(bundleWithRefs, content);
+
+        const options = {
+          surface: 'admin',
+          normalizedTag: '25.2.4',
+          majorMinor: '25.2',
+          adminMajor: 'v2'
+        };
+
+        const result = postProcessBundle(bundleWithRefs, options);
+
+        const passwordSetAt = result.components.schemas.User.properties.passwordSetAt;
+        expect(passwordSetAt.allOf).toEqual([
+          { '$ref': '#/components/schemas/google.protobuf.Timestamp' }
+        ]);
+        expect(passwordSetAt.description).toBe('When the password was last set.');
+        expect(passwordSetAt.readOnly).toBe(true);
+        expect(passwordSetAt['$ref']).toBeUndefined();
+
+        // Lone $ref should NOT be wrapped
+        const timestamp = result.components.schemas['google.protobuf.Timestamp'];
+        expect(timestamp['$ref']).toBeUndefined();
+        expect(timestamp.allOf).toBeUndefined();
       });
 
       test('should sort keys deterministically', () => {

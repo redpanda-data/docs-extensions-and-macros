@@ -249,6 +249,53 @@ function createEntrypoint(tempDir, apiSurface) {
 }
 
 /**
+ * Wrap $ref siblings into allOf to preserve field-level descriptions.
+ *
+ * OpenAPI 3.1 renderers (e.g. Bump.sh) ignore sibling properties next to $ref
+ * and instead display the generic description from the referenced schema.
+ * This function transforms { $ref, description, ... } into
+ * { allOf: [{ $ref }], description, ... } so renderers pick up field-level
+ * descriptions correctly.
+ *
+ * @param {*} node - Any value from the parsed OpenAPI spec.
+ * @returns {*} The transformed value (mutates in place for objects).
+ */
+function wrapRefSiblings(node) {
+  if (node === null || typeof node !== 'object') {
+    return node;
+  }
+
+  if (Array.isArray(node)) {
+    node.forEach((item, i) => {
+      node[i] = wrapRefSiblings(item);
+    });
+    return node;
+  }
+
+  // Check if this object has $ref with sibling properties that need wrapping
+  if (node['$ref'] && typeof node['$ref'] === 'string') {
+    const keys = Object.keys(node);
+    const hasSiblings = keys.length > 1;
+
+    if (hasSiblings) {
+      // Don't double-wrap if allOf already exists
+      if (!node.allOf) {
+        const ref = node['$ref'];
+        delete node['$ref'];
+        node.allOf = [{ '$ref': ref }];
+      }
+    }
+  }
+
+  // Recurse into all object values
+  for (const key of Object.keys(node)) {
+    node[key] = wrapRefSiblings(node[key]);
+  }
+
+  return node;
+}
+
+/**
  * Bundle one or more OpenAPI fragment files into a single bundled YAML using a selected external bundler.
  *
  * Merges multiple fragment files into a temporary single entrypoint when required, invokes the specified bundler
@@ -529,6 +576,9 @@ function postProcessBundle(filePath, options, quiet = false) {
     bundle.info['x-generated-at'] = new Date().toISOString();
     bundle.info['x-generator'] = 'redpanda-docs-openapi-bundler';
 
+    // Wrap $ref siblings into allOf so renderers display field descriptions
+    wrapRefSiblings(bundle);
+
     // Sort keys for deterministic output
     const sortedBundle = sortObjectKeys(bundle);
     
@@ -776,6 +826,7 @@ module.exports = {
   normalizeTag,
   getMajorMinor,
   sortObjectKeys,
+  wrapRefSiblings,
   detectBundler,
   createEntrypoint,
   postProcessBundle
