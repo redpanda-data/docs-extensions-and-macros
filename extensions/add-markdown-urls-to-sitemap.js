@@ -77,6 +77,20 @@ async function addMarkdownUrlsToSitemap(sitemapFile, logger) {
     const urlEntries = parsed.urlset.url
     const newEntries = []
 
+    // Collect all existing loc strings to prevent duplicates
+    const existingLocs = new Set()
+    for (const entry of urlEntries) {
+      if (entry.loc && entry.loc[0]) {
+        let url = entry.loc[0]
+        if (typeof url === 'object' && url._) {
+          url = url._
+        }
+        if (typeof url === 'string') {
+          existingLocs.add(url)
+        }
+      }
+    }
+
     // For each HTML URL, create a markdown URL entry
     for (const entry of urlEntries) {
       if (!entry.loc || !entry.loc[0]) continue
@@ -102,6 +116,12 @@ async function addMarkdownUrlsToSitemap(sitemapFile, logger) {
       const mdPath = toMarkdownUrl(urlObj.pathname)
       const mdUrl = `${urlObj.origin}${mdPath}`
 
+      // Skip if this markdown URL already exists in the sitemap or was already added
+      if (existingLocs.has(mdUrl)) {
+        logger.debug(`Skipping duplicate markdown URL: ${mdUrl}`)
+        continue
+      }
+
       // Create new entry for markdown URL with same lastmod
       const mdEntry = {
         loc: [mdUrl],
@@ -112,6 +132,7 @@ async function addMarkdownUrlsToSitemap(sitemapFile, logger) {
       }
 
       newEntries.push(mdEntry)
+      existingLocs.add(mdUrl) // Track this URL to prevent duplicates within this run
     }
 
     if (newEntries.length === 0) {

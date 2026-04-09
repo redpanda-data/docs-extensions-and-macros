@@ -73,9 +73,11 @@ module.exports.register = function () {
         let directiveText = directiveMarkdown.replace(/^>\s*/, '')
 
         // Convert markdown links [text](url) to HTML <a> tags
-        directiveText = directiveText.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+        // Add tabindex="-1" and aria-hidden="true" to remove from tab order and hide from assistive tech
+        directiveText = directiveText.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" tabindex="-1" aria-hidden="true">$1</a>')
 
-        const directiveHtml = `\n<blockquote class="llms-directive">\n<p>${directiveText}</p>\n</blockquote>\n`
+        // Add tabindex="-1" and aria-hidden="true" to blockquote to fully hide from assistive tech
+        const directiveHtml = `\n<blockquote class="llms-directive" tabindex="-1" aria-hidden="true">\n<p>${directiveText}</p>\n</blockquote>\n`
 
         // Inject the directive
         const newArticleContent =
