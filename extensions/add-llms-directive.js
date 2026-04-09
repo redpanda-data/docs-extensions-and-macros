@@ -83,8 +83,17 @@ module.exports.register = function () {
           directiveHtml +
           articleContent.slice(injectionPoint)
 
-        // Reconstruct the full HTML
-        const newHtml = html.replace(fullMatch, openTag + newArticleContent + closeTag)
+        // Reconstruct the article HTML
+        let newHtml = html.replace(fullMatch, openTag + newArticleContent + closeTag)
+
+        // Add CSS to hide the directive visually (screen-reader-only pattern)
+        // This keeps it in HTML for agents but hidden from visual users
+        const cssTag = `<style>.llms-directive{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}</style>`
+
+        // Inject CSS before </head> if not already present
+        if (!html.includes('.llms-directive{')) {
+          newHtml = newHtml.replace('</head>', `${cssTag}\n</head>`)
+        }
 
         // Update page contents
         page.contents = Buffer.from(newHtml, 'utf8')
