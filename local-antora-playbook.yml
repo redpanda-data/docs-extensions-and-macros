@@ -71,6 +71,7 @@ antora:
             - 'home'
           file_patterns:
             - '**/llms.adoc'
+  - require: './extensions/resolve-xrefs-in-attachments'
   - require: './extensions/convert-llms-to-txt.js'
   - require: './extensions/convert-sitemap-to-markdown'
   - require: './extensions/archive-attachments'
