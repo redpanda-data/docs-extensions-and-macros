@@ -628,9 +628,9 @@ function generateNavigationSection(siteUrl) {
   nav += `- [AI Agents](${siteUrl}/redpanda-cloud/ai-agents.md) - Agentic Data Plane documentation\n`;
 
   nav += `\n**Connect:**\n`;
-  nav += `- [Components](${siteUrl}/redpanda-connect/components.md) - All connectors, processors, and more\n`;
+  nav += `- [Components](${siteUrl}/redpanda-connect/components/about.md) - All connectors, processors, and more\n`;
   nav += `- [Guides](${siteUrl}/redpanda-connect/guides.md) - Integration tutorials\n`;
-  nav += `- [Configuration](${siteUrl}/redpanda-connect/configuration.md) - YAML configuration reference\n`;
+  nav += `- [Configuration](${siteUrl}/redpanda-connect/configuration/about.md) - YAML configuration reference\n`;
 
   return nav;
 }
