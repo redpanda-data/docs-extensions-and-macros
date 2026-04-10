@@ -50,6 +50,7 @@ module.exports.register = function () {
         let directiveText = directiveMarkdown.replace(/^>\s*/, '')
 
         // Convert markdown links [text](url) to HTML <a> tags
+        // Add space after <a to match afdocs test pattern expectations
         // Add tabindex="-1" and aria-hidden="true" to remove from tab order and hide from assistive tech
         directiveText = directiveText.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" tabindex="-1" aria-hidden="true">$1</a>')
 
