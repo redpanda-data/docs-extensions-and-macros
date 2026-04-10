@@ -87,6 +87,13 @@ IMPORTANT: Extensions must be registered under the `antora.extensions` key in yo
 * **process-context-switcher** - Handle context-dependent content
 * **validate-attributes** - Validate AsciiDoc attributes
 
+=== AI-friendly documentation
+* **convert-to-markdown** - Export documentation pages as markdown with frontmatter
+* **convert-llms-to-txt** - Generate llms.txt and component-specific exports for AI agents
+* **add-llms-directive** - Inject llms.txt discovery directive into HTML pages
+* **add-markdown-urls-to-sitemap** - Add markdown URL entries to sitemap.xml
+* **convert-sitemap-to-markdown** - Generate markdown sitemap indexes
+
 See link:REFERENCE.adoc[Reference documentation] for complete details on each extension.
 
 == Common use cases
