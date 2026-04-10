@@ -291,7 +291,7 @@ module.exports.register = function () {
       }
 
       // Generate navigation section with component sitemaps and key sections
-      const navSection = generateNavigationSection(siteUrl);
+      const navSection = generateNavigationSection(siteUrl, contentCatalog, components);
 
       // Calculate available space for navigation section
       const availableSpace = MAX_LLMS_TXT_CHARS - llmsTxtContent.length - 2; // -2 for \n\n separator
@@ -592,45 +592,98 @@ function truncateAtNewline(content, maxLength) {
  * Generate a comprehensive navigation section for llms.txt
  * This improves llms-txt-freshness score by providing pathways to all documentation
  *
- * NOTE: The section URLs below are hardcoded. If pages are renamed, moved, or removed,
- * these links will 404. When restructuring documentation, update these URLs accordingly.
- * Future improvement: Generate these from the content catalog at build time.
+ * Dynamically generates navigation from the content catalog - no hardcoded URLs.
  *
  * @param {string} siteUrl - Base site URL
+ * @param {Object} contentCatalog - Antora content catalog
+ * @param {Array} components - Array of component objects
  * @returns {string} Markdown navigation section
  */
-function generateNavigationSection(siteUrl) {
+function generateNavigationSection(siteUrl, contentCatalog, components) {
   let nav = `## Complete documentation index\n\n`;
   nav += `For comprehensive page listings, use the sitemaps:\n\n`;
   nav += `- [sitemap.md](${siteUrl}/sitemap.md) - Main sitemap index with all documentation\n`;
   nav += `- [sitemap-all.md](${siteUrl}/sitemap-all.md) - Combined listing of all documentation pages\n\n`;
 
+  // Generate component sitemaps dynamically
   nav += `### Component sitemaps\n\n`;
-  nav += `- [Redpanda Self-Managed](${siteUrl}/sitemap-ROOT.md)\n`;
-  nav += `- [Redpanda Cloud](${siteUrl}/sitemap-redpanda-cloud.md)\n`;
-  nav += `- [Redpanda Connect](${siteUrl}/sitemap-redpanda-connect.md)\n`;
-  nav += `- [Redpanda Labs](${siteUrl}/sitemap-redpanda-labs.md)\n`;
+  components.forEach(component => {
+    // Skip internal components like 'home'
+    if (component.name === 'home') return;
+    nav += `- [${component.title}](${siteUrl}/sitemap-${component.name}.md)\n`;
+  });
 
+  // Generate key sections dynamically from navigation structure
   nav += `\n### Key documentation sections\n\n`;
-  nav += `**Self-Managed:**\n`;
-  nav += `- [Deploy](${siteUrl}/current/deploy.md) - Installation and deployment guides\n`;
-  nav += `- [Manage](${siteUrl}/current/manage.md) - Cluster operations and administration\n`;
-  nav += `- [Develop](${siteUrl}/current/develop.md) - Application development guides\n`;
-  nav += `- [Reference](${siteUrl}/current/reference.md) - Configuration, CLI, and API references\n`;
-  nav += `- [Upgrade](${siteUrl}/current/upgrade.md) - Version upgrade procedures\n`;
-  nav += `- [Troubleshoot](${siteUrl}/current/troubleshoot.md) - Debugging and issue resolution\n`;
 
-  nav += `\n**Cloud:**\n`;
-  nav += `- [Get Started](${siteUrl}/redpanda-cloud/get-started.md) - Cloud quickstart and cluster types\n`;
-  nav += `- [Manage](${siteUrl}/redpanda-cloud/manage.md) - Cloud cluster management\n`;
-  nav += `- [Networking](${siteUrl}/redpanda-cloud/networking.md) - Network configuration\n`;
-  nav += `- [Security](${siteUrl}/redpanda-cloud/security.md) - Authentication and authorization\n`;
-  nav += `- [AI Agents](${siteUrl}/redpanda-cloud/ai-agents.md) - Agentic Data Plane documentation\n`;
+  components.forEach(component => {
+    // Skip internal components
+    if (component.name === 'home') return;
 
-  nav += `\n**Connect:**\n`;
-  nav += `- [Components](${siteUrl}/redpanda-connect/components/about.md) - All connectors, processors, and more\n`;
-  nav += `- [Guides](${siteUrl}/redpanda-connect/guides.md) - Integration tutorials\n`;
-  nav += `- [Configuration](${siteUrl}/redpanda-connect/configuration/about.md) - YAML configuration reference\n`;
+    const latest = component.latest || component.versions[0];
+    if (!latest) return;
+
+    // Find top-level navigation items for this component
+    const navPages = findTopLevelNavPages(contentCatalog, component.name, latest.version);
+
+    if (navPages.length === 0) return;
+
+    nav += `**${component.title}:**\n`;
+    navPages.forEach(page => {
+      const mdUrl = page.pub?.url ? toMarkdownUrl(page.pub.url) : null;
+      if (mdUrl) {
+        const title = page.asciidoc?.navtitle || page.asciidoc?.doctitle || page.src.stem;
+        nav += `- [${title}](${siteUrl}${mdUrl})\n`;
+      }
+    });
+    nav += `\n`;
+  });
 
   return nav;
+}
+
+/**
+ * Find top-level navigation pages for a component version.
+ * These are typically section index pages (deploy, manage, develop, etc.)
+ *
+ * @param {Object} contentCatalog - Antora content catalog
+ * @param {string} componentName - Component name
+ * @param {string} version - Version string
+ * @returns {Array} Array of page objects
+ */
+function findTopLevelNavPages(contentCatalog, componentName, version) {
+  // Get all pages for this component version
+  const pages = contentCatalog.findBy({
+    component: componentName,
+    version: version,
+    family: 'page',
+  });
+
+  // Find pages that are likely top-level sections:
+  // - Pages in the ROOT module at the top level (not in subdirectories)
+  // - Or pages with nav-title attribute (indicating they're navigation items)
+  const topLevelPages = pages.filter(page => {
+    // Must have a published URL
+    if (!page.pub?.url) return false;
+
+    // Check if it's a root-level page (index pages of major sections)
+    const relativePath = page.src.relative;
+
+    // Include pages that are direct children of the module (e.g., deploy.adoc, manage.adoc)
+    // but exclude deeply nested pages
+    const pathDepth = relativePath.split('/').length;
+    if (pathDepth <= 2 && page.src.module === 'ROOT') {
+      // Exclude the main index page
+      if (page.src.stem === 'index' && pathDepth === 1) return false;
+      return true;
+    }
+
+    return false;
+  });
+
+  // Sort by stem name for consistent ordering
+  topLevelPages.sort((a, b) => a.src.stem.localeCompare(b.src.stem));
+
+  // Limit to prevent overwhelming the navigation
+  return topLevelPages.slice(0, 10);
 }
