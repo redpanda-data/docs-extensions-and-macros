@@ -607,9 +607,10 @@ function generateNavigationSection(siteUrl, contentCatalog, components) {
 
   // Generate component sitemaps dynamically
   nav += `### Component sitemaps\n\n`;
+  const internalComponents = ['home', 'shared', 'search', 'api'];
   components.forEach(component => {
-    // Skip internal components like 'home'
-    if (component.name === 'home') return;
+    // Skip internal/utility components
+    if (internalComponents.includes(component.name)) return;
     nav += `- [${component.title}](${siteUrl}/sitemap-${component.name}.md)\n`;
   });
 
