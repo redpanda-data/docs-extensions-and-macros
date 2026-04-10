@@ -548,7 +548,7 @@ components:
         expect(passwordSetAt.readOnly).toBe(true);
         expect(passwordSetAt['$ref']).toBeUndefined();
 
-        // Lone $ref should NOT be wrapped
+        // Regular schema definitions (no $ref) should remain unchanged
         const timestamp = result.components.schemas['google.protobuf.Timestamp'];
         expect(timestamp['$ref']).toBeUndefined();
         expect(timestamp.allOf).toBeUndefined();
