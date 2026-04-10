@@ -613,27 +613,27 @@ function generateNavigationSection(siteUrl, contentCatalog, components) {
     nav += `- [${component.title}](${siteUrl}/sitemap-${component.name}.md)\n`;
   });
 
-  // Generate key sections dynamically from navigation structure
+  // Generate key sections dynamically from Antora's navigation structure
   nav += `\n### Key documentation sections\n\n`;
 
   components.forEach(component => {
-    // Skip internal components
-    if (component.name === 'home') return;
+    // Skip internal/utility components
+    const internalComponents = ['home', 'shared', 'search', 'api'];
+    if (internalComponents.includes(component.name)) return;
 
     const latest = component.latest || component.versions[0];
     if (!latest) return;
 
-    // Find top-level navigation items for this component
-    const navPages = findTopLevelNavPages(contentCatalog, component.name, latest.version);
+    // Get top-level navigation items from the component's navigation tree
+    const navItems = getTopLevelNavItems(latest);
 
-    if (navPages.length === 0) return;
+    if (navItems.length === 0) return;
 
     nav += `**${component.title}:**\n`;
-    navPages.forEach(page => {
-      const mdUrl = page.pub?.url ? toMarkdownUrl(page.pub.url) : null;
-      if (mdUrl) {
-        const title = page.asciidoc?.navtitle || page.asciidoc?.doctitle || page.src.stem;
-        nav += `- [${title}](${siteUrl}${mdUrl})\n`;
+    navItems.forEach(item => {
+      if (item.url) {
+        const mdUrl = toMarkdownUrl(item.url);
+        nav += `- [${item.content}](${siteUrl}${mdUrl})\n`;
       }
     });
     nav += `\n`;
@@ -643,47 +643,46 @@ function generateNavigationSection(siteUrl, contentCatalog, components) {
 }
 
 /**
- * Find top-level navigation pages for a component version.
- * These are typically section index pages (deploy, manage, develop, etc.)
+ * Get top-level navigation items from a component version's navigation tree.
+ * The navigation tree is built by Antora's navigation builder from nav.adoc files.
  *
- * @param {Object} contentCatalog - Antora content catalog
- * @param {string} componentName - Component name
- * @param {string} version - Version string
- * @returns {Array} Array of page objects
+ * @param {Object} componentVersion - Component version object with navigation property
+ * @returns {Array} Array of {content, url} objects
  */
-function findTopLevelNavPages(contentCatalog, componentName, version) {
-  // Get all pages for this component version
-  const pages = contentCatalog.findBy({
-    component: componentName,
-    version: version,
-    family: 'page',
+function getTopLevelNavItems(componentVersion) {
+  const navigation = componentVersion.navigation;
+
+  if (!navigation || !Array.isArray(navigation)) {
+    return [];
+  }
+
+  const topLevelItems = [];
+
+  // Navigation is an array of navigation trees (one per nav.adoc file)
+  navigation.forEach(navTree => {
+    if (!navTree.items || !Array.isArray(navTree.items)) return;
+
+    // Get first-level items from each nav tree
+    navTree.items.forEach(item => {
+      if (item.url) {
+        // Item has a direct URL
+        topLevelItems.push({
+          content: item.content || 'Untitled',
+          url: item.url,
+        });
+      } else if (item.content && item.items && item.items.length > 0) {
+        // Item is a section header - use first child's URL if available
+        const firstChild = item.items[0];
+        if (firstChild && firstChild.url) {
+          topLevelItems.push({
+            content: item.content,
+            url: firstChild.url,
+          });
+        }
+      }
+    });
   });
-
-  // Find pages that are likely top-level sections:
-  // - Pages in the ROOT module at the top level (not in subdirectories)
-  // - Or pages with nav-title attribute (indicating they're navigation items)
-  const topLevelPages = pages.filter(page => {
-    // Must have a published URL
-    if (!page.pub?.url) return false;
-
-    // Check if it's a root-level page (index pages of major sections)
-    const relativePath = page.src.relative;
-
-    // Include pages that are direct children of the module (e.g., deploy.adoc, manage.adoc)
-    // but exclude deeply nested pages
-    const pathDepth = relativePath.split('/').length;
-    if (pathDepth <= 2 && page.src.module === 'ROOT') {
-      // Exclude the main index page
-      if (page.src.stem === 'index' && pathDepth === 1) return false;
-      return true;
-    }
-
-    return false;
-  });
-
-  // Sort by stem name for consistent ordering
-  topLevelPages.sort((a, b) => a.src.stem.localeCompare(b.src.stem));
 
   // Limit to prevent overwhelming the navigation
-  return topLevelPages.slice(0, 10);
+  return topLevelItems.slice(0, 10);
 }
