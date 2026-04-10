@@ -625,7 +625,8 @@ function generateNavigationSection(siteUrl, contentCatalog, components) {
     if (!latest) return;
 
     // Get top-level navigation items from the component's navigation tree
-    const navItems = getTopLevelNavItems(latest);
+    // Falls back to pages for components without nav (like Labs)
+    const navItems = getTopLevelNavItems(contentCatalog, component, latest);
 
     if (navItems.length === 0) return;
 
@@ -643,46 +644,61 @@ function generateNavigationSection(siteUrl, contentCatalog, components) {
 }
 
 /**
- * Get top-level navigation items from a component version's navigation tree.
- * The navigation tree is built by Antora's navigation builder from nav.adoc files.
+ * Get top-level navigation items from a component version.
+ * First tries the navigation tree (from nav.adoc), then falls back to pages.
  *
- * @param {Object} componentVersion - Component version object with navigation property
+ * @param {Object} contentCatalog - Antora content catalog
+ * @param {Object} component - Component object
+ * @param {Object} componentVersion - Component version object
  * @returns {Array} Array of {content, url} objects
  */
-function getTopLevelNavItems(componentVersion) {
+function getTopLevelNavItems(contentCatalog, component, componentVersion) {
   const navigation = componentVersion.navigation;
 
-  if (!navigation || !Array.isArray(navigation)) {
-    return [];
+  // If component has navigation, use it
+  if (navigation && Array.isArray(navigation) && navigation.length > 0) {
+    const topLevelItems = [];
+
+    navigation.forEach(navTree => {
+      if (!navTree.items || !Array.isArray(navTree.items)) return;
+
+      navTree.items.forEach(item => {
+        if (item.url) {
+          topLevelItems.push({
+            content: item.content || 'Untitled',
+            url: item.url,
+          });
+        } else if (item.content && item.items && item.items.length > 0) {
+          const firstChild = item.items[0];
+          if (firstChild && firstChild.url) {
+            topLevelItems.push({
+              content: item.content,
+              url: firstChild.url,
+            });
+          }
+        }
+      });
+    });
+
+    if (topLevelItems.length > 0) {
+      return topLevelItems.slice(0, 10);
+    }
   }
 
-  const topLevelItems = [];
-
-  // Navigation is an array of navigation trees (one per nav.adoc file)
-  navigation.forEach(navTree => {
-    if (!navTree.items || !Array.isArray(navTree.items)) return;
-
-    // Get first-level items from each nav tree
-    navTree.items.forEach(item => {
-      if (item.url) {
-        // Item has a direct URL
-        topLevelItems.push({
-          content: item.content || 'Untitled',
-          url: item.url,
-        });
-      } else if (item.content && item.items && item.items.length > 0) {
-        // Item is a section header - use first child's URL if available
-        const firstChild = item.items[0];
-        if (firstChild && firstChild.url) {
-          topLevelItems.push({
-            content: item.content,
-            url: firstChild.url,
-          });
-        }
-      }
-    });
+  // Fallback: get pages directly from content catalog (for components like Labs)
+  const pages = contentCatalog.findBy({
+    component: component.name,
+    version: componentVersion.version,
+    family: 'page',
   });
 
-  // Limit to prevent overwhelming the navigation
-  return topLevelItems.slice(0, 10);
+  // Return all pages with URLs, sorted by title
+  return pages
+    .filter(page => page.pub?.url)
+    .map(page => ({
+      content: page.asciidoc?.navtitle || page.asciidoc?.doctitle || page.src.stem,
+      url: page.pub.url,
+    }))
+    .sort((a, b) => a.content.localeCompare(b.content))
+    .slice(0, 10);
 }
