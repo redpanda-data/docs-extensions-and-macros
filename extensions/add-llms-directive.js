@@ -3,8 +3,8 @@
 /**
  * Adds llms.txt directive to HTML pages for agent-friendly documentation.
  *
- * This extension injects a blockquote directive pointing to /llms.txt near the top
- * of each documentation page's <article> content. This helps AI agents discover
+ * This extension injects a blockquote directive pointing to /llms.txt immediately
+ * after the <body> tag of each documentation page. This helps AI agents discover
  * the documentation index according to the Agent-Friendly Docs spec.
  *
  * The directive is styled to be visually hidden but remains in the HTML for agents
@@ -28,39 +28,16 @@ module.exports.register = function () {
       try {
         const html = page.contents.toString('utf8')
 
-        // Find the <article class="doc"> tag and inject directive after it
-        // The directive should appear near the top of content for agent discovery
-        const articleMatch = html.match(/(<article[^>]*class=["'][^"']*\bdoc\b[^"']*["'][^>]*>)([\s\S]*?)(<\/article>)/i)
+        // Find the <body> tag and inject directive immediately after it
+        // This ensures the directive appears early in the HTML for better agent discovery
+        const bodyMatch = html.match(/(<body[^>]*>)/i)
 
-        if (!articleMatch) {
-          logger.debug(`No <article class="doc"> found in ${page.src?.path}`)
+        if (!bodyMatch) {
+          logger.debug(`No <body> tag found in ${page.src?.path}`)
           return
         }
 
-        const [fullMatch, openTag, articleContent, closeTag] = articleMatch
-
-        // Find where to inject: after breadcrumbs and h1, but before main content
-        // Look for the end of the h1.page or first content element
-        let injectionPoint = -1
-
-        // Try to find h1.page (title) - inject after it
-        const h1Match = articleContent.match(/<h1[^>]*class=["'][^"']*\bpage\b[^"']*["'][^>]*>.*?<\/h1>/i)
-        if (h1Match) {
-          injectionPoint = articleContent.indexOf(h1Match[0]) + h1Match[0].length
-        } else {
-          // Fallback: inject after breadcrumbs if present, or at start of article
-          const breadcrumbsMatch = articleContent.match(/<nav[^>]*class=["'][^"']*\bbreadcrumbs\b[^"']*["'][^>]*>[\s\S]*?<\/nav>/i)
-          if (breadcrumbsMatch) {
-            injectionPoint = articleContent.indexOf(breadcrumbsMatch[0]) + breadcrumbsMatch[0].length
-          } else {
-            injectionPoint = 0
-          }
-        }
-
-        if (injectionPoint === -1) {
-          logger.debug(`Could not find injection point in ${page.src?.path}`)
-          return
-        }
+        const bodyTag = bodyMatch[1]
 
         // Get component name for component-specific link
         const componentName = page.src?.component || ''
@@ -79,14 +56,8 @@ module.exports.register = function () {
         // Add tabindex="-1" and aria-hidden="true" to blockquote to fully hide from assistive tech
         const directiveHtml = `\n<blockquote class="llms-directive" tabindex="-1" aria-hidden="true">\n<p>${directiveText}</p>\n</blockquote>\n`
 
-        // Inject the directive
-        const newArticleContent =
-          articleContent.slice(0, injectionPoint) +
-          directiveHtml +
-          articleContent.slice(injectionPoint)
-
-        // Reconstruct the article HTML
-        let newHtml = html.replace(fullMatch, openTag + newArticleContent + closeTag)
+        // Inject the directive immediately after the <body> tag
+        let newHtml = html.replace(bodyTag, bodyTag + directiveHtml)
 
         // Add CSS to hide the directive visually (screen-reader-only pattern)
         // This keeps it in HTML for agents but hidden from visual users
