@@ -9,12 +9,13 @@ function bloblangExample(example) {
       let summary = example.summary.trim();
 
       // Convert Markdown headings to AsciiDoc
-      // ##### Heading -> ==== Heading (H5 -> H4 in AsciiDoc)
-      summary = summary.replace(/^#####\s+(.+)$/gm, '==== $1');
-      // #### Heading -> === Heading (H4 -> H3 in AsciiDoc)
-      summary = summary.replace(/^####\s+(.+)$/gm, '=== $1');
-      // ### Heading -> == Heading (H3 -> H2 in AsciiDoc)
-      summary = summary.replace(/^###\s+(.+)$/gm, '== $1');
+      // ##### Heading -> === Heading (H5 -> H3 in AsciiDoc)
+      // H3 fits correctly under the H2 "Examples" section
+      summary = summary.replace(/^#####\s+(.+)$/gm, '=== $1');
+      // #### Heading -> == Heading (H4 -> H2 in AsciiDoc)
+      summary = summary.replace(/^####\s+(.+)$/gm, '== $1');
+      // ### Heading -> = Heading (H3 -> H1 in AsciiDoc)
+      summary = summary.replace(/^###\s+(.+)$/gm, '= $1');
 
       // Ensure lead-in ends with a colon (replace period/exclamation/question mark if present)
       if (summary.endsWith('.') || summary.endsWith('!') || summary.endsWith('?')) {

@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "4.16.0",
+  "version": "4.16.1",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -62,6 +62,8 @@
     "./extensions/git-full-clone": "./extensions/git-full-clone.js",
     "./extensions/add-git-dates": "./extensions/add-git-dates.js",
     "./extensions/add-faq-structured-data": "./extensions/add-faq-structured-data.js",
+    "./extensions/add-llms-directive": "./extensions/add-llms-directive.js",
+    "./extensions/add-markdown-urls-to-sitemap": "./extensions/add-markdown-urls-to-sitemap.js",
     "./extensions/version-fetcher/set-latest-version": "./extensions/version-fetcher/set-latest-version.js",
     "./extensions/modify-connect-tag-playbook": "./extensions/modify-connect-tag-playbook.js",
     "./extensions/validate-attributes": "./extensions/validate-attributes.js",
@@ -73,6 +75,7 @@
     "./extensions/modify-redirects": "./extensions/produce-redirects.js",
     "./extensions/algolia-indexer/index": "./extensions/algolia-indexer/index.js",
     "./extensions/aggregate-terms": "./extensions/aggregate-terms.js",
+    "./extensions/resolve-xrefs-in-attachments": "./extensions/resolve-xrefs-in-attachments.js",
     "./macros/glossary": "./macros/glossary.js",
     "./macros/rp-connect-components": "./macros/rp-connect-components.js",
     "./macros/config-ref": "./macros/config-ref.js",

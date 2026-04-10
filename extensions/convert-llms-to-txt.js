@@ -291,7 +291,7 @@ module.exports.register = function () {
       }
 
       // Generate navigation section with component sitemaps and key sections
-      const navSection = generateNavigationSection(siteUrl);
+      const navSection = generateNavigationSection(siteUrl, contentCatalog, components);
 
       // Calculate available space for navigation section
       const availableSpace = MAX_LLMS_TXT_CHARS - llmsTxtContent.length - 2; // -2 for \n\n separator
@@ -592,45 +592,113 @@ function truncateAtNewline(content, maxLength) {
  * Generate a comprehensive navigation section for llms.txt
  * This improves llms-txt-freshness score by providing pathways to all documentation
  *
- * NOTE: The section URLs below are hardcoded. If pages are renamed, moved, or removed,
- * these links will 404. When restructuring documentation, update these URLs accordingly.
- * Future improvement: Generate these from the content catalog at build time.
+ * Dynamically generates navigation from the content catalog - no hardcoded URLs.
  *
  * @param {string} siteUrl - Base site URL
+ * @param {Object} contentCatalog - Antora content catalog
+ * @param {Array} components - Array of component objects
  * @returns {string} Markdown navigation section
  */
-function generateNavigationSection(siteUrl) {
+function generateNavigationSection(siteUrl, contentCatalog, components) {
   let nav = `## Complete documentation index\n\n`;
   nav += `For comprehensive page listings, use the sitemaps:\n\n`;
   nav += `- [sitemap.md](${siteUrl}/sitemap.md) - Main sitemap index with all documentation\n`;
   nav += `- [sitemap-all.md](${siteUrl}/sitemap-all.md) - Combined listing of all documentation pages\n\n`;
 
+  // Generate component sitemaps dynamically
   nav += `### Component sitemaps\n\n`;
-  nav += `- [Redpanda Self-Managed](${siteUrl}/sitemap-ROOT.md)\n`;
-  nav += `- [Redpanda Cloud](${siteUrl}/sitemap-redpanda-cloud.md)\n`;
-  nav += `- [Redpanda Connect](${siteUrl}/sitemap-redpanda-connect.md)\n`;
-  nav += `- [Redpanda Labs](${siteUrl}/sitemap-redpanda-labs.md)\n`;
+  components.forEach(component => {
+    // Skip internal components like 'home'
+    if (component.name === 'home') return;
+    nav += `- [${component.title}](${siteUrl}/sitemap-${component.name}.md)\n`;
+  });
 
+  // Generate key sections dynamically from Antora's navigation structure
   nav += `\n### Key documentation sections\n\n`;
-  nav += `**Self-Managed:**\n`;
-  nav += `- [Deploy](${siteUrl}/current/deploy.md) - Installation and deployment guides\n`;
-  nav += `- [Manage](${siteUrl}/current/manage.md) - Cluster operations and administration\n`;
-  nav += `- [Develop](${siteUrl}/current/develop.md) - Application development guides\n`;
-  nav += `- [Reference](${siteUrl}/current/reference.md) - Configuration, CLI, and API references\n`;
-  nav += `- [Upgrade](${siteUrl}/current/upgrade.md) - Version upgrade procedures\n`;
-  nav += `- [Troubleshoot](${siteUrl}/current/troubleshoot.md) - Debugging and issue resolution\n`;
 
-  nav += `\n**Cloud:**\n`;
-  nav += `- [Get Started](${siteUrl}/redpanda-cloud/get-started.md) - Cloud quickstart and cluster types\n`;
-  nav += `- [Manage](${siteUrl}/redpanda-cloud/manage.md) - Cloud cluster management\n`;
-  nav += `- [Networking](${siteUrl}/redpanda-cloud/networking.md) - Network configuration\n`;
-  nav += `- [Security](${siteUrl}/redpanda-cloud/security.md) - Authentication and authorization\n`;
-  nav += `- [AI Agents](${siteUrl}/redpanda-cloud/ai-agents.md) - Agentic Data Plane documentation\n`;
+  components.forEach(component => {
+    // Skip internal/utility components
+    const internalComponents = ['home', 'shared', 'search', 'api'];
+    if (internalComponents.includes(component.name)) return;
 
-  nav += `\n**Connect:**\n`;
-  nav += `- [Components](${siteUrl}/redpanda-connect/components.md) - All connectors, processors, and more\n`;
-  nav += `- [Guides](${siteUrl}/redpanda-connect/guides.md) - Integration tutorials\n`;
-  nav += `- [Configuration](${siteUrl}/redpanda-connect/configuration.md) - YAML configuration reference\n`;
+    const latest = component.latest || component.versions[0];
+    if (!latest) return;
+
+    // Get top-level navigation items from the component's navigation tree
+    // Falls back to pages for components without nav (like Labs)
+    const navItems = getTopLevelNavItems(contentCatalog, component, latest);
+
+    if (navItems.length === 0) return;
+
+    nav += `**${component.title}:**\n`;
+    navItems.forEach(item => {
+      if (item.url) {
+        const mdUrl = toMarkdownUrl(item.url);
+        nav += `- [${item.content}](${siteUrl}${mdUrl})\n`;
+      }
+    });
+    nav += `\n`;
+  });
 
   return nav;
+}
+
+/**
+ * Get top-level navigation items from a component version.
+ * First tries the navigation tree (from nav.adoc), then falls back to pages.
+ *
+ * @param {Object} contentCatalog - Antora content catalog
+ * @param {Object} component - Component object
+ * @param {Object} componentVersion - Component version object
+ * @returns {Array} Array of {content, url} objects
+ */
+function getTopLevelNavItems(contentCatalog, component, componentVersion) {
+  const navigation = componentVersion.navigation;
+
+  // If component has navigation, use it
+  if (navigation && Array.isArray(navigation) && navigation.length > 0) {
+    const topLevelItems = [];
+
+    navigation.forEach(navTree => {
+      if (!navTree.items || !Array.isArray(navTree.items)) return;
+
+      navTree.items.forEach(item => {
+        if (item.url) {
+          topLevelItems.push({
+            content: item.content || 'Untitled',
+            url: item.url,
+          });
+        } else if (item.content && item.items && item.items.length > 0) {
+          const firstChild = item.items[0];
+          if (firstChild && firstChild.url) {
+            topLevelItems.push({
+              content: item.content,
+              url: firstChild.url,
+            });
+          }
+        }
+      });
+    });
+
+    if (topLevelItems.length > 0) {
+      return topLevelItems.slice(0, 10);
+    }
+  }
+
+  // Fallback: get pages directly from content catalog (for components like Labs)
+  const pages = contentCatalog.findBy({
+    component: component.name,
+    version: componentVersion.version,
+    family: 'page',
+  });
+
+  // Return all pages with URLs, sorted by title
+  return pages
+    .filter(page => page.pub?.url)
+    .map(page => ({
+      content: page.asciidoc?.navtitle || page.asciidoc?.doctitle || page.src.stem,
+      url: page.pub.url,
+    }))
+    .sort((a, b) => a.content.localeCompare(b.content))
+    .slice(0, 10);
 }

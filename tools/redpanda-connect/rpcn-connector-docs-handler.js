@@ -983,45 +983,6 @@ async function handleRpcnConnectorDocs (options) {
     console.log('  Skipping diff generation, but will run binary analysis.\n')
   }
 
-  // Publish merged version
-  if (options.overrides && fs.existsSync(options.overrides)) {
-    try {
-      const { mergeOverrides, resolveReferences } = require('./generate-rpcn-connector-docs.js')
-
-      const mergedData = JSON.parse(JSON.stringify(newIndex))
-      const ovRaw = fs.readFileSync(options.overrides, 'utf8')
-      const ovObj = JSON.parse(ovRaw)
-      const resolvedOverrides = resolveReferences(ovObj, ovObj)
-      mergeOverrides(mergedData, resolvedOverrides)
-
-      const attachmentsRoot = path.resolve(process.cwd(), 'modules/components/attachments')
-      fs.mkdirSync(attachmentsRoot, { recursive: true })
-
-      const existingVersions = fs.readdirSync(attachmentsRoot)
-        .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
-        .map(f => {
-          const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
-          return match ? match[1] : null
-        })
-        .filter(v => v && semver.valid(v))
-
-      const sortedVersions = semver.sort(existingVersions) // ascending order
-
-      for (const version of sortedVersions) {
-        const oldFile = `connect-${version}.json`
-        const oldFilePath = path.join(attachmentsRoot, oldFile)
-        fs.unlinkSync(oldFilePath)
-        console.log(`🧹 Deleted old version: ${oldFile}`)
-      }
-
-      const destFile = path.join(attachmentsRoot, `connect-${newVersion}.json`)
-      fs.writeFileSync(destFile, JSON.stringify(mergedData, null, 2), 'utf8')
-      console.log(`Done: Published merged version to: ${path.relative(process.cwd(), destFile)}`)
-    } catch (err) {
-      console.error(`Error: Failed to publish merged version: ${err.message}`)
-    }
-  }
-
   // Binary analysis
   let oldBinaryAnalysis = null
 
@@ -1245,6 +1206,49 @@ async function handleRpcnConnectorDocs (options) {
       console.log(`✓ Reloaded newIndex with augmented data for diff comparison`)
     } catch (err) {
       console.error(`Warning: Failed to augment data file: ${err.message}`)
+    }
+  }
+
+  // Publish merged version to attachments
+  // IMPORTANT: This must run AFTER binary analysis and augmentation to include CGO-only connectors
+  if (options.overrides && fs.existsSync(options.overrides)) {
+    try {
+      const { mergeOverrides, resolveReferences } = require('./generate-rpcn-connector-docs.js')
+
+      // Use the augmented newIndex which now includes CGO-only and cloud-only connectors
+      const mergedData = JSON.parse(JSON.stringify(newIndex))
+
+      const ovRaw = fs.readFileSync(options.overrides, 'utf8')
+      const ovObj = JSON.parse(ovRaw)
+      const resolvedOverrides = resolveReferences(ovObj, ovObj)
+
+      mergeOverrides(mergedData, resolvedOverrides)
+
+      const attachmentsRoot = path.resolve(process.cwd(), 'modules/components/attachments')
+      fs.mkdirSync(attachmentsRoot, { recursive: true })
+
+      const existingVersions = fs.readdirSync(attachmentsRoot)
+        .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
+        .map(f => {
+          const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
+          return match ? match[1] : null
+        })
+        .filter(v => v && semver.valid(v))
+
+      const sortedVersions = semver.sort(existingVersions) // ascending order
+
+      for (const version of sortedVersions) {
+        const oldFile = `connect-${version}.json`
+        const oldFilePath = path.join(attachmentsRoot, oldFile)
+        fs.unlinkSync(oldFilePath)
+        console.log(`🧹 Deleted old version from attachments: ${oldFile}`)
+      }
+
+      const destFile = path.join(attachmentsRoot, `connect-${newVersion}.json`)
+      fs.writeFileSync(destFile, JSON.stringify(mergedData, null, 2), 'utf8')
+      console.log(`✓ Published merged version to: ${path.relative(process.cwd(), destFile)}`)
+    } catch (err) {
+      console.error(`Error: Failed to publish merged version: ${err.message}`)
     }
   }
 

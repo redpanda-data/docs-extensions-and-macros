@@ -24,15 +24,30 @@ function formatLlmsDirective(componentName) {
 }
 
 /**
- * Regex pattern to match and strip the llms directive from markdown content.
- * Matches the blockquote format with optional component-specific suffix.
+ * Helper to escape regex metacharacters in a string.
+ * @param {string} str - String to escape
+ * @returns {string} Escaped string safe for use in RegExp
  */
-const LLMS_DIRECTIVE_REGEX = /^> For the complete documentation index, see \[llms\.txt\].*$/gm;
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 /**
- * Regex pattern to match and strip HTML source comments from markdown content.
+ * Regex pattern to match and strip the llms directive from markdown content.
+ * Dynamically derived from LLMS_DIRECTIVE_BASE to stay in sync.
+ * Matches the blockquote format with optional component-specific suffix.
  */
-const SOURCE_COMMENT_REGEX = /^<!--[\s\S]*?-->\s*/gm;
+const LLMS_DIRECTIVE_REGEX = new RegExp(
+  `^> ${escapeRegExp(LLMS_DIRECTIVE_BASE)}.*$`,
+  'gm'
+);
+
+/**
+ * Regex pattern to match and strip only injected metadata HTML comments from markdown content.
+ * Only matches comments that start with known markers: "Source:" or "Note for AI:"
+ * This preserves any user-authored HTML comments in the markdown.
+ */
+const SOURCE_COMMENT_REGEX = /^<!--\s*(?:Source:|Note for AI:)[\s\S]*?-->\s*/gm;
 
 /**
  * Strip metadata added by convert-to-markdown extension from page content.
