@@ -28,6 +28,7 @@ function capToTwoSentences (description) {
   }
 
   const abbreviations = [
+    /https?:\/\/[^\s]+/gi,  // Protect URLs from being split by sentence detection
     /\bv\d+\.\d+(?:\.\d+)?/gi,
     /\d+\.\d+/g,
     /\be\.g\./gi,
@@ -1127,9 +1128,11 @@ async function handleRpcnConnectorDocs (options) {
             if (cgoConn.type === type) {
               const exists = connectorData[type].some(c => c.name === cgoConn.name)
               if (!exists) {
+                // Singularize type for consistency with stored data (except "metrics" which stays plural)
+                const componentType = cgoConn.type === 'metrics' ? 'metrics' : cgoConn.type.replace(/s$/, '')
                 connectorData[type].push({
                   ...cgoConn,
-                  type: cgoConn.type.replace(/s$/, ''),
+                  type: componentType,
                   cloudSupported: false,
                   requiresCgo: true
                 })
@@ -1144,9 +1147,11 @@ async function handleRpcnConnectorDocs (options) {
             if (cloudConn.type === type) {
               const exists = connectorData[type].some(c => c.name === cloudConn.name)
               if (!exists) {
+                // Singularize type for consistency with stored data (except "metrics" which stays plural)
+                const componentType = cloudConn.type === 'metrics' ? 'metrics' : cloudConn.type.replace(/s$/, '')
                 connectorData[type].push({
                   ...cloudConn,
-                  type: cloudConn.type.replace(/s$/, ''),
+                  type: componentType,
                   cloudSupported: true,
                   requiresCgo: false,
                   cloudOnly: true
@@ -1369,7 +1374,10 @@ async function handleRpcnConnectorDocs (options) {
         })
       } else {
         newCgoComponents = binaryAnalysis.cgoOnly.filter(cgoComp => {
-          const wasInOldOss = oldIndex[cgoComp.type]?.some(c => c.name === cgoComp.name)
+          // Check if component existed in old index (either in OSS or as CGO component)
+          const wasInOldIndex = oldIndex[cgoComp.type]?.some(c =>
+            c.name === cgoComp.name && (c.requiresCgo === true || c.requiresCgo === undefined)
+          )
 
           // Check if docs already exist
           const typePlural = cgoComp.type.endsWith('s') ? cgoComp.type : `${cgoComp.type}s`
@@ -1378,7 +1386,8 @@ async function handleRpcnConnectorDocs (options) {
             fs.existsSync(path.join(root, relPath))
           )
 
-          return !wasInOldOss && !docsExist
+          // Only treat as new if it wasn't in the old index AND docs don't exist
+          return !wasInOldIndex && !docsExist
         })
         if (newCgoComponents.length > 0) {
           console.log(`   ℹ️  No old binary analysis found - treating ${newCgoComponents.length} cgo components not in old OSS data as new`)
