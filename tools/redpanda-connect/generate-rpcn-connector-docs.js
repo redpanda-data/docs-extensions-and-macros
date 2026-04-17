@@ -430,6 +430,10 @@ async function generateRpcnConnectorDocs(options) {
           item.support = csvData.support;
         }
 
+        // Compute typeDir for use in template (avoids repetition of conditional logic)
+        const typeDir = type.endsWith('s') ? type : `${type}s`;
+        item.typeDir = typeDir;
+
         let content;
         try {
           content = compiledTemplate(item);
@@ -439,7 +443,6 @@ async function generateRpcnConnectorDocs(options) {
 
         // Determine output location based on availability
         let destFile;
-        const typeDir = type.endsWith('s') ? type : `${type}s`;
 
         if (isCloudOnly) {
           // Cloud-only connectors go to partials/components/cloud-only/{type}s/{name}.adoc

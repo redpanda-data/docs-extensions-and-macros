@@ -28,7 +28,7 @@ function capToTwoSentences (description) {
   }
 
   const abbreviations = [
-    /https?:\/\/[^\s]+/gi,  // Protect URLs from being split by sentence detection
+    /https?:\/\/[^\s]+?(?=[\s]|$|[.!?])/gi,  // Protect URLs from being split by sentence detection (non-greedy, preserve trailing punctuation)
     /\bv\d+\.\d+(?:\.\d+)?/gi,
     /\d+\.\d+/g,
     /\be\.g\./gi,
@@ -1374,9 +1374,9 @@ async function handleRpcnConnectorDocs (options) {
         })
       } else {
         newCgoComponents = binaryAnalysis.cgoOnly.filter(cgoComp => {
-          // Check if component existed in old index (either in OSS or as CGO component)
+          // Check if component existed in old index as a CGO component (requiresCgo must be explicitly true)
           const wasInOldIndex = oldIndex[cgoComp.type]?.some(c =>
-            c.name === cgoComp.name && (c.requiresCgo === true || c.requiresCgo === undefined)
+            c.name === cgoComp.name && c.requiresCgo === true
           )
 
           // Check if docs already exist
