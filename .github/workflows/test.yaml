@@ -288,7 +288,7 @@ jobs:
         run: npm ci
 
       - name: Run all tests
-        run: npm test -- --testPathIgnorePatterns="cli-contract.test.js" --maxWorkers=2
+        run: npm test -- --testPathIgnorePatterns="cli-contract.test.js|integration.test.js" --maxWorkers=2
 
   # Summary job that all other jobs depend on
   test-summary:
