@@ -506,6 +506,11 @@ module.exports.register = function () {
           // Skip directive for field-only pages (marked by generate-fields-only-pages extension)
           const isFieldOnlyPage = page.isFieldOnlyPage === true
 
+          // Debug: log field pages
+          if (page.src?.relative?.includes('fields/')) {
+            logger.info(`Processing field page: ${page.src.relative}, isFieldOnlyPage=${page.isFieldOnlyPage}, willSkipDirective=${isFieldOnlyPage}`)
+          }
+
           if (canonicalUrl && !isFieldOnlyPage) {
             const componentName = page.src?.component || '';
             // Use markdown blockquote format for the directive (visible, can be hidden with CSS)

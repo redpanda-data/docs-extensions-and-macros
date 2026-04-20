@@ -25,6 +25,9 @@ module.exports.register = function () {
     pages.forEach(page => {
       if (!page.contents) return
 
+      // Skip field-only pages (marked by generate-fields-only-pages extension)
+      if (page.isFieldOnlyPage === true) return
+
       try {
         const html = page.contents.toString('utf8')
 
