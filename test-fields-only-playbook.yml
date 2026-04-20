@@ -1,0 +1,35 @@
+site:
+  title: Test Fields-Only Extension
+  start_page: redpanda-connect::index.adoc
+  url: http://localhost:8080
+
+output:
+  dir: ./build/test-fields-only
+  clean: true
+
+runtime:
+  log:
+    level: info
+
+content:
+  sources:
+  - url: /tmp/rp-connect-docs
+    branches: HEAD
+    start_path: .
+
+ui:
+  bundle:
+    url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip
+    snapshot: true
+
+asciidoc:
+  extensions:
+  - '@asciidoctor/tabs'
+
+antora:
+  extensions:
+  - require: './extensions/generate-fields-only-pages.js'
+    enabled: true
+    format: nested
+    headingLevel: 2
+    dataPath: /tmp/rp-connect-docs/docs-data/connect-4.88.0.json

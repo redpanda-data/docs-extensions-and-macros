@@ -15,12 +15,16 @@ module.exports.register = function ({ config }) {
   const logger = this.getLogger('generate-fields-only-pages-extension')
 
   // Merge config with defaults
+  // Note: Antora lowercases all config keys, so headingLevel becomes headinglevel
   const {
     format = DEFAULTS.format,
-    headingLevel = DEFAULTS.headingLevel,
-    dataPath = DEFAULTS.dataPath,
+    headinglevel = DEFAULTS.headingLevel,  // Antora lowercases this
+    datapath = DEFAULTS.dataPath,           // Antora lowercases this
     enabled = DEFAULTS.enabled
   } = config || {}
+
+  const headingLevel = parseInt(headinglevel, 10)
+  const dataPath = datapath
 
   if (!enabled) {
     logger.info('Extension disabled via config')
@@ -108,18 +112,27 @@ async function generateFieldsOnlyPages (contentCatalog, siteCatalog, options) {
         const typeDir = type.endsWith('s') ? type : `${type}s`
 
         // Create virtual file in the content catalog
+        const relative = `fields/${typeDir}/${item.name}.adoc`
+        const absPath = path.resolve(process.cwd(), `modules/components/pages/${relative}`)
+
+        // Get origin from first page in component (for git metadata)
+        const existingPages = contentCatalog.getPages((page) => page.src.component === 'redpanda-connect')
+        const origin = existingPages.length > 0 ? existingPages[0].src.origin : { type: 'generated' }
+
         const file = contentCatalog.addFile({
+          path: absPath,  // vinyl File needs this
           contents: Buffer.from(content),
           src: {
             component: 'redpanda-connect',
             version: componentVersion.version,
             module: 'components',
             family: 'page',
-            relative: `fields/${typeDir}/${item.name}.adoc`,
+            relative: relative,
             basename: `${item.name}.adoc`,
             stem: item.name,
             extname: '.adoc',
-            mediaType: 'text/asciidoc'
+            mediaType: 'text/asciidoc',
+            origin: origin
           }
         })
 
@@ -133,6 +146,11 @@ async function generateFieldsOnlyPages (contentCatalog, siteCatalog, options) {
         }
 
         pagesGenerated++
+
+        // Debug: log first few pages
+        if (pagesGenerated <= 3) {
+          logger.info(`Added page: ${file.src.relative} (pub=${file.pub})`)
+        }
       } catch (err) {
         logger.error(`Failed to generate field-only page for ${type}/${item.name}: ${err.message}`)
       }
