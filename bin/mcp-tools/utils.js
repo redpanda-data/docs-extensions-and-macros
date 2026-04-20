@@ -117,6 +117,70 @@ function formatDate(date = new Date()) {
   return date.toISOString().split('T')[0];
 }
 
+/**
+ * Serialize an Error object to a plain object
+ * Prevents circular reference errors when JSON.stringify'ing results
+ * @param {Error} error - The error to serialize
+ * @returns {Object|string|null} Plain object with error properties, string, or null
+ */
+function serializeError(error) {
+  if (!error) return null;
+
+  // If it's already a string, return as-is
+  if (typeof error === 'string') return error;
+
+  // If it's not an Error object, try to convert to string
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  // Serialize Error object
+  return {
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+    // Include any additional properties (like stdout, stderr from exec errors)
+    ...(error.stdout && { stdout: error.stdout }),
+    ...(error.stderr && { stderr: error.stderr }),
+    ...(error.code && { code: error.code })
+  };
+}
+
+/**
+ * Deep serialize a result object, converting any Error objects to plain objects
+ * @param {*} obj - The object to serialize
+ * @returns {*} Object with all errors serialized
+ */
+function serializeResult(obj) {
+  if (!obj || typeof obj !== 'object') {
+    return obj;
+  }
+
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj.map(item => serializeResult(item));
+  }
+
+  // Handle Error objects
+  if (obj instanceof Error) {
+    return serializeError(obj);
+  }
+
+  // Handle plain objects
+  const result = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value instanceof Error) {
+      result[key] = serializeError(value);
+    } else if (value && typeof value === 'object') {
+      result[key] = serializeResult(value);
+    } else {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
 module.exports = {
   MAX_RECURSION_DEPTH,
   MAX_EXEC_BUFFER_SIZE,
@@ -127,5 +191,7 @@ module.exports = {
   getDocToolsCommand,
   executeCommand,
   normalizeVersion,
-  formatDate
+  formatDate,
+  serializeError,
+  serializeResult
 };
