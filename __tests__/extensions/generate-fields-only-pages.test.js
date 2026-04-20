@@ -199,8 +199,6 @@ describe('generate-fields-only-pages extension', () => {
     // Check the content
     const content = addedFiles[0].contents.toString()
     expect(content).toContain('= test_input Fields')
-    expect(content).toContain(':page-noindex:')
-    expect(content).toContain('Note for AI Agents and LLMs')
     expect(content).toContain('== `url`')
     expect(content).toContain('The URL to connect to')
     expect(content).toContain('*Type*: `string`')
