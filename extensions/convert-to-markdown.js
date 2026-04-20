@@ -503,16 +503,25 @@ module.exports.register = function () {
 
           // Structure: H1 → llms.txt directive (blockquote) → frontmatter → source → content
           // The directive must appear near the top for agent-friendly docs spec compliance
-          if (canonicalUrl) {
+          // Skip directive for field-only pages (marked with page-noindex)
+          const isFieldOnlyPage = page.asciidoc?.attributes?.['page-noindex'] !== undefined
+
+          if (canonicalUrl && !isFieldOnlyPage) {
             const componentName = page.src?.component || '';
             // Use markdown blockquote format for the directive (visible, can be hidden with CSS)
             const llmsDirective = formatLlmsDirective(componentName);
 
             markdown = `${h1Heading}\n${llmsDirective}\n\n${frontmatter}<!-- Source: ${canonicalUrl} -->\n\n${restOfMarkdown}`
-          } else if (frontmatter) {
+          } else if (frontmatter && !isFieldOnlyPage) {
             // If no canonical URL but we have frontmatter, still add directive after H1
             const llmsDirective = formatLlmsDirective();
             markdown = `${h1Heading}\n${llmsDirective}\n\n${frontmatter}${restOfMarkdown}`
+          } else if (canonicalUrl) {
+            // Field-only page with canonical URL but no directive
+            markdown = `${h1Heading}\n\n${frontmatter}<!-- Source: ${canonicalUrl} -->\n\n${restOfMarkdown}`
+          } else if (frontmatter) {
+            // Field-only page with frontmatter but no directive
+            markdown = `${h1Heading}\n\n${frontmatter}${restOfMarkdown}`
           }
 
           // Clean up unnecessary whitespace
