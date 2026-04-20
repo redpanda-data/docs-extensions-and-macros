@@ -503,13 +503,8 @@ module.exports.register = function () {
 
           // Structure: H1 → llms.txt directive (blockquote) → frontmatter → source → content
           // The directive must appear near the top for agent-friendly docs spec compliance
-          // Skip directive for field-only pages (identified by path containing 'fields/')
-          const isFieldOnlyPage = page.src?.path?.includes('fields/') || page.src?.relative?.includes('fields/')
-
-          // Debug logging - log all field pages
-          if (page.src?.path?.includes('fields/') || page.src?.relative?.includes('fields/')) {
-            logger.info(`Field page: path="${page.src?.path}" relative="${page.src?.relative}" isFieldOnly=${isFieldOnlyPage}`)
-          }
+          // Skip directive for field-only pages (marked by generate-fields-only-pages extension)
+          const isFieldOnlyPage = page.isFieldOnlyPage === true
 
           if (canonicalUrl && !isFieldOnlyPage) {
             const componentName = page.src?.component || '';

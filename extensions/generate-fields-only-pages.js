@@ -155,6 +155,9 @@ async function generateFieldsOnlyPages (contentCatalog, siteCatalog, options) {
           }
         }
 
+        // Add custom marker for field-only pages (used by convert-to-markdown)
+        file.isFieldOnlyPage = true
+
         pagesGenerated++
       } catch (err) {
         logger.error(`Failed to generate field-only page for ${type}/${item.name}: ${err.message}`)
