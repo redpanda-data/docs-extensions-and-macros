@@ -508,8 +508,8 @@ module.exports.register = function () {
 
           // Debug logging for field-only page detection
           if (page.src?.path?.includes('fields/')) {
-            logger.debug(`Field page check for ${page.src.path}: page-nodirective=${page.asciidoc?.attributes?.['page-nodirective']}, isFieldOnlyPage=${isFieldOnlyPage}`)
-            logger.debug(`Available attributes: ${Object.keys(page.asciidoc?.attributes || {}).join(', ')}`)
+            logger.info(`Field page check for ${page.src.path}: page-nodirective=${page.asciidoc?.attributes?.['page-nodirective']}, isFieldOnlyPage=${isFieldOnlyPage}`)
+            logger.info(`Available attributes: ${Object.keys(page.asciidoc?.attributes || {}).join(', ')}`)
           }
 
           if (canonicalUrl && !isFieldOnlyPage) {
