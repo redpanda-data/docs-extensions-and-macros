@@ -321,7 +321,7 @@ async function generateRpcnConnectorDocs(options) {
   // Compile the "main" template (used when writeFullDrafts = true)
   const compiledTemplate = handlebars.compile(fs.readFileSync(template, 'utf8'));
 
-  // Determine which templates to use for “fields” and “examples”
+  // Determine which templates to use for "fields" and "examples"
   // If templateFields is not provided, fall back to the single `template`.
   // If templateExamples is not provided, skip examples entirely.
   const fieldsTemplatePath   = templateFields   || template;
@@ -366,6 +366,10 @@ async function generateRpcnConnectorDocs(options) {
     for (const item of items) {
       if (!item.name) continue;
       const name = item.name;
+
+      // Compute typeDir once for this item (used in templates and file paths)
+      const typeDir = type.endsWith('s') ? type : `${type}s`;
+      item.typeDir = typeDir;
 
       // Always generate field and example partials (needed for both standalone and draft modes)
       // Render fields using the registered "fields" partial
@@ -430,6 +434,8 @@ async function generateRpcnConnectorDocs(options) {
           item.support = csvData.support;
         }
 
+        // typeDir is already computed at the beginning of the loop
+
         let content;
         try {
           content = compiledTemplate(item);
@@ -439,7 +445,6 @@ async function generateRpcnConnectorDocs(options) {
 
         // Determine output location based on availability
         let destFile;
-        const typeDir = type.endsWith('s') ? type : `${type}s`;
 
         if (isCloudOnly) {
           // Cloud-only connectors go to partials/components/cloud-only/{type}s/{name}.adoc

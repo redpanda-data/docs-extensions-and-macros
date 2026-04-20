@@ -1,0 +1,220 @@
+= Generate Fields-Only Pages Extension
+
+An Antora extension that generates field-only reference pages for Redpanda Connect components, intended for UX/API integration purposes.
+
+== Purpose
+
+The UX team needs stable URLs to programmatically access field references for components without the full documentation context. This extension generates dedicated pages containing only the configuration fields in either:
+
+* **Nested format**: Hierarchical AsciiDoc headings for each field
+* **Table format**: Flattened AsciiDoc table with all fields
+
+== Features
+
+* Generates field-only pages at `components:pages:fields/{type}/{name}.adoc`
+* Includes `noindex, nofollow` meta tags to prevent search engine indexing
+* Adds AI agent directive warning not to use as primary reference
+* Configurable format (nested headings or table)
+* Configurable heading level for nested format
+* Links back to full component documentation
+
+== Configuration
+
+Add to your `antora-playbook.yml`:
+
+[source,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/generate-fields-only-pages.js'
+      enabled: true
+      format: nested           # 'nested' or 'table'
+      headingLevel: 2          # Starting heading level for nested format (2-6)
+      dataPath: docs-data/connect-4.88.0.json  # Path to connector JSON data
+----
+
+=== Configuration Options
+
+[cols="1,2,1,3"]
+|===
+|Option |Type |Default |Description
+
+|`enabled`
+|boolean
+|`true`
+|Enable/disable the extension
+
+|`format`
+|string
+|`nested`
+|Output format: `nested` (hierarchical headings) or `table` (flattened table)
+
+|`headingLevel`
+|number
+|`2`
+|Starting heading level for nested format (2=`==`, 3=`===`, etc.). Subfields increment this level.
+
+|`dataPath`
+|string
+|_(required)_
+|Path to connector JSON data file relative to project root (e.g., `docs-data/connect-4.88.0.json`)
+
+|===
+
+== Examples
+
+=== Nested Format (headingLevel: 2)
+
+[source,yaml]
+----
+format: nested
+headingLevel: 2
+----
+
+Generates:
+
+[source,asciidoc]
+----
+== `timeout`
+
+Connection timeout duration.
+
+*Type*: `string`
+
+*Default*: `"30s"`
+
+=== `timeout.connect`
+
+Timeout for establishing connection.
+
+*Type*: `string`
+----
+
+=== Nested Format (headingLevel: 3)
+
+[source,yaml]
+----
+format: nested
+headingLevel: 3
+----
+
+Generates:
+
+[source,asciidoc]
+----
+=== `timeout`
+
+Connection timeout duration.
+
+*Type*: `string`
+
+*Default*: `"30s"`
+
+==== `timeout.connect`
+
+Timeout for establishing connection.
+
+*Type*: `string`
+----
+
+=== Table Format
+
+[source,yaml]
+----
+format: table
+----
+
+Generates:
+
+[source,asciidoc]
+----
+[cols="2,1,1,4"]
+|===
+|Field |Type |Default |Description
+
+|`timeout`
+|`string`
+|`"30s"`
+|Connection timeout duration.
+
+|`timeout.connect`
+|`string`
+|-
+|Timeout for establishing connection.
+
+|===
+----
+
+== Output Structure
+
+Pages are generated at:
+
+----
+modules/components/pages/fields/
+├── inputs/
+│   ├── kafka.adoc
+│   ├── http_server.adoc
+│   └── ...
+├── outputs/
+│   ├── kafka.adoc
+│   └── ...
+├── processors/
+├── metrics/
+└── ...
+----
+
+Each page includes:
+
+* Page title: `{component-name} Fields`
+* Noindex/nofollow meta tags
+* AI agent directive with link to full documentation
+* Field reference in configured format
+
+== URL Structure
+
+Stable URLs for UX team consumption:
+
+* Nested format: `\https://docs.redpanda.com/redpanda-connect/components/fields/inputs/kafka.html`
+* Table format: `\https://docs.redpanda.com/redpanda-connect/components/fields/inputs/kafka.html`
+
+== Lifecycle
+
+The extension runs during the `contentClassified` phase, after Antora has loaded all content but before converting to HTML. It:
+
+1. Loads connector data from the specified JSON file
+2. Iterates through each component type (inputs, outputs, etc.)
+3. For each component with configuration fields, generates an AsciiDoc page
+4. Adds the page to Antora's content catalog with noindex attributes
+
+== Skipped Components
+
+The extension skips:
+
+* Components without configuration fields
+* Bloblang functions and methods (they don't have config fields)
+* Deprecated components
+
+== Troubleshooting
+
+=== Extension not generating pages
+
+Check that:
+
+* `enabled: true` is set
+* `dataPath` points to a valid JSON file (note: Antora lowercases config keys, so use lowercase `datapath` if needed)
+* `headingLevel` is set (note: Antora lowercases to `headinglevel`)
+* The JSON file contains connector data in the expected format
+* The `redpanda-connect` component exists in your Antora site
+
+=== Pages are indexed by search engines
+
+Ensure your Antora UI template respects the `page-noindex` and `page-robots` attributes by adding appropriate meta tags.
+
+=== Fields are missing
+
+Verify that the connector data JSON file is up to date and contains the `config.children` or `children` arrays for each component.
+
+== See Also
+
+* xref:README.adoc[Extensions Overview]
+* xref:USER_GUIDE.adoc[Extension User Guide]
