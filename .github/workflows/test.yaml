@@ -66,6 +66,8 @@ jobs:
         node-version: [18, 20]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
@@ -86,18 +88,19 @@ jobs:
           fi
 
           if [[ -n "$CHANGED_FILES" ]]; then
-            # Try directory-based approach first, then fall back to pattern matching
+            # Build Jest test pattern for specific extension tests
             TEST_PATTERNS="__tests__/extensions/"
             for file in $CHANGED_FILES; do
               extension_name=$(basename "$file" .js)
-              TEST_PATTERNS="$TEST_PATTERNS __tests__/**/*${extension_name}*.test.js"
+              # Add specific test file pattern (will be joined with | by Jest)
+              TEST_PATTERNS="$TEST_PATTERNS ${extension_name}"
             done
             echo "test-patterns=$TEST_PATTERNS" >> $GITHUB_OUTPUT
             echo "Changed extensions: $CHANGED_FILES"
             echo "Test patterns: $TEST_PATTERNS"
           else
             # Run all extension tests if no specific files changed
-            echo "test-patterns=__tests__/extensions/ __tests__/**/*extension*.test.js" >> $GITHUB_OUTPUT
+            echo "test-patterns=__tests__/extensions/" >> $GITHUB_OUTPUT
           fi
 
       - name: Run extension tests
@@ -117,6 +120,8 @@ jobs:
         node-version: [18, 20]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
@@ -137,18 +142,19 @@ jobs:
           fi
 
           if [[ -n "$CHANGED_FILES" ]]; then
-            # Try directory-based approach first, then fall back to pattern matching
+            # Build Jest test pattern for specific macro tests
             TEST_PATTERNS="__tests__/macros/"
             for file in $CHANGED_FILES; do
               macro_name=$(basename "$file" .js)
-              TEST_PATTERNS="$TEST_PATTERNS __tests__/**/*${macro_name}*.test.js"
+              # Add specific test file pattern (will be joined with | by Jest)
+              TEST_PATTERNS="$TEST_PATTERNS ${macro_name}"
             done
             echo "test-patterns=$TEST_PATTERNS" >> $GITHUB_OUTPUT
             echo "Changed macros: $CHANGED_FILES"
             echo "Test patterns: $TEST_PATTERNS"
           else
             # Run all macro tests if no specific files changed
-            echo "test-patterns=__tests__/macros/ __tests__/**/*macro*.test.js" >> $GITHUB_OUTPUT
+            echo "test-patterns=__tests__/macros/" >> $GITHUB_OUTPUT
           fi
 
       - name: Run macro tests
@@ -179,7 +185,7 @@ jobs:
         run: npm ci
 
       - name: Run AsciiDoc extension tests
-        run: npm test -- __tests__/asciidoc-extensions/ __tests__/**/*asciidoc*.test.js --passWithNoTests
+        run: npm test -- __tests__/asciidoc-extensions/ --passWithNoTests
 
   test-tools:
     needs: detect-changes
@@ -201,7 +207,7 @@ jobs:
         run: npm ci
 
       - name: Run tools tests
-        run: npm test -- __tests__/tools/ __tests__/**/*tool*.test.js --passWithNoTests
+        run: npm test -- __tests__/tools/ __tests__/mcp/ --passWithNoTests
 
   test-property-extractor:
     needs: detect-changes
