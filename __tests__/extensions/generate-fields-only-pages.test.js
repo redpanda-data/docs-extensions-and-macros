@@ -93,12 +93,12 @@ describe('generate-fields-only-pages extension', () => {
       warn: jest.fn(),
       error: jest.fn()
     }
-    let capturedHandler
+    const handlers = {}
 
     const mockContext = {
       getLogger: () => logger,
       on: (event, handler) => {
-        capturedHandler = handler
+        handlers[event] = handler
       }
     }
 
@@ -110,7 +110,7 @@ describe('generate-fields-only-pages extension', () => {
 
     extension.register.call(mockContext, { config: {} })
 
-    await capturedHandler({ contentCatalog: mockContentCatalog, siteCatalog: {} })
+    await handlers['contentClassified']({ contentCatalog: mockContentCatalog, siteCatalog: {} })
 
     expect(logger.warn).toHaveBeenCalledWith('No dataPath specified in config. Skipping field-only page generation.')
   })
@@ -150,12 +150,12 @@ describe('generate-fields-only-pages extension', () => {
       warn: jest.fn(),
       error: jest.fn()
     }
-    let capturedHandler
+    const handlers = {}
 
     const mockContext = {
       getLogger: () => logger,
       on: (event, handler) => {
-        capturedHandler = handler
+        handlers[event] = handler
       }
     }
 
@@ -190,7 +190,7 @@ describe('generate-fields-only-pages extension', () => {
       }
     })
 
-    await capturedHandler({ contentCatalog: mockContentCatalog, siteCatalog: {} })
+    await handlers['contentClassified']({ contentCatalog: mockContentCatalog, siteCatalog: {} })
 
     // Check that a file was added
     expect(addedFiles.length).toBe(1)
@@ -239,12 +239,12 @@ describe('generate-fields-only-pages extension', () => {
       warn: jest.fn(),
       error: jest.fn()
     }
-    let capturedHandler
+    const handlers = {}
 
     const mockContext = {
       getLogger: () => logger,
       on: (event, handler) => {
-        capturedHandler = handler
+        handlers[event] = handler
       }
     }
 
@@ -278,7 +278,7 @@ describe('generate-fields-only-pages extension', () => {
       }
     })
 
-    await capturedHandler({ contentCatalog: mockContentCatalog, siteCatalog: {} })
+    await handlers['contentClassified']({ contentCatalog: mockContentCatalog, siteCatalog: {} })
 
     expect(addedFiles.length).toBe(1)
     const content = addedFiles[0].contents.toString()
@@ -317,12 +317,12 @@ describe('generate-fields-only-pages extension', () => {
       warn: jest.fn(),
       error: jest.fn()
     }
-    let capturedHandler
+    const handlers = {}
 
     const mockContext = {
       getLogger: () => logger,
       on: (event, handler) => {
-        capturedHandler = handler
+        handlers[event] = handler
       }
     }
 
@@ -357,7 +357,7 @@ describe('generate-fields-only-pages extension', () => {
       }
     })
 
-    await capturedHandler({ contentCatalog: mockContentCatalog, siteCatalog: {} })
+    await handlers['contentClassified']({ contentCatalog: mockContentCatalog, siteCatalog: {} })
 
     const content = addedFiles[0].contents.toString()
     // Should use === for level 3
@@ -383,12 +383,12 @@ describe('generate-fields-only-pages extension', () => {
       warn: jest.fn(),
       error: jest.fn()
     }
-    let capturedHandler
+    const handlers = {}
 
     const mockContext = {
       getLogger: () => logger,
       on: (event, handler) => {
-        capturedHandler = handler
+        handlers[event] = handler
       }
     }
 
@@ -408,7 +408,7 @@ describe('generate-fields-only-pages extension', () => {
       }
     })
 
-    await capturedHandler({ contentCatalog: mockContentCatalog, siteCatalog: {} })
+    await handlers['contentClassified']({ contentCatalog: mockContentCatalog, siteCatalog: {} })
 
     expect(mockContentCatalog.addFile).not.toHaveBeenCalled()
     expect(logger.info).toHaveBeenCalledWith('Generated 0 field-only pages in nested format')
