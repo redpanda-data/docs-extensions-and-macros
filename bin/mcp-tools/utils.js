@@ -148,22 +148,32 @@ function serializeError(error) {
 
 /**
  * Deep serialize a result object, converting any Error objects to plain objects
+ * Handles circular references by tracking visited objects
  * @param {*} obj - The object to serialize
+ * @param {WeakSet} [visited] - Set of visited objects (for circular reference detection)
  * @returns {*} Object with all errors serialized
  */
-function serializeResult(obj) {
+function serializeResult(obj, visited = new WeakSet()) {
   if (!obj || typeof obj !== 'object') {
     return obj;
   }
 
-  // Handle arrays
-  if (Array.isArray(obj)) {
-    return obj.map(item => serializeResult(item));
+  // Check for circular references
+  if (visited.has(obj)) {
+    return '[Circular]';
   }
 
-  // Handle Error objects
+  // Handle Error objects first
   if (obj instanceof Error) {
     return serializeError(obj);
+  }
+
+  // Add to visited set
+  visited.add(obj);
+
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj.map(item => serializeResult(item, visited));
   }
 
   // Handle plain objects
@@ -172,7 +182,7 @@ function serializeResult(obj) {
     if (value instanceof Error) {
       result[key] = serializeError(value);
     } else if (value && typeof value === 'object') {
-      result[key] = serializeResult(value);
+      result[key] = serializeResult(value, visited);
     } else {
       result[key] = value;
     }
