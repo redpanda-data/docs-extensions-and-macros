@@ -93,5 +93,10 @@ antora:
   - require: './extensions/validate-attributes'
   - require: './extensions/find-related-docs'
   - require: './extensions/find-related-labs'
+  - require: './extensions/generate-fields-only-pages'
+    enabled: true
+    component: 'redpanda-connect'
+    format: 'markdown'
+    headingLevel: 2
   - require: './extensions/aggregate-terms'
 
