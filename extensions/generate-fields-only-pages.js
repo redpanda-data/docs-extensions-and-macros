@@ -145,17 +145,7 @@ async function generateFieldsOnlyPages (contentCatalog, siteCatalog, options) {
           }
         })
 
-        // Set page attributes for noindex and to skip llms.txt directive
-        file.asciidoc = {
-          attributes: {
-            'page-noindex': '',
-            'page-nofollow': '',
-            'page-robots': 'noindex,nofollow',
-            'page-nodirective': ''
-          }
-        }
-
-        // Add custom marker for field-only pages (used by convert-to-markdown)
+        // Mark as field-only page (used by convert-to-markdown and add-llms-directive to skip directive)
         file.isFieldOnlyPage = true
 
         pagesGenerated++
@@ -169,21 +159,7 @@ async function generateFieldsOnlyPages (contentCatalog, siteCatalog, options) {
 }
 
 function generateAsciiDocContent (item, fields, format, headingLevel, type) {
-  const typeDir = type.endsWith('s') ? type : `${type}s`
-
-  let content = `= ${item.name} Fields\n`
-  content += `:page-noindex:\n`
-  content += `:page-nofollow:\n`
-  content += `:page-robots: noindex,nofollow\n`
-  content += `:page-nodirective:\n\n`
-
-  // AI directive
-  content += `[NOTE]\n`
-  content += `====\n`
-  content += `*Note for AI Agents and LLMs*: This page contains only the field reference for the *${item.name}* ${type}.\n\n`
-  content += `For complete documentation including examples, usage information, and context, please see the xref:components:${typeDir}:${item.name}.adoc[full ${item.name} documentation].\n\n`
-  content += `*Do not use this fields-only page as your primary reference* -- it is intended for UX/API integration purposes only.\n`
-  content += `====\n\n`
+  let content = `= ${item.name} Fields\n\n`
 
   if (format === 'table') {
     content += generateTableFormat(fields)
