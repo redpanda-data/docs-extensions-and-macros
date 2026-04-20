@@ -321,11 +321,7 @@ async function generateRpcnConnectorDocs(options) {
   // Compile the "main" template (used when writeFullDrafts = true)
   const compiledTemplate = handlebars.compile(fs.readFileSync(template, 'utf8'));
 
-  // Compile the fields-only markdown template (for UX team field-only pages)
-  const fieldsOnlyTemplatePath = path.resolve(__dirname, './templates/fields-only.md.hbs');
-  const fieldsOnlyTemplate = handlebars.compile(fs.readFileSync(fieldsOnlyTemplatePath, 'utf8'));
-
-  // Determine which templates to use for “fields” and “examples”
+  // Determine which templates to use for "fields" and "examples"
   // If templateFields is not provided, fall back to the single `template`.
   // If templateExamples is not provided, skip examples entirely.
   const fieldsTemplatePath   = templateFields   || template;
@@ -353,8 +349,6 @@ async function generateRpcnConnectorDocs(options) {
     ? path.resolve(process.cwd(), 'modules/components/pages')
     : path.join(outputRoot, 'components');
   const configExamplesRoot = path.resolve(process.cwd(), 'modules/components/examples');
-  // Fields-only markdown pages (for UX team, noindex)
-  const fieldsOnlyRoot = path.resolve(process.cwd(), 'modules/components/pages/fields');
 
   if (!writeFullDrafts) {
     fs.mkdirSync(fieldsOutRoot,   { recursive: true });
@@ -406,27 +400,6 @@ async function generateRpcnConnectorDocs(options) {
         if (!writeFullDrafts) {
           partialsWritten++;
           partialFiles.push(path.relative(process.cwd(), ePath));
-        }
-      }
-
-      // Generate fields-only markdown for UX team (noindex, stable URLs)
-      // Skip bloblang functions/methods as they don't have configuration fields
-      if (type !== 'bloblang-functions' && type !== 'bloblang-methods') {
-        // Only generate if there are actual fields
-        if ((item.config && item.config.children && item.config.children.length > 0) ||
-            (item.children && item.children.length > 0)) {
-          try {
-            const fieldsOnlyContent = fieldsOnlyTemplate(item);
-            const fieldsOnlyPath = path.join(fieldsOnlyRoot, typeDir, `${name}.md`);
-            fs.mkdirSync(path.dirname(fieldsOnlyPath), { recursive: true });
-            fs.writeFileSync(fieldsOnlyPath, fieldsOnlyContent, 'utf8');
-            if (!writeFullDrafts) {
-              partialsWritten++;
-              partialFiles.push(path.relative(process.cwd(), fieldsOnlyPath));
-            }
-          } catch (err) {
-            console.warn(`Warning: Failed to generate fields-only markdown for ${type}/${name}: ${err.message}`);
-          }
         }
       }
 

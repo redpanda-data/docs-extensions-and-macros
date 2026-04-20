@@ -677,44 +677,5 @@ input:
         expect(fullCacheContent).toContain('*Default*: `60s`');
       });
     });
-
-    it('generates fields-only markdown files for UX team integration', () => {
-      return generateRpcnConnectorDocs({
-        data: dataFile,
-        template: templateFile,
-        templateFields: templateFile,
-        writeFullDrafts: false
-      }).then(() => {
-        const fieldsBase = path.join(tmpDir, 'modules', 'components', 'pages', 'fields');
-        const connectorFields = path.join(fieldsBase, 'connectors', 'MyConnector.md');
-        const cacheFields = path.join(fieldsBase, 'caches', 'memory.md');
-
-        // Check that markdown files were generated
-        expect(fs.existsSync(connectorFields)).toBe(true);
-        expect(fs.existsSync(cacheFields)).toBe(true);
-
-        // Verify connector fields markdown content
-        const connectorMd = fs.readFileSync(connectorFields, 'utf8');
-        expect(connectorMd).toContain('title: "MyConnector Fields"');
-        expect(connectorMd).toContain('robots: noindex, nofollow');
-        expect(connectorMd).toContain('Note for AI Agents and LLMs');
-        expect(connectorMd).toContain('Do not use this fields-only page as your primary reference');
-        expect(connectorMd).toContain('## `timeout`');
-        expect(connectorMd).toContain('**Type**: `int`');
-        expect(connectorMd).toContain('**Default**: `1000`');
-
-        // Verify both format views are present
-        expect(connectorMd).toContain('id="format-nested"');
-        expect(connectorMd).toContain('id="format-table"');
-        expect(connectorMd).toContain('| Field | Type | Default | Description |');
-
-        // Verify cache fields markdown content
-        const cacheMd = fs.readFileSync(cacheFields, 'utf8');
-        expect(cacheMd).toContain('title: "memory Fields"');
-        expect(cacheMd).toContain('robots: noindex, nofollow');
-        expect(cacheMd).toContain('## `compaction_interval`');
-        expect(cacheMd).toContain('**Default**: `"60s"`'); // String values include quotes
-      });
-    });
   });
 });

@@ -10,8 +10,6 @@ module.exports = {
   isObject:        require('./isObject.js'),
   renderYamlList:  require('./renderYamlList.js'),
   renderConnectFields:    require('./renderConnectFields.js'),
-  renderMarkdownFieldsNested:  require('./renderMarkdownFieldsNested.js'),
-  renderMarkdownFieldsTable:   require('./renderMarkdownFieldsTable.js'),
   renderConnectExamples:  require('./renderConnectExamples.js'),
   renderLeafField:        require('./renderLeafField.js'),
   renderObjectField:      require('./renderObjectField.js'),
