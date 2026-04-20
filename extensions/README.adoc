@@ -60,6 +60,7 @@ IMPORTANT: Extensions must be registered under the `antora.extensions` key in yo
 * **generate-index-data** - Generate searchable indexes from content
 * **generate-rp-connect-categories** - Generate Redpanda Connect component categories
 * **generate-rp-connect-info** - Generate Redpanda Connect component information
+* **generate-fields-only-pages** - Generate field-only reference pages for Redpanda Connect components
 
 === Navigation
 * **unlisted-pages** - Manage pages that appear in navigation but aren't listed
@@ -90,7 +91,6 @@ IMPORTANT: Extensions must be registered under the `antora.extensions` key in yo
 === AI-friendly documentation
 * **convert-to-markdown** - Export documentation pages as markdown with frontmatter
 * **convert-llms-to-txt** - Generate llms.txt and component-specific exports for AI agents
-* **add-llms-directive** - Inject llms.txt discovery directive into HTML pages
 * **add-markdown-urls-to-sitemap** - Add markdown URL entries to sitemap.xml
 * **convert-sitemap-to-markdown** - Generate markdown sitemap indexes
 
