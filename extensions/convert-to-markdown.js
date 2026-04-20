@@ -503,14 +503,8 @@ module.exports.register = function () {
 
           // Structure: H1 → llms.txt directive (blockquote) → frontmatter → source → content
           // The directive must appear near the top for agent-friendly docs spec compliance
-          // Skip directive for pages marked with page-nodirective attribute
-          const isFieldOnlyPage = page.asciidoc?.attributes?.['page-nodirective'] !== undefined
-
-          // Debug logging for field-only page detection
-          if (page.src?.path?.includes('fields/')) {
-            logger.info(`Field page check for ${page.src.path}: page-nodirective=${page.asciidoc?.attributes?.['page-nodirective']}, isFieldOnlyPage=${isFieldOnlyPage}`)
-            logger.info(`Available attributes: ${Object.keys(page.asciidoc?.attributes || {}).join(', ')}`)
-          }
+          // Skip directive for field-only pages (identified by path containing 'fields/')
+          const isFieldOnlyPage = page.src?.path?.includes('fields/')
 
           if (canonicalUrl && !isFieldOnlyPage) {
             const componentName = page.src?.component || '';
