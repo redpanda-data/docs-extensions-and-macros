@@ -49,13 +49,22 @@ module.exports.register = function () {
         const directiveMarkdown = formatLlmsDirective(componentName)
 
         // Convert markdown blockquote to HTML blockquote
-        // Remove leading '> ' and convert markdown links to HTML
-        let directiveText = directiveMarkdown.replace(/^>\s*/, '')
+        // Remove leading '> ' from each line and convert markdown links to HTML
+        let directiveText = directiveMarkdown
+          .split('\n')
+          .map(line => line.replace(/^>\s*/, ''))
+          .join('\n')
 
         // Convert markdown links [text](url) to HTML <a> tags
         // Add space after <a to match afdocs test pattern expectations
         // Add tabindex="-1" and aria-hidden="true" to remove from tab order and hide from assistive tech
         directiveText = directiveText.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" tabindex="-1" aria-hidden="true">$1</a>')
+
+        // Convert markdown bold **text** to HTML <strong>
+        directiveText = directiveText.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+
+        // Convert markdown code `text` to HTML <code>
+        directiveText = directiveText.replace(/`([^`]+)`/g, '<code>$1</code>')
 
         // Add tabindex="-1" and aria-hidden="true" to blockquote to fully hide from assistive tech
         const directiveHtml = `\n<blockquote class="llms-directive" tabindex="-1" aria-hidden="true">\n<p>${directiveText}</p>\n</blockquote>\n`
