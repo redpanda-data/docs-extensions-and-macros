@@ -485,43 +485,65 @@ module.exports.register = function () {
             )
           }
 
-          // Generate YAML frontmatter from AsciiDoc attributes
-          const frontmatter = generateFrontmatter(page)
-          if (frontmatter) {
-            logger.debug(`Generated frontmatter for ${page.src?.path}`)
-          }
-
-          // Extract H1 heading if present (only at document start)
-          const h1Match = markdown.match(/^(#\s+.+?)(\n|$)/)
-          let h1Heading = ''
-          let restOfMarkdown = markdown
-
-          if (h1Match) {
-            h1Heading = h1Match[0]
-            restOfMarkdown = markdown.substring(h1Match[0].length).trimStart()
-          }
-
-          // Structure: H1 → llms.txt directive (blockquote) → frontmatter → source → content
-          // The directive must appear near the top for agent-friendly docs spec compliance
           // Skip directive for field-only pages (marked by generate-fields-only-pages extension)
           const isFieldOnlyPage = page.isFieldOnlyPage === true
 
-          if (canonicalUrl && !isFieldOnlyPage) {
-            const componentName = page.src?.component || '';
-            // Use markdown blockquote format for the directive (visible, can be hidden with CSS)
-            const llmsDirective = formatLlmsDirective(componentName);
+          // Field-only pages: basic markdown only, no frontmatter, no directive, no source comments
+          if (isFieldOnlyPage) {
+            // Strip anchor links from headings: [](#anchor-id)heading → heading
+            markdown = markdown.replace(/\[]\(#[^)]+\)/g, '')
 
-            markdown = `${h1Heading}\n${llmsDirective}\n\n${frontmatter}<!-- Source: ${canonicalUrl} -->\n\n${restOfMarkdown}`
-          } else if (frontmatter && !isFieldOnlyPage) {
-            // If no canonical URL but we have frontmatter, still add directive after H1
-            const llmsDirective = formatLlmsDirective();
-            markdown = `${h1Heading}\n${llmsDirective}\n\n${frontmatter}${restOfMarkdown}`
-          } else if (canonicalUrl) {
-            // Field-only page with canonical URL but no directive
-            markdown = `${h1Heading}\n\n${frontmatter}<!-- Source: ${canonicalUrl} -->\n\n${restOfMarkdown}`
-          } else if (frontmatter) {
-            // Field-only page with frontmatter but no directive
-            markdown = `${h1Heading}\n\n${frontmatter}${restOfMarkdown}`
+            // Convert relative URLs to absolute URLs if site URL is available
+            if (siteUrl) {
+              try {
+                const baseUrl = new URL(siteUrl)
+                // Convert markdown links: [text](/path) → [text](https://domain/path)
+                markdown = markdown.replace(/\[([^\]]+)\]\(\/([^)]+)\)/g, (match, text, path) => {
+                  try {
+                    const fullUrl = new URL('/' + path, baseUrl).toString()
+                    return `[${text}](${fullUrl})`
+                  } catch (e) {
+                    return match // Keep original if URL construction fails
+                  }
+                })
+              } catch (e) {
+                logger.debug(`Failed to resolve relative URLs for ${page.src?.path}: ${e.message}`)
+              }
+            }
+
+            // Just use the markdown as-is with basic cleanup
+            markdown = markdown.trim()
+          } else {
+            // Regular pages: full treatment with frontmatter and directive
+            // Generate YAML frontmatter from AsciiDoc attributes
+            const frontmatter = generateFrontmatter(page)
+            if (frontmatter) {
+              logger.debug(`Generated frontmatter for ${page.src?.path}`)
+            }
+
+            // Extract H1 heading if present (only at document start)
+            const h1Match = markdown.match(/^(#\s+.+?)(\n|$)/)
+            let h1Heading = ''
+            let restOfMarkdown = markdown
+
+            if (h1Match) {
+              h1Heading = h1Match[0]
+              restOfMarkdown = markdown.substring(h1Match[0].length).trimStart()
+            }
+
+            // Structure: H1 → llms.txt directive (blockquote) → frontmatter → source → content
+            // The directive must appear near the top for agent-friendly docs spec compliance
+            if (canonicalUrl) {
+              const componentName = page.src?.component || '';
+              // Use markdown blockquote format for the directive (visible, can be hidden with CSS)
+              const llmsDirective = formatLlmsDirective(componentName);
+
+              markdown = `${h1Heading}\n${llmsDirective}\n\n${frontmatter}<!-- Source: ${canonicalUrl} -->\n\n${restOfMarkdown}`
+            } else if (frontmatter) {
+              // If no canonical URL but we have frontmatter, still add directive after H1
+              const llmsDirective = formatLlmsDirective();
+              markdown = `${h1Heading}\n${llmsDirective}\n\n${frontmatter}${restOfMarkdown}`
+            }
           }
 
           // Clean up unnecessary whitespace
