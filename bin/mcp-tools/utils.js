@@ -134,16 +134,36 @@ function serializeError(error) {
     return String(error);
   }
 
-  // Serialize Error object
-  return {
-    name: error.name,
-    message: error.message,
-    stack: error.stack,
+  // Serialize Error object - use try-catch in case any property access fails
+  try {
+    const serialized = {
+      name: error.name || 'Error',
+      message: error.message || String(error)
+    };
+
+    // Safely add stack if available
+    if (error.stack) {
+      serialized.stack = String(error.stack);
+    }
+
     // Include any additional properties (like stdout, stderr from exec errors)
-    ...(error.stdout && { stdout: error.stdout }),
-    ...(error.stderr && { stderr: error.stderr }),
-    ...(error.code && { code: error.code })
-  };
+    // Use hasOwnProperty to avoid accessing inherited properties that might cause issues
+    for (const key of ['stdout', 'stderr', 'code', 'status']) {
+      if (Object.prototype.hasOwnProperty.call(error, key) && error[key] != null) {
+        // Convert to string to ensure serializability
+        serialized[key] = String(error[key]);
+      }
+    }
+
+    return serialized;
+  } catch (err) {
+    // If serialization fails for any reason, return a safe fallback
+    return {
+      name: 'Error',
+      message: 'Error object could not be fully serialized',
+      originalError: String(error)
+    };
+  }
 }
 
 /**
