@@ -194,20 +194,6 @@ The extension skips:
 * Bloblang functions and methods (they don't have config fields)
 * Deprecated components
 
-== Known Issues
-
-=== Vinyl File Integration
-
-There is currently an issue with creating vinyl File objects that Antora's pipeline can process correctly. The extension successfully adds files to the content catalog (verified by logs showing "Generated N field-only pages"), but the files encounter errors during the document conversion phase.
-
-The core logic is sound (all unit tests pass), but the file spec needs adjustment for production use. Specifically:
-
-* The `path` property on the vinyl File object needs to match Antora's expectations
-* The `origin` metadata needs to be properly inherited from existing pages
-* Additional vinyl File properties may be required
-
-This will be addressed in a future update. For now, the extension serves as a working prototype with full test coverage.
-
 == Troubleshooting
 
 === Extension not generating pages

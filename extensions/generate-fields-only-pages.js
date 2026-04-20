@@ -2,6 +2,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const os = require('os')
 
 // Default configuration
 const DEFAULTS = {
@@ -110,33 +111,41 @@ async function generateFieldsOnlyPages (contentCatalog, siteCatalog, options) {
       try {
         const content = generateAsciiDocContent(item, fields, format, headingLevel, type)
         const typeDir = type.endsWith('s') ? type : `${type}s`
-
-        // Create virtual file in the content catalog
         const relative = `fields/${typeDir}/${item.name}.adoc`
-        const absPath = path.resolve(process.cwd(), `modules/components/pages/${relative}`)
 
-        // Get origin from first page in component (for git metadata)
+        // Get origin from first existing page in component (for git metadata)
         const existingPages = contentCatalog.getPages((page) => page.src.component === 'redpanda-connect')
         const origin = existingPages.length > 0 ? existingPages[0].src.origin : { type: 'generated' }
 
+        // Create a fake absolute path for generated files (used by logger)
+        const fakeAbspath = path.join(os.tmpdir(), 'generated-fields-only', relative)
+
+        // Create a stat object like real files have
+        const contentBuffer = Buffer.from(content)
+        const stat = Object.assign(new fs.Stats(), {
+          mode: 0o100644,
+          mtime: new Date(),
+          size: contentBuffer.byteLength
+        })
+
+        // Create file spec with all required properties
         const file = contentCatalog.addFile({
-          path: absPath,  // vinyl File needs this
-          contents: Buffer.from(content),
+          path: `modules/components/pages/${relative}`,
+          contents: contentBuffer,
+          stat: stat,
           src: {
             component: 'redpanda-connect',
             version: componentVersion.version,
             module: 'components',
             family: 'page',
             relative: relative,
-            basename: `${item.name}.adoc`,
-            stem: item.name,
-            extname: '.adoc',
             mediaType: 'text/asciidoc',
-            origin: origin
+            origin: origin,
+            abspath: fakeAbspath  // Needed by logger for error messages
           }
         })
 
-        // Set page attributes
+        // Set page attributes for noindex
         file.asciidoc = {
           attributes: {
             'page-noindex': '',
@@ -146,11 +155,6 @@ async function generateFieldsOnlyPages (contentCatalog, siteCatalog, options) {
         }
 
         pagesGenerated++
-
-        // Debug: log first few pages
-        if (pagesGenerated <= 3) {
-          logger.info(`Added page: ${file.src.relative} (pub=${file.pub})`)
-        }
       } catch (err) {
         logger.error(`Failed to generate field-only page for ${type}/${item.name}: ${err.message}`)
       }

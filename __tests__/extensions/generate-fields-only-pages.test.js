@@ -80,7 +80,8 @@ describe('generate-fields-only-pages extension', () => {
       on: jest.fn()
     }
 
-    extension.register.call(mockContext, { config: { headingLevel: 7 } })
+    // Note: Antora lowercases config keys, so use 'headinglevel' not 'headingLevel'
+    extension.register.call(mockContext, { config: { headinglevel: 7 } })
 
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Invalid headingLevel'))
     expect(mockContext.on).not.toHaveBeenCalled()
@@ -103,6 +104,7 @@ describe('generate-fields-only-pages extension', () => {
 
     const mockContentCatalog = {
       getComponents: () => [],
+      getPages: () => [],
       addFile: jest.fn()
     }
 
@@ -165,17 +167,26 @@ describe('generate-fields-only-pages extension', () => {
           version: '1.0.0'
         }
       }],
+      getPages: () => [],  // No existing pages for mock
       addFile: jest.fn((fileSpec) => {
-        addedFiles.push(fileSpec)
-        return fileSpec
+        // Mock the file object that would be returned
+        const mockFile = {
+          ...fileSpec,
+          path: fileSpec.path || 'mock-path.adoc',
+          dirname: 'mock-dir',
+          basename: 'mock.adoc',
+          asciidoc: {}
+        }
+        addedFiles.push(mockFile)
+        return mockFile
       })
     }
 
     extension.register.call(mockContext, {
       config: {
-        dataPath: dataPath,
+        datapath: dataPath,  // Note: Antora lowercases config keys
         format: 'nested',
-        headingLevel: 2
+        headinglevel: 2
       }
     })
 
@@ -245,15 +256,24 @@ describe('generate-fields-only-pages extension', () => {
           version: '1.0.0'
         }
       }],
+      getPages: () => [],  // No existing pages for mock
       addFile: jest.fn((fileSpec) => {
-        addedFiles.push(fileSpec)
-        return fileSpec
+        // Mock the file object that would be returned
+        const mockFile = {
+          ...fileSpec,
+          path: fileSpec.path || 'mock-path.adoc',
+          dirname: 'mock-dir',
+          basename: 'mock.adoc',
+          asciidoc: {}
+        }
+        addedFiles.push(mockFile)
+        return mockFile
       })
     }
 
     extension.register.call(mockContext, {
       config: {
-        dataPath: dataPath,
+        datapath: dataPath,  // Note: Antora lowercases config keys
         format: 'table'
       }
     })
@@ -314,17 +334,26 @@ describe('generate-fields-only-pages extension', () => {
           version: '1.0.0'
         }
       }],
+      getPages: () => [],  // No existing pages for mock
       addFile: jest.fn((fileSpec) => {
-        addedFiles.push(fileSpec)
-        return fileSpec
+        // Mock the file object that would be returned
+        const mockFile = {
+          ...fileSpec,
+          path: fileSpec.path || 'mock-path.adoc',
+          dirname: 'mock-dir',
+          basename: 'mock.adoc',
+          asciidoc: {}
+        }
+        addedFiles.push(mockFile)
+        return mockFile
       })
     }
 
     extension.register.call(mockContext, {
       config: {
-        dataPath: dataPath,
+        datapath: dataPath,  // Note: Antora lowercases config keys
         format: 'nested',
-        headingLevel: 3
+        headinglevel: 3
       }
     })
 
@@ -375,7 +404,7 @@ describe('generate-fields-only-pages extension', () => {
 
     extension.register.call(mockContext, {
       config: {
-        dataPath: dataPath
+        datapath: dataPath  // Note: Antora lowercases config keys
       }
     })
 
