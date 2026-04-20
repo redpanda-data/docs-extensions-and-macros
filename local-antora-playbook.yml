@@ -95,8 +95,6 @@ antora:
   - require: './extensions/find-related-labs'
   - require: './extensions/generate-fields-only-pages'
     enabled: true
-    format: 'nested'
-    headingLevel: 2
     dataPath: 'preview/redpanda-connect/docs-data/connect-latest.json'
   - require: './extensions/aggregate-terms'
 
