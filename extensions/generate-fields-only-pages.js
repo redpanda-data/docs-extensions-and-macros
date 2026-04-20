@@ -171,7 +171,8 @@ function generateAsciiDocContent (item, fields, format, headingLevel, type) {
   let content = `= ${item.name} Fields\n`
   content += `:page-noindex:\n`
   content += `:page-nofollow:\n`
-  content += `:page-robots: noindex,nofollow\n\n`
+  content += `:page-robots: noindex,nofollow\n`
+  content += `:page-nodirective:\n\n`
 
   // AI directive
   content += `[NOTE]\n`
