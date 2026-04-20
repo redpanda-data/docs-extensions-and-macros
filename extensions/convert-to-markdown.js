@@ -503,8 +503,8 @@ module.exports.register = function () {
 
           // Structure: H1 → llms.txt directive (blockquote) → frontmatter → source → content
           // The directive must appear near the top for agent-friendly docs spec compliance
-          // Skip directive for field-only pages (marked with page-noindex)
-          const isFieldOnlyPage = page.asciidoc?.attributes?.['page-noindex'] !== undefined
+          // Skip directive for pages marked with page-nodirective attribute
+          const isFieldOnlyPage = page.asciidoc?.attributes?.['page-nodirective'] !== undefined
 
           if (canonicalUrl && !isFieldOnlyPage) {
             const componentName = page.src?.component || '';

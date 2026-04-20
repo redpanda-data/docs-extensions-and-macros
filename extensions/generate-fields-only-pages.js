@@ -145,12 +145,13 @@ async function generateFieldsOnlyPages (contentCatalog, siteCatalog, options) {
           }
         })
 
-        // Set page attributes for noindex
+        // Set page attributes for noindex and to skip llms.txt directive
         file.asciidoc = {
           attributes: {
             'page-noindex': '',
             'page-nofollow': '',
-            'page-robots': 'noindex,nofollow'
+            'page-robots': 'noindex,nofollow',
+            'page-nodirective': ''
           }
         }
 
