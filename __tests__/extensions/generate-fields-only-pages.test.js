@@ -54,6 +54,28 @@ describe('generate-fields-only-pages extension', () => {
     expect(mockContext.on).not.toHaveBeenCalled()
   })
 
+  test('errors on invalid format', () => {
+    const logger = {
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn()
+    }
+    const mockContext = {
+      getLogger: () => logger,
+      on: jest.fn()
+    }
+
+    extension.register.call(mockContext, {
+      config: {
+        format: 'invalid',
+        datapath: 'some-path.json'
+      }
+    })
+
+    expect(logger.error).toHaveBeenCalledWith("Invalid format 'invalid'. Must be 'nested' or 'table'. Disabling extension.")
+    expect(mockContext.on).not.toHaveBeenCalled()
+  })
+
   test('warns when dataPath is missing', () => {
     const logger = {
       info: jest.fn(),
@@ -71,7 +93,7 @@ describe('generate-fields-only-pages extension', () => {
     expect(mockContext.on).not.toHaveBeenCalled()
   })
 
-  test('generates field-only pages using Handlebars', () => {
+  test('generates field-only pages using Handlebars (nested format)', () => {
     const logger = {
       info: jest.fn(),
       warn: jest.fn(),
@@ -150,6 +172,110 @@ describe('generate-fields-only-pages extension', () => {
     expect(content).toContain('=== `timeout`')
     expect(content).toContain('*Type*: `int`')
     expect(content).toContain('*Default*: `30`')
+
+    expect(logger.info).toHaveBeenCalledWith('Generated 1 field-only pages')
+  })
+
+  test('generates field-only pages using table format', () => {
+    const logger = {
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn()
+    }
+
+    // Create test data file
+    const testDataPath = path.join(tmpDir, 'test-data.json')
+    const testData = {
+      outputs: [
+        {
+          name: 'test_output',
+          children: [
+            {
+              name: 'host',
+              type: 'string',
+              default: 'localhost',
+              description: 'The hostname to connect to'
+            },
+            {
+              name: 'port',
+              type: 'int',
+              default: 9092,
+              description: 'The port number'
+            },
+            {
+              name: 'options',
+              type: 'object',
+              kind: 'map',
+              description: 'Additional options',
+              children: [
+                {
+                  name: 'retry',
+                  type: 'bool',
+                  default: true,
+                  description: 'Enable retry'
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+    fs.writeFileSync(testDataPath, JSON.stringify(testData))
+
+    const addedFiles = []
+    const mockContentCatalog = {
+      getComponent: jest.fn(() => ({
+        latest: {
+          version: 'master'
+        }
+      })),
+      getPages: jest.fn(() => []),
+      addFile: jest.fn((file) => {
+        addedFiles.push(file)
+        return file
+      })
+    }
+
+    const mockContext = {
+      getLogger: () => logger,
+      on: jest.fn((event, handler) => {
+        if (event === 'contentClassified') {
+          handler({ contentCatalog: mockContentCatalog, siteCatalog: {} })
+        }
+      })
+    }
+
+    extension.register.call(mockContext, {
+      config: {
+        format: 'table',
+        datapath: testDataPath
+      }
+    })
+
+    // Check that a file was added
+    expect(addedFiles.length).toBe(1)
+    expect(addedFiles[0].src.relative).toBe('fields/outputs/test_output.adoc')
+    expect(addedFiles[0].isFieldOnlyPage).toBe(true)
+
+    // Check the content uses table format
+    const content = addedFiles[0].contents.toString()
+    expect(content).toContain('= test_output Fields')
+    expect(content).toContain('[cols="2,1,1,4"]')
+    expect(content).toContain('|===')
+    expect(content).toContain('|Field |Type |Default |Description')
+    expect(content).toContain('|`host`')
+    expect(content).toContain('|`string`')
+    expect(content).toContain('|`localhost`')
+    expect(content).toContain('|The hostname to connect to')
+    expect(content).toContain('|`port`')
+    expect(content).toContain('|`int`')
+    expect(content).toContain('|`9092`')
+    expect(content).toContain('|The port number')
+    // Check nested field appears in table
+    expect(content).toContain('|`options.retry`')
+    expect(content).toContain('|`bool`')
+    expect(content).toContain('|`true`')
 
     expect(logger.info).toHaveBeenCalledWith('Generated 1 field-only pages')
   })

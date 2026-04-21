@@ -13,10 +13,110 @@ Object.entries(helpers).forEach(([name, fn]) => {
   }
 })
 
+// Register table format helper
+handlebars.registerHelper('renderConnectFieldsTable', function (children) {
+  if (!children || !Array.isArray(children) || children.length === 0) {
+    return 'No configuration fields available.\n\n'
+  }
+
+  const rows = []
+
+  function collectFields (fieldsList, pathPrefix = '') {
+    if (!Array.isArray(fieldsList)) return
+
+    fieldsList.forEach(field => {
+      if (field.is_deprecated || !field.name) return
+
+      const isArray = field.kind === 'array'
+      const nameWithArray = (typeof field.name === 'string' && isArray && !field.name.endsWith('[]'))
+        ? `${field.name}[]`
+        : field.name
+      const currentPath = pathPrefix ? `${pathPrefix}.${nameWithArray}` : nameWithArray
+
+      // Normalize type
+      let displayType
+      const isArrayTitle = typeof field.name === 'string' && field.name.endsWith('[]')
+      if (isArrayTitle) {
+        displayType = 'array<object>'
+      } else if (field.type === 'string' && field.kind === 'array') {
+        displayType = 'array'
+      } else if (field.type === 'unknown' && field.kind === 'map') {
+        displayType = 'object'
+      } else if (field.type === 'unknown' && (field.kind === 'array' || field.kind === 'list')) {
+        displayType = 'array'
+      } else {
+        displayType = field.type
+      }
+
+      // Format default value
+      let defaultValue = ''
+      if (field.default !== undefined) {
+        if (Array.isArray(field.default) && field.default.length === 0) {
+          defaultValue = '`[]`'
+        } else if (
+          field.default !== null &&
+          typeof field.default === 'object' &&
+          !Array.isArray(field.default) &&
+          Object.keys(field.default).length === 0
+        ) {
+          defaultValue = '`{}`'
+        } else if (typeof field.default === 'string') {
+          const escaped = field.default.replace(/`/g, '\\`')
+          defaultValue = `\`${escaped}\``
+        } else if (typeof field.default === 'number' || typeof field.default === 'boolean') {
+          defaultValue = `\`${field.default}\``
+        } else if (field.default === null) {
+          defaultValue = '`null`'
+        } else {
+          defaultValue = '_(complex)_'
+        }
+      }
+
+      // Clean description for table (single line)
+      let desc = (field.description || '').replace(/\n+/g, ' ').trim()
+      if (desc.length > 150) {
+        desc = desc.substring(0, 147) + '...'
+      }
+
+      rows.push({
+        field: `\`${currentPath}\``,
+        type: `\`${displayType}\``,
+        default: defaultValue || '-',
+        description: desc || '-'
+      })
+
+      // Recurse for children
+      if (field.children && Array.isArray(field.children) && field.children.length > 0) {
+        collectFields(field.children, currentPath)
+      }
+    })
+  }
+
+  collectFields(children, '')
+
+  if (rows.length === 0) return 'No configuration fields available.\n\n'
+
+  let table = '[cols="2,1,1,4"]\n'
+  table += '|===\n'
+  table += '|Field |Type |Default |Description\n\n'
+
+  rows.forEach(row => {
+    table += `|${row.field}\n`
+    table += `|${row.type}\n`
+    table += `|${row.default}\n`
+    table += `|${row.description}\n\n`
+  })
+
+  table += '|===\n'
+
+  return new handlebars.SafeString(table)
+})
+
 // Default configuration
 const DEFAULTS = {
-  dataPath: null,   // Path to connector JSON data file (e.g., 'docs-data/connect-4.88.0.json')
-  enabled: true     // Allow disabling the extension
+  format: 'nested',  // 'nested' or 'table'
+  dataPath: null,    // Path to connector JSON data file (e.g., 'docs-data/connect-4.88.0.json')
+  enabled: true      // Allow disabling the extension
 }
 
 module.exports.register = function ({ config }) {
@@ -24,6 +124,7 @@ module.exports.register = function ({ config }) {
 
   // Merge config with defaults
   const {
+    format = DEFAULTS.format,
     datapath = DEFAULTS.dataPath,           // Antora lowercases this
     enabled = DEFAULTS.enabled
   } = config || {}
@@ -32,6 +133,12 @@ module.exports.register = function ({ config }) {
 
   if (!enabled) {
     logger.info('Extension disabled via config')
+    return
+  }
+
+  // Validate format
+  if (format !== 'nested' && format !== 'table') {
+    logger.error(`Invalid format '${format}'. Must be 'nested' or 'table'. Disabling extension.`)
     return
   }
 
@@ -52,8 +159,9 @@ module.exports.register = function ({ config }) {
     return
   }
 
-  // Compile simple template for field-only pages
-  const fieldOnlyTemplate = handlebars.compile('= {{name}} Fields\n\n{{{renderConnectFields children}}}')
+  // Compile template based on format
+  const helperName = format === 'table' ? 'renderConnectFieldsTable' : 'renderConnectFields'
+  const fieldOnlyTemplate = handlebars.compile(`= {{name}} Fields\n\n{{{${helperName} children}}}`)
 
   this.on('contentClassified', ({ contentCatalog, siteCatalog }) => {
     const component = contentCatalog.getComponent('redpanda-connect')
