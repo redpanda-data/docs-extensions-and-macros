@@ -250,4 +250,17 @@ module.exports.register = function ({ config }) {
 
     logger.info(`Generated ${pagesGenerated} field-only pages`)
   })
+
+  // Unpublish field-only pages as HTML (they should only exist as markdown)
+  // Do this in beforePublish so pages go through full processing (composition, markdown conversion)
+  // but don't get written as HTML files
+  this.on('beforePublish', ({ contentCatalog }) => {
+    const fieldOnlyPages = contentCatalog.getPages((page) => page.isFieldOnlyPage === true && page.out)
+    fieldOnlyPages.forEach((page) => {
+      delete page.out
+    })
+    if (fieldOnlyPages.length > 0) {
+      logger.debug(`Unpublished ${fieldOnlyPages.length} field-only pages from HTML output`)
+    }
+  })
 }
