@@ -485,6 +485,42 @@ module.exports.register = function () {
             )
           }
 
+          // Remove escaped underscores from headings (TurndownService escapes them unnecessarily)
+          markdown = markdown.replace(/^(#{1,6}\s+.+)$/gm, (heading) => {
+            return heading.replace(/\\_/g, '_')
+          })
+
+          // Convert relative URLs to absolute URLs if site URL is available
+          if (siteUrl && page.pub?.url) {
+            try {
+              const baseUrl = new URL(siteUrl)
+              const pageUrl = new URL(page.pub.url, baseUrl)
+
+              // Convert absolute paths: [text](/path) → [text](https://domain/path)
+              markdown = markdown.replace(/\[([^\]]+)\]\(\/([^)]+)\)/g, (match, text, path) => {
+                try {
+                  const fullUrl = new URL('/' + path, baseUrl).toString()
+                  return `[${text}](${fullUrl})`
+                } catch (e) {
+                  return match // Keep original if URL construction fails
+                }
+              })
+
+              // Convert relative paths: [text](../../path) → [text](https://domain/resolved/path)
+              markdown = markdown.replace(/\[([^\]]+)\]\((\.\.\/[^)]+)\)/g, (match, text, relativePath) => {
+                try {
+                  // Resolve relative path against the current page URL
+                  const fullUrl = new URL(relativePath, pageUrl).toString()
+                  return `[${text}](${fullUrl})`
+                } catch (e) {
+                  return match // Keep original if URL construction fails
+                }
+              })
+            } catch (e) {
+              logger.debug(`Failed to resolve relative URLs for ${page.src?.path}: ${e.message}`)
+            }
+          }
+
           // Skip directive for field-only pages (marked by generate-fields-only-pages extension)
           const isFieldOnlyPage = page.isFieldOnlyPage === true
 
@@ -492,42 +528,6 @@ module.exports.register = function () {
           if (isFieldOnlyPage) {
             // Strip anchor links from headings: [](#anchor-id)heading → heading
             markdown = markdown.replace(/\[]\(#[^)]+\)/g, '')
-
-            // Remove escaped underscores from headings (TurndownService escapes them unnecessarily)
-            markdown = markdown.replace(/^(#{1,6}\s+.+)$/gm, (heading) => {
-              return heading.replace(/\\_/g, '_')
-            })
-
-            // Convert relative URLs to absolute URLs if site URL is available
-            if (siteUrl && page.pub?.url) {
-              try {
-                const baseUrl = new URL(siteUrl)
-                const pageUrl = new URL(page.pub.url, baseUrl)
-
-                // Convert absolute paths: [text](/path) → [text](https://domain/path)
-                markdown = markdown.replace(/\[([^\]]+)\]\(\/([^)]+)\)/g, (match, text, path) => {
-                  try {
-                    const fullUrl = new URL('/' + path, baseUrl).toString()
-                    return `[${text}](${fullUrl})`
-                  } catch (e) {
-                    return match // Keep original if URL construction fails
-                  }
-                })
-
-                // Convert relative paths: [text](../../path) → [text](https://domain/resolved/path)
-                markdown = markdown.replace(/\[([^\]]+)\]\((\.\.\/[^)]+)\)/g, (match, text, relativePath) => {
-                  try {
-                    // Resolve relative path against the current page URL
-                    const fullUrl = new URL(relativePath, pageUrl).toString()
-                    return `[${text}](${fullUrl})`
-                  } catch (e) {
-                    return match // Keep original if URL construction fails
-                  }
-                })
-              } catch (e) {
-                logger.debug(`Failed to resolve relative URLs for ${page.src?.path}: ${e.message}`)
-              }
-            }
 
             // Just use the markdown as-is with basic cleanup
             markdown = markdown.trim()
