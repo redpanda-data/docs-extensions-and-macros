@@ -28,6 +28,7 @@ function capToTwoSentences (description) {
   }
 
   const abbreviations = [
+    /https?:\/\/[^\s]+?(?=[.!?](?:\s|$)|\s|$)/gi,  // Protect URLs from being split by sentence detection (non-greedy, preserve trailing punctuation)
     /\bv\d+\.\d+(?:\.\d+)?/gi,
     /\d+\.\d+/g,
     /\be\.g\./gi,
@@ -1127,9 +1128,11 @@ async function handleRpcnConnectorDocs (options) {
             if (cgoConn.type === type) {
               const exists = connectorData[type].some(c => c.name === cgoConn.name)
               if (!exists) {
+                // Singularize type for consistency with stored data (except "metrics" which stays plural)
+                const componentType = cgoConn.type === 'metrics' ? 'metrics' : cgoConn.type.replace(/s$/, '')
                 connectorData[type].push({
                   ...cgoConn,
-                  type: cgoConn.type.replace(/s$/, ''),
+                  type: componentType,
                   cloudSupported: false,
                   requiresCgo: true
                 })
@@ -1144,9 +1147,11 @@ async function handleRpcnConnectorDocs (options) {
             if (cloudConn.type === type) {
               const exists = connectorData[type].some(c => c.name === cloudConn.name)
               if (!exists) {
+                // Singularize type for consistency with stored data (except "metrics" which stays plural)
+                const componentType = cloudConn.type === 'metrics' ? 'metrics' : cloudConn.type.replace(/s$/, '')
                 connectorData[type].push({
                   ...cloudConn,
-                  type: cloudConn.type.replace(/s$/, ''),
+                  type: componentType,
                   cloudSupported: true,
                   requiresCgo: false,
                   cloudOnly: true
@@ -1368,8 +1373,14 @@ async function handleRpcnConnectorDocs (options) {
           return !wasInOldOss && !wasInOldCgo && !docsExist
         })
       } else {
+        // Fallback when oldBinaryAnalysis is unavailable
+        // NOTE: oldIndex is loaded from saved JSON files that have platform metadata stripped
+        // (see stripPlatformMetadata() call before saving). This means checking requiresCgo === true
+        // will always fail. We rely on the name match and docs existence check as a heuristic.
+        // If a component with the same name exists in oldIndex OR docs exist, treat it as existing.
         newCgoComponents = binaryAnalysis.cgoOnly.filter(cgoComp => {
-          const wasInOldOss = oldIndex[cgoComp.type]?.some(c => c.name === cgoComp.name)
+          // Check if component with same name existed in old index (metadata unavailable, just name match)
+          const wasInOldIndex = oldIndex[cgoComp.type]?.some(c => c.name === cgoComp.name)
 
           // Check if docs already exist
           const typePlural = cgoComp.type.endsWith('s') ? cgoComp.type : `${cgoComp.type}s`
@@ -1378,7 +1389,8 @@ async function handleRpcnConnectorDocs (options) {
             fs.existsSync(path.join(root, relPath))
           )
 
-          return !wasInOldOss && !docsExist
+          // Only treat as new if it wasn't in the old index AND docs don't exist
+          return !wasInOldIndex && !docsExist
         })
         if (newCgoComponents.length > 0) {
           console.log(`   ℹ️  No old binary analysis found - treating ${newCgoComponents.length} cgo components not in old OSS data as new`)

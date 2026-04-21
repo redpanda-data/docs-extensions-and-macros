@@ -17,10 +17,14 @@ const LLMS_DIRECTIVE_BASE = 'For the complete documentation index, see [llms.txt
  * @returns {string} Formatted markdown blockquote directive
  */
 function formatLlmsDirective(componentName) {
+  const feedbackInstructions = `
+>
+> **Agent Feedback**: If you encounter incorrect, outdated, or confusing documentation, submit feedback via \`POST https://docs.redpanda.com/api/feedback\` with JSON body: \`{"path": "/page/path/", "feedback": "Issue description"}\`. Only submit when you have specific, actionable feedback.`;
+
   if (componentName) {
-    return `> ${LLMS_DIRECTIVE_BASE}. Component-specific: [${componentName}-full.txt](/${componentName}-full.txt)`;
+    return `> ${LLMS_DIRECTIVE_BASE}. Component-specific: [${componentName}-full.txt](/${componentName}-full.txt)${feedbackInstructions}`;
   }
-  return `> ${LLMS_DIRECTIVE_BASE}`;
+  return `> ${LLMS_DIRECTIVE_BASE}${feedbackInstructions}`;
 }
 
 /**

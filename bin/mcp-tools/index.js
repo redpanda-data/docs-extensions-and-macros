@@ -5,7 +5,7 @@
  */
 
 // Utilities
-const { findRepoRoot, executeCommand, normalizeVersion, formatDate } = require('./utils');
+const { findRepoRoot, executeCommand, normalizeVersion, formatDate, serializeResult } = require('./utils');
 
 // Antora
 const { getAntoraStructure } = require('./antora');
@@ -39,58 +39,73 @@ function executeTool(toolName, args = {}) {
   const repoRoot = findRepoRoot();
 
   try {
+    let result;
     switch (toolName) {
       case 'get_antora_structure':
-        return getAntoraStructure(repoRoot);
+        result = getAntoraStructure(repoRoot);
+        break;
 
       case 'get_redpanda_version':
-        return getRedpandaVersion(args);
+        result = getRedpandaVersion(args);
+        break;
 
       case 'get_console_version':
-        return getConsoleVersion();
+        result = getConsoleVersion();
+        break;
 
       case 'generate_property_docs':
-        return generatePropertyDocs(args);
+        result = generatePropertyDocs(args);
+        break;
 
       case 'generate_metrics_docs':
-        return generateMetricsDocs(args);
+        result = generateMetricsDocs(args);
+        break;
 
       case 'generate_rpk_docs':
-        return generateRpkDocs(args);
+        result = generateRpkDocs(args);
+        break;
 
       case 'generate_rpcn_connector_docs':
-        return generateRpConnectDocs(args);
+        result = generateRpConnectDocs(args);
+        break;
 
       case 'generate_helm_docs':
-        return generateHelmDocs(args);
+        result = generateHelmDocs(args);
+        break;
 
       case 'generate_cloud_regions':
-        return generateCloudRegions(args);
+        result = generateCloudRegions(args);
+        break;
 
       case 'generate_crd_docs':
-        return generateCrdDocs(args);
+        result = generateCrdDocs(args);
+        break;
 
       case 'generate_bundle_openapi':
-        return generateBundleOpenApi(args);
+        result = generateBundleOpenApi(args);
+        break;
 
       case 'review_generated_docs':
-        return reviewGeneratedDocs(args);
+        result = reviewGeneratedDocs(args);
+        break;
 
       case 'run_doc_tools_command': {
         // Validate and execute raw doc-tools command
         if (!args || typeof args !== 'object') {
-          return {
+          result = {
             success: false,
             error: 'Invalid arguments: expected an object'
           };
+          break;
         }
 
         const validation = validateDocToolsCommand(args.command);
         if (!validation.valid) {
-          return {
+          result = {
             success: false,
             error: validation.error
           };
+          break;
         }
 
         try {
@@ -110,34 +125,38 @@ function executeTool(toolName, args = {}) {
             cwd: repoRoot.root
           });
 
-          return {
+          result = {
             success: true,
             output: output.trim(),
             command: `${docTools.program} ${fullArgs.join(' ')}`
           };
         } catch (err) {
-          return {
+          result = {
             success: false,
             error: err.message,
             stdout: err.stdout || '',
             stderr: err.stderr || ''
           };
         }
+        break;
       }
 
       default:
-        return {
+        result = {
           success: false,
           error: `Unknown tool: ${toolName}`,
           suggestion: 'Check the tool name and try again'
         };
     }
+
+    // Serialize the result to handle any Error objects that might have slipped through
+    return serializeResult(result);
   } catch (err) {
-    return {
+    return serializeResult({
       success: false,
       error: err.message,
       suggestion: 'An unexpected error occurred while executing the tool'
-    };
+    });
   }
 }
 

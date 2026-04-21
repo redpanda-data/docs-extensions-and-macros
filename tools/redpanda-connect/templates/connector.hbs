@@ -17,7 +17,7 @@ Common::
 --
 
 ```yml
-include::components:example$common/{{type}}s/{{name}}.yaml[]
+include::components:example$common/{{typeDir}}/{{name}}.yaml[]
 ```
 
 --
@@ -26,7 +26,7 @@ Advanced::
 --
 
 ```yml
-include::components:example$advanced/{{type}}s/{{name}}.yaml[]
+include::components:example$advanced/{{typeDir}}/{{name}}.yaml[]
 ```
 
 --
@@ -47,11 +47,11 @@ You can either xref:install:prebuilt-binary.adoc[download a prebuilt cgo-enabled
 
 {{/if}}
 {{#if (or this.config.children children)}}
-include::redpanda-connect:components:partial$fields/{{type}}s/{{name}}.adoc[]
+include::redpanda-connect:components:partial$fields/{{typeDir}}/{{name}}.adoc[]
 {{/if}}
 
 {{#if this.examples}}
-include::redpanda-connect:components:partial$examples/{{type}}s/{{name}}.adoc[]
+include::redpanda-connect:components:partial$examples/{{typeDir}}/{{name}}.adoc[]
 {{/if}}
 
 
