@@ -490,37 +490,6 @@ module.exports.register = function () {
             return heading.replace(/\\_/g, '_')
           })
 
-          // Convert relative URLs to absolute URLs if site URL is available
-          if (siteUrl && page.pub?.url) {
-            try {
-              const baseUrl = new URL(siteUrl)
-              const pageUrl = new URL(page.pub.url, baseUrl)
-
-              // Convert absolute paths: [text](/path) → [text](https://domain/path)
-              markdown = markdown.replace(/\[([^\]]+)\]\(\/([^)]+)\)/g, (match, text, path) => {
-                try {
-                  const fullUrl = new URL('/' + path, baseUrl).toString()
-                  return `[${text}](${fullUrl})`
-                } catch (e) {
-                  return match // Keep original if URL construction fails
-                }
-              })
-
-              // Convert relative paths: [text](../../path) → [text](https://domain/resolved/path)
-              markdown = markdown.replace(/\[([^\]]+)\]\((\.\.\/[^)]+)\)/g, (match, text, relativePath) => {
-                try {
-                  // Resolve relative path against the current page URL
-                  const fullUrl = new URL(relativePath, pageUrl).toString()
-                  return `[${text}](${fullUrl})`
-                } catch (e) {
-                  return match // Keep original if URL construction fails
-                }
-              })
-            } catch (e) {
-              logger.debug(`Failed to resolve relative URLs for ${page.src?.path}: ${e.message}`)
-            }
-          }
-
           // Skip directive for field-only pages (marked by generate-fields-only-pages extension)
           const isFieldOnlyPage = page.isFieldOnlyPage === true
 
@@ -561,6 +530,37 @@ module.exports.register = function () {
               // If no canonical URL but we have frontmatter, still add directive after H1
               const llmsDirective = formatLlmsDirective();
               markdown = `${h1Heading}\n${llmsDirective}\n\n${frontmatter}${restOfMarkdown}`
+            }
+          }
+
+          // Convert relative URLs to absolute URLs (after directive is added)
+          if (siteUrl && page.pub?.url) {
+            try {
+              const baseUrl = new URL(siteUrl)
+              const pageUrl = new URL(page.pub.url, baseUrl)
+
+              // Convert absolute paths: [text](/path) → [text](https://domain/path)
+              markdown = markdown.replace(/\[([^\]]+)\]\(\/([^)]+)\)/g, (match, text, path) => {
+                try {
+                  const fullUrl = new URL('/' + path, baseUrl).toString()
+                  return `[${text}](${fullUrl})`
+                } catch (e) {
+                  return match // Keep original if URL construction fails
+                }
+              })
+
+              // Convert relative paths: [text](../../path) → [text](https://domain/resolved/path)
+              markdown = markdown.replace(/\[([^\]]+)\]\((\.\.\/[^)]+)\)/g, (match, text, relativePath) => {
+                try {
+                  // Resolve relative path against the current page URL
+                  const fullUrl = new URL(relativePath, pageUrl).toString()
+                  return `[${text}](${fullUrl})`
+                } catch (e) {
+                  return match // Keep original if URL construction fails
+                }
+              })
+            } catch (e) {
+              logger.debug(`Failed to resolve relative URLs for ${page.src?.path}: ${e.message}`)
             }
           }
 
