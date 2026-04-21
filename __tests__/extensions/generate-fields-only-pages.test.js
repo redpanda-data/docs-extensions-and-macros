@@ -6,15 +6,21 @@ const os = require('os')
 
 describe('generate-fields-only-pages extension', () => {
   let tmpDir
+  let originalCwd
   let extension
 
   beforeEach(() => {
+    originalCwd = process.cwd()
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fields-only-test-'))
     process.chdir(tmpDir)
     extension = require('../../extensions/generate-fields-only-pages.js')
   })
 
   afterEach(() => {
+    // Change back to original directory before deleting tmpDir
+    if (originalCwd) {
+      process.chdir(originalCwd)
+    }
     if (tmpDir && fs.existsSync(tmpDir)) {
       fs.rmSync(tmpDir, { recursive: true, force: true })
     }
