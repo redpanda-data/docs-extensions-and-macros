@@ -28,7 +28,7 @@ function capToTwoSentences (description) {
   }
 
   const abbreviations = [
-    /https?:\/\/[^\s]+?(?=[\s]|$|[.!?])/gi,  // Protect URLs from being split by sentence detection (non-greedy, preserve trailing punctuation)
+    /https?:\/\/[^\s]+?(?=[.!?](?:\s|$)|\s|$)/gi,  // Protect URLs from being split by sentence detection (non-greedy, preserve trailing punctuation)
     /\bv\d+\.\d+(?:\.\d+)?/gi,
     /\d+\.\d+/g,
     /\be\.g\./gi,
@@ -1373,11 +1373,14 @@ async function handleRpcnConnectorDocs (options) {
           return !wasInOldOss && !wasInOldCgo && !docsExist
         })
       } else {
+        // Fallback when oldBinaryAnalysis is unavailable
+        // NOTE: oldIndex is loaded from saved JSON files that have platform metadata stripped
+        // (see stripPlatformMetadata() call before saving). This means checking requiresCgo === true
+        // will always fail. We rely on the name match and docs existence check as a heuristic.
+        // If a component with the same name exists in oldIndex OR docs exist, treat it as existing.
         newCgoComponents = binaryAnalysis.cgoOnly.filter(cgoComp => {
-          // Check if component existed in old index as a CGO component (requiresCgo must be explicitly true)
-          const wasInOldIndex = oldIndex[cgoComp.type]?.some(c =>
-            c.name === cgoComp.name && c.requiresCgo === true
-          )
+          // Check if component with same name existed in old index (metadata unavailable, just name match)
+          const wasInOldIndex = oldIndex[cgoComp.type]?.some(c => c.name === cgoComp.name)
 
           // Check if docs already exist
           const typePlural = cgoComp.type.endsWith('s') ? cgoComp.type : `${cgoComp.type}s`
