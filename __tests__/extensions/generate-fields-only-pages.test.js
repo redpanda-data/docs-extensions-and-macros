@@ -170,7 +170,6 @@ describe('generate-fields-only-pages extension', () => {
 
     // Check the content uses Handlebars rendering
     const content = addedFiles[0].contents.toString()
-    expect(content).toContain('= test_input Fields')
     expect(content).toContain('=== `url`')
     expect(content).toContain('The URL to connect to')
     expect(content).toContain('*Type*: `string`')
@@ -266,7 +265,6 @@ describe('generate-fields-only-pages extension', () => {
 
     // Check the content uses table format
     const content = addedFiles[0].contents.toString()
-    expect(content).toContain('= test_output Fields')
     expect(content).toContain('[cols="2,1,1,4"]')
     expect(content).toContain('|===')
     expect(content).toContain('|Field |Type |Default |Description')

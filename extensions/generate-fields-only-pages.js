@@ -159,9 +159,9 @@ module.exports.register = function ({ config }) {
     return
   }
 
-  // Compile template based on format
+  // Compile template based on format (without title - these pages are meant to be included)
   const helperName = format === 'table' ? 'renderConnectFieldsTable' : 'renderConnectFields'
-  const fieldOnlyTemplate = handlebars.compile(`= {{name}} Fields\n\n{{{${helperName} children}}}`)
+  const fieldOnlyTemplate = handlebars.compile(`{{{${helperName} children}}}`)
 
   this.on('contentClassified', ({ contentCatalog, siteCatalog }) => {
     const component = contentCatalog.getComponent('redpanda-connect')
