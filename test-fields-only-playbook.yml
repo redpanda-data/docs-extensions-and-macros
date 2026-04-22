@@ -32,4 +32,3 @@ antora:
     enabled: true
     format: nested
     headingLevel: 2
-    datapath: 'redpanda-connect:components:attachment$connect-4.88.0.json'

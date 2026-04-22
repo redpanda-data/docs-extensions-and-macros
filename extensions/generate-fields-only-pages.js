@@ -117,8 +117,6 @@ handlebars.registerHelper('renderConnectFieldsTable', function (children) {
 // Default configuration
 const DEFAULTS = {
   format: 'nested',   // 'nested' or 'table'
-  dataPath: null,     // Optional Antora resource ID for the connector JSON data file
-                      // (e.g., 'redpanda-connect::attachment$docs-data/connect-latest.json')
   enabled: true       // Allow disabling the extension
 }
 
@@ -128,11 +126,8 @@ module.exports.register = function ({ config }) {
   // Merge config with defaults
   const {
     format = DEFAULTS.format,
-    datapath = DEFAULTS.dataPath,           // Antora lowercases this
     enabled = DEFAULTS.enabled
   } = config || {}
-
-  const dataPath = datapath
 
   if (!enabled) {
     logger.info('Extension disabled via config')
@@ -163,53 +158,31 @@ module.exports.register = function ({ config }) {
     }
 
     let connectorData
-    if (dataPath) {
-      // dataPath is an Antora resource ID, e.g.:
-      //   redpanda-connect::attachment$docs-data/connect-latest.json
-      const context = {
-        component: 'redpanda-connect',
-        version: componentVersion.version,
-        module: 'ROOT'
-      }
-      const resource = contentCatalog.resolveResource(dataPath, context, 'attachment')
-      if (!resource) {
-        logger.error(`Could not resolve connector data resource '${dataPath}' in content catalog. Skipping field-only page generation.`)
-        return
-      }
-      try {
-        connectorData = JSON.parse(resource.contents.toString('utf8'))
-        logger.info(`Loaded connector data from content catalog resource: ${dataPath}`)
-      } catch (err) {
-        logger.error(`Failed to parse connector data from '${dataPath}': ${err.message}`)
-        return
-      }
-    } else {
-      // Default: look for any JSON attachment in the components module
-      // (i.e. modules/components/attachments/*.json)
-      const attachments = contentCatalog.findBy({
-        component: 'redpanda-connect',
-        version: componentVersion.version,
-        module: 'components',
-        family: 'attachment'
-      })
+    // Look for any versioned JSON attachment in the components module
+    // (i.e. modules/components/attachments/connect-X.Y.Z.json)
+    const attachments = contentCatalog.findBy({
+      component: 'redpanda-connect',
+      version: componentVersion.version,
+      module: 'components',
+      family: 'attachment'
+    })
 
-      const attachment = attachments.find((file) => {
-        const relative = file.src?.relative || ''
-        return /connect-\d+\.\d+\.\d+\.json$/.test(relative)
-      })
+    const attachment = attachments.find((file) => {
+      const relative = file.src?.relative || ''
+      return /connect-\d+\.\d+\.\d+\.json$/.test(relative)
+    })
 
-      if (!attachment) {
-        logger.warn('No dataPath configured and no JSON attachment found in the components module of the redpanda-connect content catalog. Skipping field-only page generation.')
-        return
-      }
+    if (!attachment) {
+      logger.warn('No JSON attachment found in the components module of the redpanda-connect content catalog. Skipping field-only page generation.')
+      return
+    }
 
-      try {
-        connectorData = JSON.parse(attachment.contents.toString('utf8'))
-        logger.info(`Loaded connector data from content catalog attachment: ${attachment.src?.relative || 'unknown'}`)
-      } catch (err) {
-        logger.error(`Failed to parse connector data from content catalog attachment: ${err.message}`)
-        return
-      }
+    try {
+      connectorData = JSON.parse(attachment.contents.toString('utf8'))
+      logger.info(`Loaded connector data from content catalog attachment: ${attachment.src?.relative || 'unknown'}`)
+    } catch (err) {
+      logger.error(`Failed to parse connector data from content catalog attachment: ${err.message}`)
+      return
     }
 
     let pagesGenerated = 0
