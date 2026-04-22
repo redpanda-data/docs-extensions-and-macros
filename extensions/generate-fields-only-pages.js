@@ -195,7 +195,7 @@ module.exports.register = function ({ config }) {
 
       const attachment = attachments.find((file) => {
         const relative = file.src?.relative || ''
-        return relative.endsWith('.json')
+        return /connect-\d+\.\d+\.\d+\.json$/.test(relative)
       })
 
       if (!attachment) {

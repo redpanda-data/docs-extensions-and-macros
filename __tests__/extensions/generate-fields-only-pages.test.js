@@ -195,7 +195,7 @@ describe('generate-fields-only-pages extension', () => {
       ]
     }
 
-    const resourceId = 'redpanda-connect::attachment$docs-data/connect-latest.json'
+    const resourceId = 'redpanda-connect:components:attachment$connect-4.88.0.json'
     const mockResource = {
       contents: Buffer.from(JSON.stringify(testData), 'utf8')
     }
@@ -292,7 +292,7 @@ describe('generate-fields-only-pages extension', () => {
       ]
     }
 
-    const resourceId = 'redpanda-connect::attachment$docs-data/connect-latest.json'
+    const resourceId = 'redpanda-connect:components:attachment$connect-4.88.0.json'
     const mockResource = {
       contents: Buffer.from(JSON.stringify(testData), 'utf8')
     }
@@ -372,7 +372,7 @@ describe('generate-fields-only-pages extension', () => {
       ]
     }
 
-    const resourceId = 'redpanda-connect::attachment$docs-data/connect-latest.json'
+    const resourceId = 'redpanda-connect:components:attachment$connect-4.88.0.json'
     const mockResource = {
       contents: Buffer.from(JSON.stringify(testData), 'utf8')
     }
