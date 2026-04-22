@@ -3,6 +3,8 @@
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
+
+
 const handlebars = require('handlebars')
 
 // Import and register Redpanda Connect helpers
@@ -114,9 +116,10 @@ handlebars.registerHelper('renderConnectFieldsTable', function (children) {
 
 // Default configuration
 const DEFAULTS = {
-  format: 'nested',  // 'nested' or 'table'
-  dataPath: null,    // Optional path to connector JSON data file (e.g., 'docs-data/connect-4.88.0.json')
-  enabled: true      // Allow disabling the extension
+  format: 'nested',   // 'nested' or 'table'
+  dataPath: null,     // Optional Antora resource ID for the connector JSON data file
+                      // (e.g., 'redpanda-connect::attachment$docs-data/connect-latest.json')
+  enabled: true       // Allow disabling the extension
 }
 
 module.exports.register = function ({ config }) {
@@ -161,13 +164,23 @@ module.exports.register = function ({ config }) {
 
     let connectorData
     if (dataPath) {
+      // dataPath is an Antora resource ID, e.g.:
+      //   redpanda-connect::attachment$docs-data/connect-latest.json
+      const context = {
+        component: 'redpanda-connect',
+        version: componentVersion.version,
+        module: 'ROOT'
+      }
+      const resource = contentCatalog.resolveResource(dataPath, context, 'attachment')
+      if (!resource) {
+        logger.error(`Could not resolve connector data resource '${dataPath}' in content catalog. Skipping field-only page generation.`)
+        return
+      }
       try {
-        const resolvedPath = path.resolve(dataPath)
-        const rawData = fs.readFileSync(resolvedPath, 'utf8')
-        connectorData = JSON.parse(rawData)
-        logger.info(`Loaded connector data from ${resolvedPath}`)
+        connectorData = JSON.parse(resource.contents.toString('utf8'))
+        logger.info(`Loaded connector data from content catalog resource: ${dataPath}`)
       } catch (err) {
-        logger.error(`Failed to load connector data from ${dataPath}: ${err.message}`)
+        logger.error(`Failed to parse connector data from '${dataPath}': ${err.message}`)
         return
       }
     } else {

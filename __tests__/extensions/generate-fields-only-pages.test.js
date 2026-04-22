@@ -1,29 +1,10 @@
 'use strict'
 
-const fs = require('fs')
-const path = require('path')
-const os = require('os')
-
 describe('generate-fields-only-pages extension', () => {
-  let tmpDir
-  let originalCwd
   let extension
 
   beforeEach(() => {
-    originalCwd = process.cwd()
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fields-only-test-'))
-    process.chdir(tmpDir)
     extension = require('../../extensions/generate-fields-only-pages.js')
-  })
-
-  afterEach(() => {
-    // Change back to original directory before deleting tmpDir
-    if (originalCwd) {
-      process.chdir(originalCwd)
-    }
-    if (tmpDir && fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true, force: true })
-    }
   })
 
   test('warns when dataPath is not provided and no attachment fallback exists', () => {
@@ -71,6 +52,40 @@ describe('generate-fields-only-pages extension', () => {
     expect(mockContext.on).not.toHaveBeenCalled()
   })
 
+  test('errors when datapath resource ID cannot be resolved', () => {
+    const logger = {
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn()
+    }
+    const mockContentCatalog = {
+      getComponent: jest.fn(() => ({
+        latest: {
+          version: 'master'
+        }
+      })),
+      resolveResource: jest.fn(() => null)
+    }
+    const mockContext = {
+      getLogger: () => logger,
+      on: jest.fn((event, handler) => {
+        if (event === 'contentClassified') {
+          handler({ contentCatalog: mockContentCatalog, siteCatalog: {} })
+        }
+      })
+    }
+
+    extension.register.call(mockContext, {
+      config: {
+        datapath: 'redpanda-connect::attachment$docs-data/connect-missing.json'
+      }
+    })
+
+    expect(logger.error).toHaveBeenCalledWith(
+      "Could not resolve connector data resource 'redpanda-connect::attachment$docs-data/connect-missing.json' in content catalog. Skipping field-only page generation."
+    )
+  })
+
   test('errors on invalid format', () => {
     const logger = {
       info: jest.fn(),
@@ -84,8 +99,7 @@ describe('generate-fields-only-pages extension', () => {
 
     extension.register.call(mockContext, {
       config: {
-        format: 'invalid',
-        datapath: 'some-path.json'
+        format: 'invalid'
       }
     })
 
@@ -159,8 +173,6 @@ describe('generate-fields-only-pages extension', () => {
       debug: jest.fn()
     }
 
-    // Create test data file
-    const testDataPath = path.join(tmpDir, 'test-data.json')
     const testData = {
       inputs: [
         {
@@ -184,7 +196,11 @@ describe('generate-fields-only-pages extension', () => {
         }
       ]
     }
-    fs.writeFileSync(testDataPath, JSON.stringify(testData))
+
+    const resourceId = 'redpanda-connect::attachment$docs-data/connect-latest.json'
+    const mockResource = {
+      contents: Buffer.from(JSON.stringify(testData), 'utf8')
+    }
 
     const addedFiles = []
     const mockContentCatalog = {
@@ -193,6 +209,7 @@ describe('generate-fields-only-pages extension', () => {
           version: 'master'
         }
       })),
+      resolveResource: jest.fn((ref) => ref === resourceId ? mockResource : null),
       getPages: jest.fn(() => []),
       addFile: jest.fn((file) => {
         addedFiles.push(file)
@@ -211,7 +228,7 @@ describe('generate-fields-only-pages extension', () => {
 
     extension.register.call(mockContext, {
       config: {
-        datapath: testDataPath
+        datapath: resourceId
       }
     })
 
@@ -241,8 +258,6 @@ describe('generate-fields-only-pages extension', () => {
       debug: jest.fn()
     }
 
-    // Create test data file
-    const testDataPath = path.join(tmpDir, 'test-data.json')
     const testData = {
       outputs: [
         {
@@ -278,7 +293,11 @@ describe('generate-fields-only-pages extension', () => {
         }
       ]
     }
-    fs.writeFileSync(testDataPath, JSON.stringify(testData))
+
+    const resourceId = 'redpanda-connect::attachment$docs-data/connect-latest.json'
+    const mockResource = {
+      contents: Buffer.from(JSON.stringify(testData), 'utf8')
+    }
 
     const addedFiles = []
     const mockContentCatalog = {
@@ -287,6 +306,7 @@ describe('generate-fields-only-pages extension', () => {
           version: 'master'
         }
       })),
+      resolveResource: jest.fn((ref) => ref === resourceId ? mockResource : null),
       getPages: jest.fn(() => []),
       addFile: jest.fn((file) => {
         addedFiles.push(file)
@@ -306,7 +326,7 @@ describe('generate-fields-only-pages extension', () => {
     extension.register.call(mockContext, {
       config: {
         format: 'table',
-        datapath: testDataPath
+        datapath: resourceId
       }
     })
 
@@ -343,8 +363,6 @@ describe('generate-fields-only-pages extension', () => {
       error: jest.fn()
     }
 
-    // Create test data with no fields
-    const testDataPath = path.join(tmpDir, 'test-data.json')
     const testData = {
       inputs: [
         {
@@ -355,7 +373,11 @@ describe('generate-fields-only-pages extension', () => {
         }
       ]
     }
-    fs.writeFileSync(testDataPath, JSON.stringify(testData))
+
+    const resourceId = 'redpanda-connect::attachment$docs-data/connect-latest.json'
+    const mockResource = {
+      contents: Buffer.from(JSON.stringify(testData), 'utf8')
+    }
 
     const addedFiles = []
     const mockContentCatalog = {
@@ -364,6 +386,7 @@ describe('generate-fields-only-pages extension', () => {
           version: 'master'
         }
       })),
+      resolveResource: jest.fn((ref) => ref === resourceId ? mockResource : null),
       getPages: jest.fn(() => []),
       addFile: jest.fn((file) => {
         addedFiles.push(file)
@@ -382,7 +405,7 @@ describe('generate-fields-only-pages extension', () => {
 
     extension.register.call(mockContext, {
       config: {
-        datapath: testDataPath
+        datapath: resourceId
       }
     })
 
