@@ -7,7 +7,7 @@ describe('generate-fields-only-pages extension', () => {
     extension = require('../../extensions/generate-fields-only-pages.js')
   })
 
-  test('warns when dataPath is not provided and no attachment fallback exists', () => {
+  test('warns when no JSON attachment is found in the components module', () => {
     const logger = {
       info: jest.fn(),
       warn: jest.fn(),
@@ -96,7 +96,7 @@ describe('generate-fields-only-pages extension', () => {
     }
     const addedFiles = []
     const attachment = {
-      src: { relative: 'connect-4.88.0.json' },
+      src: { relative: 'connect-1.0.0.json' },
       contents: Buffer.from(JSON.stringify(testData), 'utf8')
     }
     const mockContentCatalog = {
@@ -126,7 +126,7 @@ describe('generate-fields-only-pages extension', () => {
     expect(addedFiles.length).toBe(1)
     expect(addedFiles[0].src.relative).toBe('fields/inputs/fallback_input.adoc')
     expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Loaded connector data from content catalog attachment'))
-    expect(logger.warn).not.toHaveBeenCalledWith('No dataPath configured and no JSON attachment found in the components module of the redpanda-connect content catalog. Skipping field-only page generation.')
+    expect(logger.warn).not.toHaveBeenCalled()
   })
 
   test('generates field-only pages using Handlebars (nested format)', () => {
@@ -162,7 +162,7 @@ describe('generate-fields-only-pages extension', () => {
     }
 
     const attachment = {
-      src: { relative: 'connect-4.88.0.json' },
+      src: { relative: 'connect-1.0.0.json' },
       contents: Buffer.from(JSON.stringify(testData), 'utf8')
     }
 
@@ -255,7 +255,7 @@ describe('generate-fields-only-pages extension', () => {
     }
 
     const attachment = {
-      src: { relative: 'connect-4.88.0.json' },
+      src: { relative: 'connect-1.0.0.json' },
       contents: Buffer.from(JSON.stringify(testData), 'utf8')
     }
 
@@ -330,7 +330,7 @@ describe('generate-fields-only-pages extension', () => {
     }
 
     const attachment = {
-      src: { relative: 'connect-4.88.0.json' },
+      src: { relative: 'connect-1.0.0.json' },
       contents: Buffer.from(JSON.stringify(testData), 'utf8')
     }
 

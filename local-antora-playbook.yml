@@ -95,6 +95,5 @@ antora:
   - require: './extensions/find-related-labs'
   - require: './extensions/generate-fields-only-pages'
     enabled: true
-    datapath: 'redpanda-connect:components:attachment$connect-latest.json'
   - require: './extensions/aggregate-terms'
 
