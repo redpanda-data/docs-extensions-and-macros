@@ -26,21 +26,32 @@ describe('generate-fields-only-pages extension', () => {
     }
   })
 
-  test('warns when dataPath is not provided', () => {
+  test('warns when dataPath is not provided and no attachment fallback exists', () => {
     const logger = {
       info: jest.fn(),
       warn: jest.fn(),
       error: jest.fn()
     }
+    const mockContentCatalog = {
+      getComponent: jest.fn(() => ({
+        latest: {
+          version: 'master'
+        }
+      })),
+      findBy: jest.fn(() => [])
+    }
     const mockContext = {
       getLogger: () => logger,
-      on: jest.fn()
+      on: jest.fn((event, handler) => {
+        if (event === 'contentClassified') {
+          handler({ contentCatalog: mockContentCatalog, siteCatalog: {} })
+        }
+      })
     }
 
     extension.register.call(mockContext, {})
 
-    expect(logger.warn).toHaveBeenCalledWith('No dataPath configured. Skipping field-only page generation.')
-    expect(mockContext.on).not.toHaveBeenCalled()
+    expect(logger.warn).toHaveBeenCalledWith('No dataPath configured and no connector data attachment found in content catalog. Skipping field-only page generation.')
   })
 
   test('disables extension when enabled: false', () => {
@@ -82,21 +93,62 @@ describe('generate-fields-only-pages extension', () => {
     expect(mockContext.on).not.toHaveBeenCalled()
   })
 
-  test('warns when dataPath is missing', () => {
+  test('loads connector data from content catalog attachment by default', () => {
     const logger = {
       info: jest.fn(),
       warn: jest.fn(),
       error: jest.fn()
     }
+    const testData = {
+      inputs: [
+        {
+          name: 'fallback_input',
+          children: [
+            {
+              name: 'host',
+              type: 'string',
+              default: 'localhost',
+              description: 'Host to connect to'
+            }
+          ]
+        }
+      ]
+    }
+    const addedFiles = []
+    const attachment = {
+      src: { path: 'modules/ROOT/attachments/docs-data/connect-latest.json' },
+      path: 'modules/ROOT/attachments/docs-data/connect-latest.json',
+      out: { path: 'preview/redpanda-connect/docs-data/connect-latest.json' },
+      contents: Buffer.from(JSON.stringify(testData), 'utf8')
+    }
+    const mockContentCatalog = {
+      getComponent: jest.fn(() => ({
+        latest: {
+          version: 'master'
+        }
+      })),
+      findBy: jest.fn(() => [attachment]),
+      getPages: jest.fn(() => []),
+      addFile: jest.fn((file) => {
+        addedFiles.push(file)
+        return file
+      })
+    }
     const mockContext = {
       getLogger: () => logger,
-      on: jest.fn()
+      on: jest.fn((event, handler) => {
+        if (event === 'contentClassified') {
+          handler({ contentCatalog: mockContentCatalog, siteCatalog: {} })
+        }
+      })
     }
 
     extension.register.call(mockContext, { config: {} })
 
-    expect(logger.warn).toHaveBeenCalledWith('No dataPath configured. Skipping field-only page generation.')
-    expect(mockContext.on).not.toHaveBeenCalled()
+    expect(addedFiles.length).toBe(1)
+    expect(addedFiles[0].src.relative).toBe('fields/inputs/fallback_input.adoc')
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Loaded connector data from content catalog attachment'))
+    expect(logger.warn).not.toHaveBeenCalledWith('No dataPath configured and no connector data attachment found in content catalog. Skipping field-only page generation.')
   })
 
   test('generates field-only pages using Handlebars (nested format)', () => {

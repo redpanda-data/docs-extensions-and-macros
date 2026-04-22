@@ -115,7 +115,7 @@ handlebars.registerHelper('renderConnectFieldsTable', function (children) {
 // Default configuration
 const DEFAULTS = {
   format: 'nested',  // 'nested' or 'table'
-  dataPath: null,    // Path to connector JSON data file (e.g., 'docs-data/connect-4.88.0.json')
+  dataPath: null,    // Optional path to connector JSON data file (e.g., 'docs-data/connect-4.88.0.json')
   enabled: true      // Allow disabling the extension
 }
 
@@ -142,23 +142,6 @@ module.exports.register = function ({ config }) {
     return
   }
 
-  // Load the connector data file
-  if (!dataPath) {
-    logger.warn('No dataPath configured. Skipping field-only page generation.')
-    return
-  }
-
-  let connectorData
-  try {
-    const resolvedPath = path.resolve(dataPath)
-    const rawData = fs.readFileSync(resolvedPath, 'utf8')
-    connectorData = JSON.parse(rawData)
-    logger.info(`Loaded connector data from ${resolvedPath}`)
-  } catch (err) {
-    logger.error(`Failed to load connector data from ${dataPath}: ${err.message}`)
-    return
-  }
-
   // Compile template based on format (without title - these pages are meant to be included)
   const helperName = format === 'table' ? 'renderConnectFieldsTable' : 'renderConnectFields'
   const fieldOnlyTemplate = handlebars.compile(`{{{${helperName} children}}}`)
@@ -174,6 +157,53 @@ module.exports.register = function ({ config }) {
     if (!componentVersion) {
       logger.warn('No latest version found for redpanda-connect component.')
       return
+    }
+
+    let connectorData
+    if (dataPath) {
+      try {
+        const resolvedPath = path.resolve(dataPath)
+        const rawData = fs.readFileSync(resolvedPath, 'utf8')
+        connectorData = JSON.parse(rawData)
+        logger.info(`Loaded connector data from ${resolvedPath}`)
+      } catch (err) {
+        logger.error(`Failed to load connector data from ${dataPath}: ${err.message}`)
+        return
+      }
+    } else {
+      const attachments = contentCatalog.findBy({
+        component: 'redpanda-connect',
+        version: componentVersion.version,
+        family: 'attachment'
+      })
+
+      const isConnectDataFile = (filePath) => {
+        if (!filePath || typeof filePath !== 'string') return false
+        const normalized = filePath.replace(/\\/g, '/')
+        return normalized.endsWith('/docs-data/connect-latest.json') ||
+          normalized.endsWith('docs-data/connect-latest.json') ||
+          /(?:^|\/)docs-data\/connect-[^/]+\.json$/.test(normalized)
+      }
+
+      const attachment = attachments.find((file) =>
+        isConnectDataFile(file.src?.relative) ||
+        isConnectDataFile(file.src?.path) ||
+        isConnectDataFile(file.path) ||
+        isConnectDataFile(file.out?.path)
+      )
+
+      if (!attachment) {
+        logger.warn('No dataPath configured and no connector data attachment found in content catalog. Skipping field-only page generation.')
+        return
+      }
+
+      try {
+        connectorData = JSON.parse(attachment.contents.toString('utf8'))
+        logger.info(`Loaded connector data from content catalog attachment: ${attachment.src?.path || attachment.path || attachment.out?.path || 'unknown path'}`)
+      } catch (err) {
+        logger.error(`Failed to parse connector data from content catalog attachment: ${err.message}`)
+        return
+      }
     }
 
     let pagesGenerated = 0
