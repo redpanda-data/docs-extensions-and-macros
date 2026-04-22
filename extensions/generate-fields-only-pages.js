@@ -177,12 +177,12 @@ module.exports.register = function ({ config }) {
         family: 'attachment'
       })
 
+      const getAttachmentPath = (file) => file?.src?.path || file?.path || file?.out?.path || 'unknown path'
+
       const isConnectDataFile = (filePath) => {
         if (!filePath || typeof filePath !== 'string') return false
         const normalized = filePath.replace(/\\/g, '/')
-        return normalized.endsWith('/docs-data/connect-latest.json') ||
-          normalized.endsWith('docs-data/connect-latest.json') ||
-          /(?:^|\/)docs-data\/connect-[^/]+\.json$/.test(normalized)
+        return /(?:^|\/)docs-data\/connect-[^/]+\.json$/.test(normalized)
       }
 
       const attachment = attachments.find((file) =>
@@ -199,7 +199,7 @@ module.exports.register = function ({ config }) {
 
       try {
         connectorData = JSON.parse(attachment.contents.toString('utf8'))
-        logger.info(`Loaded connector data from content catalog attachment: ${attachment.src?.path || attachment.path || attachment.out?.path || 'unknown path'}`)
+        logger.info(`Loaded connector data from content catalog attachment: ${getAttachmentPath(attachment)}`)
       } catch (err) {
         logger.error(`Failed to parse connector data from content catalog attachment: ${err.message}`)
         return
