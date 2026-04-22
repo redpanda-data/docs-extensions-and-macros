@@ -184,35 +184,28 @@ module.exports.register = function ({ config }) {
         return
       }
     } else {
+      // Default: look for any JSON attachment in the components module
+      // (i.e. modules/components/attachments/*.json)
       const attachments = contentCatalog.findBy({
         component: 'redpanda-connect',
         version: componentVersion.version,
+        module: 'components',
         family: 'attachment'
       })
 
-      const getAttachmentPath = (file) => file?.src?.path || file?.path || file?.out?.path || 'unknown path'
-
-      const isConnectDataFile = (filePath) => {
-        if (!filePath || typeof filePath !== 'string') return false
-        const normalized = filePath.replace(/\\/g, '/')
-        return /(?:^|\/)docs-data\/connect-[^/]+\.json$/.test(normalized)
-      }
-
-      const attachment = attachments.find((file) =>
-        isConnectDataFile(file.src?.relative) ||
-        isConnectDataFile(file.src?.path) ||
-        isConnectDataFile(file.path) ||
-        isConnectDataFile(file.out?.path)
-      )
+      const attachment = attachments.find((file) => {
+        const relative = file.src?.relative || ''
+        return relative.endsWith('.json')
+      })
 
       if (!attachment) {
-        logger.warn('No dataPath configured and no connector data attachment found in content catalog. Skipping field-only page generation.')
+        logger.warn('No dataPath configured and no JSON attachment found in the components module of the redpanda-connect content catalog. Skipping field-only page generation.')
         return
       }
 
       try {
         connectorData = JSON.parse(attachment.contents.toString('utf8'))
-        logger.info(`Loaded connector data from content catalog attachment: ${getAttachmentPath(attachment)}`)
+        logger.info(`Loaded connector data from content catalog attachment: ${attachment.src?.relative || 'unknown'}`)
       } catch (err) {
         logger.error(`Failed to parse connector data from content catalog attachment: ${err.message}`)
         return

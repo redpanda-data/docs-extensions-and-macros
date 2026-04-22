@@ -32,7 +32,7 @@ describe('generate-fields-only-pages extension', () => {
 
     extension.register.call(mockContext, {})
 
-    expect(logger.warn).toHaveBeenCalledWith('No dataPath configured and no connector data attachment found in content catalog. Skipping field-only page generation.')
+    expect(logger.warn).toHaveBeenCalledWith('No dataPath configured and no JSON attachment found in the components module of the redpanda-connect content catalog. Skipping field-only page generation.')
   })
 
   test('disables extension when enabled: false', () => {
@@ -130,9 +130,7 @@ describe('generate-fields-only-pages extension', () => {
     }
     const addedFiles = []
     const attachment = {
-      src: { path: 'modules/ROOT/attachments/docs-data/connect-latest.json' },
-      path: 'modules/ROOT/attachments/docs-data/connect-latest.json',
-      out: { path: 'preview/redpanda-connect/docs-data/connect-latest.json' },
+      src: { relative: 'connect-4.88.0.json' },
       contents: Buffer.from(JSON.stringify(testData), 'utf8')
     }
     const mockContentCatalog = {
@@ -162,7 +160,7 @@ describe('generate-fields-only-pages extension', () => {
     expect(addedFiles.length).toBe(1)
     expect(addedFiles[0].src.relative).toBe('fields/inputs/fallback_input.adoc')
     expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Loaded connector data from content catalog attachment'))
-    expect(logger.warn).not.toHaveBeenCalledWith('No dataPath configured and no connector data attachment found in content catalog. Skipping field-only page generation.')
+    expect(logger.warn).not.toHaveBeenCalledWith('No dataPath configured and no JSON attachment found in the components module of the redpanda-connect content catalog. Skipping field-only page generation.')
   })
 
   test('generates field-only pages using Handlebars (nested format)', () => {
