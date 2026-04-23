@@ -1,5 +1,9 @@
 'use strict';
 
+jest.mock('../../tools/redpanda-connect/github-release-utils', () => ({
+  discoverIntermediateReleases: jest.fn()
+}));
+
 const { capToTwoSentences } = require('../../tools/redpanda-connect/rpcn-connector-docs-handler');
 
 describe('capToTwoSentences', () => {
