@@ -167,10 +167,39 @@ module.exports.register = function ({ config }) {
       family: 'attachment'
     })
 
-    const attachment = attachments.find((file) => {
-      const relative = file.src?.relative || ''
-      return /connect-\d+\.\d+\.\d+\.json$/.test(relative)
-    })
+    // Find all versioned connector JSON attachments and sort by semver
+    const versionedAttachmentPattern = /connect-(\d+)\.(\d+)\.(\d+)\.json$/
+    const matchingAttachments = attachments
+      .map((file) => {
+        const relative = file.src?.relative || ''
+        const match = versionedAttachmentPattern.exec(relative)
+        if (match) {
+          return {
+            file,
+            version: {
+              major: parseInt(match[1], 10),
+              minor: parseInt(match[2], 10),
+              patch: parseInt(match[3], 10),
+              string: `${match[1]}.${match[2]}.${match[3]}`
+            }
+          }
+        }
+        return null
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        // Sort by major, then minor, then patch (descending)
+        if (a.version.major !== b.version.major) return b.version.major - a.version.major
+        if (a.version.minor !== b.version.minor) return b.version.minor - a.version.minor
+        return b.version.patch - a.version.patch
+      })
+
+    if (matchingAttachments.length > 1) {
+      const versions = matchingAttachments.map(m => m.version.string).join(', ')
+      logger.warn(`Multiple versioned connector JSON attachments found (${versions}). Using highest version: ${matchingAttachments[0].version.string}`)
+    }
+
+    const attachment = matchingAttachments[0]?.file
 
     if (!attachment) {
       logger.warn('No JSON attachment found in the components module of the redpanda-connect content catalog. Skipping field-only page generation.')

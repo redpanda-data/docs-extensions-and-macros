@@ -32,6 +32,12 @@ describe('generate-fields-only-pages extension', () => {
 
     extension.register.call(mockContext, {})
 
+    expect(mockContentCatalog.findBy).toHaveBeenCalledWith({
+      component: 'redpanda-connect',
+      version: 'master',
+      module: 'components',
+      family: 'attachment'
+    })
     expect(logger.warn).toHaveBeenCalledWith('No JSON attachment found in the components module of the redpanda-connect content catalog. Skipping field-only page generation.')
   })
 
