@@ -38,7 +38,8 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
 
   // Select indexable pages
   const pages = contentCatalog.getPages((page) => {
-    if (!page.out || page.asciidoc?.attributes?.noindex != null) return
+    // Skip pages without output, noindex pages, and field-only pages (internal includes)
+    if (!page.out || page.asciidoc?.attributes?.noindex != null || page.isFieldOnlyPage) return
     return {}
   })
 
