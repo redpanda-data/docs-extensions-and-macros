@@ -1,46 +1,44 @@
 'use strict'
 
-const fs = require('fs')
-const path = require('path')
-const os = require('os')
-
 describe('generate-fields-only-pages extension', () => {
-  let tmpDir
-  let originalCwd
   let extension
 
   beforeEach(() => {
-    originalCwd = process.cwd()
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fields-only-test-'))
-    process.chdir(tmpDir)
     extension = require('../../extensions/generate-fields-only-pages.js')
   })
 
-  afterEach(() => {
-    // Change back to original directory before deleting tmpDir
-    if (originalCwd) {
-      process.chdir(originalCwd)
-    }
-    if (tmpDir && fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true, force: true })
-    }
-  })
-
-  test('warns when dataPath is not provided', () => {
+  test('warns when no JSON attachment is found in the components module', () => {
     const logger = {
       info: jest.fn(),
       warn: jest.fn(),
       error: jest.fn()
     }
+    const mockContentCatalog = {
+      getComponent: jest.fn(() => ({
+        latest: {
+          version: 'master'
+        }
+      })),
+      findBy: jest.fn(() => [])
+    }
     const mockContext = {
       getLogger: () => logger,
-      on: jest.fn()
+      on: jest.fn((event, handler) => {
+        if (event === 'contentClassified') {
+          handler({ contentCatalog: mockContentCatalog, siteCatalog: {} })
+        }
+      })
     }
 
     extension.register.call(mockContext, {})
 
-    expect(logger.warn).toHaveBeenCalledWith('No dataPath configured. Skipping field-only page generation.')
-    expect(mockContext.on).not.toHaveBeenCalled()
+    expect(mockContentCatalog.findBy).toHaveBeenCalledWith({
+      component: 'redpanda-connect',
+      version: 'master',
+      module: 'components',
+      family: 'attachment'
+    })
+    expect(logger.warn).toHaveBeenCalledWith('No JSON attachment found in the components module of the redpanda-connect content catalog. Skipping field-only page generation.')
   })
 
   test('disables extension when enabled: false', () => {
@@ -73,8 +71,7 @@ describe('generate-fields-only-pages extension', () => {
 
     extension.register.call(mockContext, {
       config: {
-        format: 'invalid',
-        datapath: 'some-path.json'
+        format: 'invalid'
       }
     })
 
@@ -82,21 +79,60 @@ describe('generate-fields-only-pages extension', () => {
     expect(mockContext.on).not.toHaveBeenCalled()
   })
 
-  test('warns when dataPath is missing', () => {
+  test('loads connector data from content catalog attachment by default', () => {
     const logger = {
       info: jest.fn(),
       warn: jest.fn(),
       error: jest.fn()
     }
+    const testData = {
+      inputs: [
+        {
+          name: 'fallback_input',
+          children: [
+            {
+              name: 'host',
+              type: 'string',
+              default: 'localhost',
+              description: 'Host to connect to'
+            }
+          ]
+        }
+      ]
+    }
+    const addedFiles = []
+    const attachment = {
+      src: { relative: 'connect-1.0.0.json' },
+      contents: Buffer.from(JSON.stringify(testData), 'utf8')
+    }
+    const mockContentCatalog = {
+      getComponent: jest.fn(() => ({
+        latest: {
+          version: 'master'
+        }
+      })),
+      findBy: jest.fn(() => [attachment]),
+      getPages: jest.fn(() => []),
+      addFile: jest.fn((file) => {
+        addedFiles.push(file)
+        return file
+      })
+    }
     const mockContext = {
       getLogger: () => logger,
-      on: jest.fn()
+      on: jest.fn((event, handler) => {
+        if (event === 'contentClassified') {
+          handler({ contentCatalog: mockContentCatalog, siteCatalog: {} })
+        }
+      })
     }
 
     extension.register.call(mockContext, { config: {} })
 
-    expect(logger.warn).toHaveBeenCalledWith('No dataPath configured. Skipping field-only page generation.')
-    expect(mockContext.on).not.toHaveBeenCalled()
+    expect(addedFiles.length).toBe(1)
+    expect(addedFiles[0].src.relative).toBe('fields/inputs/fallback_input.adoc')
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Loaded connector data from content catalog attachment'))
+    expect(logger.warn).not.toHaveBeenCalled()
   })
 
   test('generates field-only pages using Handlebars (nested format)', () => {
@@ -107,8 +143,6 @@ describe('generate-fields-only-pages extension', () => {
       debug: jest.fn()
     }
 
-    // Create test data file
-    const testDataPath = path.join(tmpDir, 'test-data.json')
     const testData = {
       inputs: [
         {
@@ -132,7 +166,11 @@ describe('generate-fields-only-pages extension', () => {
         }
       ]
     }
-    fs.writeFileSync(testDataPath, JSON.stringify(testData))
+
+    const attachment = {
+      src: { relative: 'connect-1.0.0.json' },
+      contents: Buffer.from(JSON.stringify(testData), 'utf8')
+    }
 
     const addedFiles = []
     const mockContentCatalog = {
@@ -141,6 +179,7 @@ describe('generate-fields-only-pages extension', () => {
           version: 'master'
         }
       })),
+      findBy: jest.fn(() => [attachment]),
       getPages: jest.fn(() => []),
       addFile: jest.fn((file) => {
         addedFiles.push(file)
@@ -157,11 +196,7 @@ describe('generate-fields-only-pages extension', () => {
       })
     }
 
-    extension.register.call(mockContext, {
-      config: {
-        datapath: testDataPath
-      }
-    })
+    extension.register.call(mockContext, { config: {} })
 
     // Check that a file was added
     expect(addedFiles.length).toBe(1)
@@ -189,8 +224,6 @@ describe('generate-fields-only-pages extension', () => {
       debug: jest.fn()
     }
 
-    // Create test data file
-    const testDataPath = path.join(tmpDir, 'test-data.json')
     const testData = {
       outputs: [
         {
@@ -226,7 +259,11 @@ describe('generate-fields-only-pages extension', () => {
         }
       ]
     }
-    fs.writeFileSync(testDataPath, JSON.stringify(testData))
+
+    const attachment = {
+      src: { relative: 'connect-1.0.0.json' },
+      contents: Buffer.from(JSON.stringify(testData), 'utf8')
+    }
 
     const addedFiles = []
     const mockContentCatalog = {
@@ -235,6 +272,7 @@ describe('generate-fields-only-pages extension', () => {
           version: 'master'
         }
       })),
+      findBy: jest.fn(() => [attachment]),
       getPages: jest.fn(() => []),
       addFile: jest.fn((file) => {
         addedFiles.push(file)
@@ -251,12 +289,7 @@ describe('generate-fields-only-pages extension', () => {
       })
     }
 
-    extension.register.call(mockContext, {
-      config: {
-        format: 'table',
-        datapath: testDataPath
-      }
-    })
+    extension.register.call(mockContext, { config: { format: 'table' } })
 
     // Check that a file was added
     expect(addedFiles.length).toBe(1)
@@ -291,8 +324,6 @@ describe('generate-fields-only-pages extension', () => {
       error: jest.fn()
     }
 
-    // Create test data with no fields
-    const testDataPath = path.join(tmpDir, 'test-data.json')
     const testData = {
       inputs: [
         {
@@ -303,7 +334,11 @@ describe('generate-fields-only-pages extension', () => {
         }
       ]
     }
-    fs.writeFileSync(testDataPath, JSON.stringify(testData))
+
+    const attachment = {
+      src: { relative: 'connect-1.0.0.json' },
+      contents: Buffer.from(JSON.stringify(testData), 'utf8')
+    }
 
     const addedFiles = []
     const mockContentCatalog = {
@@ -312,6 +347,7 @@ describe('generate-fields-only-pages extension', () => {
           version: 'master'
         }
       })),
+      findBy: jest.fn(() => [attachment]),
       getPages: jest.fn(() => []),
       addFile: jest.fn((file) => {
         addedFiles.push(file)
@@ -328,11 +364,7 @@ describe('generate-fields-only-pages extension', () => {
       })
     }
 
-    extension.register.call(mockContext, {
-      config: {
-        datapath: testDataPath
-      }
-    })
+    extension.register.call(mockContext, { config: {} })
 
     // No files should be generated
     expect(addedFiles.length).toBe(0)

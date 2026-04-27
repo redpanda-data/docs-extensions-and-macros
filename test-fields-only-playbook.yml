@@ -32,4 +32,3 @@ antora:
     enabled: true
     format: nested
     headingLevel: 2
-    dataPath: /tmp/rp-connect-docs/docs-data/connect-4.88.0.json

@@ -3,6 +3,8 @@
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
+
+
 const handlebars = require('handlebars')
 
 // Import and register Redpanda Connect helpers
@@ -114,9 +116,8 @@ handlebars.registerHelper('renderConnectFieldsTable', function (children) {
 
 // Default configuration
 const DEFAULTS = {
-  format: 'nested',  // 'nested' or 'table'
-  dataPath: null,    // Path to connector JSON data file (e.g., 'docs-data/connect-4.88.0.json')
-  enabled: true      // Allow disabling the extension
+  format: 'nested',   // 'nested' or 'table'
+  enabled: true       // Allow disabling the extension
 }
 
 module.exports.register = function ({ config }) {
@@ -125,11 +126,8 @@ module.exports.register = function ({ config }) {
   // Merge config with defaults
   const {
     format = DEFAULTS.format,
-    datapath = DEFAULTS.dataPath,           // Antora lowercases this
     enabled = DEFAULTS.enabled
   } = config || {}
-
-  const dataPath = datapath
 
   if (!enabled) {
     logger.info('Extension disabled via config')
@@ -139,23 +137,6 @@ module.exports.register = function ({ config }) {
   // Validate format
   if (format !== 'nested' && format !== 'table') {
     logger.error(`Invalid format '${format}'. Must be 'nested' or 'table'. Disabling extension.`)
-    return
-  }
-
-  // Load the connector data file
-  if (!dataPath) {
-    logger.warn('No dataPath configured. Skipping field-only page generation.')
-    return
-  }
-
-  let connectorData
-  try {
-    const resolvedPath = path.resolve(dataPath)
-    const rawData = fs.readFileSync(resolvedPath, 'utf8')
-    connectorData = JSON.parse(rawData)
-    logger.info(`Loaded connector data from ${resolvedPath}`)
-  } catch (err) {
-    logger.error(`Failed to load connector data from ${dataPath}: ${err.message}`)
     return
   }
 
@@ -176,7 +157,69 @@ module.exports.register = function ({ config }) {
       return
     }
 
+    let connectorData
+    // Look for any versioned JSON attachment in the components module
+    // (i.e. modules/components/attachments/connect-X.Y.Z.json)
+    const attachments = contentCatalog.findBy({
+      component: 'redpanda-connect',
+      version: componentVersion.version,
+      module: 'components',
+      family: 'attachment'
+    })
+
+    // Find all versioned connector JSON attachments and sort by semver
+    const versionedAttachmentPattern = /^connect-(\d+)\.(\d+)\.(\d+)\.json$/
+    const matchingAttachments = attachments
+      .map((file) => {
+        const relative = file.src?.relative || ''
+        const basename = relative.split('/').pop()
+        const match = versionedAttachmentPattern.exec(basename)
+        if (match) {
+          return {
+            file,
+            version: {
+              major: parseInt(match[1], 10),
+              minor: parseInt(match[2], 10),
+              patch: parseInt(match[3], 10),
+              string: `${match[1]}.${match[2]}.${match[3]}`
+            }
+          }
+        }
+        return null
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        // Sort by major, then minor, then patch (descending)
+        if (a.version.major !== b.version.major) return b.version.major - a.version.major
+        if (a.version.minor !== b.version.minor) return b.version.minor - a.version.minor
+        return b.version.patch - a.version.patch
+      })
+
+    if (matchingAttachments.length > 1) {
+      const versions = matchingAttachments.map(m => m.version.string).join(', ')
+      logger.warn(`Multiple versioned connector JSON attachments found (${versions}). Using highest version: ${matchingAttachments[0].version.string}`)
+    }
+
+    const attachment = matchingAttachments[0]?.file
+
+    if (!attachment) {
+      logger.warn('No JSON attachment found in the components module of the redpanda-connect content catalog. Skipping field-only page generation.')
+      return
+    }
+
+    try {
+      connectorData = JSON.parse(attachment.contents.toString('utf8'))
+      logger.info(`Loaded connector data from content catalog attachment: ${attachment.src?.relative || 'unknown'}`)
+    } catch (err) {
+      logger.error(`Failed to parse connector data from content catalog attachment: ${err.message}`)
+      return
+    }
+
     let pagesGenerated = 0
+
+    // Get origin from first existing page in component (for git metadata)
+    const existingPages = contentCatalog.getPages((page) => page.src.component === 'redpanda-connect')
+    const origin = existingPages.length > 0 ? existingPages[0].src.origin : { type: 'generated' }
 
     // Iterate over each type (inputs, outputs, processors, etc.)
     for (const [type, items] of Object.entries(connectorData)) {
@@ -205,10 +248,6 @@ module.exports.register = function ({ config }) {
 
           const typeDir = type.endsWith('s') ? type : `${type}s`
           const relative = `fields/${typeDir}/${item.name}.adoc`
-
-          // Get origin from first existing page in component (for git metadata)
-          const existingPages = contentCatalog.getPages((page) => page.src.component === 'redpanda-connect')
-          const origin = existingPages.length > 0 ? existingPages[0].src.origin : { type: 'generated' }
 
           // Create a fake absolute path for generated files (used by logger)
           const fakeAbspath = path.join(os.tmpdir(), 'generated-fields-only', relative)
