@@ -168,11 +168,12 @@ module.exports.register = function ({ config }) {
     })
 
     // Find all versioned connector JSON attachments and sort by semver
-    const versionedAttachmentPattern = /connect-(\d+)\.(\d+)\.(\d+)\.json$/
+    const versionedAttachmentPattern = /^connect-(\d+)\.(\d+)\.(\d+)\.json$/
     const matchingAttachments = attachments
       .map((file) => {
         const relative = file.src?.relative || ''
-        const match = versionedAttachmentPattern.exec(relative)
+        const basename = relative.split('/').pop()
+        const match = versionedAttachmentPattern.exec(basename)
         if (match) {
           return {
             file,
@@ -216,6 +217,10 @@ module.exports.register = function ({ config }) {
 
     let pagesGenerated = 0
 
+    // Get origin from first existing page in component (for git metadata)
+    const existingPages = contentCatalog.getPages((page) => page.src.component === 'redpanda-connect')
+    const origin = existingPages.length > 0 ? existingPages[0].src.origin : { type: 'generated' }
+
     // Iterate over each type (inputs, outputs, processors, etc.)
     for (const [type, items] of Object.entries(connectorData)) {
       if (!Array.isArray(items)) continue
@@ -243,10 +248,6 @@ module.exports.register = function ({ config }) {
 
           const typeDir = type.endsWith('s') ? type : `${type}s`
           const relative = `fields/${typeDir}/${item.name}.adoc`
-
-          // Get origin from first existing page in component (for git metadata)
-          const existingPages = contentCatalog.getPages((page) => page.src.component === 'redpanda-connect')
-          const origin = existingPages.length > 0 ? existingPages[0].src.origin : { type: 'generated' }
 
           // Create a fake absolute path for generated files (used by logger)
           const fakeAbspath = path.join(os.tmpdir(), 'generated-fields-only', relative)
