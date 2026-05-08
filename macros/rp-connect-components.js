@@ -1024,7 +1024,19 @@ module.exports.register = function (registry, context) {
       // Filter for the specific connector by name
       const componentRows = csvData.data.filter(row => row.connector.trim().toLowerCase() === name.trim().toLowerCase());
       if (componentRows.length === 0) {
-        console.error(`No data found for connector: ${name}`);
+        console.warn(`No CSV data found for connector: ${name}. The connector may have been removed or renamed.`);
+        // Build context-aware link to release notes
+        const isCloud = attributes['env-cloud'] !== undefined;
+        const whatsNewUrl = isCloud
+          ? '/redpanda-cloud/develop/connect/get-started/whats-new/'
+          : '/redpanda-connect/get-started/whats-new/';
+        // Return a notice for removed/unknown connectors
+        return self.createBlock(parent, 'pass', `
+          <div class="metadata-block">
+            <div class="metadata-content">
+              <p><strong>Available in:</strong> <em>This connector is no longer available. Check the <a href="${whatsNewUrl}">release notes</a> for migration guidance.</em></p>
+            </div>
+          </div>`);
       }
       // Process types and metadata from CSV
       const types = componentRows.map(row => ({
