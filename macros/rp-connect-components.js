@@ -1,4 +1,6 @@
 'use strict';
+const { posix: path } = require('path')
+
 /**
  * Registers macros for use in Redpanda Connect contexts in the Redpanda documentation.
   * @param {Registry} registry - The Antora registry where this block macro is registered.
@@ -1025,11 +1027,23 @@ module.exports.register = function (registry, context) {
       const componentRows = csvData.data.filter(row => row.connector.trim().toLowerCase() === name.trim().toLowerCase());
       if (componentRows.length === 0) {
         console.warn(`No CSV data found for connector: ${name}. The connector may have been removed or renamed.`);
-        // Build context-aware link to release notes
+        // Build link to release notes using content catalog for proper URL resolution
         const isCloud = attributes['env-cloud'] !== undefined;
-        const whatsNewUrl = isCloud
+        let whatsNewUrl = isCloud
           ? '/redpanda-cloud/develop/connect/get-started/whats-new/'
           : '/redpanda-connect/get-started/whats-new/';
+
+        // Try to resolve the page from the content catalog for accurate URLs
+        if (context.contentCatalog && context.file) {
+          const pageSpec = isCloud
+            ? 'redpanda-cloud:develop/connect/get-started:whats-new.adoc'
+            : 'redpanda-connect:get-started:whats-new.adoc';
+          const page = context.contentCatalog.resolvePage(pageSpec, context.file.src);
+          if (page) {
+            whatsNewUrl = path.relative(path.dirname(context.file.pub.url), page.pub.url);
+          }
+        }
+
         // Return a notice for removed/unknown connectors
         return self.createBlock(parent, 'pass', `
           <div class="metadata-block">
