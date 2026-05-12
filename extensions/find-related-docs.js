@@ -12,10 +12,10 @@ module.exports.register = function ({ config }) {
 
     // Retrieve all documents and labs from the latest versions of each component
     const allDocs = [];
-    const allLabs = contentCatalog.findBy({ component: 'redpanda-labs', family: 'page', version: latestVersions['redpanda-labs'] });
+    const allLabs = contentCatalog.findBy({ component: 'labs', family: 'page', version: latestVersions['labs'] });
 
     Object.keys(latestVersions).forEach(component => {
-      if (component === 'redpanda-labs') return;
+      if (component === 'labs') return;
       allDocs.push(...contentCatalog.findBy({ component, family: 'page', version: latestVersions[component] }));
     });
     allLabs.forEach((labPage) => {
@@ -26,7 +26,7 @@ module.exports.register = function ({ config }) {
       if (!pageCategories) return;
       const sourceCategoryList = pageCategories.split(',').map(c => c.trim());
       const sourceDeploymentType = getDeploymentType(sourceAttributes);
-      const docs = contentCatalog.findBy({ component: 'ROOT', family: 'page', version: latestVersions['ROOT'] });
+      const docs = contentCatalog.findBy({ component: 'streaming', family: 'page', version: latestVersions['streaming'] });
 
       allDocs.forEach((docPage) => {
         const related = findRelated(docPage, sourceCategoryList, sourceDeploymentType, logger);

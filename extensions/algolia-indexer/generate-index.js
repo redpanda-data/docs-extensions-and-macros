@@ -261,7 +261,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       unixTimestamp: unixTimestamp
     }
 
-    if (component.name !== 'redpanda-labs') {
+    if (component.name !== 'labs') {
       indexItem.product = component.title
       indexItem.breadcrumbs = breadcrumbs
       indexItem.type = 'Doc'

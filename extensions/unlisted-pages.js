@@ -7,7 +7,7 @@ module.exports.register = function ({ config }) {
   this.on('navigationBuilt', ({ siteCatalog, contentCatalog }) => {
     contentCatalog.getComponents().forEach(({ versions }) => {
       versions.forEach(({ name: component, version, navigation: nav, url: defaultUrl }) => {
-        if (component === 'api' || component === 'redpanda-labs') return;
+        if (component === 'api' || component === 'labs') return;
         if (!nav) return;
 
         const navEntriesByUrl = getNavEntriesByUrl(nav);

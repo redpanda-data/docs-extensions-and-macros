@@ -53,21 +53,21 @@ module.exports.register = function () {
     };
 
     // Fetch examples from both components
-    const examples = contentCatalog.findBy({ component: 'redpanda-connect', family: 'example' });
+    const examples = contentCatalog.findBy({ component: 'connect', family: 'example' });
     const previewExamples = contentCatalog.findBy({ component: 'preview', family: 'example' });
 
-    if (!examples.length) logger.warn(`No examples found in the 'redpanda-connect' component.`);
+    if (!examples.length) logger.warn(`No examples found in the 'connect' component.`);
 
     // Get components
-    const connect = contentCatalog.getComponents().find((c) => c.name === 'redpanda-connect');
+    const connect = contentCatalog.getComponents().find((c) => c.name === 'connect');
     const preview = contentCatalog.getComponents().find((c) => c.name === 'preview');
 
     if (connect) {
-      const connectSamples = collectExamples(examples, 'redpanda-connect');
+      const connectSamples = collectExamples(examples, 'connect');
       connect.latest.asciidoc.attributes['page-bloblang-samples'] = JSON.stringify(connectSamples);
-      logger.debug(`Bloblang samples added to 'redpanda-connect': ${JSON.stringify(connectSamples, null, 2)}`);
+      logger.debug(`Bloblang samples added to 'connect': ${JSON.stringify(connectSamples, null, 2)}`);
     } else {
-      logger.warn(`Component 'redpanda-connect' not found.`);
+      logger.warn(`Component 'connect' not found.`);
     }
 
     if (preview) {

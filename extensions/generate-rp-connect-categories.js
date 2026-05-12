@@ -14,7 +14,7 @@ module.exports.register = function ({ config }) {
   const logger = this.getLogger('redpanda-connect-category-aggregation-extension')
 
   this.on('contentClassified', ({ contentCatalog }) => {
-    const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'redpanda-connect')
+    const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'connect')
 
     if (!redpandaConnect || !redpandaConnect.latest) {
       logger.warn('Could not find the redpanda-connect component. Skipping category creation.')
@@ -61,7 +61,7 @@ module.exports.register = function ({ config }) {
     }
 
     try {
-      const files = contentCatalog.findBy({ component: 'redpanda-connect', family: 'page' })
+      const files = contentCatalog.findBy({ component: 'connect', family: 'page' })
 
       for (const file of files) {
         // Prefer using page.asciidoc.attributes when available
