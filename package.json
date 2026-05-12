@@ -77,6 +77,7 @@
     "./extensions/algolia-indexer/index": "./extensions/algolia-indexer/index.js",
     "./extensions/aggregate-terms": "./extensions/aggregate-terms.js",
     "./extensions/resolve-xrefs-in-attachments": "./extensions/resolve-xrefs-in-attachments.js",
+    "./extensions/unified-navigation": "./extensions/unified-navigation.js",
     "./macros/glossary": "./macros/glossary.js",
     "./macros/rp-connect-components": "./macros/rp-connect-components.js",
     "./macros/config-ref": "./macros/config-ref.js",
