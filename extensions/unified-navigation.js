@@ -87,7 +87,6 @@ module.exports.register = function () {
                     configOwner: component.name,
                     allComponents: allComponentsInConfig,
                   })
-                  console.log(`[config] Storing ${component.name}'s OWN config (root items: ${Array.from(allComponentsInConfig).join(', ')})`)
                 } else {
                   // Existing config is also from this component - compare depths
                   const existingOwnerDepth = getComponentDepth(existingOwnerConfig.configTree, component.name)
@@ -99,7 +98,6 @@ module.exports.register = function () {
                       configOwner: component.name,
                       allComponents: allComponentsInConfig,
                     })
-                    console.log(`[config] Updating ${component.name}'s OWN config (better depth)`)
                   }
                 }
 
@@ -392,26 +390,17 @@ function isStandalone(configTree, componentName) {
  * @returns {Array} Filtered config tree
  */
 function filterConfigTreeForComponent(configTree, componentName) {
-  const treeNames = configTree.map(t => t.name).join(', ')
-  console.log(`[filterConfigTreeForComponent] Called for ${componentName}, root items: [${treeNames}]`)
-
   // Check if component is at root level
   for (const item of configTree) {
     if (item.name === componentName) {
-      console.log(`[filterConfigTreeForComponent] ${componentName}: FOUND at root level, hasChildren: ${!!item.children}`)
       // Component is at root - if it has children, show parent nav items + children as buckets
       if (item.children) {
         // Return parent with showNavItemsOnly flag + children as separate buckets
-        const result = [{ ...item, showNavItemsOnly: true, children: undefined }, ...item.children]
-        console.log(`[filterConfigTreeForComponent] ${componentName}: returning parent with showNavItemsOnly + ${item.children.length} children`)
-        return result
+        return [{ ...item, showNavItemsOnly: true, children: undefined }, ...item.children]
       }
-      console.log(`[filterConfigTreeForComponent] ${componentName}: no children, returning original tree`)
       return configTree
     }
   }
-
-  console.log(`[filterConfigTreeForComponent] ${componentName}: NOT found at root, searching nested...`)
 
   // Component is nested - find it and determine if it's a parent or child
   function findComponentAndParent(items, parent = null) {
