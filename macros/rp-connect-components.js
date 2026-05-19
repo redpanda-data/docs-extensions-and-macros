@@ -1067,6 +1067,21 @@ module.exports.register = function (registry, context) {
         const [currentType] = sortedTypes.splice(currentTypeIndex, 1);
         sortedTypes.unshift(currentType);
       }
+
+      // Set context-switcher attribute for UI template to render compact dropdown in sticky bar
+      if (sortedTypes.length > 1) {
+        const contextSwitcherData = {};
+        sortedTypes.forEach(typeObj => {
+          const link = (component === 'Cloud' && typeObj.redpandaCloudUrl) || typeObj.redpandaConnectUrl;
+          contextSwitcherData[typeObj.type.toLowerCase()] = {
+            name: capitalize(typeObj.type),
+            to: link
+          };
+        });
+        // Set as page attribute (not document attribute) so it's accessible in UI template
+        attributes['page-context-switcher'] = JSON.stringify(contextSwitcherData);
+        parent.getDocument().setAttribute('page-context-switcher', JSON.stringify(contextSwitcherData));
+      }
       // Check if the component requires an Enterprise license (based on support level)
       let enterpriseLicenseInfo = '';
       if (component !== 'Cloud') {
@@ -1077,6 +1092,26 @@ module.exports.register = function (registry, context) {
         }
       }
       const isCloudSupported = componentRows.some(row => row.is_cloud_supported === 'y');
+
+      // Set availability attributes for UI template badges with URLs
+      if (isCloudSupported) {
+        const cloudUrl = sortedTypes[0].redpandaCloudUrl;
+        const connectUrl = sortedTypes[0].redpandaConnectUrl;
+
+        if (component === 'Connect' && cloudUrl) {
+          // Viewing Self-Managed, but also available in Cloud - show Cloud badge with link
+          parent.getDocument().setAttribute('cloud-available', 'true');
+          parent.getDocument().setAttribute('cloud-available-url', cloudUrl);
+        } else if (component === 'Cloud' && connectUrl) {
+          // Viewing Cloud, but also available in Self-Managed - show Self-Managed badge with link
+          parent.getDocument().setAttribute('self-managed-available', 'true');
+          parent.getDocument().setAttribute('self-managed-available-url', connectUrl);
+        }
+      } else if (!isCloudSupported && component === 'Connect') {
+        // Only available in Self-Managed - show "Self-Managed Only" badge (no link)
+        parent.getDocument().setAttribute('self-managed-only', 'true');
+      }
+
       let availableInInfo = '';
 
       if (isCloudSupported) {

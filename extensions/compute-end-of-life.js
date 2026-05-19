@@ -13,10 +13,10 @@ module.exports.register = function ({ config }) {
       return;
     }
 
-    eolConfigs.forEach(({ component: componentName, supported_months, warning_weeks, eol_doc, upgrade_doc }) => {
+    eolConfigs.forEach(({ component: componentName, supported_months, warning_weeks, eol_doc, upgrade_doc, whats_new_doc }) => {
       if (!eol_doc || !upgrade_doc) {
         logger.error(
-          `End-of-life configuration for component "${component}" is missing required attributes. ` +
+          `End-of-life configuration for component "${componentName}" is missing required attributes. ` +
           `Ensure both "eol_doc" and "upgrade_doc" are specified.`
         );
         return;
@@ -40,13 +40,17 @@ module.exports.register = function ({ config }) {
         if (releaseDate) {
           // Pass resolved configuration to calculateEOL
           const eolInfo = calculateEOL(releaseDate, resolvedEOLMonths, resolvedWarningWeeks, logger);
-          Object.assign(asciidoc.attributes, {
+          const attrs = {
             'page-is-nearing-eol': eolInfo.isNearingEOL.toString(),
             'page-is-past-eol': eolInfo.isPastEOL.toString(),
             'page-eol-date': eolInfo.eolDate,
             'page-eol-doc': eol_doc,
             'page-upgrade-doc': upgrade_doc,
-          });
+          };
+          if (whats_new_doc) {
+            attrs['page-whats-new-doc'] = whats_new_doc;
+          }
+          Object.assign(asciidoc.attributes, attrs);
         } else {
           logger.warn(`No release date found for component: ${componentName}. Make sure to set {page-release-date} in the antora.yml of the component version ${version}.`);
         }

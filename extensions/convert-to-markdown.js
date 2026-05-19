@@ -222,6 +222,12 @@ module.exports.register = function () {
           'nav-expand',
           'banner-container',
           'markdown-dropdown',
+          'version-selector',        // Version dropdown (not relevant for LLMs)
+          'component-indicator',     // Component header bar
+          'product-switcher',        // Product switcher dropdown
+          'breadcrumb',              // Breadcrumb navigation
+          'chat-panel',              // AI chat interface
+          'kapa',                    // Kapa AI widget
         ]
         return toRemove.some(
           (x) => classAttr.includes(x) || idAttr.includes(x)
