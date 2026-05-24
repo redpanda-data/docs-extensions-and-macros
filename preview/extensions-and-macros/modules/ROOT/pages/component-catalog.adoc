@@ -1,0 +1,12 @@
+= Component Catalog Preview
+:description: Preview of the Redpanda Connect component catalog with card-based layout
+
+This page demonstrates the new card-based component catalog layout.
+
+== All Components
+
+The catalog below shows all Redpanda Connect components with full information including support levels, cloud availability, and enterprise licensing.
+
+Click the info icon (ⓘ) next to the search bar to view the badge legend.
+
+component_table::[all]

@@ -12,6 +12,7 @@ test-results/
 coverage/
 __tests__/.test-cgo-detection/
 modules/
+!preview/**/modules/
 cloud-controlplane/
 node_modules
 .env
