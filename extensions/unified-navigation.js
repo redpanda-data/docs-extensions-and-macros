@@ -181,7 +181,20 @@ module.exports.register = function () {
           const isStandaloneComponent = isStandalone(configData.configTree, page.src.component)
 
           if (buckets.length > 0 && !isStandaloneComponent) {
-            page.asciidoc.attributes['page-custom-navigation'] = JSON.stringify(buckets)
+            // Get the component's own nav items (from nav.adoc) to prepend before buckets
+            const compData = componentVersionNavMap.get(page.src.component)
+            let ownNavItems = []
+            if (compData) {
+              const versionData = compData.versionMap.get(page.src.version)
+              if (versionData && versionData.navigation) {
+                ownNavItems = filterUnpublishedPages(versionData.navigation, publishedUrlsSet)
+              }
+            }
+
+            // Prepend component's own nav items before child buckets
+            const fullNavigation = [...ownNavItems, ...buckets]
+
+            page.asciidoc.attributes['page-custom-navigation'] = JSON.stringify(fullNavigation)
             page.asciidoc.attributes['page-has-custom-nav'] = 'true'
             // Set is-umbrella-nav to show parent bucket headers
             page.asciidoc.attributes['page-is-umbrella-nav'] = 'true'

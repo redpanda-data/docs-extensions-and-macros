@@ -63,9 +63,9 @@ module.exports = async (github, owner, repo, stableDockerTag, betaDockerTag, log
         if (error.status === 404) {
           // Branch doesn't exist yet - this is expected for unreleased versions
           if (logger) {
-            logger.warn(`Branch ${branchName} not found (operator version may not be released yet)`);
+            logger.warn(`Fetched operator ${dockerTag} from Docker Hub but branch ${branchName} not found in GitHub (source may not be released yet)`);
           } else {
-            console.warn(`Branch ${branchName} not found (operator version may not be released yet)`);
+            console.warn(`Fetched operator ${dockerTag} from Docker Hub but branch ${branchName} not found in GitHub (source may not be released yet)`);
           }
         } else {
           if (logger) {
