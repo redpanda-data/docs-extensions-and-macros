@@ -51,6 +51,8 @@ module.exports.register = function ({ config }) {
             attrs['page-whats-new-doc'] = whats_new_doc;
           }
           Object.assign(asciidoc.attributes, attrs);
+            'page-support-months': resolvedEOLMonths,
+          });
         } else {
           logger.warn(`No release date found for component: ${componentName}. Make sure to set {page-release-date} in the antora.yml of the component version ${version}.`);
         }
