@@ -181,27 +181,35 @@ module.exports.register = function () {
           const isStandaloneComponent = isStandalone(configData.configTree, page.src.component)
 
           if (buckets.length > 0 && !isStandaloneComponent) {
-            // Get the component's own nav items (from nav.adoc) to prepend before buckets
-            const compData = componentVersionNavMap.get(page.src.component)
-            let ownNavItems = []
-            if (compData) {
-              const versionData = compData.versionMap.get(page.src.version)
-              if (versionData && versionData.navigation) {
-                ownNavItems = filterUnpublishedPages(versionData.navigation, publishedUrlsSet)
-              }
-            }
-
             // Build full navigation array
             let fullNavigation = []
 
-            // If component has its own nav items, wrap them in a pseudo-bucket with showNavItemsOnly
-            // This renders the items directly without bucket header/wrapper
-            if (ownNavItems.length > 0) {
-              fullNavigation.push({
-                items: ownNavItems,
-                showNavItemsOnly: true,
-                isCurrentBucket: true,
-              })
+            // Check if this component is a top-level parent that has both its own pages AND child components
+            // Only top-level parents (like data-platform) should show their own nav items + child buckets
+            // Child components (like streaming) should only show child buckets (their siblings)
+            const isTopLevelParent = relevantTree.length > 0 &&
+                                     relevantTree.some(item => item.name === page.src.component && item.children)
+
+            if (isTopLevelParent) {
+              // Get the component's own nav items (from nav.adoc) to prepend before child buckets
+              const compData = componentVersionNavMap.get(page.src.component)
+              let ownNavItems = []
+              if (compData) {
+                const versionData = compData.versionMap.get(page.src.version)
+                if (versionData && versionData.navigation) {
+                  ownNavItems = filterUnpublishedPages(versionData.navigation, publishedUrlsSet)
+                }
+              }
+
+              // If parent component has its own nav items, wrap them in a pseudo-bucket with showNavItemsOnly
+              // This renders the items directly without bucket header/wrapper
+              if (ownNavItems.length > 0) {
+                fullNavigation.push({
+                  items: ownNavItems,
+                  showNavItemsOnly: true,
+                  isCurrentBucket: true,
+                })
+              }
             }
 
             // Add child component buckets
@@ -339,7 +347,19 @@ function getComponentDepth(tree, targetComponent, currentDepth = 0) {
  */
 function parseNavigationConfig(navConfig) {
   // If it's already an array (from YAML parsing), use it directly
-  const config = typeof navConfig === 'string' ? yaml.load(navConfig) : navConfig
+  let config
+  if (typeof navConfig === 'string') {
+    try {
+      config = yaml.load(navConfig)
+    } catch (error) {
+      // Log YAML parsing error with context
+      console.error(`Failed to parse page-navigation YAML: ${error.message}`)
+      console.error(`YAML content: ${navConfig}`)
+      return []
+    }
+  } else {
+    config = navConfig
+  }
 
   if (!Array.isArray(config)) {
     return []
