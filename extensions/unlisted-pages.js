@@ -7,7 +7,7 @@ module.exports.register = function ({ config }) {
   this.on('navigationBuilt', ({ siteCatalog, contentCatalog }) => {
     contentCatalog.getComponents().forEach(({ versions }) => {
       versions.forEach(({ name: component, version, navigation: nav, url: defaultUrl }) => {
-        if (component === 'api' || component === 'redpanda-labs') return;
+        if (component === 'api' || component === 'labs') return;
         if (!nav) return;
 
         const navEntriesByUrl = getNavEntriesByUrl(nav);
@@ -22,6 +22,10 @@ module.exports.register = function ({ config }) {
 
             // Skip field-only pages (generated for includes, not standalone navigation)
             if (page.isFieldOnlyPage) return collector;
+
+            // Skip technical pages that are intentionally unlisted (e.g., llms.txt, sitemap)
+            const technicalPages = ['llms', 'sitemap', 'sitemap-llms'];
+            if (technicalPages.includes(page.src.stem)) return collector;
 
             if (!(page.pub.url in navEntriesByUrl) && page.pub.url !== defaultUrl) {
               logger.warn({ file: page.src, source: page.src.origin }, 'detected unlisted page');

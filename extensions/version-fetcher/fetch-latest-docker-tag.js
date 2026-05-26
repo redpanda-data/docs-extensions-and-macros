@@ -6,9 +6,10 @@
  *
  * @param {string} dockerNamespace - The Docker Hub namespace (organization or username)
  * @param {string} dockerRepo - The repository name on Docker Hub
+ * @param {Object} logger - Optional Antora logger instance for logging
  * @returns {Promise<{ latestStableRelease: string|null, latestBetaRelease: string|null }>}
  */
-module.exports = async (dockerNamespace, dockerRepo) => {
+module.exports = async (dockerNamespace, dockerRepo, logger = null) => {
   const { default: fetch } = await import('node-fetch');
 
   try {
@@ -64,7 +65,11 @@ module.exports = async (dockerNamespace, dockerRepo) => {
     };
 
   } catch (error) {
-    console.error('Error fetching Docker tags:', error);
+    if (logger) {
+      logger.error('Error fetching Docker tags:', error);
+    } else {
+      console.error('Error fetching Docker tags:', error);
+    }
     return {
       latestStableRelease: null,
       latestBetaRelease: null

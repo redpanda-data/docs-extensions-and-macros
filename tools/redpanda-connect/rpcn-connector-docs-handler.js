@@ -107,6 +107,94 @@ function stripPlatformMetadata (connectors) {
 }
 
 /**
+ * Augment connector data with platform metadata from binary analysis.
+ * This adds cloudSupported/requiresCgo flags and includes CGO-only and cloud-only connectors.
+ *
+ * @param {Object} connectorData - Connector index object with arrays for each component type
+ * @param {Object} binaryAnalysis - Binary analysis results from analyzeAllBinaries()
+ * @returns {Object} Object with augmentedData, augmentedCount, addedCgoCount, addedCloudOnlyCount
+ */
+function augmentConnectorData (connectorData, binaryAnalysis) {
+  if (!binaryAnalysis) {
+    return { augmentedData: connectorData, augmentedCount: 0, addedCgoCount: 0, addedCloudOnlyCount: 0 }
+  }
+
+  // Deep clone to avoid mutating original
+  const augmentedData = JSON.parse(JSON.stringify(connectorData))
+
+  const cloudSet = new Set(
+    (binaryAnalysis.comparison?.inCloud || []).map(c => `${c.type}:${c.name}`)
+  )
+  const cgoOnlySet = new Set(
+    (binaryAnalysis.cgoOnly || []).map(c => `${c.type}:${c.name}`)
+  )
+
+  let augmentedCount = 0
+  let addedCgoCount = 0
+  let addedCloudOnlyCount = 0
+
+  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
+    'buffers', 'metrics', 'scanners', 'tracers']
+
+  for (const type of connectorTypes) {
+    if (!Array.isArray(augmentedData[type])) {
+      augmentedData[type] = []
+    }
+
+    // Add cloudSupported and requiresCgo flags to existing connectors
+    for (const connector of augmentedData[type]) {
+      const key = `${type}:${connector.name}`
+      connector.cloudSupported = cloudSet.has(key)
+      connector.requiresCgo = cgoOnlySet.has(key)
+      augmentedCount++
+    }
+
+    // Add CGO-only connectors that aren't in the OSS list
+    if (binaryAnalysis.cgoOnly) {
+      for (const cgoConn of binaryAnalysis.cgoOnly) {
+        if (cgoConn.type === type) {
+          const exists = augmentedData[type].some(c => c.name === cgoConn.name)
+          if (!exists) {
+            // Singularize type for consistency with stored data (except "metrics" which stays plural)
+            const componentType = cgoConn.type === 'metrics' ? 'metrics' : cgoConn.type.replace(/s$/, '')
+            augmentedData[type].push({
+              ...cgoConn,
+              type: componentType,
+              cloudSupported: false,
+              requiresCgo: true
+            })
+            addedCgoCount++
+          }
+        }
+      }
+    }
+
+    // Add cloud-only connectors that aren't in the OSS list
+    if (binaryAnalysis.comparison?.cloudOnly) {
+      for (const cloudConn of binaryAnalysis.comparison.cloudOnly) {
+        if (cloudConn.type === type) {
+          const exists = augmentedData[type].some(c => c.name === cloudConn.name)
+          if (!exists) {
+            // Singularize type for consistency with stored data (except "metrics" which stays plural)
+            const componentType = cloudConn.type === 'metrics' ? 'metrics' : cloudConn.type.replace(/s$/, '')
+            augmentedData[type].push({
+              ...cloudConn,
+              type: componentType,
+              cloudSupported: true,
+              requiresCgo: false,
+              cloudOnly: true
+            })
+            addedCloudOnlyCount++
+          }
+        }
+      }
+    }
+  }
+
+  return { augmentedData, augmentedCount, addedCgoCount, addedCloudOnlyCount }
+}
+
+/**
  * Update whats-new.adoc with new release information
  * @param {Object} params - Parameters
  * @param {string} params.dataDir - Data directory path
@@ -830,13 +918,22 @@ async function handleRpcnConnectorDocs (options) {
                 }
               }
 
+              // Augment newData with binary analysis results before generating diff
+              // This ensures CGO-only and cloud-only connectors are included and metadata is accurate
+              const { augmentedData: augmentedNewData, addedCgoCount, addedCloudOnlyCount } =
+                augmentConnectorData(newData, intermediateAnalysis)
+
+              if (addedCgoCount > 0 || addedCloudOnlyCount > 0) {
+                console.log(`   • Augmented newData: +${addedCgoCount} CGO-only, +${addedCloudOnlyCount} cloud-only`)
+              }
+
               // Generate diff
               console.log(`\nGenerating diff: ${fromVer} → ${toVer}...`)
               const { generateConnectorDiffJson } = require('./report-delta.js')
 
               const diffData = generateConnectorDiffJson(
                 oldData,
-                newData,
+                augmentedNewData,
                 {
                   oldVersion: fromVer,
                   newVersion: toVer,
@@ -849,6 +946,12 @@ async function handleRpcnConnectorDocs (options) {
               const diffPath = path.join(dataDir, `connect-diff-${fromVer}_to_${toVer}.json`)
               fs.writeFileSync(diffPath, JSON.stringify(diffData, null, 2), 'utf8')
               console.log(`✓ Diff saved: ${path.basename(diffPath)}`)
+
+              // Save augmented data back to file for subsequent iterations
+              // This ensures the next version pair has consistent metadata when loading this version as oldData
+              const augmentedDataPath = path.join(dataDir, `connect-${toVer}.json`)
+              fs.writeFileSync(augmentedDataPath, JSON.stringify(augmentedNewData, null, 2), 'utf8')
+              console.log(`✓ Augmented data saved: connect-${toVer}.json`)
 
               // Update what's-new if requested
               if (options.updateWhatsNew) {
@@ -1097,73 +1200,10 @@ async function handleRpcnConnectorDocs (options) {
 
       const connectorData = JSON.parse(fs.readFileSync(dataFile, 'utf8'))
 
-      const cloudSet = new Set(
-        (binaryAnalysis.comparison?.inCloud || []).map(c => `${c.type}:${c.name}`)
-      )
-      const cgoOnlySet = new Set(
-        (binaryAnalysis.cgoOnly || []).map(c => `${c.type}:${c.name}`)
-      )
+      const { augmentedData, augmentedCount, addedCgoCount, addedCloudOnlyCount } =
+        augmentConnectorData(connectorData, binaryAnalysis)
 
-      let augmentedCount = 0
-      let addedCgoCount = 0
-      let addedCloudOnlyCount = 0
-
-      const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-        'buffers', 'metrics', 'scanners', 'tracers']
-
-      for (const type of connectorTypes) {
-        if (!Array.isArray(connectorData[type])) {
-          connectorData[type] = []
-        }
-
-        for (const connector of connectorData[type]) {
-          const key = `${type}:${connector.name}`
-          connector.cloudSupported = cloudSet.has(key)
-          connector.requiresCgo = cgoOnlySet.has(key)
-          augmentedCount++
-        }
-
-        if (binaryAnalysis.cgoOnly) {
-          for (const cgoConn of binaryAnalysis.cgoOnly) {
-            if (cgoConn.type === type) {
-              const exists = connectorData[type].some(c => c.name === cgoConn.name)
-              if (!exists) {
-                // Singularize type for consistency with stored data (except "metrics" which stays plural)
-                const componentType = cgoConn.type === 'metrics' ? 'metrics' : cgoConn.type.replace(/s$/, '')
-                connectorData[type].push({
-                  ...cgoConn,
-                  type: componentType,
-                  cloudSupported: false,
-                  requiresCgo: true
-                })
-                addedCgoCount++
-              }
-            }
-          }
-        }
-
-        if (binaryAnalysis.comparison?.cloudOnly) {
-          for (const cloudConn of binaryAnalysis.comparison.cloudOnly) {
-            if (cloudConn.type === type) {
-              const exists = connectorData[type].some(c => c.name === cloudConn.name)
-              if (!exists) {
-                // Singularize type for consistency with stored data (except "metrics" which stays plural)
-                const componentType = cloudConn.type === 'metrics' ? 'metrics' : cloudConn.type.replace(/s$/, '')
-                connectorData[type].push({
-                  ...cloudConn,
-                  type: componentType,
-                  cloudSupported: true,
-                  requiresCgo: false,
-                  cloudOnly: true
-                })
-                addedCloudOnlyCount++
-              }
-            }
-          }
-        }
-      }
-
-      fs.writeFileSync(dataFile, JSON.stringify(connectorData, null, 2), 'utf8')
+      fs.writeFileSync(dataFile, JSON.stringify(augmentedData, null, 2), 'utf8')
       console.log(`Done: Augmented ${augmentedCount} connectors with cloud/cgo fields`)
       if (addedCgoCount > 0) {
         console.log(`   • Added ${addedCgoCount} cgo-only connectors to data file`)
@@ -1172,8 +1212,7 @@ async function handleRpcnConnectorDocs (options) {
         console.log(`   • Added ${addedCloudOnlyCount} cloud-only connectors to data file`)
       }
 
-      // Keep only the latest version (delete all older versions)
-      // BUT preserve any files from intermediate processing during this run
+      // Keep only the latest 2 versions (by semver), delete all others
       const dataVersions = fs.readdirSync(dataDir)
         .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
         .map(f => {
@@ -1181,21 +1220,12 @@ async function handleRpcnConnectorDocs (options) {
           return match ? match[1] : null
         })
         .filter(v => v && semver.valid(v))
+        .sort((a, b) => semver.rcompare(a, b)) // Sort descending (newest first)
 
-      // Build list of versions we need to keep for this run
-      const versionsToKeep = new Set([newVersion]); // Always keep the latest
-      if (intermediateProcessingResults.length > 0) {
-        // Keep intermediate versions from this run
-        intermediateProcessingResults.forEach(r => {
-          versionsToKeep.add(r.fromVersion);
-          versionsToKeep.add(r.toVersion);
-        });
-      }
-      if (oldVersion) {
-        versionsToKeep.add(oldVersion); // Keep old version for diff
-      }
+      // Keep only the latest 2 versions
+      const versionsToKeep = new Set(dataVersions.slice(0, 2))
 
-      // Delete only files that are NOT needed for this run
+      // Delete all older versions
       for (const version of dataVersions) {
         if (!versionsToKeep.has(version)) {
           const dataFile = `connect-${version}.json`
@@ -1205,9 +1235,29 @@ async function handleRpcnConnectorDocs (options) {
         }
       }
 
+      // Also clean up old CSV files (keep latest 2)
+      const csvVersions = fs.readdirSync(dataDir)
+        .filter(f => /^connect-info-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.csv$/.test(f))
+        .map(f => {
+          const match = f.match(/^connect-info-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.csv$/)
+          return match ? match[1] : null
+        })
+        .filter(v => v && semver.valid(v))
+        .sort((a, b) => semver.rcompare(a, b))
+
+      const csvToKeep = new Set(csvVersions.slice(0, 2))
+      for (const version of csvVersions) {
+        if (!csvToKeep.has(version)) {
+          const csvFile = `connect-info-${version}.csv`
+          const csvPath = path.join(dataDir, csvFile);
+          fs.unlinkSync(csvPath);
+          console.log(`🧹 Deleted old CSV from docs-data: ${csvFile}`);
+        }
+      }
+
       // IMPORTANT: Reload newIndex with augmented data for unified diff
       // The unified diff approach compares platform metadata to detect transitions
-      newIndex = connectorData
+      newIndex = augmentedData
       console.log(`✓ Reloaded newIndex with augmented data for diff comparison`)
     } catch (err) {
       console.error(`Warning: Failed to augment data file: ${err.message}`)

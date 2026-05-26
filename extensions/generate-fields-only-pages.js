@@ -145,15 +145,15 @@ module.exports.register = function ({ config }) {
   const fieldOnlyTemplate = handlebars.compile(`{{{${helperName} children}}}`)
 
   this.on('contentClassified', ({ contentCatalog, siteCatalog }) => {
-    const component = contentCatalog.getComponent('redpanda-connect')
+    const component = contentCatalog.getComponent('connect')
     if (!component) {
-      logger.warn('redpanda-connect component not found. Skipping field-only page generation.')
+      logger.warn('connect component not found. Skipping field-only page generation.')
       return
     }
 
     const componentVersion = component.latest
     if (!componentVersion) {
-      logger.warn('No latest version found for redpanda-connect component.')
+      logger.warn('No latest version found for connect component.')
       return
     }
 
@@ -161,7 +161,7 @@ module.exports.register = function ({ config }) {
     // Look for any versioned JSON attachment in the components module
     // (i.e. modules/components/attachments/connect-X.Y.Z.json)
     const attachments = contentCatalog.findBy({
-      component: 'redpanda-connect',
+      component: 'connect',
       version: componentVersion.version,
       module: 'components',
       family: 'attachment'
@@ -203,7 +203,7 @@ module.exports.register = function ({ config }) {
     const attachment = matchingAttachments[0]?.file
 
     if (!attachment) {
-      logger.warn('No JSON attachment found in the components module of the redpanda-connect content catalog. Skipping field-only page generation.')
+      logger.warn('No JSON attachment found in the components module of the connect content catalog. Skipping field-only page generation.')
       return
     }
 
@@ -218,7 +218,7 @@ module.exports.register = function ({ config }) {
     let pagesGenerated = 0
 
     // Get origin from first existing page in component (for git metadata)
-    const existingPages = contentCatalog.getPages((page) => page.src.component === 'redpanda-connect')
+    const existingPages = contentCatalog.getPages((page) => page.src.component === 'connect')
     const origin = existingPages.length > 0 ? existingPages[0].src.origin : { type: 'generated' }
 
     // Iterate over each type (inputs, outputs, processors, etc.)
@@ -266,7 +266,7 @@ module.exports.register = function ({ config }) {
             contents: contentBuffer,
             stat: stat,
             src: {
-              component: 'redpanda-connect',
+              component: 'connect',
               version: componentVersion.version,
               module: 'components',
               family: 'page',

@@ -8,9 +8,10 @@
  * @param {string} repo - The repository name (redpanda-operator).
  * @param {string} stableDockerTag - The stable docker tag in format v<major>.<minor>.<patch>.
  * @param {string} betaDockerTag - Optional beta docker tag in format v<major>.<minor>.<patch>-beta.
+ * @param {Object} logger - Optional Antora logger instance for logging
  * @returns {Promise<{ latestStableRelease: string|null, latestBetaRelease: string|null }>}
  */
-module.exports = async (github, owner, repo, stableDockerTag, betaDockerTag) => {
+module.exports = async (github, owner, repo, stableDockerTag, betaDockerTag, logger = null) => {
   const yaml = require('js-yaml');
   const path = 'charts/redpanda/chart/Chart.yaml';
 
@@ -29,7 +30,11 @@ module.exports = async (github, owner, repo, stableDockerTag, betaDockerTag) => 
       const versionMatch = dockerTag.match(/^v(\d+)\.(\d+)(?:\.(\d+))?(?:-beta.*)?$/);
 
       if (!versionMatch) {
-        console.error(`Invalid docker tag format: ${dockerTag}`);
+        if (logger) {
+          logger.error(`Invalid docker tag format: ${dockerTag}`);
+        } else {
+          console.error(`Invalid docker tag format: ${dockerTag}`);
+        }
         return null;
       }
 
@@ -55,11 +60,28 @@ module.exports = async (github, owner, repo, stableDockerTag, betaDockerTag) => 
         const version = chartYaml.version || null;
         return version;
       } catch (error) {
-        console.error(`Failed to fetch Chart.yaml for branch ${branchName}:`, error.message);
+        if (error.status === 404) {
+          // Branch doesn't exist yet - this is expected for unreleased versions
+          if (logger) {
+            logger.warn(`Fetched operator ${dockerTag} from Docker Hub but branch ${branchName} not found in GitHub (source may not be released yet)`);
+          } else {
+            console.warn(`Fetched operator ${dockerTag} from Docker Hub but branch ${branchName} not found in GitHub (source may not be released yet)`);
+          }
+        } else {
+          if (logger) {
+            logger.error(`Failed to fetch Chart.yaml for branch ${branchName}:`, error.message);
+          } else {
+            console.error(`Failed to fetch Chart.yaml for branch ${branchName}:`, error.message);
+          }
+        }
         return null;
       }
     } catch (error) {
-      console.error(`Error processing docker tag ${dockerTag}:`, error.message);
+      if (logger) {
+        logger.error(`Error processing docker tag ${dockerTag}:`, error.message);
+      } else {
+        console.error(`Error processing docker tag ${dockerTag}:`, error.message);
+      }
       return null;
     }
   };
@@ -75,7 +97,11 @@ module.exports = async (github, owner, repo, stableDockerTag, betaDockerTag) => 
       latestBetaRelease: betaChartVersion
     };
   } catch (error) {
-    console.error('Failed to fetch chart versions:', error.message);
+    if (logger) {
+      logger.error('Failed to fetch chart versions:', error.message);
+    } else {
+      console.error('Failed to fetch chart versions:', error.message);
+    }
     return {
       latestStableRelease: null,
       latestBetaRelease: null

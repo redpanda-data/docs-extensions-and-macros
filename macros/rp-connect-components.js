@@ -1,4 +1,6 @@
 'use strict';
+const { posix: path } = require('path')
+
 /**
  * Registers macros for use in Redpanda Connect contexts in the Redpanda documentation.
   * @param {Registry} registry - The Antora registry where this block macro is registered.
@@ -1024,7 +1026,31 @@ module.exports.register = function (registry, context) {
       // Filter for the specific connector by name
       const componentRows = csvData.data.filter(row => row.connector.trim().toLowerCase() === name.trim().toLowerCase());
       if (componentRows.length === 0) {
-        console.error(`No data found for connector: ${name}`);
+        console.warn(`No CSV data found for connector: ${name}. The connector may have been removed or renamed.`);
+        // Build link to release notes using content catalog for proper URL resolution
+        const isCloud = attributes['env-cloud'] !== undefined;
+        let whatsNewUrl = isCloud
+          ? '/redpanda-cloud/develop/connect/get-started/whats-new/'
+          : '/redpanda-connect/get-started/whats-new/';
+
+        // Try to resolve the page from the content catalog for accurate URLs
+        if (context.contentCatalog && context.file) {
+          const pageSpec = isCloud
+            ? 'redpanda-cloud:develop/connect/get-started:whats-new.adoc'
+            : 'redpanda-connect:get-started:whats-new.adoc';
+          const page = context.contentCatalog.resolvePage(pageSpec, context.file.src);
+          if (page) {
+            whatsNewUrl = path.relative(path.dirname(context.file.pub.url), page.pub.url);
+          }
+        }
+
+        // Return a notice for removed/unknown connectors
+        return self.createBlock(parent, 'pass', `
+          <div class="metadata-block">
+            <div class="metadata-content">
+              <p><strong>Available in:</strong> <em>This connector is no longer available. Check the <a href="${whatsNewUrl}">release notes</a> for migration guidance.</em></p>
+            </div>
+          </div>`);
       }
       // Process types and metadata from CSV
       const types = componentRows.map(row => ({
@@ -1041,6 +1067,21 @@ module.exports.register = function (registry, context) {
         const [currentType] = sortedTypes.splice(currentTypeIndex, 1);
         sortedTypes.unshift(currentType);
       }
+
+      // Set context-switcher attribute for UI template to render compact dropdown in sticky bar
+      if (sortedTypes.length > 1) {
+        const contextSwitcherData = {};
+        sortedTypes.forEach(typeObj => {
+          const link = (component === 'Cloud' && typeObj.redpandaCloudUrl) || typeObj.redpandaConnectUrl;
+          contextSwitcherData[typeObj.type.toLowerCase()] = {
+            name: capitalize(typeObj.type),
+            to: link
+          };
+        });
+        // Set as page attribute (not document attribute) so it's accessible in UI template
+        attributes['page-context-switcher'] = JSON.stringify(contextSwitcherData);
+        parent.getDocument().setAttribute('page-context-switcher', JSON.stringify(contextSwitcherData));
+      }
       // Check if the component requires an Enterprise license (based on support level)
       let enterpriseLicenseInfo = '';
       if (component !== 'Cloud') {
@@ -1051,6 +1092,26 @@ module.exports.register = function (registry, context) {
         }
       }
       const isCloudSupported = componentRows.some(row => row.is_cloud_supported === 'y');
+
+      // Set availability attributes for UI template badges with URLs
+      if (isCloudSupported) {
+        const cloudUrl = sortedTypes[0].redpandaCloudUrl;
+        const connectUrl = sortedTypes[0].redpandaConnectUrl;
+
+        if (component === 'Connect' && cloudUrl) {
+          // Viewing Self-Managed, but also available in Cloud - show Cloud badge with link
+          parent.getDocument().setAttribute('cloud-available', 'true');
+          parent.getDocument().setAttribute('cloud-available-url', cloudUrl);
+        } else if (component === 'Cloud' && connectUrl) {
+          // Viewing Cloud, but also available in Self-Managed - show Self-Managed badge with link
+          parent.getDocument().setAttribute('self-managed-available', 'true');
+          parent.getDocument().setAttribute('self-managed-available-url', connectUrl);
+        }
+      } else if (!isCloudSupported && component === 'Connect') {
+        // Only available in Self-Managed - show "Self-Managed Only" badge (no link)
+        parent.getDocument().setAttribute('self-managed-only', 'true');
+      }
+
       let availableInInfo = '';
 
       if (isCloudSupported) {

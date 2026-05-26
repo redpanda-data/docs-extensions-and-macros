@@ -51,7 +51,8 @@ function generateFrontmatter(page) {
     'title',
     'navtitle',
     'description',
-    'categories',
+    // Note: 'categories' removed - it's a massive object (all Connect components)
+    // that bloats frontmatter. Only include on pages that specifically need it.
     'page-component-name',
     'page-component-title',
     'page-component-version',
@@ -75,9 +76,24 @@ function generateFrontmatter(page) {
     'latest-connect-version',
   ]
 
+  // Blocklist of large data attributes that should never be in frontmatter
+  // These are component-level data used by macros but shouldn't pollute markdown
+  const blockedAttributes = [
+    'categories',  // Massive nested object with all Connect components
+    'connectCategoriesData',  // Raw Connect categories data
+    'flatComponentsData',  // Flattened Connect component data
+    'driverSupportData',  // SQL driver support matrix
+    'cacheSupportData',  // Cache support matrix
+    'csvData',  // Raw CSV data from generate-rp-connect-info
+    'commercialNamesMap',  // Commercial names mapping
+  ]
+
   // Add allowed page attributes to frontmatter
   Object.keys(attrs).forEach(key => {
     const value = attrs[key]
+
+    // Skip blocked attributes (large data objects)
+    if (blockedAttributes.includes(key)) return
 
     // Allow all learning-objective-* attributes (learning-objective-1, -2, -3, etc.)
     const isLearningObjective = key.startsWith('learning-objective-')
@@ -222,6 +238,12 @@ module.exports.register = function () {
           'nav-expand',
           'banner-container',
           'markdown-dropdown',
+          'version-selector',        // Version dropdown (not relevant for LLMs)
+          'component-indicator',     // Component header bar
+          'product-switcher',        // Product switcher dropdown
+          'breadcrumb',              // Breadcrumb navigation
+          'chat-panel',              // AI chat interface
+          'kapa',                    // Kapa AI widget
         ]
         return toRemove.some(
           (x) => classAttr.includes(x) || idAttr.includes(x)

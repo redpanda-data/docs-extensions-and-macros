@@ -107,41 +107,66 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
 
     // Start handling the article content
     const article = root.querySelector('article.doc')
+    let documentTitle, titles, intro, text, isLandingPage
+
     if (!article) {
-      logger.warn(`Page is not an article...skipping ${page.pub.url}`)
-      continue
-    }
+      // Check if this is a landing page we should index with metadata
+      const pageRole = page.asciidoc?.attributes?.['page-role'] || ''
+      const pageLayout = page.asciidoc?.attributes?.['page-layout'] || ''
+      const isUmbrellaPage = ['home', 'component-home-v3', 'data-platform'].includes(pageRole) ||
+                            ['home', 'component-home-v3', 'data-platform'].includes(pageLayout)
 
-    // Handle titles
-    const h1 = article.querySelector('h1')
-    if (!h1) {
-      logger.warn(`No H1 in ${page.pub.url}...skipping`)
-      continue
-    }
-    const documentTitle = h1.text
-    h1.remove()
-
-    const titles = []
-    article.querySelectorAll('h2,h3,h4,h5,h6').forEach((title) => {
-      const id = title.getAttribute('id')
-      if (id) {
-        titles.push({
-          t: title.text,
-          h: id
-        })
+      if (!isUmbrellaPage) {
+        logger.warn(`Page is not an article...skipping ${page.pub.url}`)
+        continue
       }
-      title.remove()
-    })
 
-    // Exclude elements within the article that should not be indexed
-    for (const excl of excludes) {
-      if (!excl) continue
-      article.querySelectorAll(excl).forEach((e) => e.remove())
+      // Index landing page using metadata
+      isLandingPage = true
+      const h1 = root.querySelector('h1') || root.querySelector('.hero-title') || root.querySelector('title')
+      documentTitle = h1 ? decode(h1.text || h1.textContent || '') : component.title || cname
+      titles = []
+
+      // Get description from meta tag or page attribute
+      const metaDesc = root.querySelector('meta[name="description"]')
+      intro = metaDesc ? metaDesc.getAttribute('content') :
+              page.asciidoc?.attributes?.description || ''
+      text = intro
+      logger.info(`Indexing landing page: ${page.pub.url}`)
+    } else {
+      isLandingPage = false
+
+      // Handle titles
+      const h1 = article.querySelector('h1')
+      if (!h1) {
+        logger.warn(`No H1 in ${page.pub.url}...skipping`)
+        continue
+      }
+      documentTitle = h1.text
+      h1.remove()
+
+      titles = []
+      article.querySelectorAll('h2,h3,h4,h5,h6').forEach((title) => {
+        const id = title.getAttribute('id')
+        if (id) {
+          titles.push({
+            t: title.text,
+            h: id
+          })
+        }
+        title.remove()
+      })
+
+      // Exclude elements within the article that should not be indexed
+      for (const excl of excludes) {
+        if (!excl) continue
+        article.querySelectorAll(excl).forEach((e) => e.remove())
+      }
+
+      // FIXED: Handle potential null intro element
+      const introElement = article.querySelector('p')
+      intro = introElement ? decode(introElement.rawText) : ''
     }
-
-    // FIXED: Handle potential null intro element
-    const introElement = article.querySelector('p')
-    const intro = introElement ? decode(introElement.rawText) : ''
 
     // Establish structure in the Algolia index
     if (!(cname in algolia)) algolia[cname] = {}
@@ -150,10 +175,12 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     // Check if this is a properties reference page (or has many titles)
     const isPropertiesPage = page.pub.url.includes('/properties/') || titles.length > 30
 
-    // Handle the article text
-    let text = ''
+    // Handle the article text (skip for landing pages - already set above)
+    if (!isLandingPage) {
+      text = ''
+    }
 
-    if (!isPropertiesPage) {
+    if (!isLandingPage && !isPropertiesPage && article) {
       // For normal pages, index full text content
       const contentElements = article.querySelectorAll('p, table, li')
       let contentText = ''
@@ -186,44 +213,62 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
         .replace(/\r/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
-    } else {
+    } else if (!isLandingPage && isPropertiesPage) {
       // For long pages, only use intro as text (property names are already in titles array)
       text = intro
       logger.info(`Skipping full text indexing for long page: ${page.pub.url} (${titles.length} properties)`)
     }
+    // For landing pages, text is already set above
 
     let tag
     const title = (component.title || '').trim()
-    if (title.toLowerCase() === 'home') {
-      // Collect all unique component titles except 'home', 'shared', 'search'
+    const titleLower = title.toLowerCase()
+
+    // Umbrella components that should include multiple product tags
+    const UMBRELLA_COMPONENTS = ['home', 'data platform', 'self-managed']
+
+    if (UMBRELLA_COMPONENTS.includes(titleLower)) {
+      // Collect all unique component titles except umbrella/utility components
       const componentsList = typeof contentCatalog.getComponents === 'function'
         ? contentCatalog.getComponents()
         : Array.isArray(contentCatalog.components)
           ? contentCatalog.components
           : Object.values(contentCatalog.components || contentCatalog._components || {})
 
-      // Find the latest version for Self-Managed (component title: 'Self-Managed')
-      let selfManagedLatestVersion
-      const selfManaged = componentsList.find(c => (c.title || '').trim().toLowerCase() === 'self-managed')
-      if (selfManaged?.latest?.version) {
-        selfManagedLatestVersion = selfManaged.latest.version
-        if (selfManagedLatestVersion && !/^v/.test(selfManagedLatestVersion)) {
-          selfManagedLatestVersion = 'v' + selfManagedLatestVersion
+      // Find the latest version for Streaming
+      let streamingLatestVersion
+      const streaming = componentsList.find(c => (c.title || '').trim().toLowerCase() === 'streaming')
+      if (streaming?.latest?.version) {
+        streamingLatestVersion = streaming.latest.version
+        if (streamingLatestVersion && !/^v/.test(streamingLatestVersion)) {
+          streamingLatestVersion = 'v' + streamingLatestVersion
         }
       }
 
-      const allComponentTitles = componentsList
-        .map(c => (c.title || '').trim())
-        .filter(t => t && !['home', 'shared', 'search'].includes(t.toLowerCase()))
-
-      if (!allComponentTitles.length) {
-        throw new Error('No component titles found for "home" page. Indexing aborted.')
+      // Filter components based on umbrella type
+      let filteredTitles
+      if (titleLower === 'home') {
+        // Home includes all main products
+        filteredTitles = componentsList
+          .map(c => (c.title || '').trim())
+          .filter(t => t && !['home', 'shared', 'search', 'data platform', 'self-managed'].includes(t.toLowerCase()))
+      } else if (titleLower === 'data platform') {
+        // Data Platform includes Cloud, Streaming, Connect
+        filteredTitles = ['Cloud', 'Streaming', 'Connect']
+      } else if (titleLower === 'self-managed') {
+        // Self-Managed includes Streaming, Connect
+        filteredTitles = ['Streaming', 'Connect']
       }
 
-      tag = [...new Set(allComponentTitles)]
-      // For Self-Managed, append v<latest-version> to the tag
-      if (selfManagedLatestVersion) {
-        tag = tag.map(t => t.toLowerCase() === 'self-managed' ? `${t} ${selfManagedLatestVersion}` : t)
+      if (!filteredTitles || !filteredTitles.length) {
+        // Fallback to component title
+        tag = title
+      } else {
+        tag = [...new Set(filteredTitles)]
+        // For Streaming, append v<latest-version> to the tag
+        if (streamingLatestVersion) {
+          tag = tag.map(t => t.toLowerCase() === 'streaming' ? `${t} ${streamingLatestVersion}` : t)
+        }
       }
     } else {
       tag = `${title}${version ? ' v' + version : ''}`
@@ -261,7 +306,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       unixTimestamp: unixTimestamp
     }
 
-    if (component.name !== 'redpanda-labs') {
+    if (component.name !== 'labs') {
       indexItem.product = component.title
       indexItem.breadcrumbs = breadcrumbs
       indexItem.type = 'Doc'

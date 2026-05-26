@@ -36,12 +36,12 @@ module.exports.register = function ({ config }) {
   })
 
   async function processContent (contentCatalog) {
-    const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'redpanda-connect')
-    const redpandaCloud = contentCatalog.getComponents().find(component => component.name === 'redpanda-cloud')
+    const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'connect')
+    const redpandaCloud = contentCatalog.getComponents().find(component => component.name === 'cloud-data-platform')
     const preview = contentCatalog.getComponents().find(component => component.name === 'preview')
 
     if (!redpandaConnect) {
-      logger.warn('redpanda-connect component not found, skipping CSV enrichment')
+      logger.warn('connect component not found, skipping CSV enrichment')
       return
     }
 
@@ -141,7 +141,7 @@ module.exports.register = function ({ config }) {
       const stem = file.src.stem
       const filePath = file.path
 
-      if (component === 'redpanda-connect') {
+      if (component === 'connect') {
         // Store by stem, but only for connector doc paths
         if (isConnectorDocPath(filePath, file)) {
           const type = extractTypeFromPath(filePath)
@@ -150,7 +150,7 @@ module.exports.register = function ({ config }) {
             connectPages.set(key, file)
           }
         }
-      } else if (component === 'redpanda-cloud') {
+      } else if (component === 'cloud-data-platform') {
         // Cloud docs have a specific path pattern
         const cloudMatch = filePath.match(/connect\/components\/([^/]+)s\/([^/]+)\.adoc$/)
         if (cloudMatch) {
@@ -280,7 +280,7 @@ module.exports.register = function ({ config }) {
       const { component, relative, module: moduleName } = page.src
 
       // Only process Redpanda Connect and Cloud component pages
-      if (component !== 'redpanda-connect' && component !== 'redpanda-cloud') continue
+      if (component !== 'connect' && component !== 'cloud-data-platform') continue
 
       // Match component documentation pages:
       // 1. Cloud-style paths: connect/components/processors/archive.adoc

@@ -1,6 +1,6 @@
 const { retryWithBackoff, isRetryableGitHubError } = require('./retry-util');
 
-module.exports = async (github, owner, repo) => {
+module.exports = async (github, owner, repo, logger = null) => {
   const semver = require('semver');
 
   return retryWithBackoff(
@@ -29,7 +29,11 @@ module.exports = async (github, owner, repo) => {
           latestBetaRelease: latestBetaReleaseVersion || null
         };
       } else {
-        console.log("No valid semver releases found.");
+        if (logger) {
+          logger.warn("No valid semver releases found.");
+        } else {
+          console.log("No valid semver releases found.");
+        }
         return { latestStableRelease: null, latestBetaRelease: null };
       }
     },
@@ -38,9 +42,14 @@ module.exports = async (github, owner, repo) => {
       initialDelay: 1000,
       shouldRetry: isRetryableGitHubError,
       operationName: `Fetch Console version from ${owner}/${repo}`
-    }
+    },
+    logger
   ).catch(error => {
-    console.error('Failed to fetch release information after retries:', error);
+    if (logger) {
+      logger.error('Failed to fetch release information after retries:', error);
+    } else {
+      console.error('Failed to fetch release information after retries:', error);
+    }
     return { latestStableRelease: null, latestBetaRelease: null };
   });
 };

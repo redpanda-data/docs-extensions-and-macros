@@ -8,9 +8,10 @@
  * @param {number} options.maxDelay - Maximum delay in ms (default: 10000)
  * @param {Function} options.shouldRetry - Function to determine if error is retryable (default: all errors)
  * @param {string} options.operationName - Name for logging
+ * @param {Object} logger - Optional Antora logger instance for logging
  * @returns {Promise<*>} Result of the function
  */
-async function retryWithBackoff(fn, options = {}) {
+async function retryWithBackoff(fn, options = {}, logger = null) {
   const {
     maxRetries = 3,
     initialDelay = 1000,
@@ -37,8 +38,14 @@ async function retryWithBackoff(fn, options = {}) {
       const jitter = Math.random() * 0.3 * baseDelay; // Add up to 30% jitter
       const delay = Math.floor(baseDelay + jitter);
 
-      console.error(`⚠️  ${operationName} failed (attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}`);
-      console.error(`   Retrying in ${delay}ms...`);
+      // Log retry attempt using logger if available, otherwise fall back to console
+      if (logger) {
+        logger.warn(`${operationName} failed (attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}`);
+        logger.warn(`Retrying in ${delay}ms...`);
+      } else {
+        console.error(`⚠️  ${operationName} failed (attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}`);
+        console.error(`   Retrying in ${delay}ms...`);
+      }
 
       // Wait before retrying
       await new Promise(resolve => setTimeout(resolve, delay));

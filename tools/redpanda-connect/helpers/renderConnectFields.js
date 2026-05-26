@@ -79,7 +79,7 @@ module.exports = function renderConnectFields(children, prefix = '') {
       block += `${desc}\n\n`;
     }
     if (child.is_secret) {
-      block += `include::redpanda-connect:components:partial$secret_warning.adoc[]\n\n`;
+      block += `include::connect:components:partial$secret_warning.adoc[]\n\n`;
     }
     if (child.version) {
       block += `ifndef::env-cloud[]\nRequires version ${child.version} or later.\nendif::[]\n\n`;
