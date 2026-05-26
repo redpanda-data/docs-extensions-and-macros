@@ -248,14 +248,23 @@ describe('unified-navigation extension', () => {
 
   describe('unpublished page filtering', () => {
     it('should filter unpublished pages from navigation', () => {
-      const page = {
+      // Parent page
+      const parentPage = {
+        src: { component: 'parent', version: 'master' },
+        asciidoc: { attributes: {} },
+        out: {},
+        pub: { url: '/parent/' },
+      }
+
+      // Published child page
+      const childPage = {
         src: { component: 'docs', version: 'master' },
         asciidoc: { attributes: {} },
         out: {},
         pub: { url: '/docs/' },
       }
 
-      // Page without out property (unpublished)
+      // Unpublished child page (no out property)
       const unpublishedPage = {
         src: { component: 'docs', version: 'master' },
         asciidoc: { attributes: {} },
@@ -263,9 +272,27 @@ describe('unified-navigation extension', () => {
         pub: { url: '/docs/unpublished/' },
       }
 
-      mockPages.push(page, unpublishedPage)
+      mockPages.push(parentPage, childPage, unpublishedPage)
 
-      const component = {
+      const parent = {
+        name: 'parent',
+        latestVersion: null,
+        versions: [{
+          version: 'master',
+          displayVersion: 'master',
+          url: '/parent/',
+          navigation: [{ content: 'Parent Home', url: '/parent/', urlType: 'internal' }],
+          asciidoc: {
+            attributes: {
+              'component-metadata': { title: 'Parent', color: '#purple' },
+              'page-navigation': '- parent:\n    - docs',
+            },
+          },
+        }],
+      }
+      parent.latestVersion = parent.versions[0]
+
+      const docs = {
         name: 'docs',
         latestVersion: null,
         versions: [{
@@ -279,20 +306,19 @@ describe('unified-navigation extension', () => {
           asciidoc: {
             attributes: {
               'component-metadata': { title: 'Docs', color: '#blue' },
-              'page-navigation': '- docs',
             },
           },
         }],
       }
-      component.latestVersion = component.versions[0]
+      docs.latestVersion = docs.versions[0]
 
-      mockComponents.push(component)
+      mockComponents.push(parent, docs)
 
       // Execute
       extensionInstance._handlers.navigationBuilt({ contentCatalog: mockContentCatalog })
 
-      // Assert
-      const customNav = JSON.parse(page.asciidoc.attributes['page-custom-navigation'])
+      // Assert: Check parent page has custom navigation
+      const customNav = JSON.parse(parentPage.asciidoc.attributes['page-custom-navigation'])
       const bucket = customNav.find(item => item.componentName === 'docs')
 
       // Should only have published page
