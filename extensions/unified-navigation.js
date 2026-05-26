@@ -191,8 +191,21 @@ module.exports.register = function () {
               }
             }
 
-            // Prepend component's own nav items before child buckets
-            const fullNavigation = [...ownNavItems, ...buckets]
+            // Build full navigation array
+            let fullNavigation = []
+
+            // If component has its own nav items, wrap them in a pseudo-bucket with showNavItemsOnly
+            // This renders the items directly without bucket header/wrapper
+            if (ownNavItems.length > 0) {
+              fullNavigation.push({
+                items: ownNavItems,
+                showNavItemsOnly: true,
+                isCurrentBucket: true,
+              })
+            }
+
+            // Add child component buckets
+            fullNavigation = fullNavigation.concat(buckets)
 
             page.asciidoc.attributes['page-custom-navigation'] = JSON.stringify(fullNavigation)
             page.asciidoc.attributes['page-has-custom-nav'] = 'true'
