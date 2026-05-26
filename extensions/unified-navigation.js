@@ -159,17 +159,18 @@ module.exports.register = function () {
           // If component has children and owns config, we'll show its nav items outside buckets
           // So build buckets only for children, not for the parent itself
           let treeForBuckets = relevantTree
-          if (hasChildComponents && ownsConfig && relevantTree.length > 0) {
-            // Extract children from parent node
-            const parentNode = relevantTree.find(item => item.name === page.src.component)
+          if (hasChildComponents && ownsConfig) {
+            // Extract children from ORIGINAL configTree (not filtered relevantTree)
+            // because filterConfigTreeForComponent sets children: undefined on parent
+            const parentNode = findNodeInTree(configData.configTree, page.src.component)
             if (parentNode && parentNode.children) {
               treeForBuckets = parentNode.children
               logger.debug(`${page.src.component}: Extracted ${parentNode.children.length} children for buckets: ${parentNode.children.map(c => c.name).join(', ')}`)
             } else {
-              logger.warn(`${page.src.component}: Has children but couldn't extract them from relevantTree`)
+              logger.warn(`${page.src.component}: Has children but couldn't find them in configTree`)
             }
           } else {
-            logger.debug(`${page.src.component}: Using full relevantTree (hasChildren=${hasChildComponents}, ownsConfig=${ownsConfig}, treeLength=${relevantTree.length})`)
+            logger.debug(`${page.src.component}: Using full relevantTree (hasChildren=${hasChildComponents}, ownsConfig=${ownsConfig})`)
           }
 
           const buckets = buildBucketsFromConfig(
@@ -328,25 +329,35 @@ function getHeaderData(version) {
 }
 
 /**
+ * Find a node in the config tree by name
+ * @param {Array} tree - Navigation config tree
+ * @param {string} componentName - Component name to search for
+ * @returns {Object|null} The node or null if not found
+ */
+function findNodeInTree(tree, componentName) {
+  if (!Array.isArray(tree)) return null
+
+  for (const item of tree) {
+    if (item.name === componentName) {
+      return item
+    }
+    if (item.children) {
+      const found = findNodeInTree(item.children, componentName)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/**
  * Check if a component has children in the config tree
  * @param {Array} tree - Navigation config tree
  * @param {string} componentName - Component name to search for
  * @returns {boolean} True if component has children
  */
 function componentHasChildren(tree, componentName) {
-  if (!Array.isArray(tree)) return false
-
-  for (const item of tree) {
-    if (item.name === componentName && item.children && item.children.length > 0) {
-      return true
-    }
-    if (item.children) {
-      if (componentHasChildren(item.children, componentName)) {
-        return true
-      }
-    }
-  }
-  return false
+  const node = findNodeInTree(tree, componentName)
+  return !!(node && node.children && node.children.length > 0)
 }
 
 /**
