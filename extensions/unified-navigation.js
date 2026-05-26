@@ -164,7 +164,12 @@ module.exports.register = function () {
             const parentNode = relevantTree.find(item => item.name === page.src.component)
             if (parentNode && parentNode.children) {
               treeForBuckets = parentNode.children
+              logger.debug(`${page.src.component}: Extracted ${parentNode.children.length} children for buckets: ${parentNode.children.map(c => c.name).join(', ')}`)
+            } else {
+              logger.warn(`${page.src.component}: Has children but couldn't extract them from relevantTree`)
             }
+          } else {
+            logger.debug(`${page.src.component}: Using full relevantTree (hasChildren=${hasChildComponents}, ownsConfig=${ownsConfig}, treeLength=${relevantTree.length})`)
           }
 
           const buckets = buildBucketsFromConfig(
@@ -201,6 +206,7 @@ module.exports.register = function () {
 
             // If component has children and owns config, show its nav items outside buckets
             if (hasChildComponents && ownsConfig) {
+              logger.debug(`${page.src.component}: Adding nav items outside buckets (has children + owns config)`)
               // Get the component's own nav items (from nav.adoc) to prepend before child buckets
               const compData = componentVersionNavMap.get(page.src.component)
               let ownNavItems = []
@@ -208,6 +214,7 @@ module.exports.register = function () {
                 const versionData = compData.versionMap.get(page.src.version)
                 if (versionData && versionData.navigation) {
                   ownNavItems = filterUnpublishedPages(versionData.navigation, publishedUrlsSet)
+                  logger.debug(`${page.src.component}: Found ${ownNavItems.length} nav items`)
                 }
               }
 
@@ -219,7 +226,12 @@ module.exports.register = function () {
                   showNavItemsOnly: true,
                   isCurrentBucket: true,
                 })
+                logger.debug(`${page.src.component}: Added ${ownNavItems.length} nav items to fullNavigation`)
+              } else {
+                logger.warn(`${page.src.component}: No nav items found despite having children and owning config`)
               }
+            } else {
+              logger.debug(`${page.src.component}: Not adding nav items (hasChildren=${hasChildComponents}, ownsConfig=${ownsConfig})`)
             }
 
             // Add child component buckets
