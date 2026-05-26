@@ -152,12 +152,6 @@ module.exports.register = function () {
           // Filter config tree to show only relevant hierarchy for current page
           const relevantTree = filterConfigTreeForComponent(configData.configTree, page.src.component)
 
-          if (page.src.component === 'streaming' && page.src.path.includes('home/index')) {
-            logger.debug(
-              `Streaming home page: filtered tree has ${relevantTree.length} root items: ${relevantTree.map((t) => t.name).join(', ')}`
-            )
-          }
-
           const buckets = buildBucketsFromConfig(
             relevantTree,
             contentCatalog,
@@ -255,15 +249,12 @@ function filterUnpublishedPages(items, publishedUrlsSet) {
         }
       }
 
-      // Create a shallow copy of the item to avoid mutation
-      const newItem = { ...item }
-
-      // Recursively filter children
-      if (newItem.items && Array.isArray(newItem.items)) {
-        newItem.items = filterUnpublishedPages(newItem.items, publishedUrlsSet)
+      // Return a new object with filtered children to avoid mutating the original
+      if (item.items && Array.isArray(item.items)) {
+        return { ...item, items: filterUnpublishedPages(item.items, publishedUrlsSet) }
       }
 
-      return newItem
+      return { ...item }
     })
     .filter(Boolean) // Remove null entries
 }

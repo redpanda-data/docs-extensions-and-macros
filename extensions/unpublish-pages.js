@@ -18,11 +18,11 @@ module.exports.register = function () {
 
       // Debug logging for ANY page with publish-only-during-beta attribute
       if (page.asciidoc?.attributes['publish-only-during-beta']) {
-        logger.warn(`Found page with publish-only-during-beta: ${page.src?.relative || page.pub?.url}`);
-        logger.warn(`  - publish-only-during-beta: ${page.asciidoc?.attributes['publish-only-during-beta']}`);
-        logger.warn(`  - page-component-version-is-prerelease: ${page.asciidoc?.attributes['page-component-version-is-prerelease']}`);
-        logger.warn(`  - page-unpublish: ${page.asciidoc?.attributes['page-unpublish']}`);
-        logger.warn(`  - component: ${componentName}, version: ${pageVersion}`);
+        logger.debug(`Found page with publish-only-during-beta: ${page.src?.relative || page.pub?.url}`);
+        logger.debug(`  - publish-only-during-beta: ${page.asciidoc?.attributes['publish-only-during-beta']}`);
+        logger.debug(`  - page-component-version-is-prerelease: ${page.asciidoc?.attributes['page-component-version-is-prerelease']}`);
+        logger.debug(`  - page-unpublish: ${page.asciidoc?.attributes['page-unpublish']}`);
+        logger.debug(`  - component: ${componentName}, version: ${pageVersion}`);
       }
 
       // Check the conditions for unpublishing the page
@@ -35,7 +35,7 @@ module.exports.register = function () {
 
       // Unpublish the shouldUnpublish pages
       if (shouldUnpublish) {
-        logger.warn(`  -> UNPUBLISHING: ${page.src?.relative || page.pub?.url}`);
+        logger.info(`Unpublishing page: ${page.src?.relative || page.pub?.url}`);
         siteCatalog.unpublishedPages.push(page.pub.url)
         delete page.out;
       }
