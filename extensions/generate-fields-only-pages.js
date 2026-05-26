@@ -147,13 +147,13 @@ module.exports.register = function ({ config }) {
   this.on('contentClassified', ({ contentCatalog, siteCatalog }) => {
     const component = contentCatalog.getComponent('connect')
     if (!component) {
-      logger.warn('redpanda-connect component not found. Skipping field-only page generation.')
+      logger.warn('connect component not found. Skipping field-only page generation.')
       return
     }
 
     const componentVersion = component.latest
     if (!componentVersion) {
-      logger.warn('No latest version found for redpanda-connect component.')
+      logger.warn('No latest version found for connect component.')
       return
     }
 
@@ -203,7 +203,7 @@ module.exports.register = function ({ config }) {
     const attachment = matchingAttachments[0]?.file
 
     if (!attachment) {
-      logger.warn('No JSON attachment found in the components module of the redpanda-connect content catalog. Skipping field-only page generation.')
+      logger.warn('No JSON attachment found in the components module of the connect content catalog. Skipping field-only page generation.')
       return
     }
 

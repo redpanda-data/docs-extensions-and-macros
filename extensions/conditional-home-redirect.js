@@ -9,6 +9,7 @@
 'use strict'
 
 module.exports.register = function () {
+  const logger = this.getLogger('conditional-home-redirect')
   let shouldRedirect = false
 
   // Check if ADP exists during content aggregation
@@ -16,9 +17,9 @@ module.exports.register = function () {
     const adpComponent = contentAggregate.find(c => c.name === 'agentic-data-plane')
     shouldRedirect = !adpComponent
     if (shouldRedirect) {
-      console.log('[conditional-home-redirect] agentic-data-plane not found, will create redirect after publish')
+      logger.info('agentic-data-plane not found, will create redirect after publish')
     } else {
-      console.log('[conditional-home-redirect] agentic-data-plane found, no redirect needed')
+      logger.info('agentic-data-plane found, no redirect needed')
     }
   })
 
@@ -31,11 +32,11 @@ module.exports.register = function () {
 
     // Get absolute output directory
     const outputDir = path.resolve(playbook.output.dir || 'build/site')
-    console.log(`[conditional-home-redirect] Output directory: ${outputDir}`)
+    logger.debug(`Output directory: ${outputDir}`)
 
     // Check redirect facility
     const redirectFacility = playbook.urls.redirectFacility || 'netlify'
-    console.log(`[conditional-home-redirect] Redirect facility: ${redirectFacility}`)
+    logger.debug(`Redirect facility: ${redirectFacility}`)
 
     if (redirectFacility === 'netlify') {
       // Add to _redirects file
@@ -46,16 +47,16 @@ module.exports.register = function () {
         let existingRedirects = ''
         if (fs.existsSync(redirectsPath)) {
           existingRedirects = fs.readFileSync(redirectsPath, 'utf8')
-          console.log(`[conditional-home-redirect] Found existing _redirects file with ${existingRedirects.split('\\n').length} lines`)
+          logger.debug(`Found existing _redirects file with ${existingRedirects.split('\\n').length} lines`)
         } else {
-          console.log(`[conditional-home-redirect] No existing _redirects file, creating new one`)
+          logger.debug('No existing _redirects file, creating new one')
         }
 
         // Prepend our redirect to the top (higher priority)
         fs.writeFileSync(redirectsPath, redirectRule + existingRedirects)
-        console.log(`[conditional-home-redirect] Added home -> data-platform redirect to _redirects`)
+        logger.info('Added home -> data-platform redirect to _redirects')
       } catch (err) {
-        console.error(`[conditional-home-redirect] Failed to write redirects file: ${err.message}`)
+        logger.error(`Failed to write redirects file: ${err.message}`)
       }
     }
 
@@ -81,9 +82,9 @@ module.exports.register = function () {
 
       // Overwrite the home page with redirect HTML
       fs.writeFileSync(homeIndexPath, redirectHtml)
-      console.log(`[conditional-home-redirect] Overwrote home page with redirect at ${homeIndexPath}`)
+      logger.info(`Overwrote home page with redirect at ${homeIndexPath}`)
     } catch (err) {
-      console.error(`[conditional-home-redirect] Failed to create redirect HTML: ${err.message}`)
+      logger.error(`Failed to create redirect HTML: ${err.message}`)
     }
   })
 }

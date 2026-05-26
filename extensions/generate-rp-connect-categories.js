@@ -17,7 +17,7 @@ module.exports.register = function ({ config }) {
     const redpandaConnect = contentCatalog.getComponents().find(component => component.name === 'connect')
 
     if (!redpandaConnect || !redpandaConnect.latest) {
-      logger.warn('Could not find the redpanda-connect component. Skipping category creation.')
+      logger.warn('Could not find the connect component. Skipping category creation.')
       return
     }
 
@@ -25,12 +25,12 @@ module.exports.register = function ({ config }) {
     const csvData = redpandaConnect.latest.asciidoc.attributes.csvData
 
     if (!descriptions) {
-      logger.error('No categories attribute found in redpanda-connect component')
+      logger.error('No categories attribute found in connect component')
       return
     }
 
     if (!csvData || !csvData.data) {
-      logger.error('No csvData attribute found in redpanda-connect component.')
+      logger.error('No csvData attribute found in connect component.')
       logger.error('Ensure generate-rp-connect-info extension is listed BEFORE this extension in your playbook.')
       return
     }

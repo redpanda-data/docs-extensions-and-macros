@@ -37,10 +37,10 @@ module.exports.register = function ({ config }) {
         latestOperatorResult,
         latestConnectResult,
       ] = await Promise.allSettled([
-        GetLatestRedpandaVersion(github, owner, 'redpanda'),
-        GetLatestDockerTag(dockerNamespace, 'console'),
-        GetLatestDockerTag(dockerNamespace, 'redpanda-operator'),
-        GetLatestConnectVersion(github, owner, 'connect'),
+        GetLatestRedpandaVersion(github, owner, 'redpanda', logger),
+        GetLatestDockerTag(dockerNamespace, 'console', logger),
+        GetLatestDockerTag(dockerNamespace, 'redpanda-operator', logger),
+        GetLatestConnectVersion(github, owner, 'connect', logger),
       ]);
       
       // Get the Helm chart version after we have the operator version (for both stable and beta)
@@ -49,11 +49,12 @@ module.exports.register = function ({ config }) {
       if (latestOperatorResult.status === 'fulfilled') {
         try {
           const helmChartVersions = await GetLatestHelmChartVersionFromOperator(
-            github, 
-            owner, 
-            'redpanda-operator', 
+            github,
+            owner,
+            'redpanda-operator',
             latestOperatorResult.value?.latestStableRelease,
-            latestOperatorResult.value?.latestBetaRelease
+            latestOperatorResult.value?.latestBetaRelease,
+            logger
           );
           
           latestHelmChartResult = { 

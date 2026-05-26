@@ -1,6 +1,6 @@
 const { retryWithBackoff, isRetryableGitHubError } = require('./retry-util');
 
-module.exports = async (github, owner, repo) => {
+module.exports = async (github, owner, repo, logger = null) => {
   const semver = require('semver');
 
   return retryWithBackoff(
@@ -67,9 +67,14 @@ module.exports = async (github, owner, repo) => {
       initialDelay: 1000,
       shouldRetry: isRetryableGitHubError,
       operationName: `Fetch Redpanda version from ${owner}/${repo}`
-    }
+    },
+    logger
   ).catch(error => {
-    console.error('Failed to fetch Redpanda release information after retries:', error);
+    if (logger) {
+      logger.error('Failed to fetch Redpanda release information after retries:', error);
+    } else {
+      console.error('Failed to fetch Redpanda release information after retries:', error);
+    }
     return { latestRedpandaRelease: null, latestRcRelease: null };
   });
 };

@@ -41,7 +41,7 @@ module.exports.register = function ({ config }) {
     const preview = contentCatalog.getComponents().find(component => component.name === 'preview')
 
     if (!redpandaConnect) {
-      logger.warn('redpanda-connect component not found, skipping CSV enrichment')
+      logger.warn('connect component not found, skipping CSV enrichment')
       return
     }
 
