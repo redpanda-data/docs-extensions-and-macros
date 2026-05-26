@@ -46,13 +46,12 @@ module.exports.register = function ({ config }) {
             'page-eol-date': eolInfo.eolDate,
             'page-eol-doc': eol_doc,
             'page-upgrade-doc': upgrade_doc,
+            'page-support-months': resolvedEOLMonths,
           };
           if (whats_new_doc) {
             attrs['page-whats-new-doc'] = whats_new_doc;
           }
           Object.assign(asciidoc.attributes, attrs);
-            'page-support-months': resolvedEOLMonths,
-          });
         } else {
           logger.warn(`No release date found for component: ${componentName}. Make sure to set {page-release-date} in the antora.yml of the component version ${version}.`);
         }
