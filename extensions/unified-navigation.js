@@ -184,12 +184,15 @@ module.exports.register = function () {
             // Build full navigation array
             let fullNavigation = []
 
-            // Check if this component is a parent that defines child components in the config tree
-            // Only components with children (like data-platform) should show their own nav items + child buckets
-            // Leaf components (like streaming) should only show sibling buckets
+            // Only show a component's nav items outside buckets if BOTH:
+            // 1. Component has children (defines child buckets)
+            // 2. Component owns the config (defined page-navigation in its own antora.yml)
+            // This ensures data-platform shows its nav items, but self-managed (which inherits
+            // data-platform's config and has children) doesn't duplicate its items
             const hasChildComponents = componentHasChildren(configData.configTree, page.src.component)
+            const ownsConfig = configData.configOwner === page.src.component
 
-            if (hasChildComponents) {
+            if (hasChildComponents && ownsConfig) {
               // Get the component's own nav items (from nav.adoc) to prepend before child buckets
               const compData = componentVersionNavMap.get(page.src.component)
               let ownNavItems = []
