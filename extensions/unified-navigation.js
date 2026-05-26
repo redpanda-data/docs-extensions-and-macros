@@ -1,5 +1,7 @@
 'use strict'
 
+const yaml = require('js-yaml')
+
 /**
  * Unified Navigation Extension (Config-Driven)
  *
@@ -151,7 +153,7 @@ module.exports.register = function () {
           const relevantTree = filterConfigTreeForComponent(configData.configTree, page.src.component)
 
           if (page.src.component === 'streaming' && page.src.path.includes('home/index')) {
-            logger.warn(
+            logger.debug(
               `Streaming home page: filtered tree has ${relevantTree.length} root items: ${relevantTree.map((t) => t.name).join(', ')}`
             )
           }
@@ -198,7 +200,7 @@ module.exports.register = function () {
       }
 
       if (configDrivenPages.size > 0) {
-        logger.warn(`Processed config-driven navigation for ${configDrivenPages.size} components: ${Array.from(configDrivenPages).join(', ')}`)
+        logger.info(`Processed config-driven navigation for ${configDrivenPages.size} components: ${Array.from(configDrivenPages).join(', ')}`)
       }
     } catch (error) {
       logger.error(`Error building unified navigation: ${error.message}`)
@@ -253,12 +255,15 @@ function filterUnpublishedPages(items, publishedUrlsSet) {
         }
       }
 
+      // Create a shallow copy of the item to avoid mutation
+      const newItem = { ...item }
+
       // Recursively filter children
-      if (item.items && Array.isArray(item.items)) {
-        item.items = filterUnpublishedPages(item.items, publishedUrlsSet)
+      if (newItem.items && Array.isArray(newItem.items)) {
+        newItem.items = filterUnpublishedPages(newItem.items, publishedUrlsSet)
       }
 
-      return item
+      return newItem
     })
     .filter(Boolean) // Remove null entries
 }
@@ -317,7 +322,7 @@ function getComponentDepth(tree, targetComponent, currentDepth = 0) {
  */
 function parseNavigationConfig(navConfig) {
   // If it's already an array (from YAML parsing), use it directly
-  const config = typeof navConfig === 'string' ? JSON.parse(navConfig) : navConfig
+  const config = typeof navConfig === 'string' ? yaml.load(navConfig) : navConfig
 
   if (!Array.isArray(config)) {
     return []
