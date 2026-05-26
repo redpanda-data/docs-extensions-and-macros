@@ -152,8 +152,23 @@ module.exports.register = function () {
           // Filter config tree to show only relevant hierarchy for current page
           const relevantTree = filterConfigTreeForComponent(configData.configTree, page.src.component)
 
+          // Check if this component has children and owns the config
+          const hasChildComponents = componentHasChildren(configData.configTree, page.src.component)
+          const ownsConfig = configData.configOwner === page.src.component
+
+          // If component has children and owns config, we'll show its nav items outside buckets
+          // So build buckets only for children, not for the parent itself
+          let treeForBuckets = relevantTree
+          if (hasChildComponents && ownsConfig && relevantTree.length > 0) {
+            // Extract children from parent node
+            const parentNode = relevantTree.find(item => item.name === page.src.component)
+            if (parentNode && parentNode.children) {
+              treeForBuckets = parentNode.children
+            }
+          }
+
           const buckets = buildBucketsFromConfig(
-            relevantTree,
+            treeForBuckets,
             contentCatalog,
             page.src.component,
             page.src.version,
@@ -184,14 +199,7 @@ module.exports.register = function () {
             // Build full navigation array
             let fullNavigation = []
 
-            // Only show a component's nav items outside buckets if BOTH:
-            // 1. Component has children (defines child buckets)
-            // 2. Component owns the config (defined page-navigation in its own antora.yml)
-            // This ensures data-platform shows its nav items, but self-managed (which inherits
-            // data-platform's config and has children) doesn't duplicate its items
-            const hasChildComponents = componentHasChildren(configData.configTree, page.src.component)
-            const ownsConfig = configData.configOwner === page.src.component
-
+            // If component has children and owns config, show its nav items outside buckets
             if (hasChildComponents && ownsConfig) {
               // Get the component's own nav items (from nav.adoc) to prepend before child buckets
               const compData = componentVersionNavMap.get(page.src.component)
