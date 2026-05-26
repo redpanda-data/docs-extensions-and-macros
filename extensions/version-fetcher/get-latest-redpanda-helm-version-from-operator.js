@@ -60,10 +60,19 @@ module.exports = async (github, owner, repo, stableDockerTag, betaDockerTag, log
         const version = chartYaml.version || null;
         return version;
       } catch (error) {
-        if (logger) {
-          logger.error(`Failed to fetch Chart.yaml for branch ${branchName}:`, error.message);
+        if (error.status === 404) {
+          // Branch doesn't exist yet - this is expected for unreleased versions
+          if (logger) {
+            logger.warn(`Branch ${branchName} not found (operator version may not be released yet)`);
+          } else {
+            console.warn(`Branch ${branchName} not found (operator version may not be released yet)`);
+          }
         } else {
-          console.error(`Failed to fetch Chart.yaml for branch ${branchName}:`, error.message);
+          if (logger) {
+            logger.error(`Failed to fetch Chart.yaml for branch ${branchName}:`, error.message);
+          } else {
+            console.error(`Failed to fetch Chart.yaml for branch ${branchName}:`, error.message);
+          }
         }
         return null;
       }
