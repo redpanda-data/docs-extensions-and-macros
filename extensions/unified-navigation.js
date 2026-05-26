@@ -184,13 +184,12 @@ module.exports.register = function () {
             // Build full navigation array
             let fullNavigation = []
 
-            // Check if this component is a top-level parent that has both its own pages AND child components
-            // Only top-level parents (like data-platform) should show their own nav items + child buckets
-            // Child components (like streaming) should only show child buckets (their siblings)
-            const isTopLevelParent = relevantTree.length > 0 &&
-                                     relevantTree.some(item => item.name === page.src.component && item.children)
+            // Check if this component is a parent that defines child components in the config tree
+            // Only components with children (like data-platform) should show their own nav items + child buckets
+            // Leaf components (like streaming) should only show sibling buckets
+            const hasChildComponents = componentHasChildren(configData.configTree, page.src.component)
 
-            if (isTopLevelParent) {
+            if (hasChildComponents) {
               // Get the component's own nav items (from nav.adoc) to prepend before child buckets
               const compData = componentVersionNavMap.get(page.src.component)
               let ownNavItems = []
@@ -303,6 +302,28 @@ function getHeaderData(version) {
     return null
   }
   return version.asciidoc.attributes['component-metadata'] || null
+}
+
+/**
+ * Check if a component has children in the config tree
+ * @param {Array} tree - Navigation config tree
+ * @param {string} componentName - Component name to search for
+ * @returns {boolean} True if component has children
+ */
+function componentHasChildren(tree, componentName) {
+  if (!Array.isArray(tree)) return false
+
+  for (const item of tree) {
+    if (item.name === componentName && item.children && item.children.length > 0) {
+      return true
+    }
+    if (item.children) {
+      if (componentHasChildren(item.children, componentName)) {
+        return true
+      }
+    }
+  }
+  return false
 }
 
 /**
