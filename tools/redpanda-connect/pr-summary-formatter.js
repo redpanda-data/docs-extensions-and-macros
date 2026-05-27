@@ -101,12 +101,12 @@ function renderBloblangChanges(data, includeVersion = false) {
   lines.push('');
   lines.push('For methods, find the appropriate category section in `methods.adoc` and add:');
   lines.push('```asciidoc');
-  lines.push('include::redpanda-connect:partial$bloblang-methods/method_name.adoc[leveloffset=+2]');
+  lines.push('include::connect:partial$bloblang-methods/method_name.adoc[leveloffset=+2]');
   lines.push('```');
   lines.push('');
   lines.push('For functions, add to the Functions section in `functions.adoc`:');
   lines.push('```asciidoc');
-  lines.push('include::redpanda-connect:partial$bloblang-functions/function_name.adoc[leveloffset=+2]');
+  lines.push('include::connect:partial$bloblang-functions/function_name.adoc[leveloffset=+2]');
   lines.push('```');
   lines.push('');
   lines.push('**Note:** Partials are auto-generated. Includes must be added manually in alphabetical order within their section.');
@@ -700,7 +700,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
           lines.push('```asciidoc');
           lines.push('= Connector Name');
           lines.push('');
-          lines.push('include::redpanda-connect:components:page$type/connector-name.adoc[tag=single-source]');
+          lines.push('include::connect:components:page$type/connector-name.adoc[tag=single-source]');
           lines.push('```');
           lines.push('');
         }
@@ -710,7 +710,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
           lines.push('```asciidoc');
           lines.push('= Connector Name');
           lines.push('');
-          lines.push('include::redpanda-connect:components:partial$components/cloud-only/type/connector-name.adoc[tag=single-source]');
+          lines.push('include::connect:components:partial$components/cloud-only/type/connector-name.adoc[tag=single-source]');
           lines.push('```');
           lines.push('');
         }

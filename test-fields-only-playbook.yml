@@ -1,6 +1,6 @@
 site:
   title: Test Fields-Only Extension
-  start_page: redpanda-connect::index.adoc
+  start_page: connect::index.adoc
   url: http://localhost:8080
 
 output:

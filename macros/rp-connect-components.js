@@ -1030,17 +1030,18 @@ module.exports.register = function (registry, context) {
         // Build link to release notes using content catalog for proper URL resolution
         const isCloud = attributes['env-cloud'] !== undefined;
         let whatsNewUrl = isCloud
-          ? '/redpanda-cloud/develop/connect/get-started/whats-new/'
-          : '/redpanda-connect/get-started/whats-new/';
+          ? '/cloud-data-platform/get-started/whats-new-cloud/'
+          : '/connect/get-started/whats-new/';
 
         // Try to resolve the page from the content catalog for accurate URLs
         if (context.contentCatalog && context.file) {
           const pageSpec = isCloud
-            ? 'redpanda-cloud:develop/connect/get-started:whats-new.adoc'
-            : 'redpanda-connect:get-started:whats-new.adoc';
+            ? 'cloud-data-platform:get-started:whats-new-cloud.adoc'
+            : 'connect:get-started:whats-new.adoc';
           const page = context.contentCatalog.resolvePage(pageSpec, context.file.src);
           if (page) {
-            whatsNewUrl = path.relative(path.dirname(context.file.pub.url), page.pub.url);
+            // For directory-style URLs like /a/b/c/, use the URL directly as the base
+            whatsNewUrl = path.relative(context.file.pub.url, page.pub.url);
           }
         }
 
