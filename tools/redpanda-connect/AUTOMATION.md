@@ -306,14 +306,14 @@ Brief summary of what this connector does.
 ====
 Common config::
 +
-include::redpanda-connect:components:partial$examples/inputs/connector_name.adoc[tag=common]
+include::connect:components:partial$examples/inputs/connector_name.adoc[tag=common]
 
 Advanced config::
 +
-include::redpanda-connect:components:partial$examples/inputs/connector_name.adoc[tag=advanced]
+include::connect:components:partial$examples/inputs/connector_name.adoc[tag=advanced]
 ====
 
-include::redpanda-connect:components:partial$fields/inputs/connector_name.adoc[]
+include::connect:components:partial$fields/inputs/connector_name.adoc[]
 
 // end::single-source[]
 ```
@@ -517,12 +517,12 @@ _No changes in this release_
 
 **For connectors in pages:**
 \```asciidoc
-include::redpanda-connect:components:page$type/name.adoc[tag=single-source]
+include::connect:components:page$type/name.adoc[tag=single-source]
 \```
 
 **For cloud-only connectors (in partials):**
 \```asciidoc
-include::redpanda-connect:components:partial$components/cloud-only/type/name.adoc[tag=single-source]
+include::connect:components:partial$components/cloud-only/type/name.adoc[tag=single-source]
 \```
 
 ### 🔧 Cgo Requirements

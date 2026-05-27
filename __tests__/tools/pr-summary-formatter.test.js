@@ -317,10 +317,10 @@ describe('PR Summary - Platform Detection', () => {
 
       // Should have both syntax examples
       expect(summary).toContain('For connectors in pages:');
-      expect(summary).toContain('include::redpanda-connect:components:page$type/connector-name.adoc[tag=single-source]');
+      expect(summary).toContain('include::connect:components:page$type/connector-name.adoc[tag=single-source]');
 
       expect(summary).toContain('For cloud-only connectors (in partials):');
-      expect(summary).toContain('include::redpanda-connect:components:partial$components/cloud-only/type/connector-name.adoc[tag=single-source]');
+      expect(summary).toContain('include::connect:components:partial$components/cloud-only/type/connector-name.adoc[tag=single-source]');
     });
   });
 
