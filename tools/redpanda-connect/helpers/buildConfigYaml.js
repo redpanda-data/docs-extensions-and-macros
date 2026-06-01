@@ -31,19 +31,24 @@ module.exports = function buildConfigYaml(type, connectorName, children, include
     lines.push(`  label: ""`);
   }
 
+  // Count how many fields will be rendered to determine if we need {}
+  const fieldsToRender = children.filter(field => {
+    if (field.is_deprecated) return false;
+    if (!includeAdvanced && field.is_advanced) return false;
+    return true;
+  });
+
   // Two‐space indent for connectorName heading
-  lines.push(`  ${connectorName}:`);
+  // If no fields will be rendered, use {} for valid YAML
+  if (fieldsToRender.length === 0) {
+    lines.push(`  ${connectorName}: {}`);
+  } else {
+    lines.push(`  ${connectorName}:`);
+  }
 
   // Four‐space indent for children
   const baseIndent = 4;
-  children.forEach(field => {
-    if (field.is_deprecated) {
-      return; // skip deprecated fields
-    }
-    if (!includeAdvanced && field.is_advanced) {
-      return; // skip advanced fields in "common" mode
-    }
-
+  fieldsToRender.forEach(field => {
     // Check if this is an array-of-objects (e.g., client_certs[])
     // These should render as empty arrays, not expanded object structures
     if (field.kind === 'array' && field.type === 'object' && Array.isArray(field.children)) {
