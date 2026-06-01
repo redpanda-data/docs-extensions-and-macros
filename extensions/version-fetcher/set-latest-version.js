@@ -153,7 +153,11 @@ module.exports.register = function ({ config }) {
       if (propertiesFiles.length > 0) {
         const versions = propertiesFiles
           .map(f => f.src.stem.replace('redpanda-properties-', ''))
-          .filter(v => semver.valid(v.replace(/^v/, '')));
+          // Only accept stable versions (no prerelease suffix like -backup, -rc1, etc.)
+          .filter(v => {
+            const normalized = v.replace(/^v/, '');
+            return semver.valid(normalized) && semver.prerelease(normalized) === null;
+          });
 
         if (versions.length > 0) {
           availablePropertiesTag = versions.sort((a, b) =>
@@ -189,7 +193,8 @@ module.exports.register = function ({ config }) {
       if (connectFiles.length > 0) {
         const versions = connectFiles
           .map(f => f.src.stem.replace('connect-', ''))
-          .filter(v => semver.valid(v));
+          // Only accept stable versions (no prerelease suffix)
+          .filter(v => semver.valid(v) && semver.prerelease(v) === null);
 
         if (versions.length > 0) {
           availableConnectVersion = versions.sort((a, b) =>

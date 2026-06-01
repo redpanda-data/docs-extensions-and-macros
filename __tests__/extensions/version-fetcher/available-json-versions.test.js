@@ -33,7 +33,11 @@ function filterConnectFiles(files) {
 function extractLatestPropertiesVersion(files) {
   const versions = files
     .map(f => f.src.stem.replace('redpanda-properties-', ''))
-    .filter(v => semver.valid(v.replace(/^v/, '')));
+    // Only accept stable versions (no prerelease suffix like -backup, -rc1, etc.)
+    .filter(v => {
+      const normalized = v.replace(/^v/, '');
+      return semver.valid(normalized) && semver.prerelease(normalized) === null;
+    });
 
   if (versions.length === 0) return null;
 
@@ -45,7 +49,8 @@ function extractLatestPropertiesVersion(files) {
 function extractLatestConnectVersion(files) {
   const versions = files
     .map(f => f.src.stem.replace('connect-', ''))
-    .filter(v => semver.valid(v));
+    // Only accept stable versions (no prerelease suffix)
+    .filter(v => semver.valid(v) && semver.prerelease(v) === null);
 
   if (versions.length === 0) return null;
 
@@ -170,30 +175,31 @@ describe('Properties JSON file detection', () => {
       expect(result).toBeNull();
     });
 
-    it('should handle prerelease versions correctly', () => {
+    it('should reject prerelease versions and use stable', () => {
       const files = [
         { src: { stem: 'redpanda-properties-v25.3.1' } },
         { src: { stem: 'redpanda-properties-v26.0.0-rc1' } },
       ];
 
       const result = extractLatestPropertiesVersion(files);
-      // v26.0.0-rc1 is higher than v25.3.1 in semver (26 > 25)
-      // If a prerelease JSON exists, we should use it
-      expect(result).toBe('v26.0.0-rc1');
+      // v26.0.0-rc1 is filtered out as a prerelease, so v25.3.1 wins
+      expect(result).toBe('v25.3.1');
     });
 
-    it('should prefer stable over prerelease of same major.minor', () => {
+    it('should reject all prerelease suffixes (-rc1, -beta1, -backup, etc.)', () => {
       const files = [
         { src: { stem: 'redpanda-properties-v25.3.1' } },
         { src: { stem: 'redpanda-properties-v25.3.2-rc1' } },
+        { src: { stem: 'redpanda-properties-v26.0.0-backup' } },
+        { src: { stem: 'redpanda-properties-v25.4.0-beta1' } },
       ];
 
       const result = extractLatestPropertiesVersion(files);
-      // v25.3.2-rc1 < v25.3.2 but > v25.3.1, so rc1 wins
-      expect(result).toBe('v25.3.2-rc1');
+      // All prerelease/suffixed versions are filtered out
+      expect(result).toBe('v25.3.1');
     });
 
-    it('should sort prereleases correctly against each other', () => {
+    it('should return null if only prerelease versions exist', () => {
       const files = [
         { src: { stem: 'redpanda-properties-v25.4.0-rc1' } },
         { src: { stem: 'redpanda-properties-v25.4.0-rc2' } },
@@ -201,8 +207,8 @@ describe('Properties JSON file detection', () => {
       ];
 
       const result = extractLatestPropertiesVersion(files);
-      // rc2 > rc1 > beta1
-      expect(result).toBe('v25.4.0-rc2');
+      // All are prereleases, so no valid versions
+      expect(result).toBeNull();
     });
   });
 });
@@ -305,7 +311,7 @@ describe('Edge cases', () => {
     expect(extractLatestConnectVersion(filterConnectFiles(connectFiles))).toBe('4.93.0');
   });
 
-  it('should handle files with similar names', () => {
+  it('should handle files with similar names and reject suffixed versions', () => {
     const files = [
       { src: { stem: 'redpanda-properties-v25.3.1', component: 'streaming', module: 'reference' } },
       { src: { stem: 'redpanda-properties-schema', component: 'streaming', module: 'reference' } },
@@ -313,10 +319,26 @@ describe('Edge cases', () => {
     ];
 
     const filtered = filterPropertiesFiles(files);
-    expect(filtered).toHaveLength(3); // All match the prefix filter
+    expect(filtered).toHaveLength(3); // All match the prefix filter (file discovery stage)
 
     const version = extractLatestPropertiesVersion(filtered);
-    expect(version).toBe('v25.3.1'); // Only valid semver
+    // extractLatestPropertiesVersion filters out:
+    // - 'schema' (not valid semver)
+    // - 'v25.3.1-backup' (valid semver prerelease, but we only accept stable versions)
+    // Only 'v25.3.1' remains as a stable release
+    expect(version).toBe('v25.3.1');
+  });
+
+  it('should pick stable version even when higher-versioned suffixed file exists', () => {
+    const files = [
+      { src: { stem: 'redpanda-properties-v25.3.1', component: 'streaming', module: 'reference' } },
+      { src: { stem: 'redpanda-properties-v26.0.0-backup', component: 'streaming', module: 'reference' } },
+    ];
+
+    const filtered = filterPropertiesFiles(files);
+    const version = extractLatestPropertiesVersion(filtered);
+    // v26.0.0-backup has higher base version but is rejected as prerelease
+    expect(version).toBe('v25.3.1');
   });
 
   it('should handle very old versions', () => {
