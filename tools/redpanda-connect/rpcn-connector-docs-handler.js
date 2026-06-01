@@ -8,7 +8,8 @@ const { getAntoraValue, setAntoraValue } = require('../../cli-utils/antora-utils
 const fetchFromGithub = require('../fetch-from-github.js')
 const { generateRpcnConnectorDocs } = require('./generate-rpcn-connector-docs.js')
 const { getRpkConnectVersion, printDeltaReport } = require('./report-delta')
-const { discoverIntermediateReleases } = require('./github-release-utils')
+const { discoverIntermediateReleases, findCloudVersionForDate } = require('./github-release-utils')
+const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
 const parseCSVConnectors = require('./parse-csv-connectors.js')
 const semver = require('semver')
 
@@ -876,9 +877,6 @@ async function handleRpcnConnectorDocs (options) {
               console.log(`Loading connector data for ${toVer} (fresh fetch)...`)
               const newData = await loadConnectorDataForVersion(toVer, dataDir, { forceFresh: true })
 
-              const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
-              const { findCloudVersionForDate } = require('./github-release-utils')
-
               const analysisOptions = {
                 skipCloud: false,
                 skipCgo: false,
@@ -1171,7 +1169,6 @@ async function handleRpcnConnectorDocs (options) {
 
   try {
     console.log('\nAnalyzing connector binaries...')
-    const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
 
     if (fs.existsSync(cleanOssDataPath)) {
       if (fs.existsSync(expectedPath)) {
