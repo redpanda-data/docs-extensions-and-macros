@@ -723,7 +723,7 @@ def transform_files_with_properties(files_with_properties):
         NumericBoundsTransformer(type_transformer),
         DurationBoundsTransformer(type_transformer),
         SimpleDefaultValuesTransformer(),
-        FriendlyDefaultTransformer(),
+        FriendlyDefaultTransformer(constant_resolver),
         ExperimentalTransformer(),
         AliasTransformer(),
     ]

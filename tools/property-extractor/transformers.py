@@ -1570,9 +1570,12 @@ class FriendlyDefaultTransformer:
     NUMERIC_LIMITS_PATTERN = r"std::numeric_limits<[^>]+>::max\(\)"
     LEGACY_DEFAULT_PATTERN = r"legacy_default<[^>]+>\(([^,]+)"
     BRACED_LIST_PATTERN = r"^\{(.*)\}$"
+    # Pattern for identifiers that look like C++ constants (ALL_CAPS with underscores)
+    CONSTANT_IDENTIFIER_PATTERN = r'^[A-Z][A-Z0-9_]*$'
 
-    def __init__(self):
+    def __init__(self, constant_resolver=None):
         self._resolver = None
+        self._constant_resolver = constant_resolver
 
     def accepts(self, info, file_pair):
         return bool(info.get("params") and len(info["params"]) > 2)
@@ -1591,6 +1594,40 @@ class FriendlyDefaultTransformer:
             except Exception:
                 return identifier
         return identifier
+
+    def _resolve_numeric_constant(self, identifier):
+        """
+        Try to resolve a C++ numeric constant using the ConstantResolver.
+
+        Args:
+            identifier: The constant name (e.g., "DEFAULT_TOPIC_MEMORY_PER_PARTITION")
+
+        Returns:
+            The friendly formatted value (e.g., "256 MiB (268435456)"), or None if not resolved
+        """
+        if not self._constant_resolver:
+            return None
+
+        try:
+            result = self._constant_resolver.resolve_numeric_constant(identifier)
+            if result:
+                return result.get('friendly')
+        except Exception as e:
+            logger.debug(f"Error resolving numeric constant {identifier}: {e}")
+
+        return None
+
+    def _looks_like_constant(self, identifier):
+        """
+        Check if an identifier looks like a C++ constant (ALL_CAPS_WITH_UNDERSCORES).
+
+        Args:
+            identifier: The identifier to check
+
+        Returns:
+            True if it looks like a constant, False otherwise
+        """
+        return bool(re.match(self.CONSTANT_IDENTIFIER_PATTERN, identifier))
 
     def _parse_initializer_list(self, text):
         """Handle braced lists like {"a", "b"}."""
@@ -1779,9 +1816,25 @@ class FriendlyDefaultTransformer:
             return property
 
         # ------------------------------------------------------------------
+        # ALL_CAPS numeric constants (DEFAULT_TOPIC_MEMORY_PER_PARTITION, etc.)
+        # Try to resolve via ConstantResolver before falling back
+        # ------------------------------------------------------------------
+        if self._looks_like_constant(d):
+            resolved = self._resolve_numeric_constant(d)
+            if resolved:
+                property["default"] = resolved
+                return property
+            # If not resolved, fall through to normalized string fallback
+
+        # ------------------------------------------------------------------
         # Constant-like or symbolic identifiers (model::..., net::..., etc.)
         # ------------------------------------------------------------------
         if "::" in d and not d.startswith("std::"):
+            # Try numeric resolution first for namespace-qualified constants
+            resolved = self._resolve_numeric_constant(d)
+            if resolved:
+                property["default"] = resolved
+                return property
             # Try to resolve to string enum if possible
             resolved = self._resolve_identifier(d)
             property["default"] = resolved or d

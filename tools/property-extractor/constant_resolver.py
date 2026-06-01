@@ -22,7 +22,8 @@ class ConstantResolver:
         Args:
             source_path: Path to the Redpanda src/v directory
         """
-        self.source_path = source_path
+        # Ensure source_path is a Path object
+        self.source_path = Path(source_path) if not isinstance(source_path, Path) else source_path
         self._constant_cache: Dict[str, str] = {}
 
     def resolve_constant(self, constant_name: str) -> Optional[str]:
@@ -370,6 +371,168 @@ class ConstantResolver:
         result = result.encode('utf-8').decode('unicode_escape')
 
         return result
+
+    def _parse_size_literal(self, value: str) -> Optional[int]:
+        """
+        Parse C++ size literals like 256_MiB, 20_GiB to integers.
+
+        Args:
+            value: The size literal string (e.g., "256_MiB", "20_GiB", "1024")
+
+        Returns:
+            The integer value in bytes, or None if parsing fails
+        """
+        if not value:
+            return None
+
+        value = value.strip()
+
+        # Binary suffixes (powers of 1024)
+        binary_suffixes = {
+            '_GiB': 1024**3,
+            '_MiB': 1024**2,
+            '_KiB': 1024,
+        }
+
+        # Decimal suffixes (powers of 1000)
+        decimal_suffixes = {
+            '_GB': 1000**3,
+            '_MB': 1000**2,
+            '_KB': 1000,
+        }
+
+        all_suffixes = {**binary_suffixes, **decimal_suffixes}
+
+        for suffix, multiplier in all_suffixes.items():
+            if value.endswith(suffix):
+                try:
+                    num = int(value[:-len(suffix)])
+                    return num * multiplier
+                except ValueError:
+                    return None
+
+        # Try parsing as plain integer
+        try:
+            return int(value)
+        except ValueError:
+            return None
+
+    def resolve_numeric_constant(self, constant_name: str) -> Optional[dict]:
+        """
+        Resolve a C++ numeric constant to its actual value.
+
+        Handles patterns like:
+        - constexpr size_t DEFAULT_TOPIC_MEMORY_PER_PARTITION = 256_MiB;
+        - inline constexpr uint64_t identifier = 12345;
+        - constexpr auto identifier = 20_GiB;
+
+        Args:
+            constant_name: The constant name (e.g., "DEFAULT_TOPIC_MEMORY_PER_PARTITION")
+
+        Returns:
+            Dict with 'raw' (int) and 'friendly' (str) values, or None if not found
+        """
+        # Check cache first
+        cache_key = f"numeric:{constant_name}"
+        if cache_key in self._constant_cache:
+            return self._constant_cache[cache_key]
+
+        # Strip namespace qualifier if present
+        if '::' in constant_name:
+            namespace, identifier = constant_name.rsplit('::', 1)
+        else:
+            namespace = None
+            identifier = constant_name
+
+        # Search patterns for numeric constants
+        numeric_patterns = [
+            # constexpr size_t/uint64_t/int64_t identifier = VALUE;
+            rf'(?:inline\s+)?constexpr\s+(?:size_t|uint64_t|int64_t|int|unsigned(?:\s+int)?|long(?:\s+long)?)\s+{re.escape(identifier)}\s*=\s*([^;]+);',
+            # constexpr auto identifier = VALUE;
+            rf'(?:inline\s+)?constexpr\s+auto\s+{re.escape(identifier)}\s*=\s*([^;]+);',
+            # constexpr type identifier{VALUE};
+            rf'(?:inline\s+)?constexpr\s+(?:size_t|uint64_t|int64_t|int|unsigned(?:\s+int)?)\s+{re.escape(identifier)}\s*\{{\s*([^}}]+)\s*\}}',
+            # static constexpr variants
+            rf'static\s+(?:inline\s+)?constexpr\s+(?:size_t|uint64_t|int64_t|int|unsigned(?:\s+int)?)\s+{re.escape(identifier)}\s*=\s*([^;]+);',
+        ]
+
+        # Determine search directories based on namespace
+        if namespace == 'config':
+            search_dirs = ['config']
+        elif namespace == 'model':
+            search_dirs = ['model']
+        elif namespace == 'kafka':
+            search_dirs = ['kafka']
+        else:
+            # Search common locations
+            search_dirs = ['config', 'model', 'kafka', 'cluster']
+
+        for dir_name in search_dirs:
+            search_path = self.source_path / dir_name
+            if not search_path.exists():
+                continue
+
+            # Search both .h and .cc files
+            for file_path in list(search_path.rglob('*.h')) + list(search_path.rglob('*.cc')):
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+
+                    for pattern in numeric_patterns:
+                        match = re.search(pattern, content)
+                        if match:
+                            raw_value = match.group(1).strip()
+                            logger.debug(f"Found numeric constant {constant_name} = {raw_value} in {file_path}")
+
+                            # Try to parse the value
+                            parsed = self._parse_size_literal(raw_value)
+                            if parsed is not None:
+                                result = self._format_numeric_result(parsed)
+                                self._constant_cache[cache_key] = result
+                                logger.info(f"Resolved numeric constant {constant_name} = {result}")
+                                return result
+                            else:
+                                # Couldn't parse, return raw string
+                                logger.debug(f"Could not parse numeric value: {raw_value}")
+
+                except Exception as e:
+                    logger.debug(f"Error reading {file_path}: {e}")
+                    continue
+
+        logger.debug(f"Could not resolve numeric constant: {constant_name}")
+        return None
+
+    def _format_numeric_result(self, value: int) -> dict:
+        """
+        Format a numeric value with both raw and human-friendly representations.
+
+        Args:
+            value: The raw numeric value in bytes
+
+        Returns:
+            Dict with 'raw' (int) and 'friendly' (str like "256 MiB (268435456)")
+        """
+        # Define units in descending order
+        units = [
+            ('GiB', 1024**3),
+            ('MiB', 1024**2),
+            ('KiB', 1024),
+        ]
+
+        for unit_name, divisor in units:
+            if value >= divisor and value % divisor == 0:
+                friendly_num = value // divisor
+                friendly_str = f"{friendly_num} {unit_name} ({value})"
+                return {
+                    'raw': value,
+                    'friendly': friendly_str
+                }
+
+        # No unit applies, just return the raw number
+        return {
+            'raw': value,
+            'friendly': str(value)
+        }
 
 
 def resolve_property_default(default_value: str, resolver: ConstantResolver) -> str:
