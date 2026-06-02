@@ -9,52 +9,21 @@
 
 const semver = require('semver');
 
-// Extract the filtering logic from set-latest-version.js for testing
-function filterPropertiesFiles(files) {
-  return files.filter(f => {
-    if (!f?.src?.stem || !f?.src?.component) return false;
-    const isStreamingComponent = f.src.component === 'streaming' || f.src.component === 'ROOT';
-    const isReferenceModule = f.src.module === 'reference';
-    const isPropertiesFile = f.src.stem.startsWith('redpanda-properties-');
-    return isStreamingComponent && isReferenceModule && isPropertiesFile;
-  });
-}
+// Import the actual filtering logic from set-latest-version.js
+const {
+  filterPropertiesFiles,
+  filterConnectFiles,
+  extractLatestPropertiesVersion: _extractLatestPropertiesVersion,
+  extractLatestConnectVersion: _extractLatestConnectVersion
+} = require('../../../extensions/version-fetcher/set-latest-version');
 
-function filterConnectFiles(files) {
-  return files.filter(f => {
-    if (!f?.src?.stem || !f?.src?.component) return false;
-    const isConnectComponent = f.src.component === 'connect' || f.src.component === 'redpanda-connect';
-    const isComponentsModule = f.src.module === 'components';
-    const isConnectFile = f.src.stem.startsWith('connect-');
-    return isConnectComponent && isComponentsModule && isConnectFile;
-  });
-}
-
+// Wrap the version extractors to inject semver dependency
 function extractLatestPropertiesVersion(files) {
-  const versions = files
-    .map(f => f.src.stem.replace('redpanda-properties-', ''))
-    // Only accept stable versions (no prerelease suffix like -backup, -rc1, etc.)
-    .filter(v => {
-      const normalized = v.replace(/^v/, '');
-      return semver.valid(normalized) && semver.prerelease(normalized) === null;
-    });
-
-  if (versions.length === 0) return null;
-
-  return versions.sort((a, b) =>
-    semver.rcompare(a.replace(/^v/, ''), b.replace(/^v/, ''))
-  )[0];
+  return _extractLatestPropertiesVersion(files, semver);
 }
 
 function extractLatestConnectVersion(files) {
-  const versions = files
-    .map(f => f.src.stem.replace('connect-', ''))
-    // Only accept stable versions (no prerelease suffix)
-    .filter(v => semver.valid(v) && semver.prerelease(v) === null);
-
-  if (versions.length === 0) return null;
-
-  return versions.sort((a, b) => semver.rcompare(a, b))[0];
+  return _extractLatestConnectVersion(files, semver);
 }
 
 describe('Properties JSON file detection', () => {
