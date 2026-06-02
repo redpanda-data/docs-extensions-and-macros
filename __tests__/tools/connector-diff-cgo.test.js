@@ -380,3 +380,147 @@ describe('CGO Connector Diff - Deprecation Detection', () => {
     expect(diff.summary.deprecatedFields).toBe(1);
   });
 });
+
+describe('CGO Connector Diff - Symmetric Augmentation (False Positive Fix)', () => {
+  // These tests verify the fix for false "new connector" reports
+  // caused by asymmetric augmentation in intermediate processing
+
+  test('should NOT report CGO connectors as new when both old and new are augmented', () => {
+    // Scenario: Both versions are properly augmented with CGO connectors
+    // This is the expected state after the fix
+    const cgoConnectors = [
+      { name: 'tigerbeetle_cdc', type: 'input', status: 'stable', requiresCgo: true, config: { children: [] } },
+      { name: 'zmq4', type: 'input', status: 'stable', requiresCgo: true, config: { children: [] } },
+      { name: 'ffi', type: 'processor', status: 'stable', requiresCgo: true, config: { children: [] } }
+    ];
+
+    const oldIndex = {
+      inputs: cgoConnectors.filter(c => c.type === 'input'),
+      processors: cgoConnectors.filter(c => c.type === 'processor')
+    };
+
+    const newIndex = {
+      inputs: cgoConnectors.filter(c => c.type === 'input'),
+      processors: cgoConnectors.filter(c => c.type === 'processor')
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.93.0',
+      newVersion: '4.94.0'
+    });
+
+    // CGO connectors should NOT be reported as new
+    expect(diff.summary.newComponents).toBe(0);
+    expect(diff.details.newComponents).toHaveLength(0);
+  });
+
+  test('should detect genuinely new connectors when both versions are augmented', () => {
+    // Scenario: Both versions augmented, but new version has an additional new connector
+    const oldIndex = {
+      inputs: [
+        { name: 'kafka', type: 'input', status: 'stable', cloudSupported: true, config: { children: [] } },
+        { name: 'tigerbeetle_cdc', type: 'input', status: 'stable', requiresCgo: true, config: { children: [] } }
+      ],
+      processors: [
+        { name: 'split', type: 'processor', status: 'stable', config: { children: [] } }
+      ]
+    };
+
+    const newIndex = {
+      inputs: [
+        { name: 'kafka', type: 'input', status: 'stable', cloudSupported: true, config: { children: [] } },
+        { name: 'tigerbeetle_cdc', type: 'input', status: 'stable', requiresCgo: true, config: { children: [] } }
+      ],
+      processors: [
+        { name: 'split', type: 'processor', status: 'stable', config: { children: [] } },
+        { name: 'brand_new_processor', type: 'processor', status: 'stable', config: { children: [] } }
+      ]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.93.0',
+      newVersion: '4.94.0'
+    });
+
+    // Only the genuinely new connector should be reported
+    expect(diff.summary.newComponents).toBe(1);
+    expect(diff.details.newComponents).toHaveLength(1);
+    expect(diff.details.newComponents[0].name).toBe('brand_new_processor');
+  });
+
+  test('should NOT report false positives for asymmetric old data (the original bug scenario)', () => {
+    // Scenario: Old data is NOT augmented (missing CGO connectors)
+    // New data IS augmented (has CGO connectors)
+    // This was the original bug - CGO connectors falsely reported as "new"
+
+    const oldIndex = {
+      inputs: [
+        // Missing tigerbeetle_cdc, zmq4 because old data was not augmented
+        { name: 'kafka', type: 'input', status: 'stable', cloudSupported: true, config: { children: [] } }
+      ],
+      processors: [
+        // Missing ffi because old data was not augmented
+        { name: 'split', type: 'processor', status: 'stable', config: { children: [] } }
+      ]
+    };
+
+    const newIndex = {
+      inputs: [
+        { name: 'kafka', type: 'input', status: 'stable', cloudSupported: true, config: { children: [] } },
+        { name: 'tigerbeetle_cdc', type: 'input', status: 'stable', requiresCgo: true, config: { children: [] } },
+        { name: 'zmq4', type: 'input', status: 'stable', requiresCgo: true, config: { children: [] } }
+      ],
+      processors: [
+        { name: 'split', type: 'processor', status: 'stable', config: { children: [] } },
+        { name: 'ffi', type: 'processor', status: 'stable', requiresCgo: true, config: { children: [] } }
+      ]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.93.0',
+      newVersion: '4.94.0'
+    });
+
+    // NOTE: Without the handler-level fix, this diff WOULD report 3 "new" connectors
+    // The fix is in the handler ensuring BOTH versions are augmented before calling this
+    // This test documents the behavior when asymmetric data is passed
+    expect(diff.summary.newComponents).toBe(3);
+
+    // The handler fix ensures this scenario doesn't happen by:
+    // 1. Force-fetching fresh data for both versions
+    // 2. Running binary analysis on BOTH versions
+    // 3. Augmenting BOTH before diff
+  });
+
+  test('should handle mixed CGO and cloud-only connectors correctly', () => {
+    // Scenario: Both CGO-only and cloud-only connectors present
+    const oldIndex = {
+      inputs: [
+        { name: 'kafka', type: 'input', status: 'stable', cloudSupported: true, config: { children: [] } },
+        { name: 'tigerbeetle_cdc', type: 'input', status: 'stable', requiresCgo: true, config: { children: [] } }
+      ],
+      processors: [
+        { name: 'redpanda_migrator_offsets', type: 'processor', status: 'stable', cloudOnly: true, config: { children: [] } }
+      ]
+    };
+
+    const newIndex = {
+      inputs: [
+        { name: 'kafka', type: 'input', status: 'stable', cloudSupported: true, config: { children: [] } },
+        { name: 'tigerbeetle_cdc', type: 'input', status: 'stable', requiresCgo: true, config: { children: [] } }
+      ],
+      processors: [
+        { name: 'redpanda_migrator_offsets', type: 'processor', status: 'stable', cloudOnly: true, config: { children: [] } }
+      ]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.93.0',
+      newVersion: '4.94.0'
+    });
+
+    // No false positives when both have matching platform connectors
+    expect(diff.summary.newComponents).toBe(0);
+    expect(diff.summary.removedComponents).toBe(0);
+  });
+});

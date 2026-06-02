@@ -254,5 +254,43 @@ describe('buildConfigYaml', () => {
       // Array-of-objects with empty children should render as empty array
       expect(result).toContain('items: []');
     });
+
+    it('should render {} when all fields are advanced and includeAdvanced is false (prometheus scenario)', () => {
+      // This mimics the prometheus metrics component where all fields are advanced
+      const allAdvancedFields = [
+        {
+          name: 'use_histogram_timing',
+          type: 'bool',
+          kind: 'scalar',
+          description: 'Use histogram for timing.',
+          is_advanced: true,
+          default: false
+        },
+        {
+          name: 'push_url',
+          type: 'string',
+          kind: 'scalar',
+          description: 'Push gateway URL.',
+          is_advanced: true,
+          default: ''
+        }
+      ];
+
+      const result = buildConfigYaml('metrics', 'prometheus', allAdvancedFields, false);
+      // When no fields to render in common mode, should use {} for valid YAML
+      expect(result).toContain('metrics:');
+      expect(result).toContain('  prometheus: {}');
+      // Should NOT have a trailing colon without value
+      expect(result).not.toMatch(/prometheus:\s*$/m);
+    });
+
+    it('should NOT render {} when fields are present', () => {
+      const result = buildConfigYaml('metrics', 'prometheus', sampleChildren, false);
+      // When fields are present, should have a colon without {}
+      expect(result).toContain('metrics:');
+      expect(result).toContain('  prometheus:');
+      expect(result).not.toContain('prometheus: {}');
+      expect(result).toContain('    host:');
+    });
   });
 });

@@ -8,7 +8,8 @@ const { getAntoraValue, setAntoraValue } = require('../../cli-utils/antora-utils
 const fetchFromGithub = require('../fetch-from-github.js')
 const { generateRpcnConnectorDocs } = require('./generate-rpcn-connector-docs.js')
 const { getRpkConnectVersion, printDeltaReport } = require('./report-delta')
-const { discoverIntermediateReleases } = require('./github-release-utils')
+const { discoverIntermediateReleases, findCloudVersionForDate } = require('./github-release-utils')
+const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
 const parseCSVConnectors = require('./parse-csv-connectors.js')
 const semver = require('semver')
 
@@ -600,15 +601,17 @@ function logCollapsed (label, filesArray, maxToShow = 10) {
 async function loadConnectorDataForVersion(version, dataDir, options = {}) {
   const dataFile = path.join(dataDir, `connect-${version}.json`);
 
-  // If file exists, load it (with platform metadata intact)
-  if (fs.existsSync(dataFile)) {
+  // If forceFresh is set, always fetch even if file exists
+  // This ensures we have accurate connector lists for diff comparison
+  if (!options.forceFresh && fs.existsSync(dataFile)) {
     console.log(`✓ Using existing data file: connect-${version}.json`);
     const data = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
     return data;
   }
 
-  // If not, fetch it
-  console.log(`📥 Data file not found for ${version}, attempting to fetch...`);
+  // Fetch fresh data
+  const reason = options.forceFresh ? 'force refresh requested' : 'file not found';
+  console.log(`📥 Fetching data for ${version} (${reason})...`);
 
   try {
     // Try installing that specific version and fetching data
@@ -866,31 +869,13 @@ async function handleRpcnConnectorDocs (options) {
             console.log('─'.repeat(80) + '\n')
 
             try {
-              // Load data for both versions
-              console.log(`Loading connector data for ${fromVer}...`)
-              const oldData = await loadConnectorDataForVersion(fromVer, dataDir)
+              // Load data for both versions - FORCE FRESH to avoid stale/incomplete data
+              // This ensures we have accurate connector lists for both versions
+              console.log(`Loading connector data for ${fromVer} (fresh fetch)...`)
+              const oldData = await loadConnectorDataForVersion(fromVer, dataDir, { forceFresh: true })
 
-              console.log(`Loading connector data for ${toVer}...`)
-              const newData = await loadConnectorDataForVersion(toVer, dataDir)
-
-              // Determine the appropriate cloud version for this release date
-              const releaseInfo = intermediateReleases.find(r => r.version === toVer)
-              let cloudVersionForRelease = options.cloudVersion || null
-
-              if (!options.cloudVersion && releaseInfo && releaseInfo.date) {
-                const { findCloudVersionForDate } = require('./github-release-utils')
-                cloudVersionForRelease = await findCloudVersionForDate(releaseInfo.date, { useCache: true })
-                if (cloudVersionForRelease) {
-                  console.log(`   Using cloud version ${cloudVersionForRelease} (current at ${new Date(releaseInfo.date).toLocaleDateString()})`)
-                } else {
-                  console.log(`   No cloud version found for release date, using OSS version ${toVer}`)
-                  cloudVersionForRelease = toVer
-                }
-              }
-
-              // Run binary analysis for the new version
-              console.log(`\nAnalyzing binaries for version ${toVer}...`)
-              const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
+              console.log(`Loading connector data for ${toVer} (fresh fetch)...`)
+              const newData = await loadConnectorDataForVersion(toVer, dataDir, { forceFresh: true })
 
               const analysisOptions = {
                 skipCloud: false,
@@ -898,6 +883,48 @@ async function handleRpcnConnectorDocs (options) {
                 cgoVersion: options.cgoVersion || null
               }
 
+              // Determine cloud version for OLD release date
+              const oldReleaseInfo = intermediateReleases.find(r => r.version === fromVer)
+              let cloudVersionForOldRelease = options.cloudVersion || null
+
+              if (!options.cloudVersion && oldReleaseInfo && oldReleaseInfo.date) {
+                cloudVersionForOldRelease = await findCloudVersionForDate(oldReleaseInfo.date, { useCache: true })
+                if (cloudVersionForOldRelease) {
+                  console.log(`   Using cloud version ${cloudVersionForOldRelease} for old release ${fromVer}`)
+                } else {
+                  cloudVersionForOldRelease = fromVer
+                }
+              }
+
+              // Determine cloud version for NEW release date
+              const newReleaseInfo = intermediateReleases.find(r => r.version === toVer)
+              let cloudVersionForRelease = options.cloudVersion || null
+
+              if (!options.cloudVersion && newReleaseInfo && newReleaseInfo.date) {
+                cloudVersionForRelease = await findCloudVersionForDate(newReleaseInfo.date, { useCache: true })
+                if (cloudVersionForRelease) {
+                  console.log(`   Using cloud version ${cloudVersionForRelease} for new release ${toVer}`)
+                } else {
+                  cloudVersionForRelease = toVer
+                }
+              }
+
+              // Run binary analysis for BOTH versions to ensure symmetric comparison
+              console.log(`\nAnalyzing binaries for OLD version ${fromVer}...`)
+              const oldAnalysis = await analyzeAllBinaries(
+                fromVer,
+                cloudVersionForOldRelease,
+                dataDir,
+                analysisOptions
+              )
+
+              console.log(`Done: Binary analysis for ${fromVer}:`)
+              console.log(`   - OSS version: ${oldAnalysis.ossVersion}`)
+              if (oldAnalysis.cgoOnly && oldAnalysis.cgoOnly.length > 0) {
+                console.log(`   - CGO-only connectors: ${oldAnalysis.cgoOnly.length}`)
+              }
+
+              console.log(`\nAnalyzing binaries for NEW version ${toVer}...`)
               const intermediateAnalysis = await analyzeAllBinaries(
                 toVer,
                 cloudVersionForRelease,
@@ -905,40 +932,46 @@ async function handleRpcnConnectorDocs (options) {
                 analysisOptions
               )
 
-              console.log('✓ Binary analysis complete:')
-              console.log(`   • OSS version: ${intermediateAnalysis.ossVersion}`)
+              console.log(`Done: Binary analysis for ${toVer}:`)
+              console.log(`   - OSS version: ${intermediateAnalysis.ossVersion}`)
               if (intermediateAnalysis.cloudVersion) {
-                console.log(`   • Cloud version: ${intermediateAnalysis.cloudVersion}`)
+                console.log(`   - Cloud version: ${intermediateAnalysis.cloudVersion}`)
               }
               if (intermediateAnalysis.comparison) {
-                console.log(`   • Connectors in cloud: ${intermediateAnalysis.comparison.inCloud.length}`)
-                console.log(`   • Self-hosted only: ${intermediateAnalysis.comparison.notInCloud.length}`)
+                console.log(`   - Connectors in cloud: ${intermediateAnalysis.comparison.inCloud.length}`)
+                console.log(`   - Self-hosted only: ${intermediateAnalysis.comparison.notInCloud.length}`)
                 if (intermediateAnalysis.comparison.cloudOnly) {
-                  console.log(`   • Cloud-only: ${intermediateAnalysis.comparison.cloudOnly.length}`)
+                  console.log(`   - Cloud-only: ${intermediateAnalysis.comparison.cloudOnly.length}`)
                 }
               }
-
-              // Augment newData with binary analysis results before generating diff
-              // This ensures CGO-only and cloud-only connectors are included and metadata is accurate
-              const { augmentedData: augmentedNewData, addedCgoCount, addedCloudOnlyCount } =
-                augmentConnectorData(newData, intermediateAnalysis)
-
-              if (addedCgoCount > 0 || addedCloudOnlyCount > 0) {
-                console.log(`   • Augmented newData: +${addedCgoCount} CGO-only, +${addedCloudOnlyCount} cloud-only`)
+              if (intermediateAnalysis.cgoOnly && intermediateAnalysis.cgoOnly.length > 0) {
+                console.log(`   - CGO-only connectors: ${intermediateAnalysis.cgoOnly.length}`)
               }
 
-              // Generate diff
-              console.log(`\nGenerating diff: ${fromVer} → ${toVer}...`)
+              // Augment BOTH oldData and newData with their respective binary analysis
+              // This ensures symmetric comparison - both have CGO/cloud connectors and metadata
+              const { augmentedData: augmentedOldData, addedCgoCount: oldCgoCount, addedCloudOnlyCount: oldCloudOnlyCount } =
+                augmentConnectorData(oldData, oldAnalysis)
+
+              const { augmentedData: augmentedNewData, addedCgoCount: newCgoCount, addedCloudOnlyCount: newCloudOnlyCount } =
+                augmentConnectorData(newData, intermediateAnalysis)
+
+              console.log(`   - Augmented oldData: +${oldCgoCount} CGO-only, +${oldCloudOnlyCount} cloud-only`)
+              console.log(`   - Augmented newData: +${newCgoCount} CGO-only, +${newCloudOnlyCount} cloud-only`)
+
+              // Generate diff with BOTH augmented (symmetric comparison)
+              console.log(`\nGenerating diff: ${fromVer} -> ${toVer}...`)
               const { generateConnectorDiffJson } = require('./report-delta.js')
 
               const diffData = generateConnectorDiffJson(
-                oldData,
+                augmentedOldData,
                 augmentedNewData,
                 {
                   oldVersion: fromVer,
                   newVersion: toVer,
                   timestamp,
-                  binaryAnalysis: intermediateAnalysis
+                  binaryAnalysis: intermediateAnalysis,
+                  oldBinaryAnalysis: oldAnalysis
                 }
               )
 
@@ -1136,7 +1169,6 @@ async function handleRpcnConnectorDocs (options) {
 
   try {
     console.log('\nAnalyzing connector binaries...')
-    const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
 
     if (fs.existsSync(cleanOssDataPath)) {
       if (fs.existsSync(expectedPath)) {
