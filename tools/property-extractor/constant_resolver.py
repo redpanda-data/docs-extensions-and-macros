@@ -377,7 +377,7 @@ class ConstantResolver:
         Parse C++ size literals like 256_MiB, 20_GiB to integers.
 
         Args:
-            value: The size literal string (e.g., "256_MiB", "20_GiB", "1024")
+            value: The size literal string (e.g., "256_MiB", "20_GiB", "1024", "1'024_KiB", "1048576ULL")
 
         Returns:
             The integer value in bytes, or None if parsing fails
@@ -386,6 +386,9 @@ class ConstantResolver:
             return None
 
         value = value.strip()
+
+        # Remove C++ digit separators (apostrophes) - e.g., 1'024 -> 1024
+        value = value.replace("'", "")
 
         # Binary suffixes (powers of 1024)
         binary_suffixes = {
@@ -412,8 +415,10 @@ class ConstantResolver:
                     return None
 
         # Try parsing as plain integer
+        # First strip C++ integer suffixes (U, L, UL, LL, ULL, etc.)
+        normalized = re.sub(r'[uUlLzZ]+$', '', value)
         try:
-            return int(value)
+            return int(normalized)
         except ValueError:
             return None
 
