@@ -135,12 +135,97 @@ module.exports.register = function ({ config }) {
         }
       });
 
+      // Find latest available Redpanda properties JSON in content catalog
+      // This ensures we use a version that actually exists, even if latest-redpanda-tag
+      // points to a newer release that doesn't have docs/attachments yet
+      // Component name is 'streaming' (or 'ROOT' for backwards compatibility)
+      const propertiesFiles = contentCatalog.findBy({
+        family: 'attachment'
+      }).filter(f => {
+        if (!f?.src?.stem || !f?.src?.component) return false;
+        const isStreamingComponent = f.src.component === 'streaming' || f.src.component === 'ROOT';
+        const isReferenceModule = f.src.module === 'reference';
+        const isPropertiesFile = f.src.stem.startsWith('redpanda-properties-');
+        return isStreamingComponent && isReferenceModule && isPropertiesFile;
+      });
+
+      let availablePropertiesTag = null;
+      if (propertiesFiles.length > 0) {
+        const versions = propertiesFiles
+          .map(f => f.src.stem.replace('redpanda-properties-', ''))
+          // Only accept stable versions (no prerelease suffix like -backup, -rc1, etc.)
+          .filter(v => {
+            const normalized = v.replace(/^v/, '');
+            return semver.valid(normalized) && semver.prerelease(normalized) === null;
+          });
+
+        if (versions.length > 0) {
+          availablePropertiesTag = versions.sort((a, b) =>
+            semver.rcompare(a.replace(/^v/, ''), b.replace(/^v/, ''))
+          )[0];
+
+          // Set on all component versions
+          components.forEach(component => {
+            component.versions.forEach(({ asciidoc }) => {
+              asciidoc.attributes['available-properties-tag'] = availablePropertiesTag;
+            });
+          });
+
+          logger.debug(`Found ${propertiesFiles.length} properties JSON files, latest available: ${availablePropertiesTag}`);
+        }
+      } else {
+        logger.debug('No properties JSON files found in content catalog');
+      }
+
+      // Find latest available Connect JSON in content catalog
+      // Component name is 'connect' (or 'redpanda-connect' for backwards compatibility)
+      const connectFiles = contentCatalog.findBy({
+        family: 'attachment'
+      }).filter(f => {
+        if (!f?.src?.stem || !f?.src?.component) return false;
+        const isConnectComponent = f.src.component === 'connect' || f.src.component === 'redpanda-connect';
+        const isComponentsModule = f.src.module === 'components';
+        const isConnectFile = f.src.stem.startsWith('connect-');
+        return isConnectComponent && isComponentsModule && isConnectFile;
+      });
+
+      let availableConnectVersion = null;
+      if (connectFiles.length > 0) {
+        const versions = connectFiles
+          .map(f => f.src.stem.replace('connect-', ''))
+          // Only accept stable versions (no prerelease suffix)
+          .filter(v => semver.valid(v) && semver.prerelease(v) === null);
+
+        if (versions.length > 0) {
+          availableConnectVersion = versions.sort((a, b) =>
+            semver.rcompare(a, b)
+          )[0];
+
+          // Set on all component versions
+          components.forEach(component => {
+            component.versions.forEach(({ asciidoc }) => {
+              asciidoc.attributes['available-connect-version'] = availableConnectVersion;
+            });
+          });
+
+          logger.debug(`Found ${connectFiles.length} connect JSON files, latest available: ${availableConnectVersion}`);
+        }
+      } else {
+        logger.debug('No connect JSON files found in content catalog');
+      }
+
       logger.info('Updated Redpanda documentation versions successfully:');
       logger.info(`- Redpanda: ${latestVersions.redpanda.latestRedpandaRelease.version}${latestVersions.redpanda.latestRcRelease ? ', beta: ' + latestVersions.redpanda.latestRcRelease.version : ''}`);
       logger.info(`- Connect: ${latestVersions.connect}`);
       logger.info(`- Console: ${latestVersions.console.latestStableRelease}${latestVersions.console.latestBetaRelease ? ', beta: ' + latestVersions.console.latestBetaRelease : ''}`);
       logger.info(`- Operator: ${latestVersions.operator?.latestStableRelease || 'unknown'}${latestVersions.operator?.latestBetaRelease ? ', beta: ' + latestVersions.operator.latestBetaRelease : ''}`);
       logger.info(`- Helm chart: ${latestVersions.helmChart?.latestStableRelease || 'unknown'}${latestVersions.helmChart?.latestBetaRelease ? ', beta: ' + latestVersions.helmChart.latestBetaRelease : ''}`);
+      if (availablePropertiesTag) {
+        logger.info(`- Available properties JSON: ${availablePropertiesTag}`);
+      }
+      if (availableConnectVersion) {
+        logger.info(`- Available Connect JSON: ${availableConnectVersion}`);
+      }
     } catch (error) {
       logger.error(`Error updating versions: ${error}`);
     }
@@ -174,4 +259,50 @@ module.exports.register = function ({ config }) {
       }
     });
   }
+};
+
+// Export helper functions for testing
+module.exports.filterPropertiesFiles = function(files) {
+  return files.filter(f => {
+    if (!f?.src?.stem || !f?.src?.component) return false;
+    const isStreamingComponent = f.src.component === 'streaming' || f.src.component === 'ROOT';
+    const isReferenceModule = f.src.module === 'reference';
+    const isPropertiesFile = f.src.stem.startsWith('redpanda-properties-');
+    return isStreamingComponent && isReferenceModule && isPropertiesFile;
+  });
+};
+
+module.exports.filterConnectFiles = function(files) {
+  return files.filter(f => {
+    if (!f?.src?.stem || !f?.src?.component) return false;
+    const isConnectComponent = f.src.component === 'connect' || f.src.component === 'redpanda-connect';
+    const isComponentsModule = f.src.module === 'components';
+    const isConnectFile = f.src.stem.startsWith('connect-');
+    return isConnectComponent && isComponentsModule && isConnectFile;
+  });
+};
+
+module.exports.extractLatestPropertiesVersion = function(files, semver) {
+  const versions = files
+    .map(f => f.src.stem.replace('redpanda-properties-', ''))
+    .filter(v => {
+      const normalized = v.replace(/^v/, '');
+      return semver.valid(normalized) && semver.prerelease(normalized) === null;
+    });
+
+  if (versions.length === 0) return null;
+
+  return versions.sort((a, b) =>
+    semver.rcompare(a.replace(/^v/, ''), b.replace(/^v/, ''))
+  )[0];
+};
+
+module.exports.extractLatestConnectVersion = function(files, semver) {
+  const versions = files
+    .map(f => f.src.stem.replace('connect-', ''))
+    .filter(v => semver.valid(v) && semver.prerelease(v) === null);
+
+  if (versions.length === 0) return null;
+
+  return versions.sort((a, b) => semver.rcompare(a, b))[0];
 };
