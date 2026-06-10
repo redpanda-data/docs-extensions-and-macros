@@ -30,6 +30,8 @@ display help for command
 * `install-test-dependencies` - Install packages for doc test workflows
 * `get-redpanda-version` - Print the latest Redpanda version
 * `get-console-version` - Print the latest Console version
+* `get-antora-value` - Read a value from antora.yml by dot-path (e.g., asciidoc.attributes.latest-redpanda-tag)
+* `set-antora-value` - Set a value in antora.yml by dot-path (e.g., asciidoc.attributes.latest-rpk-version)
 * `link-readme` - Symlink a README.adoc into docs/modules/<module>/pages/
 * `fetch` - Fetch a file or directory from GitHub and save it locally
 * `setup-mcp` - Configure the Redpanda Docs MCP server for Claude Code/Desktop
@@ -417,6 +419,8 @@ display help for command
 * `install-test-dependencies` - Install packages for doc test workflows
 * `get-redpanda-version` - Print the latest Redpanda version
 * `get-console-version` - Print the latest Console version
+* `get-antora-value` - Read a value from antora.yml by dot-path (e.g., asciidoc.attributes.latest-redpanda-tag)
+* `set-antora-value` - Set a value in antora.yml by dot-path (e.g., asciidoc.attributes.latest-rpk-version)
 * `link-readme` - Symlink a README.adoc into docs/modules/<module>/pages/
 * `fetch` - Fetch a file or directory from GitHub and save it locally
 * `setup-mcp` - Configure the Redpanda Docs MCP server for Claude Code/Desktop
@@ -484,7 +488,7 @@ display help for command
 * `metrics-docs` - Generate JSON and AsciiDoc documentation for Redpanda metrics. Defaults to branch "dev" if neither --tag nor --branch is specified.
 * `rpcn-connector-docs` - Generate RPCN connector docs and diff changes since the last version
 * `property-docs` - Generate JSON and consolidated AsciiDoc partials for Redpanda configuration properties. Defaults to branch "dev" if neither --tag nor --branch is specified.
-* `rpk-docs` - Generate AsciiDoc documentation for rpk CLI commands using JSON tree output. Requires rpk with --print-tree support (v26.2.0+).
+* `rpk-docs` - Generate rpk CLI documentation from source. Builds rpk and parses source for platform detection.
 * `rpk-overrides` - Validate rpk-overrides.json against schema and check for common issues
 * `helm-spec` - Generate AsciiDoc documentation for Helm charts. Requires either --tag or --branch for GitHub URLs.
 * `cloud-regions` - Generate Markdown table of cloud regions and tiers from GitHub YAML file
@@ -664,11 +668,11 @@ npx doc-tools generate metrics-docs --tag $VERSION
 
 === generate rpk-docs
 
-Generates comprehensive CLI reference documentation for rpk (Redpanda Keeper) using the `rpk --print-tree` JSON output. This modern approach replaces the legacy Docker-based help text parsing with faster, more accurate JSON parsing. Key features: - Parses structured JSON from `rpk --print-tree` (requires rpk v26.2.0+) - Automatically includes rpk plugins (connect, ai, check, etc.) - Tracks plugin versions separately - Supports overrides.json for description improvements - Generates versioned JSON files for downstream consumers (tooltips, etc.) - Generates diffs between versions for release notes
+Generates comprehensive CLI reference documentation for rpk (Redpanda Keeper). Clones the Redpanda source, builds rpk with Go, and parses `rpk --print-tree` JSON output. Detects Linux-only commands by analyzing Go build tags in the source code. Key features: - Clones source from GitHub (sparse checkout for speed) - Builds rpk from source using Go - Parses Go build tags to detect Linux-only commands - Automatically includes rpk plugins (connect, ai, check, etc.) - Supports overrides.json for description improvements - Generates versioned JSON files for downstream consumers (tooltips, etc.) - Generates diffs between versions for release notes
 
 *Why use it:*
 
-The legacy approach spun up Docker, ran help commands, and parsed text output. This was slow, error-prone, and didn't capture all metadata. The new --print-tree flag outputs the entire command tree as structured JSON, including plugins, enabling accurate and efficient documentation generation without Docker dependencies.
+Building from source provides accurate platform detection by analyzing Go build tags (//go:build linux) rather than comparing binaries. This is faster and more reliable.
 
 *Usage:*
 
@@ -679,25 +683,19 @@ doc-tools generate rpk-docs [options]
 
 *Options:*
 
-`-t, --tag <tag>`::
-Git tag for released content (e.g., v26.2.0)
+`-r, --ref <ref>`::
+Git branch or tag to document (e.g., dev, v26.2.0). Clones from GitHub.
 
-`-b, --branch <branch>`::
-Branch name for in-progress content
+`--from-source <path>`::
+Path to local rpk source (src/go/rpk directory)
+
+`--from-json <path>`::
+Regenerate docs from an existing versioned JSON file (skips building)
 
 `--overrides <path>`::
 Path to overrides JSON file (default: "docs-data/rpk-overrides.json")
 
-`--from-version <version>`::
-Override starting version for multi-release processing
-
-`--fetch-binary`::
-Download rpk binary for the specified version instead of using local rpk
-
-`--rpk-path <path>`::
-Path to custom rpk binary (e.g., /tmp/rpk-dev for testing)
-
-`--diff <oldTag>`::
+`--diff <oldVersion>`::
 Generate diff against previous version
 
 `--update-whats-new`::
@@ -709,23 +707,23 @@ Generate draft pages for new commands
 `--output-dir <dir>`::
 Output directory for generated AsciiDoc (default: "modules/reference/pages/rpk")
 
+`--cloud-secret-dir <dir>`::
+Output directory for rpk cloud and rpk security secret commands (defaults to partials relative to output-dir)
+
 `--data-dir <dir>`::
 Directory for versioned JSON and diff files (default: "docs-data")
 
-`--from-source <path>`::
-Path to rpk Go source directory (e.g., ~/redpanda/src/go/rpk) for pre-releases - builds for current platform only
-
-`--linux-from-source <path>`::
-Path to rpk Go source directory - builds in Linux Docker container for complete command coverage including Linux-only commands
-
-`--source-ref <ref>`::
-Git branch or tag to checkout (e.g., dev, v26.2.0). If no --from-source or --linux-from-source path, sparse-clones from GitHub
-
-`--include-linux`::
-Merge with Linux rpk tree from Docker for complete platform coverage (requires --tag with Docker image that supports --print-tree)
-
 `--preserve-from <path>`::
-Path to existing docs directory to preserve cloud conditionals and editorial includes from (e.g., ../docs/modules/reference/pages/rpk)
+Path to existing docs to preserve cloud conditionals from
+
+`--print-summary`::
+Print PR summary (for GitHub Actions)
+
+`--summary-file <path>`::
+Write PR summary to file (for GitHub Actions)
+
+`--show-info`::
+Include info-level validation messages
 
 `-h, --help`::
 display help for command
@@ -734,28 +732,26 @@ display help for command
 
 [,bash]
 ----
-# Generate docs using local rpk (must support --print-tree)
+# Generate docs for a specific version
+npx doc-tools generate rpk-docs --ref v26.2.0
+
+# Generate docs for latest development branch
+npx doc-tools generate rpk-docs --ref dev
+
+# Auto-detect local redpanda checkout (if available)
 npx doc-tools generate rpk-docs
 
-# Generate docs for specific version (downloads binary)
-npx doc-tools generate rpk-docs --tag v26.2.0 --fetch-binary
-
 # Generate with diff against previous version
-npx doc-tools generate rpk-docs --tag v26.2.0 --diff v26.1.9
+npx doc-tools generate rpk-docs --ref v26.2.0 --diff v26.1.9
 
 # Use custom overrides file
-npx doc-tools generate rpk-docs --overrides custom-overrides.json
-
-# Full workflow: document new release
-VERSION=$(npx doc-tools get-redpanda-version)
-npx doc-tools generate rpk-docs --tag $VERSION --fetch-binary
+npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
 ----
 
 *Requirements:*
 
-- rpk v26.2.0 or later (with --print-tree support)
-- Or use --fetch-binary to download a specific version
-- For Docker fallback: Docker must be running
+- Go must be installed (https://go.dev/)
+- Git must be installed (for cloning source)
 
 === generate rpcn-connector-docs
 
