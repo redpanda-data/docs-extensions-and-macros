@@ -510,8 +510,8 @@ The generator validates:
 * Patterns match against both description and command text
 * Check regex syntax is valid
 
-== Related Resources
+== Related resources
 
 * link:rpk-overrides.schema.json[JSON Schema for validation]
-* link:../tools/rpk-docs/README.adoc[rpk-docs tool documentation]
+* link:../CLI_REFERENCE.adoc[CLI reference documentation]
 * link:../CLAUDE.md[Repository overview]

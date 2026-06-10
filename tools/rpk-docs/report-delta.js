@@ -51,7 +51,22 @@ function flattenToMap(node, parentPath = '') {
     return result
   }
 
-  const currentPath = parentPath ? `${parentPath} ${node.name}` : node.name
+  // Validate node.name exists and is a non-empty string
+  const nodeName = node.name
+  if (typeof nodeName !== 'string' || nodeName.trim() === '') {
+    // Skip nodes without valid names but still process children
+    if (node.commands && Array.isArray(node.commands)) {
+      for (const child of node.commands) {
+        const childMap = flattenToMap(child, parentPath)
+        for (const [path, cmd] of childMap) {
+          result.set(path, cmd)
+        }
+      }
+    }
+    return result
+  }
+
+  const currentPath = parentPath ? `${parentPath} ${nodeName}` : nodeName
   result.set(currentPath, node)
 
   if (node.commands && Array.isArray(node.commands)) {

@@ -223,10 +223,6 @@
             ]
           }
         },
-        "pageAliases": {
-          "type": "string",
-          "description": "AsciiDoc page aliases for redirects from old URLs (e.g., 'reference:rpk/rpk-cluster/rpk-cluster-metadata.adoc' or multiple aliases separated by commas)"
-        },
         "aliases": {
           "type": "array",
           "description": "Override or add command aliases",

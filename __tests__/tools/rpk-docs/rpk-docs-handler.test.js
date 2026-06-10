@@ -22,11 +22,8 @@ describe('rpk Docs Handler', () => {
     })
 
     afterEach(() => {
-      // Clean up temp files
-      if (fs.existsSync(overridesPath)) {
-        fs.unlinkSync(overridesPath)
-      }
-      fs.rmdirSync(tempDir)
+      // Clean up temp directory and all contents
+      fs.rmSync(tempDir, { recursive: true, force: true })
     })
 
     describe('command version tracking', () => {
