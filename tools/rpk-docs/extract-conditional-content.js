@@ -7,21 +7,34 @@
 
 const fs = require('fs')
 const path = require('path')
-const { execSync } = require('child_process')
+const { spawnSync } = require('child_process')
 
 const docsDir = process.argv[2] || '../docs'
 const rpkDir = path.join(docsDir, 'modules/reference/pages/rpk')
 const overridesPath = path.join(__dirname, '../../docs-data/rpk-overrides.json')
 
+// Validate docsDir exists and is a directory
+if (!fs.existsSync(docsDir) || !fs.statSync(docsDir).isDirectory()) {
+  console.error(`ERROR: Invalid docs directory: ${docsDir}`)
+  process.exit(1)
+}
+
 console.log('Extracting conditional content from original rpk docs...')
 console.log(`  Docs directory: ${docsDir}`)
 console.log(`  Overrides file: ${overridesPath}`)
 
-// Get list of modified files
-const modifiedFilesOutput = execSync(
-  `cd "${docsDir}" && git diff --name-only modules/reference/pages/rpk/`,
-  { encoding: 'utf8' }
-)
+// Get list of modified files using spawnSync to avoid command injection
+const gitDiffResult = spawnSync('git', ['diff', '--name-only', 'modules/reference/pages/rpk/'], {
+  cwd: docsDir,
+  encoding: 'utf8'
+})
+
+if (gitDiffResult.error) {
+  console.error(`ERROR: Failed to run git diff: ${gitDiffResult.error.message}`)
+  process.exit(1)
+}
+
+const modifiedFilesOutput = gitDiffResult.stdout
 
 const modifiedFiles = modifiedFilesOutput
   .trim()
@@ -47,10 +60,16 @@ for (const relPath of modifiedFiles) {
 
   // Get the original content (before changes)
   try {
-    const originalContent = execSync(
-      `cd "${docsDir}" && git show HEAD:"${relPath}"`,
-      { encoding: 'utf8' }
-    )
+    const gitShowResult = spawnSync('git', ['show', `HEAD:${relPath}`], {
+      cwd: docsDir,
+      encoding: 'utf8'
+    })
+
+    if (gitShowResult.error || gitShowResult.status !== 0) {
+      throw new Error(gitShowResult.stderr || 'git show failed')
+    }
+
+    const originalContent = gitShowResult.stdout
 
     // Extract conditional blocks and includes
     const conditionals = []
