@@ -93,14 +93,14 @@ The tool fetches the JSON command tree from rpk (requires v26.2.0+), applies des
 Run it like this:
 
 ```bash
-# Generate docs using local rpk
-npx doc-tools generate rpk-docs
+# Generate docs from dev branch (clones source from GitHub, builds with Go)
+npx doc-tools generate rpk-docs --ref dev
 
-# Generate docs for specific version (downloads binary)
-npx doc-tools generate rpk-docs --tag v26.2.0 --fetch-binary
+# Generate docs for specific version
+npx doc-tools generate rpk-docs --ref v26.2.0
 
 # Generate with diff against previous version
-npx doc-tools generate rpk-docs --tag v26.2.0 --diff v26.1.9
+npx doc-tools generate rpk-docs --ref v26.2.0 --diff v26.1.9
 ```
 
 ### Helm chart documentation generator
