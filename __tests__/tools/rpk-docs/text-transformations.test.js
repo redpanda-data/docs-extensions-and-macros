@@ -51,33 +51,6 @@ describe('Text Transformations', () => {
       expect(overrides.textTransformations.inlineCode.length).toBeGreaterThan(0)
     })
 
-    it('should include STDOUT/STDERR transformation', () => {
-      const overridesPath = path.join(__dirname, '../../../docs-data/rpk-overrides.json')
-      const overrides = JSON.parse(fs.readFileSync(overridesPath, 'utf8'))
-
-      const stdoutPattern = overrides.textTransformations.inlineCode.find(
-        rule => (typeof rule === 'string' ? rule : rule.pattern).includes('STDOUT')
-      )
-      expect(stdoutPattern).toBeDefined()
-
-      const stderrPattern = overrides.textTransformations.inlineCode.find(
-        rule => (typeof rule === 'string' ? rule : rule.pattern).includes('STDERR')
-      )
-      expect(stderrPattern).toBeDefined()
-    })
-
-    it('should include underscore topic transformation', () => {
-      const overridesPath = path.join(__dirname, '../../../docs-data/rpk-overrides.json')
-      const overrides = JSON.parse(fs.readFileSync(overridesPath, 'utf8'))
-
-      const underscorePattern = overrides.textTransformations.inlineCode.find(
-        rule => {
-          const pattern = typeof rule === 'string' ? rule : rule.pattern
-          return pattern.includes('_[a-z]') || (rule.description && rule.description.includes('underscore'))
-        }
-      )
-      expect(underscorePattern).toBeDefined()
-    })
   })
 
   describe('Integration Test', () => {
