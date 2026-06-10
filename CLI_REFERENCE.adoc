@@ -750,8 +750,17 @@ npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
 
 *Requirements:*
 
-- Go must be installed (https://go.dev/)
-- Git must be installed (for cloning source)
+- Go must be installed (https://go.dev/) - Required for building rpk from source
+- Git must be installed - Required for cloning Redpanda repository
+
+*Platform detection:*
+
+The tool automatically detects Linux-only commands (like `rpk redpanda`, `rpk iotune`, `rpk ai`) using two methods:
+
+. *Source scanning* - Analyzes Go files for `//go:build linux` build tags
+. *Dynamic comparison* (macOS with Docker only) - Builds rpk in both a Linux container and natively, then compares command trees to find differences
+
+On Linux (including CI environments), Docker is not needed because Go builds the complete command tree natively - all commands are available on Linux.
 
 === generate rpcn-connector-docs
 
