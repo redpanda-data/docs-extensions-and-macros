@@ -66,8 +66,8 @@ describe('CLI Contract Tests', () => {
       },
       {
         name: 'rpk-docs',
-        requiredFlags: ['--tag'],
-        optionalFlags: []
+        requiredFlags: [],
+        optionalFlags: ['--ref', '--from-source', '--diff', '--update-whats-new', '--draft-missing', '--output-dir', '--data-dir', '--overrides', '--preserve-from']
       },
       {
         name: 'rpcn-connector-docs',
