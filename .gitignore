@@ -17,3 +17,7 @@ node_modules
 .env
 mcp-usage-stats.json
 *.tgz
+
+# Development rpk JSON files
+docs-data/rpk-vdev.json
+docs-data/rpk-vlocal.json
