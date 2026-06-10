@@ -16,21 +16,6 @@ const { validateDirectory, formatResults } = require('./validate-output')
  */
 const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'oxla']
 
-/**
- * Plugins that are only available on Linux.
- * These plugins are built with CGO or have Linux-specific dependencies.
- * NOTE: This is a fallback - dynamic detection is preferred when both
- * Linux and Darwin builds can be compared.
- */
-const LINUX_ONLY_PLUGINS = ['ai']
-
-/**
- * Top-level commands (not plugins) that are only available on Linux.
- * These interact with the local Redpanda process which only runs on Linux.
- * NOTE: This is a fallback - dynamic detection is preferred when both
- * Linux and Darwin builds can be compared.
- */
-const LINUX_ONLY_COMMANDS = ['rpk redpanda', 'rpk iotune']
 
 /**
  * Extract all command paths from a command tree
@@ -579,27 +564,9 @@ function inferCommandPath(sourcePath, filePath, fileName) {
 function addPlatformMarkersFromSource(tree, linuxOnlyCommands) {
   const isLinuxOnly = (cmdPath) => {
     // Check if this command or any parent is Linux-only from source detection
-    if (linuxOnlyCommands.has(cmdPath) ||
-        [...linuxOnlyCommands].some(loc => cmdPath.startsWith(loc + ' '))) {
-      return true
-    }
-
-    // Check if this is a Linux-only plugin or subcommand of one
-    for (const plugin of LINUX_ONLY_PLUGINS) {
-      const pluginPath = `rpk ${plugin}`
-      if (cmdPath === pluginPath || cmdPath.startsWith(pluginPath + ' ')) {
-        return true
-      }
-    }
-
-    // Check if this matches a known Linux-only command pattern
-    for (const cmd of LINUX_ONLY_COMMANDS) {
-      if (cmdPath === cmd || cmdPath.startsWith(cmd + ' ')) {
-        return true
-      }
-    }
-
-    return false
+    // Detection comes from: 1) Go build tags in source, 2) dynamic comparison of Linux vs Darwin builds
+    return linuxOnlyCommands.has(cmdPath) ||
+           [...linuxOnlyCommands].some(loc => cmdPath.startsWith(loc + ' '))
   }
 
   const markCommands = (commands, parentPath = 'rpk') => {
@@ -1519,8 +1486,6 @@ module.exports = {
   getCurrentPlatform,
   updateOverridesWithIntroducedVersions,
   KNOWN_PLUGINS,
-  LINUX_ONLY_PLUGINS,
-  LINUX_ONLY_COMMANDS,
   extractCommandPaths,
   detectLinuxOnlyByComparison,
   PLATFORMS,
