@@ -931,7 +931,7 @@ function updateWhatsNewFile(diffData, whatsNewPath, version) {
   const whatsNewContent = generateWhatsNewSection(diffData, { version })
 
   if (!whatsNewContent) {
-    console.log('No rpk changes to add to what\'s new')
+    console.log('No Redpanda CLI changes to add to what\'s new')
     return
   }
 
@@ -944,9 +944,9 @@ function updateWhatsNewFile(diffData, whatsNewPath, version) {
 
   const existingContent = fs.readFileSync(whatsNewPath, 'utf8')
 
-  // Check if rpk section already exists
-  if (existingContent.includes('== rpk CLI updates')) {
-    console.log('rpk CLI updates section already exists in what\'s-new file')
+  // Check if Redpanda CLI section already exists
+  if (existingContent.includes('== Redpanda CLI')) {
+    console.log('Redpanda CLI section already exists in what\'s-new file')
     return
   }
 

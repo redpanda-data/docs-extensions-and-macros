@@ -421,7 +421,7 @@ function generateWhatsNewSection(diff, options = {}) {
     return '' // No changes to document
   }
 
-  lines.push(`== rpk CLI updates`)
+  lines.push(`== Redpanda CLI`)
   lines.push(``)
 
   if (hasNewCommands) {
