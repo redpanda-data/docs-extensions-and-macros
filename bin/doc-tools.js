@@ -1071,7 +1071,7 @@ automation
   .option('--from-json <path>', 'Regenerate docs from an existing versioned JSON file (skips building)')
   .option('--overrides <path>', 'Path to overrides JSON file', 'docs-data/rpk-overrides.json')
   .option('--diff <oldVersion>', 'Generate diff against previous version')
-  .option('--update-whats-new', 'Update whats-new.adoc with changes')
+  .option('--update-whats-new <path>', 'Update what\'s-new.adoc file at path with rpk changes from diff')
   .option('--draft-missing', 'Generate draft pages for new commands')
   .option('--output-dir <dir>', 'Output directory for generated AsciiDoc', 'modules/reference/pages/rpk')
   .option('--cloud-secret-dir <dir>', 'Output directory for rpk cloud and rpk security secret commands (defaults to partials relative to output-dir)')

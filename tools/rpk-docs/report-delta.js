@@ -382,10 +382,97 @@ function generateMarkdownSummary(diff) {
   return lines.join('\n')
 }
 
+/**
+ * Convert command path to xref path
+ * @param {string} commandPath - Command path like "rpk cluster info"
+ * @returns {string} Xref path like "rpk-cluster/rpk-cluster-info.adoc"
+ */
+function commandPathToXref(commandPath) {
+  const parts = commandPath.split(' ')
+  if (parts.length === 1) {
+    return `rpk.adoc`
+  }
+  const dashified = commandPath.replace(/ /g, '-')
+  if (parts.length === 2) {
+    return `${dashified}.adoc`
+  }
+  // For deeper commands: rpk cluster info -> rpk-cluster/rpk-cluster-info.adoc
+  const parentDir = parts.slice(0, 2).join('-')
+  return `${parentDir}/${dashified}.adoc`
+}
+
+/**
+ * Generate AsciiDoc content for what's-new file
+ * @param {Object} diff - Diff object from generateRpkDiff
+ * @param {Object} options - Options
+ * @param {string} options.version - Version string to display
+ * @returns {string} AsciiDoc content
+ */
+function generateWhatsNewSection(diff, options = {}) {
+  const lines = []
+  const version = options.version || diff.comparison.newVersion
+
+  // Check if there are any changes worth documenting
+  const hasNewCommands = diff.details.newCommands.length > 0
+  const hasNewFlags = diff.details.newFlags.length > 0
+  const hasChangedDefaults = diff.details.changedDefaults.length > 0
+
+  if (!hasNewCommands && !hasNewFlags && !hasChangedDefaults) {
+    return '' // No changes to document
+  }
+
+  lines.push(`== rpk CLI updates`)
+  lines.push(``)
+
+  if (hasNewCommands) {
+    lines.push(`=== New commands`)
+    lines.push(``)
+    for (const cmd of diff.details.newCommands) {
+      const xrefPath = commandPathToXref(cmd.path)
+      const desc = cmd.description ? ` - ${cmd.description}` : ''
+      lines.push(`* xref:reference:rpk/${xrefPath}[\`${cmd.path}\`]${desc}`)
+    }
+    lines.push(``)
+  }
+
+  if (hasNewFlags) {
+    lines.push(`=== New flags`)
+    lines.push(``)
+    // Group flags by command
+    const flagsByCommand = {}
+    for (const flag of diff.details.newFlags) {
+      if (!flagsByCommand[flag.commandPath]) {
+        flagsByCommand[flag.commandPath] = []
+      }
+      flagsByCommand[flag.commandPath].push(flag)
+    }
+
+    for (const [cmdPath, flags] of Object.entries(flagsByCommand)) {
+      const xrefPath = commandPathToXref(cmdPath)
+      const flagList = flags.map(f => `\`--${f.flagName}\``).join(', ')
+      lines.push(`* xref:reference:rpk/${xrefPath}[\`${cmdPath}\`]: Added ${flagList}`)
+    }
+    lines.push(``)
+  }
+
+  if (hasChangedDefaults) {
+    lines.push(`=== Changed defaults`)
+    lines.push(``)
+    for (const change of diff.details.changedDefaults) {
+      const xrefPath = commandPathToXref(change.commandPath)
+      lines.push(`* xref:reference:rpk/${xrefPath}[\`${change.commandPath}\`]: \`--${change.flagName}\` default changed from \`${change.oldDefault}\` to \`${change.newDefault}\``)
+    }
+    lines.push(``)
+  }
+
+  return lines.join('\n')
+}
+
 module.exports = {
   generateRpkDiff,
   printDiffReport,
   generateMarkdownSummary,
+  generateWhatsNewSection,
   flattenToMap,
   getFlagsMap,
   compareFlags

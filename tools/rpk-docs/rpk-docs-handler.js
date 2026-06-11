@@ -7,7 +7,7 @@ const os = require('os')
 const semver = require('semver')
 const { findRepoRoot } = require('../../cli-utils/doc-tools-utils')
 const { generateRpkDocs, applyOverridesToTree, resolveReferences } = require('./generate-rpk-docs')
-const { generateRpkDiff, printDiffReport } = require('./report-delta')
+const { generateRpkDiff, printDiffReport, generateWhatsNewSection } = require('./report-delta')
 const { loadAndValidateOverrides, ValidationResult } = require('./validate-overrides')
 const { validateDirectory, formatResults } = require('./validate-output')
 
@@ -922,6 +922,68 @@ function countCommands(node) {
 }
 
 /**
+ * Update what's-new file with rpk changes from diff
+ * @param {Object} diffData - Diff data from generateRpkDiff
+ * @param {string} whatsNewPath - Path to what's-new.adoc file
+ * @param {string} version - Version string for display
+ */
+function updateWhatsNewFile(diffData, whatsNewPath, version) {
+  const whatsNewContent = generateWhatsNewSection(diffData, { version })
+
+  if (!whatsNewContent) {
+    console.log('No rpk changes to add to what\'s new')
+    return
+  }
+
+  if (!fs.existsSync(whatsNewPath)) {
+    console.warn(`Warning: what's-new file not found: ${whatsNewPath}`)
+    console.log('Generated what\'s-new content:')
+    console.log(whatsNewContent)
+    return
+  }
+
+  const existingContent = fs.readFileSync(whatsNewPath, 'utf8')
+
+  // Check if rpk section already exists
+  if (existingContent.includes('== rpk CLI updates')) {
+    console.log('rpk CLI updates section already exists in what\'s-new file')
+    return
+  }
+
+  // Find a good insertion point - before the last section or at the end
+  // Look for a pattern like "== New configuration properties" or similar
+  const insertionPatterns = [
+    /^== New configuration properties/m,
+    /^== Deprecations/m,
+    /^== Bug fixes/m,
+    /^== See also/m
+  ]
+
+  let insertIndex = -1
+  for (const pattern of insertionPatterns) {
+    const match = existingContent.match(pattern)
+    if (match) {
+      insertIndex = match.index
+      break
+    }
+  }
+
+  let updatedContent
+  if (insertIndex > 0) {
+    // Insert before the matched section
+    updatedContent = existingContent.slice(0, insertIndex) +
+      whatsNewContent + '\n' +
+      existingContent.slice(insertIndex)
+  } else {
+    // Append at the end
+    updatedContent = existingContent + '\n' + whatsNewContent
+  }
+
+  fs.writeFileSync(whatsNewPath, updatedContent, 'utf8')
+  console.log(`Updated what's-new file: ${whatsNewPath}`)
+}
+
+/**
  * Main handler for rpk docs generation
  *
  * Simplified workflow:
@@ -940,7 +1002,7 @@ async function handleRpkDocsGeneration(options = {}) {
     ref, // Git ref (branch or tag) to document
     sourceRef, // Alias for ref
     diff: diffVersion,
-    updateWhatsNew = false,
+    updateWhatsNew: whatsNewPath, // Path to what's-new.adoc file to update
     draftMissing = false,
     outputDir,
     cloudSecretDir, // Directory for rpk cloud and rpk security secret commands
@@ -1059,6 +1121,11 @@ async function handleRpkDocsGeneration(options = {}) {
 
           // Print diff report
           printDiffReport(diffData)
+
+          // Update what's-new file if requested
+          if (whatsNewPath) {
+            updateWhatsNewFile(diffData, whatsNewPath, rpkVersion)
+          }
         } else {
           console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
         }
@@ -1298,6 +1365,11 @@ async function handleRpkDocsGeneration(options = {}) {
         // Update overrides with introducedInVersion for new commands
         if (diffData.details.newCommands.length > 0 && effectiveOverridesPath) {
           updateOverridesWithIntroducedVersions(diffData, effectiveOverridesPath, rpkVersion)
+        }
+
+        // Update what's-new file if requested
+        if (whatsNewPath) {
+          updateWhatsNewFile(diffData, whatsNewPath, rpkVersion)
         }
       } else {
         console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
