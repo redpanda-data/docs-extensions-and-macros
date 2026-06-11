@@ -1096,29 +1096,47 @@ async function handleRpkDocsGeneration(options = {}) {
     if (canBuildLinux && canBuildNative && os.platform() !== 'linux') {
       console.log('\nBuilding rpk on both Linux and Darwin for dynamic platform detection...')
 
-      // Build on Linux (in container) - has all commands
-      console.log('Building rpk in Linux container...')
-      const linuxTree = fetchRpkTreeFromLinuxSource(sourcePath)
+      try {
+        // Build on Linux (in container) - has all commands
+        console.log('Building rpk in Linux container...')
+        const linuxTree = fetchRpkTreeFromLinuxSource(sourcePath)
 
-      // Build natively (on Darwin) - missing Linux-only commands
-      console.log('Building rpk natively for comparison...')
-      const darwinTree = fetchRpkTreeFromSource(sourcePath)
+        // Build natively (on Darwin) - missing Linux-only commands
+        console.log('Building rpk natively for comparison...')
+        const darwinTree = fetchRpkTreeFromSource(sourcePath)
 
-      // Compare trees to find Linux-only commands
-      const dynamicLinuxOnly = detectLinuxOnlyByComparison(linuxTree, darwinTree)
-      if (dynamicLinuxOnly.size > 0) {
-        console.log(`Dynamic detection found ${dynamicLinuxOnly.size} Linux-only command(s):`)
-        for (const cmd of dynamicLinuxOnly) {
-          console.log(`  - ${cmd}`)
-          linuxOnlyCommands.add(cmd)
+        // Compare trees to find Linux-only commands
+        const dynamicLinuxOnly = detectLinuxOnlyByComparison(linuxTree, darwinTree)
+        if (dynamicLinuxOnly.size > 0) {
+          console.log(`Dynamic detection found ${dynamicLinuxOnly.size} Linux-only command(s):`)
+          for (const cmd of dynamicLinuxOnly) {
+            console.log(`  - ${cmd}`)
+            linuxOnlyCommands.add(cmd)
+          }
         }
-      }
 
-      // Use the Linux tree (has all commands)
-      tree = linuxTree
+        // Use the Linux tree (has all commands)
+        tree = linuxTree
+      } catch (dockerErr) {
+        // Docker build failed (e.g., Go version mismatch) - fall back to native build
+        console.warn(`\n⚠ Docker build failed: ${dockerErr.message}`)
+        console.log('Falling back to native Go build...')
+        console.log('Note: Linux-only commands will be detected via source scanning only.\n')
+        tree = fetchRpkTreeFromSource(sourcePath)
+      }
     } else if (canBuildLinux) {
       console.log('\nBuilding rpk in Linux container...')
-      tree = fetchRpkTreeFromLinuxSource(sourcePath)
+      try {
+        tree = fetchRpkTreeFromLinuxSource(sourcePath)
+      } catch (dockerErr) {
+        if (canBuildNative) {
+          console.warn(`\n⚠ Docker build failed: ${dockerErr.message}`)
+          console.log('Falling back to native Go build...\n')
+          tree = fetchRpkTreeFromSource(sourcePath)
+        } else {
+          throw dockerErr
+        }
+      }
     } else if (canBuildNative) {
       console.log('\nBuilding rpk natively with Go...')
       tree = fetchRpkTreeFromSource(sourcePath)
