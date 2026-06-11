@@ -16,6 +16,49 @@ const { validateDirectory, formatResults } = require('./validate-output')
  */
 const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'oxla']
 
+/**
+ * Parse Go version from 'go version' output
+ * @param {string} versionOutput - Output from 'go version' command
+ * @returns {string|null} Semver-compatible version string or null
+ */
+function parseGoVersion(versionOutput) {
+  // go version go1.26.4 darwin/arm64 -> 1.26.4
+  const match = versionOutput.match(/go(\d+\.\d+(?:\.\d+)?)/)
+  return match ? match[1] : null
+}
+
+/**
+ * Get required Go version from go.mod file
+ * @param {string} sourcePath - Path to rpk source directory
+ * @returns {string|null} Required Go version or null
+ */
+function getRequiredGoVersion(sourcePath) {
+  const goModPath = path.join(sourcePath, 'go.mod')
+  if (!fs.existsSync(goModPath)) {
+    return null
+  }
+  const content = fs.readFileSync(goModPath, 'utf8')
+  // go 1.26.4
+  const match = content.match(/^go\s+(\d+\.\d+(?:\.\d+)?)/m)
+  return match ? match[1] : null
+}
+
+/**
+ * Check if installed Go version meets requirements
+ * @param {string} installedVersion - Installed Go version
+ * @param {string} requiredVersion - Required Go version from go.mod
+ * @returns {boolean} True if version is sufficient
+ */
+function checkGoVersionSufficient(installedVersion, requiredVersion) {
+  // Normalize to semver format (add .0 if needed)
+  const normalize = (v) => {
+    const parts = v.split('.')
+    while (parts.length < 3) parts.push('0')
+    return parts.join('.')
+  }
+  return semver.gte(normalize(installedVersion), normalize(requiredVersion))
+}
+
 
 /**
  * Extract all command paths from a command tree
@@ -242,6 +285,19 @@ function fetchRpkTreeFromSource(sourcePath) {
 
   console.log(`Building and running rpk from source at ${sourcePath}...`)
   console.log(`Go version: ${goCheck.stdout.trim()}`)
+
+  // Check Go version meets go.mod requirements
+  const installedGoVersion = parseGoVersion(goCheck.stdout)
+  const requiredGoVersion = getRequiredGoVersion(sourcePath)
+  if (installedGoVersion && requiredGoVersion) {
+    if (!checkGoVersionSufficient(installedGoVersion, requiredGoVersion)) {
+      throw new Error(
+        `Go version mismatch: installed ${installedGoVersion}, required >= ${requiredGoVersion}\n` +
+        `The rpk source (go.mod) requires Go ${requiredGoVersion} or newer.\n` +
+        'Update Go: brew upgrade go (macOS) or download from https://go.dev/dl/'
+      )
+    }
+  }
 
   // Run rpk directly from source using go run
   const result = spawnSync('go', ['run', 'cmd/rpk/main.go', '--print-tree'], {
@@ -906,9 +962,18 @@ async function handleRpkDocsGeneration(options = {}) {
   // If outputDir is .../modules/reference/pages/rpk, cloudSecretDir should be .../modules/reference/partials
   let defaultCloudSecretDir
   if (outputDir) {
-    // Derive cloudSecretDir from outputDir by going up from pages/rpk to partials
-    const outputParent = path.dirname(path.dirname(finalOutputDir)) // Go up from pages/rpk to reference
-    defaultCloudSecretDir = path.join(outputParent, 'partials')
+    // Check if outputDir follows docs repo structure (ends with pages/rpk or similar)
+    const normalizedOutput = finalOutputDir.replace(/\\/g, '/')
+    if (normalizedOutput.includes('/pages/')) {
+      // Derive cloudSecretDir from outputDir by going up from pages/rpk to partials
+      const pagesIndex = normalizedOutput.lastIndexOf('/pages/')
+      const referenceDir = normalizedOutput.substring(0, pagesIndex)
+      defaultCloudSecretDir = path.join(referenceDir, 'partials')
+    } else {
+      // Arbitrary output directory - use sibling partials directory
+      const outputParent = path.dirname(finalOutputDir)
+      defaultCloudSecretDir = path.join(outputParent, 'partials')
+    }
   } else {
     defaultCloudSecretDir = path.join(repoRoot, 'modules', 'reference', 'partials')
   }
