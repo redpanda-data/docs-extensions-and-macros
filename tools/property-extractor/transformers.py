@@ -1618,7 +1618,7 @@ class FriendlyDefaultTransformer:
             else:
                 logger.warning(f"Failed to resolve numeric constant: {identifier}")
         except Exception as e:
-            logger.warning(f"Error resolving numeric constant {identifier}: {e}")
+            logger.warning(f"Error resolving numeric constant {identifier}: {e}", exc_info=True)
 
         return None
 
