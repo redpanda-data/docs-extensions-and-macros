@@ -1071,7 +1071,7 @@ automation
   .option('--from-json <path>', 'Regenerate docs from an existing versioned JSON file (skips building)')
   .option('--overrides <path>', 'Path to overrides JSON file', 'docs-data/rpk-overrides.json')
   .option('--diff <oldVersion>', 'Generate diff against previous version')
-  .option('--update-whats-new <path>', 'Update what\'s-new.adoc file at path with rpk changes from diff')
+  .option('--update-whats-new [path]', 'Update what\'s-new file with rpk changes from diff (default: modules/get-started/pages/release-notes/redpanda.adoc)')
   .option('--draft-missing', 'Generate draft pages for new commands')
   .option('--output-dir <dir>', 'Output directory for generated AsciiDoc', 'modules/reference/pages/rpk')
   .option('--cloud-secret-dir <dir>', 'Output directory for rpk cloud and rpk security secret commands (defaults to partials relative to output-dir)')
@@ -1084,13 +1084,22 @@ automation
     try {
       const { handleRpkDocsGeneration } = require('../tools/rpk-docs/rpk-docs-handler.js')
 
+      // Handle --update-whats-new with optional path
+      let whatsNewPath = null
+      if (options.updateWhatsNew !== undefined) {
+        // If true (flag without path), use default; if string, use that path
+        whatsNewPath = typeof options.updateWhatsNew === 'string'
+          ? options.updateWhatsNew
+          : 'modules/get-started/pages/release-notes/redpanda.adoc'
+      }
+
       const result = await handleRpkDocsGeneration({
         ref: options.ref,
         fromSource: options.fromSource,
         fromJson: options.fromJson,
         overrides: options.overrides,
         diff: options.diff,
-        updateWhatsNew: options.updateWhatsNew,
+        updateWhatsNew: whatsNewPath,
         draftMissing: options.draftMissing,
         outputDir: options.outputDir,
         cloudSecretDir: options.cloudSecretDir,
