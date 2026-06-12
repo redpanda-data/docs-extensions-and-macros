@@ -84,16 +84,23 @@ npx doc-tools generate metrics-docs --tag v25.3.1
 
 ### Command-line tool documentation generator
 
-Location: [`tools/gen-rpk-ascii.py`](tools/gen-rpk-ascii.py)
+Location: [`tools/rpk-docs/`](tools/rpk-docs/)
 
-Redpanda's command-line tool (rpk) has dozens of commands with many options. Instead of manually documenting each command, this tool runs the commands to extract their help text and generates documentation.
+Redpanda's command-line tool (rpk) has over 200 commands with many options, including plugins like rpk connect, rpk ai, and rpk check. Instead of manually documenting each command, this tool uses the `rpk --print-tree` command to extract structured JSON containing the entire command tree.
 
-The tool downloads Redpanda source code, builds the rpk command-line tool, runs each command with the `--help` flag to get usage information, then converts the help text into documentation pages.
+The tool fetches the JSON command tree from rpk (requires v26.2.0+), applies description overrides from `docs-data/rpk-overrides.json`, generates AsciiDoc documentation for each command using Handlebars templates, and creates versioned JSON files for downstream consumers. It also generates diffs between versions for release notes.
 
 Run it like this:
 
 ```bash
-npx doc-tools generate rpk-docs --tag v25.3.1
+# Generate docs from dev branch (clones source from GitHub, builds with Go)
+npx doc-tools generate rpk-docs --ref dev
+
+# Generate docs for specific version
+npx doc-tools generate rpk-docs --ref v26.2.0
+
+# Generate with diff against previous version
+npx doc-tools generate rpk-docs --ref v26.2.0 --diff v26.1.9
 ```
 
 ### Helm chart documentation generator

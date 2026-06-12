@@ -1,0 +1,106 @@
+{{!-- Render a content item based on its type --}}
+{{~#if (eq type "example")~}}
+{{!-- Single structured example --}}
+{{#if description}}
+{{{description}}}.
+
+{{/if}}
+[,{{#if language}}{{language}}{{else}}bash{{/if}}{{#if attributes}}{{#each attributes}}{{#if @first}},{{/if}}{{@key}}="{{this}}"{{/each}}{{/if}}]
+----
+{{{code}}}
+----
+{{#if output}}
+
+Output:
+
+[.no-wrap,{{#if outputLanguage}}{{outputLanguage}}{{else}}bash{{/if}}]
+----
+{{{output}}}
+----
+{{/if}}
+
+{{~else if (eq type "examples")~}}
+{{!-- Examples section at level 2 (==) --}}
+== {{#if title}}{{title}}{{else}}Examples{{/if}}
+
+This section provides examples of how to use `{{commandPath}}`.
+
+{{#each items}}
+{{#if description}}
+{{{description}}}.
+
+{{/if}}
+[,{{#if language}}{{language}}{{else}}bash{{/if}}{{#if attributes}}{{#each attributes}}{{#if @first}},{{/if}}{{@key}}="{{this}}"{{/each}}{{/if}}]
+----
+{{{code}}}
+----
+{{#if output}}
+
+Output:
+
+[.no-wrap,{{#if outputLanguage}}{{outputLanguage}}{{else}}bash{{/if}}]
+----
+{{{output}}}
+----
+{{/if}}
+
+{{/each}}
+{{~else if (eq type "section")~}}
+{{!-- Custom section with optional subsections --}}
+{{#if title}}
+{{!-- Determine heading level (default to 2 for ==) --}}
+{{#if headingLevel}}{{#repeat headingLevel}}={{/repeat}} {{title}}{{else}}== {{title}}{{/if}}
+
+{{#if (eq title "Examples")}}
+This section provides examples of how to use `{{commandPath}}`.
+
+{{/if}}
+{{/if}}
+{{#if subsections}}
+{{!-- Render subsections recursively --}}
+{{!-- Parent section defaults to level 2 (==), so subsections start at level 3 (===) --}}
+{{#each subsections}}
+{{> subsection this headingLevel=(add (default ../headingLevel 2) 1)}}
+{{/each}}
+{{else}}
+{{!-- No subsections, render content directly --}}
+{{{content}}}
+
+{{/if}}
+{{~else if (eq type "cloud-only")~}}
+{{!-- Cloud-only content (already wrapped by generator) --}}
+{{{content}}}
+
+{{~else if (eq type "self-hosted")~}}
+{{!-- Self-hosted content (already wrapped by generator) --}}
+{{{content}}}
+
+{{~else if (eq type "note")~}}
+{{!-- Note admonition --}}
+{{{content}}}
+
+{{~else if (eq type "warning")~}}
+{{!-- Warning admonition --}}
+{{{content}}}
+
+{{~else if (eq type "tip")~}}
+{{!-- Tip admonition --}}
+{{{content}}}
+
+{{~else if (eq type "caution")~}}
+{{!-- Caution admonition --}}
+{{{content}}}
+
+{{~else if (eq type "important")~}}
+{{!-- Important admonition --}}
+{{{content}}}
+
+{{~else~}}
+{{!-- Fallback for unknown types - render as-is --}}
+{{#if title}}
+== {{title}}
+
+{{/if}}
+{{{content}}}
+
+{{~/if~}}

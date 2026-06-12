@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "5.0.4",
+  "version": "5.1.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -109,7 +109,7 @@
     "@octokit/plugin-retry": "^7.1.1",
     "@octokit/rest": "^21.1.1",
     "@redocly/cli": "^2.2.0",
-    "ajv": "^8.12.0",
+    "ajv": "^8.20.0",
     "algoliasearch": "^4.17.0",
     "chalk": "4.1.2",
     "cheerio": "^1.1.2",

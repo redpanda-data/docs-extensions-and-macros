@@ -1,5 +1,15 @@
 /**
- * MCP Tools - RPK Documentation Generation
+ * MCP Tools - rpk Documentation Generation
+ *
+ * Generates rpk CLI reference documentation by building from Go source
+ * and parsing build tags to detect Linux-only commands.
+ *
+ * Features:
+ * - Builds rpk from source (requires Go)
+ * - Detects Linux-only commands from Go build tags
+ * - Supports overrides.json for description improvements
+ * - Generates diffs between versions for release notes
+ * - Publishes versioned JSON for downstream consumers
  *
  * OPTIMIZATION: This tool calls CLI, doesn't use LLM directly.
  * - No model recommendation (CLI tool)
@@ -12,14 +22,22 @@ const { getAntoraStructure } = require('./antora');
 const { createJob } = require('./job-queue');
 
 /**
- * Generate RPK command documentation
+ * Generate rpk command documentation from source
  *
- * Use tags for released content (GA or beta), branches for in-progress content.
- * Defaults to branch "dev" if neither tag nor branch is provided.
+ * Clones redpanda source (or uses local checkout) and builds rpk to generate
+ * documentation. Parses Go build tags to detect Linux-only commands.
  *
  * @param {Object} args - Arguments
- * @param {string} [args.tag] - Git tag for released content (for example, "v25.3.1")
- * @param {string} [args.branch] - Branch name for in-progress content (for example, "dev", "main")
+ * @param {string} [args.ref] - Git ref to document (e.g., "dev", "v26.2.0", "main")
+ * @param {string} [args.tag] - Git tag (alias for ref, backward compatibility)
+ * @param {string} [args.branch] - Git branch (alias for ref, backward compatibility)
+ * @param {string} [args.from_source] - Path to local rpk source directory
+ * @param {string} [args.overrides] - Path to overrides JSON file (defaults to docs-data/rpk-overrides.json)
+ * @param {string} [args.diff] - Generate diff against this previous version
+ * @param {boolean} [args.update_whats_new] - Update whats-new.adoc with changes
+ * @param {boolean} [args.draft_missing] - Generate draft pages for new commands
+ * @param {string} [args.output_dir] - Output directory for generated AsciiDoc
+ * @param {string} [args.data_dir] - Directory for versioned JSON and diff files
  * @param {boolean} [args.background] - Run as background job
  * @returns {Object} Generation results
  */
@@ -35,23 +53,23 @@ function generateRpkDocs(args) {
     };
   }
 
-  // Validate that tag and branch are mutually exclusive
-  if (args.tag && args.branch) {
-    return {
-      success: false,
-      error: 'Cannot specify both tag and branch',
-      suggestion: 'Use either --tag or --branch, not both'
-    };
-  }
-
-  // Default to 'dev' branch if neither provided
-  const gitRef = args.tag || args.branch || 'dev';
-  const refType = args.tag ? 'tag' : 'branch';
-
-  // Normalize version (add 'v' prefix if not present and not a branch name like 'dev' or 'main')
-  let version = gitRef;
-  if (args.tag && !version.startsWith('v')) {
-    version = `v${version}`;
+  // Determine version from ref, tag, or branch (backward compatibility)
+  // Priority: ref > tag > branch > 'dev' (default)
+  let version;
+  let refType;
+  if (args.ref) {
+    version = args.ref;
+    refType = args.ref.match(/^v?\d/) ? 'tag' : 'branch';
+  } else if (args.tag) {
+    version = args.tag.startsWith('v') ? args.tag : `v${args.tag}`;
+    refType = 'tag';
+  } else if (args.branch) {
+    version = args.branch;
+    refType = 'branch';
+  } else {
+    // No ref specified - default to 'dev'
+    version = 'dev';
+    refType = 'branch';
   }
 
   // Get doc-tools command (handles both local and installed)
@@ -60,12 +78,40 @@ function generateRpkDocs(args) {
   // Build command arguments array
   const baseArgs = ['generate', 'rpk-docs'];
 
-  if (args.tag) {
-    baseArgs.push('--tag');
-    baseArgs.push(version);
-  } else {
-    baseArgs.push('--branch');
-    baseArgs.push(version);
+  // Always use --ref (defaults to 'dev' if not specified)
+  baseArgs.push('--ref', version);
+
+  // Add optional arguments
+  if (args.from_source) {
+    baseArgs.push('--from-source', args.from_source);
+  }
+
+  if (args.overrides) {
+    baseArgs.push('--overrides', args.overrides);
+  }
+
+  if (args.diff) {
+    let diffVersion = args.diff;
+    if (!diffVersion.startsWith('v')) {
+      diffVersion = `v${diffVersion}`;
+    }
+    baseArgs.push('--diff', diffVersion);
+  }
+
+  if (args.update_whats_new) {
+    baseArgs.push('--update-whats-new');
+  }
+
+  if (args.draft_missing) {
+    baseArgs.push('--draft-missing');
+  }
+
+  if (args.output_dir) {
+    baseArgs.push('--output-dir', args.output_dir);
+  }
+
+  if (args.data_dir) {
+    baseArgs.push('--data-dir', args.data_dir);
   }
 
   // If background mode, create job and return immediately
@@ -79,8 +125,10 @@ function generateRpkDocs(args) {
       success: true,
       background: true,
       job_id: jobId,
-      message: `RPK docs generation started in background. Use get_job_status with job_id: ${jobId} to check progress.`,
-      [refType]: version
+      message: `rpk docs generation started in background. Use get_job_status with job_id: ${jobId} to check progress.`,
+      ref: version,
+      version: version,
+      ref_type: refType
     };
   }
 
@@ -115,24 +163,46 @@ function generateRpkDocs(args) {
 
     const output = result.stdout;
     const commandCountMatch = output.match(/(\d+) commands/i);
+    const filesGeneratedMatch = output.match(/Generated (\d+) files/i);
 
-    return {
+    const response = {
       success: true,
-      [refType]: version,
-      files_generated: [`autogenerated/${version}/rpk/*.adoc`],
+      ref: version,
+      version: version,
+      ref_type: refType,
       commands_documented: commandCountMatch ? parseInt(commandCountMatch[1]) : null,
-      output: output.trim(),
-      summary: `Generated RPK documentation for Redpanda ${refType} ${version}`
+      files_generated: filesGeneratedMatch ? parseInt(filesGeneratedMatch[1]) : null,
+      output: output.trim()
     };
+
+    // Add diff summary if available
+    if (args.diff) {
+      response.diff_from = args.diff.startsWith('v') ? args.diff : `v${args.diff}`;
+      response.diff_to = version;
+    }
+
+    response.summary = `Generated rpk documentation for ${version}`;
+
+    return response;
   } catch (err) {
-    return {
+    const response = {
       success: false,
       error: err.message,
       stdout: err.stdout || '',
       stderr: err.stderr || '',
-      exitCode: err.status,
-      suggestion: 'Check that the version exists in the Redpanda repository'
+      exitCode: err.status
     };
+
+    // Provide helpful suggestions based on error
+    if (err.message.includes('Go is required')) {
+      response.suggestion = 'Install Go from https://go.dev/ and ensure it\'s in your PATH.';
+    } else if (err.message.includes('not found') || err.message.includes('ENOENT')) {
+      response.suggestion = 'Ensure Go and Git are installed and in your PATH.';
+    } else {
+      response.suggestion = 'Check that the version/ref exists in the Redpanda repository.';
+    }
+
+    return response;
   }
 }
 

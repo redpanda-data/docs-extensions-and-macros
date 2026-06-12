@@ -151,17 +151,45 @@ const tools = [
   },
   {
     name: 'generate_rpk_docs',
-    description: 'Generate RPK command-line documentation for a specific version. Creates AsciiDoc files for all rpk commands. Writers use this when updating CLI docs for a new release. Can run in background with progress streaming.',
+    description: 'Generate rpk command-line documentation using the JSON-based `rpk --print-tree` command (requires rpk v26.2.0+). Creates AsciiDoc files for all rpk commands including plugins (connect, ai, check, etc.). Supports overrides for description improvements and generates diffs between versions.',
     inputSchema: {
       type: 'object',
       properties: {
         tag: {
           type: 'string',
-          description: 'Git tag for released content (for example "25.3.1" or "v25.3.1"). Auto-prepends "v" if not present. Use tags for GA or beta releases.'
+          description: 'Git tag for released content (for example "26.2.0" or "v26.2.0"). Auto-prepends "v" if not present. Use tags for GA or beta releases.'
         },
         branch: {
           type: 'string',
           description: 'Branch name for in-progress content (for example "dev", "main"). Use branches for documentation under development.'
+        },
+        overrides: {
+          type: 'string',
+          description: 'Path to overrides JSON file for improving auto-generated descriptions (defaults to docs-data/rpk-overrides.json if present)'
+        },
+        fetch_binary: {
+          type: 'boolean',
+          description: 'Download rpk binary for the specified version instead of using local rpk. Required for versions with --print-tree support.'
+        },
+        diff: {
+          type: 'string',
+          description: 'Generate diff against previous version (for example "v26.1.9"). Shows new commands, removed commands, and flag changes.'
+        },
+        update_whats_new: {
+          type: 'boolean',
+          description: 'Update whats-new.adoc with changes from the diff (optional, defaults to false)'
+        },
+        draft_missing: {
+          type: 'boolean',
+          description: 'Generate draft pages for new commands that appear in the diff (optional, defaults to false)'
+        },
+        output_dir: {
+          type: 'string',
+          description: 'Output directory for generated AsciiDoc files (defaults to modules/reference/pages/rpk)'
+        },
+        data_dir: {
+          type: 'string',
+          description: 'Directory for versioned JSON and diff files (defaults to docs-data)'
         },
         background: {
           type: 'boolean',

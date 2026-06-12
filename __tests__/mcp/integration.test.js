@@ -126,14 +126,17 @@ describe('MCP Tools Integration Tests', () => {
       const result = mcpTools.executeTool('generate_rpk_docs', {});
 
       expect(result).toBeDefined();
-      // Now defaults to branch 'dev', so should be treated as if branch was provided
+      // Now defaults to ref 'dev', so should be treated as if ref was provided
       // Test will attempt to run but may fail due to missing dependencies - that's OK
       // The key is that it should NOT error about missing parameters
       if (result.error) {
         expect(result.error.toLowerCase()).not.toContain('required');
         expect(result.error.toLowerCase()).not.toContain('missing');
       } else {
-        expect(result).toHaveProperty('branch', 'dev');
+        // The new API returns 'ref' and 'version' instead of 'branch'
+        expect(result).toHaveProperty('ref', 'dev');
+        expect(result).toHaveProperty('version', 'dev');
+        expect(result).toHaveProperty('ref_type', 'branch');
       }
     });
 

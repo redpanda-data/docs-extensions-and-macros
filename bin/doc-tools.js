@@ -182,6 +182,76 @@ programCli
   })
 
 /**
+ * get-antora-value
+ *
+ * @description
+ * Reads a value from antora.yml using a dot-separated key path.
+ * Useful for retrieving version attributes and other configuration in CI/CD pipelines.
+ *
+ * @why
+ * Automation workflows need to read the currently documented versions from antora.yml
+ * to determine what version to diff against when generating updated documentation.
+ *
+ * @example
+ * # Get the latest documented Redpanda version
+ * npx doc-tools get-antora-value asciidoc.attributes.latest-redpanda-tag
+ * # Output: v26.1.9
+ *
+ * # Get the component name
+ * npx doc-tools get-antora-value name
+ * # Output: ROOT
+ *
+ * @requirements
+ * - Must run from directory containing antora.yml or antora.yaml
+ */
+programCli
+  .command('get-antora-value')
+  .description('Read a value from antora.yml by dot-path (e.g., asciidoc.attributes.latest-redpanda-tag)')
+  .argument('<keyPath>', 'Dot-separated path to the value (e.g., asciidoc.attributes.latest-redpanda-tag)')
+  .action((keyPath) => {
+    const value = getAntoraValue(keyPath)
+    if (value === undefined) {
+      process.exit(1)
+    }
+    console.log(value)
+  })
+
+/**
+ * set-antora-value
+ *
+ * @description
+ * Sets a value in antora.yml using a dot-separated key path.
+ * Uses surgical text replacement to preserve formatting and comments.
+ *
+ * @why
+ * Automation workflows need to update version attributes in antora.yml
+ * after generating documentation to track the currently documented version.
+ *
+ * @example
+ * # Update the latest rpk version
+ * npx doc-tools set-antora-value asciidoc.attributes.latest-rpk-version v26.2.0
+ *
+ * # Update the latest Redpanda version
+ * npx doc-tools set-antora-value asciidoc.attributes.latest-redpanda-tag v26.2.0
+ *
+ * @requirements
+ * - Must run from directory containing antora.yml or antora.yaml
+ */
+programCli
+  .command('set-antora-value')
+  .description('Set a value in antora.yml by dot-path (e.g., asciidoc.attributes.latest-rpk-version)')
+  .argument('<keyPath>', 'Dot-separated path to the value (e.g., asciidoc.attributes.latest-rpk-version)')
+  .argument('<value>', 'The value to set')
+  .action((keyPath, value) => {
+    const success = setAntoraValue(keyPath, value)
+    if (!success) {
+      console.error(`Failed to set ${keyPath}`)
+      process.exit(1)
+    }
+    console.log(`Set ${keyPath} = ${value}`)
+  })
+
+/**
  * link-readme
  *
  * @description
@@ -956,79 +1026,218 @@ automation
  * generate rpk-docs
  *
  * @description
- * Generates comprehensive CLI reference documentation for RPK (Redpanda Keeper), the official
- * Redpanda command-line tool. Starts Redpanda in Docker (RPK is bundled with Redpanda), executes
- * `rpk --help` for all commands and subcommands recursively, parses the help output, and generates
- * structured AsciiDoc documentation for each command with usage, flags, and descriptions.
- * Optionally compares RPK commands between versions to identify new or changed commands.
+ * Generates comprehensive CLI reference documentation for rpk (Redpanda Keeper).
+ * Clones the Redpanda source, builds rpk with Go, and parses `rpk --print-tree` JSON output.
+ * Detects Linux-only commands by analyzing Go build tags in the source code.
+ *
+ * Key features:
+ * - Clones source from GitHub (sparse checkout for speed)
+ * - Builds rpk from source using Go
+ * - Parses Go build tags to detect Linux-only commands
+ * - Automatically includes rpk plugins (connect, ai, check, etc.)
+ * - Supports overrides.json for description improvements
+ * - Generates versioned JSON files for downstream consumers (tooltips, etc.)
+ * - Generates diffs between versions for release notes
  *
  * @why
- * RPK has dozens of commands and subcommands with complex flags and options. The built-in help
- * text is the source of truth for RPK's CLI interface. Manual documentation becomes outdated as
- * RPK evolves. This automation extracts documentation directly from RPK's help output, ensuring
- * accuracy. Running RPK from Docker guarantees the exact version being documented, and diffing
- * between versions automatically highlights CLI changes for release notes.
+ * Building from source provides accurate platform detection by analyzing Go build tags
+ * (//go:build linux) rather than comparing binaries. This is faster and more reliable.
  *
  * @example
- * # Basic: Generate RPK docs for a specific version
- * npx doc-tools generate rpk-docs --tag v25.3.1
+ * # Generate docs for a specific version
+ * npx doc-tools generate rpk-docs --ref v26.2.0
  *
- * # Compare RPK commands between versions
- * npx doc-tools generate rpk-docs \
- *   --tag v25.3.1 \
- *   --diff v25.2.1
+ * # Generate docs for latest development branch
+ * npx doc-tools generate rpk-docs --ref dev
  *
- * # Use custom Docker repository
- * npx doc-tools generate rpk-docs \
- *   --tag v25.3.1 \
- *   --docker-repo docker.redpanda.com/redpandadata/redpanda
+ * # Auto-detect local redpanda checkout (if available)
+ * npx doc-tools generate rpk-docs
  *
- * # Full workflow: document new release
- * VERSION=$(npx doc-tools get-redpanda-version)
- * npx doc-tools generate rpk-docs --tag $VERSION
+ * # Generate with diff against previous version
+ * npx doc-tools generate rpk-docs --ref v26.2.0 --diff v26.1.9
+ *
+ * # Use custom overrides file
+ * npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
  *
  * @requirements
- * - Docker must be installed and running
- * - Sufficient disk space for Docker image
- * - Internet connection to pull Docker images
+ * - Go must be installed (https://go.dev/)
+ * - Git must be installed (for cloning source)
  */
 automation
   .command('rpk-docs')
-  .description('Generate AsciiDoc documentation for rpk CLI commands. Defaults to branch "dev" if neither --tag nor --branch is specified.')
-  .option('-t, --tag <tag>', 'Git tag for released content (GA/beta)')
-  .option('-b, --branch <branch>', 'Branch name for in-progress content')
-  .option('--docker-repo <repo>', 'Docker repository to use', commonOptions.dockerRepo)
-  .option('--console-tag <tag>', 'Redpanda Console version to use', commonOptions.consoleTag)
-  .option('--console-docker-repo <repo>', 'Docker repository for Console', commonOptions.consoleDockerRepo)
-  .option('--diff <oldTag>', 'Also diff autogenerated rpk docs from <oldTag> → <tag>')
-  .action((options) => {
-    verifyMetricsDependencies()
+  .description('Generate rpk CLI documentation from source. Builds rpk and parses source for platform detection.')
+  .option('-r, --ref <ref>', 'Git branch or tag to document (e.g., dev, v26.2.0). Clones from GitHub.')
+  .option('--from-source <path>', 'Path to local rpk source (src/go/rpk directory)')
+  .option('--from-json <path>', 'Regenerate docs from an existing versioned JSON file (skips building)')
+  .option('--overrides <path>', 'Path to overrides JSON file', 'docs-data/rpk-overrides.json')
+  .option('--diff <oldVersion>', 'Generate diff against previous version')
+  .option('--update-whats-new [path]', 'Update what\'s-new file with rpk changes from diff (default: modules/get-started/pages/release-notes/redpanda.adoc)')
+  .option('--draft-missing', 'Generate draft pages for new commands')
+  .option('--output-dir <dir>', 'Output directory for generated AsciiDoc', 'modules/reference/pages/rpk')
+  .option('--cloud-secret-dir <dir>', 'Output directory for rpk cloud and rpk security secret commands (defaults to partials relative to output-dir)')
+  .option('--data-dir <dir>', 'Directory for versioned JSON and diff files', 'docs-data')
+  .option('--preserve-from <path>', 'Path to existing docs to preserve cloud conditionals from')
+  .option('--print-summary', 'Print PR summary (for GitHub Actions)')
+  .option('--summary-file <path>', 'Write PR summary to file (for GitHub Actions)')
+  .option('--show-info', 'Include info-level validation messages')
+  .action(async (options) => {
+    try {
+      const { handleRpkDocsGeneration } = require('../tools/rpk-docs/rpk-docs-handler.js')
 
-    if (options.tag && options.branch) {
-      console.error('Error: Cannot specify both --tag and --branch')
+      // Handle --update-whats-new with optional path
+      let whatsNewPath = null
+      if (options.updateWhatsNew !== undefined) {
+        // If true (flag without path), use default; if string, use that path
+        whatsNewPath = typeof options.updateWhatsNew === 'string'
+          ? options.updateWhatsNew
+          : 'modules/get-started/pages/release-notes/redpanda.adoc'
+      }
+
+      const result = await handleRpkDocsGeneration({
+        ref: options.ref,
+        fromSource: options.fromSource,
+        fromJson: options.fromJson,
+        overrides: options.overrides,
+        diff: options.diff,
+        updateWhatsNew: whatsNewPath,
+        draftMissing: options.draftMissing,
+        outputDir: options.outputDir,
+        cloudSecretDir: options.cloudSecretDir,
+        dataDir: options.dataDir,
+        preserveFrom: options.preserveFrom,
+        printSummary: options.printSummary,
+        showInfo: options.showInfo
+      })
+
+      if (result.success) {
+        console.log('\n✓ rpk documentation generated successfully')
+
+        // Write PR summary to file if requested (useful for GitHub Actions)
+        if (options.summaryFile && result.prSummary) {
+          fs.writeFileSync(options.summaryFile, result.prSummary, 'utf8')
+          console.log(`PR summary written to: ${options.summaryFile}`)
+        }
+
+        // Exit with warning if validation errors found
+        if (result.validationResult?.summary?.totalErrors > 0) {
+          console.error(`\n⚠ Validation found ${result.validationResult.summary.totalErrors} error(s)`)
+          process.exit(1)
+        }
+
+        process.exit(0)
+      } else {
+        console.error('Error: Generation failed')
+        process.exit(1)
+      }
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
       process.exit(1)
     }
-
-    const newTag = options.tag || options.branch || 'dev'
-    const oldTag = options.diff
-
-    if (oldTag) {
-      const oldDir = path.join('autogenerated', oldTag, 'rpk')
-      if (!fs.existsSync(oldDir)) {
-        console.log(`Generating rpk docs for old tag ${oldTag}…`)
-        runClusterDocs('rpk', oldTag, options)
-      }
-    }
-
-    console.log(`Generating rpk docs for new tag ${newTag}…`)
-    runClusterDocs('rpk', newTag, options)
-
-    if (oldTag) {
-      diffDirs('rpk', oldTag, newTag)
-    }
-
-    process.exit(0)
   })
+
+/**
+ * validate rpk-overrides
+ *
+ * @description
+ * Validates the rpk-overrides.json file against the JSON schema and checks for common issues:
+ * - Schema compliance (required fields, valid types)
+ * - Valid $ref references (no broken or circular refs)
+ * - Valid command paths (compared against actual rpk command tree)
+ * - Valid admonition locations (after_flags, after_usage, etc.)
+ * - Valid platform values (linux, darwin, windows)
+ *
+ * @why
+ * Catching override errors early prevents broken documentation. This command lets writers
+ * validate their changes before generation, avoiding cryptic errors during the build process.
+ *
+ * @example
+ * # Validate overrides with default paths
+ * npx doc-tools validate rpk-overrides
+ *
+ * # Validate against a specific rpk tree (for complete command path validation)
+ * npx doc-tools validate rpk-overrides --tree docs-data/rpk-v26.2.0.json
+ *
+ * # Validate a custom overrides file
+ * npx doc-tools validate rpk-overrides --overrides my-overrides.json
+ *
+ * # Strict mode - exit with error code on validation failures
+ * npx doc-tools validate rpk-overrides --strict
+ *
+ * @requirements
+ * - rpk-overrides.schema.json in docs-data/
+ */
+automation
+  .command('rpk-overrides')
+  .description('Validate rpk-overrides.json against schema and check for common issues')
+  .option('--overrides <path>', 'Path to overrides JSON file', 'docs-data/rpk-overrides.json')
+  .option('--tree <path>', 'Path to rpk tree JSON file for command path validation (e.g., docs-data/rpk-v26.2.0.json)')
+  .option('--strict', 'Exit with error code on validation failures')
+  .action((options) => {
+    try {
+      const { loadAndValidateOverrides } = require('../tools/rpk-docs/validate-overrides.js')
+      const repoRoot = findRepoRoot()
+      const overridesPath = path.resolve(repoRoot, options.overrides)
+
+      // Load tree if provided for command path validation
+      let commandTree = null
+      if (options.tree) {
+        const treePath = path.resolve(repoRoot, options.tree)
+        if (!fs.existsSync(treePath)) {
+          console.error(`Error: Tree file not found: ${treePath}`)
+          process.exit(1)
+        }
+        const treeData = JSON.parse(fs.readFileSync(treePath, 'utf8'))
+        commandTree = treeData.tree || treeData
+      }
+
+      console.log(`Validating: ${overridesPath}`)
+      if (commandTree) {
+        console.log(`Comparing against tree from: ${options.tree}`)
+      } else {
+        console.log('Note: Skipping command path validation (no --tree provided)')
+      }
+      console.log('')
+
+      const { overrides, validation } = loadAndValidateOverrides(overridesPath, commandTree)
+
+      if (!overrides) {
+        console.error('Error: Could not load overrides file')
+        process.exit(1)
+      }
+
+      // Print results
+      console.log('=' .repeat(60))
+      console.log('VALIDATION RESULTS')
+      console.log('='.repeat(60))
+
+      if (validation.errors.length === 0 && validation.warnings.length === 0) {
+        console.log('✓ No issues found')
+      } else {
+        console.log(validation.format())
+      }
+
+      console.log('='.repeat(60))
+      console.log(`Errors: ${validation.errors.length}`)
+      console.log(`Warnings: ${validation.warnings.length}`)
+      console.log('='.repeat(60))
+
+      // Exit with appropriate code
+      if (options.strict && !validation.valid) {
+        console.log('\n✗ Validation failed (strict mode)')
+        process.exit(1)
+      } else if (validation.valid) {
+        console.log('\n✓ Validation passed')
+        process.exit(0)
+      } else {
+        console.log('\n⚠ Validation completed with errors (use --strict to fail)')
+        process.exit(0)
+      }
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
 
 /**
  * generate helm-spec
