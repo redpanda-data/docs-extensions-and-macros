@@ -698,8 +698,8 @@ Path to overrides JSON file (default: "docs-data/rpk-overrides.json")
 `--diff <oldVersion>`::
 Generate diff against previous version
 
-`--update-whats-new <path>`::
-Update what's-new.adoc file at path with rpk changes from diff
+`--update-whats-new [path]`::
+Update what's-new file with rpk changes from diff (default: modules/get-started/pages/release-notes/redpanda.adoc)
 
 `--draft-missing`::
 Generate draft pages for new commands
