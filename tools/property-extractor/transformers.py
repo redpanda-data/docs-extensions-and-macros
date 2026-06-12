@@ -1606,14 +1606,19 @@ class FriendlyDefaultTransformer:
             The friendly formatted value (e.g., "256 MiB (268435456)"), or None if not resolved
         """
         if not self._constant_resolver:
+            logger.debug(f"ConstantResolver not available - cannot resolve: {identifier}")
             return None
 
         try:
             result = self._constant_resolver.resolve_numeric_constant(identifier)
             if result:
-                return result.get('friendly')
+                friendly = result.get('friendly')
+                logger.info(f"Resolved constant {identifier} = {friendly}")
+                return friendly
+            else:
+                logger.warning(f"Failed to resolve numeric constant: {identifier}")
         except Exception as e:
-            logger.debug(f"Error resolving numeric constant {identifier}: {e}")
+            logger.warning(f"Error resolving numeric constant {identifier}: {e}")
 
         return None
 

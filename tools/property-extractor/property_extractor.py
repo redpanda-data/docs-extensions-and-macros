@@ -697,14 +697,19 @@ def get_files_with_properties(file_pairs, treesitter_parser, cpp_language):
 def transform_files_with_properties(files_with_properties):
     type_transformer = TypeTransformer()
 
-    # Initialize ConstantResolver for validator enum extraction
+    # Initialize ConstantResolver for constant resolution and validator enum extraction
     redpanda_src = find_redpanda_source()
     constant_resolver = None
     if redpanda_src:
         src_v_path = Path(redpanda_src) / 'src' / 'v'
         if src_v_path.exists():
             constant_resolver = ConstantResolver(src_v_path)
-            logger.debug(f"Initialized ConstantResolver with path: {src_v_path}")
+            logger.info(f"ConstantResolver initialized with path: {src_v_path}")
+        else:
+            logger.warning(f"Source path {src_v_path} does not exist - constant resolution will be disabled")
+    else:
+        logger.warning("Redpanda source not found - constant resolution will be disabled. " +
+                      "Some default values may show as unresolved constant names.")
 
     transformers = [
         EnterpriseTransformer(), ## this must be the first, as it modifies current data
