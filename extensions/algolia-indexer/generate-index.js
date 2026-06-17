@@ -292,38 +292,93 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       ? page.asciidoc.attributes['page-commercial-names'].split(',').map(name => name.trim())
       : []
 
-    // FIXED: keywords now included in index item
-    const indexItem = {
-      title: documentTitle,
-      version: version,
-      text: text,
-      intro: intro,
-      objectID: urlPath + page.pub.url,
-      titles: titles,
-      keywords: keywords,
-      categories: categories,
-      commercialNames: commercialNames,
-      unixTimestamp: unixTimestamp
-    }
+    // Algolia only indexes roughly the first ~290 words of any single record. On
+    // long reference pages (cluster/topic properties, metrics) every property or
+    // metric name lives in the `titles` array, and there can be hundreds of them, so
+    // every name past that window is stored but NOT searchable (DOC-1878). Split the
+    // titles of such pages across multiple records, each small enough to be fully
+    // indexed. Normal pages keep a single record. Chunks after the first get a unique
+    // objectID anchored to their first heading so search results deep-link into the
+    // page; the first chunk keeps the page's base objectID.
+    const baseObjectID = urlPath + page.pub.url
+    const titleChunks = isPropertiesPage ? chunkTitles(titles) : [titles]
 
-    if (component.name !== 'labs') {
-      indexItem.product = component.title
-      indexItem.breadcrumbs = breadcrumbs
-      indexItem.type = 'Doc'
-      indexItem._tags = Array.isArray(tag) ? tag : [tag]
-    } else {
-      indexItem.deployment = deployment
-      indexItem.type = 'Lab'
-      indexItem.interactive = false
-      indexItem._tags = Array.isArray(tag) ? tag : [tag]
-    }
+    titleChunks.forEach((chunkTitles, chunkIndex) => {
+      const objectID = chunkIndex === 0
+        ? baseObjectID
+        : `${baseObjectID}#${chunkTitles[0].h}`
 
-    algolia[cname][version].push(indexItem)
-    algoliaCount++
+      // keywords included in index item
+      const indexItem = {
+        title: documentTitle,
+        version: version,
+        text: text,
+        intro: intro,
+        objectID: objectID,
+        // Clean page path (no #fragment) shared by every chunk of a page. The search
+        // UI builds result links from `url` and appends its own matched-heading
+        // anchor, so chunk objectIDs (which carry a #anchor for uniqueness) must not
+        // be used for the href. `url` is also the attribute to dedupe chunks on.
+        url: baseObjectID,
+        titles: chunkTitles,
+        keywords: keywords,
+        categories: categories,
+        commercialNames: commercialNames,
+        unixTimestamp: unixTimestamp
+      }
+
+      if (component.name !== 'labs') {
+        indexItem.product = component.title
+        indexItem.breadcrumbs = breadcrumbs
+        indexItem.type = 'Doc'
+        indexItem._tags = Array.isArray(tag) ? tag : [tag]
+      } else {
+        indexItem.deployment = deployment
+        indexItem.type = 'Lab'
+        indexItem.interactive = false
+        indexItem._tags = Array.isArray(tag) ? tag : [tag]
+      }
+
+      algolia[cname][version].push(indexItem)
+      algoliaCount++
+    })
   }
 
   logger.info(`Indexed ${algoliaCount} pages`)
   return algolia
+}
+
+/**
+ * Split a titles array into chunks whose combined token count stays within
+ * Algolia's per-record indexing window (~290 words; we leave a safety margin).
+ * Each returned chunk is small enough that every heading it contains is actually
+ * indexed for search, which keeps property/metric names on long reference pages
+ * searchable (DOC-1878).
+ *
+ * @param {Array<{t: string, h: string}>} titles - Section headings for a page.
+ * @param {number} [maxTokens=180] - Approximate token budget per chunk.
+ * @returns {Array<Array<{t: string, h: string}>>} One or more title chunks. An
+ *   empty input yields a single empty chunk so the page still gets a record.
+ */
+function chunkTitles (titles, maxTokens = 180) {
+  if (!titles.length) return [[]]
+  const chunks = []
+  let current = []
+  let tokens = 0
+  for (const entry of titles) {
+    // Algolia tokenizes on separators (whitespace, underscores, dots, etc.), so a
+    // name like `partition_autobalancing_mode` counts as several tokens.
+    const entryTokens = String(entry.t || '').split(/[\s_./:-]+/).filter(Boolean).length || 1
+    if (current.length && tokens + entryTokens > maxTokens) {
+      chunks.push(current)
+      current = []
+      tokens = 0
+    }
+    current.push(entry)
+    tokens += entryTokens
+  }
+  if (current.length) chunks.push(current)
+  return chunks
 }
 
 /**
