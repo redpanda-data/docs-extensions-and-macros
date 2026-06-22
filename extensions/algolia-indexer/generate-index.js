@@ -303,10 +303,10 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
     const baseObjectID = urlPath + page.pub.url
     const titleChunks = isPropertiesPage ? chunkTitles(titles) : [titles]
 
-    titleChunks.forEach((chunkTitles, chunkIndex) => {
+    titleChunks.forEach((chunk, chunkIndex) => {
       const objectID = chunkIndex === 0
         ? baseObjectID
-        : `${baseObjectID}#${chunkTitles[0].h}`
+        : `${baseObjectID}#${chunk[0].h}`
 
       // keywords included in index item
       const indexItem = {
@@ -320,7 +320,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
         // anchor, so chunk objectIDs (which carry a #anchor for uniqueness) must not
         // be used for the href. `url` is also the attribute to dedupe chunks on.
         url: baseObjectID,
-        titles: chunkTitles,
+        titles: chunk,
         keywords: keywords,
         categories: categories,
         commercialNames: commercialNames,
