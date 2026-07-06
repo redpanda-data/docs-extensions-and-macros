@@ -387,12 +387,18 @@ function fetchRpkTreeFromLinuxSource(sourcePath) {
 
   // Start a container with the Go image, mount source, build rpk, install plugins, then print-tree
   // Use a long-running container so we can run multiple commands
+  // Pin the Go image to the exact version required by go.mod to prevent
+  // "go.mod requires go >= X.Y.Z (running X.Y.Z-1)" build failures when
+  // golang:1 resolves to a patch release behind the requirement.
+  const requiredGoVersion = getRequiredGoVersion(absoluteSourcePath)
+  const goImage = requiredGoVersion ? `golang:${requiredGoVersion}` : 'golang:1'
+
   console.log('Starting build container...')
   const createResult = spawnSync('docker', [
     'run', '-d', '--rm',
     '-v', `${absoluteSourcePath}:/rpk-source:ro`,
     '-w', '/rpk-source',
-    'golang:1',
+    goImage,
     'sh', '-c', 'sleep 600' // Keep container alive for 10 minutes
   ], {
     encoding: 'utf8',
