@@ -2126,6 +2126,8 @@ async function generateRpkDocs(options = {}) {
   let filesGenerated = 0
   let filesSkipped = 0
   let filesFailed = 0
+  let filesDeleted = 0
+  const writtenFiles = new Set()
 
   for (const { path: commandPath, command } of commands) {
     // Check if command should be excluded
@@ -2457,6 +2459,7 @@ async function generateRpkDocs(options = {}) {
 
     try {
       fs.writeFileSync(filePath, content, 'utf8')
+      writtenFiles.add(filePath)
       filesGenerated++
 
       if (filesGenerated % 50 === 0) {
@@ -2468,11 +2471,38 @@ async function generateRpkDocs(options = {}) {
     }
   }
 
+  // Delete stale .adoc files — commands that are now excluded or removed from the CLI.
+  // We only scan subdirectories that we actually wrote to; the root output dirs are
+  // skipped because they may contain hand-written .adoc files alongside generated ones.
+  const managedDirs = new Set()
+  for (const f of writtenFiles) {
+    const dir = path.dirname(f)
+    if (dir !== outputDir && (!cloudSecretDir || dir !== cloudSecretDir)) {
+      managedDirs.add(dir)
+    }
+  }
+  for (const dir of managedDirs) {
+    if (!fs.existsSync(dir)) continue
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.adoc')) continue
+      const full = path.join(dir, entry.name)
+      if (!writtenFiles.has(full)) {
+        try {
+          fs.unlinkSync(full)
+          filesDeleted++
+        } catch (err) {
+          console.warn(`Warning: Failed to delete stale file "${full}": ${err.message}`)
+        }
+      }
+    }
+  }
+
   return {
     commandCount: commands.length,
     filesGenerated,
     filesSkipped,
     filesFailed,
+    filesDeleted,
     subdirectoriesCreated: createdSubdirs.size
   }
 }

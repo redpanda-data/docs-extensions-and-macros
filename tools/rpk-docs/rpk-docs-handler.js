@@ -1130,6 +1130,9 @@ async function handleRpkDocsGeneration(options = {}) {
       console.log(`\nGeneration complete!`)
       console.log(`  - Commands documented: ${result.commandCount}`)
       console.log(`  - Files generated: ${result.filesGenerated}`)
+      if (result.filesDeleted > 0) {
+        console.log(`  - Stale files deleted: ${result.filesDeleted}`)
+      }
       console.log(`  - Output directory: ${finalOutputDir}`)
 
       // Run validation on generated output
@@ -1429,6 +1432,9 @@ async function handleRpkDocsGeneration(options = {}) {
     console.log(`\nGeneration complete!`)
     console.log(`  - Commands documented: ${result.commandCount}`)
     console.log(`  - Files generated: ${result.filesGenerated}`)
+    if (result.filesDeleted > 0) {
+      console.log(`  - Stale files deleted: ${result.filesDeleted}`)
+    }
     console.log(`  - Output directory: ${finalOutputDir}`)
 
     // Run validation on generated output
