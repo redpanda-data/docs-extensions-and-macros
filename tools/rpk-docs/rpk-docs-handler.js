@@ -405,6 +405,9 @@ function fetchRpkTreeFromLinuxSource(sourcePath) {
     timeout: 60000
   })
 
+  let activeResult = createResult
+  let activeImage = goImage
+
   if (createResult.status !== 0) {
     const stderr = createResult.stderr || ''
     if (stderr.includes('Cannot connect to the Docker daemon')) {
@@ -413,13 +416,40 @@ function fetchRpkTreeFromLinuxSource(sourcePath) {
         'Start Docker Desktop or the Docker service and try again.'
       )
     }
-    throw new Error(
-      `Failed to create build container: ${stderr}\n` +
-      'Make sure Docker is running and has sufficient resources.'
+
+    // If the pinned tag couldn't be pulled (not yet on Docker Hub for a new
+    // patch release), retry with golang:1 before giving up.
+    const isPullFailure = requiredGoVersion && (
+      stderr.includes('manifest unknown') ||
+      stderr.includes('pull access denied') ||
+      stderr.includes('not found') ||
+      stderr.includes('repository does not exist')
     )
+    if (isPullFailure) {
+      console.warn(`⚠ Could not pull ${goImage}: ${stderr.trim()}`)
+      console.log('Retrying with golang:1...')
+      activeImage = 'golang:1'
+      activeResult = spawnSync('docker', [
+        'run', '-d', '--rm',
+        '-v', `${absoluteSourcePath}:/rpk-source:ro`,
+        '-w', '/rpk-source',
+        activeImage,
+        'sh', '-c', 'sleep 600'
+      ], {
+        encoding: 'utf8',
+        timeout: 60000
+      })
+    }
+
+    if (activeResult.status !== 0) {
+      throw new Error(
+        `Failed to create build container: ${activeResult.stderr || stderr}\n` +
+        'Make sure Docker is running and has sufficient resources.'
+      )
+    }
   }
 
-  const containerId = createResult.stdout.trim()
+  const containerId = activeResult.stdout.trim()
   console.log(`Build container started: ${containerId.substring(0, 12)}`)
 
   try {
@@ -1632,6 +1662,7 @@ module.exports = {
   handleRpkDocsGeneration,
   fetchRpkTreeFromSource,
   fetchRpkTreeFromLinuxSource,
+  getRequiredGoVersion,
   prepareSourceFromRef,
   detectLinuxOnlyFromSource,
   addPlatformMarkersFromSource,
