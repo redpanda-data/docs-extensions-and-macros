@@ -1558,23 +1558,24 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // Restore early code blocks FIRST (from indented command/YAML detection)
   // This must happen before inline code restoration so that placeholders
   // inside the early code blocks (like __INLINE_CODE_X__) get resolved
+  // Use function replacements to prevent $ special-pattern interpretation (e.g. `$` → before-match)
   earlyCodeBlocks.forEach((block, i) => {
-    result = result.replace(`__EARLY_CODE_BLOCK_${i}__`, block)
+    result = result.replace(`__EARLY_CODE_BLOCK_${i}__`, () => block)
   })
 
   // Restore inline code
   inlineCode.forEach((code, i) => {
-    result = result.replace(`__INLINE_CODE_${i}__`, code)
+    result = result.replace(`__INLINE_CODE_${i}__`, () => code)
   })
 
   // Restore xrefs
   xrefs.forEach((xref, i) => {
-    result = result.replace(`__XREF_${i}__`, xref)
+    result = result.replace(`__XREF_${i}__`, () => xref)
   })
 
   // Restore code blocks
   codeBlocks.forEach((block, i) => {
-    result = result.replace(`__CODE_BLOCK_${i}__`, block)
+    result = result.replace(`__CODE_BLOCK_${i}__`, () => block)
   })
 
   // Clean up double backticks (moved AFTER restoration to catch nested backticks)
