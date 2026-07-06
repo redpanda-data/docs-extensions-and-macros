@@ -1204,6 +1204,28 @@ function convertIndentedTablesToAsciiDoc(text, options = {}) {
 }
 
 /**
+ * Apply only the text replacements from textTransformations to a raw string.
+ * Used for examples content where we want string substitutions (e.g. rpai → rpk ai)
+ * but NOT AsciiDoc structural formatting or inlineCode wrapping.
+ * @param {string} text
+ * @param {Object|null} customTransformations
+ * @returns {string}
+ */
+function applyTextTransformations(text, customTransformations) {
+  if (!text || !customTransformations?.replacements) return text
+  let result = text
+  for (const rule of customTransformations.replacements) {
+    try {
+      const flags = rule.flags || 'g'
+      result = result.replace(new RegExp(rule.pattern, flags), rule.replacement)
+    } catch (err) {
+      console.warn(`⚠ Invalid replacement pattern: ${rule.pattern}`)
+    }
+  }
+  return result
+}
+
+/**
  * Format description by adding backticks around flags and code
  * @param {string} desc - Description text
  * @param {Object} [customTransformations] - Optional custom text transformations from overrides
@@ -1581,40 +1603,48 @@ function formatUsage(usage) {
 }
 
 /**
- * Format EXAMPLES section - convert indented commands and inline code to AsciiDoc code blocks
+ * Format EXAMPLES section - convert indented commands and inline code to AsciiDoc code blocks.
+ *
+ * Handles the standard Go CLI example format where each group is separated by a blank line,
+ * comment lines (# ...) describe the example, and command lines follow:
+ *
+ *   # Description of the example
+ *   rpk some command --flag
+ *
+ *   # Another example
+ *   rpk other command
+ *   rpk other command --variant
+ *
+ * Comments become plain text descriptions; consecutive command lines share one code block.
+ *
  * @param {string} text - Examples text with indented commands or inline code
  * @returns {string} Formatted examples with code blocks
  */
 function formatExamples(text) {
   if (!text) return text
 
-  // Convert both indented commands and inline backticked commands to AsciiDoc code blocks
-  // Pattern 1: description line, then indented command (starts with 2+ spaces)
-  // Pattern 2: description line ending with colon/period, followed by `rpk command`
   const lines = text.split('\n')
   const result = []
   let i = 0
 
   while (i < lines.length) {
     const line = lines[i]
+    const isIndented = /^\s{2,}\S/.test(line)
 
-    // Check if next line is an indented command (2+ spaces followed by non-space)
-    if (i + 1 < lines.length && /^\s{2,}\S/.test(lines[i + 1])) {
-      // Current line is description, next line is command
-      result.push(line)
-      result.push('')
-      result.push('[,bash]')
-      result.push('----')
-      result.push(lines[i + 1].trim())
-      result.push('----')
-      i += 2
-    } else if (/^\s{2,}\S/.test(line)) {
-      // Standalone indented command without preceding description
-      result.push('[,bash]')
-      result.push('----')
-      result.push(line.trim())
-      result.push('----')
+    if (isIndented && line.trim().startsWith('#')) {
+      // Comment line — render as a description paragraph outside the code block
+      result.push(line.trim().replace(/^#\s*/, ''))
       i++
+    } else if (isIndented) {
+      // Command line — collect all consecutive command lines into one code block
+      // (stops at a blank line or a comment line)
+      result.push('[,bash]')
+      result.push('----')
+      while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !lines[i].trim().startsWith('#')) {
+        result.push(lines[i].trim())
+        i++
+      }
+      result.push('----')
     } else if (/^\s*`rpk .+`\s*$/.test(line)) {
       // Inline backticked command on its own line - convert to code block
       const command = line.trim().replace(/^`|`$/g, '')
@@ -1637,7 +1667,7 @@ function formatExamples(text) {
       result.push('----')
       i += 2
     } else {
-      // Regular line (description, blank line, etc.)
+      // Regular line (blank line, non-indented description text, etc.)
       result.push(line)
       i++
     }
@@ -2087,7 +2117,8 @@ async function generateRpkDocs(options = {}) {
         if (mergedCommand.excludeExamples && mergedCommand.excludeExamples.length > 0) {
           examplesContent = filterExamples(sectionContent, mergedCommand.excludeExamples)
         }
-        // Format examples: convert indented commands to code blocks
+        // Apply text transformations (e.g. rpai → rpk ai) then format
+        examplesContent = applyTextTransformations(examplesContent, textTransformations)
         sections[sectionName] = formatExamples(examplesContent)
       } else {
         sections[sectionName] = formatDescription(sectionContent, textTransformations)
@@ -2097,11 +2128,15 @@ async function generateRpkDocs(options = {}) {
     // Add examples from rpk source if not already in sections
     // rpk --print-tree provides examples in a separate field
     if (command.examples && !sections.EXAMPLES) {
-      let examplesContent = command.examples.trim()
+      // Strip surrounding blank lines only — preserve per-line indentation so formatExamples
+      // can detect indented command lines vs plain description text
+      let examplesContent = command.examples.replace(/^\n+/, '').replace(/\n+$/, '')
       // Apply excludeExamples filter BEFORE formatting
       if (mergedCommand.excludeExamples && mergedCommand.excludeExamples.length > 0) {
         examplesContent = filterExamples(examplesContent, mergedCommand.excludeExamples)
       }
+      // Apply text transformations (e.g. rpai → rpk ai) then format
+      examplesContent = applyTextTransformations(examplesContent, textTransformations)
       sections.EXAMPLES = formatExamples(examplesContent)
     }
 
