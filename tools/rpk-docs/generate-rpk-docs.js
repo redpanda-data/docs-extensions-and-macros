@@ -390,13 +390,21 @@ function processContentArray(contentArray, context = '') {
     }
 
     switch (type) {
-      case 'section':
+      case 'section': {
+        // Escape {word} (no hyphens) in table cell lines — CLI format specifiers like {hex}
+        // are not AsciiDoc attribute refs and must be escaped to prevent substitution.
+        const escapedContent = typeof content === 'string'
+          ? content.replace(/^\|(.*)$/gm, (m, cell) =>
+              /\{[a-z_][a-z0-9_]*\}/.test(cell)
+                ? '|' + cell.replace(/\{([a-z_][a-z0-9_]*)\}/g, '\\{$1}')
+                : m)
+          : content
         // Pass through all section properties (subsections, parent, headingLevel, exclude)
         result.sections[position].push({
           type: 'section',
           id,
           title,
-          content,
+          content: escapedContent,
           subsections: item.subsections,
           parent: item.parent,
           headingLevel: item.headingLevel,
@@ -408,6 +416,7 @@ function processContentArray(contentArray, context = '') {
           console.warn(`   Use seeAlso key instead`)
         }
         break
+      }
 
       case 'example':
         // Structured single example
@@ -1184,7 +1193,10 @@ function convertIndentedTablesToAsciiDoc(text, options = {}) {
             // Remove trailing colon from value (e.g., "Organization:" -> "Organization")
             const cleanValue = value.replace(/:$/, '')
             const desc = descParts.join(' ')
-            result.push(`|${cleanValue} |${desc}`)
+            // Escape {word} (no hyphens) in table cells — CLI format specifiers like {hex}, {json}
+            // are not AsciiDoc attribute refs and must be escaped to prevent substitution.
+            const escapeAttrs = s => s.replace(/\{([a-z_][a-z0-9_]*)\}/g, '\\{$1}')
+            result.push(`|${escapeAttrs(cleanValue)} |${escapeAttrs(desc)}`)
           }
           result.push('|===')
           result.push('')
@@ -1311,10 +1323,18 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   })
 
   // Protect inline code (backticked content)
+  // Escape {word} (no hyphens) inside backtick spans — these are CLI format specifiers or
+  // path placeholders, not AsciiDoc attribute refs (which use hyphens like {full-version}).
+  // AsciiDoc single-backtick spans still apply attribute substitution, so {hex}/{namespace}/etc.
+  // would expand to empty string without this escaping.
   const inlineCode = []
   preProcessed = preProcessed.replace(/`[^`]+`/g, (match) => {
     const placeholder = `__INLINE_CODE_${inlineCode.length}__`
-    inlineCode.push(match)
+    // Skip `+...+` passthrough spans — they already prevent attribute substitution
+    const escaped = (match.startsWith('`+') && match.endsWith('+`'))
+      ? match
+      : match.replace(/\{([a-z_][a-z0-9_]*)\}/g, '\\{$1}')
+    inlineCode.push(escaped)
     return placeholder
   })
 
@@ -1580,6 +1600,23 @@ function formatDescription(desc, customTransformations = null, options = {}) {
 
   // Clean up double backticks (moved AFTER restoration to catch nested backticks)
   result = result.replace(/``+/g, '`')
+
+  // Final pass: escape {word} (no hyphens) inside any backtick spans that were created
+  // dynamically during processing (after the initial inline-code protection step).
+  // Skip `+...+` passthrough spans — they already prevent attribute substitution.
+  // Use negative lookbehind (?<!\\) to avoid double-escaping already-escaped \{word}.
+  result = result.replace(/`[^`]+`/g, match => {
+    if (match.startsWith('`+') && match.endsWith('+`')) return match
+    return match.replace(/(?<!\\)\{([a-z_][a-z0-9_]*)\}/g, '\\{$1}')
+  })
+
+  // Escape {word} (no hyphens) in AsciiDoc table cell lines that come from pre-formatted
+  // AsciiDoc in CLI descriptions (e.g. format specifier tables with {hex}, {json}).
+  // These never pass through backtick-span protection, so they need a separate pass.
+  result = result.replace(/^\|(.*)$/gm, (match, cellContent) => {
+    if (!/(?<!\\)\{[a-z_][a-z0-9_]*\}/.test(cellContent)) return match
+    return '|' + cellContent.replace(/(?<!\\)\{([a-z_][a-z0-9_]*)\}/g, '\\{$1}')
+  })
 
   // Remove trailing period after backticked commands on their own line
   // e.g., "`rpk cluster status`." → "`rpk cluster status`"
