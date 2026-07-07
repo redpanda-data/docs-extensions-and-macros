@@ -1077,6 +1077,9 @@ async function handleRpkDocsGeneration(options = {}) {
   }
   const finalCloudSecretDir = cloudSecretDir || defaultCloudSecretDir
 
+  // nav.adoc lives at modules/ROOT/nav.adoc relative to the repo root
+  const navFile = path.join(repoRoot, 'modules', 'ROOT', 'nav.adoc')
+
   // Determine which version to document
   const version = effectiveRef || 'dev'
   console.log(`\nGenerating rpk documentation for version: ${version}`)
@@ -1124,7 +1127,8 @@ async function handleRpkDocsGeneration(options = {}) {
         rpkVersion,
         pluginVersions: {},
         draftMissing,
-        preservationsDir: preserveFrom
+        preservationsDir: preserveFrom,
+        navFile
       })
 
       console.log(`\nGeneration complete!`)
@@ -1132,6 +1136,9 @@ async function handleRpkDocsGeneration(options = {}) {
       console.log(`  - Files generated: ${result.filesGenerated}`)
       if (result.filesDeleted > 0) {
         console.log(`  - Stale files deleted: ${result.filesDeleted}`)
+      }
+      if (result.navUpdated) {
+        console.log(`  - Nav entries updated: ${result.navEntriesGenerated}`)
       }
       console.log(`  - Output directory: ${finalOutputDir}`)
 
@@ -1426,7 +1433,8 @@ async function handleRpkDocsGeneration(options = {}) {
       rpkVersion,
       pluginVersions,
       draftMissing,
-      preservationsDir: preserveFrom
+      preservationsDir: preserveFrom,
+      navFile
     })
 
     console.log(`\nGeneration complete!`)
@@ -1434,6 +1442,9 @@ async function handleRpkDocsGeneration(options = {}) {
     console.log(`  - Files generated: ${result.filesGenerated}`)
     if (result.filesDeleted > 0) {
       console.log(`  - Stale files deleted: ${result.filesDeleted}`)
+    }
+    if (result.navUpdated) {
+      console.log(`  - Nav entries updated: ${result.navEntriesGenerated}`)
     }
     console.log(`  - Output directory: ${finalOutputDir}`)
 

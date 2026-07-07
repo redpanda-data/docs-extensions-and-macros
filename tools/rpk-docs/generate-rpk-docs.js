@@ -2083,6 +2083,90 @@ function findTopLevelWithSubcommands(tree) {
 }
 
 /**
+ * Static entries that always appear at the top of the rpk nav section,
+ * before the auto-generated command entries. These are hand-written pages
+ * that are not part of the CLI command tree.
+ */
+const STATIC_RPK_NAV_ENTRIES = [
+  '*** xref:reference:rpk/rpk.adoc[]',
+  '*** xref:reference:rpk/rpk-commands.adoc[]',
+  '*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]',
+]
+
+/**
+ * Update the rpk section of nav.adoc with the current command tree.
+ * Replaces auto-generated entries while preserving the section header and
+ * the static hand-written entries defined in STATIC_RPK_NAV_ENTRIES.
+ * @param {string} navFile - Absolute path to nav.adoc
+ * @param {Array} commands - Flat command list from flattenCommands()
+ * @param {Object} resolvedOverrides - Resolved overrides
+ * @param {Set} topLevelWithSubcommands - Set of top-level command names with subcommands
+ * @returns {Object} { navUpdated, navEntriesGenerated }
+ */
+function updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands) {
+  if (!fs.existsSync(navFile)) {
+    console.warn(`Warning: nav file not found, skipping nav update: ${navFile}`)
+    return { navUpdated: false }
+  }
+
+  const content = fs.readFileSync(navFile, 'utf8')
+  const lines = content.split('\n')
+
+  // Locate the rpk section header
+  const sectionStart = lines.findIndex(l => /xref:reference:rpk\/index\.adoc/.test(l))
+  if (sectionStart === -1) {
+    console.warn('Warning: rpk section not found in nav file, skipping nav update')
+    return { navUpdated: false }
+  }
+
+  // Find where the section ends — next line with the same or fewer asterisks as the header
+  const headerStars = (lines[sectionStart].match(/^\*+/) || [''])[0].length
+  let sectionEnd = lines.length
+  for (let i = sectionStart + 1; i < lines.length; i++) {
+    const m = lines[i].match(/^\*+/)
+    if (m && m[0].length <= headerStars && lines[i].trim() !== '') {
+      sectionEnd = i
+      break
+    }
+  }
+
+  // Generate nav entries from the command tree (DFS order from flattenCommands)
+  const newEntries = []
+  for (const { path: commandPath } of commands) {
+    if (commandPath === 'rpk') continue
+    if (shouldExcludeCommand(resolvedOverrides, commandPath)) continue
+    if (shouldUsePartialDir(resolvedOverrides, commandPath)) continue
+    if (commandPath.startsWith('rpk cloud')) continue
+    if (commandPath.startsWith('rpk security secret')) continue
+
+    const parts = commandPath.split(' ')
+    const stars = '*'.repeat(parts.length + 1)
+    const { subdir, fileName } = getOutputPath(commandPath, topLevelWithSubcommands)
+    const xrefPath = subdir
+      ? `reference:rpk/${subdir}/${fileName}`
+      : `reference:rpk/${fileName}`
+
+    newEntries.push(`${stars} xref:${xrefPath}[]`)
+  }
+
+  // Rebuild: header + static entries + generated entries
+  const newSection = [
+    lines[sectionStart],
+    ...STATIC_RPK_NAV_ENTRIES,
+    ...newEntries,
+  ]
+
+  const newLines = [
+    ...lines.slice(0, sectionStart),
+    ...newSection,
+    ...lines.slice(sectionEnd),
+  ]
+
+  fs.writeFileSync(navFile, newLines.join('\n'), 'utf8')
+  return { navUpdated: true, navEntriesGenerated: newEntries.length }
+}
+
+/**
  * Generate AsciiDoc documentation for all rpk commands
  * @param {Object} options - Generation options
  * @returns {Object} Generation result
@@ -2096,7 +2180,8 @@ async function generateRpkDocs(options = {}) {
     rpkVersion,
     pluginVersions = {},
     draftMissing = false,
-    flatOutput = false // If true, output all files flat (legacy behavior)
+    flatOutput = false, // If true, output all files flat (legacy behavior)
+    navFile // Optional: path to nav.adoc for automatic nav updates
   } = options
 
   // Register partials
@@ -2517,13 +2602,20 @@ async function generateRpkDocs(options = {}) {
     }
   }
 
+  // Update nav.adoc if a path was provided
+  let navResult = { navUpdated: false }
+  if (navFile) {
+    navResult = updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands)
+  }
+
   return {
     commandCount: commands.length,
     filesGenerated,
     filesSkipped,
     filesFailed,
     filesDeleted,
-    subdirectoriesCreated: createdSubdirs.size
+    subdirectoriesCreated: createdSubdirs.size,
+    ...navResult
   }
 }
 
