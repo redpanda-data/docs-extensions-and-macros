@@ -275,6 +275,23 @@ function shouldExcludeCommand(overrides, commandPath) {
 }
 
 /**
+ * Check if a command should be written to the partials directory (cloudSecretDir).
+ * Walks up the command path so setting asPartial: true on "rpk ai" applies to all children.
+ * @param {Object} overrides - Resolved overrides object
+ * @param {string} commandPath - Full command path (e.g., "rpk ai agent list")
+ * @returns {boolean}
+ */
+function shouldUsePartialDir(overrides, commandPath) {
+  if (!overrides?.commands) return false
+  const parts = commandPath.split(' ')
+  for (let i = parts.length; i >= 1; i--) {
+    const ancestor = parts.slice(0, i).join(' ')
+    if (overrides.commands[ancestor]?.asPartial === true) return true
+  }
+  return false
+}
+
+/**
  * Get command metadata from overrides
  * @param {Object} overrides - Overrides object (resolved)
  * @param {string} commandPath - Full command path (e.g., "rpk topic create")
@@ -2247,11 +2264,12 @@ async function generateRpkDocs(options = {}) {
     }
 
     // Build subcommands with correct xref paths
-    // Filter out excluded subcommands so they don't appear in the parent's list
+    // Filter out excluded and asPartial subcommands — excluded have no file,
+    // asPartial ones live in the partials directory with no linkable xref.
     const subcommands = (command.commands || [])
       .filter(sub => {
         const subPath = `${commandPath} ${sub.name}`
-        return !shouldExcludeCommand(resolvedOverrides, subPath)
+        return !shouldExcludeCommand(resolvedOverrides, subPath) && !shouldUsePartialDir(resolvedOverrides, subPath)
       })
       .map(sub => {
         const subPath = `${commandPath} ${sub.name}`
@@ -2432,7 +2450,9 @@ async function generateRpkDocs(options = {}) {
     // Check if this command should go to cloudSecretDir
     const isCloudCommand = commandPath.startsWith('rpk cloud')
     const isSecuritySecretCommand = commandPath.startsWith('rpk security secret')
-    const useCloudSecretDir = cloudSecretDir && (isCloudCommand || isSecuritySecretCommand)
+    const useCloudSecretDir = cloudSecretDir && (
+      isCloudCommand || isSecuritySecretCommand || shouldUsePartialDir(overrides, commandPath)
+    )
     const effectiveOutputDir = useCloudSecretDir ? cloudSecretDir : outputDir
 
     let filePath
