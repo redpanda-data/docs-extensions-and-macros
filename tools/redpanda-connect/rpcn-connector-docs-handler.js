@@ -30,6 +30,8 @@ function capToTwoSentences (description) {
 
   const abbreviations = [
     /https?:\/\/[^\s]+?(?=[.!?](?:\s|$)|\s|$)/gi,  // Protect URLs from being split by sentence detection (non-greedy, preserve trailing punctuation)
+    /\bxref:[^\s[\]]+\[[^\]]*\]/g,  // Protect Antora xref macros (e.g. xref:components:processors/try.adoc[`try`]) whose targets contain periods
+    /\b[\w/-]+\.(?:adoc|md|ya?ml|json|html)\b/gi,  // Protect bare doc/config filenames (try.adoc, config.yaml) from splitting
     /\bv\d+\.\d+(?:\.\d+)?/gi,
     /\d+\.\d+/g,
     /\be\.g\./gi,
@@ -63,6 +65,16 @@ function capToTwoSentences (description) {
 
   const sentenceRegex = /[^.!?]+[.!?]+(?:\s|$)/g
   const sentences = normalized.match(sentenceRegex)
+
+  // If an unprotected mid-token period prevented the leading text from
+  // forming a complete match, merge that dropped prefix into the first
+  // sentence rather than silently discarding it.
+  if (sentences && sentences.length > 0) {
+    const firstIndex = normalized.indexOf(sentences[0])
+    if (firstIndex > 0) {
+      sentences[0] = normalized.slice(0, firstIndex) + sentences[0]
+    }
+  }
 
   if (!sentences || sentences.length === 0) {
     let result = normalized
@@ -135,7 +147,7 @@ function augmentConnectorData (connectorData, binaryAnalysis) {
   let addedCloudOnlyCount = 0
 
   const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-    'buffers', 'metrics', 'scanners', 'tracers']
+    'buffers', 'metrics', 'scanners', 'tracers', 'config']
 
   for (const type of connectorTypes) {
     if (!Array.isArray(augmentedData[type])) {
@@ -1112,6 +1124,12 @@ async function handleRpcnConnectorDocs (options) {
     }
   }
 
+  // Config components have no config/fields wrappers, so skip the
+  // augmentation filter above and only strip platform metadata
+  if (Array.isArray(cleanData.config)) {
+    stripPlatformMetadata(cleanData.config)
+  }
+
   fs.writeFileSync(cleanOssDataPath, JSON.stringify(cleanData, null, 2), 'utf8')
 
   const versionsMatch = oldVersion && newVersion && oldVersion === newVersion
@@ -1357,7 +1375,7 @@ async function handleRpcnConnectorDocs (options) {
       // Strip CGO/cloud-only connectors and metadata from old data
       oldIndexForDiff = JSON.parse(JSON.stringify(oldIndex))
       const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-        'buffers', 'metrics', 'scanners', 'tracers']
+        'buffers', 'metrics', 'scanners', 'tracers', 'config']
 
       let totalStripped = 0
       for (const type of connectorTypes) {
@@ -1970,5 +1988,6 @@ async function handleRpcnConnectorDocs (options) {
 module.exports = {
   handleRpcnConnectorDocs,
   updateWhatsNew,
-  capToTwoSentences
+  capToTwoSentences,
+  augmentConnectorData
 }
