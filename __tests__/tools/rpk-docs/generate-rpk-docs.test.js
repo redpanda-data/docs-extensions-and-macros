@@ -1,5 +1,9 @@
 'use strict'
 
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
+
 const {
   resolveReferences,
   mergeCommandOverrides,
@@ -9,7 +13,12 @@ const {
   flattenCommands,
   deepMerge,
   ensurePeriod,
-  convertIndentedCodeBlocksToAsciiDoc
+  convertIndentedCodeBlocksToAsciiDoc,
+  shouldExcludeCommand,
+  shouldUsePartialDir,
+  updateNavFile,
+  getOutputPath,
+  findTopLevelWithSubcommands
 } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
 
 describe('rpk Docs Generation', () => {
@@ -684,6 +693,258 @@ Specify a time range.`
       expect(result).toContain('--file test.wasm')
       expect(result).toContain('--input-topic input')
       expect(result).toContain('--output-topic output')
+    })
+  })
+
+  describe('shouldUsePartialDir', () => {
+    test('returns false when overrides is null', () => {
+      expect(shouldUsePartialDir(null, 'rpk ai')).toBe(false)
+    })
+
+    test('returns false when command has no asPartial flag', () => {
+      const overrides = { commands: { 'rpk ai': { description: 'AI commands' } } }
+      expect(shouldUsePartialDir(overrides, 'rpk ai')).toBe(false)
+    })
+
+    test('returns true when command itself has asPartial: true', () => {
+      const overrides = { commands: { 'rpk ai': { asPartial: true } } }
+      expect(shouldUsePartialDir(overrides, 'rpk ai')).toBe(true)
+    })
+
+    test('inherits from parent: child command returns true when parent has asPartial', () => {
+      const overrides = { commands: { 'rpk ai': { asPartial: true } } }
+      expect(shouldUsePartialDir(overrides, 'rpk ai agent list')).toBe(true)
+    })
+
+    test('inherits from grandparent', () => {
+      const overrides = { commands: { 'rpk ai': { asPartial: true } } }
+      expect(shouldUsePartialDir(overrides, 'rpk ai agent a2a send')).toBe(true)
+    })
+
+    test('does not inherit from sibling', () => {
+      const overrides = { commands: { 'rpk ai': { asPartial: true } } }
+      expect(shouldUsePartialDir(overrides, 'rpk topic create')).toBe(false)
+    })
+
+    test('returns false when asPartial is false', () => {
+      const overrides = { commands: { 'rpk ai': { asPartial: false } } }
+      expect(shouldUsePartialDir(overrides, 'rpk ai agent')).toBe(false)
+    })
+  })
+
+  describe('updateNavFile', () => {
+    let tmpDir
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-nav-test-'))
+    })
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    const makeNav = (content) => {
+      const navPath = path.join(tmpDir, 'nav.adoc')
+      fs.writeFileSync(navPath, content, 'utf8')
+      return navPath
+    }
+
+    const makeTree = (commands) => {
+      // commands is array of space-separated paths like ['rpk cluster', 'rpk cluster create']
+      // Build a minimal tree
+      const root = { name: 'rpk', commands: [] }
+      for (const p of commands) {
+        const parts = p.split(' ').slice(1) // remove 'rpk'
+        let node = root
+        for (const part of parts) {
+          let child = node.commands.find(c => c.name === part)
+          if (!child) {
+            child = { name: part, commands: [] }
+            node.commands.push(child)
+          }
+          node = child
+        }
+      }
+      return root
+    }
+
+    test('returns navUpdated: false when file does not exist', () => {
+      const result = updateNavFile(
+        path.join(tmpDir, 'nonexistent.adoc'),
+        [], {}, new Set()
+      )
+      expect(result.navUpdated).toBe(false)
+    })
+
+    test('returns navUpdated: false when rpk section not found', () => {
+      const navPath = makeNav('* xref:other:index.adoc[]\n** xref:other:page.adoc[]\n')
+      const result = updateNavFile(navPath, [], {}, new Set())
+      expect(result.navUpdated).toBe(false)
+    })
+
+    test('preserves section header and static entries', () => {
+      const nav = [
+        '* xref:get-started:index.adoc[]',
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk.adoc[]',
+        '*** xref:reference:rpk/rpk-commands.adoc[]',
+        '*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]',
+        '*** xref:reference:rpk/rpk-topic/rpk-topic.adoc[]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      const tree = makeTree(['rpk topic', 'rpk topic create'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+      const result = updateNavFile(navPath, commands, {}, topLevel)
+
+      const written = fs.readFileSync(navPath, 'utf8')
+      expect(result.navUpdated).toBe(true)
+      expect(written).toContain('** xref:reference:rpk/index.adoc[rpk Commands]')
+      expect(written).toContain('*** xref:reference:rpk/rpk.adoc[]')
+      expect(written).toContain('*** xref:reference:rpk/rpk-commands.adoc[]')
+      expect(written).toContain('*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]')
+    })
+
+    test('generates entries at correct nesting depths', () => {
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      const tree = makeTree(['rpk topic', 'rpk topic create', 'rpk topic delete'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+      updateNavFile(navPath, commands, {}, topLevel)
+
+      const written = fs.readFileSync(navPath, 'utf8')
+      // rpk topic → 2 parts → *** (3 stars)
+      expect(written).toContain('*** xref:reference:rpk/rpk-topic/rpk-topic.adoc[]')
+      // rpk topic create → 3 parts → **** (4 stars)
+      expect(written).toContain('**** xref:reference:rpk/rpk-topic/rpk-topic-create.adoc[]')
+      expect(written).toContain('**** xref:reference:rpk/rpk-topic/rpk-topic-delete.adoc[]')
+    })
+
+    test('omits excluded commands', () => {
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      const tree = makeTree(['rpk topic', 'rpk topic create', 'rpk topic internal'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+      const overrides = { commands: { 'rpk topic internal': { exclude: true } } }
+      updateNavFile(navPath, commands, overrides, topLevel)
+
+      const written = fs.readFileSync(navPath, 'utf8')
+      expect(written).toContain('rpk-topic-create')
+      expect(written).not.toContain('rpk-topic-internal')
+    })
+
+    test('omits asPartial commands and their descendants', () => {
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      const tree = makeTree(['rpk ai', 'rpk ai agent', 'rpk ai agent list', 'rpk topic', 'rpk topic create'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+      const overrides = { commands: { 'rpk ai': { asPartial: true } } }
+      updateNavFile(navPath, commands, overrides, topLevel)
+
+      const written = fs.readFileSync(navPath, 'utf8')
+      expect(written).not.toContain('rpk-ai')
+      expect(written).toContain('*** xref:reference:rpk/rpk-topic/rpk-topic.adoc[]')
+    })
+
+    test('omits rpk cloud and rpk security secret commands', () => {
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      const tree = makeTree([
+        'rpk cloud', 'rpk cloud login',
+        'rpk security', 'rpk security secret', 'rpk security secret list',
+        'rpk topic', 'rpk topic create'
+      ])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+      updateNavFile(navPath, commands, {}, topLevel)
+
+      const written = fs.readFileSync(navPath, 'utf8')
+      expect(written).not.toContain('rpk-cloud')
+      expect(written).not.toContain('rpk-security-secret')
+      // rpk security itself (not secret) should appear
+      expect(written).toContain('rpk-security/rpk-security.adoc')
+      expect(written).toContain('rpk-topic/rpk-topic.adoc')
+    })
+
+    test('preserves content outside the rpk section', () => {
+      const nav = [
+        '* xref:home:index.adoc[]',
+        '** xref:get-started:intro.adoc[]',
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk-topic/rpk-topic.adoc[]',
+        '** xref:reference:glossary.adoc[]',
+        '* xref:other:index.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      const tree = makeTree(['rpk topic'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+      updateNavFile(navPath, commands, {}, topLevel)
+
+      const written = fs.readFileSync(navPath, 'utf8')
+      expect(written).toContain('* xref:home:index.adoc[]')
+      expect(written).toContain('** xref:get-started:intro.adoc[]')
+      expect(written).toContain('** xref:reference:glossary.adoc[]')
+      expect(written).toContain('* xref:other:index.adoc[]')
+    })
+
+    test('is idempotent — running twice produces the same output', () => {
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      const tree = makeTree(['rpk topic', 'rpk topic create', 'rpk cluster', 'rpk cluster health'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+
+      updateNavFile(navPath, commands, {}, topLevel)
+      const firstRun = fs.readFileSync(navPath, 'utf8')
+
+      updateNavFile(navPath, commands, {}, topLevel)
+      const secondRun = fs.readFileSync(navPath, 'utf8')
+
+      expect(firstRun).toBe(secondRun)
+    })
+
+    test('returns correct entry count', () => {
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      const tree = makeTree(['rpk topic', 'rpk topic create', 'rpk topic delete'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+      const result = updateNavFile(navPath, commands, {}, topLevel)
+
+      // rpk (skipped) + rpk topic + rpk topic create + rpk topic delete = 3 entries
+      expect(result.navUpdated).toBe(true)
+      expect(result.navEntriesGenerated).toBe(3)
     })
   })
 })

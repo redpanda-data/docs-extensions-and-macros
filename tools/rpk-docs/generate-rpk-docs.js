@@ -2640,6 +2640,8 @@ module.exports = {
   loadTemplate,
   registerPartial,
   shouldExcludeCommand,
+  shouldUsePartialDir,
+  updateNavFile,
   getCommandMetadata,
   processContentArray,
   // Exported for testing
