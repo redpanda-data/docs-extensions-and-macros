@@ -2536,7 +2536,7 @@ async function generateRpkDocs(options = {}) {
     const isCloudCommand = commandPath.startsWith('rpk cloud')
     const isSecuritySecretCommand = commandPath.startsWith('rpk security secret')
     const useCloudSecretDir = cloudSecretDir && (
-      isCloudCommand || isSecuritySecretCommand || shouldUsePartialDir(overrides, commandPath)
+      isCloudCommand || isSecuritySecretCommand || shouldUsePartialDir(resolvedOverrides, commandPath)
     )
     const effectiveOutputDir = useCloudSecretDir ? cloudSecretDir : outputDir
 
@@ -2576,20 +2576,35 @@ async function generateRpkDocs(options = {}) {
     }
   }
 
-  // Delete stale .adoc files — commands that are now excluded or removed from the CLI.
-  // We only scan subdirectories that we actually wrote to; the root output dirs are
-  // skipped because they may contain hand-written .adoc files alongside generated ones.
-  const managedDirs = new Set()
-  for (const f of writtenFiles) {
-    const dir = path.dirname(f)
-    if (dir !== outputDir && (!cloudSecretDir || dir !== cloudSecretDir)) {
-      managedDirs.add(dir)
-    }
+  // Delete stale .adoc files — commands that are now excluded, converted to
+  // partials, or removed from the CLI entirely (including whole subtrees).
+  //
+  // Every generated file is named "rpk.adoc" or "rpk-*.adoc" (a dashified command
+  // path), so we only ever delete files matching that pattern. That lets us clean
+  // the shared partials directory without touching hand-written partials.
+  //
+  // We scan, regardless of whether they received a write this run:
+  //   - outputDir itself (dedicated to generated rpk pages) and its rpk-* subdirs
+  //   - the rpk-* subdirs of cloudSecretDir (cloud/secret/asPartial commands)
+  // We deliberately skip the cloudSecretDir root, which is a shared partials
+  // directory that generation does not exclusively own.
+  const generatedFilePattern = /^rpk(-[^/\\]*)?\.adoc$/
+
+  const rpkSubdirs = (baseDir) => {
+    if (!baseDir || !fs.existsSync(baseDir)) return []
+    return fs.readdirSync(baseDir, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && entry.name.startsWith('rpk-'))
+      .map(entry => path.join(baseDir, entry.name))
   }
-  for (const dir of managedDirs) {
-    if (!fs.existsSync(dir)) continue
+
+  const scanDirs = new Set()
+  if (fs.existsSync(outputDir)) scanDirs.add(outputDir)
+  for (const dir of rpkSubdirs(outputDir)) scanDirs.add(dir)
+  for (const dir of rpkSubdirs(cloudSecretDir)) scanDirs.add(dir)
+
+  for (const dir of scanDirs) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.adoc')) continue
+      if (!entry.isFile() || !generatedFilePattern.test(entry.name)) continue
       const full = path.join(dir, entry.name)
       if (!writtenFiles.has(full)) {
         try {
@@ -2598,6 +2613,14 @@ async function generateRpkDocs(options = {}) {
         } catch (err) {
           console.warn(`Warning: Failed to delete stale file "${full}": ${err.message}`)
         }
+      }
+    }
+    // Remove now-empty rpk-* subdirectories left behind by removed subtrees.
+    if (dir !== outputDir && dir !== cloudSecretDir && fs.readdirSync(dir).length === 0) {
+      try {
+        fs.rmdirSync(dir)
+      } catch (err) {
+        console.warn(`Warning: Failed to remove empty directory "${dir}": ${err.message}`)
       }
     }
   }

@@ -657,4 +657,191 @@ Original fields content that should be replaced.`,
       expect(content).toContain('COUNT: 42')
     }, 30000)
   })
+
+  describe('asPartial write path and stale file cleanup', () => {
+    let outputDir
+    let secretDir
+
+    beforeEach(() => {
+      outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-out-'))
+      secretDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-partials-'))
+    })
+
+    afterEach(() => {
+      fs.rmSync(outputDir, { recursive: true, force: true })
+      fs.rmSync(secretDir, { recursive: true, force: true })
+    })
+
+    // Finding 1: an asPartial that arrives through $ref must send the generated
+    // page to cloudSecretDir, matching the nav/xref decision (which uses the
+    // resolved overrides). The write path previously used the raw overrides, so a
+    // $ref-sourced asPartial landed in the normal output tree.
+    test('routes a $ref-sourced asPartial command to cloudSecretDir', async () => {
+      const testTree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          {
+            name: 'ai',
+            description: 'AI command.',
+            usage: 'rpk ai [flags]',
+            flags: [],
+            commands: [
+              {
+                name: 'agent',
+                description: 'Agent command.',
+                usage: 'rpk ai agent [flags]',
+                flags: []
+              }
+            ]
+          }
+        ],
+        global_flags: []
+      }
+
+      // asPartial is delivered via $ref, so it only exists after reference
+      // resolution — the raw overrides object never carries the flag directly.
+      const testOverrides = {
+        definitions: {
+          'partial-command': { asPartial: true }
+        },
+        commands: {
+          'rpk ai': { $ref: '#/definitions/partial-command' }
+        }
+      }
+
+      await generateRpkDocs({
+        tree: testTree,
+        overrides: testOverrides,
+        outputDir,
+        cloudSecretDir: secretDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      // Generated pages live in the partials directory, not the normal output tree.
+      expect(fs.existsSync(path.join(secretDir, 'rpk-ai', 'rpk-ai-agent.adoc'))).toBe(true)
+      expect(fs.existsSync(path.join(outputDir, 'rpk-ai', 'rpk-ai-agent.adoc'))).toBe(false)
+      expect(fs.existsSync(path.join(outputDir, 'rpk-ai'))).toBe(false)
+    }, 30000)
+
+    // Finding 2a: a stale root-level generated page must be deleted, while
+    // hand-written non-rpk files in the same directory are preserved.
+    test('removes stale root-level generated pages but keeps hand-written files', async () => {
+      fs.writeFileSync(path.join(outputDir, 'rpk-help.adoc'), 'stale generated page', 'utf8')
+      fs.writeFileSync(path.join(outputDir, 'handwritten.adoc'), 'keep me', 'utf8')
+
+      const testTree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          {
+            name: 'version',
+            description: 'Version command.',
+            usage: 'rpk version [flags]',
+            flags: []
+          }
+        ],
+        global_flags: []
+      }
+
+      await generateRpkDocs({
+        tree: testTree,
+        overrides: {},
+        outputDir,
+        cloudSecretDir: secretDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      expect(fs.existsSync(path.join(outputDir, 'rpk-version.adoc'))).toBe(true)
+      // Stale generated page removed.
+      expect(fs.existsSync(path.join(outputDir, 'rpk-help.adoc'))).toBe(false)
+      // Hand-written non-rpk file preserved.
+      expect(fs.existsSync(path.join(outputDir, 'handwritten.adoc'))).toBe(true)
+    }, 30000)
+
+    // Finding 2b: when a whole command subtree is removed, its subdirectory
+    // receives zero writes this run, yet its stale files must still be deleted
+    // and the empty directory cleaned up.
+    test('removes stale files from a fully removed subtree', async () => {
+      const staleDir = path.join(outputDir, 'rpk-topic')
+      fs.mkdirSync(staleDir, { recursive: true })
+      fs.writeFileSync(path.join(staleDir, 'rpk-topic-create.adoc'), 'stale', 'utf8')
+
+      const testTree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          {
+            name: 'version',
+            description: 'Version command.',
+            usage: 'rpk version [flags]',
+            flags: []
+          }
+        ],
+        global_flags: []
+      }
+
+      await generateRpkDocs({
+        tree: testTree,
+        overrides: {},
+        outputDir,
+        cloudSecretDir: secretDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      expect(fs.existsSync(path.join(staleDir, 'rpk-topic-create.adoc'))).toBe(false)
+      // Empty managed subdirectory removed.
+      expect(fs.existsSync(staleDir)).toBe(false)
+    }, 30000)
+
+    // Finding 2c: hand-written files at the shared partials root are never
+    // touched, but stale generated pages inside managed rpk-* subdirs are.
+    test('cleans rpk-* subdirs in cloudSecretDir but preserves the partials root', async () => {
+      fs.writeFileSync(path.join(secretDir, 'some-partial.adoc'), 'hand-written partial', 'utf8')
+      const staleCloudDir = path.join(secretDir, 'rpk-cloud')
+      fs.mkdirSync(staleCloudDir, { recursive: true })
+      fs.writeFileSync(path.join(staleCloudDir, 'rpk-cloud-old.adoc'), 'stale', 'utf8')
+
+      const testTree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          {
+            name: 'cloud',
+            description: 'Cloud command.',
+            usage: 'rpk cloud [flags]',
+            flags: [],
+            commands: [
+              {
+                name: 'login',
+                description: 'Login command.',
+                usage: 'rpk cloud login [flags]',
+                flags: []
+              }
+            ]
+          }
+        ],
+        global_flags: []
+      }
+
+      await generateRpkDocs({
+        tree: testTree,
+        overrides: {},
+        outputDir,
+        cloudSecretDir: secretDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      // rpk cloud commands land in the partials dir (cloudSecretDir).
+      expect(fs.existsSync(path.join(staleCloudDir, 'rpk-cloud-login.adoc'))).toBe(true)
+      // Stale generated page in the managed subdir removed.
+      expect(fs.existsSync(path.join(staleCloudDir, 'rpk-cloud-old.adoc'))).toBe(false)
+      // Hand-written file at the shared partials root untouched.
+      expect(fs.existsSync(path.join(secretDir, 'some-partial.adoc'))).toBe(true)
+    }, 30000)
+  })
 })
