@@ -208,6 +208,47 @@ function augmentConnectorData (connectorData, binaryAnalysis) {
 }
 
 /**
+ * Build a pure-OSS snapshot from a (possibly augmented) connector index, for use
+ * as the baseline in binary analysis. Removes augmentation-only entries (the
+ * cloud-only and cgo-only connectors that augmentConnectorData() adds and persists
+ * back into the data file) and strips platform metadata so the snapshot reflects
+ * only what the standard OSS rpk build reports.
+ *
+ * @param {Object} connectorIndex - Connector index object with arrays per type
+ * @returns {Object} Deep-cloned clean copy safe to diff as pure OSS data
+ */
+function buildCleanOssData (connectorIndex) {
+  const cleanData = JSON.parse(JSON.stringify(connectorIndex))
+  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
+    'buffers', 'metrics', 'scanners', 'tracers']
+
+  for (const type of connectorTypes) {
+    if (Array.isArray(cleanData[type])) {
+      // Keep only connectors from OSS rpk (have config/fields)
+      // Remove augmentation-only connectors (added by previous binary analysis)
+      cleanData[type] = cleanData[type].filter(c => c.config || c.fields)
+
+      // Remove platform metadata from remaining connectors
+      stripPlatformMetadata(cleanData[type])
+    }
+  }
+
+  // Config components have no config/fields wrappers, so the filter above
+  // can't distinguish OSS entries from augmentation-only ones. augmentConnectorData()
+  // adds cloud-only and cgo-only config entries and persists them back to the data
+  // file, so on subsequent runs they would otherwise be copied into the clean OSS
+  // snapshot and pollute binary analysis. Drop those augmentation-only entries by
+  // their platform markers (genuine OSS config entries never carry cloudOnly, and
+  // a standard-build component is never cgo-only) before stripping metadata.
+  if (Array.isArray(cleanData.config)) {
+    cleanData.config = cleanData.config.filter(c => c.cloudOnly !== true && c.requiresCgo !== true)
+    stripPlatformMetadata(cleanData.config)
+  }
+
+  return cleanData
+}
+
+/**
  * Update whats-new.adoc with new release information
  * @param {Object} params - Parameters
  * @param {string} params.dataDir - Data directory path
@@ -1109,26 +1150,7 @@ async function handleRpcnConnectorDocs (options) {
   const cleanOssDataPath = path.join(dataDir, `._connect-${newVersion}-clean.json`)
 
   // Create clean version by removing augmented connectors
-  const cleanData = JSON.parse(JSON.stringify(newIndex))
-  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-    'buffers', 'metrics', 'scanners', 'tracers']
-
-  for (const type of connectorTypes) {
-    if (Array.isArray(cleanData[type])) {
-      // Keep only connectors from OSS rpk (have config/fields)
-      // Remove augmentation-only connectors (added by previous binary analysis)
-      cleanData[type] = cleanData[type].filter(c => c.config || c.fields)
-
-      // Remove platform metadata from remaining connectors
-      stripPlatformMetadata(cleanData[type])
-    }
-  }
-
-  // Config components have no config/fields wrappers, so skip the
-  // augmentation filter above and only strip platform metadata
-  if (Array.isArray(cleanData.config)) {
-    stripPlatformMetadata(cleanData.config)
-  }
+  const cleanData = buildCleanOssData(newIndex)
 
   fs.writeFileSync(cleanOssDataPath, JSON.stringify(cleanData, null, 2), 'utf8')
 
@@ -1989,5 +2011,6 @@ module.exports = {
   handleRpcnConnectorDocs,
   updateWhatsNew,
   capToTwoSentences,
-  augmentConnectorData
+  augmentConnectorData,
+  buildCleanOssData
 }

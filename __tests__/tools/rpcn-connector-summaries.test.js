@@ -18,7 +18,7 @@
 // Jest); stub it out since these tests never touch GitHub.
 jest.mock('../../cli-utils/octokit-client', () => ({}));
 
-const { capToTwoSentences, augmentConnectorData } = require('../../tools/redpanda-connect/rpcn-connector-docs-handler');
+const { capToTwoSentences, augmentConnectorData, buildCleanOssData } = require('../../tools/redpanda-connect/rpcn-connector-docs-handler');
 const { generateConnectorDiffJson } = require('../../tools/redpanda-connect/report-delta');
 
 describe('capToTwoSentences - xref and filename protection', () => {
@@ -155,5 +155,85 @@ describe('generateConnectorDiffJson - config component status and cloud support'
 
     expect(inDetails).toBe(true);
     expect(added.cloudSupported).toBe(true);
+  });
+});
+
+describe('buildCleanOssData - pure OSS snapshot for binary analysis', () => {
+  // Simulate the persisted data file after a previous run's augmentation: the
+  // handler writes augmentConnectorData() output back to connect-<version>.json,
+  // so the next run reloads augmentation-only cloud-only/cgo-only entries.
+  const makeAugmentedIndex = () => {
+    const raw = {
+      processors: [
+        { name: 'mapping', type: 'processor', config: { children: [] } }
+      ],
+      config: [
+        { name: 'error_handling', type: 'object', kind: 'scalar', description: 'Engine-wide error handling.' }
+      ]
+    };
+    const binaryAnalysis = {
+      comparison: {
+        inCloud: [
+          { type: 'processors', name: 'mapping', status: 'stable' },
+          { type: 'config', name: 'error_handling', status: '' }
+        ],
+        cloudOnly: [
+          { type: 'config', name: 'cloud_only_block', status: '' },
+          { type: 'processors', name: 'cloud_only_proc', status: '' }
+        ]
+      },
+      cgoOnly: [
+        { type: 'config', name: 'cgo_only_block' }
+      ]
+    };
+    return augmentConnectorData(raw, binaryAnalysis).augmentedData;
+  };
+
+  test('drops augmentation-only cloud-only and cgo-only config entries', () => {
+    const augmented = makeAugmentedIndex();
+    // Sanity: augmentation added the extra config entries this run.
+    expect(augmented.config.map(c => c.name).sort())
+      .toEqual(['cgo_only_block', 'cloud_only_block', 'error_handling']);
+
+    const clean = buildCleanOssData(augmented);
+
+    // Only the genuine OSS config entry survives.
+    expect(clean.config.map(c => c.name)).toEqual(['error_handling']);
+  });
+
+  test('strips platform metadata from surviving config entries', () => {
+    const clean = buildCleanOssData(makeAugmentedIndex());
+    const errorHandling = clean.config.find(c => c.name === 'error_handling');
+
+    expect(errorHandling).toBeDefined();
+    expect(errorHandling).not.toHaveProperty('cloudSupported');
+    expect(errorHandling).not.toHaveProperty('requiresCgo');
+    expect(errorHandling).not.toHaveProperty('cloudOnly');
+    // Genuine OSS content is preserved.
+    expect(errorHandling.kind).toBe('scalar');
+    expect(errorHandling.description).toBe('Engine-wide error handling.');
+  });
+
+  test('still drops augmentation-only entries from standard connector types', () => {
+    const clean = buildCleanOssData(makeAugmentedIndex());
+    // cloud_only_proc has no config/fields wrapper, so it is dropped;
+    // the genuine mapping processor is kept with metadata stripped.
+    expect(clean.processors.map(c => c.name)).toEqual(['mapping']);
+    expect(clean.processors[0]).not.toHaveProperty('cloudSupported');
+    expect(clean.processors[0]).not.toHaveProperty('requiresCgo');
+  });
+
+  test('leaves a raw OSS index (no augmentation markers) unchanged in membership', () => {
+    const raw = {
+      config: [
+        { name: 'error_handling', type: 'object', kind: 'scalar', description: 'x' }
+      ],
+      processors: [
+        { name: 'mapping', type: 'processor', config: { children: [] } }
+      ]
+    };
+    const clean = buildCleanOssData(raw);
+    expect(clean.config.map(c => c.name)).toEqual(['error_handling']);
+    expect(clean.processors.map(c => c.name)).toEqual(['mapping']);
   });
 });
