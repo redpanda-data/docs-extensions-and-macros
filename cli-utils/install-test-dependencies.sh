@@ -464,8 +464,13 @@ install_rpk() {
     
     log_info "Detected ${os_name} ${arch_name}, downloading ${rpk_filename}..."
     
-    # Try to download and install rpk
-    if curl -LO "$rpk_url"; then
+    # Try to download and install rpk.
+    # Use -f so HTTP errors (e.g. 403/404/429/503) fail instead of writing an
+    # error page into the zip, and retry to ride out transient GitHub/CDN and
+    # network errors that otherwise cause intermittent CI failures.
+    if curl -fL --retry 5 --retry-delay 3 --retry-all-errors \
+            --connect-timeout 30 --max-time 300 \
+            -o "$rpk_filename" "$rpk_url"; then
         if unzip "$rpk_filename" 2>/dev/null; then
             mkdir -p ~/.local/bin
             if mv rpk ~/.local/bin/ 2>/dev/null; then
