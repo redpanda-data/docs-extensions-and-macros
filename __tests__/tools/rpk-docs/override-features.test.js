@@ -725,11 +725,19 @@ Original fields content that should be replaced.`,
       expect(fs.existsSync(path.join(outputDir, 'rpk-ai'))).toBe(false)
     }, 30000)
 
-    // Finding 2a: a stale root-level generated page must be deleted, while
-    // hand-written non-rpk files in the same directory are preserved.
-    test('removes stale root-level generated pages but keeps hand-written files', async () => {
-      fs.writeFileSync(path.join(outputDir, 'rpk-help.adoc'), 'stale generated page', 'utf8')
+    // Finding 2a: the root output directory is never cleaned. It holds
+    // hand-written pages (e.g. index.adoc, rpk-commands.adoc, rpk-x-options.adoc)
+    // that share the "rpk-*.adoc" naming with generated pages, so there is no
+    // safe way to tell a stale generated root page from a hand-written one.
+    // Everything at the root must survive a run.
+    test('never deletes files at the root output directory', async () => {
+      // Hand-written root pages that the docs repo actually ships and links in nav.
+      fs.writeFileSync(path.join(outputDir, 'rpk-commands.adoc'), 'hand-written', 'utf8')
+      fs.writeFileSync(path.join(outputDir, 'rpk-x-options.adoc'), 'hand-written', 'utf8')
+      fs.writeFileSync(path.join(outputDir, 'index.adoc'), 'hand-written landing', 'utf8')
+      // A non-rpk file and a root page for a command not in this run's tree.
       fs.writeFileSync(path.join(outputDir, 'handwritten.adoc'), 'keep me', 'utf8')
+      fs.writeFileSync(path.join(outputDir, 'rpk-help.adoc'), 'not regenerated this run', 'utf8')
 
       const testTree = {
         name: 'rpk',
@@ -755,10 +763,10 @@ Original fields content that should be replaced.`,
       })
 
       expect(fs.existsSync(path.join(outputDir, 'rpk-version.adoc'))).toBe(true)
-      // Stale generated page removed.
-      expect(fs.existsSync(path.join(outputDir, 'rpk-help.adoc'))).toBe(false)
-      // Hand-written non-rpk file preserved.
-      expect(fs.existsSync(path.join(outputDir, 'handwritten.adoc'))).toBe(true)
+      // Nothing at the root is ever deleted.
+      for (const name of ['rpk-commands.adoc', 'rpk-x-options.adoc', 'index.adoc', 'handwritten.adoc', 'rpk-help.adoc']) {
+        expect(fs.existsSync(path.join(outputDir, name))).toBe(true)
+      }
     }, 30000)
 
     // Finding 2b: when a whole command subtree is removed, its subdirectory

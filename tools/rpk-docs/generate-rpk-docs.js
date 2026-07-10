@@ -2576,18 +2576,21 @@ async function generateRpkDocs(options = {}) {
     }
   }
 
-  // Delete stale .adoc files — commands that are now excluded, converted to
-  // partials, or removed from the CLI entirely (including whole subtrees).
+  // Delete stale .adoc files from removed/excluded commands, including whole
+  // subtrees that no longer receive any writes this run.
   //
-  // Every generated file is named "rpk.adoc" or "rpk-*.adoc" (a dashified command
-  // path), so we only ever delete files matching that pattern. That lets us clean
-  // the shared partials directory without touching hand-written partials.
+  // We only clean the "rpk-*" subdirectories (e.g. rpk-topic/, rpk-cluster/),
+  // which are created and owned exclusively by generation. We deliberately do
+  // NOT touch the root output directory: it holds hand-written pages alongside
+  // generated ones (e.g. index.adoc, rpk-commands.adoc, rpk-x-options.adoc), and
+  // those hand-written pages share the "rpk-*.adoc" naming, so there is no safe
+  // way to distinguish a stale generated root page from a hand-written one. A
+  // rare stale root page is preferable to deleting hand-written content.
   //
-  // We scan, regardless of whether they received a write this run:
-  //   - outputDir itself (dedicated to generated rpk pages) and its rpk-* subdirs
-  //   - the rpk-* subdirs of cloudSecretDir (cloud/secret/asPartial commands)
-  // We deliberately skip the cloudSecretDir root, which is a shared partials
-  // directory that generation does not exclusively own.
+  // Deletions are further restricted to the generated "rpk.adoc"/"rpk-*.adoc"
+  // pattern so a stray non-rpk file inside a subdir is never removed. This also
+  // lets us clean the rpk-* subdirs of the shared partials directory
+  // (cloudSecretDir) without touching hand-written partials at its root.
   const generatedFilePattern = /^rpk(-[^/\\]*)?\.adoc$/
 
   const rpkSubdirs = (baseDir) => {
@@ -2598,7 +2601,6 @@ async function generateRpkDocs(options = {}) {
   }
 
   const scanDirs = new Set()
-  if (fs.existsSync(outputDir)) scanDirs.add(outputDir)
   for (const dir of rpkSubdirs(outputDir)) scanDirs.add(dir)
   for (const dir of rpkSubdirs(cloudSecretDir)) scanDirs.add(dir)
 
@@ -2615,8 +2617,8 @@ async function generateRpkDocs(options = {}) {
         }
       }
     }
-    // Remove now-empty rpk-* subdirectories left behind by removed subtrees.
-    if (dir !== outputDir && dir !== cloudSecretDir && fs.readdirSync(dir).length === 0) {
+    // Remove the rpk-* subdirectory itself if it is now empty (removed subtree).
+    if (fs.readdirSync(dir).length === 0) {
       try {
         fs.rmdirSync(dir)
       } catch (err) {
