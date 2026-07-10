@@ -786,7 +786,6 @@ Specify a time range.`
       const nav = [
         '* xref:get-started:index.adoc[]',
         '** xref:reference:rpk/index.adoc[rpk Commands]',
-        '*** xref:reference:rpk/rpk.adoc[]',
         '*** xref:reference:rpk/rpk-commands.adoc[]',
         '*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]',
         '*** xref:reference:rpk/rpk-topic/rpk-topic.adoc[]',
@@ -802,9 +801,11 @@ Specify a time range.`
       const written = fs.readFileSync(navPath, 'utf8')
       expect(result.navUpdated).toBe(true)
       expect(written).toContain('** xref:reference:rpk/index.adoc[rpk Commands]')
-      expect(written).toContain('*** xref:reference:rpk/rpk.adoc[]')
       expect(written).toContain('*** xref:reference:rpk/rpk-commands.adoc[]')
       expect(written).toContain('*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]')
+      // The root rpk command is represented by the hand-written index.adoc
+      // landing page; it must not get its own generated rpk.adoc nav entry.
+      expect(written).not.toContain('xref:reference:rpk/rpk.adoc[]')
     })
 
     test('generates entries at correct nesting depths', () => {

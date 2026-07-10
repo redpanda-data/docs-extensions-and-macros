@@ -725,6 +725,44 @@ Original fields content that should be replaced.`,
       expect(fs.existsSync(path.join(outputDir, 'rpk-ai'))).toBe(false)
     }, 30000)
 
+    // The root `rpk` command must not generate an rpk.adoc; its reference is the
+    // hand-written index.adoc landing page, which generation must leave untouched.
+    test('skips the root rpk command and does not touch index.adoc', async () => {
+      const existingIndex = '= rpk Commands\n:page-layout: index\n\nHand-written landing content.\n'
+      fs.writeFileSync(path.join(outputDir, 'index.adoc'), existingIndex, 'utf8')
+
+      const testTree = {
+        name: 'rpk',
+        description: 'rpk is the Redpanda CLI.',
+        usage: 'rpk [command]',
+        flags: [],
+        commands: [
+          {
+            name: 'version',
+            description: 'Version command.',
+            usage: 'rpk version [flags]',
+            flags: []
+          }
+        ],
+        global_flags: []
+      }
+
+      await generateRpkDocs({
+        tree: testTree,
+        overrides: { commands: { rpk: { description: 'rpk root.' } } },
+        outputDir,
+        cloudSecretDir: secretDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      // Subcommand page is generated; the root command is not.
+      expect(fs.existsSync(path.join(outputDir, 'rpk-version.adoc'))).toBe(true)
+      expect(fs.existsSync(path.join(outputDir, 'rpk.adoc'))).toBe(false)
+      // The hand-written landing page is left byte-for-byte unchanged.
+      expect(fs.readFileSync(path.join(outputDir, 'index.adoc'), 'utf8')).toBe(existingIndex)
+    }, 30000)
+
     // Finding 2a: the root output directory is never cleaned. It holds
     // hand-written pages (e.g. index.adoc, rpk-commands.adoc, rpk-x-options.adoc)
     // that share the "rpk-*.adoc" naming with generated pages, so there is no

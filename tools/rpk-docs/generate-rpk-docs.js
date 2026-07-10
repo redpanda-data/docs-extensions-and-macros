@@ -2085,10 +2085,11 @@ function findTopLevelWithSubcommands(tree) {
 /**
  * Static entries that always appear at the top of the rpk nav section,
  * before the auto-generated command entries. These are hand-written pages
- * that are not part of the CLI command tree.
+ * that are not part of the CLI command tree. The root `rpk` command is not
+ * listed here: it is represented by the section's hand-written index.adoc
+ * landing page (the section header), so it is skipped during generation.
  */
 const STATIC_RPK_NAV_ENTRIES = [
-  '*** xref:reference:rpk/rpk.adoc[]',
   '*** xref:reference:rpk/rpk-commands.adoc[]',
   '*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]',
 ]
@@ -2232,6 +2233,14 @@ async function generateRpkDocs(options = {}) {
   const writtenFiles = new Set()
 
   for (const { path: commandPath, command } of commands) {
+    // Skip the root `rpk` command: its reference is the section's hand-written
+    // index.adoc landing page, which generation must not overwrite. The nav
+    // builder skips it for the same reason (see updateNavFile).
+    if (commandPath === 'rpk') {
+      filesSkipped++
+      continue
+    }
+
     // Check if command should be excluded
     if (shouldExcludeCommand(resolvedOverrides, commandPath)) {
       filesSkipped++
