@@ -21,7 +21,7 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     return {
       name,
       type,
-      status: raw.status || raw.type || '',
+      status: raw.status || '',
       version: raw.version || raw.introducedInVersion || '',
       description: raw.description || '',
       requiresCgo: metadata.requiresCgo || false,
@@ -39,7 +39,7 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     return {
       name,
       type,
-      status: raw.status || raw.type || '',
+      status: raw.status || '',
       version: raw.version || raw.introducedInVersion || '',
       description: raw.description || '',
       requiresCgo: metadata.requiresCgo || false,
@@ -101,7 +101,7 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       deprecatedComponents.push({
         name,
         type,
-        status: raw.status || raw.type || '',
+        status: raw.status || '',
         version: raw.version || raw.introducedInVersion || '',
         description: raw.description || ''
       });
@@ -561,7 +561,7 @@ function printDeltaReport(oldIndex, newIndex) {
     newComponentKeys.forEach(key => {
       const [type, name] = key.split(':');
       const raw = newMap[key].raw;
-      const status = raw.status || raw.type || '';
+      const status = raw.status || '';
       const version = raw.version || raw.introducedInVersion || '';
       console.log(
         `   • ${type}/${name}${

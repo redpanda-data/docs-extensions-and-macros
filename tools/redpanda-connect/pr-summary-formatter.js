@@ -235,7 +235,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
         else if (isSelfHostedOnly) platformIndicator = ' 🖥️';
         if (isCgoOnly) platformIndicator += ' 🔧';
 
-        lines.push(`##### \`${comp.name}\` (${comp.type}, ${comp.status})${platformIndicator}`);
+        lines.push(`##### \`${comp.name}\` (${comp.status ? `${comp.type}, ${comp.status}` : comp.type})${platformIndicator}`);
 
         // Add description (truncated to 2 sentences)
         if (comp.description) {
@@ -982,7 +982,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
         lines.push('**☁️ Cloud Supported:**');
         lines.push('');
         cloudSupportedNew.forEach(c => {
-          lines.push(`- **${c.name}** (${c.type}, ${c.status})`);
+          lines.push(`- **${c.name}** (${c.status ? `${c.type}, ${c.status}` : c.type})`);
           const desc = c.summary || c.description;
           if (desc) {
             const shortDesc = truncateToSentence(desc, 2);
@@ -996,7 +996,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
         lines.push('**Self-Hosted Only:**');
         lines.push('');
         selfHostedOnlyNew.forEach(c => {
-          lines.push(`- **${c.name}** (${c.type}, ${c.status})`);
+          lines.push(`- **${c.name}** (${c.status ? `${c.type}, ${c.status}` : c.type})`);
           const desc = c.summary || c.description;
           if (desc) {
             const shortDesc = truncateToSentence(desc, 2);
@@ -1008,7 +1008,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
     } else {
       // No cloud support info, just list all
       diffData.details.newComponents.forEach(c => {
-        lines.push(`- **${c.name}** (${c.type}, ${c.status})`);
+        lines.push(`- **${c.name}** (${c.status ? `${c.type}, ${c.status}` : c.type})`);
         const desc = c.summary || c.description;
         if (desc) {
           const shortDesc = truncateToSentence(desc, 2);
@@ -1247,7 +1247,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
     Object.entries(gapsByType).forEach(([type, connectors]) => {
       lines.push(`**${type}:**`);
       connectors.forEach(c => {
-        lines.push(`- ${c.name} (${c.status})`);
+        lines.push(`- ${c.name}${c.status ? ` (${c.status})` : ''}`);
       });
       lines.push('');
     });
