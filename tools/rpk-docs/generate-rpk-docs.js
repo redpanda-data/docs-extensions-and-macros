@@ -275,6 +275,23 @@ function shouldExcludeCommand(overrides, commandPath) {
 }
 
 /**
+ * Check if a command should be written to the partials directory (cloudSecretDir).
+ * Walks up the command path so setting asPartial: true on "rpk ai" applies to all children.
+ * @param {Object} overrides - Resolved overrides object
+ * @param {string} commandPath - Full command path (e.g., "rpk ai agent list")
+ * @returns {boolean}
+ */
+function shouldUsePartialDir(overrides, commandPath) {
+  if (!overrides?.commands) return false
+  const parts = commandPath.split(' ')
+  for (let i = parts.length; i >= 1; i--) {
+    const ancestor = parts.slice(0, i).join(' ')
+    if (overrides.commands[ancestor]?.asPartial === true) return true
+  }
+  return false
+}
+
+/**
  * Get command metadata from overrides
  * @param {Object} overrides - Overrides object (resolved)
  * @param {string} commandPath - Full command path (e.g., "rpk topic create")
@@ -390,13 +407,21 @@ function processContentArray(contentArray, context = '') {
     }
 
     switch (type) {
-      case 'section':
+      case 'section': {
+        // Escape {word} (no hyphens) in table cell lines — CLI format specifiers like {hex}
+        // are not AsciiDoc attribute refs and must be escaped to prevent substitution.
+        const escapedContent = typeof content === 'string'
+          ? content.replace(/^\|(.*)$/gm, (m, cell) =>
+              /\{[a-z_][a-z0-9_]*\}/.test(cell)
+                ? '|' + cell.replace(/\{([a-z_][a-z0-9_]*)\}/g, '\\{$1}')
+                : m)
+          : content
         // Pass through all section properties (subsections, parent, headingLevel, exclude)
         result.sections[position].push({
           type: 'section',
           id,
           title,
-          content,
+          content: escapedContent,
           subsections: item.subsections,
           parent: item.parent,
           headingLevel: item.headingLevel,
@@ -408,6 +433,7 @@ function processContentArray(contentArray, context = '') {
           console.warn(`   Use seeAlso key instead`)
         }
         break
+      }
 
       case 'example':
         // Structured single example
@@ -1184,7 +1210,10 @@ function convertIndentedTablesToAsciiDoc(text, options = {}) {
             // Remove trailing colon from value (e.g., "Organization:" -> "Organization")
             const cleanValue = value.replace(/:$/, '')
             const desc = descParts.join(' ')
-            result.push(`|${cleanValue} |${desc}`)
+            // Escape {word} (no hyphens) in table cells — CLI format specifiers like {hex}, {json}
+            // are not AsciiDoc attribute refs and must be escaped to prevent substitution.
+            const escapeAttrs = s => s.replace(/\{([a-z_][a-z0-9_]*)\}/g, '\\{$1}')
+            result.push(`|${escapeAttrs(cleanValue)} |${escapeAttrs(desc)}`)
           }
           result.push('|===')
           result.push('')
@@ -1201,6 +1230,28 @@ function convertIndentedTablesToAsciiDoc(text, options = {}) {
   }
 
   return result.join('\n')
+}
+
+/**
+ * Apply only the text replacements from textTransformations to a raw string.
+ * Used for examples content where we want string substitutions (e.g. rpai → rpk ai)
+ * but NOT AsciiDoc structural formatting or inlineCode wrapping.
+ * @param {string} text
+ * @param {Object|null} customTransformations
+ * @returns {string}
+ */
+function applyTextTransformations(text, customTransformations) {
+  if (!text || !customTransformations?.replacements) return text
+  let result = text
+  for (const rule of customTransformations.replacements) {
+    try {
+      const flags = rule.flags || 'g'
+      result = result.replace(new RegExp(rule.pattern, flags), rule.replacement)
+    } catch (err) {
+      console.warn(`⚠ Invalid replacement pattern: ${rule.pattern}`)
+    }
+  }
+  return result
 }
 
 /**
@@ -1289,10 +1340,18 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   })
 
   // Protect inline code (backticked content)
+  // Escape {word} (no hyphens) inside backtick spans — these are CLI format specifiers or
+  // path placeholders, not AsciiDoc attribute refs (which use hyphens like {full-version}).
+  // AsciiDoc single-backtick spans still apply attribute substitution, so {hex}/{namespace}/etc.
+  // would expand to empty string without this escaping.
   const inlineCode = []
   preProcessed = preProcessed.replace(/`[^`]+`/g, (match) => {
     const placeholder = `__INLINE_CODE_${inlineCode.length}__`
-    inlineCode.push(match)
+    // Skip `+...+` passthrough spans — they already prevent attribute substitution
+    const escaped = (match.startsWith('`+') && match.endsWith('+`'))
+      ? match
+      : match.replace(/\{([a-z_][a-z0-9_]*)\}/g, '\\{$1}')
+    inlineCode.push(escaped)
     return placeholder
   })
 
@@ -1536,27 +1595,45 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // Restore early code blocks FIRST (from indented command/YAML detection)
   // This must happen before inline code restoration so that placeholders
   // inside the early code blocks (like __INLINE_CODE_X__) get resolved
+  // Use function replacements to prevent $ special-pattern interpretation (e.g. `$` → before-match)
   earlyCodeBlocks.forEach((block, i) => {
-    result = result.replace(`__EARLY_CODE_BLOCK_${i}__`, block)
+    result = result.replace(`__EARLY_CODE_BLOCK_${i}__`, () => block)
   })
 
   // Restore inline code
   inlineCode.forEach((code, i) => {
-    result = result.replace(`__INLINE_CODE_${i}__`, code)
+    result = result.replace(`__INLINE_CODE_${i}__`, () => code)
   })
 
   // Restore xrefs
   xrefs.forEach((xref, i) => {
-    result = result.replace(`__XREF_${i}__`, xref)
+    result = result.replace(`__XREF_${i}__`, () => xref)
   })
 
   // Restore code blocks
   codeBlocks.forEach((block, i) => {
-    result = result.replace(`__CODE_BLOCK_${i}__`, block)
+    result = result.replace(`__CODE_BLOCK_${i}__`, () => block)
   })
 
   // Clean up double backticks (moved AFTER restoration to catch nested backticks)
   result = result.replace(/``+/g, '`')
+
+  // Final pass: escape {word} (no hyphens) inside any backtick spans that were created
+  // dynamically during processing (after the initial inline-code protection step).
+  // Skip `+...+` passthrough spans — they already prevent attribute substitution.
+  // Use negative lookbehind (?<!\\) to avoid double-escaping already-escaped \{word}.
+  result = result.replace(/`[^`]+`/g, match => {
+    if (match.startsWith('`+') && match.endsWith('+`')) return match
+    return match.replace(/(?<!\\)\{([a-z_][a-z0-9_]*)\}/g, '\\{$1}')
+  })
+
+  // Escape {word} (no hyphens) in AsciiDoc table cell lines that come from pre-formatted
+  // AsciiDoc in CLI descriptions (e.g. format specifier tables with {hex}, {json}).
+  // These never pass through backtick-span protection, so they need a separate pass.
+  result = result.replace(/^\|(.*)$/gm, (match, cellContent) => {
+    if (!/(?<!\\)\{[a-z_][a-z0-9_]*\}/.test(cellContent)) return match
+    return '|' + cellContent.replace(/(?<!\\)\{([a-z_][a-z0-9_]*)\}/g, '\\{$1}')
+  })
 
   // Remove trailing period after backticked commands on their own line
   // e.g., "`rpk cluster status`." → "`rpk cluster status`"
@@ -1581,40 +1658,48 @@ function formatUsage(usage) {
 }
 
 /**
- * Format EXAMPLES section - convert indented commands and inline code to AsciiDoc code blocks
+ * Format EXAMPLES section - convert indented commands and inline code to AsciiDoc code blocks.
+ *
+ * Handles the standard Go CLI example format where each group is separated by a blank line,
+ * comment lines (# ...) describe the example, and command lines follow:
+ *
+ *   # Description of the example
+ *   rpk some command --flag
+ *
+ *   # Another example
+ *   rpk other command
+ *   rpk other command --variant
+ *
+ * Comments become plain text descriptions; consecutive command lines share one code block.
+ *
  * @param {string} text - Examples text with indented commands or inline code
  * @returns {string} Formatted examples with code blocks
  */
 function formatExamples(text) {
   if (!text) return text
 
-  // Convert both indented commands and inline backticked commands to AsciiDoc code blocks
-  // Pattern 1: description line, then indented command (starts with 2+ spaces)
-  // Pattern 2: description line ending with colon/period, followed by `rpk command`
   const lines = text.split('\n')
   const result = []
   let i = 0
 
   while (i < lines.length) {
     const line = lines[i]
+    const isIndented = /^\s{2,}\S/.test(line)
 
-    // Check if next line is an indented command (2+ spaces followed by non-space)
-    if (i + 1 < lines.length && /^\s{2,}\S/.test(lines[i + 1])) {
-      // Current line is description, next line is command
-      result.push(line)
-      result.push('')
-      result.push('[,bash]')
-      result.push('----')
-      result.push(lines[i + 1].trim())
-      result.push('----')
-      i += 2
-    } else if (/^\s{2,}\S/.test(line)) {
-      // Standalone indented command without preceding description
-      result.push('[,bash]')
-      result.push('----')
-      result.push(line.trim())
-      result.push('----')
+    if (isIndented && line.trim().startsWith('#')) {
+      // Comment line — render as a description paragraph outside the code block
+      result.push(line.trim().replace(/^#\s*/, ''))
       i++
+    } else if (isIndented) {
+      // Command line — collect all consecutive command lines into one code block
+      // (stops at a blank line or a comment line)
+      result.push('[,bash]')
+      result.push('----')
+      while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !lines[i].trim().startsWith('#')) {
+        result.push(lines[i].trim())
+        i++
+      }
+      result.push('----')
     } else if (/^\s*`rpk .+`\s*$/.test(line)) {
       // Inline backticked command on its own line - convert to code block
       const command = line.trim().replace(/^`|`$/g, '')
@@ -1637,7 +1722,7 @@ function formatExamples(text) {
       result.push('----')
       i += 2
     } else {
-      // Regular line (description, blank line, etc.)
+      // Regular line (blank line, non-indented description text, etc.)
       result.push(line)
       i++
     }
@@ -1998,6 +2083,91 @@ function findTopLevelWithSubcommands(tree) {
 }
 
 /**
+ * Static entries that always appear at the top of the rpk nav section,
+ * before the auto-generated command entries. These are hand-written pages
+ * that are not part of the CLI command tree. The root `rpk` command is not
+ * listed here: it is represented by the section's hand-written index.adoc
+ * landing page (the section header), so it is skipped during generation.
+ */
+const STATIC_RPK_NAV_ENTRIES = [
+  '*** xref:reference:rpk/rpk-commands.adoc[]',
+  '*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]',
+]
+
+/**
+ * Update the rpk section of nav.adoc with the current command tree.
+ * Replaces auto-generated entries while preserving the section header and
+ * the static hand-written entries defined in STATIC_RPK_NAV_ENTRIES.
+ * @param {string} navFile - Absolute path to nav.adoc
+ * @param {Array} commands - Flat command list from flattenCommands()
+ * @param {Object} resolvedOverrides - Resolved overrides
+ * @param {Set} topLevelWithSubcommands - Set of top-level command names with subcommands
+ * @returns {Object} { navUpdated, navEntriesGenerated }
+ */
+function updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands) {
+  if (!fs.existsSync(navFile)) {
+    console.warn(`Warning: nav file not found, skipping nav update: ${navFile}`)
+    return { navUpdated: false }
+  }
+
+  const content = fs.readFileSync(navFile, 'utf8')
+  const lines = content.split('\n')
+
+  // Locate the rpk section header
+  const sectionStart = lines.findIndex(l => /xref:reference:rpk\/index\.adoc/.test(l))
+  if (sectionStart === -1) {
+    console.warn('Warning: rpk section not found in nav file, skipping nav update')
+    return { navUpdated: false }
+  }
+
+  // Find where the section ends — next line with the same or fewer asterisks as the header
+  const headerStars = (lines[sectionStart].match(/^\*+/) || [''])[0].length
+  let sectionEnd = lines.length
+  for (let i = sectionStart + 1; i < lines.length; i++) {
+    const m = lines[i].match(/^\*+/)
+    if (m && m[0].length <= headerStars && lines[i].trim() !== '') {
+      sectionEnd = i
+      break
+    }
+  }
+
+  // Generate nav entries from the command tree (DFS order from flattenCommands)
+  const newEntries = []
+  for (const { path: commandPath } of commands) {
+    if (commandPath === 'rpk') continue
+    if (shouldExcludeCommand(resolvedOverrides, commandPath)) continue
+    if (shouldUsePartialDir(resolvedOverrides, commandPath)) continue
+    if (commandPath.startsWith('rpk cloud')) continue
+    if (commandPath.startsWith('rpk security secret')) continue
+
+    const parts = commandPath.split(' ')
+    const stars = '*'.repeat(parts.length + 1)
+    const { subdir, fileName } = getOutputPath(commandPath, topLevelWithSubcommands)
+    const xrefPath = subdir
+      ? `reference:rpk/${subdir}/${fileName}`
+      : `reference:rpk/${fileName}`
+
+    newEntries.push(`${stars} xref:${xrefPath}[]`)
+  }
+
+  // Rebuild: header + static entries + generated entries
+  const newSection = [
+    lines[sectionStart],
+    ...STATIC_RPK_NAV_ENTRIES,
+    ...newEntries,
+  ]
+
+  const newLines = [
+    ...lines.slice(0, sectionStart),
+    ...newSection,
+    ...lines.slice(sectionEnd),
+  ]
+
+  fs.writeFileSync(navFile, newLines.join('\n'), 'utf8')
+  return { navUpdated: true, navEntriesGenerated: newEntries.length }
+}
+
+/**
  * Generate AsciiDoc documentation for all rpk commands
  * @param {Object} options - Generation options
  * @returns {Object} Generation result
@@ -2011,7 +2181,8 @@ async function generateRpkDocs(options = {}) {
     rpkVersion,
     pluginVersions = {},
     draftMissing = false,
-    flatOutput = false // If true, output all files flat (legacy behavior)
+    flatOutput = false, // If true, output all files flat (legacy behavior)
+    navFile // Optional: path to nav.adoc for automatic nav updates
   } = options
 
   // Register partials
@@ -2058,8 +2229,18 @@ async function generateRpkDocs(options = {}) {
   let filesGenerated = 0
   let filesSkipped = 0
   let filesFailed = 0
+  let filesDeleted = 0
+  const writtenFiles = new Set()
 
   for (const { path: commandPath, command } of commands) {
+    // Skip the root `rpk` command: its reference is the section's hand-written
+    // index.adoc landing page, which generation must not overwrite. The nav
+    // builder skips it for the same reason (see updateNavFile).
+    if (commandPath === 'rpk') {
+      filesSkipped++
+      continue
+    }
+
     // Check if command should be excluded
     if (shouldExcludeCommand(resolvedOverrides, commandPath)) {
       filesSkipped++
@@ -2087,7 +2268,8 @@ async function generateRpkDocs(options = {}) {
         if (mergedCommand.excludeExamples && mergedCommand.excludeExamples.length > 0) {
           examplesContent = filterExamples(sectionContent, mergedCommand.excludeExamples)
         }
-        // Format examples: convert indented commands to code blocks
+        // Apply text transformations (e.g. rpai → rpk ai) then format
+        examplesContent = applyTextTransformations(examplesContent, textTransformations)
         sections[sectionName] = formatExamples(examplesContent)
       } else {
         sections[sectionName] = formatDescription(sectionContent, textTransformations)
@@ -2097,11 +2279,15 @@ async function generateRpkDocs(options = {}) {
     // Add examples from rpk source if not already in sections
     // rpk --print-tree provides examples in a separate field
     if (command.examples && !sections.EXAMPLES) {
-      let examplesContent = command.examples.trim()
+      // Strip surrounding blank lines only — preserve per-line indentation so formatExamples
+      // can detect indented command lines vs plain description text
+      let examplesContent = command.examples.replace(/^\n+/, '').replace(/\n+$/, '')
       // Apply excludeExamples filter BEFORE formatting
       if (mergedCommand.excludeExamples && mergedCommand.excludeExamples.length > 0) {
         examplesContent = filterExamples(examplesContent, mergedCommand.excludeExamples)
       }
+      // Apply text transformations (e.g. rpai → rpk ai) then format
+      examplesContent = applyTextTransformations(examplesContent, textTransformations)
       sections.EXAMPLES = formatExamples(examplesContent)
     }
 
@@ -2172,11 +2358,12 @@ async function generateRpkDocs(options = {}) {
     }
 
     // Build subcommands with correct xref paths
-    // Filter out excluded subcommands so they don't appear in the parent's list
+    // Filter out excluded and asPartial subcommands — excluded have no file,
+    // asPartial ones live in the partials directory with no linkable xref.
     const subcommands = (command.commands || [])
       .filter(sub => {
         const subPath = `${commandPath} ${sub.name}`
-        return !shouldExcludeCommand(resolvedOverrides, subPath)
+        return !shouldExcludeCommand(resolvedOverrides, subPath) && !shouldUsePartialDir(resolvedOverrides, subPath)
       })
       .map(sub => {
         const subPath = `${commandPath} ${sub.name}`
@@ -2357,7 +2544,9 @@ async function generateRpkDocs(options = {}) {
     // Check if this command should go to cloudSecretDir
     const isCloudCommand = commandPath.startsWith('rpk cloud')
     const isSecuritySecretCommand = commandPath.startsWith('rpk security secret')
-    const useCloudSecretDir = cloudSecretDir && (isCloudCommand || isSecuritySecretCommand)
+    const useCloudSecretDir = cloudSecretDir && (
+      isCloudCommand || isSecuritySecretCommand || shouldUsePartialDir(resolvedOverrides, commandPath)
+    )
     const effectiveOutputDir = useCloudSecretDir ? cloudSecretDir : outputDir
 
     let filePath
@@ -2384,6 +2573,7 @@ async function generateRpkDocs(options = {}) {
 
     try {
       fs.writeFileSync(filePath, content, 'utf8')
+      writtenFiles.add(filePath)
       filesGenerated++
 
       if (filesGenerated % 50 === 0) {
@@ -2395,12 +2585,71 @@ async function generateRpkDocs(options = {}) {
     }
   }
 
+  // Delete stale .adoc files from removed/excluded commands, including whole
+  // subtrees that no longer receive any writes this run.
+  //
+  // We only clean the "rpk-*" subdirectories (e.g. rpk-topic/, rpk-cluster/),
+  // which are created and owned exclusively by generation. We deliberately do
+  // NOT touch the root output directory: it holds hand-written pages alongside
+  // generated ones (e.g. index.adoc, rpk-commands.adoc, rpk-x-options.adoc), and
+  // those hand-written pages share the "rpk-*.adoc" naming, so there is no safe
+  // way to distinguish a stale generated root page from a hand-written one. A
+  // rare stale root page is preferable to deleting hand-written content.
+  //
+  // Deletions are further restricted to the generated "rpk.adoc"/"rpk-*.adoc"
+  // pattern so a stray non-rpk file inside a subdir is never removed. This also
+  // lets us clean the rpk-* subdirs of the shared partials directory
+  // (cloudSecretDir) without touching hand-written partials at its root.
+  const generatedFilePattern = /^rpk(-[^/\\]*)?\.adoc$/
+
+  const rpkSubdirs = (baseDir) => {
+    if (!baseDir || !fs.existsSync(baseDir)) return []
+    return fs.readdirSync(baseDir, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && entry.name.startsWith('rpk-'))
+      .map(entry => path.join(baseDir, entry.name))
+  }
+
+  const scanDirs = new Set()
+  for (const dir of rpkSubdirs(outputDir)) scanDirs.add(dir)
+  for (const dir of rpkSubdirs(cloudSecretDir)) scanDirs.add(dir)
+
+  for (const dir of scanDirs) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !generatedFilePattern.test(entry.name)) continue
+      const full = path.join(dir, entry.name)
+      if (!writtenFiles.has(full)) {
+        try {
+          fs.unlinkSync(full)
+          filesDeleted++
+        } catch (err) {
+          console.warn(`Warning: Failed to delete stale file "${full}": ${err.message}`)
+        }
+      }
+    }
+    // Remove the rpk-* subdirectory itself if it is now empty (removed subtree).
+    if (fs.readdirSync(dir).length === 0) {
+      try {
+        fs.rmdirSync(dir)
+      } catch (err) {
+        console.warn(`Warning: Failed to remove empty directory "${dir}": ${err.message}`)
+      }
+    }
+  }
+
+  // Update nav.adoc if a path was provided
+  let navResult = { navUpdated: false }
+  if (navFile) {
+    navResult = updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands)
+  }
+
   return {
     commandCount: commands.length,
     filesGenerated,
     filesSkipped,
     filesFailed,
-    subdirectoriesCreated: createdSubdirs.size
+    filesDeleted,
+    subdirectoriesCreated: createdSubdirs.size,
+    ...navResult
   }
 }
 
@@ -2425,6 +2674,8 @@ module.exports = {
   loadTemplate,
   registerPartial,
   shouldExcludeCommand,
+  shouldUsePartialDir,
+  updateNavFile,
   getCommandMetadata,
   processContentArray,
   // Exported for testing
