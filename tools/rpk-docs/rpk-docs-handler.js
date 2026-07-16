@@ -14,7 +14,7 @@ const { validateDirectory, formatResults } = require('./validate-output')
 /**
  * Known rpk plugins that are managed separately (have install/uninstall commands)
  */
-const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'oxla']
+const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'k8s', 'oxla']
 
 /**
  * Parse Go version from 'go version' output

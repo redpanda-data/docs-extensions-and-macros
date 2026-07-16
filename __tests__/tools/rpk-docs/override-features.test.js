@@ -171,6 +171,40 @@ It continues here.`
       expect(result).toContain('It continues here.')
       expect(result).not.toContain('[,bash]')
     })
+
+    test('keeps multi-line commands with backslash continuations in one code block', () => {
+      const input = [
+        '  # Bootstrap all clusters from a kubeconfig file',
+        '  rpk k8s multicluster bootstrap \\',
+        '    --kubeconfig /path/to/kubeconfig \\',
+        '    --namespace redpanda'
+      ].join('\n')
+
+      const result = formatExamples(input)
+
+      // One code block containing the whole command
+      expect((result.match(/\[,bash\]/g) || []).length).toBe(1)
+      // Comment becomes a description line outside the block
+      expect(result).toContain('Bootstrap all clusters from a kubeconfig file')
+      expect(result).not.toMatch(/^#/m)
+      // Continuation lines keep their relative indentation (dedent, not trim)
+      expect(result).toContain('rpk k8s multicluster bootstrap \\\n  --kubeconfig /path/to/kubeconfig \\\n  --namespace redpanda')
+    })
+
+    test('separates blank-line-delimited examples into distinct code blocks', () => {
+      const input = [
+        '  rpk k8s multicluster bundle --context cluster-a \\',
+        '    -o /tmp/operator-bundle.zip',
+        '',
+        '  rpk k8s multicluster status --context cluster-a'
+      ].join('\n')
+
+      const result = formatExamples(input)
+
+      expect((result.match(/\[,bash\]/g) || []).length).toBe(2)
+      expect(result).toContain('rpk k8s multicluster bundle --context cluster-a \\\n  -o /tmp/operator-bundle.zip')
+      expect(result).toContain('rpk k8s multicluster status --context cluster-a')
+    })
   })
 
   describe('mergeCommandOverrides with excludeExamples', () => {
