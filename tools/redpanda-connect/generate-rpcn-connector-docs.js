@@ -18,6 +18,9 @@ Object.entries(helpers).forEach(([name, fn]) => {
 // Default “main” template (connector.hbs) which invokes partials {{> intro}}, {{> fields}}, {{> examples}}
 const DEFAULT_TEMPLATE = path.resolve(__dirname, './templates/connector.hbs');
 
+// Default template for the regenerated per-connector metadata partial.
+const DEFAULT_METADATA_TEMPLATE = path.resolve(__dirname, './templates/metadata-partials.hbs');
+
 /**
  * Reads a file at `filePath` and registers it as a Handlebars partial called `name`.
  * Throws if the file cannot be read.
@@ -241,6 +244,7 @@ async function generateRpcnConnectorDocs(options) {
     templateIntro,
     templateFields,
     templateExamples,
+    templateMetadata,
     templateBloblang,
     writeFullDrafts,
     cgoOnly = [],        // Array of cgo-only connectors from cgo binary inspection
@@ -336,6 +340,12 @@ async function generateRpcnConnectorDocs(options) {
     registerPartial('examples', examplesTemplatePath);
   }
 
+  // Always register the metadata partial. Like fields and examples, it is
+  // regenerated on every run so that metadata fields added to a connector's
+  // upstream description flow into the docs automatically.
+  const metadataTemplatePath = templateMetadata || DEFAULT_METADATA_TEMPLATE;
+  registerPartial('metadata', metadataTemplatePath);
+
   // In draft mode, also register the intro partial
   if (writeFullDrafts && templateIntro) {
     registerPartial('intro', templateIntro);
@@ -344,6 +354,7 @@ async function generateRpcnConnectorDocs(options) {
   const outputRoot     = path.resolve(process.cwd(), 'modules/components/partials');
   const fieldsOutRoot   = path.join(outputRoot, 'fields');
   const examplesOutRoot = path.join(outputRoot, 'examples');
+  const metadataOutRoot = path.join(outputRoot, 'metadata');
   // Drafts go to pages/, not partials/
   const componentsRoot  = writeFullDrafts
     ? path.resolve(process.cwd(), 'modules/components/pages')
@@ -353,6 +364,7 @@ async function generateRpcnConnectorDocs(options) {
   if (!writeFullDrafts) {
     fs.mkdirSync(fieldsOutRoot,   { recursive: true });
     fs.mkdirSync(examplesOutRoot, { recursive: true });
+    fs.mkdirSync(metadataOutRoot, { recursive: true });
   }
 
   let partialsWritten = 0;
@@ -400,6 +412,21 @@ async function generateRpcnConnectorDocs(options) {
         if (!writeFullDrafts) {
           partialsWritten++;
           partialFiles.push(path.relative(process.cwd(), ePath));
+        }
+      }
+
+      // Render the metadata partial from the connector's description. Only
+      // written when the description contains a `== Metadata` section.
+      const metadataOut = handlebars
+        .compile('{{> metadata description=description type=type typeDir=typeDir name=name}}')(item);
+
+      if (metadataOut.trim() && type !== 'bloblang-functions' && type !== 'bloblang-methods') {
+        const mPath = path.join(metadataOutRoot, type, `${name}.adoc`);
+        fs.mkdirSync(path.dirname(mPath), { recursive: true });
+        fs.writeFileSync(mPath, metadataOut);
+        if (!writeFullDrafts) {
+          partialsWritten++;
+          partialFiles.push(path.relative(process.cwd(), mPath));
         }
       }
 
