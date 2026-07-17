@@ -48,6 +48,11 @@ function main () {
   let skipped = 0;
 
   for (const page of pages) {
+    // Connector pages live in a <type> subdirectory (pages/<type>/<name>.adoc).
+    // Skip pages directly under pages/ — they are not connector pages, and the
+    // parent-directory name would be a bogus type.
+    if (path.dirname(page) === PAGES_ROOT) { skipped++; continue; }
+
     const content = fs.readFileSync(page, 'utf8');
     const found = locateMetadata(content);
     if (!found) { skipped++; continue; }

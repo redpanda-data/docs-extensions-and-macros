@@ -71,6 +71,29 @@ describe('metadata-utils: locateMetadata', () => {
     expect(found.block).toContain('=== Notes');
     expect(found.block).not.toContain('== Permissions');
   });
+
+  test('ignores a "== Metadata" line inside a ---- delimited block', () => {
+    const desc = [
+      'Intro.', '',
+      '[source,text]', '----', '== Metadata', 'not a real heading', '----',
+    ].join('\n');
+    expect(locateMetadata(desc)).toBeNull();
+  });
+
+  test('a heading-like line inside a ---- block does not terminate the section', () => {
+    const desc = [
+      'Intro.', '',
+      '== Metadata', '',
+      'Example output:', '',
+      '----', '== Permissions', '----', '',
+      '- a: 1', '',
+      '== Permissions', '', 'perms',
+    ].join('\n');
+    const found = locateMetadata(desc);
+    expect(found.block).toContain('- a: 1');
+    // The real terminator is the heading outside the block.
+    expect(found.block.endsWith('- a: 1')).toBe(true);
+  });
 });
 
 describe('metadata-utils: extractMetadata', () => {

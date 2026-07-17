@@ -15,6 +15,9 @@
 
 const METADATA_HEADING = /^==\s+Metadata\s*$/;
 const LEVEL2_HEADING = /^==\s+\S/;
+// AsciiDoc listing/literal block delimiter (`----`, possibly longer). Lines
+// inside such blocks must not be treated as headings.
+const BLOCK_DELIMITER = /^-{4,}$/;
 
 /**
  * Locate the `== Metadata` section within a description.
@@ -28,15 +31,19 @@ function locateMetadata (description) {
 
   const lines = description.split('\n');
   let headingLine = -1;
+  let inBlock = false;
   for (let i = 0; i < lines.length; i++) {
-    if (METADATA_HEADING.test(lines[i])) { headingLine = i; break; }
+    if (BLOCK_DELIMITER.test(lines[i])) { inBlock = !inBlock; continue; }
+    if (!inBlock && METADATA_HEADING.test(lines[i])) { headingLine = i; break; }
   }
   if (headingLine === -1) return null;
 
   // Find the terminating heading (next level-2 heading after the metadata one).
   let endLine = lines.length;
+  inBlock = false;
   for (let i = headingLine + 1; i < lines.length; i++) {
-    if (LEVEL2_HEADING.test(lines[i])) { endLine = i; break; }
+    if (BLOCK_DELIMITER.test(lines[i])) { inBlock = !inBlock; continue; }
+    if (!inBlock && LEVEL2_HEADING.test(lines[i])) { endLine = i; break; }
   }
 
   // Trim trailing blank lines inside the section so the block ends cleanly.

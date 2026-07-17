@@ -421,7 +421,9 @@ async function generateRpcnConnectorDocs(options) {
         .compile('{{> metadata description=description type=type typeDir=typeDir name=name}}')(item);
 
       if (metadataOut.trim() && type !== 'bloblang-functions' && type !== 'bloblang-methods') {
-        const mPath = path.join(metadataOutRoot, type, `${name}.adoc`);
+        // Write under typeDir (not the raw data key) so the file path always
+        // matches the include directive built by metadataIncludeLine().
+        const mPath = path.join(metadataOutRoot, typeDir, `${name}.adoc`);
         fs.mkdirSync(path.dirname(mPath), { recursive: true });
         fs.writeFileSync(mPath, metadataOut);
         if (!writeFullDrafts) {
