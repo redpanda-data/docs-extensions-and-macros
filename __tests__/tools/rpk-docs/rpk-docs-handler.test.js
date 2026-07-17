@@ -8,7 +8,8 @@ const {
   updateOverridesWithIntroducedVersions,
   detectLinuxOnlyFromSource,
   addPlatformMarkersFromSource,
-  countCommands
+  countCommands,
+  getRequiredGoVersion
 } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
 
 describe('rpk Docs Handler', () => {
@@ -388,6 +389,44 @@ describe('rpk Docs Handler', () => {
     test('handles empty commands array', () => {
       const tree = { name: 'rpk', commands: [] }
       expect(countCommands(tree)).toBe(1)
+    })
+  })
+
+  describe('getRequiredGoVersion', () => {
+    let tempDir
+
+    beforeEach(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-go-version-test-'))
+    })
+
+    afterEach(() => {
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    })
+
+    test('returns version from go.mod — drives golang:<version> image selection', () => {
+      fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module example.com/rpk\n\ngo 1.26.4\n')
+      const version = getRequiredGoVersion(tempDir)
+      expect(version).toBe('1.26.4')
+      // Caller uses: requiredGoVersion ? `golang:${requiredGoVersion}` : 'golang:1'
+      const goImage = version ? `golang:${version}` : 'golang:1'
+      expect(goImage).toBe('golang:1.26.4')
+    })
+
+    test('returns null when go.mod is absent — drives golang:1 fallback', () => {
+      const version = getRequiredGoVersion(tempDir)
+      expect(version).toBeNull()
+      const goImage = version ? `golang:${version}` : 'golang:1'
+      expect(goImage).toBe('golang:1')
+    })
+
+    test('returns null when go.mod has no go directive', () => {
+      fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module example.com/rpk\n')
+      expect(getRequiredGoVersion(tempDir)).toBeNull()
+    })
+
+    test('handles two-part go version (no patch)', () => {
+      fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module example.com/rpk\n\ngo 1.26\n')
+      expect(getRequiredGoVersion(tempDir)).toBe('1.26')
     })
   })
 })

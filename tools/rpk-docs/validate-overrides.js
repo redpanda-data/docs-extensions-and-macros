@@ -107,9 +107,23 @@ function normalizeCommandPath(cmdPath) {
 
 /**
  * Load and compile the JSON Schema for validation
+ * @param {string} [overridesPath] - Path to the overrides file; the schema is
+ *   looked up as a sibling (same directory) before falling back to the
+ *   package-relative path.
  * @returns {Function} Compiled schema validator
  */
-function loadSchemaValidator() {
+function loadSchemaValidator(overridesPath) {
+  // Primary: look for the schema next to the overrides file (docs repo's docs-data/).
+  if (overridesPath) {
+    const siblingPath = path.join(path.dirname(path.resolve(overridesPath)), 'rpk-overrides.schema.json')
+    if (fs.existsSync(siblingPath)) {
+      const schema = JSON.parse(fs.readFileSync(siblingPath, 'utf8'))
+      const ajv = new Ajv2020({ allErrors: true, verbose: true })
+      return ajv.compile(schema)
+    }
+  }
+
+  // Fallback: package-relative path (legacy / monorepo usage).
   const schemaPath = path.resolve(__dirname, '../../docs-data/rpk-overrides.schema.json')
 
   if (!fs.existsSync(schemaPath)) {
@@ -124,13 +138,14 @@ function loadSchemaValidator() {
 /**
  * Validate overrides against JSON Schema
  * @param {Object} overrides - Overrides object to validate
+ * @param {string} [overridesPath] - Path to the overrides file (used to locate schema)
  * @returns {ValidationResult}
  */
-function validateSchema(overrides) {
+function validateSchema(overrides, overridesPath) {
   const result = new ValidationResult()
 
   try {
-    const validate = loadSchemaValidator()
+    const validate = loadSchemaValidator(overridesPath)
     const valid = validate(overrides)
 
     if (!valid) {
@@ -531,7 +546,7 @@ function validateDescriptions(commandOverride, context) {
  * @param {Object} [commandTree] - Optional command tree for path validation
  * @returns {ValidationResult}
  */
-function validateOverrides(overrides, commandTree = null) {
+function validateOverrides(overrides, commandTree = null, overridesPath = null) {
   const result = new ValidationResult()
 
   if (!overrides || typeof overrides !== 'object') {
@@ -540,7 +555,7 @@ function validateOverrides(overrides, commandTree = null) {
   }
 
   // 1. Schema validation
-  result.merge(validateSchema(overrides))
+  result.merge(validateSchema(overrides, overridesPath))
 
   // 2. Reference validation
   result.merge(validateReferences(overrides))
@@ -596,7 +611,7 @@ function loadAndValidateOverrides(overridesPath, commandTree = null) {
   }
 
   // Run validations
-  validation.merge(validateOverrides(overrides, commandTree))
+  validation.merge(validateOverrides(overrides, commandTree, overridesPath))
 
   return { overrides, validation }
 }

@@ -387,17 +387,26 @@ function fetchRpkTreeFromLinuxSource(sourcePath) {
 
   // Start a container with the Go image, mount source, build rpk, install plugins, then print-tree
   // Use a long-running container so we can run multiple commands
+  // Pin the Go image to the exact version required by go.mod to prevent
+  // "go.mod requires go >= X.Y.Z (running X.Y.Z-1)" build failures when
+  // golang:1 resolves to a patch release behind the requirement.
+  const requiredGoVersion = getRequiredGoVersion(absoluteSourcePath)
+  const goImage = requiredGoVersion ? `golang:${requiredGoVersion}` : 'golang:1'
+
   console.log('Starting build container...')
   const createResult = spawnSync('docker', [
     'run', '-d', '--rm',
     '-v', `${absoluteSourcePath}:/rpk-source:ro`,
     '-w', '/rpk-source',
-    'golang:1',
+    goImage,
     'sh', '-c', 'sleep 600' // Keep container alive for 10 minutes
   ], {
     encoding: 'utf8',
     timeout: 60000
   })
+
+  let activeResult = createResult
+  let activeImage = goImage
 
   if (createResult.status !== 0) {
     const stderr = createResult.stderr || ''
@@ -407,13 +416,40 @@ function fetchRpkTreeFromLinuxSource(sourcePath) {
         'Start Docker Desktop or the Docker service and try again.'
       )
     }
-    throw new Error(
-      `Failed to create build container: ${stderr}\n` +
-      'Make sure Docker is running and has sufficient resources.'
+
+    // If the pinned tag couldn't be pulled (not yet on Docker Hub for a new
+    // patch release), retry with golang:1 before giving up.
+    const isPullFailure = requiredGoVersion && (
+      stderr.includes('manifest unknown') ||
+      stderr.includes('pull access denied') ||
+      stderr.includes('not found') ||
+      stderr.includes('repository does not exist')
     )
+    if (isPullFailure) {
+      console.warn(`⚠ Could not pull ${goImage}: ${stderr.trim()}`)
+      console.log('Retrying with golang:1...')
+      activeImage = 'golang:1'
+      activeResult = spawnSync('docker', [
+        'run', '-d', '--rm',
+        '-v', `${absoluteSourcePath}:/rpk-source:ro`,
+        '-w', '/rpk-source',
+        activeImage,
+        'sh', '-c', 'sleep 600'
+      ], {
+        encoding: 'utf8',
+        timeout: 60000
+      })
+    }
+
+    if (activeResult.status !== 0) {
+      throw new Error(
+        `Failed to create build container: ${activeResult.stderr || stderr}\n` +
+        'Make sure Docker is running and has sufficient resources.'
+      )
+    }
   }
 
-  const containerId = createResult.stdout.trim()
+  const containerId = activeResult.stdout.trim()
   console.log(`Build container started: ${containerId.substring(0, 12)}`)
 
   try {
@@ -1041,6 +1077,9 @@ async function handleRpkDocsGeneration(options = {}) {
   }
   const finalCloudSecretDir = cloudSecretDir || defaultCloudSecretDir
 
+  // nav.adoc lives at modules/ROOT/nav.adoc relative to the repo root
+  const navFile = path.join(repoRoot, 'modules', 'ROOT', 'nav.adoc')
+
   // Determine which version to document
   const version = effectiveRef || 'dev'
   console.log(`\nGenerating rpk documentation for version: ${version}`)
@@ -1088,12 +1127,19 @@ async function handleRpkDocsGeneration(options = {}) {
         rpkVersion,
         pluginVersions: {},
         draftMissing,
-        preservationsDir: preserveFrom
+        preservationsDir: preserveFrom,
+        navFile
       })
 
       console.log(`\nGeneration complete!`)
       console.log(`  - Commands documented: ${result.commandCount}`)
       console.log(`  - Files generated: ${result.filesGenerated}`)
+      if (result.filesDeleted > 0) {
+        console.log(`  - Stale files deleted: ${result.filesDeleted}`)
+      }
+      if (result.navUpdated) {
+        console.log(`  - Nav entries updated: ${result.navEntriesGenerated}`)
+      }
       console.log(`  - Output directory: ${finalOutputDir}`)
 
       // Run validation on generated output
@@ -1387,12 +1433,19 @@ async function handleRpkDocsGeneration(options = {}) {
       rpkVersion,
       pluginVersions,
       draftMissing,
-      preservationsDir: preserveFrom
+      preservationsDir: preserveFrom,
+      navFile
     })
 
     console.log(`\nGeneration complete!`)
     console.log(`  - Commands documented: ${result.commandCount}`)
     console.log(`  - Files generated: ${result.filesGenerated}`)
+    if (result.filesDeleted > 0) {
+      console.log(`  - Stale files deleted: ${result.filesDeleted}`)
+    }
+    if (result.navUpdated) {
+      console.log(`  - Nav entries updated: ${result.navEntriesGenerated}`)
+    }
     console.log(`  - Output directory: ${finalOutputDir}`)
 
     // Run validation on generated output
@@ -1626,6 +1679,7 @@ module.exports = {
   handleRpkDocsGeneration,
   fetchRpkTreeFromSource,
   fetchRpkTreeFromLinuxSource,
+  getRequiredGoVersion,
   prepareSourceFromRef,
   detectLinuxOnlyFromSource,
   addPlatformMarkersFromSource,
