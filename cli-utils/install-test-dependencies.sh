@@ -104,7 +104,11 @@ install_buf() {
         # Download and install buf for Linux
         BIN="/usr/local/bin/buf"
         VERSION="1.28.1"
-        curl -sSL "https://github.com/bufbuild/buf/releases/download/v${VERSION}/buf-$(uname -s)-$(uname -m)" -o "${BIN}" || { log_error "Failed to download buf"; exit 1; }
+        # Same download hardening as install_rpk: fail on HTTP errors and
+        # retry transient GitHub/CDN failures with exponential backoff.
+        curl -fsSL --retry 5 --retry-all-errors \
+            --connect-timeout 30 --max-time 300 --retry-max-time 600 \
+            "https://github.com/bufbuild/buf/releases/download/v${VERSION}/buf-$(uname -s)-$(uname -m)" -o "${BIN}" || { log_error "Failed to download buf"; rm -f "${BIN}" 2>/dev/null; exit 1; }
         chmod +x "${BIN}" || { log_error "Failed to make buf executable"; exit 1; }
         ;;
       Darwin)
@@ -466,10 +470,12 @@ install_rpk() {
     
     # Try to download and install rpk.
     # Use -f so HTTP errors (e.g. 403/404/429/503) fail instead of writing an
-    # error page into the zip, and retry to ride out transient GitHub/CDN and
-    # network errors that otherwise cause intermittent CI failures.
-    if curl -fL --retry 5 --retry-delay 3 --retry-all-errors \
-            --connect-timeout 30 --max-time 300 \
+    # error page into the zip, and retry with curl's default exponential
+    # backoff (1s, 2s, 4s, ...) to ride out transient GitHub/CDN and network
+    # errors, including rate limits that need time to clear. --retry-max-time
+    # caps the whole retry window so CI fails fast on persistent errors.
+    if curl -fL --retry 5 --retry-all-errors \
+            --connect-timeout 30 --max-time 300 --retry-max-time 600 \
             -o "$rpk_filename" "$rpk_url"; then
         if unzip "$rpk_filename" 2>/dev/null; then
             mkdir -p ~/.local/bin
@@ -510,6 +516,8 @@ install_rpk() {
         fi
     else
         log_warn "Failed to download $rpk_url"
+        # A mid-transfer failure can leave a partial file behind even with -f.
+        rm -f "$rpk_filename" 2>/dev/null
         log_warn "Please install rpk manually:"
         log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
         return 1
