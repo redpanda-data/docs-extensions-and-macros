@@ -800,6 +800,9 @@ Fields section partial template (default: "<repository-root>/tools/redpanda-conn
 `--template-examples <path>`::
 Examples section partial template (default: "<repository-root>/tools/redpanda-connect/templates/examples-partials.hbs")
 
+`--template-metadata <path>`::
+Metadata section partial template (default: "<repository-root>/tools/redpanda-connect/templates/metadata-partials.hbs")
+
 `--template-bloblang <path>`::
 Custom Handlebars template for bloblang function/method partials
 
