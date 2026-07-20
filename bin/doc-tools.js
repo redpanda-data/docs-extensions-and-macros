@@ -794,6 +794,38 @@ automation
   })
 
 /**
+ * generate migrate-rpcn-metadata
+ *
+ * @description
+ * One-time migration that moves inline `== Metadata` blocks out of connector
+ * reference pages (modules/components/pages/<type>/<name>.adoc) and into
+ * regenerated partials (modules/components/partials/metadata/<type>/<name>.adoc),
+ * replacing the inline block in the page with an include directive. Afterwards
+ * `generate rpcn-connector-docs` keeps the partial in sync with the connector's
+ * upstream description on every run.
+ *
+ * @why
+ * Metadata documented inline in the main page is never refreshed by normal
+ * regeneration, so it drifts from the source. Extracting it into a partial makes
+ * it flow through automatically, matching the fields and examples partials.
+ *
+ * @example
+ * # Dry run (default): report the pages that would change
+ * npx doc-tools generate migrate-rpcn-metadata
+ *
+ * # Apply the migration
+ * npx doc-tools generate migrate-rpcn-metadata --write
+ */
+automation
+  .command('migrate-rpcn-metadata')
+  .description('One-time migration of inline connector == Metadata blocks into regenerated partials. Dry run unless --write is given.')
+  .option('--write', 'Apply changes (default is a dry run that only reports)')
+  .action((options) => {
+    const { migrateMetadataToPartials } = require('../tools/redpanda-connect/migrate-metadata-to-partials.js')
+    migrateMetadataToPartials({ write: Boolean(options.write) })
+  })
+
+/**
  * generate property-docs
  *
  * @description

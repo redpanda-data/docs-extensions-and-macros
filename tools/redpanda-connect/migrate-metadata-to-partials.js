@@ -14,12 +14,13 @@
  * sync with the connector's upstream description on every run.
  *
  * Usage (run from the docs repo root):
- *   node <path>/migrate-metadata-to-partials.js            # dry run, reports changes
- *   node <path>/migrate-metadata-to-partials.js --write    # apply changes
+ *   npx doc-tools generate migrate-rpcn-metadata            # dry run, reports changes
+ *   npx doc-tools generate migrate-rpcn-metadata --write    # apply changes
  */
 
 const fs = require('fs');
 const path = require('path');
+const { globSync } = require('glob');
 const { locateMetadata, metadataIncludeLine } = require('./metadata-utils.js');
 
 const PARTIAL_BANNER =
@@ -28,20 +29,20 @@ const PARTIAL_BANNER =
 const PAGES_ROOT = path.resolve(process.cwd(), 'modules/components/pages');
 const PARTIALS_ROOT = path.resolve(process.cwd(), 'modules/components/partials/metadata');
 
-/** Recursively collect .adoc files under a directory. */
+/** Recursively collect .adoc files under a directory (minimatch glob). */
 function collectAdocFiles (dir) {
-  const out = [];
-  if (!fs.existsSync(dir)) return out;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...collectAdocFiles(full));
-    else if (entry.isFile() && entry.name.endsWith('.adoc')) out.push(full);
-  }
-  return out;
+  if (!fs.existsSync(dir)) return [];
+  return globSync('**/*.adoc', { cwd: dir, absolute: true, nodir: true });
 }
 
-function main () {
-  const write = process.argv.includes('--write');
+/**
+ * Migrate inline `== Metadata` blocks in connector pages to regenerated
+ * partials plus include directives.
+ * @param {object} [options]
+ * @param {boolean} [options.write=false] Apply changes (otherwise dry run).
+ * @returns {{migrated:number, skipped:number}}
+ */
+function migrateMetadataToPartials ({ write = false } = {}) {
   const pages = collectAdocFiles(PAGES_ROOT);
 
   let migrated = 0;
@@ -89,6 +90,14 @@ function main () {
 
   console.log(`\n${write ? 'Migrated' : 'Would migrate'} ${migrated} page(s); ${skipped} without an inline metadata section.`);
   if (!write) console.log('Dry run only. Re-run with --write to apply.');
+
+  return { migrated, skipped };
 }
 
-main();
+module.exports = { migrateMetadataToPartials };
+
+// Allow direct execution for local development; the supported entry point is
+// `npx doc-tools generate migrate-rpcn-metadata`.
+if (require.main === module) {
+  migrateMetadataToPartials({ write: process.argv.includes('--write') });
+}
