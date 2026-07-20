@@ -188,6 +188,12 @@ function generateRpkDocs(args) {
     const response = {
       success: false,
       error: err.message,
+      // Report the ref that was resolved and attempted, even on failure, so
+      // callers can confirm parameter defaulting worked independently of the
+      // (environment-dependent) build outcome.
+      ref: version,
+      version: version,
+      ref_type: refType,
       stdout: err.stdout || '',
       stderr: err.stderr || '',
       exitCode: err.status

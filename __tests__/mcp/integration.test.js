@@ -126,18 +126,17 @@ describe('MCP Tools Integration Tests', () => {
       const result = mcpTools.executeTool('generate_rpk_docs', {});
 
       expect(result).toBeDefined();
-      // Now defaults to ref 'dev', so should be treated as if ref was provided
-      // Test will attempt to run but may fail due to missing dependencies - that's OK
-      // The key is that it should NOT error about missing parameters
-      if (result.error) {
-        expect(result.error.toLowerCase()).not.toContain('required');
-        expect(result.error.toLowerCase()).not.toContain('missing');
-      } else {
-        // The new API returns 'ref' and 'version' instead of 'branch'
-        expect(result).toHaveProperty('ref', 'dev');
-        expect(result).toHaveProperty('version', 'dev');
-        expect(result).toHaveProperty('ref_type', 'branch');
-      }
+      // The tool defaults to ref 'dev' when no ref/tag/branch is given. The
+      // build itself may fail for environment reasons (for example an outdated
+      // local Go toolchain) — that's fine here. What this test verifies is that
+      // parameter defaulting worked: the resolved ref must be 'dev' regardless
+      // of the build outcome, which the tool now reports even on failure.
+      // (Substring-matching the error text for "required"/"missing" is
+      // unreliable: build errors such as "requires go 1.x or newer" contain
+      // those words without being parameter-validation failures.)
+      expect(result).toHaveProperty('ref', 'dev');
+      expect(result).toHaveProperty('version', 'dev');
+      expect(result).toHaveProperty('ref_type', 'branch');
     });
 
     test('generate_crd_docs requires tag parameter', () => {
