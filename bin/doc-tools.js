@@ -26,6 +26,7 @@ const {
   diffDirs,
   generatePropertyComparisonReport,
   updatePropertyOverridesWithVersion,
+  updatePropertiesJsonWithVersion,
   cleanupOldDiffs
 } = require('../cli-utils/diff-utils')
 
@@ -969,6 +970,12 @@ automation
 
           if (overridesPath && fs.existsSync(overridesPath)) {
             updatePropertyOverridesWithVersion(overridesPath, diffData, newTag)
+            // The overrides were baked into the extracted JSON during Phase 1,
+            // before the stamp above existed. Stamp the JSON too, so the
+            // AsciiDoc generated in Phase 3 shows "Introduced in" for
+            // properties new in this release instead of one release late.
+            const extractedJsonPath = path.resolve(outputDir, 'attachments', `redpanda-properties-${newTag}.json`)
+            updatePropertiesJsonWithVersion(extractedJsonPath, diffData, newTag)
           }
         }
       } catch (err) {
