@@ -497,6 +497,13 @@ function fetchRpkTreeFromLinuxSource(sourcePath) {
         } else if (stderr.includes('unknown command') || stderr.includes('Error: unknown command')) {
           console.log(`    - ${plugin} is not an installable plugin`)
         } else {
+          // A failed install is non-fatal: generation continues, but this
+          // plugin's commands will be absent from the tree. Expected for `k8s`
+          // during the 26.2 beta window — `rpk k8s install` finds no `latest`
+          // release because the plugin publisher's stableVersionRe only promotes
+          // pure X.Y.Z versions, so k8s commands only appear at GA. A pre-GA
+          // regen that omits `rpk k8s` pages is this, not a generator bug.
+          // See redpanda-data/docs#1801.
           console.warn(`    ✗ Failed to install ${plugin}: ${stderr || stdout}`)
         }
       }
