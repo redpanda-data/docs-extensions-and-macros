@@ -770,6 +770,7 @@ automation
   .option('--template-intro <path>', 'Intro section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/intro.hbs'))
   .option('--template-fields <path>', 'Fields section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/fields-partials.hbs'))
   .option('--template-examples <path>', 'Examples section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/examples-partials.hbs'))
+  .option('--template-metadata <path>', 'Metadata section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/metadata-partials.hbs'))
   .option('--template-bloblang <path>', 'Custom Handlebars template for bloblang function/method partials')
   .option('--overrides <path>', 'Optional JSON file with overrides', 'docs-data/overrides.json')
   .option('--include-bloblang', 'Include Bloblang functions and methods in generation')
@@ -790,6 +791,38 @@ automation
 
     const { handleRpcnConnectorDocs } = require('../tools/redpanda-connect/rpcn-connector-docs-handler.js')
     await handleRpcnConnectorDocs(options)
+  })
+
+/**
+ * generate migrate-rpcn-metadata
+ *
+ * @description
+ * One-time migration that moves inline `== Metadata` blocks out of connector
+ * reference pages (modules/components/pages/<type>/<name>.adoc) and into
+ * regenerated partials (modules/components/partials/metadata/<type>/<name>.adoc),
+ * replacing the inline block in the page with an include directive. Afterwards
+ * `generate rpcn-connector-docs` keeps the partial in sync with the connector's
+ * upstream description on every run.
+ *
+ * @why
+ * Metadata documented inline in the main page is never refreshed by normal
+ * regeneration, so it drifts from the source. Extracting it into a partial makes
+ * it flow through automatically, matching the fields and examples partials.
+ *
+ * @example
+ * # Dry run (default): report the pages that would change
+ * npx doc-tools generate migrate-rpcn-metadata
+ *
+ * # Apply the migration
+ * npx doc-tools generate migrate-rpcn-metadata --write
+ */
+automation
+  .command('migrate-rpcn-metadata')
+  .description('One-time migration of inline connector == Metadata blocks into regenerated partials. Dry run unless --write is given.')
+  .option('--write', 'Apply changes (default is a dry run that only reports)')
+  .action((options) => {
+    const { migrateMetadataToPartials } = require('../tools/redpanda-connect/migrate-metadata-to-partials.js')
+    migrateMetadataToPartials({ write: Boolean(options.write) })
   })
 
 /**

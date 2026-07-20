@@ -162,6 +162,9 @@ function generatePropertyDocs(args) {
     return {
       success: false,
       error: err.message,
+      // Report the resolved ref even on failure so callers can confirm
+      // parameter defaulting worked independently of the build outcome.
+      [refType]: version,
       stdout: err.stdout || '',
       stderr: err.stderr || '',
       exitCode: err.status,

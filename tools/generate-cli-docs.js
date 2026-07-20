@@ -304,7 +304,8 @@ IMPORTANT: This documentation is auto-generated. Do not edit manually. Run \`npm
     'cloud-regions',
     'crd-spec',
     'bundle-openapi',
-    'update-connect-version'
+    'update-connect-version',
+    'migrate-rpcn-metadata'
   ];
 
   generateSubcommands.forEach(subcmd => {
