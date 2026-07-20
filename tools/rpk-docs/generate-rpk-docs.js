@@ -1692,13 +1692,18 @@ function formatExamples(text) {
       i++
     } else if (isIndented) {
       // Command line — collect all consecutive command lines into one code block
-      // (stops at a blank line or a comment line)
-      result.push('[,bash]')
-      result.push('----')
+      // (stops at a blank line or a comment line). Dedent by the run's minimum
+      // indent rather than trimming each line, so multi-line commands with
+      // backslash continuations keep their relative indentation.
+      const run = []
       while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !lines[i].trim().startsWith('#')) {
-        result.push(lines[i].trim())
+        run.push(lines[i])
         i++
       }
+      const minIndent = Math.min(...run.map(l => l.match(/^\s*/)[0].length))
+      result.push('[,bash]')
+      result.push('----')
+      run.forEach(l => result.push(l.slice(minIndent)))
       result.push('----')
     } else if (/^\s*`rpk .+`\s*$/.test(line)) {
       // Inline backticked command on its own line - convert to code block

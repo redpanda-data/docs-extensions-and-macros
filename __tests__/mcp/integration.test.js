@@ -3,8 +3,21 @@
  * These tests verify that the MCP tools correctly interface with the doc-tools CLI
  */
 
-const { describe, test, expect, beforeAll } = require('@jest/globals');
+const { describe, test, expect, beforeAll, afterAll } = require('@jest/globals');
+
+// Stub only `spawnSync` so the parameter-defaulting tests below can verify
+// ref/tag defaulting without triggering a real (multi-minute, environment-
+// dependent) build from source. `execSync` and `spawn` keep their real
+// implementations, so the CLI-availability tests still exercise the actual
+// doc-tools binary. The default implementation delegates to the real
+// spawnSync; individual describe blocks override it as needed.
+jest.mock('child_process', () => {
+  const actual = jest.requireActual('child_process');
+  return { ...actual, spawnSync: jest.fn(actual.spawnSync) };
+});
+
 const mcpTools = require('../../bin/mcp-tools');
+const childProcess = require('child_process');
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -92,52 +105,57 @@ describe('MCP Tools Integration Tests', () => {
   });
 
   describe('Generate Tools - Parameter Validation', () => {
+    // These tools default to ref/branch 'dev' when no ref is given, then build
+    // from source. We only want to verify the *defaulting*, not run a real
+    // build (which is multi-minute and environment-dependent), so stub the
+    // build to fail fast. Each tool now reports the resolved ref even on the
+    // failure path, so defaulting can be asserted deterministically.
+    beforeAll(() => {
+      childProcess.spawnSync.mockImplementation(() => ({
+        status: 1,
+        stdout: '',
+        stderr: 'build skipped in unit test',
+        error: null
+      }));
+    });
+
+    afterAll(() => {
+      // Restore the real implementation for any later describe blocks.
+      childProcess.spawnSync.mockImplementation(
+        jest.requireActual('child_process').spawnSync
+      );
+    });
+
     test('generate_property_docs defaults to dev branch when no parameters provided', () => {
       const result = mcpTools.executeTool('generate_property_docs', {});
 
       expect(result).toBeDefined();
-      // Now defaults to branch 'dev', so should be treated as if branch was provided
-      // Test will attempt to run but may fail due to missing dependencies - that's OK
-      // The key is that it should NOT error about missing parameters
-      if (result.error) {
-        expect(result.error.toLowerCase()).not.toContain('required');
-        expect(result.error.toLowerCase()).not.toContain('missing');
-      } else {
-        expect(result).toHaveProperty('branch', 'dev');
-      }
+      // Defaulting to branch 'dev' must be reported regardless of build outcome.
+      expect(result).toHaveProperty('branch', 'dev');
     });
 
     test('generate_metrics_docs defaults to dev branch when no parameters provided', () => {
       const result = mcpTools.executeTool('generate_metrics_docs', {});
 
       expect(result).toBeDefined();
-      // Now defaults to branch 'dev', so should be treated as if branch was provided
-      // Test will attempt to run but may fail due to missing dependencies - that's OK
-      // The key is that it should NOT error about missing parameters
-      if (result.error) {
-        expect(result.error.toLowerCase()).not.toContain('required');
-        expect(result.error.toLowerCase()).not.toContain('missing');
-      } else {
-        expect(result).toHaveProperty('branch', 'dev');
-      }
+      // Defaulting to branch 'dev' must be reported regardless of build outcome.
+      expect(result).toHaveProperty('branch', 'dev');
     });
 
     test('generate_rpk_docs defaults to dev branch when no parameters provided', () => {
       const result = mcpTools.executeTool('generate_rpk_docs', {});
 
       expect(result).toBeDefined();
-      // Now defaults to ref 'dev', so should be treated as if ref was provided
-      // Test will attempt to run but may fail due to missing dependencies - that's OK
-      // The key is that it should NOT error about missing parameters
-      if (result.error) {
-        expect(result.error.toLowerCase()).not.toContain('required');
-        expect(result.error.toLowerCase()).not.toContain('missing');
-      } else {
-        // The new API returns 'ref' and 'version' instead of 'branch'
-        expect(result).toHaveProperty('ref', 'dev');
-        expect(result).toHaveProperty('version', 'dev');
-        expect(result).toHaveProperty('ref_type', 'branch');
-      }
+      // The tool defaults to ref 'dev' when no ref/tag/branch is given. What
+      // this test verifies is that parameter defaulting worked: the resolved
+      // ref must be 'dev' regardless of the (stubbed, and in real use
+      // environment-dependent) build outcome, which the tool reports even on
+      // failure. Substring-matching the error text for "required"/"missing"
+      // was unreliable: build errors such as "requires go 1.x or newer" contain
+      // those words without being parameter-validation failures.
+      expect(result).toHaveProperty('ref', 'dev');
+      expect(result).toHaveProperty('version', 'dev');
+      expect(result).toHaveProperty('ref_type', 'branch');
     });
 
     test('generate_crd_docs requires tag parameter', () => {
