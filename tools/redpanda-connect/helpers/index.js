@@ -11,6 +11,8 @@ module.exports = {
   renderYamlList:  require('./renderYamlList.js'),
   renderConnectFields:    require('./renderConnectFields.js'),
   renderConnectExamples:  require('./renderConnectExamples.js'),
+  renderConnectMetadata:  require('./renderConnectMetadata.js'),
+  descriptionWithMetadataInclude: require('./descriptionWithMetadataInclude.js'),
   renderLeafField:        require('./renderLeafField.js'),
   renderObjectField:      require('./renderObjectField.js'),
   buildConfigYaml:        require('./buildConfigYaml.js'),
