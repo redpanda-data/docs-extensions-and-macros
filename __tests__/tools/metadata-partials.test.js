@@ -94,6 +94,50 @@ describe('metadata-utils: locateMetadata', () => {
     // The real terminator is the heading outside the block.
     expect(found.block.endsWith('- a: 1')).toBe(true);
   });
+
+  test('on a full page, the block ends at the fields include, not end-of-string', () => {
+    // Regression: when == Metadata is the last heading on a reference page, the
+    // block must terminate at the trailing partial include / single-source tag,
+    // not run to EOF and swallow them (which deleted the fields table and the
+    // // end::single-source[] close tag from migrated pages).
+    const page = [
+      '= aws_s3',
+      '// tag::single-source[]',
+      '',
+      'Consumes objects from an S3 bucket.',
+      '',
+      '== Metadata',
+      '',
+      '- s3_key',
+      '- s3_bucket',
+      '',
+      'include::connect:components:partial$fields/inputs/aws_s3.adoc[]',
+      '',
+      '// end::single-source[]',
+    ].join('\n');
+    const found = locateMetadata(page);
+    expect(found.block).toContain('- s3_bucket');
+    expect(found.block).not.toContain('partial$fields');
+    expect(found.block).not.toContain('end::single-source');
+    // The content outside the located block is preserved on replacement.
+    const rest = page.slice(0, found.start) + page.slice(found.end);
+    expect(rest).toContain('include::connect:components:partial$fields/inputs/aws_s3.adoc[]');
+    expect(rest).toContain('// end::single-source[]');
+  });
+
+  test('an examples include between the heading and fields include terminates the block', () => {
+    const page = [
+      'Intro.', '',
+      '== Metadata', '',
+      '- activity_id', '',
+      'include::connect:components:partial$examples/inputs/azure_cosmosdb.adoc[]', '',
+      'include::connect:components:partial$fields/inputs/azure_cosmosdb.adoc[]', '',
+      '// end::single-source[]',
+    ].join('\n');
+    const found = locateMetadata(page);
+    expect(found.block.endsWith('- activity_id')).toBe(true);
+    expect(found.block).not.toContain('partial$examples');
+  });
 });
 
 describe('metadata-utils: extractMetadata', () => {
