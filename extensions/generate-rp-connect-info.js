@@ -30,9 +30,23 @@ module.exports.register = function ({ config }) {
     return require('../cli-utils/octokit-client')
   }
 
+  // Translated CSV rows, kept for the documentsConverted hook below
+  let translatedRows = null
+
   // Use 'on' and return the promise so Antora waits for async completion
   this.on('contentClassified', ({ contentCatalog }) => {
     return processContent(contentCatalog)
+  })
+
+  // Set sticky-bar page attributes (type context switcher and availability badges) so the UI
+  // templates (article.hbs) render them server-side, with no flash of client-side rearranging.
+  // This must run on documentsConverted: Antora extracts page attributes for UI templates in a
+  // header-only parse with Asciidoctor extensions disabled, so these attributes cannot be set
+  // from the component_type_dropdown macro during conversion. Mutating page.asciidoc.attributes
+  // after conversion is the supported way to feed computed attributes to UI templates.
+  this.on('documentsConverted', ({ contentCatalog }) => {
+    if (!translatedRows) return
+    setStickyBarPageAttributes(contentCatalog, translatedRows, logger)
   })
 
   async function processContent (contentCatalog) {
@@ -56,6 +70,7 @@ module.exports.register = function ({ config }) {
       const parsedData = Papa.parse(csvData, { header: true, skipEmptyLines: true })
       const enrichedData = translateCsvData(parsedData, pages, logger)
       parsedData.data = enrichedData
+      translatedRows = enrichedData
 
       // Set csvData on all relevant components
       const componentsToEnrich = [redpandaConnect, redpandaCloud, preview].filter(Boolean)
@@ -342,5 +357,84 @@ module.exports.register = function ({ config }) {
     logger.info(`Enriched ${enrichedCount} component pages with commercial names`)
 
     return csvCommercialNames
+  }
+
+  /**
+   * Sets sticky-bar metadata attributes on connector pages after conversion, so the UI templates
+   * (article.hbs and the context-switcher partial) render the Type dropdown and availability
+   * badges server-side:
+   * - page-context-switcher: Type dropdown entries (when the connector has multiple types)
+   * - page-cloud-available + page-cloud-available-url: on Self-Managed pages with a Cloud variant
+   * - page-self-managed-available + page-self-managed-available-url: on Cloud pages with a
+   *   Self-Managed variant
+   * - page-self-managed-only: on Self-Managed pages with no Cloud variant
+   */
+  function setStickyBarPageAttributes (contentCatalog, rows, logger) {
+    const pagesByUrl = new Map()
+    contentCatalog.getPages((page) => page.out && page.pub && page.asciidoc).forEach((page) => {
+      pagesByUrl.set(page.pub.url, page)
+    })
+
+    // Group CSV rows by connector name; each row is one type (input, output, and so on)
+    const rowsByConnector = new Map()
+    for (const row of rows) {
+      const connector = (row.connector || '').trim().toLowerCase()
+      if (!connector) continue
+      if (!rowsByConnector.has(connector)) rowsByConnector.set(connector, [])
+      rowsByConnector.get(connector).push(row)
+    }
+
+    let decoratedCount = 0
+    for (const connectorRows of rowsByConnector.values()) {
+      const isCloudSupported = connectorRows.some((row) => row.is_cloud_supported === 'y')
+      for (const row of connectorRows) {
+        // Self-Managed (Connect) variant of this connector page
+        const connectPage = row.redpandaConnectUrl && pagesByUrl.get(row.redpandaConnectUrl)
+        if (connectPage) {
+          const attrs = connectPage.asciidoc.attributes
+          if (connectorRows.length > 1) {
+            attrs['page-context-switcher'] = buildContextSwitcher(connectorRows, row, 'connect')
+          }
+          if (isCloudSupported && row.redpandaCloudUrl) {
+            attrs['page-cloud-available'] = 'true'
+            attrs['page-cloud-available-url'] = row.redpandaCloudUrl
+          } else if (!isCloudSupported) {
+            attrs['page-self-managed-only'] = 'true'
+          }
+          decoratedCount++
+        }
+        // Cloud variant of this connector page
+        const cloudPage = row.redpandaCloudUrl && pagesByUrl.get(row.redpandaCloudUrl)
+        if (cloudPage) {
+          const attrs = cloudPage.asciidoc.attributes
+          if (connectorRows.length > 1) {
+            attrs['page-context-switcher'] = buildContextSwitcher(connectorRows, row, 'cloud')
+          }
+          if (row.redpandaConnectUrl) {
+            attrs['page-self-managed-available'] = 'true'
+            attrs['page-self-managed-available-url'] = row.redpandaConnectUrl
+          }
+          decoratedCount++
+        }
+      }
+    }
+    logger.info(`Set sticky-bar metadata attributes on ${decoratedCount} connector pages`)
+  }
+
+  /**
+   * Builds the page-context-switcher JSON: one Type dropdown entry per connector type, linking to
+   * that type's page in the current site variant. The current page's type is listed first.
+   */
+  function buildContextSwitcher (connectorRows, currentRow, variant) {
+    const capitalize = (value) => value.charAt(0).toUpperCase() + value.slice(1)
+    const orderedRows = [currentRow, ...connectorRows.filter((row) => row !== currentRow)]
+    const data = {}
+    for (const row of orderedRows) {
+      const link = (variant === 'cloud' && row.redpandaCloudUrl) || row.redpandaConnectUrl
+      if (!link) continue
+      const type = row.type.trim()
+      data[type.toLowerCase()] = { name: capitalize(type), to: link }
+    }
+    return JSON.stringify(data)
   }
 }
