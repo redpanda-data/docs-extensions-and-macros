@@ -143,6 +143,26 @@ describe('normalize-metadata: normalizeMetadataBlock', () => {
     expect(normalizeMetadataBlock(block)).toBe(block);
   });
 
+  test('codes fields that use a " - " dash separator (command, gcp_pubsub)', () => {
+    const block = [
+      '- command_stderr - Contains the stderr output of a successful command, if any.',
+      '- gcp_pubsub_message_id - The unique identifier of the message.',
+    ].join('\n');
+    const out = normalizeMetadataBlock(block);
+    expect(out).toContain('- `command_stderr` - Contains the stderr output');
+    expect(out).toContain('- `gcp_pubsub_message_id` - The unique identifier');
+  });
+
+  test('codes the field name even when the description contains inline code', () => {
+    const block = [
+      '- transaction_id: The Oracle transaction ID in `USN.SLOT.SEQ` format.',
+      '- schema: inferred from the collection\'s `$jsonSchema` validator if available.',
+    ].join('\n');
+    const out = normalizeMetadataBlock(block);
+    expect(out).toContain('- `transaction_id`: The Oracle transaction ID in `USN.SLOT.SEQ` format.');
+    expect(out).toContain('- `schema`: inferred from the collection\'s `$jsonSchema` validator');
+  });
+
   test('preserves `===` subheadings that group metadata by operation (nats_kv)', () => {
     const block = [
       '== Metadata', '',
