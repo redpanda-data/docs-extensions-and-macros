@@ -24,14 +24,17 @@ const FENCE_OPEN = /^(\s*)(```|~~~)(.*)$/;
 const FENCE_CLOSE = /^(\s*)(```|~~~)\s*$/;
 const BULLET = /^(\s*[-*]\s+)(.*)$/;
 // A metadata field bullet: the leading token is a lowercase snake_case
-// identifier, optionally followed by a parenthetical annotation (for example
-// "(RFC3339)") and/or a ": description". Field names in Connect metadata are
-// lowercase snake_case (gcs_key, http_server_verb, nats_kv_revision), which
-// distinguishes them from descriptive bullets like "All headers ...".
-const FIELD_BULLET = /^([a-z][a-z0-9_]*)(\s*(?:\([^)]*\))?\s*(?::.*)?)$/;
+// identifier (gcs_key, http_server_verb, header), optionally followed by a
+// parenthetical annotation (for example "(RFC3339)"), and optionally a
+// description separated by ":" or " - ". This distinguishes real field bullets
+// from descriptive ones like "All headers ..." (which start with a capital).
+// The description may itself contain inline code, so it is matched loosely.
+const FIELD_BULLET = /^([a-z][a-z0-9_]*)((?:\s*\([^)]*\))?(?:\s*(?::|-)\s.*)?)$/s;
 
 function normalizeBullet (prefix, content) {
-  if (content.includes('`')) return prefix + content; // already formatted
+  // Skip only when the field name itself is already inline-coded; a backtick
+  // later in the description must not prevent coding the field name.
+  if (content.startsWith('`')) return prefix + content;
   const m = content.match(FIELD_BULLET);
   if (!m) return prefix + content;                     // descriptive, leave as prose
   return `${prefix}\`${m[1]}\`${m[2]}`;                 // inline-code the field name
