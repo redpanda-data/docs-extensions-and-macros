@@ -35,6 +35,7 @@ asciidoc:
   - './macros/config-ref'
   - './macros/helm-ref'
   - './macros/rp-connect-components'
+  - './macros/iceberg-explorer'
   - './asciidoc-extensions/add-line-numbers-highlights'
 antora:
   extensions:
