@@ -29,6 +29,21 @@ const PARTIAL_BANNER =
 const PAGES_ROOT = path.resolve(process.cwd(), 'modules/components/pages');
 const PARTIALS_ROOT = path.resolve(process.cwd(), 'modules/components/partials/metadata');
 
+/**
+ * True when a generated metadata partial carries no actual metadata — either it
+ * is only the autogeneration banner / comments, or it has no `== Metadata`
+ * heading. The generator writes such a partial when the connector's upstream
+ * description has no `== Metadata` section.
+ * @param {string} partial
+ * @returns {boolean}
+ */
+function isEmptyMetadataPartial (partial) {
+  // Reuse the same literal-block-aware parser used for extraction, so a
+  // `== Metadata` line inside a `----` code block (for example an example that
+  // literally contains that text) is not mistaken for a real metadata section.
+  return !locateMetadata(partial);
+}
+
 /** Recursively collect .adoc files under a directory (minimatch glob). */
 function collectAdocFiles (dir) {
   if (!fs.existsSync(dir)) return [];
@@ -75,6 +90,18 @@ function migrateMetadataToPartials ({ write = false } = {}) {
     // migration works standalone but never clobbers generated content.
     const partialExists = fs.existsSync(partialPath);
 
+    // Guard against metadata loss: when the generator produced an EMPTY partial
+    // (the connector's upstream description has no == Metadata section), the
+    // page's inline block is the only real metadata. Migrating it to an include
+    // would replace live metadata with an empty partial. Skip these — the
+    // connector's upstream description must gain a == Metadata section before
+    // the page can be migrated.
+    if (partialExists && isEmptyMetadataPartial(fs.readFileSync(partialPath, 'utf8'))) {
+      console.log(`SKIP (generated partial is empty; keeping inline metadata): ${typeDir}/${name}`);
+      skipped++;
+      continue;
+    }
+
     console.log(`${write ? 'MIGRATE' : 'WOULD MIGRATE'}: ${typeDir}/${name}`);
     console.log(`  -> partial: ${path.relative(process.cwd(), partialPath)}${partialExists ? ' (exists, kept)' : ' (seeded from page)'}`);
 
@@ -94,7 +121,7 @@ function migrateMetadataToPartials ({ write = false } = {}) {
   return { migrated, skipped };
 }
 
-module.exports = { migrateMetadataToPartials };
+module.exports = { migrateMetadataToPartials, isEmptyMetadataPartial };
 
 // Allow direct execution for local development; the supported entry point is
 // `npx doc-tools generate migrate-rpcn-metadata`.

@@ -14,10 +14,17 @@
  */
 
 const METADATA_HEADING = /^==\s+Metadata\s*$/;
-const LEVEL2_HEADING = /^==\s+\S/;
 // AsciiDoc listing/literal block delimiter (`----`, possibly longer). Lines
 // inside such blocks must not be treated as headings.
 const BLOCK_DELIMITER = /^-{4,}$/;
+// The metadata block ends at the next structural element. Besides the next
+// level-2 heading, this also covers page-level constructs that follow the
+// section when locateMetadata runs against a full reference page (not just a
+// connector description): Antora include directives (for example the fields or
+// examples partials) and single-source tag comments. Without these, a metadata
+// section that is the last heading on a page would run to end-of-string and
+// swallow the trailing `include::...partial$fields[]` and `// end::single-source[]`.
+const SECTION_END = /^(?:==\s+\S|include::|\/\/\s*(?:tag|end)::)/;
 
 /**
  * Locate the `== Metadata` section within a description.
@@ -38,12 +45,13 @@ function locateMetadata (description) {
   }
   if (headingLine === -1) return null;
 
-  // Find the terminating heading (next level-2 heading after the metadata one).
+  // Find the terminating element after the metadata heading: the next level-2
+  // heading, an Antora include directive, or a single-source tag comment.
   let endLine = lines.length;
   inBlock = false;
   for (let i = headingLine + 1; i < lines.length; i++) {
     if (BLOCK_DELIMITER.test(lines[i])) { inBlock = !inBlock; continue; }
-    if (!inBlock && LEVEL2_HEADING.test(lines[i])) { endLine = i; break; }
+    if (!inBlock && SECTION_END.test(lines[i])) { endLine = i; break; }
   }
 
   // Trim trailing blank lines inside the section so the block ends cleanly.
