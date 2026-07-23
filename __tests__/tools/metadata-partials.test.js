@@ -125,6 +125,28 @@ describe('metadata-utils: locateMetadata', () => {
     expect(rest).toContain('// end::single-source[]');
   });
 
+  test('the block terminates directly at // end::single-source[] with no include between', () => {
+    // Exercises the `// end::` arm of SECTION_END on its own: a page whose
+    // metadata section is followed immediately by the close tag (no fields
+    // include). Without `// end::` in SECTION_END the block would run to EOF
+    // and swallow the closing tag.
+    const page = [
+      '= thing',
+      '// tag::single-source[]',
+      '',
+      '== Metadata',
+      '',
+      '- thing_id',
+      '',
+      '// end::single-source[]',
+    ].join('\n');
+    const found = locateMetadata(page);
+    expect(found.block).toContain('- thing_id');
+    expect(found.block).not.toContain('end::single-source');
+    const rest = page.slice(0, found.start) + page.slice(found.end);
+    expect(rest).toContain('// end::single-source[]');
+  });
+
   test('an examples include between the heading and fields include terminates the block', () => {
     const page = [
       'Intro.', '',

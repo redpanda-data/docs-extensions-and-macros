@@ -20,6 +20,17 @@ describe('migrate-metadata: isEmptyMetadataPartial', () => {
   test('false when the partial contains a real == Metadata section', () => {
     expect(isEmptyMetadataPartial(`${BANNER}\n\n== Metadata\n\n- \`foo\`: bar\n`)).toBe(false);
   });
+
+  test('true when the only "== Metadata" text sits inside a ---- literal block', () => {
+    // A code example that literally contains "== Metadata" is not a real
+    // metadata section; isEmptyMetadataPartial must agree with locateMetadata.
+    const partial = [
+      BANNER, '',
+      'Some prose about the connector.', '',
+      '[source,text]', '----', '== Metadata', 'not a real heading', '----', '',
+    ].join('\n');
+    expect(isEmptyMetadataPartial(partial)).toBe(true);
+  });
 });
 
 describe('migrate-metadata: does not migrate when the generated partial is empty', () => {

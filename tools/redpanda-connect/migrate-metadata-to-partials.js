@@ -38,10 +38,10 @@ const PARTIALS_ROOT = path.resolve(process.cwd(), 'modules/components/partials/m
  * @returns {boolean}
  */
 function isEmptyMetadataPartial (partial) {
-  const meaningful = partial
-    .split('\n')
-    .filter((l) => l.trim() !== '' && !l.trimStart().startsWith('//'));
-  return !meaningful.some((l) => /^==\s+Metadata\s*$/.test(l));
+  // Reuse the same literal-block-aware parser used for extraction, so a
+  // `== Metadata` line inside a `----` code block (for example an example that
+  // literally contains that text) is not mistaken for a real metadata section.
+  return !locateMetadata(partial);
 }
 
 /** Recursively collect .adoc files under a directory (minimatch glob). */
