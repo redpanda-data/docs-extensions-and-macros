@@ -83,7 +83,8 @@
     "./macros/rp-connect-components": "./macros/rp-connect-components.js",
     "./macros/config-ref": "./macros/config-ref.js",
     "./macros/helm-ref": "./macros/helm-ref.js",
-    "./macros/badge": "./macros/badge.js"
+    "./macros/badge": "./macros/badge.js",
+    "./macros/iceberg-explorer": "./macros/iceberg-explorer.js"
   },
   "files": [
     "extensions",
