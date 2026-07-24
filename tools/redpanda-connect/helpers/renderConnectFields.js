@@ -31,13 +31,14 @@ module.exports = function renderConnectFields(children, prefix = '') {
     const isArrayTitle = typeof child.name === 'string' && child.name.endsWith('[]');
     if (isArrayTitle) {
       displayType = 'array<object>';
-    } else if (child.type === 'string' && child.kind === 'array') {
-      displayType = 'array';
-    } else if (child.type === 'unknown' && child.kind === 'map') {
+    } else if (child.kind === 'map') {
+      // Any map renders as an object, regardless of its value type. Previously
+      // only `type: unknown` maps were handled, so string-valued maps (for
+      // example a `map[string]string` field) fell through and rendered as
+      // `string`, which is misleading.
       displayType = 'object';
-    } else if (child.type === 'unknown' && child.kind === 'array') {
-      displayType = 'array';
-    } else if (child.type === 'unknown' && child.kind === 'list') {
+    } else if (child.kind === 'array' || child.kind === 'list') {
+      // Any list/array renders as `array` regardless of element type.
       displayType = 'array';
     } else {
       displayType = child.type;

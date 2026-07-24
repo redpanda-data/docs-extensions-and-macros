@@ -429,6 +429,24 @@ describe('Utility Helpers', () => {
       expect(result).toContain("*Default*: `30`");
     });
 
+    it('renders a string-valued map field as object, not string', () => {
+      const mapField = [
+        { name: 'headers', type: 'string', kind: 'map', description: 'Custom headers keyed by name.' },
+      ];
+      const result = renderConnectFields(mapField).toString();
+      expect(result).toContain('=== `headers`');
+      expect(result).toContain('*Type*: `object`');
+      expect(result).not.toContain('*Type*: `string`');
+    });
+
+    it('renders any list/array field as array regardless of element type', () => {
+      const listField = [
+        { name: 'ports', type: 'int', kind: 'array', description: 'Ports.' },
+      ];
+      const result = renderConnectFields(listField).toString();
+      expect(result).toContain('*Type*: `array`');
+    });
+
     it('recursively renders nested children with correct path', () => {
       const result = renderConnectFields(nestedField).toString();
       expect(result).toContain("=== `parent`");
