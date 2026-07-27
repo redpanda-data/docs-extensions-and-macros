@@ -537,6 +537,7 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
 
     // Step 2: Install plugins
     console.log('Installing plugins for complete command coverage...')
+    const failedPlugins = []
     for (const plugin of KNOWN_PLUGINS) {
       // A pin installs a specific version instead of the manifest's latest.
       // This is how pre-GA plugins (no version promoted to latest) get into a
@@ -580,6 +581,7 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
           // commands only appear at GA unless the run pins a version.
           // See redpanda-data/docs#1801.
           console.warn(`    ✗ Failed to install ${plugin}: ${stderr || stdout}`)
+          failedPlugins.push(plugin)
         }
       }
     }

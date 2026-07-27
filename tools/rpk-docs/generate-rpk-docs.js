@@ -2166,7 +2166,7 @@ const STATIC_RPK_NAV_ENTRIES = [
  * @param {Set} topLevelWithSubcommands - Set of top-level command names with subcommands
  * @returns {Object} { navUpdated, navEntriesGenerated }
  */
-function updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands) {
+function updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands, protectedPlugins = []) {
   if (!fs.existsSync(navFile)) {
     console.warn(`Warning: nav file not found, skipping nav update: ${navFile}`)
     return { navUpdated: false }
@@ -2212,11 +2212,28 @@ function updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcomm
     newEntries.push(`${stars} xref:${xrefPath}[]`)
   }
 
-  // Rebuild: header + static entries + generated entries
+  // Preserve existing entries for protected plugins (their commands are
+  // absent from this run's tree, so they would otherwise be dropped).
+  const preservedEntries = []
+  if (protectedPlugins.length > 0) {
+    const patterns = protectedPlugins.map(pl => `reference:rpk/rpk-${pl}/`)
+    const regenerated = new Set(newEntries.map(e => e.replace(/^\*+ /, '')))
+    for (const line of lines.slice(sectionStart + 1, sectionEnd)) {
+      if (patterns.some(pat => line.includes(pat)) && !regenerated.has(line.replace(/^\*+ /, ''))) {
+        preservedEntries.push(line)
+      }
+    }
+    if (preservedEntries.length > 0) {
+      console.log(`  Preserving ${preservedEntries.length} nav entries for plugins: ${protectedPlugins.join(', ')}`)
+    }
+  }
+
+  // Rebuild: header + static entries + generated entries + preserved plugin entries
   const newSection = [
     lines[sectionStart],
     ...STATIC_RPK_NAV_ENTRIES,
     ...newEntries,
+    ...preservedEntries,
   ]
 
   const newLines = [
@@ -2244,7 +2261,12 @@ async function generateRpkDocs(options = {}) {
     pluginVersions = {},
     draftMissing = false,
     flatOutput = false, // If true, output all files flat (legacy behavior)
-    navFile // Optional: path to nav.adoc for automatic nav updates
+    navFile, // Optional: path to nav.adoc for automatic nav updates
+    // Plugins that exist but could not be installed for this run (for example,
+    // rpk k8s before its GA plugin publishes). Their pages and nav entries are
+    // preserved instead of treated as stale, because their absence from the
+    // command tree reflects the generation environment, not the product.
+    protectedPlugins = []
   } = options
 
   // Register partials
@@ -2681,9 +2703,35 @@ async function generateRpkDocs(options = {}) {
       .map(entry => path.join(baseDir, entry.name))
   }
 
+  // Auto-detect plugins whose commands are missing from this run's tree.
+  // rpk core ships only a shim (install/uninstall/upgrade) for managed
+  // plugins; the real commands appear only when the plugin binary is
+  // installed in the generation environment. If a known plugin's subtree is
+  // absent or shim-only, its existing pages reflect the plugin, not stale
+  // commands, so preserve them. Pre-GA windows hit this every time: the
+  // plugin publisher only promotes stable X.Y.Z releases, so `rpk <plugin>
+  // install` finds nothing until GA (see redpanda-data/docs#1831).
+  const PLUGIN_SHIM_COMMANDS = new Set(['install', 'uninstall', 'upgrade'])
+  const KNOWN_PLUGIN_NAMES = ['ai', 'check', 'connect', 'k8s', 'oxla']
+  const autoProtected = KNOWN_PLUGIN_NAMES.filter(pl => {
+    const subNames = commands
+      .filter(c => c.path.startsWith(`rpk ${pl} `))
+      .map(c => c.path.split(' ')[2])
+    const hasTopLevel = commands.some(c => c.path === `rpk ${pl}`)
+    if (!hasTopLevel) return true
+    return subNames.length === 0 || subNames.every(n => PLUGIN_SHIM_COMMANDS.has(n))
+  })
+  const effectiveProtectedPlugins = [...new Set([...protectedPlugins, ...autoProtected])]
+  const protectedDirNames = new Set(effectiveProtectedPlugins.map(pl => `rpk-${pl}`))
   const scanDirs = new Set()
   for (const dir of rpkSubdirs(outputDir)) scanDirs.add(dir)
   for (const dir of rpkSubdirs(cloudSecretDir)) scanDirs.add(dir)
+  for (const dir of [...scanDirs]) {
+    if (protectedDirNames.has(path.basename(dir))) {
+      console.log(`  Preserving ${path.basename(dir)}/ (plugin commands absent from this run's tree)`)
+      scanDirs.delete(dir)
+    }
+  }
 
   for (const dir of scanDirs) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -2711,7 +2759,7 @@ async function generateRpkDocs(options = {}) {
   // Update nav.adoc if a path was provided
   let navResult = { navUpdated: false }
   if (navFile) {
-    navResult = updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands)
+    navResult = updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands, effectiveProtectedPlugins)
   }
 
   return {
