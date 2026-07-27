@@ -477,6 +477,7 @@ function fetchRpkTreeFromLinuxSource(sourcePath) {
 
     // Step 2: Install plugins
     console.log('Installing plugins for complete command coverage...')
+    const failedPlugins = []
     for (const plugin of KNOWN_PLUGINS) {
       console.log(`  Installing plugin: ${plugin}...`)
       const installResult = spawnSync('docker', [
@@ -505,6 +506,7 @@ function fetchRpkTreeFromLinuxSource(sourcePath) {
           // regen that omits `rpk k8s` pages is this, not a generator bug.
           // See redpanda-data/docs#1801.
           console.warn(`    ✗ Failed to install ${plugin}: ${stderr || stdout}`)
+          failedPlugins.push(plugin)
         }
       }
     }
