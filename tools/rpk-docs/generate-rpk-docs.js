@@ -1807,11 +1807,27 @@ function parseDescriptionSections(desc) {
   let currentContent = []
   const mainLines = []
 
-  for (const line of lines) {
+  let skipNext = false
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (skipNext) {
+      skipNext = false
+      continue
+    }
     // Check for ALL CAPS header (at least 2 chars, possibly with spaces, hyphens, slashes, or ampersands)
     // Examples: "FIELDS", "BALANCER STATUS", "PRODUCER ID & EPOCH"
-    const headerMatch = line.match(/^([A-Z][A-Z\s\-\/&]{0,}[A-Z])$/)
+    // A line with runs of multiple spaces is a column-header row of aligned
+    // sample output (for example "PARTITION      REASON"), not a section
+    // header, so leave it in the content.
+    const headerMatch = /  /.test(line) ? null : line.match(/^([A-Z][A-Z\s\-\/&]{0,}[A-Z])$/)
     if (headerMatch) {
+      // Help text often underlines section titles with a run of = or -
+      // characters. Consume the underline: left in the content, a line of
+      // 4+ = or - is an AsciiDoc block delimiter and breaks the page
+      // (unterminated example block).
+      if (i + 1 < lines.length && /^\s*(={3,}|-{3,})\s*$/.test(lines[i + 1])) {
+        skipNext = true
+      }
       // Save previous section
       if (currentSection) {
         // Preserve indentation: only remove leading/trailing blank lines, not spaces
@@ -1830,6 +1846,13 @@ function parseDescriptionSections(desc) {
   if (currentSection) {
     // Preserve indentation: only remove leading/trailing blank lines, not spaces
     sections[currentSection] = trimBlankLines(currentContent.join('\n'))
+  }
+
+  const delimiterRun = /^\s*(={4,}|-{4,})\s*$/
+  for (const [name, body] of Object.entries(sections)) {
+    if (body.split('\n').some(l => delimiterRun.test(l))) {
+      console.warn(`Warning: section "${name}" contains a bare =/- delimiter run; it may break AsciiDoc rendering`)
+    }
   }
 
   return {
