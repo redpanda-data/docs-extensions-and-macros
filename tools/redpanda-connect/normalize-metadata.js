@@ -16,13 +16,16 @@
  *      bullets that already contain inline code are left untouched.
  *
  * Everything else (intro sentences, notes, `===` subheadings that legitimately
- * group metadata by operation, and non-field-list fenced blocks) is preserved
- * verbatim.
+ * group metadata by operation, non-field-list fenced blocks, and AsciiDoc
+ * `----` literal blocks) is preserved verbatim.
  */
 
 const FENCE_OPEN = /^(\s*)(```|~~~)(.*)$/;
-const FENCE_CLOSE = /^(\s*)(```|~~~)\s*$/;
 const BULLET = /^(\s*[-*]\s+)(.*)$/;
+// AsciiDoc literal/listing block delimiter. Content inside `----` blocks is
+// rendered verbatim, so backticks would show up literally — such regions must
+// pass through untouched (no field-name inline-coding).
+const BLOCK_DELIMITER = /^-{4,}$/;
 // A metadata field bullet: the leading token is a lowercase snake_case
 // identifier (gcs_key, http_server_verb, header), optionally followed by a
 // parenthetical annotation (for example "(RFC3339)"), and optionally a
@@ -45,7 +48,14 @@ function isFieldListFence (infoString, contentLines) {
   const info = infoString.trim();
   if (info !== '' && info !== 'text') return false;
   const nonBlank = contentLines.filter((l) => l.trim() !== '');
-  return nonBlank.length > 0 && nonBlank.every((l) => BULLET.test(l));
+  if (nonBlank.length === 0 || !nonBlank.every((l) => BULLET.test(l))) return false;
+  // Require at least one real field-name bullet. A fenced block of purely
+  // descriptive bullets (no snake_case field name) is not a field list, so its
+  // fences must be preserved rather than stripped.
+  return nonBlank.some((l) => {
+    const b = l.match(BULLET);
+    return b && FIELD_BULLET.test(b[2]);
+  });
 }
 
 /**
@@ -58,14 +68,30 @@ function normalizeMetadataBlock (block) {
   const out = [];
 
   for (let i = 0; i < lines.length; i++) {
+    // AsciiDoc literal/listing block: pass the whole `----` … `----` region
+    // through verbatim. Field-name lines inside are rendered literally, so they
+    // must not be inline-coded (backticks would appear as visible characters).
+    if (BLOCK_DELIMITER.test(lines[i].trim())) {
+      out.push(lines[i]);
+      let j = i + 1;
+      for (; j < lines.length; j++) {
+        out.push(lines[j]);
+        if (BLOCK_DELIMITER.test(lines[j].trim())) break;
+      }
+      i = j;
+      continue;
+    }
+
     const fence = lines[i].match(FENCE_OPEN);
     if (fence) {
-      // Collect the fenced content up to the closing fence.
+      // Collect the fenced content up to a closing fence of the SAME marker
+      // (a ```-opened block is not closed by ~~~, and vice versa).
+      const marker = fence[2];
       const content = [];
       let j = i + 1;
       let closed = false;
       for (; j < lines.length; j++) {
-        if (FENCE_CLOSE.test(lines[j])) { closed = true; break; }
+        if (lines[j].trim() === marker) { closed = true; break; }
         content.push(lines[j]);
       }
       if (closed && isFieldListFence(fence[3], content)) {

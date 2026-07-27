@@ -267,6 +267,41 @@ describe('normalize-metadata: normalizeMetadataBlock', () => {
     expect(out).toContain('```yaml');
     expect(out).toContain('    parse_header_row: true');
   });
+
+  test('passes an AsciiDoc ---- literal block through verbatim (no inline-coding)', () => {
+    const block = [
+      '== Metadata', '',
+      '- real_field', '',
+      'Example output:', '',
+      '----',
+      '- looks_like_a_field',
+      '----',
+    ].join('\n');
+    const out = normalizeMetadataBlock(block);
+    // Real bullet outside the literal block is coded.
+    expect(out).toContain('- `real_field`');
+    // Content inside the ---- block is untouched (no backticks added — they
+    // would render literally inside a listing block).
+    expect(out).toContain('- looks_like_a_field');
+    expect(out).not.toContain('`looks_like_a_field`');
+  });
+
+  test('does not treat a ~~~ line as closing a ```-opened fence', () => {
+    // Mismatched fences: the ``` block is never validly closed, so it must be
+    // passed through verbatim rather than de-fenced.
+    const block = ['```text', '- foo_field', '~~~'].join('\n');
+    const out = normalizeMetadataBlock(block);
+    expect(out).toContain('```text');
+    expect(out).toContain('- foo_field');
+  });
+
+  test('preserves fences around a fenced block of purely descriptive bullets', () => {
+    // No snake_case field name, so it is not a field list and must keep fences.
+    const block = ['```', '- All headers', '- All cookies', '```'].join('\n');
+    const out = normalizeMetadataBlock(block);
+    expect(out).toContain('```');
+    expect(out).toContain('- All headers');
+  });
 });
 
 describe('metadata-utils: typeDirFor / metadataIncludeLine', () => {
