@@ -111,10 +111,23 @@ function descriptionWithMetadataInclude (item) {
   return description.slice(0, found.start) + metadataIncludeLine(item) + description.slice(found.end);
 }
 
+/**
+ * Build the Antora include directive for a connector's description partial.
+ * Mirrors {@link metadataIncludeLine} so a drafted page can pull its
+ * auto-generated summary and description from a regenerated partial instead of
+ * freezing them into the page body at first draft.
+ * @param {object} item connector data with `type`/`typeDir` and `name`
+ * @returns {string}
+ */
+function descriptionIncludeLine (item) {
+  return `include::connect:components:partial$descriptions/${typeDirFor(item)}/${item.name}.adoc[]`;
+}
+
 module.exports = {
   locateMetadata,
   extractMetadata,
   typeDirFor,
   metadataIncludeLine,
   descriptionWithMetadataInclude,
+  descriptionIncludeLine,
 };

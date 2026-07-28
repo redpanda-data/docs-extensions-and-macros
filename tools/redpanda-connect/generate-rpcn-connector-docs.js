@@ -21,6 +21,11 @@ const DEFAULT_TEMPLATE = path.resolve(__dirname, './templates/connector.hbs');
 // Default template for the regenerated per-connector metadata partial.
 const DEFAULT_METADATA_TEMPLATE = path.resolve(__dirname, './templates/metadata-partials.hbs');
 
+// Default template for the regenerated per-connector description partial. Like
+// the metadata partial, this is rewritten on every run so summary/description
+// changes upstream flow into already-published pages that include it.
+const DEFAULT_DESCRIPTION_TEMPLATE = path.resolve(__dirname, './templates/descriptions-partials.hbs');
+
 // Banner-only content written to a metadata partial when its `== Metadata`
 // section is removed upstream. Kept as an AsciiDoc comment so the file renders
 // nothing while any lingering include directive still resolves cleanly.
@@ -253,6 +258,7 @@ async function generateRpcnConnectorDocs(options) {
     templateFields,
     templateExamples,
     templateMetadata,
+    templateDescription,
     templateBloblang,
     writeFullDrafts,
     cgoOnly = [],        // Array of cgo-only connectors from cgo binary inspection
@@ -354,6 +360,12 @@ async function generateRpcnConnectorDocs(options) {
   const metadataTemplatePath = templateMetadata || DEFAULT_METADATA_TEMPLATE;
   registerPartial('metadata', metadataTemplatePath);
 
+  // Always register the description partial. Like metadata, it is regenerated
+  // on every run so summary/description edits upstream flow into any page that
+  // includes it, instead of being frozen into the page body at first draft.
+  const descriptionTemplatePath = templateDescription || DEFAULT_DESCRIPTION_TEMPLATE;
+  registerPartial('description', descriptionTemplatePath);
+
   // In draft mode, also register the intro partial
   if (writeFullDrafts && templateIntro) {
     registerPartial('intro', templateIntro);
@@ -363,6 +375,7 @@ async function generateRpcnConnectorDocs(options) {
   const fieldsOutRoot   = path.join(outputRoot, 'fields');
   const examplesOutRoot = path.join(outputRoot, 'examples');
   const metadataOutRoot = path.join(outputRoot, 'metadata');
+  const descriptionOutRoot = path.join(outputRoot, 'descriptions');
   // Drafts go to pages/, not partials/
   const componentsRoot  = writeFullDrafts
     ? path.resolve(process.cwd(), 'modules/components/pages')
@@ -373,6 +386,7 @@ async function generateRpcnConnectorDocs(options) {
     fs.mkdirSync(fieldsOutRoot,   { recursive: true });
     fs.mkdirSync(examplesOutRoot, { recursive: true });
     fs.mkdirSync(metadataOutRoot, { recursive: true });
+    fs.mkdirSync(descriptionOutRoot, { recursive: true });
   }
 
   let partialsWritten = 0;
@@ -451,6 +465,25 @@ async function generateRpcnConnectorDocs(options) {
             `Metadata section removed upstream; emptied stale partial ${path.relative(process.cwd(), mPath)} ` +
             `(remove its include directive from the ${type}/${name} page)`
           );
+        }
+      }
+
+      // Render the description partial (summary + version + description, with
+      // the `== Metadata` block replaced by its own partial include). Emitted
+      // for every non-bloblang connector so a page that includes it always
+      // shows the current summary/description instead of first-draft text.
+      const descriptionOut = handlebars
+        .compile('{{> description summary=summary version=version description=description type=type typeDir=typeDir name=name}}')(item);
+
+      if (type !== 'bloblang-functions' && type !== 'bloblang-methods') {
+        const dPath = path.join(descriptionOutRoot, typeDir, `${name}.adoc`);
+        if (descriptionOut.trim()) {
+          fs.mkdirSync(path.dirname(dPath), { recursive: true });
+          fs.writeFileSync(dPath, descriptionOut);
+          if (!writeFullDrafts) {
+            partialsWritten++;
+            partialFiles.push(path.relative(process.cwd(), dPath));
+          }
         }
       }
 
