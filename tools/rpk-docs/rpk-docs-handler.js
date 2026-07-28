@@ -856,13 +856,23 @@ function loadVersionedJson(version, dataDir) {
  * @param {Object} diffData - Diff data with new commands and flags
  * @param {string} overridesPath - Path to overrides JSON file
  * @param {string} version - Version to set as introducedInVersion
+ * @param {Object} [pluginVersions] - Plugin versions keyed by rpk command
+ *   name. Commands under a plugin subtree are stamped with the plugin's own
+ *   version (the page note renders "introduced in <plugin> version X"), not
+ *   the rpk version, because plugins release on their own cadence.
  */
-function updateOverridesWithIntroducedVersions(diffData, overridesPath, version) {
+function updateOverridesWithIntroducedVersions(diffData, overridesPath, version, pluginVersions = {}) {
   const hasNewCommands = diffData.details.newCommands && diffData.details.newCommands.length > 0
   const hasNewFlags = diffData.details.newFlags && diffData.details.newFlags.length > 0
 
   if (!hasNewCommands && !hasNewFlags) {
     return
+  }
+
+  // "rpk connect lint" -> pluginVersions.connect, else the rpk version
+  const versionFor = (cmdPath) => {
+    const topLevel = cmdPath.split(' ')[1]
+    return pluginVersions[topLevel] || version
   }
 
   let overrides = {}
@@ -891,7 +901,7 @@ function updateOverridesWithIntroducedVersions(diffData, overridesPath, version)
       }
       // Only set if not already set (preserve manual overrides)
       if (!overrides.commands[cmdPath].introducedInVersion) {
-        overrides.commands[cmdPath].introducedInVersion = version
+        overrides.commands[cmdPath].introducedInVersion = versionFor(cmdPath)
         commandsUpdated++
       }
     }
@@ -915,7 +925,7 @@ function updateOverridesWithIntroducedVersions(diffData, overridesPath, version)
 
       // Only set if not already set (preserve manual overrides)
       if (!overrides.commands[cmdPath].flags[flagName].introducedInVersion) {
-        overrides.commands[cmdPath].flags[flagName].introducedInVersion = version
+        overrides.commands[cmdPath].flags[flagName].introducedInVersion = versionFor(cmdPath)
         flagsUpdated++
       }
     }
@@ -1535,6 +1545,19 @@ async function handleRpkDocsGeneration(options = {}) {
           ` into snapshot for rpk ${rpkVersion}`
         )
 
+        // Stamp new plugin commands and flags with the plugin's own version
+        // so pages render "This command was introduced in <plugin> version X".
+        // Runs before the overrides load below, so the stamps apply to this
+        // run's rendering, not just the next one.
+        if (resolvedVersion) {
+          updateOverridesWithIntroducedVersions(
+            pluginDiffData,
+            overridesPath || path.join(dataDir, 'rpk-overrides.json'),
+            resolvedVersion,
+            { [plugin]: resolvedVersion }
+          )
+        }
+
         if (diffVersion) {
           console.warn('Note: --diff is ignored in --plugin mode (the summary uses a plugin-scoped diff)')
         }
@@ -1885,9 +1908,12 @@ async function handleRpkDocsGeneration(options = {}) {
         // Print diff report
         printDiffReport(diffData)
 
-        // Update overrides with introducedInVersion for new commands
+        // Update overrides with introducedInVersion for new commands. Plugin
+        // commands get the plugin's own version (plugins release on their own
+        // cadence, so the rpk version would be wrong and the page note would
+        // render "introduced in <plugin> version <rpk version>").
         if (diffData.details.newCommands.length > 0 && effectiveOverridesPath) {
-          updateOverridesWithIntroducedVersions(diffData, effectiveOverridesPath, rpkVersion)
+          updateOverridesWithIntroducedVersions(diffData, effectiveOverridesPath, rpkVersion, pluginVersions)
         }
 
         // Update what's-new file if requested
