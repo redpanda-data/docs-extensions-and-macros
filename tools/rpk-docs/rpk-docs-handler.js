@@ -8,6 +8,7 @@ const os = require('os')
 const semver = require('semver')
 const { findRepoRoot } = require('../../cli-utils/doc-tools-utils')
 const { generateRpkDocs, applyOverridesToTree, resolveReferences, shouldExcludeCommand, shouldUsePartialDir } = require('./generate-rpk-docs')
+const { detectLinuxOnlyFromSource, warnIfDetectionLooksBroken } = require('./detect-platform-commands')
 const { generateRpkDiff, printDiffReport, generateWhatsNewSection, flattenToMap } = require('./report-delta')
 const { loadAndValidateOverrides, ValidationResult } = require('./validate-overrides')
 const { validateDirectory, formatResults } = require('./validate-output')
@@ -657,105 +658,6 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
 }
 
 /**
- * Scan Go source files for Linux-only build tags
- * Looks for //go:build linux or // +build linux
- * @param {string} sourcePath - Path to rpk Go source directory
- * @returns {Set<string>} Set of Linux-only command paths (e.g., 'rpk redpanda tune')
- */
-function detectLinuxOnlyFromSource(sourcePath) {
-  const linuxOnlyCommands = new Set()
-
-  // Map of source directory patterns to command paths
-  // rpk commands are typically in pkg/cli/cmd/<command>/<subcommand>/
-  const scanDirectory = (dir, prefix = '') => {
-    if (!fs.existsSync(dir)) return
-
-    const entries = fs.readdirSync(dir, { withFileTypes: true })
-
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name)
-
-      if (entry.isDirectory()) {
-        // Recurse into subdirectories
-        const newPrefix = prefix ? `${prefix} ${entry.name}` : entry.name
-        scanDirectory(fullPath, newPrefix)
-      } else if (entry.name.endsWith('.go') && !entry.name.endsWith('_test.go')) {
-        // Check Go files for build tags
-        try {
-          const content = fs.readFileSync(fullPath, 'utf8')
-          const firstLines = content.split('\n').slice(0, 20).join('\n')
-
-          // Check for Linux build constraints
-          const hasLinuxTag = /\/\/go:build\s+.*linux/.test(firstLines) ||
-                             /\/\/\s*\+build\s+.*linux/.test(firstLines)
-
-          if (hasLinuxTag) {
-            // Try to determine command path from file location
-            const commandPath = inferCommandPath(sourcePath, fullPath, entry.name)
-            if (commandPath) {
-              linuxOnlyCommands.add(commandPath)
-            }
-          }
-        } catch (err) {
-          // Skip files we can't read
-        }
-      }
-    }
-  }
-
-  // Scan the cmd/rpk directory for command implementations
-  const cmdDir = path.join(sourcePath, 'pkg', 'cli', 'cmd')
-  if (fs.existsSync(cmdDir)) {
-    scanDirectory(cmdDir, 'rpk')
-  }
-
-  // Also check the older structure
-  const oldCmdDir = path.join(sourcePath, 'cmd', 'rpk')
-  if (fs.existsSync(oldCmdDir)) {
-    scanDirectory(oldCmdDir, 'rpk')
-  }
-
-  return linuxOnlyCommands
-}
-
-/**
- * Infer command path from Go source file location
- * @param {string} sourcePath - Root source path
- * @param {string} filePath - Full path to Go file
- * @param {string} fileName - Name of the Go file
- * @returns {string|null} Command path or null
- */
-function inferCommandPath(sourcePath, filePath, fileName) {
-  // Get relative path from source root
-  const relativePath = filePath.replace(sourcePath, '').replace(/^\//, '')
-
-  // Common patterns:
-  // pkg/cli/cmd/redpanda/tune.go -> rpk redpanda tune
-  // pkg/cli/cmd/redpanda/start.go -> rpk redpanda start
-  // cmd/rpk/iotune/iotune.go -> rpk iotune
-
-  // Remove common prefixes and file extension
-  let parts = relativePath
-    .replace(/^pkg\/cli\/cmd\//, '')
-    .replace(/^cmd\/rpk\//, '')
-    .replace(/\.go$/, '')
-    .split('/')
-
-  // If file name matches directory name, use directory only
-  // e.g., iotune/iotune.go -> iotune
-  if (parts.length > 1 && parts[parts.length - 1] === parts[parts.length - 2]) {
-    parts = parts.slice(0, -1)
-  }
-
-  // Filter out common non-command directories
-  parts = parts.filter(p => !['internal', 'common', 'config', 'cmd'].includes(p))
-
-  if (parts.length === 0) return null
-
-  return 'rpk ' + parts.join(' ')
-}
-
-/**
  * Add platform markers to command tree based on source analysis
  * @param {Object} tree - Command tree from rpk --print-tree
  * @param {Set<string>} linuxOnlyCommands - Set of Linux-only command paths
@@ -769,11 +671,18 @@ function addPlatformMarkersFromSource(tree, linuxOnlyCommands) {
            [...linuxOnlyCommands].some(loc => cmdPath.startsWith(loc + ' '))
   }
 
+  // Collect every tree path actually marked Linux-only so the persisted
+  // linux_only_commands list is fully expanded (each descendant listed),
+  // matching what dynamic Linux-vs-Darwin tree comparison produces.
+  const markedPaths = new Set()
+
   const markCommands = (commands, parentPath = 'rpk') => {
     if (!commands) return commands
     return commands.map(cmd => {
       const fullPath = `${parentPath} ${cmd.name}`
-      const platforms = isLinuxOnly(fullPath)
+      const linuxOnly = isLinuxOnly(fullPath)
+      if (linuxOnly) markedPaths.add(fullPath)
+      const platforms = linuxOnly
         ? [PLATFORMS.LINUX]
         : [PLATFORMS.LINUX, PLATFORMS.DARWIN]
       return {
@@ -792,11 +701,15 @@ function addPlatformMarkersFromSource(tree, linuxOnlyCommands) {
     }
   }
 
+  const markedCommands = markCommands(tree.commands)
+
   return {
     ...tree,
     platforms: [PLATFORMS.LINUX, PLATFORMS.DARWIN],
-    linux_only_commands: [...linuxOnlyCommands],
-    commands: markCommands(tree.commands)
+    // Union of detected paths and marked tree paths: keeps detected roots
+    // even when the tree was built on a platform where they don't exist
+    linux_only_commands: [...new Set([...linuxOnlyCommands, ...markedPaths])].sort(),
+    commands: markedCommands
   }
 }
 
@@ -2217,10 +2130,17 @@ async function handleRpkDocsGeneration(options = {}) {
     rpkVersion = effectiveRef || 'local'
 
     // Step 2: Detect Linux-only commands
-    // Try dynamic detection first (compare Linux vs Darwin builds)
-    // Fall back to static lists for plugins and known commands
+    // Static detection (build-constraint analysis) works on any platform,
+    // including Linux CI runners. Dynamic detection (comparing Linux vs
+    // Darwin builds) supplements it below when the host can run both.
     console.log('\nAnalyzing source for Linux-only commands...')
     let linuxOnlyCommands = detectLinuxOnlyFromSource(sourcePath)
+    if (linuxOnlyCommands.size > 0) {
+      console.log(`Static detection found ${linuxOnlyCommands.size} Linux-only command path(s):`)
+      for (const cmd of [...linuxOnlyCommands].sort()) {
+        console.log(`  - ${cmd}`)
+      }
+    }
 
     // Step 3: Build rpk and get command tree
     // Use Docker if available (for running rpk plugins in Linux)
@@ -2230,8 +2150,19 @@ async function handleRpkDocsGeneration(options = {}) {
     const canBuildNative = goCheck.status === 0
     const canBuildLinux = dockerCheck.status === 0
 
-    // Dynamic detection: if we can build on both platforms, compare the trees
-    if (canBuildLinux && canBuildNative && os.platform() !== 'linux') {
+    // Dynamic detection: if we can build on both platforms, compare the trees.
+    // Only possible on non-Linux hosts: a Linux runner can cross-compile a
+    // darwin rpk but cannot execute it to get its command tree, so Linux CI
+    // relies on the static detection above.
+    // RPK_DOCS_SKIP_DYNAMIC_DETECTION=1 forces the static-only path (useful
+    // for testing what a Linux CI runner would produce).
+    const skipDynamicDetection = ['1', 'true'].includes(
+      String(process.env.RPK_DOCS_SKIP_DYNAMIC_DETECTION || '').toLowerCase()
+    )
+    if (skipDynamicDetection) {
+      console.log('\nDynamic platform detection disabled via RPK_DOCS_SKIP_DYNAMIC_DETECTION')
+    }
+    if (canBuildLinux && canBuildNative && os.platform() !== 'linux' && !skipDynamicDetection) {
       console.log('\nBuilding rpk on both Linux and Darwin for dynamic platform detection...')
 
       try {
@@ -2296,6 +2227,12 @@ async function handleRpkDocsGeneration(options = {}) {
         'Install Docker or Go to continue.'
       )
     }
+
+    // Tripwire: an empty combined detection result while the source tree
+    // demonstrably contains Linux-gated files means the scan is broken and
+    // Linux-only pages are about to be published as cross-platform
+    // (see redpanda-data/docs#1831).
+    warnIfDetectionLooksBroken(sourcePath, linuxOnlyCommands)
 
     // Step 4: Add platform markers based on detection
     // This includes both source scanning results and static fallback lists
