@@ -389,8 +389,20 @@ This section provides examples of how to use `{{commandPath}}`.
 |Command |Description
 
 {{#each subcommands}}
+{{#if cloudOnly}}
+ifdef::env-cloud[]
+{{/if}}
+{{#if selfHostedOnly}}
+ifndef::env-cloud[]
+{{/if}}
 |xref:{{xrefPath}}[`{{fullPath}}`]
 |{{{shortDesc}}}
+{{#if cloudOnly}}
+endif::[]
+{{/if}}
+{{#if selfHostedOnly}}
+endif::[]
+{{/if}}
 
 {{/each}}
 |===

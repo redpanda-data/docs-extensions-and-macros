@@ -924,4 +924,153 @@ Original fields content that should be replaced.`,
       expect(fs.existsSync(path.join(secretDir, 'some-partial.adoc'))).toBe(true)
     }, 30000)
   })
+
+  describe('subcommand table env-cloud gating', () => {
+    let outputDir
+    let secretDir
+
+    beforeEach(() => {
+      outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-out-'))
+      secretDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-partials-'))
+    })
+
+    afterEach(() => {
+      fs.rmSync(outputDir, { recursive: true, force: true })
+      fs.rmSync(secretDir, { recursive: true, force: true })
+    })
+
+    const clusterTree = () => ({
+      name: 'rpk',
+      description: 'Root command',
+      commands: [
+        {
+          name: 'cluster',
+          description: 'Cluster command.',
+          usage: 'rpk cluster [flags]',
+          flags: [],
+          commands: [
+            { name: 'health', description: 'Health command.', usage: 'rpk cluster health [flags]', flags: [] },
+            { name: 'info', description: 'Info command.', usage: 'rpk cluster info [flags]', flags: [] }
+          ]
+        }
+      ],
+      global_flags: []
+    })
+
+    // Cloud-docs single-sources these tables, so a row whose page only exists
+    // in the self-managed docs must not render in the cloud build.
+    test('wraps selfHostedOnly subcommand rows in ifndef::env-cloud', async () => {
+      await generateRpkDocs({
+        tree: clusterTree(),
+        overrides: { commands: { 'rpk cluster health': { selfHostedOnly: true } } },
+        outputDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      const page = fs.readFileSync(path.join(outputDir, 'rpk-cluster', 'rpk-cluster.adoc'), 'utf8')
+      expect(page).toMatch(
+        /ifndef::env-cloud\[\]\n\|xref:reference:rpk\/rpk-cluster\/rpk-cluster-health\.adoc\[`rpk cluster health`\]\n\|Health command\.\nendif::\[\]/
+      )
+      // The ungated sibling stays a plain row.
+      expect(page).not.toMatch(/ifndef::env-cloud\[\]\n\|xref:reference:rpk\/rpk-cluster\/rpk-cluster-info\.adoc/)
+      expect(page).toContain('|xref:reference:rpk/rpk-cluster/rpk-cluster-info.adoc[`rpk cluster info`]')
+    }, 30000)
+
+    test('wraps cloudOnly subcommand rows in ifdef::env-cloud', async () => {
+      await generateRpkDocs({
+        tree: clusterTree(),
+        overrides: { commands: { 'rpk cluster health': { cloudOnly: true } } },
+        outputDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      const page = fs.readFileSync(path.join(outputDir, 'rpk-cluster', 'rpk-cluster.adoc'), 'utf8')
+      expect(page).toMatch(
+        /ifdef::env-cloud\[\]\n\|xref:reference:rpk\/rpk-cluster\/rpk-cluster-health\.adoc\[`rpk cluster health`\]\n\|Health command\.\nendif::\[\]/
+      )
+    }, 30000)
+
+    const securityTree = () => ({
+      name: 'rpk',
+      description: 'Root command',
+      commands: [
+        {
+          name: 'security',
+          description: 'Security command.',
+          usage: 'rpk security [flags]',
+          flags: [],
+          commands: [
+            {
+              name: 'secret',
+              description: 'Secret command.',
+              usage: 'rpk security secret [flags]',
+              flags: [],
+              commands: [
+                { name: 'list', description: 'List command.', usage: 'rpk security secret list [flags]', flags: [] }
+              ]
+            },
+            { name: 'acl', description: 'Acl command.', usage: 'rpk security acl [flags]', flags: [] }
+          ]
+        },
+        {
+          name: 'cloud',
+          description: 'Cloud command.',
+          usage: 'rpk cloud [flags]',
+          flags: [],
+          commands: [
+            { name: 'login', description: 'Login command.', usage: 'rpk cloud login [flags]', flags: [] }
+          ]
+        }
+      ],
+      global_flags: []
+    })
+
+    // rpk cloud and rpk security secret pages are routed to cloudSecretDir and
+    // published by cloud-docs, so rows in regular pages must cross components —
+    // an in-component xref would point at a page that does not exist.
+    test('links cloudSecretDir-routed rows across to the cloud component', async () => {
+      await generateRpkDocs({
+        tree: securityTree(),
+        overrides: { commands: {} },
+        outputDir,
+        cloudSecretDir: secretDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      const security = fs.readFileSync(path.join(outputDir, 'rpk-security', 'rpk-security.adoc'), 'utf8')
+      expect(security).toContain(
+        '|xref:cloud-data-platform:reference:rpk/rpk-security/rpk-security-secret.adoc[`rpk security secret`]'
+      )
+      expect(security).toContain('|xref:reference:rpk/rpk-security/rpk-security-acl.adoc[`rpk security acl`]')
+
+      // Inside the cloud family the tables render in cloud-docs itself, so
+      // in-component xrefs are correct and must not gain a component prefix.
+      const secret = fs.readFileSync(path.join(secretDir, 'rpk-security', 'rpk-security-secret.adoc'), 'utf8')
+      expect(secret).toContain('|xref:reference:rpk/rpk-security/rpk-security-secret-list.adoc[`rpk security secret list`]')
+      expect(secret).not.toContain('cloud-data-platform:')
+
+      const cloud = fs.readFileSync(path.join(secretDir, 'rpk-cloud', 'rpk-cloud.adoc'), 'utf8')
+      expect(cloud).toContain('|xref:reference:rpk/rpk-cloud/rpk-cloud-login.adoc[`rpk cloud login`]')
+      expect(cloud).not.toContain('cloud-data-platform:')
+    }, 30000)
+
+    // Without cloudSecretDir every page lands in the normal output tree, so
+    // in-component xrefs stay correct.
+    test('keeps in-component xrefs when no cloudSecretDir is configured', async () => {
+      await generateRpkDocs({
+        tree: securityTree(),
+        overrides: { commands: {} },
+        outputDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      const security = fs.readFileSync(path.join(outputDir, 'rpk-security', 'rpk-security.adoc'), 'utf8')
+      expect(security).toContain('|xref:reference:rpk/rpk-security/rpk-security-secret.adoc[`rpk security secret`]')
+      expect(security).not.toContain('cloud-data-platform:')
+    }, 30000)
+  })
 })
