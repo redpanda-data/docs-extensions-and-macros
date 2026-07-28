@@ -1,9 +1,54 @@
 const { URL } = require('url');
 
 /**
+ * Maps docs.redpanda.com URL path slugs to Antora component names.
+ *
+ * The generated output of this converter lands in the Self-Managed docs
+ * (redpanda-data/docs, Antora component `streaming`), so URLs to other doc
+ * sets must emit fully qualified `xref:component:module:page.adoc` resource
+ * IDs instead of being treated as a module in the current component.
+ *
+ * Each entry is verified against the target repo's antora.yml `name:` key.
+ * Legacy slugs are included because docs.redpanda.com serves 301 redirects
+ * from them to the component-name slug (for example,
+ * /redpanda-connect/... -> /connect/...).
+ */
+const COMPONENT_SLUG_MAP = {
+  // rp-connect-docs (antora.yml name: connect)
+  'redpanda-connect': 'connect', // legacy slug
+  'connect': 'connect',
+  // cloud-docs (antora.yml name: cloud-data-platform)
+  'redpanda-cloud': 'cloud-data-platform', // legacy slug
+  'cloud-data-platform': 'cloud-data-platform',
+  // redpanda-labs (docs/antora.yml name: labs)
+  'redpanda-labs': 'labs', // legacy slug
+  'labs': 'labs',
+  // redpanda-data/docs (antora.yml name: streaming). Self-qualified so that
+  // versioned URLs such as /streaming/current/... resolve correctly.
+  'streaming': 'streaming',
+  // adp-docs (antora.yml name: agentic-data-plane)
+  'agentic-data-plane': 'agentic-data-plane',
+  // docs-site umbrella components (home/antora.yml, data-platform/antora.yml,
+  // self-managed/antora.yml)
+  'home': 'home',
+  'data-platform': 'data-platform',
+  'self-managed': 'self-managed',
+};
+
+// Version path segment that can follow a component slug, for example
+// /streaming/current/... or /streaming/25.1/... or /streaming/beta/...
+const VERSION_SEGMENT_RE = /^(?:current|beta|v?\d+\.\d+)$/;
+
+/**
  * Converts a docs.redpanda.com URL, optionally suffixed with a label in brackets, into an Antora xref resource ID string.
  *
  * If the input includes a label in square brackets (for example, `[Label]`), the label is preserved and appended to the resulting xref.
+ *
+ * URLs whose first path segment identifies another Antora component on
+ * docs.redpanda.com (see COMPONENT_SLUG_MAP) produce a fully qualified
+ * `xref:component:module:page.adoc` resource ID. All other URLs keep the
+ * historical behavior: the first path segment is treated as a module in the
+ * current component.
  *
  * @param {string} input - A docs.redpanda.com URL, optionally followed by a label in square brackets.
  * @returns {string} The corresponding Antora xref resource ID, with the label preserved if present.
@@ -36,14 +81,35 @@ function urlToXref(input) {
     /^\/(?:docs(?:\/(?:v?\d+\.\d+|current))?|v?\d+\.\d+|current)\/?/,
     ''
   );
+  // Legacy URLs carry a /docs or version prefix and always point into the
+  // current component, so the slug map only applies when nothing was stripped.
+  const hadLegacyPrefix = p !== url.pathname;
   // Drop trailing slash
   p = p.replace(/\/$/, '');
   const segments = p.split('/').filter(Boolean);
 
   // Build module + path + .adoc
   let xref;
+  const component = !hadLegacyPrefix && segments.length > 0
+    ? COMPONENT_SLUG_MAP[segments[0]]
+    : undefined;
   if (segments.length === 0) {
     xref = 'xref:index.adoc';
+  } else if (component) {
+    // Cross-component URL: emit a fully qualified resource ID.
+    segments.shift();
+    // Drop a version segment that may follow the slug (for example
+    // /streaming/current/manage/...)
+    if (segments.length > 0 && VERSION_SEGMENT_RE.test(segments[0])) {
+      segments.shift();
+    }
+    if (segments.length === 0) {
+      xref = `xref:${component}::index.adoc`;
+    } else {
+      const moduleName = segments.shift();
+      const fileName   = (segments.length > 0 ? segments.join('/') : 'index') + '.adoc';
+      xref = `xref:${component}:${moduleName}:${fileName}`;
+    }
   } else {
     const moduleName = segments.shift();
     const pagePath   = segments.join('/');
