@@ -1301,14 +1301,21 @@ function fetchPluginSubtree({ plugin, pluginVersion, rpkBinPath }) {
     return spawnSync(rpkBinPath, args, { encoding: 'utf8', env, timeout: 300000 })
   }
 
+  let pinApplied = Boolean(pluginVersion)
   let installResult = runInstall(true)
   if (installResult.status !== 0 && pluginVersion) {
     const output = `${installResult.stderr || ''}${installResult.stdout || ''}`
-    if (output.includes('unknown flag')) {
+    // 'unknown flag': this rpk predates the pin flag.
+    // 'is not valid': rpk's version validation rejected the pin (its regex
+    // caps each segment at two digits, so connect versions like 4.102.0
+    // fail). In both cases installing latest is the right recovery: the
+    // dispatch fires right after a release, when latest IS the release.
+    if (output.includes('unknown flag') || output.includes('is not valid')) {
       console.warn(
-        `Version flag ${PLUGIN_INSTALL_VERSION_FLAGS[plugin]} not supported by this rpk; ` +
-        'retrying without the pin (installs latest)'
+        `rpk rejected the version pin for '${plugin}' ` +
+        `(${output.trim().split('\n')[0]}); retrying without the pin (installs latest)`
       )
+      pinApplied = false
       installResult = runInstall(false)
     }
   }
@@ -1351,11 +1358,19 @@ function fetchPluginSubtree({ plugin, pluginVersion, rpkBinPath }) {
     )
   }
 
-  const version = pluginVersion || fetchLatestPluginVersion(plugin)
+  // When the pin was applied, record it. When we fell back to latest (or no
+  // pin was given), record what the manifest says latest is: that is what
+  // actually installed.
+  const version = pinApplied ? pluginVersion : fetchLatestPluginVersion(plugin)
   if (!version) {
     console.warn(
       `Could not determine the installed version of '${plugin}'; ` +
       'plugin_versions will not be updated for this run'
+    )
+  } else if (pluginVersion && version !== pluginVersion) {
+    console.warn(
+      `Requested ${plugin} ${pluginVersion} but installed latest (${version}) ` +
+      'because rpk rejected the version pin'
     )
   }
 
@@ -1483,11 +1498,20 @@ async function handleRpkDocsGeneration(options = {}) {
         }
 
         const rpkBinPath = acquireRpkBinary(rpkVersion, { rpkBin })
-        const { node: freshNode, version: resolvedVersion } = fetchPluginSubtree({
+        const { node: rawNode, version: resolvedVersion } = fetchPluginSubtree({
           plugin,
           pluginVersion,
           rpkBinPath
         })
+
+        // Reapply platform markers: the fresh subtree comes from a plain
+        // --print-tree run, but every command in the snapshot's tree carries
+        // a platforms field. Reuse the snapshot's recorded Linux-only list.
+        const linuxOnly = new Set(tree.linux_only_commands || [])
+        const freshNode = addPlatformMarkersFromSource(
+          { commands: [rawNode] },
+          linuxOnly
+        ).commands[0]
 
         // Plugin-scoped diff for the PR summary: compare only the plugin's
         // subtree, old snapshot state vs fresh install
