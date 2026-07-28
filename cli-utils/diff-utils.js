@@ -346,7 +346,25 @@ function diffDirs (kind, oldTag, newTag, oldTempDir, newTempDir) {
   }
 }
 
+/**
+ * Decide whether a committed baseline attachment can serve as the old side of
+ * a property diff. Rebuilding the old tag in place overwrites the committed
+ * attachment with a fresh extraction, so any contamination in that extraction
+ * silently becomes both the stored baseline and the diff input (the diff then
+ * compares the run against its own output and reports no new properties).
+ * @param {string} outputDir - Docs output dir that contains attachments/
+ * @param {string} oldTag - Old version tag (for example, v26.1.14)
+ * @param {boolean} [regenerate=false] - Force re-extraction even if a baseline exists
+ * @returns {{useCommitted: boolean, baselinePath: string}}
+ */
+function resolveDiffBaseline (outputDir, oldTag, regenerate = false) {
+  const baselinePath = path.resolve(outputDir, 'attachments', `redpanda-properties-${oldTag}.json`)
+  return { useCommitted: !regenerate && fs.existsSync(baselinePath), baselinePath }
+}
+
 module.exports = {
+  resolveDiffBaseline,
+
   runClusterDocs,
   cleanupOldDiffs,
   generatePropertyComparisonReport,
