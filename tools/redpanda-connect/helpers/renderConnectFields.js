@@ -38,8 +38,10 @@ module.exports = function renderConnectFields(children, prefix = '') {
       // Arrays render as `array<element>` when the element type is known,
       // for example `array<string>`. 2D arrays nest the element type, for
       // example `array<array<string>>`. Unknown element types render as
-      // plain `array`.
-      const elementType = (typeof child.type === 'string' && child.type !== '' && child.type !== 'unknown')
+      // plain `array`. A `type` of `array` (used by some overrides to force
+      // the old plain-array display) is treated as unknown so the field
+      // renders as `array` rather than the degenerate `array<array>`.
+      const elementType = (typeof child.type === 'string' && child.type !== '' && child.type !== 'unknown' && child.type !== 'array')
         ? child.type
         : null;
       if (elementType) {

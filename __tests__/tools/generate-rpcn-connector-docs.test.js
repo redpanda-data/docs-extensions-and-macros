@@ -483,6 +483,17 @@ describe('Utility Helpers', () => {
       expect(result).not.toContain('array<');
     });
 
+    it('falls back to plain array when the element type is itself array (override-forced types)', () => {
+      // docs-data/overrides.json in rp-connect-docs sets `type: "array"` on
+      // some fields (for example, NATS `urls`) to force a plain-array display.
+      const listField = [
+        { name: 'urls', type: 'array', kind: 'array', description: 'URLs.' },
+      ];
+      const result = renderConnectFields(listField).toString();
+      expect(result).toContain('*Type*: `array`');
+      expect(result).not.toContain('array<');
+    });
+
     it('recursively renders nested children with correct path', () => {
       const result = renderConnectFields(nestedField).toString();
       expect(result).toContain("=== `parent`");
