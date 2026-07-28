@@ -129,6 +129,26 @@ describe('process-context-switcher extension', () => {
     expect(version3Item.to).toBe('current@ROOT:console:config/security/authentication.adoc');
   });
 
+  it('should pass through root-relative URL entries without resolution or warnings', async () => {
+    // generate-rp-connect-info sets pub.url values (root-relative) for connector
+    // Type switchers; these need no resource-ID resolution or target injection.
+    mockPage.asciidoc.attributes['page-context-switcher'] =
+      '[{"name": "Cache", "to": "/redpanda-connect/components/caches/aws_dynamodb/"},{"name": "Output", "to": "/redpanda-connect/components/outputs/aws_dynamodb/"}]';
+
+    extension.register.call(extensionContext, { config: {} });
+    const handler = extensionContext.on.mock.calls[0][1];
+    await handler({ contentCatalog: mockContentCatalog });
+
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+    expect(mockLogger.error).not.toHaveBeenCalled();
+    // Attribute is untouched: no 'current' replacement, no rewritten targets
+    const attr = JSON.parse(mockPage.asciidoc.attributes['page-context-switcher']);
+    expect(attr).toEqual([
+      { name: 'Cache', to: '/redpanda-connect/components/caches/aws_dynamodb/' },
+      { name: 'Output', to: '/redpanda-connect/components/outputs/aws_dynamodb/' }
+    ]);
+  });
+
   it('should handle invalid JSON gracefully', async () => {
     mockPage.asciidoc.attributes['page-context-switcher'] = 'invalid json';
 
