@@ -439,13 +439,17 @@ describe('Utility Helpers', () => {
       expect(result).not.toContain('*Type*: `string`');
     });
 
-    it('renders any list/array field as array regardless of element type', () => {
-      const listField = [
-        { name: 'ports', type: 'int', kind: 'array', description: 'Ports.' },
-      ];
-      const result = renderConnectFields(listField).toString();
-      expect(result).toContain('*Type*: `array`');
-    });
+    it.each(['array', 'list', '2darray'])(
+      'renders a field of kind %s as array regardless of element type',
+      (kind) => {
+        const listField = [
+          { name: 'ports', type: 'int', kind, description: 'Ports.' },
+        ];
+        const result = renderConnectFields(listField).toString();
+        expect(result).toContain('*Type*: `array`');
+        expect(result).not.toContain('*Type*: `int`');
+      }
+    );
 
     it('recursively renders nested children with correct path', () => {
       const result = renderConnectFields(nestedField).toString();
