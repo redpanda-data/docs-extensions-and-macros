@@ -35,9 +35,20 @@ module.exports = function renderConnectFields(children, prefix = '') {
       // Maps always render as `object`, regardless of value type.
       displayType = 'object';
     } else if (child.kind === 'array' || child.kind === 'list' || child.kind === '2darray') {
-      // Lists, arrays, and 2D arrays always render as `array`, regardless of
-      // element type.
-      displayType = 'array';
+      // Arrays render as `array<element>` when the element type is known,
+      // for example `array<string>`. 2D arrays nest the element type, for
+      // example `array<array<string>>`. Unknown element types render as
+      // plain `array`.
+      const elementType = (typeof child.type === 'string' && child.type !== '' && child.type !== 'unknown')
+        ? child.type
+        : null;
+      if (elementType) {
+        displayType = child.kind === '2darray'
+          ? `array<array<${elementType}>>`
+          : `array<${elementType}>`;
+      } else {
+        displayType = 'array';
+      }
     } else {
       displayType = child.type;
     }
