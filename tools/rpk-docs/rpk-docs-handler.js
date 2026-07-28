@@ -1,6 +1,7 @@
 'use strict'
 
 const { spawnSync } = require('child_process')
+const crypto = require('crypto')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -15,6 +16,37 @@ const { validateDirectory, formatResults } = require('./validate-output')
  * Known rpk plugins that are managed separately (have install/uninstall commands)
  */
 const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'k8s', 'oxla']
+
+/**
+ * Plugins whose docs can be refreshed individually with --plugin.
+ * oxla is excluded: it is a "Coming Soon" stub with no installable binary.
+ */
+const REFRESHABLE_PLUGINS = ['ai', 'check', 'connect', 'k8s']
+
+/**
+ * Per-plugin install flags that pin a version (rpk <plugin> install <flag> <version>).
+ * k8s uses the generic flag name; the others embed the plugin name.
+ */
+const PLUGIN_INSTALL_VERSION_FLAGS = {
+  ai: '--ai-version',
+  check: '--check-version',
+  connect: '--connect-version',
+  k8s: '--plugin-version'
+}
+
+/**
+ * Manifest slugs at https://rpk-plugins.redpanda.com/<slug>/manifest.json
+ * where the slug differs from the rpk command name.
+ */
+const PLUGIN_MANIFEST_SLUGS = { ai: 'rpai' }
+
+const PLUGIN_MANIFEST_HOST = 'https://rpk-plugins.redpanda.com'
+
+/**
+ * Subcommands compiled into rpk itself for managed plugins. A plugin node
+ * whose children are only these never actually installed.
+ */
+const PLUGIN_SHIM_SUBCOMMANDS = new Set(['install', 'uninstall', 'upgrade'])
 
 /**
  * Parse Go version from 'go version' output
@@ -1027,6 +1059,310 @@ function updateWhatsNewFile(diffData, whatsNewPath, version) {
 }
 
 /**
+ * Build an rpk binary natively from Go source.
+ * @param {string} sourcePath - Path to rpk Go source directory (src/go/rpk)
+ * @param {string} outPath - Where to write the binary
+ * @returns {string} Path to the built binary
+ */
+function buildRpkBinary(sourcePath, outPath) {
+  const goCheck = spawnSync('go', ['version'], { encoding: 'utf8', timeout: 5000 })
+  if (goCheck.status !== 0) {
+    throw new Error(
+      'Go is required to build rpk from source but was not found.\n' +
+      'Install Go from https://go.dev/ and ensure it\'s in your PATH.'
+    )
+  }
+
+  const installedGoVersion = parseGoVersion(goCheck.stdout)
+  const requiredGoVersion = getRequiredGoVersion(sourcePath)
+  if (installedGoVersion && requiredGoVersion &&
+      !checkGoVersionSufficient(installedGoVersion, requiredGoVersion)) {
+    throw new Error(
+      `Go version mismatch: installed ${installedGoVersion}, required >= ${requiredGoVersion}\n` +
+      `The rpk source (go.mod) requires Go ${requiredGoVersion} or newer.`
+    )
+  }
+
+  console.log(`Building rpk from source at ${sourcePath}...`)
+  const buildResult = spawnSync('go', ['build', '-o', outPath, './cmd/rpk'], {
+    cwd: sourcePath,
+    encoding: 'utf8',
+    timeout: 300000
+  })
+
+  if (buildResult.status !== 0) {
+    throw new Error(`Failed to build rpk from source: ${buildResult.stderr}`)
+  }
+
+  return outPath
+}
+
+/**
+ * Download an official rpk release binary for the current platform.
+ * @param {string} tag - Release tag (e.g., v26.1.12)
+ * @param {string} destDir - Directory to download and extract into
+ * @returns {string|null} Path to the extracted binary, or null if the
+ *   release asset is unavailable (caller falls back to a source build)
+ */
+function downloadRpkRelease(tag, destDir) {
+  const osName = { darwin: 'darwin', linux: 'linux', win32: 'windows' }[process.platform]
+  const archName = { arm64: 'arm64', x64: 'amd64' }[process.arch]
+  if (!osName || !archName) {
+    console.warn(`No rpk release asset for platform ${process.platform}/${process.arch}`)
+    return null
+  }
+
+  const assetName = `rpk-${osName}-${archName}.zip`
+  const baseUrl = `https://github.com/redpanda-data/redpanda/releases/download/${tag}`
+  const zipPath = path.join(destDir, assetName)
+
+  console.log(`Downloading ${assetName} for ${tag}...`)
+  const curlResult = spawnSync('curl', [
+    '-fL', '--retry', '5', '--retry-all-errors',
+    '--connect-timeout', '30', '--max-time', '300',
+    '-o', zipPath, `${baseUrl}/${assetName}`
+  ], { encoding: 'utf8', timeout: 360000 })
+
+  if (curlResult.status !== 0) {
+    console.warn(`Could not download rpk release for ${tag} (draft or missing release asset)`)
+    return null
+  }
+
+  // Verify against the release checksum file when it exists
+  const checksumAsset = `rpk_${tag.replace(/^v/, '')}_checksums.txt`
+  const checksumPath = path.join(destDir, checksumAsset)
+  const checksumResult = spawnSync('curl', [
+    '-fsSL', '--retry', '3', '--connect-timeout', '30', '--max-time', '60',
+    '-o', checksumPath, `${baseUrl}/${checksumAsset}`
+  ], { encoding: 'utf8', timeout: 90000 })
+
+  if (checksumResult.status === 0) {
+    const expectedLine = fs.readFileSync(checksumPath, 'utf8')
+      .split('\n')
+      .find(line => line.trim().endsWith(assetName))
+    if (expectedLine) {
+      const expected = expectedLine.trim().split(/\s+/)[0]
+      const actual = crypto.createHash('sha256').update(fs.readFileSync(zipPath)).digest('hex')
+      if (expected !== actual) {
+        throw new Error(
+          `Checksum mismatch for ${assetName} (${tag}):\n` +
+          `  expected ${expected}\n  actual   ${actual}`
+        )
+      }
+      console.log('Checksum verified')
+    }
+  } else {
+    console.warn('No checksum file published for this release; skipping verification')
+  }
+
+  const unzipResult = spawnSync('unzip', ['-o', zipPath, '-d', destDir], {
+    encoding: 'utf8',
+    timeout: 60000
+  })
+  if (unzipResult.status !== 0) {
+    throw new Error(`Failed to extract ${assetName}: ${unzipResult.stderr}`)
+  }
+
+  const binPath = path.join(destDir, 'rpk')
+  if (!fs.existsSync(binPath)) {
+    throw new Error(`Extracted archive did not contain an rpk binary: ${zipPath}`)
+  }
+  fs.chmodSync(binPath, 0o755)
+  return binPath
+}
+
+/**
+ * Get an rpk binary matching the given version.
+ * Prefers the official release download (published stable releases only;
+ * RC releases are drafts, so their assets are not publicly downloadable).
+ * Falls back to building from source at the tag.
+ * @param {string} rpkVersion - Version tag from the snapshot (e.g., v26.1.12, v26.2.1-rc2)
+ * @param {Object} [options]
+ * @param {string} [options.rpkBin] - Existing binary to use, skipping download/build
+ * @returns {string} Path to an rpk binary
+ */
+function acquireRpkBinary(rpkVersion, options = {}) {
+  const { rpkBin } = options
+
+  if (rpkBin) {
+    const binPath = path.resolve(rpkBin)
+    if (!fs.existsSync(binPath)) {
+      throw new Error(`rpk binary not found: ${binPath}`)
+    }
+    console.log(`Using provided rpk binary: ${binPath}`)
+    return binPath
+  }
+
+  const tag = rpkVersion.startsWith('v') ? rpkVersion : `v${rpkVersion}`
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-bin-'))
+
+  // Only published (non-draft) releases have downloadable assets
+  if (/^v\d+\.\d+\.\d+$/.test(tag)) {
+    const downloaded = downloadRpkRelease(tag, workDir)
+    if (downloaded) {
+      return downloaded
+    }
+    console.log('Falling back to building rpk from source...')
+  } else {
+    console.log(`No published release binary for ${tag}; building from source...`)
+  }
+
+  if (!/^v\d+\.\d+\.\d+(-rc\d+)?$/.test(tag) && tag !== 'vdev') {
+    throw new Error(
+      `Cannot acquire an rpk binary for version '${rpkVersion}'.\n` +
+      'The snapshot\'s rpk_version is not a release tag. ' +
+      'Pass --rpk-bin <path> to use a local rpk binary instead.'
+    )
+  }
+
+  const sourceRef = tag === 'vdev' ? 'dev' : tag
+  const sourcePath = prepareSourceFromRef(sourceRef, null)
+  return buildRpkBinary(sourcePath, path.join(workDir, 'rpk'))
+}
+
+/**
+ * Look up the latest published version of a plugin from its manifest.
+ * @param {string} plugin - rpk command name (ai, connect, k8s, check)
+ * @returns {string|null} Latest version, or null if unavailable
+ */
+function fetchLatestPluginVersion(plugin) {
+  const slug = PLUGIN_MANIFEST_SLUGS[plugin] || plugin
+  const result = spawnSync('curl', [
+    '-fsSL', '--retry', '3', '--connect-timeout', '15', '--max-time', '30',
+    `${PLUGIN_MANIFEST_HOST}/${slug}/manifest.json`
+  ], { encoding: 'utf8', timeout: 60000 })
+
+  if (result.status !== 0) {
+    console.warn(`Could not fetch plugin manifest for ${plugin} (slug: ${slug})`)
+    return null
+  }
+
+  try {
+    const manifest = JSON.parse(result.stdout)
+    const latest = (manifest.archives || []).find(a => a.is_latest)
+    return latest ? latest.version : null
+  } catch (err) {
+    console.warn(`Could not parse plugin manifest for ${plugin}: ${err.message}`)
+    return null
+  }
+}
+
+/**
+ * Check whether a plugin node contains real plugin commands, as opposed to
+ * only the install/uninstall/upgrade shim compiled into rpk itself.
+ * @param {Object} node - Top-level command node for the plugin
+ * @returns {boolean}
+ */
+function pluginNodeHasRealCommands(node) {
+  return (node.commands || []).some(c => !PLUGIN_SHIM_SUBCOMMANDS.has(c.name))
+}
+
+/**
+ * Replace a plugin's top-level node in a command tree.
+ * Replace-only: throws if the plugin is not already present, so a refresh
+ * can never introduce a command that the snapshot's rpk version lacks.
+ * @param {Object} tree - Full command tree (root node)
+ * @param {string} plugin - rpk command name
+ * @param {Object} freshNode - Replacement node
+ * @returns {Object} New tree with the node replaced
+ */
+function splicePluginNode(tree, plugin, freshNode) {
+  const commands = tree.commands || []
+  if (!commands.some(c => c.name === plugin)) {
+    throw new Error(`Cannot splice plugin '${plugin}': not present in the base tree`)
+  }
+  return {
+    ...tree,
+    commands: commands.map(c => (c.name === plugin ? freshNode : c))
+  }
+}
+
+/**
+ * Install a single plugin and capture its fresh command subtree.
+ * Runs with an isolated HOME so the install never touches the caller's
+ * rpk plugin state, and the caller's installed plugins never leak in.
+ * @param {Object} params
+ * @param {string} params.plugin - rpk command name (ai, connect, k8s, check)
+ * @param {string} [params.pluginVersion] - Version to pin; defaults to latest
+ * @param {string} params.rpkBinPath - rpk binary to run
+ * @returns {Object} { node, version } - Fresh plugin node and the version recorded
+ */
+function fetchPluginSubtree({ plugin, pluginVersion, rpkBinPath }) {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-plugin-home-'))
+  const env = { ...process.env, HOME: tmpHome }
+
+  const runInstall = (pinned) => {
+    const args = [plugin, 'install']
+    const versionFlag = PLUGIN_INSTALL_VERSION_FLAGS[plugin]
+    if (pinned && pluginVersion && versionFlag) {
+      args.push(versionFlag, pluginVersion)
+    }
+    console.log(`Installing plugin: rpk ${args.join(' ')}`)
+    return spawnSync(rpkBinPath, args, { encoding: 'utf8', env, timeout: 300000 })
+  }
+
+  let installResult = runInstall(true)
+  if (installResult.status !== 0 && pluginVersion) {
+    const output = `${installResult.stderr || ''}${installResult.stdout || ''}`
+    if (output.includes('unknown flag')) {
+      console.warn(
+        `Version flag ${PLUGIN_INSTALL_VERSION_FLAGS[plugin]} not supported by this rpk; ` +
+        'retrying without the pin (installs latest)'
+      )
+      installResult = runInstall(false)
+    }
+  }
+  if (installResult.status !== 0) {
+    throw new Error(
+      `Failed to install plugin '${plugin}':\n` +
+      `${installResult.stderr || installResult.stdout || 'no output'}`
+    )
+  }
+
+  const treeResult = spawnSync(rpkBinPath, ['--print-tree'], {
+    encoding: 'utf8',
+    env,
+    timeout: 120000,
+    maxBuffer: 50 * 1024 * 1024
+  })
+  if (treeResult.status !== 0) {
+    const stderr = treeResult.stderr || ''
+    if (stderr.includes('unknown flag')) {
+      throw new Error(
+        'This rpk binary does not support --print-tree (requires rpk >= v26.2.0).\n' +
+        'Pass --rpk-bin with a newer binary.'
+      )
+    }
+    throw new Error(`Failed to run rpk --print-tree: ${stderr}`)
+  }
+
+  const freshTree = JSON.parse(treeResult.stdout)
+  const node = (freshTree.commands || []).find(c => c.name === plugin)
+  if (!node) {
+    throw new Error(`Plugin '${plugin}' not found in rpk command tree after install`)
+  }
+  if (!pluginNodeHasRealCommands(node)) {
+    throw new Error(
+      `Plugin '${plugin}' installed but exposed no commands beyond the ` +
+      'install/uninstall/upgrade shim.\n' +
+      'The install likely resolved nothing. For pre-GA plugins (no promoted ' +
+      'latest version in the manifest), a version pin is required: ' +
+      `--plugin-version <version>`
+    )
+  }
+
+  const version = pluginVersion || fetchLatestPluginVersion(plugin)
+  if (!version) {
+    console.warn(
+      `Could not determine the installed version of '${plugin}'; ` +
+      'plugin_versions will not be updated for this run'
+    )
+  }
+
+  return { node, version }
+}
+
+/**
  * Main handler for rpk docs generation
  *
  * Simplified workflow:
@@ -1042,6 +1378,9 @@ async function handleRpkDocsGeneration(options = {}) {
     overrides: overridesPath,
     fromSource, // Path to local rpk Go source directory
     fromJson, // Path to existing versioned JSON file to regenerate from
+    plugin, // Refresh a single plugin's subtree (requires fromJson)
+    pluginVersion, // Version to pin for the plugin install (defaults to latest)
+    rpkBin, // Existing rpk binary to use for the plugin refresh
     ref, // Git ref (branch or tag) to document
     sourceRef, // Alias for ref
     diff: diffVersion,
@@ -1113,6 +1452,70 @@ async function handleRpkDocsGeneration(options = {}) {
 
       console.log(`Loaded tree with rpk version: ${rpkVersion}`)
 
+      // Refresh a single plugin's subtree in the snapshot before rendering.
+      // Plugins release on their own cadence, so their commands can change
+      // without a new rpk release. Splice the fresh subtree into the full
+      // tree and re-render everything: only the plugin's pages actually
+      // change, and stale-file cleanup, nav rebuild, and override
+      // validation all see a complete tree.
+      let pluginVersions = jsonData.plugin_versions || {}
+      let pluginDiffData = null
+      if (plugin) {
+        if (!REFRESHABLE_PLUGINS.includes(plugin)) {
+          throw new Error(
+            `Unknown plugin '${plugin}'. Supported plugins: ${REFRESHABLE_PLUGINS.join(', ')}\n` +
+            'Use the rpk command name (for example "ai"), not the manifest slug ("rpai").'
+          )
+        }
+
+        const oldNode = (tree.commands || []).find(c => c.name === plugin)
+        if (!oldNode) {
+          console.log(
+            `rpk ${rpkVersion} has no '${plugin}' command; nothing to update. ` +
+            'This is expected when the plugin only exists in a newer rpk line.'
+          )
+          return {
+            success: true,
+            skipped: true,
+            reason: `plugin '${plugin}' not present in rpk ${rpkVersion}`,
+            rpkVersion
+          }
+        }
+
+        const rpkBinPath = acquireRpkBinary(rpkVersion, { rpkBin })
+        const { node: freshNode, version: resolvedVersion } = fetchPluginSubtree({
+          plugin,
+          pluginVersion,
+          rpkBinPath
+        })
+
+        // Plugin-scoped diff for the PR summary: compare only the plugin's
+        // subtree, old snapshot state vs fresh install
+        pluginDiffData = generateRpkDiff(
+          { ...tree, commands: [oldNode] },
+          { ...tree, commands: [freshNode] },
+          {
+            oldVersion: pluginVersions[plugin] || 'previous snapshot',
+            newVersion: resolvedVersion || 'latest'
+          }
+        )
+        printDiffReport(pluginDiffData)
+
+        tree = splicePluginNode(tree, plugin, freshNode)
+        if (resolvedVersion) {
+          pluginVersions = { ...pluginVersions, [plugin]: resolvedVersion }
+        }
+        console.log(
+          `Spliced fresh '${plugin}' subtree` +
+          (resolvedVersion ? ` (version ${resolvedVersion})` : '') +
+          ` into snapshot for rpk ${rpkVersion}`
+        )
+
+        if (diffVersion) {
+          console.warn('Note: --diff is ignored in --plugin mode (the summary uses a plugin-scoped diff)')
+        }
+      }
+
       // Skip to documentation generation (after the source building steps)
       // Load and validate overrides
       const defaultOverridesPath = path.join(dataDir, 'rpk-overrides.json')
@@ -1121,6 +1524,22 @@ async function handleRpkDocsGeneration(options = {}) {
 
       if (overridesData) {
         console.log(`Loaded overrides from ${effectiveOverridesPath}`)
+      }
+
+      // Persist the merged snapshot so the refreshed plugin subtree and its
+      // recorded version become the new baseline (mirrors the from-source
+      // path's augmentedData structure)
+      if (plugin) {
+        let enhancedTree = tree
+        if (overridesData) {
+          const resolvedOverrides = resolveReferences(overridesData, overridesData)
+          enhancedTree = applyOverridesToTree(tree, resolvedOverrides, '')
+        }
+        jsonData.raw_tree = tree
+        jsonData.tree = enhancedTree
+        jsonData.plugin_versions = pluginVersions
+        jsonData.generated_at = new Date().toISOString()
+        saveVersionedJson(jsonData, rpkVersion, dataDir)
       }
 
       // Generate AsciiDoc documentation
@@ -1132,7 +1551,7 @@ async function handleRpkDocsGeneration(options = {}) {
         outputDir: finalOutputDir,
         cloudSecretDir: finalCloudSecretDir,
         rpkVersion,
-        pluginVersions: {},
+        pluginVersions,
         draftMissing,
         preservationsDir: preserveFrom,
         navFile
@@ -1154,9 +1573,10 @@ async function handleRpkDocsGeneration(options = {}) {
         showInfo
       })
 
-      // Generate diff if requested
+      // Generate diff if requested (rpk-version diff; not used in --plugin
+      // mode, which produces its own plugin-scoped diff)
       let diffData = null
-      if (diffVersion) {
+      if (diffVersion && !plugin) {
         const oldData = loadVersionedJson(diffVersion, dataDir)
         if (oldData) {
           // Use raw_tree for diffing (falls back to tree for backward compatibility)
@@ -1187,10 +1607,12 @@ async function handleRpkDocsGeneration(options = {}) {
       // Generate PR summary
       const prSummary = generatePRSummary({
         rpkVersion,
+        plugin,
+        pluginVersion: plugin ? pluginVersions[plugin] : undefined,
         commandCount: result.commandCount,
         filesGenerated: result.filesGenerated,
         filesSkipped: result.filesSkipped,
-        diffData,
+        diffData: plugin ? pluginDiffData : diffData,
         validationResult,
         outputDir: finalOutputDir
       })
@@ -1211,10 +1633,19 @@ async function handleRpkDocsGeneration(options = {}) {
         filesSkipped: result.filesSkipped,
         outputDir: finalOutputDir,
         rpkVersion,
-        diffData,
+        plugin,
+        pluginVersion: plugin ? pluginVersions[plugin] : undefined,
+        diffData: plugin ? pluginDiffData : diffData,
         validationResult,
         prSummary
       }
+    }
+
+    if (plugin) {
+      throw new Error(
+        '--plugin requires --from-json <snapshot>.\n' +
+        'A plugin refresh splices the fresh subtree into an existing committed snapshot.'
+      )
     }
 
     // Step 1: Get source code
@@ -1343,8 +1774,23 @@ async function handleRpkDocsGeneration(options = {}) {
     const plugins = detectPlugins(tree)
     console.log(`Detected plugins: ${plugins.join(', ') || 'none'}`)
 
-    // Note: Plugin versions not available when building from source
+    // Record the version of each plugin that actually installed during the
+    // build (`rpk <plugin> install` resolves the manifest's latest, so the
+    // manifest lookup reflects what the tree contains). Shim-only plugins
+    // (failed installs) are skipped: their subtree carries no plugin commands.
     const pluginVersions = {}
+    for (const pluginName of REFRESHABLE_PLUGINS) {
+      const node = (tree.commands || []).find(c => c.name === pluginName)
+      if (node && pluginNodeHasRealCommands(node)) {
+        const latestVersion = fetchLatestPluginVersion(pluginName)
+        if (latestVersion) {
+          pluginVersions[pluginName] = latestVersion
+        }
+      }
+    }
+    if (Object.keys(pluginVersions).length > 0) {
+      console.log(`Plugin versions: ${JSON.stringify(pluginVersions)}`)
+    }
 
     // Step 5: Scan source for deprecated/hidden commands
     let deprecatedCommands = {}
@@ -1509,6 +1955,8 @@ async function handleRpkDocsGeneration(options = {}) {
 function generatePRSummary(options) {
   const {
     rpkVersion,
+    plugin,
+    pluginVersion,
     commandCount,
     filesGenerated,
     filesSkipped = 0,
@@ -1520,12 +1968,27 @@ function generatePRSummary(options) {
   const lines = []
 
   // Header
-  lines.push('## rpk Documentation Generation Summary')
-  lines.push('')
+  if (plugin) {
+    lines.push(`## rpk ${plugin} Plugin Documentation Update`)
+    lines.push('')
+    if (pluginVersion) {
+      lines.push(`**Plugin version:** ${pluginVersion}`)
+    }
+    lines.push(`**Base rpk snapshot:** ${rpkVersion}`)
+    lines.push('')
+    lines.push(
+      `Only the \`rpk ${plugin}\` subtree was refreshed. ` +
+      'All other pages were re-rendered from the committed snapshot and are unchanged.'
+    )
+    lines.push('')
+  } else {
+    lines.push('## rpk Documentation Generation Summary')
+    lines.push('')
 
-  // Version info
-  lines.push(`**Version:** ${rpkVersion}`)
-  lines.push('')
+    // Version info
+    lines.push(`**Version:** ${rpkVersion}`)
+    lines.push('')
+  }
 
   // Generation stats
   lines.push('### Generation Statistics')
@@ -1686,6 +2149,16 @@ module.exports = {
   handleRpkDocsGeneration,
   fetchRpkTreeFromSource,
   fetchRpkTreeFromLinuxSource,
+  acquireRpkBinary,
+  buildRpkBinary,
+  downloadRpkRelease,
+  fetchPluginSubtree,
+  fetchLatestPluginVersion,
+  pluginNodeHasRealCommands,
+  splicePluginNode,
+  REFRESHABLE_PLUGINS,
+  PLUGIN_INSTALL_VERSION_FLAGS,
+  PLUGIN_MANIFEST_SLUGS,
   getRequiredGoVersion,
   prepareSourceFromRef,
   detectLinuxOnlyFromSource,

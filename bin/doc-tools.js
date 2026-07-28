@@ -1109,6 +1109,9 @@ automation
   .option('-r, --ref <ref>', 'Git branch or tag to document (e.g., dev, v26.2.0). Clones from GitHub.')
   .option('--from-source <path>', 'Path to local rpk source (src/go/rpk directory)')
   .option('--from-json <path>', 'Regenerate docs from an existing versioned JSON file (skips building)')
+  .option('--plugin <name>', 'Refresh a single rpk plugin\'s docs (ai, connect, k8s, check). Requires --from-json. Installs the plugin, splices its fresh subtree into the snapshot, and re-renders.')
+  .option('--plugin-version <version>', 'Plugin version to install and record (for example, 4.102.0). Defaults to the latest published version.')
+  .option('--rpk-bin <path>', 'Path to an existing rpk binary for the plugin refresh (skips download/build)')
   .option('--overrides <path>', 'Path to overrides JSON file', 'docs-data/rpk-overrides.json')
   .option('--diff <oldVersion>', 'Generate diff against previous version')
   .option('--update-whats-new [path]', 'Update what\'s-new file with rpk changes from diff (default: modules/get-started/pages/release-notes/redpanda.adoc)')
@@ -1124,6 +1127,12 @@ automation
     try {
       const { handleRpkDocsGeneration } = require('../tools/rpk-docs/rpk-docs-handler.js')
 
+      if (options.plugin && !options.fromJson) {
+        console.error('Error: --plugin requires --from-json <snapshot>')
+        console.error('A plugin refresh splices the fresh subtree into an existing committed snapshot.')
+        process.exit(1)
+      }
+
       // Handle --update-whats-new with optional path
       let whatsNewPath = null
       if (options.updateWhatsNew !== undefined) {
@@ -1137,6 +1146,9 @@ automation
         ref: options.ref,
         fromSource: options.fromSource,
         fromJson: options.fromJson,
+        plugin: options.plugin,
+        pluginVersion: options.pluginVersion,
+        rpkBin: options.rpkBin,
         overrides: options.overrides,
         diff: options.diff,
         updateWhatsNew: whatsNewPath,
@@ -1150,6 +1162,10 @@ automation
       })
 
       if (result.success) {
+        if (result.skipped) {
+          console.log(`\n✓ Skipped: ${result.reason}`)
+          process.exit(0)
+        }
         console.log('\n✓ rpk documentation generated successfully')
 
         // Write PR summary to file if requested (useful for GitHub Actions)
