@@ -456,6 +456,35 @@ antora:
   - '@redpanda-data/docs-extensions-and-macros/extensions/version-fetcher/set-latest-version'
 ```
 
+== Set available attachment versions
+
+This extension scans the content catalog for generated JSON attachments and sets attributes that point UI templates at the newest file that actually exists, instead of the newest released version. Release-tracking attributes such as `latest-redpanda-tag` and `latest-connect-version` can be ahead of the newest generated JSON in the catalog; without this extension, the docs-ui `head-meta` partial falls back to a constructed production URL that returns 404 on every page view.
+
+It sets the following attributes on component versions (never overwriting a value that is already set, so they can be pinned in `antora.yml`):
+
+* `available-properties-tag`: newest `redpanda-properties-<tag>.json` attachment in the `reference` module of each streaming (`ROOT`) component version.
+* `available-connect-version`: newest `connect-<version>.json` attachment in the `components` module of the `connect` component.
+* `page-disable-property-tooltips`: set to `true` on streaming versions that have no properties JSON at all, so browsers never request a URL that cannot exist.
+
+=== Environment variables
+
+This extension does not require any environment variables.
+
+=== Configuration options
+
+There are no configurable options for this extension.
+
+=== Registration
+
+Register the `set-available-attachment-versions` extension in the Antora playbook under the `antora.extensions` key like so:
+
+[source,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/set-available-attachment-versions'
+----
+
 == Validate attributes
 
 This extension ensures the consistency and validity of page attributes, focusing on validating page categories against a predefined list of valid categories and subcategories. It automatically adds missing parent categories for any specified subcategories and removes any specified categories that are invalid. Additionally, it processes specific environment attributes, setting corresponding page-level attributes when environment conditions are met.
