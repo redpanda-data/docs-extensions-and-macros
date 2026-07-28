@@ -502,6 +502,41 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
 }
 
 /**
+ * Derive the fragment anchor for a connector field heading.
+ *
+ * Field docs render each field as a section heading (for example,
+ * `=== \`batching.byte_size\``), and the docs site builds section IDs with
+ * `idprefix: ''` and `idseparator: '-'` (set in the shared global-attributes
+ * component loaded by the Antora playbook). Under those settings Asciidoctor
+ * derives IDs by downcasing the heading text, dropping characters that are
+ * not word characters, hyphens, dots, or spaces (so `[]` array markers are
+ * discarded), converting runs of dots and spaces to a single `-`, and
+ * trimming any leading or trailing separator.
+ *
+ * Examples of rendered IDs this must match:
+ * - `checkpoint_limit`                    -> `checkpoint_limit`
+ * - `batching.byte_size`                  -> `batching-byte_size`
+ * - `batching.processors[]`               -> `batching-processors`
+ * - `sasl[].aws.credentials.from_ec2_role` -> `sasl-aws-credentials-from_ec2_role`
+ *
+ * @param {string} fieldName - Field name as it appears in the connector data
+ * @returns {string} Fragment anchor matching the rendered heading ID
+ */
+function fieldAnchor (fieldName) {
+  return String(fieldName)
+    .toLowerCase()
+    // Characters that are invalid in section IDs (for example, `[` and `]`
+    // array markers) become spaces, mirroring Asciidoctor's substitution.
+    .replace(/[^ \w\-.]+/g, ' ')
+    // idseparator '-' replaces runs of spaces and dots with a single hyphen.
+    .replace(/[ .]+/g, '-')
+    // idprefix '' means no leading separator, and Asciidoctor chomps a
+    // trailing separator.
+    .replace(/^-+/, '')
+    .replace(/-+$/, '')
+}
+
+/**
  * Build a fields table for whats-new.adoc
  * @param {Array} fields - Field data
  * @param {Function} capFn - Caption function
@@ -541,7 +576,7 @@ function buildFieldsTable (fields, capFn) {
 
       componentList += `*${typeLabel}:*\n\n`
       names.forEach(name => {
-        componentList += `* xref:components:${type}/${name}.adoc#${fieldName}[${name}]\n`
+        componentList += `* xref:components:${type}/${name}.adoc#${fieldAnchor(fieldName)}[${name}]\n`
       })
     }
 
@@ -611,7 +646,7 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
 
       componentList += `*${typeLabel}:*\n\n`
       names.forEach(name => {
-        componentList += `* xref:components:${type}/${name}.adoc#${info.field}[${name}]\n`
+        componentList += `* xref:components:${type}/${name}.adoc#${fieldAnchor(info.field)}[${name}]\n`
       })
     }
 
@@ -2014,5 +2049,8 @@ module.exports = {
   updateWhatsNew,
   capToTwoSentences,
   augmentConnectorData,
-  buildCleanOssData
+  buildCleanOssData,
+  fieldAnchor,
+  buildFieldsTable,
+  buildChangedDefaultsTable
 }
