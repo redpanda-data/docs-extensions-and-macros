@@ -18,7 +18,8 @@ const {
   shouldUsePartialDir,
   updateNavFile,
   getOutputPath,
-  findTopLevelWithSubcommands
+  findTopLevelWithSubcommands,
+  generateRpkDocs
 } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
 
 describe('rpk Docs Generation', () => {
@@ -947,5 +948,192 @@ Specify a time range.`
       expect(result.navUpdated).toBe(true)
       expect(result.navEntriesGenerated).toBe(3)
     })
+
+    test('preserves nav entries for protected plugins absent from the tree', () => {
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk-connect/rpk-connect.adoc[]',
+        '**** xref:reference:rpk/rpk-connect/rpk-connect-run.adoc[]',
+        '*** xref:reference:rpk/rpk-topic/rpk-topic.adoc[]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      // connect is entirely absent from this run's tree
+      const tree = makeTree(['rpk topic', 'rpk topic create'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+      updateNavFile(navPath, commands, {}, topLevel, ['connect'])
+
+      const written = fs.readFileSync(navPath, 'utf8')
+      expect(written).toContain('*** xref:reference:rpk/rpk-connect/rpk-connect.adoc[]')
+      expect(written).toContain('**** xref:reference:rpk/rpk-connect/rpk-connect-run.adoc[]')
+      expect(written).toContain('*** xref:reference:rpk/rpk-topic/rpk-topic.adoc[]')
+    })
+
+    test('does not duplicate preserved entries that also exist in regenerated output', () => {
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk-connect/rpk-connect.adoc[]',
+        '**** xref:reference:rpk/rpk-connect/rpk-connect-run.adoc[]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      // connect IS in this run's tree, so its entries are regenerated; the
+      // protected-plugin preservation must not append them a second time.
+      const tree = makeTree(['rpk connect', 'rpk connect run', 'rpk topic', 'rpk topic create'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+      updateNavFile(navPath, commands, {}, topLevel, ['connect'])
+
+      const written = fs.readFileSync(navPath, 'utf8')
+      const count = (needle) => written.split('\n').filter(l => l.includes(needle)).length
+      expect(count('rpk-connect/rpk-connect.adoc')).toBe(1)
+      expect(count('rpk-connect/rpk-connect-run.adoc')).toBe(1)
+      expect(count('rpk-topic/rpk-topic.adoc')).toBe(1)
+    })
+
+    test('protected-plugin preservation is idempotent across runs', () => {
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk-connect/rpk-connect.adoc[]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      const tree = makeTree(['rpk topic', 'rpk topic create'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+
+      updateNavFile(navPath, commands, {}, topLevel, ['connect'])
+      const firstRun = fs.readFileSync(navPath, 'utf8')
+      updateNavFile(navPath, commands, {}, topLevel, ['connect'])
+      const secondRun = fs.readFileSync(navPath, 'utf8')
+
+      expect(firstRun).toBe(secondRun)
+      expect(firstRun.split('\n').filter(l => l.includes('rpk-connect/rpk-connect.adoc')).length).toBe(1)
+    })
+  })
+
+  describe('stale file cleanup with protected plugins', () => {
+    let tmpDir
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-cleanup-test-'))
+    })
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    const writePage = (...segments) => {
+      const filePath = path.join(tmpDir, ...segments)
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, '= Existing page\n', 'utf8')
+      return filePath
+    }
+
+    const cmd = (name, extra = {}) => ({
+      name,
+      description: `${name} command.`,
+      usage: `rpk ${name} [flags]`,
+      flags: [],
+      ...extra
+    })
+
+    test('pages under a protected plugin dir survive the sweep while a stale non-plugin page is deleted', async () => {
+      // Pre-existing pages from an earlier run where the connect plugin
+      // installed successfully and rpk topic had a "describe" subcommand.
+      const connectRoot = writePage('rpk-connect', 'rpk-connect.adoc')
+      const connectRun = writePage('rpk-connect', 'rpk-connect-run.adoc')
+      const staleTopic = writePage('rpk-topic', 'rpk-topic-describe.adoc')
+
+      // This run's tree: connect is entirely absent (failed plugin install),
+      // and rpk topic no longer has "describe".
+      const tree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          cmd('topic', { commands: [cmd('create')] })
+        ],
+        global_flags: []
+      }
+
+      const result = await generateRpkDocs({
+        tree,
+        outputDir: tmpDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      // Protected plugin pages must survive: connect is a known plugin whose
+      // subtree is absent from this run's tree.
+      expect(fs.existsSync(connectRoot)).toBe(true)
+      expect(fs.existsSync(connectRun)).toBe(true)
+
+      // The genuinely stale non-plugin page must be swept.
+      expect(fs.existsSync(staleTopic)).toBe(false)
+      expect(result.filesDeleted).toBe(1)
+
+      // Regenerated pages exist as usual.
+      expect(fs.existsSync(path.join(tmpDir, 'rpk-topic', 'rpk-topic.adoc'))).toBe(true)
+      expect(fs.existsSync(path.join(tmpDir, 'rpk-topic', 'rpk-topic-create.adoc'))).toBe(true)
+    }, 30000)
+
+    test('shim-only plugin subtree still protects the plugin dir', async () => {
+      // Page from an earlier run where the plugin binary was installed.
+      const connectRun = writePage('rpk-connect', 'rpk-connect-run.adoc')
+
+      // This run's tree has the connect shim (install/uninstall/upgrade)
+      // but none of the real plugin commands: the plugin failed to install.
+      const tree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          cmd('connect', { commands: [cmd('install'), cmd('uninstall'), cmd('upgrade')] }),
+          cmd('topic', { commands: [cmd('create')] })
+        ],
+        global_flags: []
+      }
+
+      const result = await generateRpkDocs({
+        tree,
+        outputDir: tmpDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      // The shim-only subtree marks connect as auto-protected, so the page
+      // written by the earlier (successful) run is not treated as stale.
+      expect(fs.existsSync(connectRun)).toBe(true)
+      expect(result.filesDeleted).toBe(0)
+    }, 30000)
+
+    test('explicitly protected plugins are honored alongside auto-protection', async () => {
+      const aiPage = writePage('rpk-ai', 'rpk-ai-agent.adoc')
+      const stale = writePage('rpk-cluster', 'rpk-cluster-old.adoc')
+
+      const tree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          cmd('cluster', { commands: [cmd('health')] })
+        ],
+        global_flags: []
+      }
+
+      const result = await generateRpkDocs({
+        tree,
+        outputDir: tmpDir,
+        rpkVersion: 'test',
+        pluginVersions: {},
+        protectedPlugins: ['ai']
+      })
+
+      expect(fs.existsSync(aiPage)).toBe(true)
+      expect(fs.existsSync(stale)).toBe(false)
+      expect(result.filesDeleted).toBe(1)
+    }, 30000)
   })
 })
