@@ -2082,52 +2082,83 @@ function generatePRSummary(options) {
     lines.push('### Changes from Previous Version')
     lines.push('')
 
-    const { newCommands, removedCommands, newFlags, removedFlags, changedDescriptions } = diffData.summary
+    const {
+      newCommands,
+      removedCommands,
+      newFlags,
+      removedFlags,
+      changedDefaults = 0,
+      changedFlagTypes = 0,
+      changedFlagRequirements = 0,
+      changedFlagDescriptions = 0,
+      descriptionChanges = 0,
+      newlyDeprecatedCommands = 0
+    } = diffData.summary
 
-    if (newCommands === 0 && removedCommands === 0 && newFlags === 0 && removedFlags === 0) {
-      lines.push('No command or flag changes detected.')
+    const totalChanges = newCommands + removedCommands + newFlags + removedFlags +
+      changedDefaults + changedFlagTypes + changedFlagRequirements +
+      changedFlagDescriptions + descriptionChanges + newlyDeprecatedCommands
+
+    if (totalChanges === 0) {
+      lines.push('No command, flag, or default changes detected.')
     } else {
       lines.push(`| Change Type | Count |`)
       lines.push(`|-------------|-------|`)
       if (newCommands > 0) lines.push(`| New commands | ${newCommands} |`)
+      if (newlyDeprecatedCommands > 0) lines.push(`| Deprecated commands | ${newlyDeprecatedCommands} |`)
       if (removedCommands > 0) lines.push(`| Removed commands | ${removedCommands} |`)
       if (newFlags > 0) lines.push(`| New flags | ${newFlags} |`)
       if (removedFlags > 0) lines.push(`| Removed flags | ${removedFlags} |`)
-      if (changedDescriptions > 0) lines.push(`| Changed descriptions | ${changedDescriptions} |`)
+      if (changedDefaults > 0) lines.push(`| Changed flag defaults | ${changedDefaults} |`)
+      if (changedFlagTypes > 0) lines.push(`| Changed flag types | ${changedFlagTypes} |`)
+      if (changedFlagRequirements > 0) lines.push(`| Changed flag requirements | ${changedFlagRequirements} |`)
+      if (changedFlagDescriptions > 0) lines.push(`| Changed flag descriptions | ${changedFlagDescriptions} |`)
+      if (descriptionChanges > 0) lines.push(`| Changed command descriptions | ${descriptionChanges} |`)
     }
     lines.push('')
 
-    // List new commands
-    if (diffData.details?.newCommands?.length > 0) {
+    // Collapsible list helper: itemized up to a cap, with an overflow note
+    const pushDetailsList = (title, items, renderItem) => {
+      if (!items || items.length === 0) return
       lines.push('<details>')
-      lines.push('<summary>New Commands</summary>')
+      lines.push(`<summary>${title}</summary>`)
       lines.push('')
-      for (const cmd of diffData.details.newCommands.slice(0, 20)) {
-        lines.push(`- \`${cmd.path}\``)
+      for (const item of items.slice(0, 30)) {
+        lines.push(renderItem(item))
       }
-      if (diffData.details.newCommands.length > 20) {
-        lines.push(`- ... and ${diffData.details.newCommands.length - 20} more`)
+      if (items.length > 30) {
+        lines.push(`- ... and ${items.length - 30} more (see the diff JSON in docs-data/)`)
       }
       lines.push('')
       lines.push('</details>')
       lines.push('')
     }
 
-    // List removed commands
-    if (diffData.details?.removedCommands?.length > 0) {
-      lines.push('<details>')
-      lines.push('<summary>Removed Commands</summary>')
-      lines.push('')
-      for (const cmd of diffData.details.removedCommands.slice(0, 20)) {
-        lines.push(`- \`${cmd.path}\``)
-      }
-      if (diffData.details.removedCommands.length > 20) {
-        lines.push(`- ... and ${diffData.details.removedCommands.length - 20} more`)
-      }
-      lines.push('')
-      lines.push('</details>')
-      lines.push('')
+    const formatValue = (value) => {
+      if (value === undefined) return 'unset'
+      if (value === null) return 'null'
+      if (typeof value === 'object') return JSON.stringify(value)
+      return String(value)
     }
+
+    pushDetailsList('New Commands', diffData.details?.newCommands,
+      cmd => `- \`${cmd.path}\``)
+    pushDetailsList('Deprecated Commands', diffData.details?.newlyDeprecatedCommands,
+      cmd => `- \`${cmd.path}\`${cmd.message ? ` — ${cmd.message}` : ''}${cmd.hidden ? ' _(hidden from help output)_' : ''}`)
+    pushDetailsList('Removed Commands', diffData.details?.removedCommands,
+      cmd => `- \`${cmd.path}\``)
+    pushDetailsList('New Flags', diffData.details?.newFlags,
+      flag => `- \`${flag.commandPath}\`: \`--${flag.flagName}\` (${flag.type})`)
+    pushDetailsList('Removed Flags', diffData.details?.removedFlags,
+      flag => `- \`${flag.commandPath}\`: \`--${flag.flagName}\``)
+    pushDetailsList('Changed Flag Defaults', diffData.details?.changedDefaults,
+      change => `- \`${change.commandPath}\`: \`--${change.flagName}\` default \`${formatValue(change.oldDefault)}\` → \`${formatValue(change.newDefault)}\``)
+    pushDetailsList('Changed Flag Types', diffData.details?.changedFlagTypes,
+      change => `- \`${change.commandPath}\`: \`--${change.flagName}\` type \`${change.oldType}\` → \`${change.newType}\``)
+    pushDetailsList('Changed Flag Requirements', diffData.details?.changedFlagRequirements,
+      change => `- \`${change.commandPath}\`: \`--${change.flagName}\` required \`${change.oldRequired}\` → \`${change.newRequired}\``)
+    pushDetailsList('Changed Command Descriptions', diffData.details?.descriptionChanges,
+      change => `- \`${change.path}\``)
   }
 
   // Validation results

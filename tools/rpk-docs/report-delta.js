@@ -168,6 +168,9 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
   const newFlags = []
   const removedFlags = []
   const changedDefaults = []
+  const changedFlagTypes = []
+  const changedFlagRequirements = []
+  const changedFlagDescriptions = []
   const descriptionChanges = []
 
   for (const path of newPaths) {
@@ -222,6 +225,30 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
             newDefault: changes.default.new
           })
         }
+        if (changes.type) {
+          changedFlagTypes.push({
+            commandPath: path,
+            flagName,
+            oldType: changes.type.old,
+            newType: changes.type.new
+          })
+        }
+        if (changes.required) {
+          changedFlagRequirements.push({
+            commandPath: path,
+            flagName,
+            oldRequired: changes.required.old,
+            newRequired: changes.required.new
+          })
+        }
+        if (changes.description) {
+          changedFlagDescriptions.push({
+            commandPath: path,
+            flagName,
+            oldDescription: changes.description.old,
+            newDescription: changes.description.new
+          })
+        }
       }
     }
 
@@ -248,6 +275,9 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
       newFlags: newFlags.length,
       removedFlags: removedFlags.length,
       changedDefaults: changedDefaults.length,
+      changedFlagTypes: changedFlagTypes.length,
+      changedFlagRequirements: changedFlagRequirements.length,
+      changedFlagDescriptions: changedFlagDescriptions.length,
       descriptionChanges: descriptionChanges.length
     },
     details: {
@@ -256,6 +286,9 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
       newFlags,
       removedFlags,
       changedDefaults,
+      changedFlagTypes,
+      changedFlagRequirements,
+      changedFlagDescriptions,
       descriptionChanges
     }
   }
@@ -272,11 +305,14 @@ function printDiffReport(diff) {
 
   console.log('Summary:')
   console.log(`  New commands: ${diff.summary.newCommands}`)
-  console.log(`  Deprecated commands: ${diff.summary.removedCommands}`)
+  console.log(`  Removed commands: ${diff.summary.removedCommands}`)
   console.log(`  New flags: ${diff.summary.newFlags}`)
-  console.log(`  Deprecated flags: ${diff.summary.removedFlags}`)
+  console.log(`  Removed flags: ${diff.summary.removedFlags}`)
   console.log(`  Changed defaults: ${diff.summary.changedDefaults}`)
-  console.log(`  Description changes: ${diff.summary.descriptionChanges}`)
+  console.log(`  Changed flag types: ${diff.summary.changedFlagTypes || 0}`)
+  console.log(`  Changed flag requirements: ${diff.summary.changedFlagRequirements || 0}`)
+  console.log(`  Changed flag descriptions: ${diff.summary.changedFlagDescriptions || 0}`)
+  console.log(`  Command description changes: ${diff.summary.descriptionChanges}`)
 
   if (diff.details.newCommands.length > 0) {
     console.log('\nNew Commands:')
@@ -290,7 +326,7 @@ function printDiffReport(diff) {
   }
 
   if (diff.details.removedCommands.length > 0) {
-    console.log('\nDeprecated Commands (no longer in command tree):')
+    console.log('\nRemoved Commands (no longer in command tree):')
     for (const cmd of diff.details.removedCommands) {
       console.log(`  ⚠ ${cmd.path}`)
     }
@@ -304,7 +340,7 @@ function printDiffReport(diff) {
   }
 
   if (diff.details.removedFlags.length > 0) {
-    console.log('\nDeprecated Flags (no longer in command tree):')
+    console.log('\nRemoved Flags (no longer in command tree):')
     for (const flag of diff.details.removedFlags) {
       console.log(`  ⚠ ${flag.commandPath} --${flag.flagName}`)
     }
@@ -315,6 +351,20 @@ function printDiffReport(diff) {
     for (const change of diff.details.changedDefaults) {
       console.log(`  ~ ${change.commandPath} --${change.flagName}`)
       console.log(`      ${JSON.stringify(change.oldDefault)} → ${JSON.stringify(change.newDefault)}`)
+    }
+  }
+
+  if ((diff.details.changedFlagTypes || []).length > 0) {
+    console.log('\nChanged Flag Types:')
+    for (const change of diff.details.changedFlagTypes) {
+      console.log(`  ~ ${change.commandPath} --${change.flagName}: ${change.oldType} → ${change.newType}`)
+    }
+  }
+
+  if ((diff.details.changedFlagRequirements || []).length > 0) {
+    console.log('\nChanged Flag Requirements:')
+    for (const change of diff.details.changedFlagRequirements) {
+      console.log(`  ~ ${change.commandPath} --${change.flagName}: required ${change.oldRequired} → ${change.newRequired}`)
     }
   }
 
@@ -339,9 +389,9 @@ function generateMarkdownSummary(diff) {
   lines.push(`| Category | Count |`)
   lines.push(`|----------|-------|`)
   lines.push(`| New commands | ${diff.summary.newCommands} |`)
-  lines.push(`| Deprecated commands | ${diff.summary.removedCommands} |`)
+  lines.push(`| Removed commands | ${diff.summary.removedCommands} |`)
   lines.push(`| New flags | ${diff.summary.newFlags} |`)
-  lines.push(`| Deprecated flags | ${diff.summary.removedFlags} |`)
+  lines.push(`| Removed flags | ${diff.summary.removedFlags} |`)
   lines.push(`| Changed defaults | ${diff.summary.changedDefaults} |`)
   lines.push(``)
 
@@ -355,9 +405,9 @@ function generateMarkdownSummary(diff) {
   }
 
   if (diff.details.removedCommands.length > 0) {
-    lines.push(`### Deprecated Commands`)
+    lines.push(`### Removed Commands`)
     lines.push(``)
-    lines.push(`> Commands no longer in the active command tree. These may still work but are deprecated.`)
+    lines.push(`> Commands no longer in the active command tree.`)
     lines.push(``)
     for (const cmd of diff.details.removedCommands) {
       lines.push(`- ~~\`${cmd.path}\`~~`)
@@ -414,10 +464,14 @@ function generateWhatsNewSection(diff, options = {}) {
 
   // Check if there are any changes worth documenting
   const hasNewCommands = diff.details.newCommands.length > 0
+  const hasRemovedCommands = diff.details.removedCommands.length > 0
   const hasNewFlags = diff.details.newFlags.length > 0
+  const hasRemovedFlags = diff.details.removedFlags.length > 0
   const hasChangedDefaults = diff.details.changedDefaults.length > 0
+  const hasChangedFlagTypes = (diff.details.changedFlagTypes || []).length > 0
 
-  if (!hasNewCommands && !hasNewFlags && !hasChangedDefaults) {
+  if (!hasNewCommands && !hasRemovedCommands && !hasNewFlags &&
+      !hasRemovedFlags && !hasChangedDefaults && !hasChangedFlagTypes) {
     return '' // No changes to document
   }
 
@@ -460,12 +514,64 @@ function generateWhatsNewSection(diff, options = {}) {
     lines.push(``)
     for (const change of diff.details.changedDefaults) {
       const xrefPath = commandPathToXref(change.commandPath)
-      lines.push(`* xref:reference:rpk/${xrefPath}[\`${change.commandPath}\`]: \`--${change.flagName}\` default changed from \`${change.oldDefault}\` to \`${change.newDefault}\``)
+      const oldVal = formatFlagValue(change.oldDefault)
+      const newVal = formatFlagValue(change.newDefault)
+      lines.push(`* xref:reference:rpk/${xrefPath}[\`${change.commandPath}\`]: \`--${change.flagName}\` default changed from \`${oldVal}\` to \`${newVal}\``)
+    }
+    lines.push(``)
+  }
+
+  if (hasChangedFlagTypes) {
+    lines.push(`=== Changed flag types`)
+    lines.push(``)
+    for (const change of diff.details.changedFlagTypes) {
+      const xrefPath = commandPathToXref(change.commandPath)
+      lines.push(`* xref:reference:rpk/${xrefPath}[\`${change.commandPath}\`]: \`--${change.flagName}\` type changed from \`${change.oldType}\` to \`${change.newType}\``)
+    }
+    lines.push(``)
+  }
+
+  if (hasRemovedCommands) {
+    lines.push(`=== Removed commands`)
+    lines.push(``)
+    for (const cmd of diff.details.removedCommands) {
+      lines.push(`* \`${cmd.path}\``)
+    }
+    lines.push(``)
+  }
+
+  if (hasRemovedFlags) {
+    lines.push(`=== Removed flags`)
+    lines.push(``)
+    const removedByCommand = {}
+    for (const flag of diff.details.removedFlags) {
+      if (!removedByCommand[flag.commandPath]) {
+        removedByCommand[flag.commandPath] = []
+      }
+      removedByCommand[flag.commandPath].push(flag)
+    }
+    for (const [cmdPath, flags] of Object.entries(removedByCommand)) {
+      const xrefPath = commandPathToXref(cmdPath)
+      const flagList = flags.map(f => `\`--${f.flagName}\``).join(', ')
+      lines.push(`* xref:reference:rpk/${xrefPath}[\`${cmdPath}\`]: Removed ${flagList}`)
     }
     lines.push(``)
   }
 
   return lines.join('\n')
+}
+
+/**
+ * Render a flag value for display. Objects and arrays are JSON-encoded so
+ * they never render as [object Object].
+ * @param {*} value - Flag default value
+ * @returns {string}
+ */
+function formatFlagValue(value) {
+  if (value === undefined) return 'unset'
+  if (value === null) return 'null'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
 }
 
 module.exports = {

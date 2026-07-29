@@ -197,6 +197,96 @@ describe('rpk Docs Diff Generation', () => {
       expect(diff.comparison.newVersion).toBe('v2.0.0')
       expect(diff.comparison.timestamp).toBeDefined()
     })
+
+    test('detects flag type changes', () => {
+      const diff = generateRpkDiff(oldTree, newTree, { oldVersion: 'v1', newVersion: 'v2' })
+      expect(diff.summary.changedFlagTypes).toBe(1)
+      expect(diff.details.changedFlagTypes[0]).toMatchObject({
+        commandPath: 'rpk topic create',
+        flagName: 'partitions',
+        oldType: 'int',
+        newType: 'int32'
+      })
+    })
+
+    test('detects flag default, requirement, and description changes', () => {
+      const before = {
+        name: 'rpk',
+        commands: [{
+          name: 'topic',
+          flags: [
+            { name: 'timeout', type: 'duration', default: '5s', description: 'Wait time', required: false }
+          ],
+          commands: []
+        }]
+      }
+      const after = {
+        name: 'rpk',
+        commands: [{
+          name: 'topic',
+          flags: [
+            { name: 'timeout', type: 'duration', default: '30s', description: 'Maximum wait time', required: true }
+          ],
+          commands: []
+        }]
+      }
+      const diff = generateRpkDiff(before, after)
+      expect(diff.summary.changedDefaults).toBe(1)
+      expect(diff.details.changedDefaults[0]).toMatchObject({ oldDefault: '5s', newDefault: '30s' })
+      expect(diff.summary.changedFlagRequirements).toBe(1)
+      expect(diff.details.changedFlagRequirements[0]).toMatchObject({ oldRequired: false, newRequired: true })
+      expect(diff.summary.changedFlagDescriptions).toBe(1)
+    })
+  })
+
+  describe('generateWhatsNewSection change coverage', () => {
+    const { generateWhatsNewSection } = require('../../../tools/rpk-docs/report-delta.js')
+
+    const baseDiff = (details) => ({
+      comparison: { oldVersion: 'v1', newVersion: 'v2' },
+      summary: {},
+      details: {
+        newCommands: [],
+        removedCommands: [],
+        newFlags: [],
+        removedFlags: [],
+        changedDefaults: [],
+        changedFlagTypes: [],
+        descriptionChanges: [],
+        ...details
+      }
+    })
+
+    test('renders removed commands and flags', () => {
+      const section = generateWhatsNewSection(baseDiff({
+        removedCommands: [{ path: 'rpk old command' }],
+        removedFlags: [{ commandPath: 'rpk topic create', flagName: 'legacy' }]
+      }))
+      expect(section).toContain('=== Removed commands')
+      expect(section).toContain('`rpk old command`')
+      expect(section).toContain('=== Removed flags')
+      expect(section).toContain('`--legacy`')
+    })
+
+    test('renders changed flag types', () => {
+      const section = generateWhatsNewSection(baseDiff({
+        changedFlagTypes: [{ commandPath: 'rpk topic create', flagName: 'partitions', oldType: 'int', newType: 'int32' }]
+      }))
+      expect(section).toContain('=== Changed flag types')
+      expect(section).toContain('`int32`')
+    })
+
+    test('renders array defaults as JSON, not [object Object]', () => {
+      const section = generateWhatsNewSection(baseDiff({
+        changedDefaults: [{ commandPath: 'rpk topic create', flagName: 'brokers', oldDefault: ['a'], newDefault: ['a', 'b'] }]
+      }))
+      expect(section).toContain('["a","b"]')
+      expect(section).not.toContain('[object Object]')
+    })
+
+    test('returns empty string when nothing changed', () => {
+      expect(generateWhatsNewSection(baseDiff({}))).toBe('')
+    })
   })
 
   describe('generateMarkdownSummary', () => {
