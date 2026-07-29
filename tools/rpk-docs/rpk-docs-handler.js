@@ -7,7 +7,7 @@ const fs = require('fs')
 const os = require('os')
 const semver = require('semver')
 const { findRepoRoot } = require('../../cli-utils/doc-tools-utils')
-const { generateRpkDocs, applyOverridesToTree, resolveReferences } = require('./generate-rpk-docs')
+const { generateRpkDocs, applyOverridesToTree, resolveReferences, shouldExcludeCommand, shouldUsePartialDir } = require('./generate-rpk-docs')
 const { generateRpkDiff, printDiffReport, generateWhatsNewSection, flattenToMap } = require('./report-delta')
 const { loadAndValidateOverrides, ValidationResult } = require('./validate-overrides')
 const { validateDirectory, formatResults } = require('./validate-output')
@@ -1078,8 +1078,22 @@ function countCommands(node) {
  * @param {string} whatsNewPath - Path to what's-new.adoc file
  * @param {string} version - Version string for display
  */
-function updateWhatsNewFile(diffData, whatsNewPath, version) {
-  const whatsNewContent = generateWhatsNewSection(diffData, { version })
+/**
+ * Build a predicate that reports whether a command path renders as a
+ * linkable page (not excluded and not routed to partials by the overrides).
+ * @param {Object|null} overridesData - Loaded overrides
+ * @returns {Function} (commandPath) => boolean
+ */
+function makeLinkablePredicate(overridesData) {
+  if (!overridesData) return () => true
+  const resolved = resolveReferences(overridesData, overridesData)
+  return (commandPath) =>
+    !shouldExcludeCommand(resolved, commandPath) &&
+    !shouldUsePartialDir(resolved, commandPath)
+}
+
+function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
+  const whatsNewContent = generateWhatsNewSection(diffData, { version, ...options })
 
   if (!whatsNewContent) {
     console.log('No Redpanda CLI changes to add to what\'s new')
@@ -1095,9 +1109,39 @@ function updateWhatsNewFile(diffData, whatsNewPath, version) {
 
   const existingContent = fs.readFileSync(whatsNewPath, 'utf8')
 
-  // Check if Redpanda CLI section already exists
-  if (existingContent.includes('== Redpanda CLI')) {
-    console.log('Redpanda CLI section already exists in what\'s-new file')
+  // Version-scoped marker block: re-runs for the same version replace their
+  // own block, and later versions (for example, successive RCs in a beta
+  // cycle, or plugin releases) append their own blocks inside the existing
+  // Redpanda CLI section instead of being dropped. Writers can edit or
+  // remove blocks freely; the automation only ever touches content between
+  // its own markers for the same version label.
+  const startMarker = `// AUTOGEN-RPK-CHANGES ${version} START`
+  const endMarker = `// AUTOGEN-RPK-CHANGES ${version} END`
+  const sectionBody = whatsNewContent.replace(/^== Redpanda CLI[^\n]*\n+/, '')
+  const block = `${startMarker}\n${sectionBody.trimEnd()}\n${endMarker}`
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+  if (existingContent.includes(startMarker)) {
+    // Replace this version's existing block (idempotent re-runs)
+    const blockRe = new RegExp(`${escapeRe(startMarker)}[\\s\\S]*?${escapeRe(endMarker)}`)
+    const updatedContent = existingContent.replace(blockRe, block)
+    fs.writeFileSync(whatsNewPath, updatedContent, 'utf8')
+    console.log(`Refreshed existing ${version} block in what's-new file: ${whatsNewPath}`)
+    return
+  }
+
+  const headingMatch = existingContent.match(/^== Redpanda CLI[^\n]*$/m)
+  if (headingMatch) {
+    // Append this version's block at the end of the existing section, just
+    // before the next level-2 heading (or end of file)
+    const sectionStart = headingMatch.index + headingMatch[0].length
+    const rest = existingContent.slice(sectionStart)
+    const nextHeading = rest.search(/\n== /)
+    const insertAt = nextHeading === -1 ? existingContent.length : sectionStart + nextHeading
+    const before = existingContent.slice(0, insertAt).replace(/\s*$/, '\n\n')
+    const after = existingContent.slice(insertAt).replace(/^\n*/, '\n')
+    fs.writeFileSync(whatsNewPath, `${before}${block}${after}`, 'utf8')
+    console.log(`Appended ${version} block to the Redpanda CLI section in: ${whatsNewPath}`)
     return
   }
 
@@ -1119,19 +1163,21 @@ function updateWhatsNewFile(diffData, whatsNewPath, version) {
     }
   }
 
+  const fullSection = `== Redpanda CLI\n\n${block}\n`
+
   let updatedContent
   if (insertIndex > 0) {
     // Insert before the matched section
     updatedContent = existingContent.slice(0, insertIndex) +
-      whatsNewContent + '\n' +
+      fullSection + '\n' +
       existingContent.slice(insertIndex)
   } else {
     // Append at the end
-    updatedContent = existingContent + '\n' + whatsNewContent
+    updatedContent = existingContent.replace(/\s*$/, '\n\n') + fullSection
   }
 
   fs.writeFileSync(whatsNewPath, updatedContent, 'utf8')
-  console.log(`Updated what's-new file: ${whatsNewPath}`)
+  console.log(`Created Redpanda CLI section in what's-new file: ${whatsNewPath}`)
 }
 
 /**
@@ -1637,6 +1683,17 @@ async function handleRpkDocsGeneration(options = {}) {
         if (diffVersion) {
           console.warn('Note: --diff is ignored in --plugin mode (the summary uses a plugin-scoped diff)')
         }
+
+        // Plugin releases land in What's new too when requested: their
+        // changes never arrive through a Redpanda release diff. Entries
+        // render without xrefs because plugin subtrees may render as
+        // partials with no linkable pages.
+        if (whatsNewPath) {
+          const label = resolvedVersion
+            ? `${plugin} plugin ${resolvedVersion}`
+            : `${plugin} plugin`
+          updateWhatsNewFile(pluginDiffData, whatsNewPath, label, { xrefs: false })
+        }
       }
 
       // Skip to documentation generation (after the source building steps)
@@ -1722,7 +1779,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
           // Update what's-new file if requested
           if (whatsNewPath) {
-            updateWhatsNewFile(diffData, whatsNewPath, rpkVersion)
+            updateWhatsNewFile(diffData, whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData) })
           }
         } else {
           console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
@@ -2004,7 +2061,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
         // Update what's-new file if requested
         if (whatsNewPath) {
-          updateWhatsNewFile(diffData, whatsNewPath, rpkVersion)
+          updateWhatsNewFile(diffData, whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData) })
         }
       } else {
         console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
@@ -2341,6 +2398,7 @@ module.exports = {
   getPlatformDescription,
   getCurrentPlatform,
   updateOverridesWithIntroducedVersions,
+  updateWhatsNewFile,
   KNOWN_PLUGINS,
   extractCommandPaths,
   detectLinuxOnlyByComparison,

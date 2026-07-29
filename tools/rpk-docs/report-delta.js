@@ -162,7 +162,7 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
   // Newly deprecated commands: in the new snapshot's deprecation map but not
   // the old one. Detected by source scanning, because deprecated commands
   // that are also hidden never appear in --print-tree output.
-  const newlyDeprecatedDetails = Object.entries(newDeprecatedCommands)
+  const newlyDeprecatedRaw = Object.entries(newDeprecatedCommands)
     .filter(([path]) => !oldDeprecatedCommands[path])
     .map(([path, info]) => ({
       path,
@@ -171,6 +171,22 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
       hidden: info.hidden === true || /Hidden:\s*true/.test(info._note || ''),
       deprecatedInVersion: newVersion
     }))
+
+  // Roll deprecated subcommands up into their nearest deprecated ancestor:
+  // one entry for `rpk redpanda admin` with its subcommands listed reads
+  // better than a dozen sibling entries
+  const newlyDeprecatedDetails = newlyDeprecatedRaw.filter(d =>
+    !newlyDeprecatedRaw.some(other => other !== d && d.path.startsWith(other.path + ' ')))
+  for (const child of newlyDeprecatedRaw) {
+    if (newlyDeprecatedDetails.includes(child)) continue
+    const root = newlyDeprecatedDetails.find(r => child.path.startsWith(r.path + ' '))
+    if (root) {
+      root.affectedSubcommands = root.affectedSubcommands || []
+      if (!root.affectedSubcommands.includes(child.path)) {
+        root.affectedSubcommands.push(child.path)
+      }
+    }
+  }
 
   // Find removed commands, then separate genuine removals from commands that
   // disappeared from the tree because they (or an ancestor) were deprecated
@@ -188,7 +204,9 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
       const entry = newlyDeprecatedDetails.find(d => d.path === root)
       if (path !== root) {
         entry.affectedSubcommands = entry.affectedSubcommands || []
-        entry.affectedSubcommands.push(path)
+        if (!entry.affectedSubcommands.includes(path)) {
+          entry.affectedSubcommands.push(path)
+        }
       }
       continue
     }
@@ -199,6 +217,10 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
       description: cmd.description || '',
       removedInVersion: newVersion
     })
+  }
+
+  for (const dep of newlyDeprecatedDetails) {
+    if (dep.affectedSubcommands) dep.affectedSubcommands.sort()
   }
 
   // Find flag changes in existing commands
@@ -512,6 +534,15 @@ function commandPathToXref(commandPath) {
 function generateWhatsNewSection(diff, options = {}) {
   const lines = []
   const version = options.version || diff.comparison.newVersion
+  // Plugin subtrees may render as partials with no linkable pages, so plugin
+  // runs disable xrefs and render plain command names instead.
+  const useXrefs = options.xrefs !== false
+  // Commands that render as partials or are excluded have no linkable page
+  const linkable = typeof options.linkable === 'function' ? options.linkable : () => true
+  const cmdRef = (commandPath) => {
+    if (!useXrefs || !linkable(commandPath)) return `\`${commandPath}\``
+    return `xref:reference:rpk/${commandPathToXref(commandPath)}[\`${commandPath}\`]`
+  }
 
   // Check if there are any changes worth documenting
   const hasNewCommands = diff.details.newCommands.length > 0
@@ -534,9 +565,10 @@ function generateWhatsNewSection(diff, options = {}) {
     lines.push(`=== New commands`)
     lines.push(``)
     for (const cmd of diff.details.newCommands) {
-      const xrefPath = commandPathToXref(cmd.path)
-      const desc = cmd.description ? ` - ${cmd.description}` : ''
-      lines.push(`* xref:reference:rpk/${xrefPath}[\`${cmd.path}\`]${desc}`)
+      // First line only: multi-line help text would break the bullet list
+      const shortDesc = (cmd.description || '').split('\n')[0].trim()
+      const desc = shortDesc ? ` - ${shortDesc}` : ''
+      lines.push(`* ${cmdRef(cmd.path)}${desc}`)
     }
     lines.push(``)
   }
@@ -554,9 +586,8 @@ function generateWhatsNewSection(diff, options = {}) {
     }
 
     for (const [cmdPath, flags] of Object.entries(flagsByCommand)) {
-      const xrefPath = commandPathToXref(cmdPath)
       const flagList = flags.map(f => `\`--${f.flagName}\``).join(', ')
-      lines.push(`* xref:reference:rpk/${xrefPath}[\`${cmdPath}\`]: Added ${flagList}`)
+      lines.push(`* ${cmdRef(cmdPath)}: Added ${flagList}`)
     }
     lines.push(``)
   }
@@ -565,10 +596,9 @@ function generateWhatsNewSection(diff, options = {}) {
     lines.push(`=== Changed defaults`)
     lines.push(``)
     for (const change of diff.details.changedDefaults) {
-      const xrefPath = commandPathToXref(change.commandPath)
       const oldVal = formatFlagValue(change.oldDefault)
       const newVal = formatFlagValue(change.newDefault)
-      lines.push(`* xref:reference:rpk/${xrefPath}[\`${change.commandPath}\`]: \`--${change.flagName}\` default changed from \`${oldVal}\` to \`${newVal}\``)
+      lines.push(`* ${cmdRef(change.commandPath)}: \`--${change.flagName}\` default changed from \`${oldVal}\` to \`${newVal}\``)
     }
     lines.push(``)
   }
@@ -577,8 +607,7 @@ function generateWhatsNewSection(diff, options = {}) {
     lines.push(`=== Changed flag types`)
     lines.push(``)
     for (const change of diff.details.changedFlagTypes) {
-      const xrefPath = commandPathToXref(change.commandPath)
-      lines.push(`* xref:reference:rpk/${xrefPath}[\`${change.commandPath}\`]: \`--${change.flagName}\` type changed from \`${change.oldType}\` to \`${change.newType}\``)
+      lines.push(`* ${cmdRef(change.commandPath)}: \`--${change.flagName}\` type changed from \`${change.oldType}\` to \`${change.newType}\``)
     }
     lines.push(``)
   }
@@ -622,9 +651,8 @@ function generateWhatsNewSection(diff, options = {}) {
       removedByCommand[flag.commandPath].push(flag)
     }
     for (const [cmdPath, flags] of Object.entries(removedByCommand)) {
-      const xrefPath = commandPathToXref(cmdPath)
       const flagList = flags.map(f => `\`--${f.flagName}\``).join(', ')
-      lines.push(`* xref:reference:rpk/${xrefPath}[\`${cmdPath}\`]: Removed ${flagList}`)
+      lines.push(`* ${cmdRef(cmdPath)}: Removed ${flagList}`)
     }
     lines.push(``)
   }
