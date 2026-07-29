@@ -381,7 +381,7 @@ function fetchRpkTreeFromSource(sourcePath) {
  * @param {string} sourcePath - Path to rpk Go source directory (e.g., ~/redpanda/src/go/rpk)
  * @returns {Object} Parsed JSON tree
  */
-function fetchRpkTreeFromLinuxSource(sourcePath) {
+function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
   // Resolve to absolute path
   const absoluteSourcePath = path.resolve(sourcePath)
 
@@ -510,14 +510,29 @@ function fetchRpkTreeFromLinuxSource(sourcePath) {
     // Step 2: Install plugins
     console.log('Installing plugins for complete command coverage...')
     for (const plugin of KNOWN_PLUGINS) {
-      console.log(`  Installing plugin: ${plugin}...`)
-      const installResult = spawnSync('docker', [
-        'exec', containerId,
-        '/tmp/rpk', plugin, 'install'
-      ], {
-        encoding: 'utf8',
-        timeout: 120000
-      })
+      // A pin installs a specific version instead of the manifest's latest.
+      // This is how pre-GA plugins (no version promoted to latest) get into a
+      // full regeneration at all — without a pin their install resolves
+      // nothing and their commands are absent from the tree.
+      const pin = pluginPins[plugin]
+      const versionFlag = PLUGIN_INSTALL_VERSION_FLAGS[plugin]
+      const runInstall = (pinned) => {
+        const args = ['exec', containerId, '/tmp/rpk', plugin, 'install']
+        if (pinned && pin && versionFlag) {
+          args.push(versionFlag, pin)
+        }
+        return spawnSync('docker', args, { encoding: 'utf8', timeout: 120000 })
+      }
+
+      console.log(`  Installing plugin: ${plugin}${pin ? ` (pinned to ${pin})` : ''}...`)
+      let installResult = runInstall(true)
+      if (installResult.status !== 0 && pin) {
+        const output = `${installResult.stderr || ''}${installResult.stdout || ''}`
+        if (output.includes('unknown flag') || output.includes('is not valid')) {
+          console.warn(`    rpk rejected the version pin for ${plugin}; retrying without the pin (installs latest)`)
+          installResult = runInstall(false)
+        }
+      }
 
       if (installResult.status === 0) {
         console.log(`    ✓ ${plugin} installed`)
@@ -530,11 +545,11 @@ function fetchRpkTreeFromLinuxSource(sourcePath) {
           console.log(`    - ${plugin} is not an installable plugin`)
         } else {
           // A failed install is non-fatal: generation continues, but this
-          // plugin's commands will be absent from the tree. Expected for `k8s`
-          // during the 26.2 beta window — `rpk k8s install` finds no `latest`
-          // release because the plugin publisher's stableVersionRe only promotes
-          // pure X.Y.Z versions, so k8s commands only appear at GA. A pre-GA
-          // regen that omits `rpk k8s` pages is this, not a generator bug.
+          // plugin's commands will be absent from the tree. Expected for
+          // beta-only plugins with no version pin — `rpk <plugin> install`
+          // finds no `latest` release because the plugin publisher's
+          // stableVersionRe only promotes pure X.Y.Z versions, so their
+          // commands only appear at GA unless the run pins a version.
           // See redpanda-data/docs#1801.
           console.warn(`    ✗ Failed to install ${plugin}: ${stderr || stdout}`)
         }
@@ -1405,6 +1420,7 @@ async function handleRpkDocsGeneration(options = {}) {
     fromJson, // Path to existing versioned JSON file to regenerate from
     plugin, // Refresh a single plugin's subtree (requires fromJson)
     pluginVersion, // Version to pin for the plugin install (defaults to latest)
+    pluginPins = {}, // Per-plugin version pins for full generation (pre-GA plugins)
     rpkBin, // Existing rpk binary to use for the plugin refresh
     ref, // Git ref (branch or tag) to document
     sourceRef, // Alias for ref
@@ -1421,6 +1437,15 @@ async function handleRpkDocsGeneration(options = {}) {
 
   // Normalize ref/sourceRef
   const effectiveRef = ref || sourceRef
+
+  for (const pinnedPlugin of Object.keys(pluginPins)) {
+    if (!REFRESHABLE_PLUGINS.includes(pinnedPlugin)) {
+      console.warn(
+        `Warning: --plugin-pin for unknown plugin '${pinnedPlugin}' ` +
+        `(known plugins: ${REFRESHABLE_PLUGINS.join(', ')}); the pin will have no effect`
+      )
+    }
+  }
 
   const repoRoot = findRepoRoot()
   const dataDir = customDataDir || path.join(repoRoot, 'docs-data')
@@ -1762,7 +1787,7 @@ async function handleRpkDocsGeneration(options = {}) {
       try {
         // Build on Linux (in container) - has all commands
         console.log('Building rpk in Linux container...')
-        const linuxTree = fetchRpkTreeFromLinuxSource(sourcePath)
+        const linuxTree = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins)
 
         // Build natively (on Darwin) - missing Linux-only commands
         console.log('Building rpk natively for comparison...')
@@ -1790,7 +1815,7 @@ async function handleRpkDocsGeneration(options = {}) {
     } else if (canBuildLinux) {
       console.log('\nBuilding rpk in Linux container...')
       try {
-        tree = fetchRpkTreeFromLinuxSource(sourcePath)
+        tree = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins)
       } catch (dockerErr) {
         if (canBuildNative) {
           console.warn(`\n⚠ Docker build failed: ${dockerErr.message}`)
@@ -1829,9 +1854,9 @@ async function handleRpkDocsGeneration(options = {}) {
     for (const pluginName of REFRESHABLE_PLUGINS) {
       const node = (tree.commands || []).find(c => c.name === pluginName)
       if (node && pluginNodeHasRealCommands(node)) {
-        const latestVersion = fetchLatestPluginVersion(pluginName)
-        if (latestVersion) {
-          pluginVersions[pluginName] = latestVersion
+        const installedVersion = pluginPins[pluginName] || fetchLatestPluginVersion(pluginName)
+        if (installedVersion) {
+          pluginVersions[pluginName] = installedVersion
         }
       }
     }

@@ -1111,6 +1111,14 @@ automation
   .option('--from-json <path>', 'Regenerate docs from an existing versioned JSON file (skips building)')
   .option('--plugin <name>', 'Refresh a single rpk plugin\'s docs (ai, connect, k8s, check). Requires --from-json. Installs the plugin, splices its fresh subtree into the snapshot, and re-renders.')
   .option('--plugin-version <version>', 'Plugin version to install and record (for example, 4.102.0). Defaults to the latest published version.')
+  .option('--plugin-pin <name=version>', 'Pin a plugin version for the installs during full generation (repeatable, for example --plugin-pin k8s=26.3.1-beta.1). Required for pre-GA plugins with no promoted latest version.', (value, pins) => {
+    const eq = value.indexOf('=')
+    if (eq < 1 || eq === value.length - 1) {
+      throw new Error(`Invalid --plugin-pin '${value}': expected <name>=<version>`)
+    }
+    pins[value.slice(0, eq)] = value.slice(eq + 1)
+    return pins
+  }, {})
   .option('--rpk-bin <path>', 'Path to an existing rpk binary for the plugin refresh (skips download/build)')
   .option('--overrides <path>', 'Path to overrides JSON file', 'docs-data/rpk-overrides.json')
   .option('--diff <oldVersion>', 'Generate diff against previous version')
@@ -1148,6 +1156,7 @@ automation
         fromJson: options.fromJson,
         plugin: options.plugin,
         pluginVersion: options.pluginVersion,
+        pluginPins: options.pluginPin,
         rpkBin: options.rpkBin,
         overrides: options.overrides,
         diff: options.diff,
