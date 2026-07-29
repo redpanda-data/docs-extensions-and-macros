@@ -358,7 +358,12 @@ function diffDirs (kind, oldTag, newTag, oldTempDir, newTempDir) {
  * @returns {{useCommitted: boolean, baselinePath: string}}
  */
 function resolveDiffBaseline (outputDir, oldTag, regenerate = false) {
-  const baselinePath = path.resolve(outputDir, 'attachments', `redpanda-properties-${oldTag}.json`)
+  const attachmentsDir = path.resolve(outputDir, 'attachments')
+  const baselinePath = path.resolve(attachmentsDir, `redpanda-properties-${oldTag}.json`)
+  const relativePath = path.relative(attachmentsDir, baselinePath)
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath) || relativePath.includes(path.sep)) {
+    throw new Error(`Invalid old tag "${oldTag}": baseline must resolve within the attachments directory`)
+  }
   return { useCommitted: !regenerate && fs.existsSync(baselinePath), baselinePath }
 }
 

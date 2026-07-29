@@ -175,4 +175,13 @@ describe('resolveDiffBaseline', () => {
     const result = resolveDiffBaseline(tmpDir, 'v26.1.14', true);
     expect(result.useCommitted).toBe(false);
   });
+
+  it('rejects tags that traverse outside the attachments directory', () => {
+    expect(() => resolveDiffBaseline(tmpDir, '../../etc/passwd')).toThrow(/attachments directory/);
+    expect(() => resolveDiffBaseline(tmpDir, '../secrets')).toThrow(/attachments directory/);
+  });
+
+  it('rejects tags that resolve into a subdirectory of attachments', () => {
+    expect(() => resolveDiffBaseline(tmpDir, 'nested/v26.1.14')).toThrow(/attachments directory/);
+  });
 });
