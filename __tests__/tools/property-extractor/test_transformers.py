@@ -351,6 +351,45 @@ class TestBasicInfoTransformer(unittest.TestCase):
         self.assertEqual(result["name"], "default_topic_replications")
         self.assertEqual(result["description"], "Default replication factor for new topics.")
 
+    def test_description_extracted_after_leading_lambda_with_unquoted_literals(self):
+        """Description indexing must align with normalized (unquoted) literals.
+
+        Regression test: the parser strips quotes from string literals, so the
+        start-index scan must select by parameter type, not by surrounding
+        quotes. With a leading lambda, the old quote-based scan left start_idx
+        at 0 and description extraction read the lambda source instead of the
+        real description.
+        """
+        info = {
+            "params": [
+                {"value": "[](const auto& v) { return v > 0; }", "type": "lambda_expression"},
+                {"value": "timeout_ms", "type": "string_literal"},
+                {"value": "Timeout in milliseconds for the request.", "type": "string_literal"},
+            ],
+        }
+
+        property = PropertyBag()
+        result = self.transformer.parse(property, info, self.file_pair)
+
+        self.assertEqual(result["name"], "timeout_ms")
+        self.assertEqual(result["description"], "Timeout in milliseconds for the request.")
+
+    def test_no_description_when_no_string_literal_params(self):
+        """No description is extracted when the params hold no string literal."""
+        info = {
+            "name_in_file": "some_property",
+            "params": [
+                {"value": "[](const auto& v) { return v > 0; }", "type": "lambda_expression"},
+                {"value": "config::defaults::some_value", "type": "qualified_identifier"},
+            ],
+        }
+
+        property = PropertyBag()
+        result = self.transformer.parse(property, info, self.file_pair)
+
+        self.assertEqual(result["name"], "some_property")
+        self.assertIsNone(result["description"])
+
     def test_member_identifier_fallback_when_no_name_literal(self):
         """Fall back to the member identifier when the first string literal is not a name."""
         info = {

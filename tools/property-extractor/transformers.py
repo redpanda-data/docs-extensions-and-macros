@@ -674,16 +674,14 @@ class BasicInfoTransformer:
             return property
 
         # --- Step 1: find the "real" start of the property definition ---
-        # Skip lambdas, validators, and non-string literals at the start
-        start_idx = 0
+        # Skip lambdas, validators, and non-string literals at the start.
+        # The parser normalizes string_literal values to unquoted strings, so
+        # select by parameter type rather than by surrounding quotes.
+        start_idx = None
         for i, p in enumerate(params):
-            val = str(p.get("value", ""))
-            typ = p.get("type", "")
             if is_validator_param(p):
                 continue
-            if typ in ("lambda_expression", "qualified_identifier", "unresolved_identifier"):
-                continue
-            if not (val.startswith('"') and val.endswith('"')):
+            if p.get("type") != "string_literal":
                 continue
             # First string literal we hit is the name
             start_idx = i
@@ -713,7 +711,7 @@ class BasicInfoTransformer:
         property["name"] = name
 
         desc = None
-        if len(params) > start_idx + 1:
+        if start_idx is not None and len(params) > start_idx + 1:
             v0 = params[start_idx].get("value")
             v1 = params[start_idx + 1].get("value")
             if isinstance(v1, str) and len(v1) > 10 and " " in v1:
