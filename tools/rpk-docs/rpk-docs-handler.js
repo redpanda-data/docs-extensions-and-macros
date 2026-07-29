@@ -8,7 +8,7 @@ const os = require('os')
 const semver = require('semver')
 const { findRepoRoot } = require('../../cli-utils/doc-tools-utils')
 const { generateRpkDocs, applyOverridesToTree, resolveReferences } = require('./generate-rpk-docs')
-const { generateRpkDiff, printDiffReport, generateWhatsNewSection } = require('./report-delta')
+const { generateRpkDiff, printDiffReport, generateWhatsNewSection, flattenToMap } = require('./report-delta')
 const { loadAndValidateOverrides, ValidationResult } = require('./validate-overrides')
 const { validateDirectory, formatResults } = require('./validate-output')
 
@@ -821,6 +821,57 @@ function loadOverrides(overridesPath, commandTree = null, options = {}) {
   }
 
   return overrides
+}
+
+/**
+ * Merge deprecation metadata for commands still present in the tree into the
+ * overrides file, so their pages render deprecation banners without manual
+ * curation. Hidden deprecated commands are excluded: they are absent from
+ * --print-tree, have no pages, and would only produce unknown-path warnings.
+ * Commands whose overrides already carry a `deprecated` value are left alone.
+ * @param {Object} deprecatedCommands - Map from scan-deprecated-commands.js
+ * @param {Object} tree - Current command tree
+ * @param {string} overridesPath - Path to overrides JSON file
+ */
+function mergeVisibleDeprecationsIntoOverrides(deprecatedCommands, tree, overridesPath) {
+  const entries = Object.entries(deprecatedCommands || {})
+  if (entries.length === 0 || !overridesPath || !fs.existsSync(overridesPath)) {
+    return
+  }
+
+  const treePaths = new Set(flattenToMap(tree).keys())
+
+  let overrides
+  try {
+    overrides = JSON.parse(fs.readFileSync(overridesPath, 'utf8'))
+  } catch (err) {
+    console.warn(`Warning: Could not parse overrides file for deprecation merge: ${err.message}`)
+    return
+  }
+  if (!overrides.commands) {
+    overrides.commands = {}
+  }
+
+  let annotated = 0
+  for (const [cmdPath, info] of entries) {
+    if (!treePaths.has(cmdPath)) continue
+    const existing = overrides.commands[cmdPath] || {}
+    if (existing.deprecated !== undefined) continue
+    overrides.commands[cmdPath] = {
+      ...existing,
+      deprecated: true,
+      ...(info.deprecatedMessage && !existing.deprecatedMessage
+        ? { deprecatedMessage: info.deprecatedMessage } : {}),
+      ...(info.replacement && !existing.replacement
+        ? { replacement: info.replacement } : {})
+    }
+    annotated++
+  }
+
+  if (annotated > 0) {
+    fs.writeFileSync(overridesPath, JSON.stringify(overrides, null, 2), 'utf8')
+    console.log(`Annotated ${annotated} visible deprecated command(s) in ${overridesPath}`)
+  }
 }
 
 /**
@@ -1655,7 +1706,9 @@ async function handleRpkDocsGeneration(options = {}) {
           const oldTree = oldData.raw_tree || oldData.tree
           diffData = generateRpkDiff(oldTree, tree, {
             oldVersion: diffVersion,
-            newVersion: rpkVersion
+            newVersion: rpkVersion,
+            oldDeprecatedCommands: oldData.deprecated_commands || {},
+            newDeprecatedCommands: jsonData.deprecated_commands || {}
           })
 
           // Save diff
@@ -1883,6 +1936,12 @@ async function handleRpkDocsGeneration(options = {}) {
     // Load and validate overrides
     const defaultOverridesPath = path.join(dataDir, 'rpk-overrides.json')
     const effectiveOverridesPath = overridesPath || defaultOverridesPath
+
+    // Annotate deprecated commands that are still visible in the tree so
+    // their pages render deprecation banners without manual curation. Runs
+    // before the overrides load so the annotations apply to this run.
+    mergeVisibleDeprecationsIntoOverrides(deprecatedCommands, tree, effectiveOverridesPath)
+
     const overridesData = loadOverrides(effectiveOverridesPath, tree, { strict: false })
 
     if (overridesData) {
@@ -1921,7 +1980,9 @@ async function handleRpkDocsGeneration(options = {}) {
         const oldTree = oldData.raw_tree || oldData.tree
         diffData = generateRpkDiff(oldTree, tree, {
           oldVersion: diffVersion,
-          newVersion: rpkVersion
+          newVersion: rpkVersion,
+          oldDeprecatedCommands: oldData.deprecated_commands || {},
+          newDeprecatedCommands: deprecatedCommands
         })
 
         // Save diff

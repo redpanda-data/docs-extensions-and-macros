@@ -239,6 +239,69 @@ describe('rpk Docs Diff Generation', () => {
     })
   })
 
+  describe('deprecation detection', () => {
+    const oldTreeDep = {
+      name: 'rpk',
+      commands: [
+        { name: 'redpanda', commands: [{ name: 'admin', commands: [{ name: 'brokers', commands: [{ name: 'list', commands: [] }] }] }] },
+        { name: 'gone', commands: [] }
+      ]
+    }
+    const newTreeDep = {
+      name: 'rpk',
+      commands: [
+        { name: 'redpanda', commands: [] }
+      ]
+    }
+    const newDeprecated = {
+      'rpk redpanda admin': {
+        deprecated: true,
+        _note: 'Hidden: true, found by scanning Go source',
+        deprecatedMessage: 'use `rpk cluster` subcommands',
+        replacement: 'Use xref:reference:rpk/rpk-cluster/rpk-cluster.adoc[`rpk cluster`] instead.'
+      }
+    }
+
+    test('reports newly deprecated commands with metadata', () => {
+      const diff = generateRpkDiff(oldTreeDep, newTreeDep, {
+        newVersion: 'v2',
+        oldDeprecatedCommands: {},
+        newDeprecatedCommands: newDeprecated
+      })
+      expect(diff.summary.newlyDeprecatedCommands).toBe(1)
+      const dep = diff.details.newlyDeprecatedCommands[0]
+      expect(dep.path).toBe('rpk redpanda admin')
+      expect(dep.hidden).toBe(true)
+      expect(dep.message).toContain('rpk cluster')
+      expect(dep.replacement).toContain('xref:')
+    })
+
+    test('reclassifies hidden-deprecated subtree removals as deprecations', () => {
+      const diff = generateRpkDiff(oldTreeDep, newTreeDep, {
+        newVersion: 'v2',
+        oldDeprecatedCommands: {},
+        newDeprecatedCommands: newDeprecated
+      })
+      // rpk gone is a genuine removal; the admin family is not
+      expect(diff.details.removedCommands.map(c => c.path)).toEqual(['rpk gone'])
+      const dep = diff.details.newlyDeprecatedCommands[0]
+      expect(dep.affectedSubcommands).toEqual(
+        expect.arrayContaining(['rpk redpanda admin brokers', 'rpk redpanda admin brokers list'])
+      )
+    })
+
+    test('already-deprecated commands do not re-report', () => {
+      const diff = generateRpkDiff(oldTreeDep, newTreeDep, {
+        newVersion: 'v2',
+        oldDeprecatedCommands: newDeprecated,
+        newDeprecatedCommands: newDeprecated
+      })
+      expect(diff.summary.newlyDeprecatedCommands).toBe(0)
+      // Without a NEW deprecation, the subtree disappearance counts as removal
+      expect(diff.summary.removedCommands).toBe(4)
+    })
+  })
+
   describe('generateWhatsNewSection change coverage', () => {
     const { generateWhatsNewSection } = require('../../../tools/rpk-docs/report-delta.js')
 
@@ -286,6 +349,21 @@ describe('rpk Docs Diff Generation', () => {
 
     test('returns empty string when nothing changed', () => {
       expect(generateWhatsNewSection(baseDiff({}))).toBe('')
+    })
+
+    test('renders deprecated commands with replacement and affected subcommands', () => {
+      const section = generateWhatsNewSection(baseDiff({
+        newlyDeprecatedCommands: [{
+          path: 'rpk redpanda admin',
+          message: 'use `rpk cluster` subcommands',
+          replacement: 'Use xref:reference:rpk/rpk-cluster/rpk-cluster.adoc[`rpk cluster`] instead.',
+          hidden: true,
+          affectedSubcommands: ['rpk redpanda admin brokers']
+        }]
+      }))
+      expect(section).toContain('=== Deprecated commands')
+      expect(section).toContain('xref:reference:rpk/rpk-cluster/rpk-cluster.adoc')
+      expect(section).toContain('rpk redpanda admin brokers')
     })
   })
 

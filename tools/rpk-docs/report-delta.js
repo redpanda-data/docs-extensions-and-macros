@@ -132,7 +132,14 @@ function compareFlags(oldFlag, newFlag) {
  * @returns {Object} Diff report
  */
 function generateRpkDiff(oldTree, newTree, options = {}) {
-  const { oldVersion = 'old', newVersion = 'new' } = options
+  const {
+    oldVersion = 'old',
+    newVersion = 'new',
+    // deprecated_commands maps from the snapshots (path -> metadata), as
+    // produced by scan-deprecated-commands.js
+    oldDeprecatedCommands = {},
+    newDeprecatedCommands = {}
+  } = options
 
   const oldCommands = flattenToMap(oldTree)
   const newCommands = flattenToMap(newTree)
@@ -152,17 +159,47 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
     }
   })
 
-  // Find removed commands
+  // Newly deprecated commands: in the new snapshot's deprecation map but not
+  // the old one. Detected by source scanning, because deprecated commands
+  // that are also hidden never appear in --print-tree output.
+  const newlyDeprecatedDetails = Object.entries(newDeprecatedCommands)
+    .filter(([path]) => !oldDeprecatedCommands[path])
+    .map(([path, info]) => ({
+      path,
+      message: info.deprecatedMessage || '',
+      replacement: info.replacement || '',
+      hidden: info.hidden === true || /Hidden:\s*true/.test(info._note || ''),
+      deprecatedInVersion: newVersion
+    }))
+
+  // Find removed commands, then separate genuine removals from commands that
+  // disappeared from the tree because they (or an ancestor) were deprecated
+  // and hidden — those still work as aliases and should be reported as
+  // deprecations, not removals.
+  const deprecatedRoots = newlyDeprecatedDetails.map(d => d.path)
+  const isUnderNewlyDeprecated = (p) =>
+    deprecatedRoots.some(root => p === root || p.startsWith(root + ' '))
+
   const removedCommandPaths = [...oldPaths].filter(p => !newPaths.has(p))
-  const removedCommandsDetails = removedCommandPaths.map(path => {
+  const removedCommandsDetails = []
+  for (const path of removedCommandPaths) {
+    if (isUnderNewlyDeprecated(path)) {
+      const root = deprecatedRoots.find(r => path === r || path.startsWith(r + ' '))
+      const entry = newlyDeprecatedDetails.find(d => d.path === root)
+      if (path !== root) {
+        entry.affectedSubcommands = entry.affectedSubcommands || []
+        entry.affectedSubcommands.push(path)
+      }
+      continue
+    }
     const cmd = oldCommands.get(path)
-    return {
+    removedCommandsDetails.push({
       path,
       name: cmd.name,
       description: cmd.description || '',
       removedInVersion: newVersion
-    }
-  })
+    })
+  }
 
   // Find flag changes in existing commands
   const newFlags = []
@@ -271,6 +308,7 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
     },
     summary: {
       newCommands: newCommandsDetails.length,
+      newlyDeprecatedCommands: newlyDeprecatedDetails.length,
       removedCommands: removedCommandsDetails.length,
       newFlags: newFlags.length,
       removedFlags: removedFlags.length,
@@ -282,6 +320,7 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
     },
     details: {
       newCommands: newCommandsDetails,
+      newlyDeprecatedCommands: newlyDeprecatedDetails,
       removedCommands: removedCommandsDetails,
       newFlags,
       removedFlags,
@@ -305,6 +344,7 @@ function printDiffReport(diff) {
 
   console.log('Summary:')
   console.log(`  New commands: ${diff.summary.newCommands}`)
+  console.log(`  Deprecated commands: ${diff.summary.newlyDeprecatedCommands || 0}`)
   console.log(`  Removed commands: ${diff.summary.removedCommands}`)
   console.log(`  New flags: ${diff.summary.newFlags}`)
   console.log(`  Removed flags: ${diff.summary.removedFlags}`)
@@ -321,6 +361,17 @@ function printDiffReport(diff) {
       if (cmd.description) {
         const shortDesc = cmd.description.split('\n')[0].substring(0, 60)
         console.log(`      ${shortDesc}${cmd.description.length > 60 ? '...' : ''}`)
+      }
+    }
+  }
+
+  if ((diff.details.newlyDeprecatedCommands || []).length > 0) {
+    console.log('\nDeprecated Commands (still work, hidden or discouraged):')
+    for (const cmd of diff.details.newlyDeprecatedCommands) {
+      console.log(`  ⚠ ${cmd.path}${cmd.hidden ? ' (hidden)' : ''}`)
+      if (cmd.message) console.log(`      ${cmd.message}`)
+      if ((cmd.affectedSubcommands || []).length > 0) {
+        console.log(`      affects ${cmd.affectedSubcommands.length} subcommand(s)`)
       }
     }
   }
@@ -464,14 +515,15 @@ function generateWhatsNewSection(diff, options = {}) {
 
   // Check if there are any changes worth documenting
   const hasNewCommands = diff.details.newCommands.length > 0
+  const hasDeprecatedCommands = (diff.details.newlyDeprecatedCommands || []).length > 0
   const hasRemovedCommands = diff.details.removedCommands.length > 0
   const hasNewFlags = diff.details.newFlags.length > 0
   const hasRemovedFlags = diff.details.removedFlags.length > 0
   const hasChangedDefaults = diff.details.changedDefaults.length > 0
   const hasChangedFlagTypes = (diff.details.changedFlagTypes || []).length > 0
 
-  if (!hasNewCommands && !hasRemovedCommands && !hasNewFlags &&
-      !hasRemovedFlags && !hasChangedDefaults && !hasChangedFlagTypes) {
+  if (!hasNewCommands && !hasDeprecatedCommands && !hasRemovedCommands &&
+      !hasNewFlags && !hasRemovedFlags && !hasChangedDefaults && !hasChangedFlagTypes) {
     return '' // No changes to document
   }
 
@@ -527,6 +579,25 @@ function generateWhatsNewSection(diff, options = {}) {
     for (const change of diff.details.changedFlagTypes) {
       const xrefPath = commandPathToXref(change.commandPath)
       lines.push(`* xref:reference:rpk/${xrefPath}[\`${change.commandPath}\`]: \`--${change.flagName}\` type changed from \`${change.oldType}\` to \`${change.newType}\``)
+    }
+    lines.push(``)
+  }
+
+  if (hasDeprecatedCommands) {
+    lines.push(`=== Deprecated commands`)
+    lines.push(``)
+    for (const cmd of diff.details.newlyDeprecatedCommands) {
+      let entry = `* \`${cmd.path}\``
+      if (cmd.replacement) {
+        entry += `: ${cmd.replacement}`
+      } else if (cmd.message) {
+        entry += `: ${cmd.message}`
+      }
+      lines.push(entry)
+      if ((cmd.affectedSubcommands || []).length > 0) {
+        lines.push(`+`)
+        lines.push(`Includes its subcommands: ${cmd.affectedSubcommands.map(s => `\`${s}\``).join(', ')}.`)
+      }
     }
     lines.push(``)
   }
