@@ -6,6 +6,7 @@ property fabricates a placeholder doc entry, and the run must record every
 such stub so the end-of-run summary can flag them loudly.
 """
 
+import logging
 import unittest
 import sys
 import os
@@ -103,8 +104,12 @@ class TestPhantomStubTracking(unittest.TestCase):
         properties = {"real_property": {"name": "real_property"}}
         apply_property_overrides(properties, {"properties": {"real_property": {"description": "x"}}})
 
-        with self.assertNoLogs("viewer", level="WARNING"):
+        # assertNoLogs requires Python 3.10, and CI also runs 3.9. Log a
+        # sentinel inside assertLogs and assert it is the only record.
+        with self.assertLogs("viewer", level="WARNING") as captured:
+            logging.getLogger("viewer").warning("sentinel")
             report_phantom_stubs()
+        self.assertEqual(captured.output, ["WARNING:viewer:sentinel"])
 
 
 if __name__ == "__main__":
