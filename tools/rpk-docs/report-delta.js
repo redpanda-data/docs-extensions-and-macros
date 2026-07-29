@@ -539,6 +539,13 @@ function generateWhatsNewSection(diff, options = {}) {
   const useXrefs = options.xrefs !== false
   // Commands that render as partials or are excluded have no linkable page
   const linkable = typeof options.linkable === 'function' ? options.linkable : () => true
+  // Section heading for the page ("== Redpanda CLI" for core rpk changes,
+  // "== rpk plugins" for plugin releases). When blockLabel is set, the block
+  // opens with a "=== <label>" heading and category headings nest one level
+  // deeper, so accumulated blocks never produce colliding section ids.
+  const sectionHeading = options.sectionHeading || '== Redpanda CLI'
+  const blockLabel = options.blockLabel || null
+  const h = blockLabel ? '====' : '==='
   const cmdRef = (commandPath) => {
     if (!useXrefs || !linkable(commandPath)) return `\`${commandPath}\``
     return `xref:reference:rpk/${commandPathToXref(commandPath)}[\`${commandPath}\`]`
@@ -558,11 +565,15 @@ function generateWhatsNewSection(diff, options = {}) {
     return '' // No changes to document
   }
 
-  lines.push(`== Redpanda CLI`)
+  lines.push(sectionHeading)
   lines.push(``)
+  if (blockLabel) {
+    lines.push(`=== ${blockLabel}`)
+    lines.push(``)
+  }
 
   if (hasNewCommands) {
-    lines.push(`=== New commands`)
+    lines.push(`${h} New commands`)
     lines.push(``)
     for (const cmd of diff.details.newCommands) {
       // First line only: multi-line help text would break the bullet list
@@ -574,7 +585,7 @@ function generateWhatsNewSection(diff, options = {}) {
   }
 
   if (hasNewFlags) {
-    lines.push(`=== New flags`)
+    lines.push(`${h} New flags`)
     lines.push(``)
     // Group flags by command
     const flagsByCommand = {}
@@ -593,7 +604,7 @@ function generateWhatsNewSection(diff, options = {}) {
   }
 
   if (hasChangedDefaults) {
-    lines.push(`=== Changed defaults`)
+    lines.push(`${h} Changed defaults`)
     lines.push(``)
     for (const change of diff.details.changedDefaults) {
       const oldVal = formatFlagValue(change.oldDefault)
@@ -604,7 +615,7 @@ function generateWhatsNewSection(diff, options = {}) {
   }
 
   if (hasChangedFlagTypes) {
-    lines.push(`=== Changed flag types`)
+    lines.push(`${h} Changed flag types`)
     lines.push(``)
     for (const change of diff.details.changedFlagTypes) {
       lines.push(`* ${cmdRef(change.commandPath)}: \`--${change.flagName}\` type changed from \`${change.oldType}\` to \`${change.newType}\``)
@@ -613,7 +624,7 @@ function generateWhatsNewSection(diff, options = {}) {
   }
 
   if (hasDeprecatedCommands) {
-    lines.push(`=== Deprecated commands`)
+    lines.push(`${h} Deprecated commands`)
     lines.push(``)
     for (const cmd of diff.details.newlyDeprecatedCommands) {
       let entry = `* \`${cmd.path}\``
@@ -632,7 +643,7 @@ function generateWhatsNewSection(diff, options = {}) {
   }
 
   if (hasRemovedCommands) {
-    lines.push(`=== Removed commands`)
+    lines.push(`${h} Removed commands`)
     lines.push(``)
     for (const cmd of diff.details.removedCommands) {
       lines.push(`* \`${cmd.path}\``)
@@ -641,7 +652,7 @@ function generateWhatsNewSection(diff, options = {}) {
   }
 
   if (hasRemovedFlags) {
-    lines.push(`=== Removed flags`)
+    lines.push(`${h} Removed flags`)
     lines.push(``)
     const removedByCommand = {}
     for (const flag of diff.details.removedFlags) {

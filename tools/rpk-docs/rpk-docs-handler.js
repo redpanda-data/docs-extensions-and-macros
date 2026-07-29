@@ -1093,7 +1093,14 @@ function makeLinkablePredicate(overridesData) {
 }
 
 function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
-  const whatsNewContent = generateWhatsNewSection(diffData, { version, ...options })
+  // Each block opens with a "=== <version>" heading so accumulated blocks
+  // (successive RCs, multiple plugin releases) never collide on section ids
+  const sectionHeading = options.sectionHeading || '== Redpanda CLI'
+  const whatsNewContent = generateWhatsNewSection(diffData, {
+    version,
+    blockLabel: version,
+    ...options
+  })
 
   if (!whatsNewContent) {
     console.log('No Redpanda CLI changes to add to what\'s new')
@@ -1117,7 +1124,7 @@ function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
   // its own markers for the same version label.
   const startMarker = `// AUTOGEN-RPK-CHANGES ${version} START`
   const endMarker = `// AUTOGEN-RPK-CHANGES ${version} END`
-  const sectionBody = whatsNewContent.replace(/^== Redpanda CLI[^\n]*\n+/, '')
+  const sectionBody = whatsNewContent.replace(/^== [^\n]*\n+/, '')
   const block = `${startMarker}\n${sectionBody.trimEnd()}\n${endMarker}`
   const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -1130,7 +1137,7 @@ function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
     return
   }
 
-  const headingMatch = existingContent.match(/^== Redpanda CLI[^\n]*$/m)
+  const headingMatch = existingContent.match(new RegExp(`^${escapeRe(sectionHeading)}[^\\n]*$`, 'm'))
   if (headingMatch) {
     // Append this version's block at the end of the existing section, just
     // before the next level-2 heading (or end of file)
@@ -1141,7 +1148,7 @@ function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
     const before = existingContent.slice(0, insertAt).replace(/\s*$/, '\n\n')
     const after = existingContent.slice(insertAt).replace(/^\n*/, '\n')
     fs.writeFileSync(whatsNewPath, `${before}${block}${after}`, 'utf8')
-    console.log(`Appended ${version} block to the Redpanda CLI section in: ${whatsNewPath}`)
+    console.log(`Appended ${version} block to the "${sectionHeading}" section in: ${whatsNewPath}`)
     return
   }
 
@@ -1163,7 +1170,7 @@ function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
     }
   }
 
-  const fullSection = `== Redpanda CLI\n\n${block}\n`
+  const fullSection = `${sectionHeading}\n\n${block}\n`
 
   let updatedContent
   if (insertIndex > 0) {
@@ -1177,7 +1184,7 @@ function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
   }
 
   fs.writeFileSync(whatsNewPath, updatedContent, 'utf8')
-  console.log(`Created Redpanda CLI section in what's-new file: ${whatsNewPath}`)
+  console.log(`Created "${sectionHeading}" section in what's-new file: ${whatsNewPath}`)
 }
 
 /**
@@ -1692,7 +1699,7 @@ async function handleRpkDocsGeneration(options = {}) {
           const label = resolvedVersion
             ? `${plugin} plugin ${resolvedVersion}`
             : `${plugin} plugin`
-          updateWhatsNewFile(pluginDiffData, whatsNewPath, label, { xrefs: false })
+          updateWhatsNewFile(pluginDiffData, whatsNewPath, label, { xrefs: false, sectionHeading: '== rpk plugins' })
         }
       }
 

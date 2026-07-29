@@ -101,14 +101,36 @@ describe('updateWhatsNewFile merge semantics', () => {
     expect(content.indexOf('AUTOGEN-RPK-CHANGES v2.0.1-rc3 END')).toBeLessThan(content.indexOf('== Bug fixes'))
   })
 
-  test('plugin runs write plugin-labeled blocks without xrefs', () => {
-    fs.writeFileSync(whatsNewPath, '= What\'s New\n')
-    updateWhatsNewFile(rcDiff('rpk ai gateway'), whatsNewPath, 'ai plugin 0.3.0', { xrefs: false })
+  test('plugin runs write to a separate rpk plugins section without xrefs', () => {
+    fs.writeFileSync(whatsNewPath, '= What\'s New\n\n== Redpanda CLI\n\n* Core entry.\n')
+    updateWhatsNewFile(rcDiff('rpk ai gateway'), whatsNewPath, 'ai plugin 0.3.0', {
+      xrefs: false,
+      sectionHeading: '== rpk plugins'
+    })
 
     const content = fs.readFileSync(whatsNewPath, 'utf8')
+    expect(content).toContain('== rpk plugins')
     expect(content).toContain('AUTOGEN-RPK-CHANGES ai plugin 0.3.0 START')
+    expect(content).toContain('=== ai plugin 0.3.0')
     expect(content).toContain('`rpk ai gateway`')
     expect(content).not.toContain('xref:')
+    // Core section untouched
+    expect(content).toContain('* Core entry.')
+    const cliIdx = content.indexOf('== Redpanda CLI')
+    expect(content.indexOf('AUTOGEN-RPK-CHANGES')).toBeGreaterThan(cliIdx)
+  })
+
+  test('block headings carry the version so accumulated blocks never collide', () => {
+    fs.writeFileSync(whatsNewPath, '= What\'s New\n')
+    updateWhatsNewFile(rcDiff('rpk topic a'), whatsNewPath, 'v2.0.1-rc1')
+    updateWhatsNewFile(rcDiff('rpk topic b'), whatsNewPath, 'v2.0.1-rc2')
+
+    const content = fs.readFileSync(whatsNewPath, 'utf8')
+    expect(content).toContain('=== v2.0.1-rc1')
+    expect(content).toContain('=== v2.0.1-rc2')
+    // Category headings nest under the version heading
+    expect(content).toContain('==== New commands')
+    expect(content).not.toMatch(/^=== New commands$/m)
   })
 
   test('writes deprecations from the diff', () => {
@@ -123,7 +145,7 @@ describe('updateWhatsNewFile merge semantics', () => {
     }), whatsNewPath, 'v2.0.0')
 
     const content = fs.readFileSync(whatsNewPath, 'utf8')
-    expect(content).toContain('=== Deprecated commands')
+    expect(content).toContain('==== Deprecated commands')
     expect(content).toContain('rpk-cluster.adoc')
   })
 })
