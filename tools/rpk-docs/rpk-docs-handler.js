@@ -583,8 +583,9 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
       )
     }
 
+    let tree
     try {
-      return JSON.parse(result.stdout)
+      tree = JSON.parse(result.stdout)
     } catch (err) {
       throw new Error(
         `Failed to parse rpk tree JSON from Linux source build: ${err.message}\n` +
@@ -592,6 +593,26 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
         'This may indicate a version mismatch or corrupted source.'
       )
     }
+
+    // Step 4: Fill in flags for plugin subtrees. Their commands come from
+    // --help-autocomplete, which carries no flag data, so without this every
+    // plugin command page renders an empty flags section.
+    console.log('Extracting flags from plugin command help output...')
+    for (const plugin of KNOWN_PLUGINS) {
+      const node = (tree.commands || []).find(c => c.name === plugin)
+      if (!node || !pluginNodeHasRealCommands(node)) continue
+      const enriched = enrichPluginTreeWithFlags(node, (argPath) => {
+        const helpResult = spawnSync('docker', [
+          'exec', containerId, '/tmp/rpk', ...argPath, '--help'
+        ], { encoding: 'utf8', timeout: 30000 })
+        return helpResult.status === 0 ? helpResult.stdout : null
+      })
+      if (enriched > 0) {
+        console.log(`  ${plugin}: extracted flags for ${enriched} command(s)`)
+      }
+    }
+
+    return tree
   } finally {
     // Clean up container
     console.log('Cleaning up build container...')
@@ -1407,6 +1428,89 @@ function splicePluginNode(tree, plugin, freshNode) {
 }
 
 /**
+ * Parse the local "Flags:" section of cobra --help output into flag objects
+ * matching the shape rpk --print-tree emits for compiled-in commands.
+ * The "Global Flags:" section is ignored: rpk-core globals are documented by
+ * the shared global-flags table, and plugin-global flags are captured from
+ * the plugin root command's own Flags section.
+ * @param {string} helpText - Output of `rpk <command> --help`
+ * @returns {Array<Object>} Flags: { name, shorthand?, type, description, default? }
+ */
+function parseCobraFlags(helpText) {
+  const lines = (helpText || '').split('\n')
+  const start = lines.findIndex(l => /^Flags:\s*$/.test(l))
+  if (start === -1) return []
+
+  const flags = []
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (/^\S/.test(line)) break // next section (Global Flags:, Use "...", ...)
+    if (line.trim() === '') break
+
+    const m = line.match(/^\s+(?:-(\w),\s+)?--([\w.-]+)(?:\s+(\S+))?\s{2,}(.*)$/)
+    if (m) {
+      const [, shorthand, name, valueType, desc] = m
+      if (name === 'help') continue
+      const flag = {
+        name,
+        type: valueType || 'bool',
+        description: desc.trim()
+      }
+      if (shorthand) flag.shorthand = shorthand
+      const def = flag.description.match(/\s*\(default (.+)\)$/)
+      if (def) {
+        flag.default = def[1]
+        flag.description = flag.description.slice(0, def.index).trim()
+      }
+      flags.push(flag)
+    } else if (flags.length > 0 && /^\s{4,}\S/.test(line) && !line.trim().startsWith('-')) {
+      // Wrapped description continuation
+      const last = flags[flags.length - 1]
+      last.description = `${last.description} ${line.trim()}`.trim()
+      const def = last.description.match(/\s*\(default (.+)\)$/)
+      if (def) {
+        last.default = def[1]
+        last.description = last.description.slice(0, def.index).trim()
+      }
+    }
+  }
+  return flags
+}
+
+/**
+ * Fill in flags for plugin subtree commands by running `--help` per command.
+ * Plugin subcommand nodes come from the plugin's --help-autocomplete output,
+ * which carries no flag information, so without this every plugin command
+ * page renders with an empty flags section. Nodes that already have flags
+ * (the install/uninstall/upgrade shim compiled into rpk) are left alone.
+ * Help failures are non-fatal: the affected command keeps an empty list.
+ * @param {Object} node - The plugin's top-level command node (mutated)
+ * @param {Function} execHelp - (argPath: string[]) => string|null, returns
+ *   the help text for `rpk <argPath...> --help`
+ * @returns {number} Number of commands enriched
+ */
+function enrichPluginTreeWithFlags(node, execHelp) {
+  let enriched = 0
+  const walk = (cmd, argPath) => {
+    if (!cmd.flags || cmd.flags.length === 0) {
+      const helpText = execHelp(argPath)
+      if (helpText) {
+        const flags = parseCobraFlags(helpText)
+        if (flags.length > 0) {
+          cmd.flags = flags
+          enriched++
+        }
+      }
+    }
+    for (const child of cmd.commands || []) {
+      walk(child, [...argPath, child.name])
+    }
+  }
+  walk(node, [node.name])
+  return enriched
+}
+
+/**
  * Install a single plugin and capture its fresh command subtree.
  * Runs with an isolated HOME so the install never touches the caller's
  * rpk plugin state, and the caller's installed plugins never leak in.
@@ -1486,6 +1590,19 @@ function fetchPluginSubtree({ plugin, pluginVersion, rpkBinPath }) {
       `--plugin-version <version>`
     )
   }
+
+  // Fill in per-command flags: autocomplete trees carry none, but the plugin
+  // binary is installed, so each command's --help documents them
+  console.log(`Extracting flags from ${plugin} command help output...`)
+  const enriched = enrichPluginTreeWithFlags(node, (argPath) => {
+    const helpResult = spawnSync(rpkBinPath, [...argPath, '--help'], {
+      encoding: 'utf8',
+      env,
+      timeout: 30000
+    })
+    return helpResult.status === 0 ? helpResult.stdout : null
+  })
+  console.log(`  Extracted flags for ${enriched} command(s)`)
 
   // When the pin was applied, record it. When we fell back to latest (or no
   // pin was given), record what the manifest says latest is: that is what
@@ -2384,6 +2501,8 @@ module.exports = {
   buildRpkBinary,
   downloadRpkRelease,
   fetchPluginSubtree,
+  parseCobraFlags,
+  enrichPluginTreeWithFlags,
   fetchLatestPluginVersion,
   pluginNodeHasRealCommands,
   splicePluginNode,

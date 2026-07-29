@@ -1941,6 +1941,45 @@ function dashify(commandPath) {
  * @param {string} desc - Full description
  * @returns {string} Short description
  */
+/**
+ * Collapse runs of three or more newlines to a single blank line, except
+ * inside AsciiDoc delimited blocks (----, ====, ...., |===), where blank
+ * lines are content.
+ * @param {string} text - Rendered page content
+ * @returns {string}
+ */
+function collapseBlankLines(text) {
+  const lines = text.split('\n')
+  const out = []
+  let inBlock = false
+  let blockDelim = null
+  let blankRun = 0
+
+  for (const line of lines) {
+    const trimmed = line.trimEnd()
+    const isDelim = /^(-{4,}|={4,}|\.{4,}|\|===)$/.test(trimmed)
+    if (isDelim) {
+      if (!inBlock) {
+        inBlock = true
+        blockDelim = trimmed
+      } else if (trimmed === blockDelim || (blockDelim === '|===' && trimmed === '|===')) {
+        inBlock = false
+        blockDelim = null
+      }
+    }
+
+    if (!inBlock && trimmed === '') {
+      blankRun++
+      if (blankRun > 1) continue
+    } else {
+      blankRun = 0
+    }
+    out.push(line)
+  }
+
+  return out.join('\n')
+}
+
 function capToTwoSentences(desc) {
   if (!desc) return ''
   if (typeof desc !== 'string') return String(desc)
@@ -1982,11 +2021,26 @@ function capToTwoSentences(desc) {
     })
   }
 
+  // Protect decimal points in version-like numbers (OAuth 2.0, HTTP 1.1) so
+  // they neither split a sentence nor cause the leading fragment to be
+  // dropped by the sentence matcher
+  normalized = normalized.replace(/(\d)\.(\d)/g, '$1__DECIMAL__$2')
+
   // Match sentences
-  const sentences = normalized.match(/[^.!?]+[.!?]+(?:\s|$)/g)
+  let sentences = normalized.match(/[^.!?]+[.!?]+(?:\s|$)/g)
+
+  // Never drop a leading fragment: if the first matched sentence does not
+  // start at the beginning of the text (an unterminated prefix was skipped),
+  // glue the prefix back onto it
+  if (sentences && sentences.length > 0) {
+    const firstIdx = normalized.indexOf(sentences[0])
+    if (firstIdx > 0) {
+      sentences = [normalized.slice(0, firstIdx) + sentences[0], ...sentences.slice(1)]
+    }
+  }
   if (!sentences || sentences.length === 0) {
     // Restore and return
-    let result = normalized
+    let result = normalized.replace(/__DECIMAL__/g, '.')
     placeholders.forEach(({ ph, original }) => {
       result = result.replace(ph, original)
     })
@@ -1997,6 +2051,9 @@ function capToTwoSentences(desc) {
   }
 
   let result = sentences.slice(0, 2).join('')
+
+  // Restore decimal points
+  result = result.replace(/__DECIMAL__/g, '.')
 
   // Restore abbreviations
   placeholders.forEach(({ ph, original }) => {
@@ -2542,8 +2599,11 @@ async function generateRpkDocs(options = {}) {
       hasUnknownSections: unknownSections.length > 0
     }
 
-    // Render template
-    const content = template(context)
+    // Render template, then collapse runs of blank lines left behind by
+    // absent optional sections (plugin commands have no aliases or flags, so
+    // the separators between skipped blocks stack up). Blank lines inside
+    // delimited blocks are preserved: they are content there.
+    const content = collapseBlankLines(template(context))
 
     // Determine output path
     // Check if this command should go to cloudSecretDir
