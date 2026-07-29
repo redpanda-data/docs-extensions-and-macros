@@ -699,6 +699,9 @@ Refresh a single rpk plugin's docs (ai, connect, k8s, check). Requires --from-js
 `--plugin-version <version>`::
 Plugin version to install and record (for example, 4.102.0). Defaults to the latest published version.
 
+`--plugin-pin <name=version>`::
+Pin a plugin version for the installs during full generation (repeatable, for example --plugin-pin k8s=26.3.1-beta.1). Required for pre-GA plugins with no promoted latest version. (default: {})
+
 `--rpk-bin <path>`::
 Path to an existing rpk binary for the plugin refresh (skips download/build)
 
