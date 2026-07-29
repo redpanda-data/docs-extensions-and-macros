@@ -79,7 +79,7 @@ ENUM_PATTERN = re.compile(r'^[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)$')  # Match full qu
 CONSTRUCTOR_PATTERN = re.compile(r'([a-zA-Z0-9_:]+)\((.*)\)')
 BRACED_CONSTRUCTOR_PATTERN = re.compile(r'([a-zA-Z0-9_:]+)\{(.*)\}')
 DIGIT_SEPARATOR_PATTERN = re.compile(r"(?<=\d)'(?=\d)")
-FUNCTION_CALL_PATTERN = re.compile(r'([a-zA-Z0-9_:.]+)\(\)')
+FUNCTION_CALL_PATTERN = re.compile(r'([a-zA-Z0-9_:.]+)\(\)$')
 CHRONO_PATTERN = re.compile(r'std::chrono::([a-zA-Z]+)\s*\{\s*(\d+)\s*\}')
 CHRONO_PAREN_PATTERN = re.compile(r'(?:std::)?chrono::([a-zA-Z]+)\s*\(\s*([^)]+)\s*\)')
 TIME_UNIT_PATTERN = re.compile(r'(\d+)\s*(min|s|ms|h)')

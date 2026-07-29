@@ -69,6 +69,17 @@ class FunctionCallPatternTest(unittest.TestCase):
     def test_does_not_match_calls_with_arguments(self):
         self.assertIsNone(pe.FUNCTION_CALL_PATTERN.match('std::chrono::milliseconds(30000)'))
 
+    def test_does_not_match_call_with_trailing_expression(self):
+        """A call that is only the prefix of a compound expression must not
+        match, otherwise the resolver silently discards the rest of the
+        expression (for example, `+ "_suffix"`)."""
+        self.assertIsNone(pe.FUNCTION_CALL_PATTERN.match(
+            'model::schema_registry_internal_tp.topic() + "_suffix"'
+        ))
+        self.assertIsNone(pe.FUNCTION_CALL_PATTERN.match(
+            'model::kafka_audit_logging_topic() + other()'
+        ))
+
 
 if __name__ == '__main__':
     unittest.main()
