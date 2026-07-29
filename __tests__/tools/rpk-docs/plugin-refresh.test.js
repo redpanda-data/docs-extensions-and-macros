@@ -2,6 +2,7 @@
 
 const {
   splicePluginNode,
+  preserveLinuxOnlyCommands,
   pluginNodeHasRealCommands,
   REFRESHABLE_PLUGINS,
   PLUGIN_INSTALL_VERSION_FLAGS,
@@ -75,6 +76,63 @@ describe('Plugin refresh (--plugin mode)', () => {
     test('throws when the plugin is not in the base tree', () => {
       expect(() => splicePluginNode(baseTree, 'k8s', shimOnlyNode))
         .toThrow(/not present in the base tree/)
+    })
+
+    test('keeps the tree linux_only_commands list through a splice', () => {
+      const treeWithMarkers = { ...baseTree, linux_only_commands: ['rpk debug bundle', 'rpk iotune'] }
+      const result = splicePluginNode(treeWithMarkers, 'connect', installedNode)
+      expect(result.linux_only_commands).toEqual(['rpk debug bundle', 'rpk iotune'])
+    })
+  })
+
+  describe('preserveLinuxOnlyCommands', () => {
+    const linuxOnly = ['rpk debug bundle', 'rpk iotune']
+
+    test('inherits the snapshot list when the working tree lacks it', () => {
+      const result = preserveLinuxOnlyCommands(baseTree, { ...baseTree, linux_only_commands: linuxOnly })
+      expect(result.linux_only_commands).toEqual(linuxOnly)
+      // Copies, not aliases: mutating the result must not touch the snapshot
+      expect(result.linux_only_commands).not.toBe(linuxOnly)
+      expect(result.commands).toBe(baseTree.commands)
+    })
+
+    test('keeps the working tree list when it already has one', () => {
+      const tree = { ...baseTree, linux_only_commands: linuxOnly }
+      const result = preserveLinuxOnlyCommands(tree, { ...baseTree, linux_only_commands: ['rpk other'] })
+      expect(result).toBe(tree)
+      expect(result.linux_only_commands).toEqual(linuxOnly)
+    })
+
+    test('is a no-op when neither tree carries the list', () => {
+      expect(preserveLinuxOnlyCommands(baseTree, baseTree)).toBe(baseTree)
+      expect(preserveLinuxOnlyCommands(baseTree, undefined)).toBe(baseTree)
+      expect(preserveLinuxOnlyCommands(null, baseTree)).toBe(null)
+    })
+
+    test('refresh persistence chain keeps markers for the saved snapshot', () => {
+      // Mirrors the --plugin save path: derive the working tree from the
+      // snapshot, splice the fresh subtree, then preserve before persisting.
+      const snapshot = {
+        raw_tree: { ...baseTree, linux_only_commands: linuxOnly },
+        tree: { ...baseTree, linux_only_commands: linuxOnly }
+      }
+      let tree = snapshot.raw_tree || snapshot.tree
+      tree = preserveLinuxOnlyCommands(tree, snapshot.tree || snapshot.raw_tree)
+      tree = splicePluginNode(tree, 'connect', installedNode)
+      tree = preserveLinuxOnlyCommands(tree, snapshot.raw_tree || snapshot.tree)
+      expect(tree.linux_only_commands).toEqual(linuxOnly)
+    })
+
+    test('refresh persistence chain restores markers when only the enhanced tree has them', () => {
+      // Older snapshots may carry the field on only one stored tree; the
+      // derivation step must inherit it so the re-saved snapshot keeps it.
+      const snapshot = {
+        raw_tree: { ...baseTree },
+        tree: { ...baseTree, linux_only_commands: linuxOnly }
+      }
+      let tree = snapshot.raw_tree || snapshot.tree
+      tree = preserveLinuxOnlyCommands(tree, snapshot.tree || snapshot.raw_tree)
+      expect(tree.linux_only_commands).toEqual(linuxOnly)
     })
   })
 

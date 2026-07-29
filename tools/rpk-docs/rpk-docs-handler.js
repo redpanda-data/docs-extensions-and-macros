@@ -1428,6 +1428,24 @@ function splicePluginNode(tree, plugin, freshNode) {
 }
 
 /**
+ * Carry a snapshot's recorded Linux-only command list onto a working tree.
+ * The list comes from scanning Go build tags in the rpk source, which
+ * from-json runs (including --plugin refreshes) never see, so it can only be
+ * inherited from the existing snapshot. Without it the refreshed snapshot
+ * would lose its platform markers for every future from-json run.
+ * @param {Object} tree - Working command tree (root node)
+ * @param {Object} [fallbackTree] - Tree to inherit linux_only_commands from
+ *   when the working tree does not carry the field itself
+ * @returns {Object} Tree that carries linux_only_commands when available
+ */
+function preserveLinuxOnlyCommands(tree, fallbackTree) {
+  if (!tree || tree.linux_only_commands) return tree
+  const inherited = fallbackTree && fallbackTree.linux_only_commands
+  if (!inherited) return tree
+  return { ...tree, linux_only_commands: [...inherited] }
+}
+
+/**
  * Parse the local "Flags:" section of cobra --help output into flag objects
  * matching the shape rpk --print-tree emits for compiled-in commands.
  * The "Global Flags:" section is ignored: rpk-core globals are documented by
@@ -1715,6 +1733,10 @@ async function handleRpkDocsGeneration(options = {}) {
       console.log(`Loading command tree from ${jsonPath}`)
       const jsonData = JSON.parse(fs.readFileSync(jsonPath, 'utf8'))
       tree = jsonData.raw_tree || jsonData.tree
+      // Inherit the Linux-only command list from whichever stored tree
+      // carries it: it cannot be re-detected without the rpk source, and
+      // both rendering and the re-saved snapshot below depend on it.
+      tree = preserveLinuxOnlyCommands(tree, jsonData.tree || jsonData.raw_tree)
       rpkVersion = jsonData.rpk_version || 'local'
 
       if (!tree) {
@@ -1834,6 +1856,10 @@ async function handleRpkDocsGeneration(options = {}) {
       // recorded version become the new baseline (mirrors the from-source
       // path's augmentedData structure)
       if (plugin) {
+        // The Linux-only list can't be re-detected during a plugin refresh
+        // (it comes from Go build-tag scanning of the rpk source), so make
+        // sure the saved snapshot's trees still carry it before persisting.
+        tree = preserveLinuxOnlyCommands(tree, jsonData.raw_tree || jsonData.tree)
         let enhancedTree = tree
         if (overridesData) {
           const resolvedOverrides = resolveReferences(overridesData, overridesData)
@@ -2506,6 +2532,7 @@ module.exports = {
   fetchLatestPluginVersion,
   pluginNodeHasRealCommands,
   splicePluginNode,
+  preserveLinuxOnlyCommands,
   REFRESHABLE_PLUGINS,
   PLUGIN_INSTALL_VERSION_FLAGS,
   PLUGIN_MANIFEST_SLUGS,
