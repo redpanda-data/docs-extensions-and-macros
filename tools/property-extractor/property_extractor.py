@@ -905,6 +905,32 @@ def merge_properties_and_definitions(properties, definitions):
     return dict(properties=properties, definitions=definitions)
 
 
+# Phantom stub entries created by apply_property_overrides during the current
+# run. An entry is recorded whenever an override key matches no extracted
+# property and a placeholder doc entry is fabricated from the override alone.
+# Tracked at module level so the run summary in main() can report them all in
+# one place at the end of the run.
+phantom_stub_entries = []
+
+
+def report_phantom_stubs():
+    """Log one prominent warning block listing every phantom stub created from overrides."""
+    if not phantom_stub_entries:
+        return
+    logger.warning("=" * 70)
+    logger.warning(
+        f"⚠️  {len(phantom_stub_entries)} override "
+        f"{'entry' if len(phantom_stub_entries) == 1 else 'entries'} matched no extracted property"
+    )
+    for entry in phantom_stub_entries:
+        logger.warning(
+            f"Override key '{entry['name']}' matched no extracted property — created a stub entry "
+            f"with config_scope '{entry['config_scope']}'. If the property was renamed or removed, "
+            f"update docs-data/property-overrides.json."
+        )
+    logger.warning("=" * 70)
+
+
 def apply_property_overrides(properties, overrides, overrides_file_path=None):
     """
     Apply overrides from an overrides mapping to the extracted properties, mutating and returning the properties dictionary.
@@ -924,6 +950,7 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
     Returns:
         dict: The same properties mapping with overrides applied and any new properties created.
     """
+    phantom_stub_entries.clear()
     if overrides and "properties" in overrides:
         for prop, override in overrides["properties"].items():
             # First check if property exists by key
@@ -945,7 +972,13 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
                 else:
                     # Create new property from override
                     logger.info(f"Creating new property from override: {prop}")
-                    properties[prop] = _create_property_from_override(prop, override, overrides_file_path)
+                    new_property = _create_property_from_override(prop, override, overrides_file_path)
+                    properties[prop] = new_property
+                    # Record the phantom stub so the run summary can flag it loudly
+                    phantom_stub_entries.append({
+                        "name": prop,
+                        "config_scope": new_property.get("config_scope"),
+                    })
     return properties
 
 
@@ -3035,6 +3068,17 @@ def main():
         except IOError as e:
             logging.error(f"Failed to write enhanced output file: {e}")
             sys.exit(1)
+
+    # Surface phantom stubs prominently at the end of the run. These are
+    # override keys that matched no extracted property, so a placeholder doc
+    # entry was fabricated from the override alone.
+    if phantom_stub_entries:
+        report_phantom_stubs()
+        phantom_names = ", ".join(entry["name"] for entry in phantom_stub_entries)
+        print(
+            f"⚠️  Phantom stub entries created from overrides: "
+            f"{len(phantom_stub_entries)} ({phantom_names})"
+        )
 
 if __name__ == "__main__":
     main()

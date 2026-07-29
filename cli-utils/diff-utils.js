@@ -65,9 +65,16 @@ function cleanupOldDiffs (diffDir) {
 /**
  * Generate a detailed JSON report describing property changes between two releases.
  *
+ * When either input JSON is missing the comparison is skipped with a warning
+ * (a genuinely new oldest tag legitimately has no baseline). When both inputs
+ * exist but the comparison itself fails, this throws so callers fail loudly
+ * instead of silently dropping removed-deprecated restoration and version
+ * stamping.
+ *
  * @param {string} oldTag - Release tag or identifier for the "old" properties set.
  * @param {string} newTag - Release tag or identifier for the "new" properties set.
  * @param {string} outputDir - Directory where the comparison report will be written.
+ * @throws {Error} When both input JSONs exist but the comparison fails to run or exits non-zero.
  */
 function generatePropertyComparisonReport (oldTag, newTag, outputDir) {
   try {
@@ -81,13 +88,14 @@ function generatePropertyComparisonReport (oldTag, newTag, outputDir) {
 
     if (!fs.existsSync(oldJsonPath)) {
       console.log(`Warning: Old properties JSON not found at: ${oldJsonPath}`)
-      console.log('   Skipping detailed property comparison.')
+      console.log('   Skipping detailed property comparison: no diff report will be generated, so removed deprecated properties are not restored and new properties are not stamped with "Introduced in" versions.')
+      console.log(`   This is expected only when ${oldTag} has never been extracted (for example, the oldest supported release).`)
       return
     }
 
     if (!fs.existsSync(newJsonPath)) {
       console.log(`Warning: New properties JSON not found at: ${newJsonPath}`)
-      console.log('   Skipping detailed property comparison.')
+      console.log('   Skipping detailed property comparison: no diff report will be generated, so removed deprecated properties are not restored and new properties are not stamped with "Introduced in" versions.')
       return
     }
 
@@ -107,15 +115,19 @@ function generatePropertyComparisonReport (oldTag, newTag, outputDir) {
       cwd: propertyExtractorDir
     })
 
+    // Both inputs exist, so a failed comparison is a hard error: continuing
+    // would silently skip removed-deprecated restoration and version stamping
     if (result.error) {
-      console.error(`Error: Property comparison failed: ${result.error.message}`)
-    } else if (result.status !== 0) {
-      console.error(`Error: Property comparison exited with code: ${result.status}`)
-    } else {
-      console.log(`Done: Property comparison report saved to: ${reportPath}`)
+      throw new Error(`Property comparison failed to run: ${result.error.message}`)
     }
+    if (result.status !== 0) {
+      throw new Error(`Property comparison exited with code ${result.status}`)
+    }
+    console.log(`Done: Property comparison report saved to: ${reportPath}`)
   } catch (error) {
     console.error(`Error: Error generating property comparison: ${error.message}`)
+    // Propagate so callers fail loudly instead of shipping incomplete docs
+    throw error
   }
 }
 

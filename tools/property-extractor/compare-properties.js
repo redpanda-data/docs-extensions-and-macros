@@ -364,8 +364,10 @@ function generateConsoleReport(report, oldVersion, newVersion) {
 /**
  * Write a structured JSON comparison report to disk.
  *
- * Produces a JSON file containing a comparison header (old/new versions and timestamp),
+ * Produces a JSON file containing a comparison header (old/new versions),
  * a summary with counts for each change category, and the full details object passed as `report`.
+ * The report is deterministic: rerunning the comparison on the same inputs
+ * produces byte-identical output, so committed reports do not churn.
  *
  * @param {Object} report - Comparison details object produced by compareProperties; expected to contain arrays: `newProperties`, `changedDefaults`, `changedDescriptions`, `changedTypes`, `deprecatedProperties`, `removedProperties`, and `emptyDescriptions`.
  * @param {string} oldVersion - The previous version identifier included in the comparison header.
@@ -376,8 +378,7 @@ function generateJsonReport(report, oldVersion, newVersion, outputPath) {
   const jsonReport = {
     comparison: {
       oldVersion,
-      newVersion,
-      timestamp: new Date().toISOString()
+      newVersion
     },
     summary: {
       newProperties: report.newProperties.length,
