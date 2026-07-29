@@ -73,7 +73,11 @@ clean:
 
 # --- Clone or update Redpanda, checkout TAG or default branch ---
 # Clones are shallow: the extractor only reads source files at a single tag,
-# so full history is wasted time and disk
+# so full history is wasted time and disk.
+# Auth is passed as a per-invocation HTTP header (git -c before the clone
+# subcommand), never embedded in the remote URL, so no token is persisted in
+# the clone's .git/config. The clone lives inside the installed package dir,
+# so a persisted token would be readable by anything that can list it.
 redpanda-git:
 	@mkdir -p "$(TMP_ROOT)"
 	@echo "🔄 Cloning/updating Redpanda into $(REDPANDA_SRC)…"
@@ -83,14 +87,15 @@ redpanda-git:
 	    git -C "$(REDPANDA_SRC)" fetch --all --tags -q; \
 	else \
 	  GH_TOKEN=$${REDPANDA_GITHUB_TOKEN:-$${GITHUB_TOKEN:-$${GH_TOKEN}}}; \
+	  REPO_URL="https://github.com/redpanda-data/redpanda.git"; \
 	  if [ -n "$$GH_TOKEN" ]; then \
 	    echo "🔑 Using authenticated clone (token provided)"; \
-	    REPO_URL="https://$$GH_TOKEN@github.com/redpanda-data/redpanda.git"; \
+	    AUTH_HEADER="AUTHORIZATION: basic $$(printf '%s' "x-access-token:$$GH_TOKEN" | base64 | tr -d '\n')"; \
 	  else \
-	    REPO_URL="https://github.com/redpanda-data/redpanda.git"; \
+	    AUTH_HEADER=""; \
 	  fi; \
-	  git clone -q --depth 1 --branch "$(TAG)" "$$REPO_URL" "$(REDPANDA_SRC)" 2>/dev/null || \
-	    git clone -q --depth 1 "$$REPO_URL" "$(REDPANDA_SRC)"; \
+	  git -c http.https://github.com/.extraheader="$$AUTH_HEADER" clone -q --depth 1 --branch "$(TAG)" "$$REPO_URL" "$(REDPANDA_SRC)" 2>/dev/null || \
+	    git -c http.https://github.com/.extraheader="$$AUTH_HEADER" clone -q --depth 1 "$$REPO_URL" "$(REDPANDA_SRC)"; \
 	fi; \
 	if git -C "$(REDPANDA_SRC)" rev-parse --verify -q "origin/$(TAG)" >/dev/null 2>&1; then \
 	  echo "🔖 Checking out remote branch 'origin/$(TAG)'"; \

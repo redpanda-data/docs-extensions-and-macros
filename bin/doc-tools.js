@@ -1053,9 +1053,11 @@ automation
 
       try {
         const jsonDir = path.resolve(outputDir, 'attachments')
-        // Invariant: keep at least 2 versioned JSONs, the current release plus
-        // the diff baseline. The next run's comparison needs the previous
-        // version's JSON to survive. Mirrors the retention in
+        // Invariant: always retain the comparison pair this run actually used
+        // (the current tag's JSON and the diff baseline's JSON) in addition to
+        // the 2 newest versioned JSONs. A backport run can compare tags that
+        // are not the 2 newest, and the next run's comparison needs its
+        // baseline JSON to survive. Mirrors the retention in
         // tools/property-extractor/Makefile (generate-docs cleanup).
         const parseVersion = f => f.match(/^redpanda-properties-v([\d.]+)\.json$/)[1].split('.').map(Number)
         const byVersionDesc = (a, b) => {
@@ -1069,10 +1071,14 @@ automation
           .filter(f => /^redpanda-properties-v[\d.]+\.json$/.test(f))
           .sort(byVersionDesc)
 
-        const filesToDelete = propertyFiles.slice(2)
+        const filesToKeep = new Set(propertyFiles.slice(0, 2))
+        for (const tag of [newTag, oldTag]) {
+          if (tag) filesToKeep.add(`redpanda-properties-${tag}.json`)
+        }
+        const filesToDelete = propertyFiles.filter(f => !filesToKeep.has(f))
 
         if (filesToDelete.length > 0) {
-          console.log('🧹 Cleaning up old property JSON files (keeping the 2 newest)...')
+          console.log('🧹 Cleaning up old property JSON files (keeping the 2 newest plus the comparison pair)...')
           filesToDelete.forEach(file => {
             fs.unlinkSync(path.join(jsonDir, file))
             console.log(`   Deleted: ${file}`)
