@@ -753,7 +753,24 @@ def transform_files_with_properties(files_with_properties):
                 continue
 
             if len(property_definition) > 0:
-                all_properties[name] = property_definition
+                # Key the output by the property's registered name (the string
+                # literal passed to the constructor), which can differ from the
+                # C++ member identifier used as the parser key. For example,
+                # the member `default_topic_replication` registers the name
+                # "default_topic_replications".
+                output_key = property_definition.get("name") or name
+                existing = all_properties.get(output_key)
+                if existing is not None and existing.get("defined_in") == property_definition.get("defined_in"):
+                    # Two members of the same config store register the same
+                    # property name. config_store registers properties with
+                    # emplace(), so the first registration wins at runtime.
+                    # Match that behavior and keep the first definition.
+                    logging.warning(
+                        f"Duplicate property name '{output_key}' (member '{name}') in "
+                        f"{property_definition.get('defined_in')}: keeping the first definition."
+                    )
+                    continue
+                all_properties[output_key] = property_definition
 
     return all_properties
 

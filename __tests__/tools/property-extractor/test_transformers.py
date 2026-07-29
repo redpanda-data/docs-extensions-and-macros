@@ -328,6 +328,43 @@ class TestBasicInfoTransformer(unittest.TestCase):
         # BasicInfoTransformer should skip lambda and find first string literal
         self.assertEqual(result["name"], "timeout_ms")
 
+    def test_name_string_literal_wins_over_member_identifier(self):
+        """The registered name string literal must win over the C++ member name.
+
+        Regression test for redpanda-data/docs#1657: the member
+        `default_topic_replication` registers the property name
+        "default_topic_replications" (plural). The parser normalizes string
+        literals by stripping quotes, so values here are unquoted, exactly as
+        BasicInfoTransformer receives them in production.
+        """
+        info = {
+            "name_in_file": "default_topic_replication",
+            "params": [
+                {"value": "default_topic_replications", "type": "string_literal"},
+                {"value": "Default replication factor for new topics.", "type": "string_literal"},
+            ],
+        }
+
+        property = PropertyBag()
+        result = self.transformer.parse(property, info, self.file_pair)
+
+        self.assertEqual(result["name"], "default_topic_replications")
+        self.assertEqual(result["description"], "Default replication factor for new topics.")
+
+    def test_member_identifier_fallback_when_no_name_literal(self):
+        """Fall back to the member identifier when the first string literal is not a name."""
+        info = {
+            "name_in_file": "some_property",
+            "params": [
+                {"value": "A description with spaces, not a name.", "type": "string_literal"},
+            ],
+        }
+
+        property = PropertyBag()
+        result = self.transformer.parse(property, info, self.file_pair)
+
+        self.assertEqual(result["name"], "some_property")
+
     def test_normalize_file_path(self):
         """Test that file paths are normalized to start with src/."""
         info = {"params": [
