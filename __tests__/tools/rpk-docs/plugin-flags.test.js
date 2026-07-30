@@ -144,3 +144,37 @@ describe('mergeVisibleDeprecationsIntoOverrides', () => {
     expect(fs.readFileSync(overridesPath, 'utf8')).toBe(before)
   })
 })
+
+describe('parseUrfaveFlags (Redpanda Connect help format)', () => {
+  const { parseUrfaveFlags, parseHelpFlags } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
+
+  const HELP = [
+    'NAME:',
+    '   redpanda-connect run - Run',
+    '',
+    'OPTIONS:',
+    '   --log.level value                     override the log level',
+    '   --set value, -s value [ --set value, -s value ]   set a field',
+    '   --chilled                             continue on lint errors (default: false)',
+    '   --watcher, -w                         watch config files (default: false)',
+    '',
+    'GLOBAL OPTIONS:',
+    '   --verbose   noisy'
+  ].join('\n')
+
+  test('parses names, shorthands, types, and defaults', () => {
+    const flags = parseUrfaveFlags(HELP)
+    const byName = Object.fromEntries(flags.map(f => [f.name, f]))
+    expect(byName['log.level']).toMatchObject({ type: 'string' })
+    expect(byName['set']).toMatchObject({ shorthand: 's', type: 'strings' })
+    expect(byName['chilled']).toMatchObject({ type: 'bool', default: 'false' })
+    expect(byName['watcher']).toMatchObject({ shorthand: 'w', type: 'bool' })
+    expect(flags.map(f => f.name)).not.toContain('verbose')
+  })
+
+  test('parseHelpFlags dispatches by section header', () => {
+    expect(parseHelpFlags(HELP).length).toBe(4)
+    expect(parseHelpFlags('Flags:\n      --no-browser   print URL\n').length).toBe(1)
+    expect(parseHelpFlags('Usage: nothing here')).toEqual([])
+  })
+})

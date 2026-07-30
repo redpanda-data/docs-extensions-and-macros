@@ -1544,6 +1544,75 @@ function parseCobraFlags(helpText) {
 }
 
 /**
+ * Parse the OPTIONS section of urfave/cli --help output (Redpanda Connect)
+ * into the same flag shape as parseCobraFlags. Entries look like:
+ *   --log.level value                     override the configured log level
+ *   --set value, -s value [ --set value, -s value ]   set a field ...
+ *   --chilled                             continue ... (default: false)
+ * The GLOBAL OPTIONS section is skipped, matching the cobra handling.
+ * @param {string} helpText - Output of `rpk <command> --help`
+ * @returns {Array<Object>} Flags: { name, shorthand?, type, description, default? }
+ */
+function parseUrfaveFlags(helpText) {
+  const lines = (helpText || '').split('\n')
+  const start = lines.findIndex(l => /^OPTIONS:\s*$/.test(l))
+  if (start === -1) return []
+
+  const flags = []
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (/^\S/.test(line)) break // next section (GLOBAL OPTIONS:, ...)
+    if (line.trim() === '') break
+
+    const m = line.match(/^\s{2,}(--\S[^\s]*(?:[^ ]| (?!\s))*)\s{2,}(.*)$/)
+    if (m) {
+      const [, spec, desc] = m
+      const nameMatch = spec.match(/^--([\w.-]+)/)
+      if (!nameMatch) continue
+      const name = nameMatch[1]
+      if (name === 'help') continue
+
+      const flag = { name, description: desc.trim() }
+      const shorthandMatch = spec.match(/,\s+-(\w)\b/)
+      if (shorthandMatch) flag.shorthand = shorthandMatch[1]
+
+      const repeatable = spec.includes('[ --')
+      const hasValue = new RegExp(`^--${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+\\S`).test(spec)
+      flag.type = repeatable ? 'strings' : (hasValue ? 'string' : 'bool')
+
+      const def = flag.description.match(/\s*\(default:\s*(.+?)\)$/)
+      if (def) {
+        flag.default = def[1]
+        flag.description = flag.description.slice(0, def.index).trim()
+      }
+      flags.push(flag)
+    } else if (flags.length > 0 && /^\s{4,}\S/.test(line) && !line.trim().startsWith('-')) {
+      const last = flags[flags.length - 1]
+      last.description = `${last.description} ${line.trim()}`.trim()
+      const def = last.description.match(/\s*\(default:\s*(.+?)\)$/)
+      if (def) {
+        last.default = def[1]
+        last.description = last.description.slice(0, def.index).trim()
+      }
+    }
+  }
+  return flags
+}
+
+/**
+ * Parse flags from --help output regardless of CLI framework: cobra prints a
+ * "Flags:" section (rpk ai, k8s, check), urfave/cli prints "OPTIONS:"
+ * (Redpanda Connect).
+ * @param {string} helpText
+ * @returns {Array<Object>}
+ */
+function parseHelpFlags(helpText) {
+  if (/^Flags:\s*$/m.test(helpText || '')) return parseCobraFlags(helpText)
+  if (/^OPTIONS:\s*$/m.test(helpText || '')) return parseUrfaveFlags(helpText)
+  return []
+}
+
+/**
  * Fill in flags for plugin subtree commands by running `--help` per command.
  * Plugin subcommand nodes come from the plugin's --help-autocomplete output,
  * which carries no flag information, so without this every plugin command
@@ -1561,7 +1630,7 @@ function enrichPluginTreeWithFlags(node, execHelp) {
     if (!cmd.flags || cmd.flags.length === 0) {
       const helpText = execHelp(argPath)
       if (helpText) {
-        const flags = parseCobraFlags(helpText)
+        const flags = parseHelpFlags(helpText)
         if (flags.length > 0) {
           cmd.flags = flags
           enriched++
@@ -2587,6 +2656,8 @@ module.exports = {
   downloadRpkRelease,
   fetchPluginSubtree,
   parseCobraFlags,
+  parseUrfaveFlags,
+  parseHelpFlags,
   mergeVisibleDeprecationsIntoOverrides,
   makeLinkablePredicate,
   enrichPluginTreeWithFlags,
