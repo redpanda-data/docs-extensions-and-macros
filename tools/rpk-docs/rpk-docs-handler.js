@@ -6,15 +6,10 @@ const fs = require('fs')
 const os = require('os')
 const semver = require('semver')
 const { findRepoRoot } = require('../../cli-utils/doc-tools-utils')
-const { generateRpkDocs, applyOverridesToTree, resolveReferences } = require('./generate-rpk-docs')
+const { generateRpkDocs, applyOverridesToTree, resolveReferences, KNOWN_PLUGINS } = require('./generate-rpk-docs')
 const { generateRpkDiff, printDiffReport, generateWhatsNewSection } = require('./report-delta')
 const { loadAndValidateOverrides, ValidationResult } = require('./validate-overrides')
 const { validateDirectory, formatResults } = require('./validate-output')
-
-/**
- * Known rpk plugins that are managed separately (have install/uninstall commands)
- */
-const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'k8s', 'oxla']
 
 /**
  * Parse Go version from 'go version' output
@@ -347,7 +342,10 @@ function fetchRpkTreeFromSource(sourcePath) {
  * Builds rpk binary, installs plugins, then runs --print-tree for complete command coverage.
  * Falls back to native Go build if Docker is unavailable.
  * @param {string} sourcePath - Path to rpk Go source directory (e.g., ~/redpanda/src/go/rpk)
- * @returns {Object} Parsed JSON tree
+ * @returns {Object} { tree, failedPlugins } — the parsed JSON tree plus the
+ *   names of managed plugins whose install failed this run. Callers pass
+ *   failedPlugins to generateRpkDocs as protectedPlugins so those plugins'
+ *   existing pages and nav entries are preserved instead of treated as stale.
  */
 function fetchRpkTreeFromLinuxSource(sourcePath) {
   // Resolve to absolute path
@@ -539,7 +537,7 @@ function fetchRpkTreeFromLinuxSource(sourcePath) {
     }
 
     try {
-      return JSON.parse(result.stdout)
+      return { tree: JSON.parse(result.stdout), failedPlugins }
     } catch (err) {
       throw new Error(
         `Failed to parse rpk tree JSON from Linux source build: ${err.message}\n` +
@@ -1096,6 +1094,10 @@ async function handleRpkDocsGeneration(options = {}) {
   let tree
   let rpkVersion
   let sourcePath
+  // Managed plugins whose install failed this run. Passed to generateRpkDocs
+  // as explicit protectedPlugins (merged there with auto-detection) so a
+  // failed install never deletes or rewrites that plugin's existing docs.
+  let failedPlugins = []
 
   try {
     // Fast path: regenerate from existing JSON file
@@ -1137,7 +1139,8 @@ async function handleRpkDocsGeneration(options = {}) {
         pluginVersions: {},
         draftMissing,
         preservationsDir: preserveFrom,
-        navFile
+        navFile,
+        protectedPlugins: failedPlugins
       })
 
       console.log(`\nGeneration complete!`)
@@ -1286,7 +1289,7 @@ async function handleRpkDocsGeneration(options = {}) {
       try {
         // Build on Linux (in container) - has all commands
         console.log('Building rpk in Linux container...')
-        const linuxTree = fetchRpkTreeFromLinuxSource(sourcePath)
+        const { tree: linuxTree, failedPlugins: linuxFailedPlugins } = fetchRpkTreeFromLinuxSource(sourcePath)
 
         // Build natively (on Darwin) - missing Linux-only commands
         console.log('Building rpk natively for comparison...')
@@ -1304,6 +1307,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
         // Use the Linux tree (has all commands)
         tree = linuxTree
+        failedPlugins = linuxFailedPlugins
       } catch (dockerErr) {
         // Docker build failed (e.g., Go version mismatch) - fall back to native build
         console.warn(`\n⚠ Docker build failed: ${dockerErr.message}`)
@@ -1314,7 +1318,7 @@ async function handleRpkDocsGeneration(options = {}) {
     } else if (canBuildLinux) {
       console.log('\nBuilding rpk in Linux container...')
       try {
-        tree = fetchRpkTreeFromLinuxSource(sourcePath)
+        ({ tree, failedPlugins } = fetchRpkTreeFromLinuxSource(sourcePath))
       } catch (dockerErr) {
         if (canBuildNative) {
           console.warn(`\n⚠ Docker build failed: ${dockerErr.message}`)
@@ -1443,7 +1447,8 @@ async function handleRpkDocsGeneration(options = {}) {
       pluginVersions,
       draftMissing,
       preservationsDir: preserveFrom,
-      navFile
+      navFile,
+      protectedPlugins: failedPlugins
     })
 
     console.log(`\nGeneration complete!`)
