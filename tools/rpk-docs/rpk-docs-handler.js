@@ -2093,24 +2093,35 @@ async function handleRpkDocsGeneration(options = {}) {
         console.log('Building rpk in Linux container...')
         const linuxTree = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins)
 
-        // Build natively (on Darwin) - missing Linux-only commands
-        console.log('Building rpk natively for comparison...')
-        const darwinTree = fetchRpkTreeFromSource(sourcePath)
+        // Build natively (on Darwin) for comparison. The Linux tree is
+        // authoritative, so a comparison-build failure (for example, local
+        // Go older than go.mod requires) only skips dynamic platform
+        // detection - it must not discard the Linux tree.
+        let darwinTree = null
+        try {
+          console.log('Building rpk natively for comparison...')
+          darwinTree = fetchRpkTreeFromSource(sourcePath)
+        } catch (nativeErr) {
+          console.warn(`⚠ Native comparison build failed: ${nativeErr.message}`)
+          console.log('Skipping dynamic platform detection; using source scanning only.')
+        }
 
-        // Compare trees to find Linux-only commands
-        const dynamicLinuxOnly = detectLinuxOnlyByComparison(linuxTree, darwinTree)
-        if (dynamicLinuxOnly.size > 0) {
-          console.log(`Dynamic detection found ${dynamicLinuxOnly.size} Linux-only command(s):`)
-          for (const cmd of dynamicLinuxOnly) {
-            console.log(`  - ${cmd}`)
-            linuxOnlyCommands.add(cmd)
+        if (darwinTree) {
+          // Compare trees to find Linux-only commands
+          const dynamicLinuxOnly = detectLinuxOnlyByComparison(linuxTree, darwinTree)
+          if (dynamicLinuxOnly.size > 0) {
+            console.log(`Dynamic detection found ${dynamicLinuxOnly.size} Linux-only command(s):`)
+            for (const cmd of dynamicLinuxOnly) {
+              console.log(`  - ${cmd}`)
+              linuxOnlyCommands.add(cmd)
+            }
           }
         }
 
         // Use the Linux tree (has all commands)
         tree = linuxTree
       } catch (dockerErr) {
-        // Docker build failed (e.g., Go version mismatch) - fall back to native build
+        // Docker build failed - fall back to native build
         console.warn(`\n⚠ Docker build failed: ${dockerErr.message}`)
         console.log('Falling back to native Go build...')
         console.log('Note: Linux-only commands will be detected via source scanning only.\n')
