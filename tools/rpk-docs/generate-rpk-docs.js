@@ -2422,9 +2422,16 @@ async function generateRpkDocs(options = {}) {
     // Build subcommands with correct xref paths
     // Filter out excluded and asPartial subcommands — excluded have no file,
     // asPartial ones live in the partials directory with no linkable xref.
+    // rpk cloud and rpk security secret are hardcoded-routed to partials
+    // (single-sourced into cloud docs), so they have no linkable pages
+    // either: rpk-security.adoc linking rpk-security-secret.adoc was a
+    // broken xref in the published site.
     const subcommands = (command.commands || [])
       .filter(sub => {
         const subPath = `${commandPath} ${sub.name}`
+        if (subPath.startsWith('rpk cloud') || subPath.startsWith('rpk security secret')) {
+          return false
+        }
         return !shouldExcludeCommand(resolvedOverrides, subPath) && !shouldUsePartialDir(resolvedOverrides, subPath)
       })
       .map(sub => {
