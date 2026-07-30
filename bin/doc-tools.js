@@ -1201,6 +1201,119 @@ automation
   })
 
 /**
+ * generate rpk-plugin-stubs
+ *
+ * @description
+ * Reconciles a consumer repo's single-source stub pages and nav section
+ * against the rpk plugin partials generated in the docs repo. Run from the
+ * consumer repo root (for example, adp-docs for rpk ai). Creates stubs for
+ * new partials, deletes managed stubs whose partial is gone, rebuilds the
+ * plugin's nav block, and proposes page aliases for likely renames.
+ * Full reconcile, so it is idempotent and heals pre-existing drift.
+ */
+automation
+  .command('rpk-plugin-stubs')
+  .description('Reconcile single-source stub pages and nav against the docs repo\'s rpk plugin partials. Run from the consumer repo root.')
+  .option('--plugin <name>', 'rpk plugin command name', 'ai')
+  .option('--docs-repo <owner/repo>', 'Docs repo that owns the partials', 'redpanda-data/docs')
+  .option('--docs-ref <ref>', 'Branch or tag to read partials from', 'main')
+  .option('--partials-dir <path>', 'Local partials directory (skips cloning the docs repo)')
+  .option('--stub-dir <path>', 'Stub pages directory in the consumer repo (default: modules/reference/pages/rpk/rpk-<plugin>)')
+  .option('--nav-file <path>', 'Nav file whose plugin block is rebuilt', 'modules/ROOT/nav.adoc')
+  .option('--include-prefix <prefix>', 'Antora resource prefix for stub includes. Default: inferred from an existing stub.')
+  .option('--attribute <line>', 'Page attribute line added to new stubs (repeatable)', (value, acc) => { acc.push(value); return acc }, [])
+  .option('--summary-file <path>', 'Write a markdown summary (for PR bodies)')
+  .option('--dry-run', 'Report what would change without writing')
+  .action(async (options) => {
+    try {
+      const {
+        readPartialTitles, fetchPartialsDir, inferIncludePrefix, reconcileStubs
+      } = require('../tools/rpk-docs/generate-plugin-stubs.js')
+
+      const plugin = options.plugin
+      const stubDir = options.stubDir || `modules/reference/pages/rpk/rpk-${plugin}`
+      const partialsDir = options.partialsDir || fetchPartialsDir({
+        docsRepo: options.docsRepo,
+        docsRef: options.docsRef,
+        plugin
+      })
+
+      const includePrefix = options.includePrefix || inferIncludePrefix(stubDir, plugin)
+      if (!includePrefix) {
+        console.error('Error: could not infer the include prefix (no existing stubs). Pass --include-prefix, for example: streaming:reference:partial$rpk-ai/')
+        process.exit(1)
+      }
+
+      const partials = readPartialTitles(partialsDir)
+      console.log(`Reconciling ${partials.length} partial(s) against ${stubDir}`)
+
+      const result = reconcileStubs({
+        partials,
+        stubDir,
+        navFile: options.navFile,
+        plugin,
+        includePrefix,
+        ...(options.attribute.length > 0 ? { attributes: options.attribute } : {}),
+        dryRun: options.dryRun
+      })
+
+      console.log(`  Created: ${result.created.length}, deleted: ${result.deleted.length}, nav updated: ${result.navUpdated}`)
+      for (const f of result.created) console.log(`  + ${f}`)
+      for (const f of result.deleted) console.log(`  - ${f}`)
+      for (const f of result.keptNonStub) console.log(`  ! kept (not a managed stub): ${f}`)
+
+      const lines = []
+      lines.push(`## rpk ${plugin} stub reconciliation`)
+      lines.push('')
+      lines.push(`Reconciled against \`${options.partialsDir ? partialsDir : `${options.docsRepo}@${options.docsRef}`}\`.`)
+      lines.push('')
+      if (result.created.length + result.deleted.length === 0 && !result.navUpdated) {
+        lines.push('No changes: stubs and nav already match the partials.')
+      }
+      if (result.created.length > 0) {
+        lines.push(`### New stubs (${result.created.length})`)
+        lines.push('')
+        result.created.forEach(f => lines.push(`- \`${f}\``))
+        lines.push('')
+      }
+      if (result.deleted.length > 0) {
+        lines.push(`### Deleted stubs (${result.deleted.length})`)
+        lines.push('')
+        result.deleted.forEach(f => lines.push(`- \`${f}\``))
+        lines.push('')
+      }
+      if (result.renameCandidates.length > 0) {
+        lines.push('### Possible renames — reviewer decision needed')
+        lines.push('')
+        lines.push('These deleted/created pairs look like renames. If so, add `:page-aliases:` for the old page name to the new stub so published URLs keep working:')
+        lines.push('')
+        for (const rc of result.renameCandidates) {
+          lines.push(`- \`${rc.deleted}\` → \`${rc.created}\`: add \`:page-aliases: reference:rpk/rpk-${plugin}/${rc.deleted}\` to the new stub`)
+        }
+        lines.push('')
+      }
+      if (result.keptNonStub.length > 0) {
+        lines.push('### Kept (not managed stubs)')
+        lines.push('')
+        lines.push('These pages do not match the managed stub shape, so they were not touched:')
+        lines.push('')
+        result.keptNonStub.forEach(f => lines.push(`- \`${f}\``))
+        lines.push('')
+      }
+      const summary = lines.join('\n')
+      if (options.summaryFile) {
+        fs.writeFileSync(options.summaryFile, summary, 'utf8')
+        console.log(`Summary written to: ${options.summaryFile}`)
+      }
+
+      process.exit(0)
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
  * validate rpk-overrides
  *
  * @description
