@@ -2168,6 +2168,61 @@ function findTopLevelWithSubcommands(tree) {
 }
 
 /**
+ * Known rpk plugins that are managed separately from rpk core (they have
+ * install/uninstall/upgrade shim commands, and their real command tree only
+ * appears when the plugin binary is installed in the generation environment).
+ * Shared with rpk-docs-handler.js, which iterates this list to install each
+ * plugin before running --print-tree.
+ */
+const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'k8s', 'oxla']
+
+/**
+ * Subcommands that rpk core ships as a built-in shim for managed plugins,
+ * present even when the plugin binary itself is not installed.
+ */
+const PLUGIN_SHIM_COMMANDS = new Set(['install', 'uninstall', 'upgrade'])
+
+/**
+ * Check whether a command path belongs to a protected plugin's subtree
+ * (including the plugin's own top-level command).
+ * @param {string} commandPath - Full command path, e.g. 'rpk k8s multicluster'
+ * @param {Array<string>} protectedPlugins - Plugin names, e.g. ['k8s']
+ * @returns {boolean}
+ */
+function isProtectedCommandPath(commandPath, protectedPlugins) {
+  return protectedPlugins.some(pl => commandPath === `rpk ${pl}` || commandPath.startsWith(`rpk ${pl} `))
+}
+
+/**
+ * Determine which managed plugins must be protected for this run.
+ *
+ * Auto-detects plugins whose commands are missing from this run's tree:
+ * rpk core ships only a shim (install/uninstall/upgrade) for managed
+ * plugins; the real commands appear only when the plugin binary is
+ * installed in the generation environment. If a known plugin's subtree is
+ * absent or shim-only, its existing pages reflect the plugin, not stale
+ * commands, so they must be preserved. Pre-GA windows hit this every time:
+ * the plugin publisher only promotes stable X.Y.Z releases, so `rpk <plugin>
+ * install` finds nothing until GA (see redpanda-data/docs#1831).
+ *
+ * @param {Array} commands - Flat command list from flattenCommands()
+ * @param {Array<string>} explicitProtected - Plugins the caller already knows
+ *   failed to install this run (merged with auto-detection)
+ * @returns {Array<string>} Deduplicated protected plugin names
+ */
+function detectProtectedPlugins(commands, explicitProtected = []) {
+  const autoProtected = KNOWN_PLUGINS.filter(pl => {
+    const subNames = commands
+      .filter(c => c.path.startsWith(`rpk ${pl} `))
+      .map(c => c.path.split(' ')[2])
+    const hasTopLevel = commands.some(c => c.path === `rpk ${pl}`)
+    if (!hasTopLevel) return true
+    return subNames.length === 0 || subNames.every(n => PLUGIN_SHIM_COMMANDS.has(n))
+  })
+  return [...new Set([...explicitProtected, ...autoProtected])]
+}
+
+/**
  * Static entries that always appear at the top of the rpk nav section,
  * before the auto-generated command entries. These are hand-written pages
  * that are not part of the CLI command tree. The root `rpk` command is not
@@ -2220,6 +2275,10 @@ function updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcomm
   const newEntries = []
   for (const { path: commandPath } of commands) {
     if (commandPath === 'rpk') continue
+    // Protected plugins get no generated entries: this run's tree has at
+    // most the shim (install/uninstall/upgrade) for them, so their previous
+    // nav block is preserved in place instead (below).
+    if (isProtectedCommandPath(commandPath, protectedPlugins)) continue
     if (shouldExcludeCommand(resolvedOverrides, commandPath)) continue
     if (shouldUsePartialDir(resolvedOverrides, commandPath)) continue
     if (commandPath.startsWith('rpk cloud')) continue
@@ -2235,29 +2294,65 @@ function updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcomm
     newEntries.push(`${stars} xref:${xrefPath}[]`)
   }
 
-  // Preserve existing entries for protected plugins (their commands are
-  // absent from this run's tree, so they would otherwise be dropped).
-  const preservedEntries = []
+  // Preserve existing entries for protected plugins. Their commands are
+  // absent (or shim-only) in this run's tree, so nothing was generated for
+  // them above. Each plugin's previous nav block (parent entry plus nested
+  // children) is kept together and spliced back in at its original position,
+  // anchored to the nearest preceding entry that survives regeneration —
+  // never appended at the end, where the children would render under the
+  // wrong parent.
+  const stripStars = (line) => line.replace(/^\*+ /, '')
+  const emittedTargets = new Set([...STATIC_RPK_NAV_ENTRIES, ...newEntries].map(stripStars))
+  // Map of anchor target (or null for "before all surviving entries") to the
+  // preserved lines that follow that anchor, in original order.
+  const preservedBlocks = new Map()
+  let preservedCount = 0
+  const preservedPlugins = new Set()
   if (protectedPlugins.length > 0) {
-    const patterns = protectedPlugins.map(pl => `reference:rpk/rpk-${pl}/`)
-    const regenerated = new Set(newEntries.map(e => e.replace(/^\*+ /, '')))
+    const patternsFor = (pl) => [`reference:rpk/rpk-${pl}/`, `reference:rpk/rpk-${pl}.adoc`]
+    const pluginFor = (line) => protectedPlugins.find(pl => patternsFor(pl).some(pat => line.includes(pat)))
+    let lastAnchor = null
     for (const line of lines.slice(sectionStart + 1, sectionEnd)) {
-      if (patterns.some(pat => line.includes(pat)) && !regenerated.has(line.replace(/^\*+ /, ''))) {
-        preservedEntries.push(line)
+      const plugin = pluginFor(line)
+      if (plugin) {
+        // Never duplicate an entry that regeneration already emits.
+        if (emittedTargets.has(stripStars(line))) continue
+        if (!preservedBlocks.has(lastAnchor)) preservedBlocks.set(lastAnchor, [])
+        preservedBlocks.get(lastAnchor).push(line)
+        preservedCount++
+        preservedPlugins.add(plugin)
+      } else if (emittedTargets.has(stripStars(line))) {
+        lastAnchor = stripStars(line)
       }
     }
-    if (preservedEntries.length > 0) {
-      console.log(`  Preserving ${preservedEntries.length} nav entries for plugins: ${protectedPlugins.join(', ')}`)
+    if (preservedCount > 0) {
+      console.log(`  Preserving ${preservedCount} nav entries for plugins: ${[...preservedPlugins].join(', ')}`)
     }
   }
 
-  // Rebuild: header + static entries + generated entries + preserved plugin entries
-  const newSection = [
-    lines[sectionStart],
-    ...STATIC_RPK_NAV_ENTRIES,
-    ...newEntries,
-    ...preservedEntries,
-  ]
+  // Rebuild: header + static entries + generated entries, splicing each
+  // preserved block back in directly after its anchor entry.
+  const newSection = [lines[sectionStart]]
+  const pushEntry = (line) => {
+    newSection.push(line)
+    const target = stripStars(line)
+    if (preservedBlocks.has(target)) {
+      newSection.push(...preservedBlocks.get(target))
+      preservedBlocks.delete(target)
+    }
+  }
+  // Blocks that preceded every surviving entry in the old nav go right after
+  // the section header, before the static entries.
+  if (preservedBlocks.has(null)) {
+    newSection.push(...preservedBlocks.get(null))
+    preservedBlocks.delete(null)
+  }
+  for (const line of STATIC_RPK_NAV_ENTRIES) pushEntry(line)
+  for (const line of newEntries) pushEntry(line)
+  // Safety net: if an anchor vanished between collection and rebuild (it
+  // cannot with the logic above, but never silently drop preserved entries),
+  // append any remaining blocks at the end.
+  for (const block of preservedBlocks.values()) newSection.push(...block)
 
   const newLines = [
     ...lines.slice(0, sectionStart),
@@ -2327,6 +2422,16 @@ async function generateRpkDocs(options = {}) {
   // Flatten command tree
   const commands = flattenCommands(tree)
 
+  // Determine which managed plugins are protected this run: explicitly
+  // passed by the caller (failed installs) merged with auto-detection of
+  // absent or shim-only plugin subtrees. Protection covers the whole
+  // pipeline — page writes, the stale-file sweep, and nav updates — so a
+  // run without the plugin binary leaves the plugin's docs fully untouched.
+  const effectiveProtectedPlugins = detectProtectedPlugins(commands, protectedPlugins)
+  if (effectiveProtectedPlugins.length > 0) {
+    console.log(`  Protected plugins this run (pages and nav preserved, not regenerated): ${effectiveProtectedPlugins.join(', ')}`)
+  }
+
   // Find top-level commands with subcommands (for directory structure)
   const topLevelWithSubcommands = findTopLevelWithSubcommands(tree)
 
@@ -2344,6 +2449,18 @@ async function generateRpkDocs(options = {}) {
     // index.adoc landing page, which generation must not overwrite. The nav
     // builder skips it for the same reason (see updateNavFile).
     if (commandPath === 'rpk') {
+      filesSkipped++
+      continue
+    }
+
+    // Protected plugins: skip generating the whole subtree, parent page
+    // included. This run's tree has at most the shim
+    // (install/uninstall/upgrade) for these plugins, so regenerating would
+    // overwrite full-plugin pages from an earlier successful run — for
+    // example, rewriting rpk-k8s.adoc with a Subcommands table reduced to
+    // the shim and orphaning the preserved child pages. Existing pages stay
+    // untouched, exactly as in the fully-absent-plugin case.
+    if (isProtectedCommandPath(commandPath, effectiveProtectedPlugins)) {
       filesSkipped++
       continue
     }
@@ -2726,25 +2843,9 @@ async function generateRpkDocs(options = {}) {
       .map(entry => path.join(baseDir, entry.name))
   }
 
-  // Auto-detect plugins whose commands are missing from this run's tree.
-  // rpk core ships only a shim (install/uninstall/upgrade) for managed
-  // plugins; the real commands appear only when the plugin binary is
-  // installed in the generation environment. If a known plugin's subtree is
-  // absent or shim-only, its existing pages reflect the plugin, not stale
-  // commands, so preserve them. Pre-GA windows hit this every time: the
-  // plugin publisher only promotes stable X.Y.Z releases, so `rpk <plugin>
-  // install` finds nothing until GA (see redpanda-data/docs#1831).
-  const PLUGIN_SHIM_COMMANDS = new Set(['install', 'uninstall', 'upgrade'])
-  const KNOWN_PLUGIN_NAMES = ['ai', 'check', 'connect', 'k8s', 'oxla']
-  const autoProtected = KNOWN_PLUGIN_NAMES.filter(pl => {
-    const subNames = commands
-      .filter(c => c.path.startsWith(`rpk ${pl} `))
-      .map(c => c.path.split(' ')[2])
-    const hasTopLevel = commands.some(c => c.path === `rpk ${pl}`)
-    if (!hasTopLevel) return true
-    return subNames.length === 0 || subNames.every(n => PLUGIN_SHIM_COMMANDS.has(n))
-  })
-  const effectiveProtectedPlugins = [...new Set([...protectedPlugins, ...autoProtected])]
+  // Protected plugins (computed before the write loop, see
+  // detectProtectedPlugins): their existing pages reflect the plugin, not
+  // stale commands, so their directories are excluded from the sweep.
   const protectedDirNames = new Set(effectiveProtectedPlugins.map(pl => `rpk-${pl}`))
   const scanDirs = new Set()
   for (const dir of rpkSubdirs(outputDir)) scanDirs.add(dir)
@@ -2819,6 +2920,8 @@ module.exports = {
   shouldExcludeCommand,
   shouldUsePartialDir,
   updateNavFile,
+  KNOWN_PLUGINS,
+  detectProtectedPlugins,
   getCommandMetadata,
   processContentArray,
   // Exported for testing
