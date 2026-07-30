@@ -379,7 +379,10 @@ function fetchRpkTreeFromSource(sourcePath) {
  * Builds rpk binary, installs plugins, then runs --print-tree for complete command coverage.
  * Falls back to native Go build if Docker is unavailable.
  * @param {string} sourcePath - Path to rpk Go source directory (e.g., ~/redpanda/src/go/rpk)
- * @returns {Object} Parsed JSON tree
+ * @returns {Object} { tree, failedPlugins } — the parsed JSON tree plus the
+ *   names of managed plugins whose install failed this run. Callers pass
+ *   failedPlugins to generateRpkDocs as protectedPlugins so those plugins'
+ *   existing pages and nav entries are preserved instead of treated as stale.
  */
 function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
   // Resolve to absolute path
@@ -642,7 +645,7 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
       }
     }
 
-    return tree
+    return { tree, failedPlugins }
   } finally {
     // Clean up container
     console.log('Cleaning up build container...')
@@ -1841,6 +1844,10 @@ async function handleRpkDocsGeneration(options = {}) {
   let tree
   let rpkVersion
   let sourcePath
+  // Managed plugins whose install failed this run. Passed to generateRpkDocs
+  // as explicit protectedPlugins (merged there with auto-detection) so a
+  // failed install never deletes or rewrites that plugin's existing docs.
+  let failedPlugins = []
 
   try {
     // Fast path: regenerate from existing JSON file
@@ -2003,7 +2010,8 @@ async function handleRpkDocsGeneration(options = {}) {
         pluginVersions,
         draftMissing,
         preservationsDir: preserveFrom,
-        navFile
+        navFile,
+        protectedPlugins: failedPlugins
       })
 
       console.log(`\nGeneration complete!`)
@@ -2166,7 +2174,7 @@ async function handleRpkDocsGeneration(options = {}) {
       try {
         // Build on Linux (in container) - has all commands
         console.log('Building rpk in Linux container...')
-        const linuxTree = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins)
+        const { tree: linuxTree, failedPlugins: linuxFailedPlugins } = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins)
 
         // Build natively (on Darwin) for comparison. The Linux tree is
         // authoritative, so a comparison-build failure (for example, local
@@ -2195,6 +2203,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
         // Use the Linux tree (has all commands)
         tree = linuxTree
+        failedPlugins = linuxFailedPlugins
       } catch (dockerErr) {
         // Docker build failed - fall back to native build
         console.warn(`\n⚠ Docker build failed: ${dockerErr.message}`)
@@ -2205,7 +2214,7 @@ async function handleRpkDocsGeneration(options = {}) {
     } else if (canBuildLinux) {
       console.log('\nBuilding rpk in Linux container...')
       try {
-        tree = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins)
+        ({ tree, failedPlugins } = fetchRpkTreeFromLinuxSource(sourcePath, pluginPins))
       } catch (dockerErr) {
         if (canBuildNative) {
           console.warn(`\n⚠ Docker build failed: ${dockerErr.message}`)
@@ -2360,7 +2369,8 @@ async function handleRpkDocsGeneration(options = {}) {
       pluginVersions,
       draftMissing,
       preservationsDir: preserveFrom,
-      navFile
+      navFile,
+      protectedPlugins: failedPlugins
     })
 
     console.log(`\nGeneration complete!`)
