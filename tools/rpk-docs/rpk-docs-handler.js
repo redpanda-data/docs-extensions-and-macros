@@ -487,13 +487,25 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
   try {
     // Step 1: Build rpk binary
     console.log('Building rpk binary...')
-    const buildResult = spawnSync('docker', [
-      'exec', containerId,
-      'go', 'build', '-o', '/tmp/rpk', './cmd/rpk'
-    ], {
-      encoding: 'utf8',
-      timeout: 300000 // 5 minutes for build
-    })
+    // Module downloads from proxy.golang.org fail transiently (stream
+    // INTERNAL_ERROR), especially on a cold module cache. Retry: the second
+    // attempt reuses whatever the first already downloaded.
+    let buildResult
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      buildResult = spawnSync('docker', [
+        'exec', containerId,
+        'go', 'build', '-o', '/tmp/rpk', './cmd/rpk'
+      ], {
+        encoding: 'utf8',
+        timeout: 300000 // 5 minutes per attempt
+      })
+      if (buildResult.status === 0) break
+      if (attempt < 3) {
+        const firstError = (buildResult.stderr || buildResult.signal || 'unknown error')
+          .toString().trim().split('\n').slice(-1)[0]
+        console.warn(`  Build attempt ${attempt} failed (${firstError}); retrying...`)
+      }
+    }
 
     if (buildResult.status !== 0) {
       const stderr = buildResult.stderr || ''
@@ -503,6 +515,18 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
         '  1. Source code is out of date - run: git pull origin dev\n' +
         '  2. Go module issues - the container will download dependencies automatically\n' +
         '  3. Insufficient Docker resources - check Docker Desktop settings'
+      )
+    }
+
+    // Trust but verify: a zero exit with no binary has been observed after
+    // Docker daemon recoveries, and everything downstream execs /tmp/rpk
+    const binCheck = spawnSync('docker', [
+      'exec', containerId, 'test', '-x', '/tmp/rpk'
+    ], { encoding: 'utf8', timeout: 15000 })
+    if (binCheck.status !== 0) {
+      throw new Error(
+        'rpk build reported success but /tmp/rpk does not exist in the ' +
+        'build container. Retry the run; if it persists, restart Docker.'
       )
     }
     console.log('  ✓ rpk binary built')
