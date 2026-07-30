@@ -491,7 +491,8 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
     // INTERNAL_ERROR), especially on a cold module cache. Retry: the second
     // attempt reuses whatever the first already downloaded.
     let buildResult
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    let binaryExists = false
+    for (let attempt = 1; attempt <= 4; attempt++) {
       buildResult = spawnSync('docker', [
         'exec', containerId,
         'go', 'build', '-o', '/tmp/rpk', './cmd/rpk'
@@ -499,34 +500,37 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
         encoding: 'utf8',
         timeout: 300000 // 5 minutes per attempt
       })
-      if (buildResult.status === 0) break
-      if (attempt < 3) {
+
+      if (buildResult.status === 0) {
+        // Trust but verify: docker exec has been observed returning zero for
+        // a build that produced nothing, and everything downstream execs
+        // /tmp/rpk. Treat a phantom success as a failed attempt.
+        const binCheck = spawnSync('docker', [
+          'exec', containerId, 'test', '-x', '/tmp/rpk'
+        ], { encoding: 'utf8', timeout: 15000 })
+        if (binCheck.status === 0) {
+          binaryExists = true
+          break
+        }
+        if (attempt < 4) {
+          console.warn(`  Build attempt ${attempt} reported success but produced no binary; retrying...`)
+          continue
+        }
+      } else if (attempt < 4) {
         const firstError = (buildResult.stderr || buildResult.signal || 'unknown error')
           .toString().trim().split('\n').slice(-1)[0]
         console.warn(`  Build attempt ${attempt} failed (${firstError}); retrying...`)
       }
     }
 
-    if (buildResult.status !== 0) {
+    if (!binaryExists) {
       const stderr = buildResult.stderr || ''
       throw new Error(
-        `Failed to build rpk in Linux container: ${stderr}\n` +
+        `Failed to build rpk in Linux container: ${stderr || 'build produced no binary'}\n` +
         'Common causes:\n' +
         '  1. Source code is out of date - run: git pull origin dev\n' +
         '  2. Go module issues - the container will download dependencies automatically\n' +
         '  3. Insufficient Docker resources - check Docker Desktop settings'
-      )
-    }
-
-    // Trust but verify: a zero exit with no binary has been observed after
-    // Docker daemon recoveries, and everything downstream execs /tmp/rpk
-    const binCheck = spawnSync('docker', [
-      'exec', containerId, 'test', '-x', '/tmp/rpk'
-    ], { encoding: 'utf8', timeout: 15000 })
-    if (binCheck.status !== 0) {
-      throw new Error(
-        'rpk build reported success but /tmp/rpk does not exist in the ' +
-        'build container. Retry the run; if it persists, restart Docker.'
       )
     }
     console.log('  ✓ rpk binary built')
