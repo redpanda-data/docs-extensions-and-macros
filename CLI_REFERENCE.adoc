@@ -490,6 +490,7 @@ display help for command
 * `migrate-rpcn-metadata` - One-time migration of inline connector == Metadata blocks into regenerated partials. Dry run unless --write is given.
 * `property-docs` - Generate JSON and consolidated AsciiDoc partials for Redpanda configuration properties. Defaults to branch "dev" if neither --tag nor --branch is specified.
 * `rpk-docs` - Generate rpk CLI documentation from source. Builds rpk and parses source for platform detection.
+* `rpk-plugin-stubs` - Reconcile single-source stub pages and nav against the docs repo's rpk plugin partials. Run from the consumer repo root.
 * `rpk-overrides` - Validate rpk-overrides.json against schema and check for common issues
 * `helm-spec` - Generate AsciiDoc documentation for Helm charts. Requires either --tag or --branch for GitHub URLs.
 * `cloud-regions` - Generate Markdown table of cloud regions and tiers from GitHub YAML file
