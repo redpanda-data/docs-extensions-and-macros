@@ -1966,8 +1966,8 @@ function dashify(commandPath) {
  */
 /**
  * Collapse runs of three or more newlines to a single blank line, except
- * inside AsciiDoc delimited blocks (----, ====, ...., |===), where blank
- * lines are content.
+ * inside AsciiDoc delimited blocks (----, ====, ...., |===, and -- open
+ * blocks), where blank lines are content.
  * @param {string} text - Rendered page content
  * @returns {string}
  */
@@ -1980,7 +1980,7 @@ function collapseBlankLines(text) {
 
   for (const line of lines) {
     const trimmed = line.trimEnd()
-    const isDelim = /^(-{4,}|={4,}|\.{4,}|\|===)$/.test(trimmed)
+    const isDelim = /^(-{4,}|={4,}|\.{4,}|\|===|--)$/.test(trimmed)
     if (isDelim) {
       if (!inBlock) {
         inBlock = true
