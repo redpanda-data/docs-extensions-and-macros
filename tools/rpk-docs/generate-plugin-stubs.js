@@ -60,10 +60,12 @@ function readPartialTitles(partialsDir) {
  * @param {string} params.plugin - Plugin command name (e.g. ai)
  * @returns {string} Local path to the partials directory
  */
-function fetchPartialsDir({ docsRepo, docsRef, plugin }) {
+function fetchPartialsDir({ docsRepo, docsRef, plugin, sourcePath }) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-stubs-'))
   const repoDir = path.join(tmpDir, 'docs')
-  const sparsePath = `modules/reference/partials/rpk-${plugin}`
+  // ai and cloud content renders as partials; connect renders as pages —
+  // both carry the single-source tag, so either family can be stubbed
+  const sparsePath = sourcePath || `modules/reference/partials/rpk-${plugin}`
 
   console.log(`Fetching ${sparsePath} from ${docsRepo}@${docsRef}...`)
   const cloneResult = spawnSync('git', [
@@ -101,7 +103,7 @@ function inferIncludePrefix(stubDir, plugin) {
   for (const file of fs.readdirSync(stubDir)) {
     if (!file.endsWith('.adoc')) continue
     const content = fs.readFileSync(path.join(stubDir, file), 'utf8')
-    const match = content.match(new RegExp(`include::([^\\[]*partial\\$rpk-${plugin}/)`))
+    const match = content.match(new RegExp(`include::([^\\[]*(?:partial|page)\\$[^\\[]*rpk-${plugin}/)`))
     if (match) return match[1]
   }
   return null
@@ -147,7 +149,7 @@ function reconcileStubs({
   attributes = [':page-preview: true'],
   dryRun = false
 }) {
-  const managedStubRe = new RegExp(`include::[^\\[]*partial\\$rpk-${plugin}/([\\w.-]+\\.adoc)\\[`)
+  const managedStubRe = new RegExp(`include::[^\\[]*(?:partial|page)\\$[^\\[]*rpk-${plugin}/([\\w.-]+\\.adoc)\\[`)
   const partialByFile = new Map(partials.map(p => [p.file, p]))
 
   fs.mkdirSync(stubDir, { recursive: true })

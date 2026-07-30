@@ -1218,6 +1218,7 @@ automation
   .option('--docs-repo <owner/repo>', 'Docs repo that owns the partials', 'redpanda-data/docs')
   .option('--docs-ref <ref>', 'Branch or tag to read partials from', 'main')
   .option('--partials-dir <path>', 'Local partials directory (skips cloning the docs repo)')
+  .option('--source-path <path>', 'Path in the docs repo to read from (default: modules/reference/partials/rpk-<plugin>; use modules/reference/pages/rpk/rpk-connect for page-family content)')
   .option('--stub-dir <path>', 'Stub pages directory in the consumer repo (default: modules/reference/pages/rpk/rpk-<plugin>)')
   .option('--nav-file <path>', 'Nav file whose plugin block is rebuilt', 'modules/ROOT/nav.adoc')
   .option('--include-prefix <prefix>', 'Antora resource prefix for stub includes. Default: inferred from an existing stub.')
@@ -1235,7 +1236,8 @@ automation
       const partialsDir = options.partialsDir || fetchPartialsDir({
         docsRepo: options.docsRepo,
         docsRef: options.docsRef,
-        plugin
+        plugin,
+        sourcePath: options.sourcePath
       })
 
       const includePrefix = options.includePrefix || inferIncludePrefix(stubDir, plugin)

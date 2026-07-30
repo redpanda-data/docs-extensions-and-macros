@@ -124,6 +124,29 @@ describe('plugin stub reconciler', () => {
     expect(inferIncludePrefix(path.join(dir, 'missing'), 'ai')).toBe(null)
   })
 
+  test('supports page-family includes (rp-connect-docs pattern)', () => {
+    writePartial('rpk-connect-run.adoc', 'rpk connect run')
+    const result = reconcileStubs({
+      partials: readPartialTitles(partialsDir),
+      stubDir,
+      navFile: null,
+      plugin: 'connect',
+      includePrefix: 'streaming:reference:page$rpk/rpk-connect/'
+    })
+    expect(result.created).toEqual(['rpk-connect-run.adoc'])
+    const stub = fs.readFileSync(path.join(stubDir, 'rpk-connect-run.adoc'), 'utf8')
+    expect(stub).toContain('include::streaming:reference:page$rpk/rpk-connect/rpk-connect-run.adoc[tag=single-source]')
+    // A second run recognizes the page-family stub as managed
+    const second = reconcileStubs({
+      partials: [],
+      stubDir,
+      navFile: null,
+      plugin: 'connect',
+      includePrefix: 'streaming:reference:page$rpk/rpk-connect/'
+    })
+    expect(second.deleted).toEqual(['rpk-connect-run.adoc'])
+  })
+
   test('dry run reports without writing', () => {
     writePartial('rpk-ai.adoc', 'rpk ai')
     const result = run({ dryRun: true })
