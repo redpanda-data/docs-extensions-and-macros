@@ -2,12 +2,17 @@
 
 const { descriptionWithMetadataInclude } = require('../metadata-utils.js');
 
-// A structural AsciiDoc heading (level 2 or deeper) or a listing/literal block
-// delimiter. A description that carries its own headings is already navigable,
-// so it is passed through unchanged; only heading-less prose "walls" are
-// candidates for the collapsible mitigation.
-const HEADING = /^={2,}\s+\S/m;
+// AsciiDoc listing/literal block delimiter (`----`, possibly longer). Lines
+// inside such blocks must not be treated as headings.
 const BLOCK_DELIMITER = /^-{4,}$/;
+
+// An AsciiDoc example/admonition block delimiter (`====` on its own line). The
+// collapsible wrapper itself is a `====`-delimited example block, so a body
+// that contains its own `====` delimiters cannot be wrapped: the first nested
+// `====` would terminate the collapsible early and the rest of the body would
+// leak out as top-level blocks (seen with the http_server output's nested
+// CAUTION admonition). Such bodies are ineligible for collapsing.
+const EXAMPLE_DELIMITER = /^={4,}[ \t]*$/m;
 
 // Default length (characters) above which a heading-less description is
 // considered a large block worth collapsing. Roughly a screen of prose.
@@ -53,7 +58,8 @@ function splitLeadParagraph (body) {
  * heading-less descriptions are mitigated: the first paragraph stays visible
  * and the remainder is moved into an AsciiDoc collapsible block so the page
  * does not open with a wall of text. Descriptions that already carry their own
- * headings are left structured and pass through unchanged.
+ * headings, or that contain `====` block delimiters (which would collide with
+ * the collapsible's own delimiters), pass through unchanged.
  *
  * @param {object} item connector data (needs `description`, `type`/`typeDir`, `name`)
  * @param {object} [options] Handlebars options; `options.hash.collapseThreshold`
@@ -70,8 +76,15 @@ module.exports = function renderConnectDescription (item, options) {
     ? hash.collapseThreshold
     : DEFAULT_COLLAPSE_THRESHOLD;
 
-  // Structured or short-enough descriptions render as-is.
-  if (!collapseEnabled || body.length <= threshold || hasStructuralHeadings(body)) {
+  // Structured or short-enough descriptions render as-is. Bodies containing
+  // `====` delimiters would collide with the collapsible's own delimiters, so
+  // they also pass through unchanged.
+  if (
+    !collapseEnabled ||
+    body.length <= threshold ||
+    hasStructuralHeadings(body) ||
+    EXAMPLE_DELIMITER.test(body)
+  ) {
     return body.trim();
   }
 
