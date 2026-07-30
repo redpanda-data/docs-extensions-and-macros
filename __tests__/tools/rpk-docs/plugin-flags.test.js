@@ -85,3 +85,62 @@ describe('enrichPluginTreeWithFlags', () => {
     expect(node.commands[0].flags).toBeUndefined()
   })
 })
+
+describe('mergeVisibleDeprecationsIntoOverrides', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const os = require('os')
+  const { mergeVisibleDeprecationsIntoOverrides } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
+
+  const tree = {
+    name: 'rpk',
+    commands: [
+      { name: 'oldcmd', commands: [] },
+      { name: 'topic', commands: [] }
+    ]
+  }
+
+  let dir, overridesPath
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dep-merge-'))
+    overridesPath = path.join(dir, 'overrides.json')
+  })
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+  test('annotates visible deprecated commands, skips hidden ones', () => {
+    fs.writeFileSync(overridesPath, JSON.stringify({ commands: {} }))
+    mergeVisibleDeprecationsIntoOverrides({
+      'rpk oldcmd': { deprecated: true, deprecatedMessage: 'use rpk newcmd', replacement: 'See `rpk newcmd`.' },
+      'rpk hiddencmd': { deprecated: true, _note: 'Hidden: true' }
+    }, tree, overridesPath)
+
+    const result = JSON.parse(fs.readFileSync(overridesPath, 'utf8'))
+    expect(result.commands['rpk oldcmd']).toMatchObject({
+      deprecated: true,
+      deprecatedMessage: 'use rpk newcmd',
+      replacement: 'See `rpk newcmd`.'
+    })
+    // hiddencmd is not in the tree: no page to annotate
+    expect(result.commands['rpk hiddencmd']).toBeUndefined()
+  })
+
+  test('never overwrites curated deprecation overrides', () => {
+    fs.writeFileSync(overridesPath, JSON.stringify({
+      commands: { 'rpk oldcmd': { deprecated: false, deprecatedMessage: 'curated text' } }
+    }))
+    mergeVisibleDeprecationsIntoOverrides({
+      'rpk oldcmd': { deprecated: true, deprecatedMessage: 'scanner text' }
+    }, tree, overridesPath)
+
+    const result = JSON.parse(fs.readFileSync(overridesPath, 'utf8'))
+    expect(result.commands['rpk oldcmd'].deprecated).toBe(false)
+    expect(result.commands['rpk oldcmd'].deprecatedMessage).toBe('curated text')
+  })
+
+  test('no-op when nothing to annotate', () => {
+    fs.writeFileSync(overridesPath, JSON.stringify({ commands: {} }))
+    const before = fs.readFileSync(overridesPath, 'utf8')
+    mergeVisibleDeprecationsIntoOverrides({}, tree, overridesPath)
+    expect(fs.readFileSync(overridesPath, 'utf8')).toBe(before)
+  })
+})

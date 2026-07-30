@@ -1105,12 +1105,32 @@ function countCommands(node) {
  * @param {Object|null} overridesData - Loaded overrides
  * @returns {Function} (commandPath) => boolean
  */
+/**
+ * Build a predicate that reports whether a command path has subcommands,
+ * which determines its page location (groups render into their own dir).
+ * @param {Object} tree - Full command tree
+ * @returns {Function} (commandPath) => boolean
+ */
+function makeSubcommandPredicate(tree) {
+  const commandMap = flattenToMap(tree)
+  return (commandPath) => {
+    const node = commandMap.get(commandPath)
+    return Boolean(node && (node.commands || []).length > 0)
+  }
+}
+
 function makeLinkablePredicate(overridesData) {
-  if (!overridesData) return () => true
-  const resolved = resolveReferences(overridesData, overridesData)
-  return (commandPath) =>
-    !shouldExcludeCommand(resolved, commandPath) &&
-    !shouldUsePartialDir(resolved, commandPath)
+  const resolved = overridesData ? resolveReferences(overridesData, overridesData) : null
+  return (commandPath) => {
+    // rpk cloud and rpk security secret render to partials (single-sourced
+    // into cloud docs), so this repo has no linkable pages for them
+    if (commandPath.startsWith('rpk cloud') || commandPath.startsWith('rpk security secret')) {
+      return false
+    }
+    if (!resolved) return true
+    return !shouldExcludeCommand(resolved, commandPath) &&
+      !shouldUsePartialDir(resolved, commandPath)
+  }
 }
 
 function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
@@ -1929,7 +1949,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
           // Update what's-new file if requested
           if (whatsNewPath) {
-            updateWhatsNewFile(diffData, whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData) })
+            updateWhatsNewFile(diffData, whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
           }
         } else {
           console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
@@ -2211,7 +2231,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
         // Update what's-new file if requested
         if (whatsNewPath) {
-          updateWhatsNewFile(diffData, whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData) })
+          updateWhatsNewFile(diffData, whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
         }
       } else {
         console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
@@ -2528,6 +2548,8 @@ module.exports = {
   downloadRpkRelease,
   fetchPluginSubtree,
   parseCobraFlags,
+  mergeVisibleDeprecationsIntoOverrides,
+  makeLinkablePredicate,
   enrichPluginTreeWithFlags,
   fetchLatestPluginVersion,
   pluginNodeHasRealCommands,

@@ -351,6 +351,30 @@ describe('rpk Docs Diff Generation', () => {
       expect(generateWhatsNewSection(baseDiff({}))).toBe('')
     })
 
+    test('routes command-group roots into their directory', () => {
+      const section = generateWhatsNewSection(baseDiff({
+        newCommands: [
+          { path: 'rpk check', description: 'Production readiness checks.' },
+          { path: 'rpk check run', description: 'Run the checks.' },
+          { path: 'rpk version', description: 'Prints the version.' }
+        ]
+      }), { hasSubcommands: (p) => p === 'rpk check' })
+      expect(section).toContain('xref:reference:rpk/rpk-check/rpk-check.adoc[`rpk check`]')
+      expect(section).toContain('xref:reference:rpk/rpk-check/rpk-check-run.adoc[`rpk check run`]')
+      expect(section).toContain('xref:reference:rpk/rpk-version.adoc[`rpk version`]')
+    })
+
+    test('caps bullet descriptions at a sentence boundary', () => {
+      const section = generateWhatsNewSection(baseDiff({
+        newCommands: [{
+          path: 'rpk ai llm-provider diff',
+          description: 'Dry-run of apply for LLM providers. Prints, per manifest, whether apply would\ncreate, update, or leave the resource unchanged.'
+        }]
+      }))
+      expect(section).toContain(' - Dry-run of apply for LLM providers.')
+      expect(section).not.toContain('whether apply would')
+    })
+
     test('renders deprecated commands with replacement and affected subcommands', () => {
       const section = generateWhatsNewSection(baseDiff({
         newlyDeprecatedCommands: [{

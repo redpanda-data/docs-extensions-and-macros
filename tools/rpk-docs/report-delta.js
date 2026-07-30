@@ -546,9 +546,19 @@ function generateWhatsNewSection(diff, options = {}) {
   const sectionHeading = options.sectionHeading || '== Redpanda CLI'
   const blockLabel = options.blockLabel || null
   const h = blockLabel ? '====' : '==='
+  // Command groups (two-part commands with subcommands) render into their own
+  // directory: rpk check -> rpk-check/rpk-check.adoc, not rpk-check.adoc
+  const hasSubcommands = typeof options.hasSubcommands === 'function'
+    ? options.hasSubcommands
+    : () => false
   const cmdRef = (commandPath) => {
     if (!useXrefs || !linkable(commandPath)) return `\`${commandPath}\``
-    return `xref:reference:rpk/${commandPathToXref(commandPath)}[\`${commandPath}\`]`
+    let xrefPath = commandPathToXref(commandPath)
+    if (commandPath.split(' ').length === 2 && hasSubcommands(commandPath)) {
+      const dashified = commandPath.replace(/ /g, '-')
+      xrefPath = `${dashified}/${dashified}.adoc`
+    }
+    return `xref:reference:rpk/${xrefPath}[\`${commandPath}\`]`
   }
 
   // Check if there are any changes worth documenting
@@ -576,8 +586,7 @@ function generateWhatsNewSection(diff, options = {}) {
     lines.push(`${h} New commands`)
     lines.push(``)
     for (const cmd of diff.details.newCommands) {
-      // First line only: multi-line help text would break the bullet list
-      const shortDesc = (cmd.description || '').split('\n')[0].trim()
+      const shortDesc = firstSentence(cmd.description || '')
       const desc = shortDesc ? ` - ${shortDesc}` : ''
       lines.push(`* ${cmdRef(cmd.path)}${desc}`)
     }
@@ -669,6 +678,23 @@ function generateWhatsNewSection(diff, options = {}) {
   }
 
   return lines.join('\n')
+}
+
+/**
+ * Extract the first sentence of a description for a one-line bullet.
+ * Newlines are collapsed first (cobra help wraps mid-sentence), and decimal
+ * points in version numbers do not end a sentence. Falls back to the whole
+ * collapsed text when no sentence boundary exists.
+ * @param {string} str - Command description
+ * @returns {string}
+ */
+function firstSentence(str) {
+  if (!str) return ''
+  const singleLine = String(str).replace(/\s*\n+\s*/g, ' ').trim()
+  const protectedText = singleLine.replace(/(\d)\.(\d)/g, '$1__DECIMAL__$2')
+  const match = protectedText.match(/^.*?[.!?](?=\s|$)/)
+  const sentence = match ? match[0] : protectedText
+  return sentence.replace(/__DECIMAL__/g, '.').trim()
 }
 
 /**

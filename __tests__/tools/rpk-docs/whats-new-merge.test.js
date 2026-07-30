@@ -149,3 +149,14 @@ describe('updateWhatsNewFile merge semantics', () => {
     expect(content).toContain('rpk-cluster.adoc')
   })
 })
+
+describe('linkable predicate coverage', () => {
+  const { makeLinkablePredicate } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
+
+  test('cloud and security-secret commands are never linkable', () => {
+    const linkable = makeLinkablePredicate(null)
+    expect(linkable('rpk cloud auth list')).toBe(false)
+    expect(linkable('rpk security secret create')).toBe(false)
+    expect(linkable('rpk topic create')).toBe(true)
+  })
+})
