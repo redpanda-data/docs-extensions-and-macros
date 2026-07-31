@@ -35,6 +35,13 @@ link:mcp/DEVELOPMENT.adoc[**MCP server development**]:: How to work on the MCP s
 * Testing guidelines
 * Security and best practices
 
+link:TESTING_AUTOMATIONS.adoc[**Testing automations end to end**]:: How to verify doc generators and their workflows before merging
++
+* Ground-truth corpora and independent checkers
+* Asciidoctor and Antora validation stages
+* Verifying version claims and release-notes diffs
+* Workflow testing, including act safety
+
 == Quickstart
 
 === Prerequisites
@@ -220,6 +227,7 @@ Open a pull request on GitHub with:
 * Write tests for all new functionality
 * Maintain test coverage
 * Test edge cases and error conditions
+* For doc generators and workflows, run an end-to-end verification against the consumer repos before merging. See link:TESTING_AUTOMATIONS.adoc[Testing automations end to end].
 
 == Documentation standards
 
