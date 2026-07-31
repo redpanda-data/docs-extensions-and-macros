@@ -1470,6 +1470,11 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     // Also handles '--flag/-f', '--flag help', and similar patterns
     .replace(/'(--[a-z][-a-z0-9]*(?:\/-[a-z])?(?:\s+\w+)?)'/gi, '$1')
     .replace(/'(-[a-z])'/gi, '$1')
+    // Drop a dangling example lead-in with nothing after it (upstream help
+    // strings sometimes end mid-example, which would render as "for example,.")
+    .replace(/[,;]?\s*\be\.g\.[\s,]*$/i, '')
+    // Stray space before a closing parenthesis (upstream help typo)
+    .replace(/ +\)/g, ')')
     // === STYLE GUIDE COMPLIANCE ===
     .replace(/\be\.g\.\s*/gi, 'for example, ')
     .replace(/\bi\.e\.\s*/gi, 'that is, ')
@@ -2790,6 +2795,21 @@ async function generateRpkDocs(options = {}) {
     // the separators between skipped blocks stack up). Blank lines inside
     // delimited blocks are preserved: they are content there.
     const content = collapseBlankLines(template(context))
+
+    // Duplicate top-level headings almost always mean an override adds a
+    // section the page already renders (or embeds its own heading in raw
+    // content). The page still builds, but anchors collide and readers see
+    // the same section twice.
+    const h2Counts = new Map()
+    for (const line of content.split('\n')) {
+      const h2 = line.match(/^== (\S.*)$/)
+      if (h2) h2Counts.set(h2[1], (h2Counts.get(h2[1]) || 0) + 1)
+    }
+    for (const [heading, count] of h2Counts) {
+      if (count > 1) {
+        console.warn(`⚠️  ${commandPath}: heading "== ${heading}" appears ${count} times. Check the override content for this command.`)
+      }
+    }
 
     // Determine output path
     // Check if this command should go to cloudSecretDir

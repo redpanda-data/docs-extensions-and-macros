@@ -239,6 +239,22 @@ describe('rpk Docs Generation', () => {
       expect(formatDescription(undefined)).toBe('')
     })
 
+    test('strips a dangling e.g. with nothing after it', () => {
+      // Upstream rpai help ends some flag descriptions mid-example; the
+      // e.g. transform would otherwise render "for example,."
+      const input = 'fields optionally suffixed with " desc" (default ascending), e.g.'
+      expect(formatDescription(input)).toBe('fields optionally suffixed with " desc" (default ascending)')
+    })
+
+    test('keeps e.g. transform when an example follows', () => {
+      expect(formatDescription('durations, e.g. 30s or 1.5m')).toBe('durations, for example, 30s or 1.5m')
+    })
+
+    test('removes stray space before a closing parenthesis', () => {
+      const input = 'topic:partition_id (repeatable; e.g. -t foo:0,1,2 )'
+      expect(formatDescription(input)).toBe('topic:partition_id (repeatable; for example, `-t` foo:0,1,2)')
+    })
+
     test('converts markdown-style dash lists to AsciiDoc asterisk lists', () => {
       const input = 'States:\n  - Active: The item is active.\n  - Inactive: The item is inactive.'
       const result = formatDescription(input)
