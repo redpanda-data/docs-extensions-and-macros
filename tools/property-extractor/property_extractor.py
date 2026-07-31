@@ -79,7 +79,7 @@ ENUM_PATTERN = re.compile(r'^[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)$')  # Match full qu
 CONSTRUCTOR_PATTERN = re.compile(r'([a-zA-Z0-9_:]+)\((.*)\)')
 BRACED_CONSTRUCTOR_PATTERN = re.compile(r'([a-zA-Z0-9_:]+)\{(.*)\}')
 DIGIT_SEPARATOR_PATTERN = re.compile(r"(?<=\d)'(?=\d)")
-FUNCTION_CALL_PATTERN = re.compile(r'([a-zA-Z0-9_:]+)\(\)')
+FUNCTION_CALL_PATTERN = re.compile(r'([a-zA-Z0-9_:.]+)\(\)$')
 CHRONO_PATTERN = re.compile(r'std::chrono::([a-zA-Z]+)\s*\{\s*(\d+)\s*\}')
 CHRONO_PAREN_PATTERN = re.compile(r'(?:std::)?chrono::([a-zA-Z]+)\s*\(\s*([^)]+)\s*\)')
 TIME_UNIT_PATTERN = re.compile(r'(\d+)\s*(min|s|ms|h)')
@@ -159,6 +159,15 @@ class ConstexprCache:
             re.compile(r'const\s+model::ns\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*"([^"]+)"\s*\)'),
         ]
 
+        # Member accessors on inline constants used in property defaults,
+        # for example model::schema_registry_internal_tp.topic() -> "_schemas".
+        # Each entry maps a variable declaration to the member name whose call
+        # returns the captured string, cached under "<variable>.<member>".
+        member_accessor_patterns = [
+            # Pattern: inline const model::topic_partition name{model::topic{"value"}, ...}
+            (re.compile(r'inline\s+const\s+(?:model::)?topic_partition\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{\s*(?:model::)?topic\{\s*"([^"]+)"\s*\}'), 'topic'),
+        ]
+
         # Legacy specific patterns (kept for compatibility, but general patterns should cover these)
         function_patterns = {}
 
@@ -205,6 +214,17 @@ class ConstexprCache:
                                     if namespace:
                                         qualified_name = f"{namespace}::{func_name}"
                                         self.function_cache[qualified_name] = func_value
+
+                            # Extract member accessors on inline constants
+                            for pattern, member in member_accessor_patterns:
+                                for match in pattern.finditer(content):
+                                    var_name = match.group(1)
+                                    value = match.group(2)
+                                    key = f"{var_name}.{member}"
+                                    namespace = self._extract_namespace_for_function(content, match.start())
+                                    self.function_cache[key] = value
+                                    if namespace:
+                                        self.function_cache[f"{namespace}::{key}"] = value
 
                             # Legacy: Extract function definitions from hardcoded patterns (if any)
                             for func_name, patterns in function_patterns.items():
