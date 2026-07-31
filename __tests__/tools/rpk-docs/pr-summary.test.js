@@ -119,3 +119,33 @@ describe('generatePRSummary change reporting', () => {
     expect(summary).toContain('_(hidden from help output)_')
   })
 })
+
+describe('computeDescriptionCoverage', () => {
+  const { computeDescriptionCoverage } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
+
+  const tree = {
+    name: 'rpk',
+    commands: [
+      { name: 'group', description: 'x'.repeat(2000), commands: [] },
+      { name: 'version', description: 'Prints the version.', commands: [] }
+    ]
+  }
+
+  test('flags overrides that hide substantially longer source help', () => {
+    const overrides = { commands: {
+      'rpk group': { description: 'Manage groups.' },
+      'rpk version': { description: 'Print version info.' }
+    } }
+    const result = computeDescriptionCoverage(tree, overrides)
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ commandPath: 'rpk group', sourceChars: 2000 })
+  })
+
+  test('ignores overrides without descriptions and unknown commands', () => {
+    const overrides = { commands: {
+      'rpk group': { flags: {} },
+      'rpk nonexistent': { description: 'x' }
+    } }
+    expect(computeDescriptionCoverage(tree, overrides)).toEqual([])
+  })
+})

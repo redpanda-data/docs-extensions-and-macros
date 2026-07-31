@@ -2135,6 +2135,7 @@ async function handleRpkDocsGeneration(options = {}) {
         diffData: plugin ? pluginDiffData : diffData,
         validationResult,
         overrideValidation,
+        descriptionCoverage: computeDescriptionCoverage(tree, overridesData),
         outputDir: finalOutputDir
       })
 
@@ -2460,6 +2461,7 @@ async function handleRpkDocsGeneration(options = {}) {
       filesSkipped: result.filesSkipped,
       diffData,
       validationResult,
+      descriptionCoverage: computeDescriptionCoverage(tree, overridesData),
       outputDir: finalOutputDir
     })
 
@@ -2498,6 +2500,33 @@ async function handleRpkDocsGeneration(options = {}) {
  * @param {Object} options - Summary options
  * @returns {string} Markdown formatted summary
  */
+/**
+ * Find description overrides that replace substantially longer source help.
+ * Curation is legitimate, but silent replacement is how stale or wrong
+ * content survives regeneration, so every regen PR lists what is hidden.
+ * @param {Object} tree - Raw command tree
+ * @param {Object} overridesData - Parsed overrides
+ * @returns {Array<{commandPath: string, overrideChars: number, sourceChars: number}>}
+ */
+function computeDescriptionCoverage(tree, overridesData) {
+  if (!tree || !overridesData?.commands) return []
+  const commandMap = flattenToMap(tree)
+  const results = []
+  for (const [cmdPath, override] of Object.entries(overridesData.commands)) {
+    if (typeof override?.description !== 'string') continue
+    const cmd = commandMap.get(cmdPath)
+    if (!cmd || typeof cmd.description !== 'string') continue
+    const sourceChars = cmd.description.trim().length
+    // appendToDescription content still reaches the page, so count it
+    const appended = typeof override.appendToDescription === 'string' ? override.appendToDescription.trim().length : 0
+    const overrideChars = override.description.trim().length + appended
+    if (sourceChars - overrideChars > 500) {
+      results.push({ commandPath: cmdPath, overrideChars, sourceChars })
+    }
+  }
+  return results.sort((a, b) => (b.sourceChars - b.overrideChars) - (a.sourceChars - a.overrideChars))
+}
+
 function generatePRSummary(options) {
   const {
     rpkVersion,
@@ -2509,6 +2538,7 @@ function generatePRSummary(options) {
     diffData,
     validationResult,
     overrideValidation,
+    descriptionCoverage,
     outputDir
   } = options
 
@@ -2653,6 +2683,24 @@ function generatePRSummary(options) {
     lines.push('')
   }
 
+  // Description overrides that hide most of the source help. Curation is
+  // fine, but this is where stale content hides, so keep it reviewable.
+  if (descriptionCoverage && descriptionCoverage.length > 0) {
+    lines.push('### Curated descriptions replacing source help')
+    lines.push('')
+    lines.push('These overrides replace substantially longer help text from the rpk source. Confirm the curated version still carries every operational detail (or intentionally omits it):')
+    lines.push('')
+    lines.push('| Command | Override | Source help |')
+    lines.push('|---------|----------|-------------|')
+    for (const entry of descriptionCoverage.slice(0, 15)) {
+      lines.push(`| \`${entry.commandPath}\` | ${entry.overrideChars} chars | ${entry.sourceChars} chars |`)
+    }
+    if (descriptionCoverage.length > 15) {
+      lines.push(`| ... and ${descriptionCoverage.length - 15} more | | |`)
+    }
+    lines.push('')
+  }
+
   // Validation results
   if (validationResult) {
     lines.push('### Validation Report')
@@ -2779,6 +2827,7 @@ module.exports = {
   getPlatformDescription,
   getCurrentPlatform,
   updateOverridesWithIntroducedVersions,
+  computeDescriptionCoverage,
   updateWhatsNewFile,
   KNOWN_PLUGINS,
   extractCommandPaths,

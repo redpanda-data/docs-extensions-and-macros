@@ -1318,6 +1318,24 @@ function applyTextTransformations(text, customTransformations, options = {}) {
 }
 
 /**
+ * Apply text transformations to examples content line by line. Indented
+ * lines are verbatim commands: only rules flagged applyToCode may touch
+ * them (a caption rule once rewrote '{"quotas":...}' inside a command to
+ * '{`quotas`:...}'). Caption lines get the full rule set.
+ * @param {string} text
+ * @param {Object|null} customTransformations
+ * @returns {string}
+ */
+function applyTextTransformationsToExamples(text, customTransformations) {
+  if (!text || !customTransformations?.replacements) return text
+  return text.split('\n').map(line =>
+    /^[ ]{2,}\S/.test(line)
+      ? applyTextTransformations(line, customTransformations, { code: true })
+      : applyTextTransformations(line, customTransformations)
+  ).join('\n')
+}
+
+/**
  * Format description by adding backticks around flags and code
  * @param {string} desc - Description text
  * @param {Object} [customTransformations] - Optional custom text transformations from overrides
@@ -2593,8 +2611,9 @@ async function generateRpkDocs(options = {}) {
         if (mergedCommand.excludeExamples && mergedCommand.excludeExamples.length > 0) {
           examplesContent = filterExamples(sectionContent, mergedCommand.excludeExamples)
         }
-        // Apply text transformations (e.g. rpai → rpk ai) then format
-        examplesContent = applyTextTransformations(examplesContent, textTransformations)
+        // Apply text transformations (e.g. rpai → rpk ai) then format.
+        // Command lines only get code-safe rules.
+        examplesContent = applyTextTransformationsToExamples(examplesContent, textTransformations)
         sections[sectionName] = formatExamples(examplesContent)
       } else {
         sections[sectionName] = formatDescription(sectionContent, textTransformations)
@@ -2611,8 +2630,9 @@ async function generateRpkDocs(options = {}) {
       if (mergedCommand.excludeExamples && mergedCommand.excludeExamples.length > 0) {
         examplesContent = filterExamples(examplesContent, mergedCommand.excludeExamples)
       }
-      // Apply text transformations (e.g. rpai → rpk ai) then format
-      examplesContent = applyTextTransformations(examplesContent, textTransformations)
+      // Apply text transformations (e.g. rpai → rpk ai) then format.
+      // Command lines only get code-safe rules.
+      examplesContent = applyTextTransformationsToExamples(examplesContent, textTransformations)
       sections.EXAMPLES = formatExamples(examplesContent)
     }
 
@@ -3059,5 +3079,6 @@ module.exports = {
   processContentArray,
   // Exported for testing
   filterExamples,
-  formatExamples
+  formatExamples,
+  applyTextTransformationsToExamples
 }
