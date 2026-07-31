@@ -2568,6 +2568,7 @@ function generatePRSummary(options) {
       if (changedFlagRequirements > 0) lines.push(`| Changed flag requirements | ${changedFlagRequirements} |`)
       if (changedFlagDescriptions > 0) lines.push(`| Changed flag descriptions | ${changedFlagDescriptions} |`)
       if (descriptionChanges > 0) lines.push(`| Changed command descriptions | ${descriptionChanges} |`)
+      if (diffData.summary?.flagDataBackfilled > 0) lines.push(`| Flag docs backfilled (not new flags) | ${diffData.summary.flagDataBackfilled} commands |`)
     }
     lines.push('')
 

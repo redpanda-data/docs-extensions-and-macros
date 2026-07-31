@@ -231,6 +231,7 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
   const changedFlagRequirements = []
   const changedFlagDescriptions = []
   const descriptionChanges = []
+  const flagDataBackfilled = []
 
   for (const path of newPaths) {
     if (!oldPaths.has(path)) continue // Skip new commands
@@ -241,8 +242,19 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
     const oldFlags = getFlagsMap(oldCmd)
     const newFlagsMap = getFlagsMap(newCmd)
 
-    // Find new flags
-    for (const [flagName, flag] of newFlagsMap) {
+    // Baseline gap guard: when a pre-existing command had NO flags recorded
+    // in the old snapshot, its flags in the new snapshot are newly captured
+    // documentation (plugin flag extraction backfilling data), not newly
+    // introduced flags. Stamping them "New in <version>" would mislabel
+    // long-standing flags, so report them separately and skip the flag diff
+    // (description changes below are still detected).
+    const isFlagBackfill = oldFlags.size === 0 && newFlagsMap.size > 0
+    if (isFlagBackfill) {
+      flagDataBackfilled.push({ commandPath: path, flagCount: newFlagsMap.size })
+    }
+
+    // Find new flags (skipped entirely for backfilled commands)
+    for (const [flagName, flag] of isFlagBackfill ? [] : newFlagsMap) {
       if (!oldFlags.has(flagName)) {
         newFlags.push({
           commandPath: path,
@@ -338,7 +350,8 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
       changedFlagTypes: changedFlagTypes.length,
       changedFlagRequirements: changedFlagRequirements.length,
       changedFlagDescriptions: changedFlagDescriptions.length,
-      descriptionChanges: descriptionChanges.length
+      descriptionChanges: descriptionChanges.length,
+      flagDataBackfilled: flagDataBackfilled.length
     },
     details: {
       newCommands: newCommandsDetails,
@@ -350,7 +363,8 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
       changedFlagTypes,
       changedFlagRequirements,
       changedFlagDescriptions,
-      descriptionChanges
+      descriptionChanges,
+      flagDataBackfilled
     }
   }
 }
@@ -369,6 +383,9 @@ function printDiffReport(diff) {
   console.log(`  Deprecated commands: ${diff.summary.newlyDeprecatedCommands || 0}`)
   console.log(`  Removed commands: ${diff.summary.removedCommands}`)
   console.log(`  New flags: ${diff.summary.newFlags}`)
+  if (diff.summary.flagDataBackfilled) {
+    console.log(`  Flag documentation backfilled: ${diff.summary.flagDataBackfilled} command(s) (baseline had no flag data; not reported as new flags)`)
+  }
   console.log(`  Removed flags: ${diff.summary.removedFlags}`)
   console.log(`  Changed defaults: ${diff.summary.changedDefaults}`)
   console.log(`  Changed flag types: ${diff.summary.changedFlagTypes || 0}`)
@@ -466,6 +483,9 @@ function generateMarkdownSummary(diff) {
   lines.push(`| New flags | ${diff.summary.newFlags} |`)
   lines.push(`| Removed flags | ${diff.summary.removedFlags} |`)
   lines.push(`| Changed defaults | ${diff.summary.changedDefaults} |`)
+  if (diff.summary.flagDataBackfilled) {
+    lines.push(`| Flag docs backfilled (baseline had no flag data) | ${diff.summary.flagDataBackfilled} commands |`)
+  }
   lines.push(``)
 
   if (diff.details.newCommands.length > 0) {

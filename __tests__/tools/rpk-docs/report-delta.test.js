@@ -529,3 +529,62 @@ describe('firstSentence', () => {
       .toBe('Installs version 4.32.0 of the plugin.')
   })
 })
+
+describe('flag data backfill guard', () => {
+  const { generateRpkDiff } = require('../../../tools/rpk-docs/report-delta.js')
+
+  const tree = (cmds) => ({ name: 'rpk', commands: cmds })
+
+  test('does not report backfilled plugin flags as new', () => {
+    // v26.1.12-style baseline: plugin command exists but no flags captured
+    const oldTree = tree([{ name: 'connect', commands: [{ name: 'streams', flags: [] }] }])
+    const newTree = tree([{
+      name: 'connect',
+      commands: [{
+        name: 'streams',
+        flags: [{ name: 'observability', type: 'string' }, { name: 'chilled', type: 'bool' }]
+      }]
+    }])
+
+    const diff = generateRpkDiff(oldTree, newTree, { oldVersion: 'v1', newVersion: 'v2' })
+    expect(diff.summary.newFlags).toBe(0)
+    expect(diff.summary.flagDataBackfilled).toBe(1)
+    expect(diff.details.flagDataBackfilled).toEqual([
+      { commandPath: 'rpk connect streams', flagCount: 2 }
+    ])
+  })
+
+  test('still detects description changes on backfilled commands', () => {
+    const oldTree = tree([{ name: 'connect', commands: [{ name: 'streams', flags: [], description: 'old' }] }])
+    const newTree = tree([{ name: 'connect', commands: [{ name: 'streams', flags: [{ name: 'x' }], description: 'new' }] }])
+
+    const diff = generateRpkDiff(oldTree, newTree)
+    expect(diff.summary.descriptionChanges).toBe(1)
+  })
+
+  test('reports genuinely new flags when the baseline has flag data', () => {
+    const oldTree = tree([{ name: 'cluster', commands: [{ name: 'info', flags: [{ name: 'brokers', type: 'string' }] }] }])
+    const newTree = tree([{
+      name: 'cluster',
+      commands: [{ name: 'info', flags: [{ name: 'brokers', type: 'string' }, { name: 'detailed', type: 'bool' }] }]
+    }])
+
+    const diff = generateRpkDiff(oldTree, newTree, { newVersion: 'v26.2.1' })
+    expect(diff.summary.flagDataBackfilled).toBe(0)
+    expect(diff.summary.newFlags).toBe(1)
+    expect(diff.details.newFlags[0]).toMatchObject({
+      commandPath: 'rpk cluster info',
+      flagName: 'detailed',
+      introducedInVersion: 'v26.2.1'
+    })
+  })
+
+  test('new commands are unaffected by the guard', () => {
+    const oldTree = tree([])
+    const newTree = tree([{ name: 'policy', flags: [{ name: 'format' }], commands: [] }])
+
+    const diff = generateRpkDiff(oldTree, newTree, { newVersion: 'v26.2.1' })
+    expect(diff.summary.newCommands).toBe(1)
+    expect(diff.summary.flagDataBackfilled).toBe(0)
+  })
+})
