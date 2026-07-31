@@ -1386,6 +1386,16 @@ function acquireRpkBinary(rpkVersion, options = {}) {
     // macOS host that needs it for plugin installs (review finding on the
     // 5.3.0 train). rpk builds with CGO disabled, so cross-compilation
     // from the linux container is safe.
+    // Only macOS and Linux hosts are supported: mapping anything else to
+    // linux would hand a Windows host an unrunnable binary, the exact bug
+    // class the cross-compile fixes (review finding on #238).
+    if (process.platform !== 'darwin' && process.platform !== 'linux') {
+      throw new Error(
+        `${nativeErr.message}\n` +
+        `Container fallback does not support host platform "${process.platform}". ` +
+        'Update Go, or pass --rpk-bin <path> to use an existing rpk binary.'
+      )
+    }
     const hostGoos = process.platform === 'darwin' ? 'darwin' : 'linux'
     const hostGoarch = process.arch === 'arm64' ? 'arm64' : 'amd64'
     const buildResult = spawnSync('docker', [
