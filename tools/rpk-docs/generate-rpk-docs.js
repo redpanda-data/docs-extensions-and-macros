@@ -2235,6 +2235,10 @@ function detectProtectedPlugins(commands, explicitProtected = []) {
  * landing page (the section header), so it is skipped during generation.
  */
 const STATIC_RPK_NAV_ENTRIES = [
+  // The root rpk command page is generated but skipped by the entry loop
+  // (its path has no group segment), so it is listed here to keep it in
+  // the nav ahead of the hand-written pages.
+  '*** xref:reference:rpk/rpk.adoc[]',
   '*** xref:reference:rpk/rpk-commands.adoc[]',
   '*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]',
 ]

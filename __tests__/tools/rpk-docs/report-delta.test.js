@@ -509,3 +509,23 @@ describe('rpk Docs Diff Generation', () => {
     })
   })
 })
+
+describe('firstSentence', () => {
+  const { firstSentence } = require('../../../tools/rpk-docs/report-delta.js')
+
+  test('cuts an unterminated summary at the paragraph break', () => {
+    // cobra descriptions often open with a periodless summary line
+    expect(firstSentence('Install Redpanda Check\n\nThis command installs the latest version by default.'))
+      .toBe('Install Redpanda Check')
+  })
+
+  test('joins hard-wrapped lines within the first paragraph', () => {
+    expect(firstSentence('Collects environment data that can help debug\nissues with a cluster. It then bundles the data.'))
+      .toBe('Collects environment data that can help debug issues with a cluster.')
+  })
+
+  test('keeps decimal numbers intact', () => {
+    expect(firstSentence('Installs version 4.32.0 of the plugin. More text.'))
+      .toBe('Installs version 4.32.0 of the plugin.')
+  })
+})

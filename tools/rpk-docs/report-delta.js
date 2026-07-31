@@ -690,7 +690,12 @@ function generateWhatsNewSection(diff, options = {}) {
  */
 function firstSentence(str) {
   if (!str) return ''
-  const singleLine = String(str).replace(/\s*\n+\s*/g, ' ').trim()
+  // A blank line separates the summary from the long text even when the
+  // summary has no terminal period ("Install Redpanda Check\n\nThis
+  // command..."), so cut at the paragraph break before joining the
+  // hard-wrapped lines within it.
+  const firstParagraph = String(str).split(/\n\s*\n/, 1)[0]
+  const singleLine = firstParagraph.replace(/\s*\n+\s*/g, ' ').trim()
   const protectedText = singleLine.replace(/(\d)\.(\d)/g, '$1__DECIMAL__$2')
   const match = protectedText.match(/^.*?[.!?](?=\s|$)/)
   const sentence = match ? match[0] : protectedText
@@ -717,5 +722,7 @@ module.exports = {
   generateWhatsNewSection,
   flattenToMap,
   getFlagsMap,
-  compareFlags
+  compareFlags,
+  // Exported for testing
+  firstSentence
 }

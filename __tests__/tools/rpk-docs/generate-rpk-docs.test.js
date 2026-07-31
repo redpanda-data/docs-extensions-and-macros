@@ -803,6 +803,7 @@ Specify a time range.`
       const nav = [
         '* xref:get-started:index.adoc[]',
         '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk.adoc[]',
         '*** xref:reference:rpk/rpk-commands.adoc[]',
         '*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]',
         '*** xref:reference:rpk/rpk-topic/rpk-topic.adoc[]',
@@ -820,9 +821,12 @@ Specify a time range.`
       expect(written).toContain('** xref:reference:rpk/index.adoc[rpk Commands]')
       expect(written).toContain('*** xref:reference:rpk/rpk-commands.adoc[]')
       expect(written).toContain('*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]')
-      // The root rpk command is represented by the hand-written index.adoc
-      // landing page; it must not get its own generated rpk.adoc nav entry.
-      expect(written).not.toContain('xref:reference:rpk/rpk.adoc[]')
+      // The generated root rpk.adoc page is listed ahead of the hand-written
+      // entries; without it Antora reports the page as unlisted.
+      const lines = written.split('\n')
+      const rootIdx = lines.indexOf('*** xref:reference:rpk/rpk.adoc[]')
+      expect(rootIdx).toBeGreaterThan(-1)
+      expect(rootIdx).toBeLessThan(lines.indexOf('*** xref:reference:rpk/rpk-commands.adoc[]'))
     })
 
     test('generates entries at correct nesting depths', () => {
@@ -1037,6 +1041,7 @@ Specify a time range.`
       // block; this run's tree has only the k8s shim.
       const nav = [
         '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk.adoc[]',
         '*** xref:reference:rpk/rpk-commands.adoc[]',
         '*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]',
         '*** xref:reference:rpk/rpk-iotune.adoc[]',
@@ -1081,6 +1086,7 @@ Specify a time range.`
     test('keeps a fully absent plugin block in its original position', () => {
       const nav = [
         '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk.adoc[]',
         '*** xref:reference:rpk/rpk-commands.adoc[]',
         '*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]',
         '*** xref:reference:rpk/rpk-connect/rpk-connect.adoc[]',
