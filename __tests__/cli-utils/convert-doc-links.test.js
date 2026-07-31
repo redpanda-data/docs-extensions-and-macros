@@ -138,3 +138,25 @@ describe('urlToXref fragment preservation', () => {
       .toBe('xref:connect:guides:bloblang/about.adoc');
   });
 });
+
+describe('urlToXref coverage for remaining slug-map entries and version forms', () => {
+  const { urlToXref } = require('../../cli-utils/convert-doc-links.js');
+
+  test('strips a beta version segment after the slug', () => {
+    expect(urlToXref('https://docs.redpanda.com/streaming/beta/manage/kubernetes/manage-resources/'))
+      .toBe('xref:streaming:manage:kubernetes/manage-resources.adoc');
+  });
+
+  test('maps the agentic-data-plane component', () => {
+    expect(urlToXref('https://docs.redpanda.com/agentic-data-plane/get-started/overview/'))
+      .toBe('xref:agentic-data-plane:get-started:overview.adoc');
+  });
+
+  test('maps the docs-site umbrella components', () => {
+    expect(urlToXref('https://docs.redpanda.com/home/')).toBe('xref:home::index.adoc');
+    expect(urlToXref('https://docs.redpanda.com/data-platform/overview/'))
+      .toBe('xref:data-platform:overview:index.adoc');
+    expect(urlToXref('https://docs.redpanda.com/self-managed/get-started/intro/'))
+      .toBe('xref:self-managed:get-started:intro.adoc');
+  });
+});
