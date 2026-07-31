@@ -111,10 +111,62 @@ function descriptionWithMetadataInclude (item) {
   return description.slice(0, found.start) + metadataIncludeLine(item) + description.slice(found.end);
 }
 
+// Markdown-style fence delimiter (``` or ~~~, possibly with a language tag).
+// Metadata blocks can carry fenced examples alongside AsciiDoc ---- blocks.
+const FENCE_DELIMITER = /^(`{3,}|~{3,})/;
+
+/**
+ * Collect the section heading titles in an AsciiDoc block, ignoring lines
+ * inside `----` literal blocks and ```/~~~ fenced blocks. Titles are returned
+ * without their `=` markers so callers can compare sections across heading
+ * levels (the same section may be `==` in a connector description but `===`
+ * in a partial migrated from a page).
+ * @param {string} text
+ * @returns {string[]}
+ */
+function sectionHeadings (text) {
+  if (!text || typeof text !== 'string') return [];
+  const headings = [];
+  let inBlock = false;
+  let fence = null;
+  for (const line of text.split('\n')) {
+    const fenceMatch = line.match(FENCE_DELIMITER);
+    if (fenceMatch) {
+      if (!fence) fence = fenceMatch[1][0];
+      else if (fenceMatch[1][0] === fence) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    if (BLOCK_DELIMITER.test(line)) { inBlock = !inBlock; continue; }
+    if (inBlock) continue;
+    const m = line.match(/^=+\s+(\S.*)$/);
+    if (m) headings.push(m[1].trim());
+  }
+  return headings;
+}
+
+/**
+ * Report the section headings present in a previously generated metadata
+ * partial that are missing from its regenerated replacement. Regeneration is
+ * authoritative, but published content silently disappearing is how docs lose
+ * examples: a section that lives outside the upstream description's
+ * `== Metadata` block (or was hand-migrated from a page) is dropped without a
+ * trace on the next run. Callers use this to warn before overwriting.
+ * @param {string} oldContent existing partial on disk
+ * @param {string} newContent regenerated partial about to be written
+ * @returns {string[]} heading titles present in oldContent but not newContent
+ */
+function lostMetadataSections (oldContent, newContent) {
+  const newHeadings = new Set(sectionHeadings(newContent));
+  return sectionHeadings(oldContent).filter((h) => !newHeadings.has(h));
+}
+
 module.exports = {
   locateMetadata,
   extractMetadata,
   typeDirFor,
   metadataIncludeLine,
   descriptionWithMetadataInclude,
+  sectionHeadings,
+  lostMetadataSections,
 };

@@ -5,6 +5,7 @@ const path = require('path');
 const handlebars = require('handlebars');
 const yaml = require('yaml');
 const helpers = require('./helpers');
+const { lostMetadataSections } = require('./metadata-utils.js');
 
 // Register each helper under handlebars, verifying that it’s a function
 Object.entries(helpers).forEach(([name, fn]) => {
@@ -434,6 +435,24 @@ async function generateRpcnConnectorDocs(options) {
         const mPath = path.join(metadataOutRoot, typeDir, `${name}.adoc`);
         if (metadataOut.trim()) {
           fs.mkdirSync(path.dirname(mPath), { recursive: true });
+          if (fs.existsSync(mPath)) {
+            // Regeneration is authoritative, but a section vanishing from a
+            // published partial is usually content loss, not cleanup: the
+            // section either sits outside the upstream description's
+            // `== Metadata` block or was hand-migrated from a page, and
+            // overwriting drops it without a trace. Warn so the auto-docs PR
+            // reviewer can move the content to the connector page or restore
+            // it upstream before merging.
+            const lost = lostMetadataSections(fs.readFileSync(mPath, 'utf8'), metadataOut);
+            if (lost.length) {
+              console.warn(
+                `Warning: regenerated metadata partial ${path.relative(process.cwd(), mPath)} ` +
+                `drops previously published section(s): ${lost.map((h) => `"${h}"`).join(', ')}. ` +
+                'If this content is still wanted, move it to the connector page or restore it ' +
+                "in the upstream description's Metadata section."
+              );
+            }
+          }
           fs.writeFileSync(mPath, metadataOut);
           if (!writeFullDrafts) {
             partialsWritten++;
