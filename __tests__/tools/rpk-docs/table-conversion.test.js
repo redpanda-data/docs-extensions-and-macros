@@ -419,3 +419,79 @@ Without \`--node-id\`, the request is sent to any broker.`
     })
   })
 })
+
+describe('unindented shell examples and colon-introduced code', () => {
+  const {
+    convertIndentedCodeBlocksToAsciiDoc,
+    parseDescriptionSections
+  } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  test('captures a column-0 $ invocation and its output as blocks', () => {
+    const store = []
+    const input = [
+      'Progress is reported as follows.',
+      '',
+      '$ rpk cluster brokers decommission-status 4',
+      'DECOMMISSION PROGRESS',
+      '=====================',
+      'kafka/test/0   3   9   1699470920',
+      '',
+      'Using --detailed prints granular reports.'
+    ].join('\n')
+
+    const out = convertIndentedCodeBlocksToAsciiDoc(input, store)
+    expect(store).toHaveLength(1)
+    expect(store[0]).toContain('[,bash]\n----\nrpk cluster brokers decommission-status 4\n----')
+    expect(store[0]).toContain('[.no-copy]\n----\nDECOMMISSION PROGRESS\n=====================\nkafka/test/0   3   9   1699470920\n----')
+    expect(out).toContain('__EARLY_CODE_BLOCK_0__')
+    expect(out).toContain('Using --detailed prints granular reports.')
+  })
+
+  test('all-caps output title after a $ invocation is not a section header', () => {
+    const desc = [
+      'Reports progress.',
+      '',
+      '$ rpk thing status 4',
+      'DECOMMISSION PROGRESS',
+      '=====================',
+      'row 1',
+      '',
+      'Trailing prose.'
+    ].join('\n')
+
+    const { mainDescription, sections } = parseDescriptionSections(desc)
+    expect(Object.keys(sections)).toEqual([])
+    expect(mainDescription).toContain('DECOMMISSION PROGRESS')
+  })
+
+  test('captures a colon-introduced indented code sample verbatim', () => {
+    const store = []
+    const input = [
+      'Scope the resource to your MCP server, e.g.:',
+      '',
+      '  permit(principal, action == Action::"tools_call",',
+      '         resource == McpServer::"servicenow");',
+      '',
+      'Data shaping is NOT configured here.'
+    ].join('\n')
+
+    const out = convertIndentedCodeBlocksToAsciiDoc(input, store)
+    expect(store).toHaveLength(1)
+    expect(store[0]).toContain('permit(principal, action == Action::"tools_call",\n       resource == McpServer::"servicenow");')
+    expect(out).toContain('Data shaping is NOT configured here.')
+  })
+
+  test('colon-introduced indented lists are not captured as code', () => {
+    const store = []
+    const input = [
+      'The following conditions are met:',
+      '',
+      '  - All partitions have leaders',
+      '  - No brokers are down',
+      ''
+    ].join('\n')
+
+    convertIndentedCodeBlocksToAsciiDoc(input, store)
+    expect(store).toHaveLength(0)
+  })
+})

@@ -125,3 +125,23 @@ describe('Text Transformations', () => {
     }, 30000)
   })
 })
+
+describe('applyToCode rules in early code blocks', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  const transforms = {
+    replacements: [
+      { pattern: '\\brpai\\b', replacement: 'rpk ai', flags: 'g', applyToCode: true },
+      { pattern: '(^|\\n\\s*)Note:\\s', replacement: '$1NOTE: ', flags: 'g' }
+    ]
+  }
+
+  test('applies only code-safe rules inside captured code blocks', () => {
+    const input = 'Run the agent, e.g.:\n\n  rpai run claude -L anthropic\n  Note: output follows\n\nDone.'
+    const out = formatDescription(input, transforms)
+    expect(out).toContain('rpk ai run claude -L anthropic')
+    // The admonition rule must NOT rewrite text inside the code block
+    expect(out).toContain('Note: output follows')
+    expect(out).not.toContain('NOTE: output follows')
+  })
+})

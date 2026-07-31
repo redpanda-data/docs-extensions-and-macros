@@ -778,6 +778,66 @@ function convertIndentedCodeBlocksToAsciiDoc(text, codeBlockStore = []) {
   while (i < lines.length) {
     const line = lines[i]
 
+    // Unindented shell example: "$ rpk ..." at column 0 followed by its
+    // sample output on the contiguous lines below. Rendered as a command
+    // block plus a no-copy output block so the output's =-underlined titles
+    // and aligned columns are never parsed as prose or headings.
+    if (/^\$\s/.test(line)) {
+      const command = line.replace(/^\$\s+/, '')
+      let j = i + 1
+      const outputLines = []
+      while (j < lines.length && lines[j].trim() !== '' && !/^\$\s/.test(lines[j])) {
+        outputLines.push(lines[j])
+        j++
+      }
+      let block = `\n[,bash]\n----\n${command}\n----\n`
+      if (outputLines.length > 0) {
+        block += `\n[.no-copy]\n----\n${outputLines.join('\n')}\n----\n`
+      }
+      const placeholder = `__EARLY_CODE_BLOCK_${codeBlockStore.length}__`
+      codeBlockStore.push(block)
+      result.push('')
+      result.push(placeholder)
+      result.push('')
+      i = j
+      continue
+    }
+
+    // Colon-introduced code sample: prose ending with ":" followed by an
+    // indented block that is not a list (Cedar policies, config snippets).
+    // Captured verbatim (dedented) so inline-code transforms never touch it.
+    const prevNonBlank = [...result].reverse().find(l => l.trim() !== '')
+    if (
+      prevNonBlank && /:\s*$/.test(prevNonBlank) &&
+      /^[ ]{2,}\S/.test(line) &&
+      !/^[ ]{2,}(-|\*|\d+[.)])\s/.test(line) &&
+      !/^[ ]{2,}(--|rpk\s|\$\s)/.test(line)
+    ) {
+      const blockLines = []
+      let j = i
+      while (j < lines.length && (/^[ ]{2,}\S/.test(lines[j]) || lines[j].trim() === '')) {
+        if (lines[j].trim() === '' && (j + 1 >= lines.length || !/^[ ]{2,}\S/.test(lines[j + 1]))) break
+        blockLines.push(lines[j])
+        j++
+      }
+      // Column-aligned layouts (two or more lines with a run of spaces
+      // separating columns) are definition tables, not code: leave them for
+      // the indented-table/YAML converters below.
+      const alignedLines = blockLines.filter(l => /\S\s{2,}\S/.test(l.trim())).length
+      if (alignedLines < 2) {
+        const indent = Math.min(...blockLines.filter(l => l.trim() !== '').map(l => l.search(/\S/)))
+        const dedented = blockLines.map(l => l.slice(indent)).join('\n')
+        const codeBlock = `\n[,text]\n----\n${dedented}\n----\n`
+        const placeholder = `__EARLY_CODE_BLOCK_${codeBlockStore.length}__`
+        codeBlockStore.push(codeBlock)
+        result.push('')
+        result.push(placeholder)
+        result.push('')
+        i = j
+        continue
+      }
+    }
+
     // Check for indented command example: 2+ spaces then --, rpk, or $ (shell prompt)
     // e.g. "  --job-name test --labels ..."
     // e.g. "  rpk cluster info"
@@ -1240,10 +1300,13 @@ function convertIndentedTablesToAsciiDoc(text, options = {}) {
  * @param {Object|null} customTransformations
  * @returns {string}
  */
-function applyTextTransformations(text, customTransformations) {
+function applyTextTransformations(text, customTransformations, options = {}) {
   if (!text || !customTransformations?.replacements) return text
   let result = text
   for (const rule of customTransformations.replacements) {
+    // Code blocks are verbatim: only rules explicitly marked applyToCode
+    // (like the rpai -> rpk ai binary-name rewrite) may touch them.
+    if (options.code && !rule.applyToCode) continue
     try {
       const flags = rule.flags || 'g'
       result = result.replace(new RegExp(rule.pattern, flags), rule.replacement)
@@ -1476,8 +1539,13 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     // Stray space before a closing parenthesis (upstream help typo)
     .replace(/ +\)/g, ')')
     // === STYLE GUIDE COMPLIANCE ===
-    .replace(/\be\.g\.\s*/gi, 'for example, ')
-    .replace(/\bi\.e\.\s*/gi, 'that is, ')
+    // "e.g.:" introduces a block; keep the colon instead of rendering ", :".
+    // Horizontal whitespace only: crossing a newline would glue the next
+    // line (often a code-block placeholder) onto this sentence.
+    .replace(/,?[^\S\n]*\be\.g\.:[^\S\n]*/gi, ', for example: ')
+    .replace(/, for example: $/gm, ', for example:')
+    .replace(/\be\.g\.[^\S\n]*/gi, 'for example, ')
+    .replace(/\bi\.e\.[^\S\n]*/gi, 'that is, ')
     // === TYPO CORRECTIONS ===
     // Fix "an" before consonant sounds (common source typos)
     .replace(/\ban\s+(prod|dev|test|local|remote|new|cluster|config|file)\b/gi, 'a $1')
@@ -1602,7 +1670,8 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // inside the early code blocks (like __INLINE_CODE_X__) get resolved
   // Use function replacements to prevent $ special-pattern interpretation (e.g. `$` → before-match)
   earlyCodeBlocks.forEach((block, i) => {
-    result = result.replace(`__EARLY_CODE_BLOCK_${i}__`, () => block)
+    const transformed = applyTextTransformations(block, customTransformations, { code: true })
+    result = result.replace(`__EARLY_CODE_BLOCK_${i}__`, () => transformed)
   })
 
   // Restore inline code
@@ -1824,7 +1893,17 @@ function parseDescriptionSections(desc) {
     // A line with runs of multiple spaces is a column-header row of aligned
     // sample output (for example "PARTITION      REASON"), not a section
     // header, so leave it in the content.
-    const headerMatch = /  /.test(line) ? null : line.match(/^([A-Z][A-Z\s\-\/&]{0,}[A-Z])$/)
+    let headerMatch = /  /.test(line) ? null : line.match(/^([A-Z][A-Z\s\-\/&]{0,}[A-Z])$/)
+    // An all-caps line directly after a "$ command" invocation is the title
+    // of that command's sample output (for example "DECOMMISSION PROGRESS"),
+    // not a section header. Splitting there would strand the invocation in
+    // one section and its output table in another.
+    if (headerMatch) {
+      for (let p = i - 1; p >= 0; p--) {
+        if (lines[p].trim() === '') break
+        if (/^\$\s/.test(lines[p])) { headerMatch = null; break }
+      }
+    }
     if (headerMatch) {
       // Help text often underlines section titles with a run of = or -
       // characters. Consume the underline: left in the content, a line of
@@ -2015,6 +2094,19 @@ function capToTwoSentences(desc) {
   // Remove section headers and content after them (for overrides that include full content)
   // Pattern: matches == Section Header and everything after it
   let cleaned = desc.replace(/\s*==\s+.+$/s, '')
+
+  // Delimited code/output blocks never belong in a summary. Indented help
+  // examples are converted to [,text]/[,bash]/[.no-copy] blocks before this
+  // runs. A block introduced by a colon ends the summary there (the prose
+  // after it would read as a non sequitur without the sample); otherwise
+  // drop the block and keep the surrounding prose.
+  const blockRe = /\n?\[[^\]\n]*\]\n----\n[\s\S]*?\n----|\n----\n[\s\S]*?\n----/
+  const firstBlock = cleaned.match(blockRe)
+  if (firstBlock && /:\s*$/.test(cleaned.slice(0, firstBlock.index))) {
+    cleaned = cleaned.slice(0, firstBlock.index)
+  } else {
+    cleaned = cleaned.replace(new RegExp(blockRe.source, 'g'), '')
+  }
 
   // Remove indented content (tables, lists, etc.) after colons before sentence detection
   // Pattern: text ending with colon, optionally followed by blank line, then indented content

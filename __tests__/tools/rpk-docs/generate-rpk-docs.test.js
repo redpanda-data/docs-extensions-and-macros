@@ -1310,3 +1310,18 @@ Specify a time range.`
     }, 30000)
   })
 })
+
+describe('capToTwoSentences with code blocks', () => {
+  const { capToTwoSentences } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  test('ends the summary at a colon that introduces a code block', () => {
+    const input = 'Prints a config according to an expression. The expression takes three lists, divided by slashes:\n\n[,text]\n----\nredpanda-connect create stdin/bloblang,awk/nats\n----\n\nIf omitted a default config is created.'
+    // The block and its dangling colon introducer are both dropped
+    expect(capToTwoSentences(input)).toBe('Prints a config according to an expression.')
+  })
+
+  test('drops a mid-prose block and keeps surrounding sentences', () => {
+    const input = 'Reports progress.\n\n[,bash]\n----\nrpk thing status 4\n----\n\nUse --detailed for more.'
+    expect(capToTwoSentences(input)).toBe('Reports progress. Use --detailed for more.')
+  })
+})
