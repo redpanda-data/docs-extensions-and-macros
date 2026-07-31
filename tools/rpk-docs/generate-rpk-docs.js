@@ -292,6 +292,24 @@ function shouldUsePartialDir(overrides, commandPath) {
 }
 
 /**
+ * Check if a command belongs to the rpk cloud or rpk security secret families.
+ * Their pages are routed to the cloud partials directory (cloudSecretDir) and
+ * published by cloud-docs, so links to them from regular pages must cross to
+ * the cloud component.
+ * @param {string} commandPath - Full command path (e.g., "rpk cloud login")
+ * @returns {boolean}
+ */
+function isCloudSecretCommand(commandPath) {
+  return commandPath === 'rpk cloud' || commandPath.startsWith('rpk cloud ') ||
+    commandPath === 'rpk security secret' || commandPath.startsWith('rpk security secret ')
+}
+
+/**
+ * Antora component that publishes the rpk cloud and rpk security secret pages.
+ */
+const CLOUD_DOCS_COMPONENT = 'cloud-data-platform'
+
+/**
  * Get command metadata from overrides
  * @param {Object} overrides - Overrides object (resolved)
  * @param {string} commandPath - Full command path (e.g., "rpk topic create")
@@ -2420,8 +2438,7 @@ function updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcomm
     if (isProtectedCommandPath(commandPath, protectedPlugins)) continue
     if (shouldExcludeCommand(resolvedOverrides, commandPath)) continue
     if (shouldUsePartialDir(resolvedOverrides, commandPath)) continue
-    if (commandPath.startsWith('rpk cloud')) continue
-    if (commandPath.startsWith('rpk security secret')) continue
+    if (isCloudSecretCommand(commandPath)) continue
 
     const parts = commandPath.split(' ')
     const stars = '*'.repeat(parts.length + 1)
@@ -2725,16 +2742,13 @@ async function generateRpkDocs(options = {}) {
     // Build subcommands with correct xref paths
     // Filter out excluded and asPartial subcommands — excluded have no file,
     // asPartial ones live in the partials directory with no linkable xref.
-    // rpk cloud and rpk security secret are hardcoded-routed to partials
-    // (single-sourced into cloud docs), so they have no linkable pages
-    // either: rpk-security.adoc linking rpk-security-secret.adoc was a
-    // broken xref in the published site.
+    // rpk cloud and rpk security secret rows stay in the table: their pages
+    // are routed to the cloud partials directory and published by
+    // cloud-docs, so the xref below links across to the cloud component
+    // instead of dropping the row (which hid the subcommand entirely).
     const subcommands = (command.commands || [])
       .filter(sub => {
         const subPath = `${commandPath} ${sub.name}`
-        if (subPath.startsWith('rpk cloud') || subPath.startsWith('rpk security secret')) {
-          return false
-        }
         return !shouldExcludeCommand(resolvedOverrides, subPath) && !shouldUsePartialDir(resolvedOverrides, subPath)
       })
       .map(sub => {
@@ -2756,6 +2770,13 @@ async function generateRpkDocs(options = {}) {
           }
         }
 
+        // rpk cloud and rpk security secret pages are routed to the cloud
+        // partials directory and published by cloud-docs, so rows in regular
+        // pages must link across to the cloud component.
+        if (cloudSecretDir && isCloudSecretCommand(subPath) && !isCloudSecretCommand(commandPath)) {
+          xrefPath = `${CLOUD_DOCS_COMPONENT}:${xrefPath}`
+        }
+
         // Use overridden description if available
         const subOverride = resolvedOverrides?.commands?.[subPath]
         const subDescription = subOverride?.description || sub.description || ''
@@ -2765,6 +2786,8 @@ async function generateRpkDocs(options = {}) {
           fullPath: subPath,
           dashifiedPath: dashifiedSubPath,
           xrefPath,
+          cloudOnly: subOverride?.cloudOnly === true,
+          selfHostedOnly: subOverride?.selfHostedOnly === true,
           shortDesc: ensurePeriod(capToTwoSentences(formatDescription(subDescription, textTransformations, { skipTableConversion: true, skipListConversion: true })))
         }
       })
@@ -2949,10 +2972,8 @@ async function generateRpkDocs(options = {}) {
 
     // Determine output path
     // Check if this command should go to cloudSecretDir
-    const isCloudCommand = commandPath.startsWith('rpk cloud')
-    const isSecuritySecretCommand = commandPath.startsWith('rpk security secret')
     const useCloudSecretDir = cloudSecretDir && (
-      isCloudCommand || isSecuritySecretCommand || shouldUsePartialDir(resolvedOverrides, commandPath)
+      isCloudSecretCommand(commandPath) || shouldUsePartialDir(resolvedOverrides, commandPath)
     )
     const effectiveOutputDir = useCloudSecretDir ? cloudSecretDir : outputDir
 
