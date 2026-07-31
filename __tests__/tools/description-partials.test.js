@@ -348,3 +348,52 @@ describe('generator empties a stale description partial when the description is 
     expect(logged).toContain(path.join('descriptions', 'inputs', 'dropped_desc.adoc'));
   });
 });
+
+describe('summary-only and escapable-summary connectors (CodeRabbit findings)', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-summary-only');
+  let originalCwd, templateFile;
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('a connector with a summary but no description still gets a partial (40 real connectors)', () => {
+    const data = {
+      outputs: [
+        {
+          name: 'summary_only',
+          type: 'output',
+          summary: "Caches messages & forwards them to Bob's <special> queue.",
+          config: { children: [{ name: 'x', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    const dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
+      const dPath = path.join(
+        tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'summary_only.adoc'
+      );
+      expect(fs.existsSync(dPath)).toBe(true);
+      const content = fs.readFileSync(dPath, 'utf8');
+      // Not blanked as "removed upstream"
+      expect(content).not.toContain('intentionally empty');
+      expect(content).toContain('// tag::attrs[]');
+      // The attribute value is raw text, never HTML-escaped
+      expect(content).toContain(":description: Caches messages & forwards them to Bob's <special> queue.");
+      expect(content).not.toContain('&amp;');
+      expect(content).not.toContain('&#x27;');
+      expect(content).not.toContain('&lt;');
+    });
+  });
+});
