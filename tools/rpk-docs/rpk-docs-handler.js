@@ -1350,8 +1350,18 @@ function acquireRpkBinary(rpkVersion, options = {}) {
     console.warn(`Native build failed (${nativeErr.message.split('\n')[0]}); building in a container...`)
     const goVersion = getRequiredGoVersion(sourcePath)
     const goImage = goVersion ? `golang:${goVersion}` : 'golang:1'
+    // Cross-compile for the HOST platform: the container reports
+    // GOOS=linux, and a linux binary dies silently when executed on the
+    // macOS host that needs it for plugin installs (review finding on the
+    // 5.3.0 train). rpk builds with CGO disabled, so cross-compilation
+    // from the linux container is safe.
+    const hostGoos = process.platform === 'darwin' ? 'darwin' : 'linux'
+    const hostGoarch = process.arch === 'arm64' ? 'arm64' : 'amd64'
     const buildResult = spawnSync('docker', [
       'run', '--rm',
+      '-e', `GOOS=${hostGoos}`,
+      '-e', `GOARCH=${hostGoarch}`,
+      '-e', 'CGO_ENABLED=0',
       '-v', `${path.resolve(sourcePath)}:/rpk-source:ro`,
       '-v', `${workDir}:/out`,
       '-w', '/rpk-source',

@@ -532,3 +532,27 @@ describe('validate-overrides', () => {
     })
   })
 })
+
+describe('cloudOnly and selfHostedOnly mutual exclusion', () => {
+  const { validateOverrides } = require('../../../tools/rpk-docs/validate-overrides.js')
+
+  const tree = { name: 'rpk', commands: [{ name: 'cluster', commands: [{ name: 'info', commands: [] }] }] }
+
+  test('both set at command level is an error', () => {
+    const overrides = { commands: { 'rpk cluster info': { cloudOnly: true, selfHostedOnly: true } } }
+    const result = validateOverrides(overrides, tree)
+    expect(result.errors.some(e => /unsatisfiable/.test(e.message))).toBe(true)
+  })
+
+  test('both set on a flag is an error', () => {
+    const overrides = { commands: { 'rpk cluster info': { flags: { detailed: { cloudOnly: true, selfHostedOnly: true } } } } }
+    const result = validateOverrides(overrides, tree)
+    expect(result.errors.some(e => /flag "detailed"/.test(e.message))).toBe(true)
+  })
+
+  test('one of the two is fine', () => {
+    const overrides = { commands: { 'rpk cluster info': { selfHostedOnly: true, flags: { detailed: { cloudOnly: true } } } } }
+    const result = validateOverrides(overrides, tree)
+    expect(result.errors.filter(e => /unsatisfiable/.test(e.message))).toHaveLength(0)
+  })
+})
