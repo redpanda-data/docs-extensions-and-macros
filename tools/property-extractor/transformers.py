@@ -639,8 +639,9 @@ class BasicInfoTransformer:
     
     NAME RESOLUTION PRIORITY:
     1. Pre-existing property["name"] (from previous processing)
-    2. info["name_in_file"] (C++ variable name from Tree-sitter)  
-    3. First parameter value if it looks like an identifier
+    2. First string-literal parameter if it looks like an identifier
+       (the name argument passed to the property constructor)
+    3. info["name_in_file"] (C++ member name from Tree-sitter) as fallback
     
     DESCRIPTION EXTRACTION LOGIC:
     1. If first parameter is a string and differs from name → use as description
@@ -673,29 +674,44 @@ class BasicInfoTransformer:
             return property
 
         # --- Step 1: find the "real" start of the property definition ---
-        # Skip lambdas, validators, and non-string literals at the start
-        start_idx = 0
+        # Skip lambdas, validators, and non-string literals at the start.
+        # The parser normalizes string_literal values to unquoted strings, so
+        # select by parameter type rather than by surrounding quotes.
+        start_idx = None
         for i, p in enumerate(params):
-            val = str(p.get("value", ""))
-            typ = p.get("type", "")
             if is_validator_param(p):
                 continue
-            if typ in ("lambda_expression", "qualified_identifier", "unresolved_identifier"):
-                continue
-            if not (val.startswith('"') and val.endswith('"')):
+            if p.get("type") != "string_literal":
                 continue
             # First string literal we hit is the name
             start_idx = i
             break
 
         # --- Step 2: extract name and description robustly ---
-        name = property.get("name") or info.get("name_in_file")
-        if not name and len(params) > start_idx:
-            name = params[start_idx].get("value", "").strip('"')
+        # The property's registered name is the first string-literal constructor
+        # argument, NOT the C++ member identifier. They usually match, but not
+        # always: for example, the member `default_topic_replication` registers
+        # the name "default_topic_replications". info["name_in_file"] (the
+        # member identifier) is only a fallback.
+        name = property.get("name")
+        if not name:
+            for p in params:
+                if p.get("type") != "string_literal":
+                    continue
+                candidate = str(p.get("value", "")).strip().strip('"')
+                # The name literal is a single identifier with no whitespace.
+                # If the first string literal looks like a description instead
+                # (for example, the name was passed as a constant), fall back
+                # to the member identifier below.
+                if candidate and not re.search(r"\s", candidate):
+                    name = candidate
+                break  # only the first string literal can be the name
+        if not name:
+            name = info.get("name_in_file")
         property["name"] = name
 
         desc = None
-        if len(params) > start_idx + 1:
+        if start_idx is not None and len(params) > start_idx + 1:
             v0 = params[start_idx].get("value")
             v1 = params[start_idx + 1].get("value")
             if isinstance(v1, str) and len(v1) > 10 and " " in v1:
