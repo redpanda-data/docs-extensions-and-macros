@@ -25,6 +25,7 @@ const DEFAULT_METADATA_TEMPLATE = path.resolve(__dirname, './templates/metadata-
 // the metadata partial, this is rewritten on every run so summary/description
 // changes upstream flow into already-published pages that include it.
 const DEFAULT_DESCRIPTION_TEMPLATE = path.resolve(__dirname, './templates/descriptions-partials.hbs');
+const { hasStructuralHeadings, LONG_HEADINGLESS_THRESHOLD } = require('./helpers/renderConnectDescription.js');
 
 // Banner-only content written to a metadata partial when its `== Metadata`
 // section is removed upstream. Kept as an AsciiDoc comment so the file renders
@@ -504,6 +505,19 @@ async function generateRpcnConnectorDocs(options) {
           if (!writeFullDrafts) {
             partialsWritten++;
             partialFiles.push(path.relative(process.cwd(), dPath));
+          }
+          // Long heading-less descriptions render as a wall of text. The fix
+          // belongs upstream (add == sections in the Connect source), so
+          // surface them here instead of hiding them in the docs build.
+          if (
+            typeof item.description === 'string' &&
+            item.description.length > LONG_HEADINGLESS_THRESHOLD &&
+            !hasStructuralHeadings(item.description)
+          ) {
+            console.warn(
+              `Long heading-less description: ${typeDir}/${name} ` +
+              `(${item.description.length} chars). Consider adding == sections upstream in the Connect source.`
+            );
           }
         } else if (fs.existsSync(dPath)) {
           // The upstream description disappeared, but a previously generated

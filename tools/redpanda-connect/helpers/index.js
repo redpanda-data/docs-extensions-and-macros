@@ -13,6 +13,7 @@ module.exports = {
   renderConnectExamples:  require('./renderConnectExamples.js'),
   renderConnectMetadata:  require('./renderConnectMetadata.js'),
   renderConnectDescription: require('./renderConnectDescription.js'),
+  summaryAttribute: require('./summaryAttribute.js'),
   descriptionWithMetadataInclude: require('./descriptionWithMetadataInclude.js'),
   renderLeafField:        require('./renderLeafField.js'),
   renderObjectField:      require('./renderObjectField.js'),

@@ -65,38 +65,19 @@ describe('renderConnectDescription helper', () => {
     expect(out).not.toContain('- a: one');
   });
 
-  test('passes a structured description through unchanged (no collapsing)', () => {
-    // Long, but carries its own headings: already navigable, must not collapse.
-    const body = 'Intro paragraph.\n\n== Details\n\n' + 'word '.repeat(500);
-    const out = renderConnectDescription({ type: 'output', name: 'x', description: body });
-    expect(out).not.toContain('[%collapsible]');
-    expect(out).toContain('== Details');
-  });
+  test('passes every description through unchanged: no collapsing, no demotion', () => {
+    // Collapsible wrapping was evaluated and rejected: it hides primary
+    // content, breaks on bodies with their own ==== delimiters, and
+    // find/deep-link behavior into closed details is browser-dependent.
+    // Heading demotion was rejected: the description renders before the
+    // page's first == section, so demoted headings are out of sequence.
+    const structured = 'Intro paragraph.\n\n== Details\n\n' + 'word '.repeat(500);
+    expect(renderConnectDescription({ type: 'output', name: 'x', description: structured }))
+      .toBe(structured.trim());
 
-  test('collapses a long, heading-less prose wall after the first paragraph', () => {
-    const lead = 'This is the lead paragraph that stays visible.';
-    const tail = 'Follow-up detail. ' + 'more '.repeat(400);
-    const out = renderConnectDescription({
-      type: 'output', name: 'x', description: `${lead}\n\n${tail}`,
-    });
-    expect(out.startsWith(lead)).toBe(true);
-    expect(out).toContain('.More details');
-    expect(out).toContain('[%collapsible]');
-    expect(out).toContain('====');
-    expect(out).toContain('Follow-up detail.');
-  });
-
-  test('leaves a short prose description untouched', () => {
-    const out = renderConnectDescription({ type: 'output', name: 'x', description: 'Short and sweet.' });
-    expect(out).toBe('Short and sweet.');
-  });
-
-  test('collapse can be disabled via the hash option', () => {
-    const body = 'Lead.\n\n' + 'x '.repeat(2000);
-    const out = renderConnectDescription(
-      { type: 'output', name: 'x', description: body },
-      { hash: { collapse: false } },
-    );
+    const wall = 'Lead paragraph.\n\n' + 'more '.repeat(600);
+    const out = renderConnectDescription({ type: 'output', name: 'x', description: wall });
+    expect(out).toBe(wall.trim());
     expect(out).not.toContain('[%collapsible]');
   });
 
@@ -104,66 +85,57 @@ describe('renderConnectDescription helper', () => {
     expect(renderConnectDescription({ type: 'output', name: 'x' })).toBe('');
   });
 
-  test('passes through a long body containing ==== delimiters (delimiter collision)', () => {
-    // The collapsible wrapper is itself a ====-delimited block. A body with
-    // its own ==== delimiters (admonition/example blocks, as in the
-    // http_server output) must not be wrapped: the nested opening ====
-    // would terminate the collapsible early and leak the rest of the body.
+  renderTest('Asciidoctor renders embedded headings as clean top-level sections (published-page parity)', () => {
     const body = [
-      'Lead paragraph explaining the connector. ' + 'pad '.repeat(300),
+      'Lead paragraph.',
       '',
-      '[CAUTION]',
-      '.Endpoint caveats',
-      '====',
-      'Do not expose this endpoint publicly without auth.',
-      '====',
+      '== Credentials',
       '',
-      'Trailing prose after the admonition.',
+      'How to authenticate.',
+      '',
+      '=== Key pair authentication',
+      '',
+      'Details.',
     ].join('\n');
-    const out = renderConnectDescription({ type: 'output', name: 'http_server', description: body });
-    expect(out).not.toContain('[%collapsible]');
-    expect(out).not.toContain('.More details');
-    // The admonition block survives intact, delimiters and all.
-    expect(out).toBe(body.trim());
+    const out = renderConnectDescription({ type: 'output', name: 'snowflake_put', description: body });
+    const mem = asciidoctor.MemoryLogger.create();
+    asciidoctor.LoggerManager.setLogger(mem);
+    const html = asciidoctor.convert(`= snowflake_put\n\n${out}\n\n== Fields\n\nfields`);
+    // Passthrough produces the same h2/h3 structure the published pages have
+    // today, with zero section-sequence warnings. (Demotion produces
+    // "section title out of sequence" for every embedded heading.)
+    expect(html).toMatch(/<h2[^>]*>(<a[^>]*><\/a>)?Credentials/);
+    expect(html).toMatch(/<h3[^>]*>(<a[^>]*><\/a>)?Key pair authentication/);
+    expect(mem.getMessages().length).toBe(0);
+  });
+});
+
+describe('hasStructuralHeadings', () => {
+  const { hasStructuralHeadings, LONG_HEADINGLESS_THRESHOLD } = renderConnectDescription;
+
+  test('detects headings outside listing blocks and ignores ones inside', () => {
+    expect(hasStructuralHeadings('Prose.\n\n== Section\n\nMore.')).toBe(true);
+    expect(hasStructuralHeadings('Prose.\n\n----\n== not a heading\n----\n')).toBe(false);
+    expect(hasStructuralHeadings('Just prose.')).toBe(false);
   });
 
-  renderTest('Asciidoctor render of a ====-carrying body keeps the admonition intact (no leaked blocks)', () => {
-    const body = [
-      'Lead paragraph. ' + 'pad '.repeat(300),
-      '',
-      '[CAUTION]',
-      '.Endpoint caveats',
-      '====',
-      'Do not expose this endpoint publicly without auth.',
-      '====',
-      '',
-      'Trailing prose after the admonition.',
-    ].join('\n');
-    const out = renderConnectDescription({ type: 'output', name: 'http_server', description: body });
-    const html = asciidoctor.convert(out);
-    // The caution renders as a styled admonition, not as leaked paragraphs.
-    expect(html).toContain('admonitionblock caution');
-    expect(html).toContain('Endpoint caveats');
-    // No collapsible and no stray empty example block (the ==== body renders
-    // as the admonition, not as a bare example block).
-    expect(html).not.toContain('<details');
-    expect(html).not.toContain('exampleblock');
+  test('exports the reporting threshold', () => {
+    expect(LONG_HEADINGLESS_THRESHOLD).toBe(1200);
+  });
+});
+
+describe('summaryAttribute helper', () => {
+  const summaryAttribute = require('../../tools/redpanda-connect/helpers/summaryAttribute.js');
+
+  test('flattens multi-line summaries to a single attribute-safe line', () => {
+    expect(summaryAttribute('Executes a query\nfor each message.'))
+      .toBe('Executes a query for each message.');
   });
 
-  renderTest('Asciidoctor render of the plain collapsible case keeps all content inside the block', () => {
-    const lead = 'This is the lead paragraph that stays visible.';
-    const tail = 'Follow-up detail sentinel. ' + 'more '.repeat(400);
-    const out = renderConnectDescription({
-      type: 'output', name: 'x', description: `${lead}\n\n${tail}`,
-    });
-    const html = asciidoctor.convert(out);
-    const detailsStart = html.indexOf('<details>');
-    const detailsEnd = html.indexOf('</details>');
-    expect(detailsStart).toBeGreaterThan(-1);
-    // The tail is inside the collapsible, and nothing renders after it.
-    expect(html.indexOf('Follow-up detail sentinel.')).toBeGreaterThan(detailsStart);
-    expect(html.indexOf('Follow-up detail sentinel.')).toBeLessThan(detailsEnd);
-    expect(html.slice(detailsEnd + '</details>'.length).trim().replace(/<\/div>/g, '').trim()).toBe('');
+  test('passes single-line summaries through and handles empties', () => {
+    expect(summaryAttribute('Already one line.')).toBe('Already one line.');
+    expect(summaryAttribute('')).toBe('');
+    expect(summaryAttribute(undefined)).toBe('');
   });
 });
 
@@ -232,6 +204,72 @@ describe('generator writes a regenerated description partial', () => {
       expect(content).toContain('include::connect:components:partial$metadata/outputs/sql_raw.adoc[]');
       expect(content).not.toContain('- kafka_partition: The partition.');
     });
+  });
+
+  test('emits attrs and body tags so pages can refresh :description: and the body from one file', () => {
+    return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
+      const dPath = path.join(
+        tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'sql_raw.adoc'
+      );
+      const content = fs.readFileSync(dPath, 'utf8');
+      expect(content).toContain('// tag::attrs[]');
+      expect(content).toContain(':description: Executes an arbitrary SQL query for each message.');
+      expect(content).toContain('// end::attrs[]');
+      expect(content).toContain('// tag::body[]');
+      expect(content).toContain('// end::body[]');
+      // The attribute line sits inside the attrs tag, before the body tag.
+      const attrLine = content.indexOf(':description: Executes');
+      expect(attrLine).toBeGreaterThan(content.indexOf('// tag::attrs[]'));
+      expect(attrLine).toBeLessThan(content.indexOf('// tag::body[]'));
+    });
+  });
+
+  renderTest('a page consuming both tags gets a fresh :description: attribute and body', () => {
+    return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
+      const dPath = path.join(
+        tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'sql_raw.adoc'
+      );
+      const page = [
+        '= sql_raw',
+        `include::${dPath}[tag=attrs]`,
+        '',
+        `include::${dPath}[tag=body]`,
+        '',
+        '== Fields',
+        '',
+        'fields',
+      ].join('\n');
+      const pagePath = path.join(tmpDir, 'page.adoc');
+      fs.writeFileSync(pagePath, page, 'utf8');
+      const doc = asciidoctor.loadFile(pagePath, { safe: 'unsafe' });
+      expect(doc.getAttribute('description')).toBe('Executes an arbitrary SQL query for each message.');
+      const html = doc.convert();
+      expect(html).toContain('Executes an arbitrary SQL query for each message.');
+      expect(html).toContain('Runs a query.');
+    });
+  });
+
+  test('reports long heading-less descriptions as upstream structure candidates', () => {
+    const wallData = {
+      outputs: [
+        {
+          name: 'walloftext',
+          type: 'output',
+          summary: 'Writes somewhere.',
+          description: 'Lead paragraph. ' + 'prose '.repeat(300),
+          config: { children: [{ name: 'dsn', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    const wallFile = path.join(tmpDir, 'wall.json');
+    fs.writeFileSync(wallFile, JSON.stringify(wallData), 'utf8');
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    return generateRpcnConnectorDocs({ data: wallFile, template: templateFile }).then(() => {
+      const warned = warnSpy.mock.calls.map(args => args.join(' ')).join('\n');
+      warnSpy.mockRestore();
+      expect(warned).toContain('Long heading-less description: outputs/walloftext');
+      expect(warned).toContain('adding == sections upstream');
+    }, (err) => { warnSpy.mockRestore(); throw err; });
   });
 
   test('does not emit description partials for non-connector data keys such as config', () => {
