@@ -1325,3 +1325,23 @@ describe('capToTwoSentences with code blocks', () => {
     expect(capToTwoSentences(input)).toBe('Reports progress. Use --detailed for more.')
   })
 })
+
+describe('placeholder brace escaping', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  test('escapes template placeholders so Asciidoctor keeps them', () => {
+    const input = 'Enable code mode: adds {name}_search and {name}_execute tools.'
+    const out = formatDescription(input)
+    expect(out).toContain('\\{name}_search')
+    expect(out).toContain('\\{name}_execute')
+  })
+
+  test('leaves a bare vbar attribute in prose alone', () => {
+    // {vbar} in prose is a real attribute (pipe escaping); placeholders in
+    // backtick spans were already escaped by the span-protection step
+    const input = 'Format: `table{vbar}json` uses {vbar} in prose.'
+    const out = formatDescription(input)
+    expect(out).toContain('uses {vbar} in prose')
+    expect(out).toContain('`table\\{vbar}json`')
+  })
+})

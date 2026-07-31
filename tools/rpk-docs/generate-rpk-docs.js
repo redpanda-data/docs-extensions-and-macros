@@ -805,11 +805,21 @@ function convertIndentedCodeBlocksToAsciiDoc(text, codeBlockStore = []) {
 
     // Colon-introduced code sample: prose ending with ":" followed by an
     // indented block that is not a list (Cedar policies, config snippets).
+    // Deeply indented (4+ space) blocks are literals by help-text convention
+    // even without a colon introducer (path templates like
+    // "    kafka/{topic}/{partition}_{revision}/" would otherwise render as
+    // prose whose braces Asciidoctor eats as attribute references).
     // Captured verbatim (dedented) so inline-code transforms never touch it.
     const prevNonBlank = [...result].reverse().find(l => l.trim() !== '')
+    // Only a chunk that starts after a blank line is a standalone literal;
+    // a deeply indented line mid-chunk is a wrapped continuation of a table
+    // row or list item and belongs to the converters below.
+    const atChunkStart = result.length === 0 || result[result.length - 1].trim() === ''
     if (
-      prevNonBlank && /:\s*$/.test(prevNonBlank) &&
-      /^[ ]{2,}\S/.test(line) &&
+      (
+        (prevNonBlank && /:\s*$/.test(prevNonBlank) && /^[ ]{2,}\S/.test(line)) ||
+        (atChunkStart && /^[ ]{4,}\S/.test(line))
+      ) &&
       !/^[ ]{2,}(-|\*|\d+[.)])\s/.test(line) &&
       !/^[ ]{2,}(--|rpk\s|\$\s)/.test(line)
     ) {
@@ -1682,6 +1692,16 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // Pattern: #NNNN (4+ digits) when not inside backticks or code
   // e.g., "(see #2904)" → "(see https://github.com/redpanda-data/redpanda/issues/2904[#2904])"
   result = result.replace(/(?<![`\w])#(\d{4,})(?![`\w])/g, 'https://github.com/redpanda-data/redpanda/issues/$1[#$1]')
+
+  // Escape template placeholders like {name} in prose: Asciidoctor would
+  // consume them as attribute references and drop them from the output.
+  // Backtick spans can hold raw code at this stage, so only prose segments
+  // between spans are touched. {vbar} stays: it is a real attribute used to
+  // escape pipes in table cells.
+  result = result.split(/(`[^`]*`)/).map((segment, idx) =>
+    idx % 2 === 1 ? segment : segment.replace(/(?<![\\`\w{]){([a-z][\w-]{0,30})}/g, (match, token) =>
+      token === 'vbar' ? match : `\\{${token}}`)
+  ).join('')
 
   // Restore early code blocks FIRST (from indented command/YAML detection)
   // This must happen before inline code restoration so that placeholders
