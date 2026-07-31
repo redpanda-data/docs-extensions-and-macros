@@ -160,3 +160,43 @@ describe('linkable predicate coverage', () => {
     expect(linkable('rpk topic create')).toBe(true)
   })
 })
+
+describe('filterDiffForWhatsNew (rpk ai exclusion)', () => {
+  const { filterDiffForWhatsNew } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
+
+  const diff = {
+    summary: {},
+    details: {
+      newCommands: [
+        { path: 'rpk ai llm-provider create', name: 'create', description: 'x' },
+        { path: 'rpk check install', name: 'install', description: 'y' },
+      ],
+      removedCommands: [
+        { path: 'rpk ai llm', name: 'llm', description: 'x' },
+        { path: 'rpk aim', name: 'aim', description: 'not ai: prefix must respect word boundary' },
+      ],
+      newFlags: [
+        { commandPath: 'rpk ai auth login', flagName: 'no-browser' },
+        { commandPath: 'rpk cluster info', flagName: 'detailed' },
+      ],
+      changedDefaults: [
+        { commandPath: 'rpk container start', flagName: 'console-image', oldDefault: 'a', newDefault: 'b' },
+      ],
+    },
+  }
+
+  test('drops rpk ai entries from every category and keeps the rest', () => {
+    const out = filterDiffForWhatsNew(diff)
+    expect(out.details.newCommands.map(c => c.path)).toEqual(['rpk check install'])
+    expect(out.details.removedCommands.map(c => c.path)).toEqual(['rpk aim'])
+    expect(out.details.newFlags.map(f => f.commandPath)).toEqual(['rpk cluster info'])
+    expect(out.details.changedDefaults).toHaveLength(1)
+    // Input untouched
+    expect(diff.details.newCommands).toHaveLength(2)
+  })
+
+  test('custom exclusion list is honored', () => {
+    const out = filterDiffForWhatsNew(diff, ['rpk check'])
+    expect(out.details.newCommands.map(c => c.path)).toEqual(['rpk ai llm-provider create'])
+  })
+})

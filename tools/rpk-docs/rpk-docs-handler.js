@@ -1079,6 +1079,37 @@ function makeLinkablePredicate(overridesData) {
   }
 }
 
+// Command subtrees whose changes never belong in the Self-Managed What's
+// new. rpk ai's documentation home is adp-docs, and the ADP release notes
+// already cover its CLI changes per release. The plugin-release receiver
+// workflow excludes ai from --update-whats-new for exactly this reason; the
+// full-regeneration path must agree, or a full run floods the Self-Managed
+// release notes with rpk ai entries (a rename release alone produces 21 new
+// plus 21 removed bullets).
+const WHATS_NEW_EXCLUDED_SUBTREES = ['rpk ai']
+
+/**
+ * Return a copy of diffData without entries under the excluded subtrees.
+ * Only the published What's-new block filters; diff reports and PR
+ * summaries keep the full picture.
+ * @param {Object} diffData - Diff from generateRpkDiff
+ * @param {string[]} [excluded] - Command-path prefixes to drop
+ * @returns {Object} Filtered copy
+ */
+function filterDiffForWhatsNew(diffData, excluded = WHATS_NEW_EXCLUDED_SUBTREES) {
+  const outside = (cmdPath) => !excluded.some(prefix =>
+    cmdPath === prefix || (typeof cmdPath === 'string' && cmdPath.startsWith(prefix + ' ')))
+  const details = diffData.details || {}
+  const filteredDetails = { ...details }
+  for (const key of ['newCommands', 'newlyDeprecatedCommands', 'removedCommands', 'descriptionChanges']) {
+    if (Array.isArray(details[key])) filteredDetails[key] = details[key].filter(e => outside(e.path))
+  }
+  for (const key of ['newFlags', 'removedFlags', 'changedDefaults', 'changedFlagTypes', 'changedFlagRequirements', 'changedFlagDescriptions']) {
+    if (Array.isArray(details[key])) filteredDetails[key] = details[key].filter(e => outside(e.commandPath))
+  }
+  return { ...diffData, details: filteredDetails }
+}
+
 function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
   // Each block opens with a "=== <version>" heading so accumulated blocks
   // (successive RCs, multiple plugin releases) never collide on section ids
@@ -1350,8 +1381,18 @@ function acquireRpkBinary(rpkVersion, options = {}) {
     console.warn(`Native build failed (${nativeErr.message.split('\n')[0]}); building in a container...`)
     const goVersion = getRequiredGoVersion(sourcePath)
     const goImage = goVersion ? `golang:${goVersion}` : 'golang:1'
+    // Cross-compile for the HOST platform: the container reports
+    // GOOS=linux, and a linux binary dies silently when executed on the
+    // macOS host that needs it for plugin installs (review finding on the
+    // 5.3.0 train). rpk builds with CGO disabled, so cross-compilation
+    // from the linux container is safe.
+    const hostGoos = process.platform === 'darwin' ? 'darwin' : 'linux'
+    const hostGoarch = process.arch === 'arm64' ? 'arm64' : 'amd64'
     const buildResult = spawnSync('docker', [
       'run', '--rm',
+      '-e', `GOOS=${hostGoos}`,
+      '-e', `GOARCH=${hostGoarch}`,
+      '-e', 'CGO_ENABLED=0',
       '-v', `${path.resolve(sourcePath)}:/rpk-source:ro`,
       '-v', `${workDir}:/out`,
       '-w', '/rpk-source',
@@ -1914,10 +1955,14 @@ async function handleRpkDocsGeneration(options = {}) {
         // render without xrefs because plugin subtrees may render as
         // partials with no linkable pages.
         if (whatsNewPath) {
-          const label = resolvedVersion
-            ? `${plugin} plugin ${resolvedVersion}`
-            : `${plugin} plugin`
-          updateWhatsNewFile(pluginDiffData, whatsNewPath, label, { xrefs: false, sectionHeading: '== rpk plugins' })
+          if (WHATS_NEW_EXCLUDED_SUBTREES.includes(`rpk ${plugin}`)) {
+            console.log(`Skipping What's new for rpk ${plugin}: its documentation home covers CLI changes in its own release notes`)
+          } else {
+            const label = resolvedVersion
+              ? `${plugin} plugin ${resolvedVersion}`
+              : `${plugin} plugin`
+            updateWhatsNewFile(pluginDiffData, whatsNewPath, label, { xrefs: false, sectionHeading: '== rpk plugins' })
+          }
         }
       }
 
@@ -2030,7 +2075,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
           // Update what's-new file if requested
           if (whatsNewPath) {
-            updateWhatsNewFile(diffData, whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
+            updateWhatsNewFile(filterDiffForWhatsNew(diffData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
           }
         } else {
           console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
@@ -2350,7 +2395,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
         // Update what's-new file if requested
         if (whatsNewPath) {
-          updateWhatsNewFile(diffData, whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
+          updateWhatsNewFile(filterDiffForWhatsNew(diffData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
         }
       } else {
         console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
@@ -2764,6 +2809,7 @@ module.exports = {
   getPlatformDescription,
   getCurrentPlatform,
   updateOverridesWithIntroducedVersions,
+  filterDiffForWhatsNew,
   computeDescriptionCoverage,
   updateWhatsNewFile,
   KNOWN_PLUGINS,
