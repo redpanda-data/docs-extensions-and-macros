@@ -874,7 +874,7 @@ function loadOverrides(overridesPath, commandTree = null, options = {}) {
     )
   }
 
-  return overrides
+  return { overrides, validation }
 }
 
 /**
@@ -1420,7 +1420,37 @@ function acquireRpkBinary(rpkVersion, options = {}) {
 
   const sourceRef = tag === 'vdev' ? 'dev' : tag
   const sourcePath = prepareSourceFromRef(sourceRef, null)
-  return buildRpkBinary(sourcePath, path.join(workDir, 'rpk'))
+  try {
+    return buildRpkBinary(sourcePath, path.join(workDir, 'rpk'))
+  } catch (nativeErr) {
+    // Local Go older than go.mod requires is common on laptops; the --ref
+    // path already tolerates this by building in a container, so do the same
+    // here when Docker is available
+    const dockerCheck = spawnSync('docker', ['info'], { encoding: 'utf8', timeout: 10000 })
+    if (dockerCheck.status !== 0) {
+      throw new Error(
+        `${nativeErr.message}\n` +
+        'Docker is not available for a container build either. ' +
+        'Update Go, start Docker, or pass --rpk-bin <path> to use an existing rpk binary.'
+      )
+    }
+    console.warn(`Native build failed (${nativeErr.message.split('\n')[0]}); building in a container...`)
+    const goVersion = getRequiredGoVersion(sourcePath)
+    const goImage = goVersion ? `golang:${goVersion}` : 'golang:1'
+    const buildResult = spawnSync('docker', [
+      'run', '--rm',
+      '-v', `${path.resolve(sourcePath)}:/rpk-source:ro`,
+      '-v', `${workDir}:/out`,
+      '-w', '/rpk-source',
+      goImage,
+      'go', 'build', '-o', '/out/rpk', './cmd/rpk'
+    ], { encoding: 'utf8', timeout: 600000 })
+    const binPath = path.join(workDir, 'rpk')
+    if (buildResult.status !== 0 || !fs.existsSync(binPath)) {
+      throw new Error(`Container build failed: ${buildResult.stderr || 'no binary produced'}`)
+    }
+    return binPath
+  }
 }
 
 /**
@@ -1513,6 +1543,7 @@ function parseCobraFlags(helpText) {
   if (start === -1) return []
 
   const flags = []
+  let flagIndent = null
   for (let i = start + 1; i < lines.length; i++) {
     const line = lines[i]
     if (/^\S/.test(line)) break // next section (Global Flags:, Use "...", ...)
@@ -1522,6 +1553,7 @@ function parseCobraFlags(helpText) {
     if (m) {
       const [, shorthand, name, valueType, desc] = m
       if (name === 'help') continue
+      flagIndent = line.search(/\S/)
       const flag = {
         name,
         type: valueType || 'bool',
@@ -1534,8 +1566,12 @@ function parseCobraFlags(helpText) {
         flag.description = flag.description.slice(0, def.index).trim()
       }
       flags.push(flag)
-    } else if (flags.length > 0 && /^\s{4,}\S/.test(line) && !line.trim().startsWith('-')) {
-      // Wrapped description continuation
+    } else if (flags.length > 0 && flagIndent !== null && line.search(/\S/) > flagIndent) {
+      // Wrapped description continuation: any line indented deeper than the
+      // flag column that did not parse as a flag. Continuations can begin
+      // with flag-looking tokens ("(alias: --x-ref)" wraps to "--x-ref)"),
+      // so no dash guard — a genuine flag line always matches the regex
+      // above first.
       const last = flags[flags.length - 1]
       last.description = `${last.description} ${line.trim()}`.trim()
       const def = last.description.match(/\s*\(default (.+)\)$/)
@@ -1564,6 +1600,7 @@ function parseUrfaveFlags(helpText) {
   if (start === -1) return []
 
   const flags = []
+  let urfaveIndent = null
   for (let i = start + 1; i < lines.length; i++) {
     const line = lines[i]
     if (/^\S/.test(line)) break // next section (GLOBAL OPTIONS:, ...)
@@ -1576,6 +1613,7 @@ function parseUrfaveFlags(helpText) {
       if (!nameMatch) continue
       const name = nameMatch[1]
       if (name === 'help') continue
+      urfaveIndent = line.search(/\S/)
 
       const flag = { name, description: desc.trim() }
       const shorthandMatch = spec.match(/,\s+-(\w)\b/)
@@ -1591,7 +1629,9 @@ function parseUrfaveFlags(helpText) {
         flag.description = flag.description.slice(0, def.index).trim()
       }
       flags.push(flag)
-    } else if (flags.length > 0 && /^\s{4,}\S/.test(line) && !line.trim().startsWith('-')) {
+    } else if (flags.length > 0 && urfaveIndent !== null && line.search(/\S/) > urfaveIndent) {
+      // Continuation lines may begin with flag-looking tokens; see the
+      // cobra parser above for why there is no dash guard
       const last = flags[flags.length - 1]
       last.description = `${last.description} ${line.trim()}`.trim()
       const def = last.description.match(/\s*\(default:\s*(.+?)\)$/)
@@ -1972,7 +2012,7 @@ async function handleRpkDocsGeneration(options = {}) {
       // Load and validate overrides
       const defaultOverridesPath = path.join(dataDir, 'rpk-overrides.json')
       const effectiveOverridesPath = overridesPath || defaultOverridesPath
-      const overridesData = loadOverrides(effectiveOverridesPath, tree, { strict: false })
+      const { overrides: overridesData, validation: overrideValidation } = loadOverrides(effectiveOverridesPath, tree, { strict: false }) || {}
 
       if (overridesData) {
         console.log(`Loaded overrides from ${effectiveOverridesPath}`)
@@ -2073,6 +2113,7 @@ async function handleRpkDocsGeneration(options = {}) {
         filesSkipped: result.filesSkipped,
         diffData: plugin ? pluginDiffData : diffData,
         validationResult,
+        overrideValidation,
         outputDir: finalOutputDir
       })
 
@@ -2288,7 +2329,7 @@ async function handleRpkDocsGeneration(options = {}) {
     // before the overrides load so the annotations apply to this run.
     mergeVisibleDeprecationsIntoOverrides(deprecatedCommands, tree, effectiveOverridesPath)
 
-    const overridesData = loadOverrides(effectiveOverridesPath, tree, { strict: false })
+    const { overrides: overridesData, validation: overrideValidation } = loadOverrides(effectiveOverridesPath, tree, { strict: false }) || {}
 
     if (overridesData) {
       console.log(`Loaded overrides from ${effectiveOverridesPath}`)
@@ -2392,6 +2433,7 @@ async function handleRpkDocsGeneration(options = {}) {
     // Generate PR summary
     const prSummary = generatePRSummary({
       rpkVersion,
+      overrideValidation,
       commandCount: result.commandCount,
       filesGenerated: result.filesGenerated,
       filesSkipped: result.filesSkipped,
@@ -2445,6 +2487,7 @@ function generatePRSummary(options) {
     filesSkipped = 0,
     diffData,
     validationResult,
+    overrideValidation,
     outputDir
   } = options
 
@@ -2460,8 +2503,11 @@ function generatePRSummary(options) {
     lines.push(`**Base rpk snapshot:** ${rpkVersion}`)
     lines.push('')
     lines.push(
-      `Only the \`rpk ${plugin}\` subtree was refreshed. ` +
-      'All other pages were re-rendered from the committed snapshot and are unchanged.'
+      `The \`rpk ${plugin}\` subtree was refreshed in the snapshot, then the ` +
+      'full rpk reference was re-rendered from it as a converge. Pages outside ' +
+      `\`rpk ${plugin}\` can carry template-level or consistency updates, and ` +
+      'stale generated files are cleaned up, so the change list may be wider ' +
+      'than the plugin itself.'
     )
     lines.push('')
   } else {
@@ -2567,6 +2613,22 @@ function generatePRSummary(options) {
       change => `- \`${change.commandPath}\`: \`--${change.flagName}\` required \`${change.oldRequired}\` → \`${change.newRequired}\``)
     pushDetailsList('Changed Command Descriptions', diffData.details?.descriptionChanges,
       change => `- \`${change.path}\``)
+  }
+
+  // Override validation: entries referencing commands the tree lacks do
+  // nothing silently, so surface them where they become actionable
+  if (overrideValidation && overrideValidation.errors && overrideValidation.errors.length > 0) {
+    lines.push('### Override Validation')
+    lines.push('')
+    lines.push(`⚠ ${overrideValidation.errors.length} override entr${overrideValidation.errors.length === 1 ? 'y' : 'ies'} did not apply (unknown command paths — stale entries in the overrides file):`)
+    lines.push('')
+    for (const err of overrideValidation.errors.slice(0, 10)) {
+      lines.push(`- ${typeof err === 'string' ? err : err.message || JSON.stringify(err)}`)
+    }
+    if (overrideValidation.errors.length > 10) {
+      lines.push(`- ... and ${overrideValidation.errors.length - 10} more`)
+    }
+    lines.push('')
   }
 
   // Validation results

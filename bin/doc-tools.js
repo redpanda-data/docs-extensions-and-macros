@@ -1284,6 +1284,25 @@ automation
         result.deleted.forEach(f => lines.push(`- \`${f}\``))
         lines.push('')
       }
+      if ((result.skippedAliasTargets || []).length > 0) {
+        lines.push('### Skipped: names claimed as page aliases')
+        lines.push('')
+        lines.push('These partials exist upstream, but a page here already claims the name as a `:page-aliases:` target — creating the stub would make the Antora build fatal. Usually this means a rename alias exists while the upstream partial for the old name has not been cleaned up yet:')
+        lines.push('')
+        for (const t of result.skippedAliasTargets) {
+          lines.push(`- \`${t.file}\` (claimed by \`${t.claimedBy}\`)`)
+        }
+        lines.push('')
+      }
+      const straightDeletions = result.deleted.filter(d => !result.renameCandidates.some(rc => rc.deleted === d))
+      if (straightDeletions.length > 0) {
+        lines.push('### Deletions with no rename partner')
+        lines.push('')
+        lines.push('These pages were removed with no successor detected. Their published URLs will 404 — consider adding a redirect or an alias on a related page:')
+        lines.push('')
+        straightDeletions.forEach(f => lines.push(`- \`${f}\``))
+        lines.push('')
+      }
       if (result.renameCandidates.length > 0) {
         lines.push('### Possible renames — reviewer decision needed')
         lines.push('')

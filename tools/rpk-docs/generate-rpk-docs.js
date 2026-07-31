@@ -2657,7 +2657,24 @@ async function generateRpkDocs(options = {}) {
           return `${parentPath} ${alias}`
         }),
       aliasNotes: commandOverride.aliasNotes,
-      flags: (mergedCommand.flags || []).map(flag => ({
+      // A curated override section titled "Flags" wins over the extracted
+      // flag table: rendering both produced duplicate == Flags headings and
+      // conflicting content (rpk connect run). Curation is authoritative;
+      // the warning tells maintainers the override can be dropped to adopt
+      // the extracted table.
+      flags: (() => {
+        const hasCuratedFlagsSection = Object.values(processedContent.sections || {})
+          .some(items => (items || []).some(item => /^flags$/i.test(item.title || '')))
+        if (hasCuratedFlagsSection && (mergedCommand.flags || []).length > 0) {
+          console.warn(
+            `Warning: ${commandPath} has a curated "Flags" override section; ` +
+            `skipping the extracted flag table (${mergedCommand.flags.length} flags). ` +
+            'Remove the override section to adopt the extracted table.'
+          )
+          return []
+        }
+        return mergedCommand.flags || []
+      })().map(flag => ({
         ...flag,
         name: flag.shorthand ? `-${flag.shorthand}, --${flag.name}` : `--${flag.name}`,
         type: flag.type || '-',

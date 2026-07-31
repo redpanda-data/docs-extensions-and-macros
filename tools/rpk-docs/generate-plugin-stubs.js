@@ -158,6 +158,23 @@ function reconcileStubs({
   const created = []
   const deleted = []
   const keptNonStub = []
+  const skippedAliasTargets = []
+
+  // Page names already claimed as aliases by other pages in this directory.
+  // Creating a page whose resource ID is an alias target makes the Antora
+  // build fatal ("Page alias cannot reference an existing page"), which
+  // happens when a rename alias exists here while the upstream partial for
+  // the old name still lingers. Skip those creations and surface them.
+  const aliasClaims = new Map()
+  for (const file of existingStubs) {
+    const content = fs.readFileSync(path.join(stubDir, file), 'utf8')
+    const aliasLine = content.match(/^:page-aliases:\s*(.+)$/m)
+    if (!aliasLine) continue
+    for (const target of aliasLine[1].split(',')) {
+      const base = target.trim().split('/').pop()
+      if (base) aliasClaims.set(base, file)
+    }
+  }
 
   // Delete managed stubs whose partial no longer exists. Pages that do not
   // match the managed-stub shape are never deleted: they may be hand-written.
@@ -184,6 +201,10 @@ function reconcileStubs({
   )
   for (const partial of partials) {
     if (remainingStubs.has(partial.file)) continue
+    if (aliasClaims.has(partial.file)) {
+      skippedAliasTargets.push({ file: partial.file, claimedBy: aliasClaims.get(partial.file) })
+      continue
+    }
     if (!dryRun) {
       fs.writeFileSync(
         path.join(stubDir, partial.file),
@@ -235,8 +256,10 @@ function reconcileStubs({
         end++
       }
 
+      const skippedFiles = new Set(skippedAliasTargets.map(t => t.file))
       const entries = []
       for (const partial of partials) {
+        if (skippedFiles.has(partial.file)) continue
         const words = partial.title.split(' ').length
         if (words <= 2) continue // the parent line represents the root command
         const stars = '*'.repeat(parentStars + (words - 2))
@@ -256,7 +279,7 @@ function reconcileStubs({
     }
   }
 
-  return { created, deleted, keptNonStub, navUpdated, renameCandidates }
+  return { created, deleted, keptNonStub, navUpdated, renameCandidates, skippedAliasTargets }
 }
 
 module.exports = {

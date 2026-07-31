@@ -154,3 +154,37 @@ describe('plugin stub reconciler', () => {
     expect(fs.existsSync(path.join(stubDir, 'rpk-ai.adoc'))).toBe(false)
   })
 })
+
+describe('alias-collision guard', () => {
+  const fs2 = require('fs')
+  const path2 = require('path')
+  const os2 = require('os')
+  const { reconcileStubs: recon, readPartialTitles: readTitles, renderStub: render } = require('../../../tools/rpk-docs/generate-plugin-stubs.js')
+
+  test('never creates a stub whose name is claimed as a page alias', () => {
+    const dir = fs2.mkdtempSync(path2.join(os2.tmpdir(), 'alias-guard-'))
+    const partialsDir = path2.join(dir, 'partials'); fs2.mkdirSync(partialsDir)
+    const stubDir = path2.join(dir, 'stubs'); fs2.mkdirSync(stubDir)
+
+    // Upstream still has the old-name partial; this repo's renamed page claims it as alias
+    fs2.writeFileSync(path2.join(partialsDir, 'rpk-ai-llm.adoc'), '= rpk ai llm\n')
+    fs2.writeFileSync(path2.join(partialsDir, 'rpk-ai-llm-provider.adoc'), '= rpk ai llm-provider\n')
+    fs2.writeFileSync(path2.join(stubDir, 'rpk-ai-llm-provider.adoc'),
+      '= rpk ai llm-provider\n:page-aliases: reference:rpk/rpk-ai/rpk-ai-llm.adoc\n\ninclude::streaming:reference:partial$rpk-ai/rpk-ai-llm-provider.adoc[tag=single-source]\n')
+
+    const result = recon({
+      partials: readTitles(partialsDir),
+      stubDir,
+      navFile: null,
+      plugin: 'ai',
+      includePrefix: 'streaming:reference:partial$rpk-ai/'
+    })
+
+    expect(result.skippedAliasTargets).toEqual([
+      { file: 'rpk-ai-llm.adoc', claimedBy: 'rpk-ai-llm-provider.adoc' }
+    ])
+    expect(result.created).toEqual([])
+    expect(fs2.existsSync(path2.join(stubDir, 'rpk-ai-llm.adoc'))).toBe(false)
+    fs2.rmSync(dir, { recursive: true, force: true })
+  })
+})
