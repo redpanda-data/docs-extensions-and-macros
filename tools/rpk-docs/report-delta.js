@@ -233,6 +233,22 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
   const descriptionChanges = []
   const flagDataBackfilled = []
 
+  // Baseline gap detection: plugin subtrees captured before flag extraction
+  // existed record no flags on any of their own commands (the install/
+  // uninstall/upgrade shims are rpk-native and do carry flags). Flag
+  // "additions" inside such a group are newly captured documentation, not
+  // newly introduced flags, and stamping them "New in <version>" would
+  // mislabel long-standing flags. Core groups have baseline flag data, so a
+  // zero-flag command there that gains a flag is a genuine addition.
+  const groupsWithBaselineFlagData = new Set()
+  for (const [path, cmd] of oldCommands) {
+    const parts = path.split(' ')
+    if (parts.length < 2) continue
+    // "rpk <plugin> install|uninstall|upgrade" shims are rpk-native
+    if (parts.length === 3 && /^(install|uninstall|upgrade)$/.test(parts[2])) continue
+    if ((cmd.flags || []).length > 0) groupsWithBaselineFlagData.add(parts[1])
+  }
+
   for (const path of newPaths) {
     if (!oldPaths.has(path)) continue // Skip new commands
 
@@ -242,13 +258,10 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
     const oldFlags = getFlagsMap(oldCmd)
     const newFlagsMap = getFlagsMap(newCmd)
 
-    // Baseline gap guard: when a pre-existing command had NO flags recorded
-    // in the old snapshot, its flags in the new snapshot are newly captured
-    // documentation (plugin flag extraction backfilling data), not newly
-    // introduced flags. Stamping them "New in <version>" would mislabel
-    // long-standing flags, so report them separately and skip the flag diff
-    // (description changes below are still detected).
-    const isFlagBackfill = oldFlags.size === 0 && newFlagsMap.size > 0
+    const topLevel = path.split(' ')[1]
+    const isFlagBackfill = topLevel !== undefined &&
+      !groupsWithBaselineFlagData.has(topLevel) &&
+      oldFlags.size === 0 && newFlagsMap.size > 0
     if (isFlagBackfill) {
       flagDataBackfilled.push({ commandPath: path, flagCount: newFlagsMap.size })
     }

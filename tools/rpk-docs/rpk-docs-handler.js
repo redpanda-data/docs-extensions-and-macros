@@ -2012,6 +2012,27 @@ async function handleRpkDocsGeneration(options = {}) {
       // Load and validate overrides
       const defaultOverridesPath = path.join(dataDir, 'rpk-overrides.json')
       const effectiveOverridesPath = overridesPath || defaultOverridesPath
+
+      // Stamp new commands and flags with introducedInVersion BEFORE the
+      // overrides load so this run's pages render the labels. Without this,
+      // a --from-json --diff run emits unlabeled pages and the labels only
+      // appear on the next regeneration (the from-source path stamps before
+      // rendering already).
+      if (diffVersion && !plugin) {
+        const oldDataForStamp = loadVersionedJson(diffVersion, dataDir)
+        if (oldDataForStamp) {
+          const stampDiff = generateRpkDiff(oldDataForStamp.raw_tree || oldDataForStamp.tree, tree, {
+            oldVersion: diffVersion,
+            newVersion: rpkVersion,
+            oldDeprecatedCommands: oldDataForStamp.deprecated_commands || {},
+            newDeprecatedCommands: jsonData.deprecated_commands || {}
+          })
+          if (stampDiff.details.newCommands.length > 0 || stampDiff.details.newFlags.length > 0) {
+            updateOverridesWithIntroducedVersions(stampDiff, effectiveOverridesPath, rpkVersion, pluginVersions)
+          }
+        }
+      }
+
       const { overrides: overridesData, validation: overrideValidation } = loadOverrides(effectiveOverridesPath, tree, { strict: false }) || {}
 
       if (overridesData) {
@@ -2385,7 +2406,7 @@ async function handleRpkDocsGeneration(options = {}) {
         // commands get the plugin's own version (plugins release on their own
         // cadence, so the rpk version would be wrong and the page note would
         // render "introduced in <plugin> version <rpk version>").
-        if (diffData.details.newCommands.length > 0 && effectiveOverridesPath) {
+        if ((diffData.details.newCommands.length > 0 || diffData.details.newFlags.length > 0) && effectiveOverridesPath) {
           updateOverridesWithIntroducedVersions(diffData, effectiveOverridesPath, rpkVersion, pluginVersions)
         }
 

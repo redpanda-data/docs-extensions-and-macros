@@ -588,3 +588,59 @@ describe('flag data backfill guard', () => {
     expect(diff.summary.flagDataBackfilled).toBe(0)
   })
 })
+
+describe('flag data backfill guard: group-level baseline detection', () => {
+  const { generateRpkDiff } = require('../../../tools/rpk-docs/report-delta.js')
+  const tree = (cmds) => ({ name: 'rpk', commands: cmds })
+
+  test('a zero-flag core command in a group with baseline data gets genuine new flags', () => {
+    // rpk cluster config status gained --format; the cluster group has
+    // baseline flag data elsewhere, so this is not backfill
+    const oldTree = tree([{
+      name: 'cluster',
+      commands: [
+        { name: 'health', flags: [{ name: 'watch', type: 'bool' }] },
+        { name: 'config', commands: [{ name: 'status', flags: [] }] }
+      ]
+    }])
+    const newTree = tree([{
+      name: 'cluster',
+      commands: [
+        { name: 'health', flags: [{ name: 'watch', type: 'bool' }] },
+        { name: 'config', commands: [{ name: 'status', flags: [{ name: 'format', type: 'string' }] }] }
+      ]
+    }])
+
+    const diff = generateRpkDiff(oldTree, newTree, { newVersion: 'v26.2.1' })
+    expect(diff.summary.flagDataBackfilled).toBe(0)
+    expect(diff.details.newFlags).toEqual([expect.objectContaining({
+      commandPath: 'rpk cluster config status',
+      flagName: 'format'
+    })])
+  })
+
+  test('shim flags do not count as plugin baseline data', () => {
+    // Old connect subtree only has the rpk-native install shim flag; the
+    // plugin commands themselves recorded no flags, so it is backfill
+    const oldTree = tree([{
+      name: 'connect',
+      commands: [
+        { name: 'install', flags: [{ name: 'connect-version', type: 'string' }] },
+        { name: 'streams', flags: [] }
+      ]
+    }])
+    const newTree = tree([{
+      name: 'connect',
+      commands: [
+        { name: 'install', flags: [{ name: 'connect-version', type: 'string' }] },
+        { name: 'streams', flags: [{ name: 'observability', type: 'string' }] }
+      ]
+    }])
+
+    const diff = generateRpkDiff(oldTree, newTree)
+    expect(diff.summary.newFlags).toBe(0)
+    expect(diff.details.flagDataBackfilled).toEqual([
+      { commandPath: 'rpk connect streams', flagCount: 1 }
+    ])
+  })
+})
