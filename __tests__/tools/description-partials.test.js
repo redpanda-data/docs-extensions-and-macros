@@ -397,3 +397,47 @@ describe('summary-only and escapable-summary connectors (CodeRabbit findings)', 
     });
   });
 });
+
+describe('placeholder escaping and heading-sequence reporting', () => {
+  test('escapes brace placeholders in prose and spans, never in listing blocks', () => {
+    const { escapePlaceholderBraces } = renderConnectDescription;
+    const input = 'Posts to `{endpoint}/v1/traces` and /data/{api_version}/graphql.\n\n----\ncurl {endpoint}/v1/logs\n----';
+    const out = escapePlaceholderBraces(input);
+    expect(out).toContain('`\\{endpoint}/v1/traces`');
+    expect(out).toContain('/data/\\{api_version}/graphql');
+    // Inside the listing block the braces are already literal
+    expect(out).toContain('curl {endpoint}/v1/logs');
+  });
+
+  test('renderConnectDescription applies the escaping (otlp_http case)', () => {
+    const out = renderConnectDescription({
+      type: 'output', name: 'otlp_http',
+      description: 'Traces go to `{endpoint}/v1/traces`.',
+    });
+    expect(out).toContain('\\{endpoint}');
+  });
+
+  test('firstHeadingDepth flags markdown ### and asciidoc === starts, accepts == and ##', () => {
+    const { firstHeadingDepth } = renderConnectDescription;
+    expect(firstHeadingDepth('Intro.\n\n### Prerequisites\n\nBody.')).toBe(3);
+    expect(firstHeadingDepth('Intro.\n\n=== Apache Polaris\n\nBody.')).toBe(3);
+    expect(firstHeadingDepth('Intro.\n\n== Operators\n\n=== to_json')).toBe(2);
+    expect(firstHeadingDepth('No headings at all.')).toBe(null);
+    expect(firstHeadingDepth('----\n=== inside block\n----\nprose')).toBe(null);
+  });
+});
+
+describe('ensureHeadingSeparation', () => {
+  const { ensureHeadingSeparation } = renderConnectDescription;
+
+  test('inserts the blank line a glued heading needs (protobuf case)', () => {
+    const input = 'Prose paragraph.\n== Operators\n\n=== `to_json`\n\nBody.';
+    const out = ensureHeadingSeparation(input);
+    expect(out).toContain('Prose paragraph.\n\n== Operators');
+  });
+
+  test('leaves already-separated headings and listing blocks alone', () => {
+    const ok = 'Prose.\n\n== Section\n\n----\ntext\n== not a heading\n----';
+    expect(ensureHeadingSeparation(ok)).toBe(ok);
+  });
+});

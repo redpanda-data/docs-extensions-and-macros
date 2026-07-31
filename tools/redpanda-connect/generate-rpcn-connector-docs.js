@@ -25,7 +25,7 @@ const DEFAULT_METADATA_TEMPLATE = path.resolve(__dirname, './templates/metadata-
 // the metadata partial, this is rewritten on every run so summary/description
 // changes upstream flow into already-published pages that include it.
 const DEFAULT_DESCRIPTION_TEMPLATE = path.resolve(__dirname, './templates/descriptions-partials.hbs');
-const { hasStructuralHeadings, LONG_HEADINGLESS_THRESHOLD } = require('./helpers/renderConnectDescription.js');
+const { hasStructuralHeadings, firstHeadingDepth, LONG_HEADINGLESS_THRESHOLD } = require('./helpers/renderConnectDescription.js');
 
 // Banner-only content written to a metadata partial when its `== Metadata`
 // section is removed upstream. Kept as an AsciiDoc comment so the file renders
@@ -517,6 +517,15 @@ async function generateRpcnConnectorDocs(options) {
             console.warn(
               `Long heading-less description: ${typeDir}/${name} ` +
               `(${item.description.length} chars). Consider adding == sections upstream in the Connect source.`
+            );
+          }
+          // Headings that start deeper than level one render out of
+          // sequence on the page. Upstream fix, so report it.
+          const headingDepth = typeof item.description === 'string' ? firstHeadingDepth(item.description) : null;
+          if (headingDepth !== null && headingDepth > 2) {
+            console.warn(
+              `Out-of-sequence headings: ${typeDir}/${name} starts at level ${headingDepth - 1} ` +
+              `(=== or ### with no parent section). Promote the top headings upstream in the Connect source.`
             );
           }
         } else if (fs.existsSync(dPath)) {
