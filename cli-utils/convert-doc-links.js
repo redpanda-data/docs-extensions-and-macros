@@ -117,6 +117,13 @@ function urlToXref(input) {
     xref = `xref:${moduleName}:${fileName}`;
   }
 
+  // Preserve the URL fragment: deep links like
+  // .../cluster-properties/#kafka_batch_max_bytes must keep their anchor
+  // (previously the fragment was silently dropped).
+  if (url.hash && url.hash.length > 1) {
+    xref += url.hash;
+  }
+
   // Re-attach label if there was one
   return label ? `${xref}[${label}]` : xref;
 }

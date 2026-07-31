@@ -119,3 +119,22 @@ describe('urlToXref', () => {
     });
   });
 });
+
+describe('urlToXref fragment preservation', () => {
+  const { urlToXref } = require('../../cli-utils/convert-doc-links.js');
+
+  test('keeps the anchor on a legacy-prefixed URL', () => {
+    expect(urlToXref('https://docs.redpanda.com/current/reference/properties/cluster-properties/#kafka_batch_max_bytes'))
+      .toBe('xref:reference:properties/cluster-properties.adoc#kafka_batch_max_bytes');
+  });
+
+  test('keeps the anchor on a cross-component URL with a label', () => {
+    expect(urlToXref('https://docs.redpanda.com/redpanda-connect/guides/bloblang/about/#functions[Bloblang functions]'))
+      .toBe('xref:connect:guides:bloblang/about.adoc#functions[Bloblang functions]');
+  });
+
+  test('no fragment means no trailing hash', () => {
+    expect(urlToXref('https://docs.redpanda.com/redpanda-connect/guides/bloblang/about/'))
+      .toBe('xref:connect:guides:bloblang/about.adoc');
+  });
+});
