@@ -76,6 +76,33 @@ describe('rpk Docs Handler', () => {
         const result = JSON.parse(fs.readFileSync(overridesPath, 'utf8'))
         expect(result.commands['rpk topic existing'].introducedInVersion).toBe('v26.1.0')
       })
+
+      test('stamps plugin commands with the plugin version, core commands with the rpk version', () => {
+        fs.writeFileSync(overridesPath, JSON.stringify({ commands: {} }))
+
+        const diffData = {
+          summary: { newCommands: 2 },
+          details: {
+            newCommands: [
+              { path: 'rpk connect new-subcommand' },
+              { path: 'rpk cluster new-command' }
+            ],
+            newFlags: [
+              { commandPath: 'rpk connect run', flagName: 'new-flag' }
+            ],
+            removedCommands: [],
+            removedFlags: [],
+            changedDefaults: []
+          }
+        }
+
+        updateOverridesWithIntroducedVersions(diffData, overridesPath, 'v26.2.0', { connect: '4.103.0' })
+
+        const result = JSON.parse(fs.readFileSync(overridesPath, 'utf8'))
+        expect(result.commands['rpk connect new-subcommand'].introducedInVersion).toBe('4.103.0')
+        expect(result.commands['rpk cluster new-command'].introducedInVersion).toBe('v26.2.0')
+        expect(result.commands['rpk connect run'].flags['new-flag'].introducedInVersion).toBe('4.103.0')
+      })
     })
 
     describe('flag version tracking', () => {

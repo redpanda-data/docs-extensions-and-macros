@@ -125,3 +125,47 @@ describe('Text Transformations', () => {
     }, 30000)
   })
 })
+
+describe('applyToCode rules in early code blocks', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  const transforms = {
+    replacements: [
+      { pattern: '\\brpai\\b', replacement: 'rpk ai', flags: 'g', applyToCode: true },
+      { pattern: '(^|\\n\\s*)Note:\\s', replacement: '$1NOTE: ', flags: 'g' }
+    ]
+  }
+
+  test('applies only code-safe rules inside captured code blocks', () => {
+    const input = 'Run the agent, e.g.:\n\n  rpai run claude -L anthropic\n  Note: output follows\n\nDone.'
+    const out = formatDescription(input, transforms)
+    expect(out).toContain('rpk ai run claude -L anthropic')
+    // The admonition rule must NOT rewrite text inside the code block
+    expect(out).toContain('Note: output follows')
+    expect(out).not.toContain('NOTE: output follows')
+  })
+})
+
+describe('applyTextTransformationsToExamples', () => {
+  const { applyTextTransformationsToExamples } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  const transforms = {
+    replacements: [
+      { pattern: '"([a-z]{1,20})"', replacement: '`$1`', flags: 'g' },
+      { pattern: '\\brpai\\b', replacement: 'rpk ai', flags: 'g', applyToCode: true }
+    ]
+  }
+
+  test('caption rules never rewrite quoted strings inside command lines', () => {
+    const input = 'Import client "quotas" from a string:\n  rpk cluster quotas import --from \'{"quotas":...}\''
+    const out = applyTextTransformationsToExamples(input, transforms)
+    expect(out).toContain('`quotas` from a string')
+    expect(out).toContain(String.raw`'{"quotas":...}'`)
+  })
+
+  test('code-safe rules still apply to command lines', () => {
+    const input = 'Send a task:\n  rpai agent a2a send hello'
+    const out = applyTextTransformationsToExamples(input, transforms)
+    expect(out).toContain('  rpk ai agent a2a send hello')
+  })
+})

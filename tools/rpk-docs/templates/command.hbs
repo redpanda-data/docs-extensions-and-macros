@@ -24,6 +24,11 @@ ifndef::env-cloud[]
 {{/each}}
 
 // tag::single-source[]
+:description: {{{wrapDescriptionPassthrough shortDesc}}}
+{{!-- The description attribute is repeated inside the tagged region so
+     single-sourcing consumers (stub pages that include this tag) inherit
+     the meta description. page-aliases and page-platforms deliberately stay
+     outside the tag: consumers must not inherit alias registrations. --}}
 {{!-- Deprecation notice --}}
 {{#if deprecated}}
 [CAUTION]

@@ -778,6 +778,76 @@ function convertIndentedCodeBlocksToAsciiDoc(text, codeBlockStore = []) {
   while (i < lines.length) {
     const line = lines[i]
 
+    // Unindented shell example: "$ rpk ..." at column 0 followed by its
+    // sample output on the contiguous lines below. Rendered as a command
+    // block plus a no-copy output block so the output's =-underlined titles
+    // and aligned columns are never parsed as prose or headings.
+    if (/^\$\s/.test(line)) {
+      const command = line.replace(/^\$\s+/, '')
+      let j = i + 1
+      const outputLines = []
+      while (j < lines.length && lines[j].trim() !== '' && !/^\$\s/.test(lines[j])) {
+        outputLines.push(lines[j])
+        j++
+      }
+      let block = `\n[,bash]\n----\n${command}\n----\n`
+      if (outputLines.length > 0) {
+        block += `\n[.no-copy]\n----\n${outputLines.join('\n')}\n----\n`
+      }
+      const placeholder = `__EARLY_CODE_BLOCK_${codeBlockStore.length}__`
+      codeBlockStore.push(block)
+      result.push('')
+      result.push(placeholder)
+      result.push('')
+      i = j
+      continue
+    }
+
+    // Colon-introduced code sample: prose ending with ":" followed by an
+    // indented block that is not a list (Cedar policies, config snippets).
+    // Deeply indented (4+ space) blocks are literals by help-text convention
+    // even without a colon introducer (path templates like
+    // "    kafka/{topic}/{partition}_{revision}/" would otherwise render as
+    // prose whose braces Asciidoctor eats as attribute references).
+    // Captured verbatim (dedented) so inline-code transforms never touch it.
+    const prevNonBlank = [...result].reverse().find(l => l.trim() !== '')
+    // Only a chunk that starts after a blank line is a standalone literal;
+    // a deeply indented line mid-chunk is a wrapped continuation of a table
+    // row or list item and belongs to the converters below.
+    const atChunkStart = result.length === 0 || result[result.length - 1].trim() === ''
+    if (
+      (
+        (prevNonBlank && /:\s*$/.test(prevNonBlank) && /^[ ]{2,}\S/.test(line)) ||
+        (atChunkStart && /^[ ]{4,}\S/.test(line))
+      ) &&
+      !/^[ ]{2,}(-|\*|\d+[.)])\s/.test(line) &&
+      !/^[ ]{2,}(--|rpk\s|\$\s)/.test(line)
+    ) {
+      const blockLines = []
+      let j = i
+      while (j < lines.length && (/^[ ]{2,}\S/.test(lines[j]) || lines[j].trim() === '')) {
+        if (lines[j].trim() === '' && (j + 1 >= lines.length || !/^[ ]{2,}\S/.test(lines[j + 1]))) break
+        blockLines.push(lines[j])
+        j++
+      }
+      // Column-aligned layouts (two or more lines with a run of spaces
+      // separating columns) are definition tables, not code: leave them for
+      // the indented-table/YAML converters below.
+      const alignedLines = blockLines.filter(l => /\S\s{2,}\S/.test(l.trim())).length
+      if (alignedLines < 2) {
+        const indent = Math.min(...blockLines.filter(l => l.trim() !== '').map(l => l.search(/\S/)))
+        const dedented = blockLines.map(l => l.slice(indent)).join('\n')
+        const codeBlock = `\n[,text]\n----\n${dedented}\n----\n`
+        const placeholder = `__EARLY_CODE_BLOCK_${codeBlockStore.length}__`
+        codeBlockStore.push(codeBlock)
+        result.push('')
+        result.push(placeholder)
+        result.push('')
+        i = j
+        continue
+      }
+    }
+
     // Check for indented command example: 2+ spaces then --, rpk, or $ (shell prompt)
     // e.g. "  --job-name test --labels ..."
     // e.g. "  rpk cluster info"
@@ -1240,10 +1310,13 @@ function convertIndentedTablesToAsciiDoc(text, options = {}) {
  * @param {Object|null} customTransformations
  * @returns {string}
  */
-function applyTextTransformations(text, customTransformations) {
+function applyTextTransformations(text, customTransformations, options = {}) {
   if (!text || !customTransformations?.replacements) return text
   let result = text
   for (const rule of customTransformations.replacements) {
+    // Code blocks are verbatim: only rules explicitly marked applyToCode
+    // (like the rpai -> rpk ai binary-name rewrite) may touch them.
+    if (options.code && !rule.applyToCode) continue
     try {
       const flags = rule.flags || 'g'
       result = result.replace(new RegExp(rule.pattern, flags), rule.replacement)
@@ -1252,6 +1325,24 @@ function applyTextTransformations(text, customTransformations) {
     }
   }
   return result
+}
+
+/**
+ * Apply text transformations to examples content line by line. Indented
+ * lines are verbatim commands: only rules flagged applyToCode may touch
+ * them (a caption rule once rewrote '{"quotas":...}' inside a command to
+ * '{`quotas`:...}'). Caption lines get the full rule set.
+ * @param {string} text
+ * @param {Object|null} customTransformations
+ * @returns {string}
+ */
+function applyTextTransformationsToExamples(text, customTransformations) {
+  if (!text || !customTransformations?.replacements) return text
+  return text.split('\n').map(line =>
+    /^[ ]{2,}\S/.test(line)
+      ? applyTextTransformations(line, customTransformations, { code: true })
+      : applyTextTransformations(line, customTransformations)
+  ).join('\n')
 }
 
 /**
@@ -1470,9 +1561,19 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     // Also handles '--flag/-f', '--flag help', and similar patterns
     .replace(/'(--[a-z][-a-z0-9]*(?:\/-[a-z])?(?:\s+\w+)?)'/gi, '$1')
     .replace(/'(-[a-z])'/gi, '$1')
+    // Drop a dangling example lead-in with nothing after it (upstream help
+    // strings sometimes end mid-example, which would render as "for example,.")
+    .replace(/[,;]?\s*\be\.g\.[\s,]*$/i, '')
+    // Stray space before a closing parenthesis (upstream help typo)
+    .replace(/ +\)/g, ')')
     // === STYLE GUIDE COMPLIANCE ===
-    .replace(/\be\.g\.\s*/gi, 'for example, ')
-    .replace(/\bi\.e\.\s*/gi, 'that is, ')
+    // "e.g.:" introduces a block; keep the colon instead of rendering ", :".
+    // Horizontal whitespace only: crossing a newline would glue the next
+    // line (often a code-block placeholder) onto this sentence.
+    .replace(/,?[^\S\n]*\be\.g\.:[^\S\n]*/gi, ', for example: ')
+    .replace(/, for example: $/gm, ', for example:')
+    .replace(/\be\.g\.[^\S\n]*/gi, 'for example, ')
+    .replace(/\bi\.e\.[^\S\n]*/gi, 'that is, ')
     // === TYPO CORRECTIONS ===
     // Fix "an" before consonant sounds (common source typos)
     .replace(/\ban\s+(prod|dev|test|local|remote|new|cluster|config|file)\b/gi, 'a $1')
@@ -1592,12 +1693,23 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // e.g., "(see #2904)" → "(see https://github.com/redpanda-data/redpanda/issues/2904[#2904])"
   result = result.replace(/(?<![`\w])#(\d{4,})(?![`\w])/g, 'https://github.com/redpanda-data/redpanda/issues/$1[#$1]')
 
+  // Escape template placeholders like {name} in prose: Asciidoctor would
+  // consume them as attribute references and drop them from the output.
+  // Backtick spans can hold raw code at this stage, so only prose segments
+  // between spans are touched. {vbar} stays: it is a real attribute used to
+  // escape pipes in table cells.
+  result = result.split(/(`[^`]*`)/).map((segment, idx) =>
+    idx % 2 === 1 ? segment : segment.replace(/(?<![\\`\w{]){([a-z][\w-]{0,30})}/g, (match, token) =>
+      token === 'vbar' ? match : `\\{${token}}`)
+  ).join('')
+
   // Restore early code blocks FIRST (from indented command/YAML detection)
   // This must happen before inline code restoration so that placeholders
   // inside the early code blocks (like __INLINE_CODE_X__) get resolved
   // Use function replacements to prevent $ special-pattern interpretation (e.g. `$` → before-match)
   earlyCodeBlocks.forEach((block, i) => {
-    result = result.replace(`__EARLY_CODE_BLOCK_${i}__`, () => block)
+    const transformed = applyTextTransformations(block, customTransformations, { code: true })
+    result = result.replace(`__EARLY_CODE_BLOCK_${i}__`, () => transformed)
   })
 
   // Restore inline code
@@ -1807,11 +1919,37 @@ function parseDescriptionSections(desc) {
   let currentContent = []
   const mainLines = []
 
-  for (const line of lines) {
+  let skipNext = false
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (skipNext) {
+      skipNext = false
+      continue
+    }
     // Check for ALL CAPS header (at least 2 chars, possibly with spaces, hyphens, slashes, or ampersands)
     // Examples: "FIELDS", "BALANCER STATUS", "PRODUCER ID & EPOCH"
-    const headerMatch = line.match(/^([A-Z][A-Z\s\-\/&]{0,}[A-Z])$/)
+    // A line with runs of multiple spaces is a column-header row of aligned
+    // sample output (for example "PARTITION      REASON"), not a section
+    // header, so leave it in the content.
+    let headerMatch = /  /.test(line) ? null : line.match(/^([A-Z][A-Z\s\-\/&]{0,}[A-Z])$/)
+    // An all-caps line directly after a "$ command" invocation is the title
+    // of that command's sample output (for example "DECOMMISSION PROGRESS"),
+    // not a section header. Splitting there would strand the invocation in
+    // one section and its output table in another.
     if (headerMatch) {
+      for (let p = i - 1; p >= 0; p--) {
+        if (lines[p].trim() === '') break
+        if (/^\$\s/.test(lines[p])) { headerMatch = null; break }
+      }
+    }
+    if (headerMatch) {
+      // Help text often underlines section titles with a run of = or -
+      // characters. Consume the underline: left in the content, a line of
+      // 4+ = or - is an AsciiDoc block delimiter and breaks the page
+      // (unterminated example block).
+      if (i + 1 < lines.length && /^\s*(={3,}|-{3,})\s*$/.test(lines[i + 1])) {
+        skipNext = true
+      }
       // Save previous section
       if (currentSection) {
         // Preserve indentation: only remove leading/trailing blank lines, not spaces
@@ -1830,6 +1968,13 @@ function parseDescriptionSections(desc) {
   if (currentSection) {
     // Preserve indentation: only remove leading/trailing blank lines, not spaces
     sections[currentSection] = trimBlankLines(currentContent.join('\n'))
+  }
+
+  const delimiterRun = /^\s*(={4,}|-{4,})\s*$/
+  for (const [name, body] of Object.entries(sections)) {
+    if (body.split('\n').some(l => delimiterRun.test(l))) {
+      console.warn(`Warning: section "${name}" contains a bare =/- delimiter run; it may break AsciiDoc rendering`)
+    }
   }
 
   return {
@@ -1941,6 +2086,45 @@ function dashify(commandPath) {
  * @param {string} desc - Full description
  * @returns {string} Short description
  */
+/**
+ * Collapse runs of three or more newlines to a single blank line, except
+ * inside AsciiDoc delimited blocks (----, ====, ...., |===, and -- open
+ * blocks), where blank lines are content.
+ * @param {string} text - Rendered page content
+ * @returns {string}
+ */
+function collapseBlankLines(text) {
+  const lines = text.split('\n')
+  const out = []
+  let inBlock = false
+  let blockDelim = null
+  let blankRun = 0
+
+  for (const line of lines) {
+    const trimmed = line.trimEnd()
+    const isDelim = /^(-{4,}|={4,}|\.{4,}|\|===|--)$/.test(trimmed)
+    if (isDelim) {
+      if (!inBlock) {
+        inBlock = true
+        blockDelim = trimmed
+      } else if (trimmed === blockDelim || (blockDelim === '|===' && trimmed === '|===')) {
+        inBlock = false
+        blockDelim = null
+      }
+    }
+
+    if (!inBlock && trimmed === '') {
+      blankRun++
+      if (blankRun > 1) continue
+    } else {
+      blankRun = 0
+    }
+    out.push(line)
+  }
+
+  return out.join('\n')
+}
+
 function capToTwoSentences(desc) {
   if (!desc) return ''
   if (typeof desc !== 'string') return String(desc)
@@ -1948,6 +2132,19 @@ function capToTwoSentences(desc) {
   // Remove section headers and content after them (for overrides that include full content)
   // Pattern: matches == Section Header and everything after it
   let cleaned = desc.replace(/\s*==\s+.+$/s, '')
+
+  // Delimited code/output blocks never belong in a summary. Indented help
+  // examples are converted to [,text]/[,bash]/[.no-copy] blocks before this
+  // runs. A block introduced by a colon ends the summary there (the prose
+  // after it would read as a non sequitur without the sample); otherwise
+  // drop the block and keep the surrounding prose.
+  const blockRe = /\n?\[[^\]\n]*\]\n----\n[\s\S]*?\n----|\n----\n[\s\S]*?\n----/
+  const firstBlock = cleaned.match(blockRe)
+  if (firstBlock && /:\s*$/.test(cleaned.slice(0, firstBlock.index))) {
+    cleaned = cleaned.slice(0, firstBlock.index)
+  } else {
+    cleaned = cleaned.replace(new RegExp(blockRe.source, 'g'), '')
+  }
 
   // Remove indented content (tables, lists, etc.) after colons before sentence detection
   // Pattern: text ending with colon, optionally followed by blank line, then indented content
@@ -1982,11 +2179,26 @@ function capToTwoSentences(desc) {
     })
   }
 
+  // Protect decimal points in version-like numbers (OAuth 2.0, HTTP 1.1) so
+  // they neither split a sentence nor cause the leading fragment to be
+  // dropped by the sentence matcher
+  normalized = normalized.replace(/(\d)\.(\d)/g, '$1__DECIMAL__$2')
+
   // Match sentences
-  const sentences = normalized.match(/[^.!?]+[.!?]+(?:\s|$)/g)
+  let sentences = normalized.match(/[^.!?]+[.!?]+(?:\s|$)/g)
+
+  // Never drop a leading fragment: if the first matched sentence does not
+  // start at the beginning of the text (an unterminated prefix was skipped),
+  // glue the prefix back onto it
+  if (sentences && sentences.length > 0) {
+    const firstIdx = normalized.indexOf(sentences[0])
+    if (firstIdx > 0) {
+      sentences = [normalized.slice(0, firstIdx) + sentences[0], ...sentences.slice(1)]
+    }
+  }
   if (!sentences || sentences.length === 0) {
     // Restore and return
-    let result = normalized
+    let result = normalized.replace(/__DECIMAL__/g, '.')
     placeholders.forEach(({ ph, original }) => {
       result = result.replace(ph, original)
     })
@@ -1997,6 +2209,9 @@ function capToTwoSentences(desc) {
   }
 
   let result = sentences.slice(0, 2).join('')
+
+  // Restore decimal points
+  result = result.replace(/__DECIMAL__/g, '.')
 
   // Restore abbreviations
   placeholders.forEach(({ ph, original }) => {
@@ -2088,6 +2303,61 @@ function findTopLevelWithSubcommands(tree) {
 }
 
 /**
+ * Known rpk plugins that are managed separately from rpk core (they have
+ * install/uninstall/upgrade shim commands, and their real command tree only
+ * appears when the plugin binary is installed in the generation environment).
+ * Shared with rpk-docs-handler.js, which iterates this list to install each
+ * plugin before running --print-tree.
+ */
+const KNOWN_PLUGINS = ['ai', 'check', 'connect', 'k8s', 'oxla']
+
+/**
+ * Subcommands that rpk core ships as a built-in shim for managed plugins,
+ * present even when the plugin binary itself is not installed.
+ */
+const PLUGIN_SHIM_COMMANDS = new Set(['install', 'uninstall', 'upgrade'])
+
+/**
+ * Check whether a command path belongs to a protected plugin's subtree
+ * (including the plugin's own top-level command).
+ * @param {string} commandPath - Full command path, e.g. 'rpk k8s multicluster'
+ * @param {Array<string>} protectedPlugins - Plugin names, e.g. ['k8s']
+ * @returns {boolean}
+ */
+function isProtectedCommandPath(commandPath, protectedPlugins) {
+  return protectedPlugins.some(pl => commandPath === `rpk ${pl}` || commandPath.startsWith(`rpk ${pl} `))
+}
+
+/**
+ * Determine which managed plugins must be protected for this run.
+ *
+ * Auto-detects plugins whose commands are missing from this run's tree:
+ * rpk core ships only a shim (install/uninstall/upgrade) for managed
+ * plugins; the real commands appear only when the plugin binary is
+ * installed in the generation environment. If a known plugin's subtree is
+ * absent or shim-only, its existing pages reflect the plugin, not stale
+ * commands, so they must be preserved. Pre-GA windows hit this every time:
+ * the plugin publisher only promotes stable X.Y.Z releases, so `rpk <plugin>
+ * install` finds nothing until GA (see redpanda-data/docs#1831).
+ *
+ * @param {Array} commands - Flat command list from flattenCommands()
+ * @param {Array<string>} explicitProtected - Plugins the caller already knows
+ *   failed to install this run (merged with auto-detection)
+ * @returns {Array<string>} Deduplicated protected plugin names
+ */
+function detectProtectedPlugins(commands, explicitProtected = []) {
+  const autoProtected = KNOWN_PLUGINS.filter(pl => {
+    const subNames = commands
+      .filter(c => c.path.startsWith(`rpk ${pl} `))
+      .map(c => c.path.split(' ')[2])
+    const hasTopLevel = commands.some(c => c.path === `rpk ${pl}`)
+    if (!hasTopLevel) return true
+    return subNames.length === 0 || subNames.every(n => PLUGIN_SHIM_COMMANDS.has(n))
+  })
+  return [...new Set([...explicitProtected, ...autoProtected])]
+}
+
+/**
  * Static entries that always appear at the top of the rpk nav section,
  * before the auto-generated command entries. These are hand-written pages
  * that are not part of the CLI command tree. The root `rpk` command is not
@@ -2095,6 +2365,10 @@ function findTopLevelWithSubcommands(tree) {
  * landing page (the section header), so it is skipped during generation.
  */
 const STATIC_RPK_NAV_ENTRIES = [
+  // The root rpk command page is generated but skipped by the entry loop
+  // (its path has no group segment), so it is listed here to keep it in
+  // the nav ahead of the hand-written pages.
+  '*** xref:reference:rpk/rpk.adoc[]',
   '*** xref:reference:rpk/rpk-commands.adoc[]',
   '*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]',
 ]
@@ -2109,7 +2383,7 @@ const STATIC_RPK_NAV_ENTRIES = [
  * @param {Set} topLevelWithSubcommands - Set of top-level command names with subcommands
  * @returns {Object} { navUpdated, navEntriesGenerated }
  */
-function updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands) {
+function updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands, protectedPlugins = []) {
   if (!fs.existsSync(navFile)) {
     console.warn(`Warning: nav file not found, skipping nav update: ${navFile}`)
     return { navUpdated: false }
@@ -2140,6 +2414,10 @@ function updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcomm
   const newEntries = []
   for (const { path: commandPath } of commands) {
     if (commandPath === 'rpk') continue
+    // Protected plugins get no generated entries: this run's tree has at
+    // most the shim (install/uninstall/upgrade) for them, so their previous
+    // nav block is preserved in place instead (below).
+    if (isProtectedCommandPath(commandPath, protectedPlugins)) continue
     if (shouldExcludeCommand(resolvedOverrides, commandPath)) continue
     if (shouldUsePartialDir(resolvedOverrides, commandPath)) continue
     if (commandPath.startsWith('rpk cloud')) continue
@@ -2155,12 +2433,65 @@ function updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcomm
     newEntries.push(`${stars} xref:${xrefPath}[]`)
   }
 
-  // Rebuild: header + static entries + generated entries
-  const newSection = [
-    lines[sectionStart],
-    ...STATIC_RPK_NAV_ENTRIES,
-    ...newEntries,
-  ]
+  // Preserve existing entries for protected plugins. Their commands are
+  // absent (or shim-only) in this run's tree, so nothing was generated for
+  // them above. Each plugin's previous nav block (parent entry plus nested
+  // children) is kept together and spliced back in at its original position,
+  // anchored to the nearest preceding entry that survives regeneration —
+  // never appended at the end, where the children would render under the
+  // wrong parent.
+  const stripStars = (line) => line.replace(/^\*+ /, '')
+  const emittedTargets = new Set([...STATIC_RPK_NAV_ENTRIES, ...newEntries].map(stripStars))
+  // Map of anchor target (or null for "before all surviving entries") to the
+  // preserved lines that follow that anchor, in original order.
+  const preservedBlocks = new Map()
+  let preservedCount = 0
+  const preservedPlugins = new Set()
+  if (protectedPlugins.length > 0) {
+    const patternsFor = (pl) => [`reference:rpk/rpk-${pl}/`, `reference:rpk/rpk-${pl}.adoc`]
+    const pluginFor = (line) => protectedPlugins.find(pl => patternsFor(pl).some(pat => line.includes(pat)))
+    let lastAnchor = null
+    for (const line of lines.slice(sectionStart + 1, sectionEnd)) {
+      const plugin = pluginFor(line)
+      if (plugin) {
+        // Never duplicate an entry that regeneration already emits.
+        if (emittedTargets.has(stripStars(line))) continue
+        if (!preservedBlocks.has(lastAnchor)) preservedBlocks.set(lastAnchor, [])
+        preservedBlocks.get(lastAnchor).push(line)
+        preservedCount++
+        preservedPlugins.add(plugin)
+      } else if (emittedTargets.has(stripStars(line))) {
+        lastAnchor = stripStars(line)
+      }
+    }
+    if (preservedCount > 0) {
+      console.log(`  Preserving ${preservedCount} nav entries for plugins: ${[...preservedPlugins].join(', ')}`)
+    }
+  }
+
+  // Rebuild: header + static entries + generated entries, splicing each
+  // preserved block back in directly after its anchor entry.
+  const newSection = [lines[sectionStart]]
+  const pushEntry = (line) => {
+    newSection.push(line)
+    const target = stripStars(line)
+    if (preservedBlocks.has(target)) {
+      newSection.push(...preservedBlocks.get(target))
+      preservedBlocks.delete(target)
+    }
+  }
+  // Blocks that preceded every surviving entry in the old nav go right after
+  // the section header, before the static entries.
+  if (preservedBlocks.has(null)) {
+    newSection.push(...preservedBlocks.get(null))
+    preservedBlocks.delete(null)
+  }
+  for (const line of STATIC_RPK_NAV_ENTRIES) pushEntry(line)
+  for (const line of newEntries) pushEntry(line)
+  // Safety net: if an anchor vanished between collection and rebuild (it
+  // cannot with the logic above, but never silently drop preserved entries),
+  // append any remaining blocks at the end.
+  for (const block of preservedBlocks.values()) newSection.push(...block)
 
   const newLines = [
     ...lines.slice(0, sectionStart),
@@ -2187,7 +2518,12 @@ async function generateRpkDocs(options = {}) {
     pluginVersions = {},
     draftMissing = false,
     flatOutput = false, // If true, output all files flat (legacy behavior)
-    navFile // Optional: path to nav.adoc for automatic nav updates
+    navFile, // Optional: path to nav.adoc for automatic nav updates
+    // Plugins that exist but could not be installed for this run (for example,
+    // rpk k8s before its GA plugin publishes). Their pages and nav entries are
+    // preserved instead of treated as stale, because their absence from the
+    // command tree reflects the generation environment, not the product.
+    protectedPlugins = []
   } = options
 
   // Register partials
@@ -2225,6 +2561,16 @@ async function generateRpkDocs(options = {}) {
   // Flatten command tree
   const commands = flattenCommands(tree)
 
+  // Determine which managed plugins are protected this run: explicitly
+  // passed by the caller (failed installs) merged with auto-detection of
+  // absent or shim-only plugin subtrees. Protection covers the whole
+  // pipeline — page writes, the stale-file sweep, and nav updates — so a
+  // run without the plugin binary leaves the plugin's docs fully untouched.
+  const effectiveProtectedPlugins = detectProtectedPlugins(commands, protectedPlugins)
+  if (effectiveProtectedPlugins.length > 0) {
+    console.log(`  Protected plugins this run (pages and nav preserved, not regenerated): ${effectiveProtectedPlugins.join(', ')}`)
+  }
+
   // Find top-level commands with subcommands (for directory structure)
   const topLevelWithSubcommands = findTopLevelWithSubcommands(tree)
 
@@ -2242,6 +2588,18 @@ async function generateRpkDocs(options = {}) {
     // index.adoc landing page, which generation must not overwrite. The nav
     // builder skips it for the same reason (see updateNavFile).
     if (commandPath === 'rpk') {
+      filesSkipped++
+      continue
+    }
+
+    // Protected plugins: skip generating the whole subtree, parent page
+    // included. This run's tree has at most the shim
+    // (install/uninstall/upgrade) for these plugins, so regenerating would
+    // overwrite full-plugin pages from an earlier successful run — for
+    // example, rewriting rpk-k8s.adoc with a Subcommands table reduced to
+    // the shim and orphaning the preserved child pages. Existing pages stay
+    // untouched, exactly as in the fully-absent-plugin case.
+    if (isProtectedCommandPath(commandPath, effectiveProtectedPlugins)) {
       filesSkipped++
       continue
     }
@@ -2273,8 +2631,9 @@ async function generateRpkDocs(options = {}) {
         if (mergedCommand.excludeExamples && mergedCommand.excludeExamples.length > 0) {
           examplesContent = filterExamples(sectionContent, mergedCommand.excludeExamples)
         }
-        // Apply text transformations (e.g. rpai → rpk ai) then format
-        examplesContent = applyTextTransformations(examplesContent, textTransformations)
+        // Apply text transformations (e.g. rpai → rpk ai) then format.
+        // Command lines only get code-safe rules.
+        examplesContent = applyTextTransformationsToExamples(examplesContent, textTransformations)
         sections[sectionName] = formatExamples(examplesContent)
       } else {
         sections[sectionName] = formatDescription(sectionContent, textTransformations)
@@ -2291,8 +2650,9 @@ async function generateRpkDocs(options = {}) {
       if (mergedCommand.excludeExamples && mergedCommand.excludeExamples.length > 0) {
         examplesContent = filterExamples(examplesContent, mergedCommand.excludeExamples)
       }
-      // Apply text transformations (e.g. rpai → rpk ai) then format
-      examplesContent = applyTextTransformations(examplesContent, textTransformations)
+      // Apply text transformations (e.g. rpai → rpk ai) then format.
+      // Command lines only get code-safe rules.
+      examplesContent = applyTextTransformationsToExamples(examplesContent, textTransformations)
       sections.EXAMPLES = formatExamples(examplesContent)
     }
 
@@ -2365,9 +2725,16 @@ async function generateRpkDocs(options = {}) {
     // Build subcommands with correct xref paths
     // Filter out excluded and asPartial subcommands — excluded have no file,
     // asPartial ones live in the partials directory with no linkable xref.
+    // rpk cloud and rpk security secret are hardcoded-routed to partials
+    // (single-sourced into cloud docs), so they have no linkable pages
+    // either: rpk-security.adoc linking rpk-security-secret.adoc was a
+    // broken xref in the published site.
     const subcommands = (command.commands || [])
       .filter(sub => {
         const subPath = `${commandPath} ${sub.name}`
+        if (subPath.startsWith('rpk cloud') || subPath.startsWith('rpk security secret')) {
+          return false
+        }
         return !shouldExcludeCommand(resolvedOverrides, subPath) && !shouldUsePartialDir(resolvedOverrides, subPath)
       })
       .map(sub => {
@@ -2431,7 +2798,24 @@ async function generateRpkDocs(options = {}) {
           return `${parentPath} ${alias}`
         }),
       aliasNotes: commandOverride.aliasNotes,
-      flags: (mergedCommand.flags || []).map(flag => ({
+      // A curated override section titled "Flags" wins over the extracted
+      // flag table: rendering both produced duplicate == Flags headings and
+      // conflicting content (rpk connect run). Curation is authoritative;
+      // the warning tells maintainers the override can be dropped to adopt
+      // the extracted table.
+      flags: (() => {
+        const hasCuratedFlagsSection = Object.values(processedContent.sections || {})
+          .some(items => (items || []).some(item => /^flags$/i.test(item.title || '')))
+        if (hasCuratedFlagsSection && (mergedCommand.flags || []).length > 0) {
+          console.warn(
+            `Warning: ${commandPath} has a curated "Flags" override section; ` +
+            `skipping the extracted flag table (${mergedCommand.flags.length} flags). ` +
+            'Remove the override section to adopt the extracted table.'
+          )
+          return []
+        }
+        return mergedCommand.flags || []
+      })().map(flag => ({
         ...flag,
         name: flag.shorthand ? `-${flag.shorthand}, --${flag.name}` : `--${flag.name}`,
         type: flag.type || '-',
@@ -2542,8 +2926,26 @@ async function generateRpkDocs(options = {}) {
       hasUnknownSections: unknownSections.length > 0
     }
 
-    // Render template
-    const content = template(context)
+    // Render template, then collapse runs of blank lines left behind by
+    // absent optional sections (plugin commands have no aliases or flags, so
+    // the separators between skipped blocks stack up). Blank lines inside
+    // delimited blocks are preserved: they are content there.
+    const content = collapseBlankLines(template(context))
+
+    // Duplicate top-level headings almost always mean an override adds a
+    // section the page already renders (or embeds its own heading in raw
+    // content). The page still builds, but anchors collide and readers see
+    // the same section twice.
+    const h2Counts = new Map()
+    for (const line of content.split('\n')) {
+      const h2 = line.match(/^== (\S.*)$/)
+      if (h2) h2Counts.set(h2[1], (h2Counts.get(h2[1]) || 0) + 1)
+    }
+    for (const [heading, count] of h2Counts) {
+      if (count > 1) {
+        console.warn(`⚠️  ${commandPath}: heading "== ${heading}" appears ${count} times. Check the override content for this command.`)
+      }
+    }
 
     // Determine output path
     // Check if this command should go to cloudSecretDir
@@ -2614,9 +3016,19 @@ async function generateRpkDocs(options = {}) {
       .map(entry => path.join(baseDir, entry.name))
   }
 
+  // Protected plugins (computed before the write loop, see
+  // detectProtectedPlugins): their existing pages reflect the plugin, not
+  // stale commands, so their directories are excluded from the sweep.
+  const protectedDirNames = new Set(effectiveProtectedPlugins.map(pl => `rpk-${pl}`))
   const scanDirs = new Set()
   for (const dir of rpkSubdirs(outputDir)) scanDirs.add(dir)
   for (const dir of rpkSubdirs(cloudSecretDir)) scanDirs.add(dir)
+  for (const dir of [...scanDirs]) {
+    if (protectedDirNames.has(path.basename(dir))) {
+      console.log(`  Preserving ${path.basename(dir)}/ (plugin commands absent from this run's tree)`)
+      scanDirs.delete(dir)
+    }
+  }
 
   for (const dir of scanDirs) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -2644,7 +3056,7 @@ async function generateRpkDocs(options = {}) {
   // Update nav.adoc if a path was provided
   let navResult = { navUpdated: false }
   if (navFile) {
-    navResult = updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands)
+    navResult = updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands, effectiveProtectedPlugins)
   }
 
   return {
@@ -2681,9 +3093,12 @@ module.exports = {
   shouldExcludeCommand,
   shouldUsePartialDir,
   updateNavFile,
+  KNOWN_PLUGINS,
+  detectProtectedPlugins,
   getCommandMetadata,
   processContentArray,
   // Exported for testing
   filterExamples,
-  formatExamples
+  formatExamples,
+  applyTextTransformationsToExamples
 }

@@ -2,7 +2,7 @@
 {{~#if (eq type "example")~}}
 {{!-- Single structured example --}}
 {{#if description}}
-{{{description}}}.
+{{{ensurePeriod description}}}
 
 {{/if}}
 [,{{#if language}}{{language}}{{else}}bash{{/if}}{{#if attributes}}{{#each attributes}}{{#if @first}},{{/if}}{{@key}}="{{this}}"{{/each}}{{/if}}]
@@ -27,7 +27,7 @@ This section provides examples of how to use `{{commandPath}}`.
 
 {{#each items}}
 {{#if description}}
-{{{description}}}.
+{{{ensurePeriod description}}}
 
 {{/if}}
 [,{{#if language}}{{language}}{{else}}bash{{/if}}{{#if attributes}}{{#each attributes}}{{#if @first}},{{/if}}{{@key}}="{{this}}"{{/each}}{{/if}}]

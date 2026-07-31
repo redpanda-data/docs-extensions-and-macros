@@ -132,7 +132,14 @@ function compareFlags(oldFlag, newFlag) {
  * @returns {Object} Diff report
  */
 function generateRpkDiff(oldTree, newTree, options = {}) {
-  const { oldVersion = 'old', newVersion = 'new' } = options
+  const {
+    oldVersion = 'old',
+    newVersion = 'new',
+    // deprecated_commands maps from the snapshots (path -> metadata), as
+    // produced by scan-deprecated-commands.js
+    oldDeprecatedCommands = {},
+    newDeprecatedCommands = {}
+  } = options
 
   const oldCommands = flattenToMap(oldTree)
   const newCommands = flattenToMap(newTree)
@@ -152,23 +159,95 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
     }
   })
 
-  // Find removed commands
+  // Newly deprecated commands: in the new snapshot's deprecation map but not
+  // the old one. Detected by source scanning, because deprecated commands
+  // that are also hidden never appear in --print-tree output.
+  const newlyDeprecatedRaw = Object.entries(newDeprecatedCommands)
+    .filter(([path]) => !oldDeprecatedCommands[path])
+    .map(([path, info]) => ({
+      path,
+      message: info.deprecatedMessage || '',
+      replacement: info.replacement || '',
+      hidden: info.hidden === true || /Hidden:\s*true/.test(info._note || ''),
+      deprecatedInVersion: newVersion
+    }))
+
+  // Roll deprecated subcommands up into their nearest deprecated ancestor:
+  // one entry for `rpk redpanda admin` with its subcommands listed reads
+  // better than a dozen sibling entries
+  const newlyDeprecatedDetails = newlyDeprecatedRaw.filter(d =>
+    !newlyDeprecatedRaw.some(other => other !== d && d.path.startsWith(other.path + ' ')))
+  for (const child of newlyDeprecatedRaw) {
+    if (newlyDeprecatedDetails.includes(child)) continue
+    const root = newlyDeprecatedDetails.find(r => child.path.startsWith(r.path + ' '))
+    if (root) {
+      root.affectedSubcommands = root.affectedSubcommands || []
+      if (!root.affectedSubcommands.includes(child.path)) {
+        root.affectedSubcommands.push(child.path)
+      }
+    }
+  }
+
+  // Find removed commands, then separate genuine removals from commands that
+  // disappeared from the tree because they (or an ancestor) were deprecated
+  // and hidden — those still work as aliases and should be reported as
+  // deprecations, not removals.
+  const deprecatedRoots = newlyDeprecatedDetails.map(d => d.path)
+  const isUnderNewlyDeprecated = (p) =>
+    deprecatedRoots.some(root => p === root || p.startsWith(root + ' '))
+
   const removedCommandPaths = [...oldPaths].filter(p => !newPaths.has(p))
-  const removedCommandsDetails = removedCommandPaths.map(path => {
+  const removedCommandsDetails = []
+  for (const path of removedCommandPaths) {
+    if (isUnderNewlyDeprecated(path)) {
+      const root = deprecatedRoots.find(r => path === r || path.startsWith(r + ' '))
+      const entry = newlyDeprecatedDetails.find(d => d.path === root)
+      if (path !== root) {
+        entry.affectedSubcommands = entry.affectedSubcommands || []
+        if (!entry.affectedSubcommands.includes(path)) {
+          entry.affectedSubcommands.push(path)
+        }
+      }
+      continue
+    }
     const cmd = oldCommands.get(path)
-    return {
+    removedCommandsDetails.push({
       path,
       name: cmd.name,
       description: cmd.description || '',
       removedInVersion: newVersion
-    }
-  })
+    })
+  }
+
+  for (const dep of newlyDeprecatedDetails) {
+    if (dep.affectedSubcommands) dep.affectedSubcommands.sort()
+  }
 
   // Find flag changes in existing commands
   const newFlags = []
   const removedFlags = []
   const changedDefaults = []
+  const changedFlagTypes = []
+  const changedFlagRequirements = []
+  const changedFlagDescriptions = []
   const descriptionChanges = []
+  const flagDataBackfilled = []
+
+  // Baseline gap detection: plugin subtrees captured before flag extraction
+  // existed record no flags on any of their own commands (the install/
+  // uninstall/upgrade shims are rpk-native and do carry flags). Flag
+  // "additions" inside such a group are newly captured documentation, not
+  // newly introduced flags, and stamping them "New in <version>" would
+  // mislabel long-standing flags. Core groups have baseline flag data, so a
+  // zero-flag command there that gains a flag is a genuine addition.
+  const groupsWithBaselineFlagData = new Set()
+  for (const [path, cmd] of oldCommands) {
+    const parts = path.split(' ')
+    if (parts.length < 2) continue
+    // "rpk <plugin> install|uninstall|upgrade" shims are rpk-native
+    if (parts.length === 3 && /^(install|uninstall|upgrade)$/.test(parts[2])) continue
+    if ((cmd.flags || []).length > 0) groupsWithBaselineFlagData.add(parts[1])
+  }
 
   for (const path of newPaths) {
     if (!oldPaths.has(path)) continue // Skip new commands
@@ -179,8 +258,16 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
     const oldFlags = getFlagsMap(oldCmd)
     const newFlagsMap = getFlagsMap(newCmd)
 
-    // Find new flags
-    for (const [flagName, flag] of newFlagsMap) {
+    const topLevel = path.split(' ')[1]
+    const isFlagBackfill = topLevel !== undefined &&
+      !groupsWithBaselineFlagData.has(topLevel) &&
+      oldFlags.size === 0 && newFlagsMap.size > 0
+    if (isFlagBackfill) {
+      flagDataBackfilled.push({ commandPath: path, flagCount: newFlagsMap.size })
+    }
+
+    // Find new flags (skipped entirely for backfilled commands)
+    for (const [flagName, flag] of isFlagBackfill ? [] : newFlagsMap) {
       if (!oldFlags.has(flagName)) {
         newFlags.push({
           commandPath: path,
@@ -222,6 +309,30 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
             newDefault: changes.default.new
           })
         }
+        if (changes.type) {
+          changedFlagTypes.push({
+            commandPath: path,
+            flagName,
+            oldType: changes.type.old,
+            newType: changes.type.new
+          })
+        }
+        if (changes.required) {
+          changedFlagRequirements.push({
+            commandPath: path,
+            flagName,
+            oldRequired: changes.required.old,
+            newRequired: changes.required.new
+          })
+        }
+        if (changes.description) {
+          changedFlagDescriptions.push({
+            commandPath: path,
+            flagName,
+            oldDescription: changes.description.old,
+            newDescription: changes.description.new
+          })
+        }
       }
     }
 
@@ -244,19 +355,29 @@ function generateRpkDiff(oldTree, newTree, options = {}) {
     },
     summary: {
       newCommands: newCommandsDetails.length,
+      newlyDeprecatedCommands: newlyDeprecatedDetails.length,
       removedCommands: removedCommandsDetails.length,
       newFlags: newFlags.length,
       removedFlags: removedFlags.length,
       changedDefaults: changedDefaults.length,
-      descriptionChanges: descriptionChanges.length
+      changedFlagTypes: changedFlagTypes.length,
+      changedFlagRequirements: changedFlagRequirements.length,
+      changedFlagDescriptions: changedFlagDescriptions.length,
+      descriptionChanges: descriptionChanges.length,
+      flagDataBackfilled: flagDataBackfilled.length
     },
     details: {
       newCommands: newCommandsDetails,
+      newlyDeprecatedCommands: newlyDeprecatedDetails,
       removedCommands: removedCommandsDetails,
       newFlags,
       removedFlags,
       changedDefaults,
-      descriptionChanges
+      changedFlagTypes,
+      changedFlagRequirements,
+      changedFlagDescriptions,
+      descriptionChanges,
+      flagDataBackfilled
     }
   }
 }
@@ -272,11 +393,18 @@ function printDiffReport(diff) {
 
   console.log('Summary:')
   console.log(`  New commands: ${diff.summary.newCommands}`)
-  console.log(`  Deprecated commands: ${diff.summary.removedCommands}`)
+  console.log(`  Deprecated commands: ${diff.summary.newlyDeprecatedCommands || 0}`)
+  console.log(`  Removed commands: ${diff.summary.removedCommands}`)
   console.log(`  New flags: ${diff.summary.newFlags}`)
-  console.log(`  Deprecated flags: ${diff.summary.removedFlags}`)
+  if (diff.summary.flagDataBackfilled) {
+    console.log(`  Flag documentation backfilled: ${diff.summary.flagDataBackfilled} command(s) (baseline had no flag data; not reported as new flags)`)
+  }
+  console.log(`  Removed flags: ${diff.summary.removedFlags}`)
   console.log(`  Changed defaults: ${diff.summary.changedDefaults}`)
-  console.log(`  Description changes: ${diff.summary.descriptionChanges}`)
+  console.log(`  Changed flag types: ${diff.summary.changedFlagTypes || 0}`)
+  console.log(`  Changed flag requirements: ${diff.summary.changedFlagRequirements || 0}`)
+  console.log(`  Changed flag descriptions: ${diff.summary.changedFlagDescriptions || 0}`)
+  console.log(`  Command description changes: ${diff.summary.descriptionChanges}`)
 
   if (diff.details.newCommands.length > 0) {
     console.log('\nNew Commands:')
@@ -289,8 +417,19 @@ function printDiffReport(diff) {
     }
   }
 
+  if ((diff.details.newlyDeprecatedCommands || []).length > 0) {
+    console.log('\nDeprecated Commands (still work, hidden or discouraged):')
+    for (const cmd of diff.details.newlyDeprecatedCommands) {
+      console.log(`  ⚠ ${cmd.path}${cmd.hidden ? ' (hidden)' : ''}`)
+      if (cmd.message) console.log(`      ${cmd.message}`)
+      if ((cmd.affectedSubcommands || []).length > 0) {
+        console.log(`      affects ${cmd.affectedSubcommands.length} subcommand(s)`)
+      }
+    }
+  }
+
   if (diff.details.removedCommands.length > 0) {
-    console.log('\nDeprecated Commands (no longer in command tree):')
+    console.log('\nRemoved Commands (no longer in command tree):')
     for (const cmd of diff.details.removedCommands) {
       console.log(`  ⚠ ${cmd.path}`)
     }
@@ -304,7 +443,7 @@ function printDiffReport(diff) {
   }
 
   if (diff.details.removedFlags.length > 0) {
-    console.log('\nDeprecated Flags (no longer in command tree):')
+    console.log('\nRemoved Flags (no longer in command tree):')
     for (const flag of diff.details.removedFlags) {
       console.log(`  ⚠ ${flag.commandPath} --${flag.flagName}`)
     }
@@ -315,6 +454,20 @@ function printDiffReport(diff) {
     for (const change of diff.details.changedDefaults) {
       console.log(`  ~ ${change.commandPath} --${change.flagName}`)
       console.log(`      ${JSON.stringify(change.oldDefault)} → ${JSON.stringify(change.newDefault)}`)
+    }
+  }
+
+  if ((diff.details.changedFlagTypes || []).length > 0) {
+    console.log('\nChanged Flag Types:')
+    for (const change of diff.details.changedFlagTypes) {
+      console.log(`  ~ ${change.commandPath} --${change.flagName}: ${change.oldType} → ${change.newType}`)
+    }
+  }
+
+  if ((diff.details.changedFlagRequirements || []).length > 0) {
+    console.log('\nChanged Flag Requirements:')
+    for (const change of diff.details.changedFlagRequirements) {
+      console.log(`  ~ ${change.commandPath} --${change.flagName}: required ${change.oldRequired} → ${change.newRequired}`)
     }
   }
 
@@ -339,10 +492,13 @@ function generateMarkdownSummary(diff) {
   lines.push(`| Category | Count |`)
   lines.push(`|----------|-------|`)
   lines.push(`| New commands | ${diff.summary.newCommands} |`)
-  lines.push(`| Deprecated commands | ${diff.summary.removedCommands} |`)
+  lines.push(`| Removed commands | ${diff.summary.removedCommands} |`)
   lines.push(`| New flags | ${diff.summary.newFlags} |`)
-  lines.push(`| Deprecated flags | ${diff.summary.removedFlags} |`)
+  lines.push(`| Removed flags | ${diff.summary.removedFlags} |`)
   lines.push(`| Changed defaults | ${diff.summary.changedDefaults} |`)
+  if (diff.summary.flagDataBackfilled) {
+    lines.push(`| Flag docs backfilled (baseline had no flag data) | ${diff.summary.flagDataBackfilled} commands |`)
+  }
   lines.push(``)
 
   if (diff.details.newCommands.length > 0) {
@@ -355,9 +511,9 @@ function generateMarkdownSummary(diff) {
   }
 
   if (diff.details.removedCommands.length > 0) {
-    lines.push(`### Deprecated Commands`)
+    lines.push(`### Removed Commands`)
     lines.push(``)
-    lines.push(`> Commands no longer in the active command tree. These may still work but are deprecated.`)
+    lines.push(`> Commands no longer in the active command tree.`)
     lines.push(``)
     for (const cmd of diff.details.removedCommands) {
       lines.push(`- ~~\`${cmd.path}\`~~`)
@@ -411,32 +567,67 @@ function commandPathToXref(commandPath) {
 function generateWhatsNewSection(diff, options = {}) {
   const lines = []
   const version = options.version || diff.comparison.newVersion
+  // Plugin subtrees may render as partials with no linkable pages, so plugin
+  // runs disable xrefs and render plain command names instead.
+  const useXrefs = options.xrefs !== false
+  // Commands that render as partials or are excluded have no linkable page
+  const linkable = typeof options.linkable === 'function' ? options.linkable : () => true
+  // Section heading for the page ("== Redpanda CLI" for core rpk changes,
+  // "== rpk plugins" for plugin releases). When blockLabel is set, the block
+  // opens with a "=== <label>" heading and category headings nest one level
+  // deeper, so accumulated blocks never produce colliding section ids.
+  const sectionHeading = options.sectionHeading || '== Redpanda CLI'
+  const blockLabel = options.blockLabel || null
+  const h = blockLabel ? '====' : '==='
+  // Command groups (two-part commands with subcommands) render into their own
+  // directory: rpk check -> rpk-check/rpk-check.adoc, not rpk-check.adoc
+  const hasSubcommands = typeof options.hasSubcommands === 'function'
+    ? options.hasSubcommands
+    : () => false
+  const cmdRef = (commandPath) => {
+    if (!useXrefs || !linkable(commandPath)) return `\`${commandPath}\``
+    let xrefPath = commandPathToXref(commandPath)
+    if (commandPath.split(' ').length === 2 && hasSubcommands(commandPath)) {
+      const dashified = commandPath.replace(/ /g, '-')
+      xrefPath = `${dashified}/${dashified}.adoc`
+    }
+    return `xref:reference:rpk/${xrefPath}[\`${commandPath}\`]`
+  }
 
   // Check if there are any changes worth documenting
   const hasNewCommands = diff.details.newCommands.length > 0
+  const hasDeprecatedCommands = (diff.details.newlyDeprecatedCommands || []).length > 0
+  const hasRemovedCommands = diff.details.removedCommands.length > 0
   const hasNewFlags = diff.details.newFlags.length > 0
+  const hasRemovedFlags = diff.details.removedFlags.length > 0
   const hasChangedDefaults = diff.details.changedDefaults.length > 0
+  const hasChangedFlagTypes = (diff.details.changedFlagTypes || []).length > 0
 
-  if (!hasNewCommands && !hasNewFlags && !hasChangedDefaults) {
+  if (!hasNewCommands && !hasDeprecatedCommands && !hasRemovedCommands &&
+      !hasNewFlags && !hasRemovedFlags && !hasChangedDefaults && !hasChangedFlagTypes) {
     return '' // No changes to document
   }
 
-  lines.push(`== Redpanda CLI`)
+  lines.push(sectionHeading)
   lines.push(``)
+  if (blockLabel) {
+    lines.push(`=== ${blockLabel}`)
+    lines.push(``)
+  }
 
   if (hasNewCommands) {
-    lines.push(`=== New commands`)
+    lines.push(`${h} New commands`)
     lines.push(``)
     for (const cmd of diff.details.newCommands) {
-      const xrefPath = commandPathToXref(cmd.path)
-      const desc = cmd.description ? ` - ${cmd.description}` : ''
-      lines.push(`* xref:reference:rpk/${xrefPath}[\`${cmd.path}\`]${desc}`)
+      const shortDesc = firstSentence(cmd.description || '')
+      const desc = shortDesc ? ` - ${shortDesc}` : ''
+      lines.push(`* ${cmdRef(cmd.path)}${desc}`)
     }
     lines.push(``)
   }
 
   if (hasNewFlags) {
-    lines.push(`=== New flags`)
+    lines.push(`${h} New flags`)
     lines.push(``)
     // Group flags by command
     const flagsByCommand = {}
@@ -448,24 +639,113 @@ function generateWhatsNewSection(diff, options = {}) {
     }
 
     for (const [cmdPath, flags] of Object.entries(flagsByCommand)) {
-      const xrefPath = commandPathToXref(cmdPath)
       const flagList = flags.map(f => `\`--${f.flagName}\``).join(', ')
-      lines.push(`* xref:reference:rpk/${xrefPath}[\`${cmdPath}\`]: Added ${flagList}`)
+      lines.push(`* ${cmdRef(cmdPath)}: Added ${flagList}`)
     }
     lines.push(``)
   }
 
   if (hasChangedDefaults) {
-    lines.push(`=== Changed defaults`)
+    lines.push(`${h} Changed defaults`)
     lines.push(``)
     for (const change of diff.details.changedDefaults) {
-      const xrefPath = commandPathToXref(change.commandPath)
-      lines.push(`* xref:reference:rpk/${xrefPath}[\`${change.commandPath}\`]: \`--${change.flagName}\` default changed from \`${change.oldDefault}\` to \`${change.newDefault}\``)
+      const oldVal = formatFlagValue(change.oldDefault)
+      const newVal = formatFlagValue(change.newDefault)
+      lines.push(`* ${cmdRef(change.commandPath)}: \`--${change.flagName}\` default changed from \`${oldVal}\` to \`${newVal}\``)
+    }
+    lines.push(``)
+  }
+
+  if (hasChangedFlagTypes) {
+    lines.push(`${h} Changed flag types`)
+    lines.push(``)
+    for (const change of diff.details.changedFlagTypes) {
+      lines.push(`* ${cmdRef(change.commandPath)}: \`--${change.flagName}\` type changed from \`${change.oldType}\` to \`${change.newType}\``)
+    }
+    lines.push(``)
+  }
+
+  if (hasDeprecatedCommands) {
+    lines.push(`${h} Deprecated commands`)
+    lines.push(``)
+    for (const cmd of diff.details.newlyDeprecatedCommands) {
+      let entry = `* \`${cmd.path}\``
+      if (cmd.replacement) {
+        entry += `: ${cmd.replacement}`
+      } else if (cmd.message) {
+        entry += `: ${cmd.message}`
+      }
+      lines.push(entry)
+      if ((cmd.affectedSubcommands || []).length > 0) {
+        lines.push(`+`)
+        lines.push(`Includes its subcommands: ${cmd.affectedSubcommands.map(s => `\`${s}\``).join(', ')}.`)
+      }
+    }
+    lines.push(``)
+  }
+
+  if (hasRemovedCommands) {
+    lines.push(`${h} Removed commands`)
+    lines.push(``)
+    for (const cmd of diff.details.removedCommands) {
+      lines.push(`* \`${cmd.path}\``)
+    }
+    lines.push(``)
+  }
+
+  if (hasRemovedFlags) {
+    lines.push(`${h} Removed flags`)
+    lines.push(``)
+    const removedByCommand = {}
+    for (const flag of diff.details.removedFlags) {
+      if (!removedByCommand[flag.commandPath]) {
+        removedByCommand[flag.commandPath] = []
+      }
+      removedByCommand[flag.commandPath].push(flag)
+    }
+    for (const [cmdPath, flags] of Object.entries(removedByCommand)) {
+      const flagList = flags.map(f => `\`--${f.flagName}\``).join(', ')
+      lines.push(`* ${cmdRef(cmdPath)}: Removed ${flagList}`)
     }
     lines.push(``)
   }
 
   return lines.join('\n')
+}
+
+/**
+ * Extract the first sentence of a description for a one-line bullet.
+ * Newlines are collapsed first (cobra help wraps mid-sentence), and decimal
+ * points in version numbers do not end a sentence. Falls back to the whole
+ * collapsed text when no sentence boundary exists.
+ * @param {string} str - Command description
+ * @returns {string}
+ */
+function firstSentence(str) {
+  if (!str) return ''
+  // A blank line separates the summary from the long text even when the
+  // summary has no terminal period ("Install Redpanda Check\n\nThis
+  // command..."), so cut at the paragraph break before joining the
+  // hard-wrapped lines within it.
+  const firstParagraph = String(str).split(/\n\s*\n/, 1)[0]
+  const singleLine = firstParagraph.replace(/\s*\n+\s*/g, ' ').trim()
+  const protectedText = singleLine.replace(/(\d)\.(\d)/g, '$1__DECIMAL__$2')
+  const match = protectedText.match(/^.*?[.!?](?=\s|$)/)
+  const sentence = match ? match[0] : protectedText
+  return sentence.replace(/__DECIMAL__/g, '.').trim()
+}
+
+/**
+ * Render a flag value for display. Objects and arrays are JSON-encoded so
+ * they never render as [object Object].
+ * @param {*} value - Flag default value
+ * @returns {string}
+ */
+function formatFlagValue(value) {
+  if (value === undefined) return 'unset'
+  if (value === null) return 'null'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
 }
 
 module.exports = {
@@ -475,5 +755,7 @@ module.exports = {
   generateWhatsNewSection,
   flattenToMap,
   getFlagsMap,
-  compareFlags
+  compareFlags,
+  // Exported for testing
+  firstSentence
 }

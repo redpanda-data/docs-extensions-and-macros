@@ -18,7 +18,8 @@ const {
   shouldUsePartialDir,
   updateNavFile,
   getOutputPath,
-  findTopLevelWithSubcommands
+  findTopLevelWithSubcommands,
+  generateRpkDocs
 } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
 
 describe('rpk Docs Generation', () => {
@@ -236,6 +237,22 @@ describe('rpk Docs Generation', () => {
       expect(formatDescription('')).toBe('')
       expect(formatDescription(null)).toBe('')
       expect(formatDescription(undefined)).toBe('')
+    })
+
+    test('strips a dangling e.g. with nothing after it', () => {
+      // Upstream rpai help ends some flag descriptions mid-example; the
+      // e.g. transform would otherwise render "for example,."
+      const input = 'fields optionally suffixed with " desc" (default ascending), e.g.'
+      expect(formatDescription(input)).toBe('fields optionally suffixed with " desc" (default ascending)')
+    })
+
+    test('keeps e.g. transform when an example follows', () => {
+      expect(formatDescription('durations, e.g. 30s or 1.5m')).toBe('durations, for example, 30s or 1.5m')
+    })
+
+    test('removes stray space before a closing parenthesis', () => {
+      const input = 'topic:partition_id (repeatable; e.g. -t foo:0,1,2 )'
+      expect(formatDescription(input)).toBe('topic:partition_id (repeatable; for example, `-t` foo:0,1,2)')
     })
 
     test('converts markdown-style dash lists to AsciiDoc asterisk lists', () => {
@@ -786,6 +803,7 @@ Specify a time range.`
       const nav = [
         '* xref:get-started:index.adoc[]',
         '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk.adoc[]',
         '*** xref:reference:rpk/rpk-commands.adoc[]',
         '*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]',
         '*** xref:reference:rpk/rpk-topic/rpk-topic.adoc[]',
@@ -803,9 +821,12 @@ Specify a time range.`
       expect(written).toContain('** xref:reference:rpk/index.adoc[rpk Commands]')
       expect(written).toContain('*** xref:reference:rpk/rpk-commands.adoc[]')
       expect(written).toContain('*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]')
-      // The root rpk command is represented by the hand-written index.adoc
-      // landing page; it must not get its own generated rpk.adoc nav entry.
-      expect(written).not.toContain('xref:reference:rpk/rpk.adoc[]')
+      // The generated root rpk.adoc page is listed ahead of the hand-written
+      // entries; without it Antora reports the page as unlisted.
+      const lines = written.split('\n')
+      const rootIdx = lines.indexOf('*** xref:reference:rpk/rpk.adoc[]')
+      expect(rootIdx).toBeGreaterThan(-1)
+      expect(rootIdx).toBeLessThan(lines.indexOf('*** xref:reference:rpk/rpk-commands.adoc[]'))
     })
 
     test('generates entries at correct nesting depths', () => {
@@ -947,5 +968,380 @@ Specify a time range.`
       expect(result.navUpdated).toBe(true)
       expect(result.navEntriesGenerated).toBe(3)
     })
+
+    test('preserves nav entries for protected plugins absent from the tree', () => {
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk-connect/rpk-connect.adoc[]',
+        '**** xref:reference:rpk/rpk-connect/rpk-connect-run.adoc[]',
+        '*** xref:reference:rpk/rpk-topic/rpk-topic.adoc[]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      // connect is entirely absent from this run's tree
+      const tree = makeTree(['rpk topic', 'rpk topic create'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+      updateNavFile(navPath, commands, {}, topLevel, ['connect'])
+
+      const written = fs.readFileSync(navPath, 'utf8')
+      expect(written).toContain('*** xref:reference:rpk/rpk-connect/rpk-connect.adoc[]')
+      expect(written).toContain('**** xref:reference:rpk/rpk-connect/rpk-connect-run.adoc[]')
+      expect(written).toContain('*** xref:reference:rpk/rpk-topic/rpk-topic.adoc[]')
+    })
+
+    test('does not duplicate preserved entries that also exist in regenerated output', () => {
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk-connect/rpk-connect.adoc[]',
+        '**** xref:reference:rpk/rpk-connect/rpk-connect-run.adoc[]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      // connect IS in this run's tree, but protection wins: no connect
+      // entries are generated, and the previous nav block is preserved in
+      // place exactly once — never regenerated AND preserved.
+      const tree = makeTree(['rpk connect', 'rpk connect run', 'rpk topic', 'rpk topic create'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+      updateNavFile(navPath, commands, {}, topLevel, ['connect'])
+
+      const written = fs.readFileSync(navPath, 'utf8')
+      const count = (needle) => written.split('\n').filter(l => l.includes(needle)).length
+      expect(count('rpk-connect/rpk-connect.adoc')).toBe(1)
+      expect(count('rpk-connect/rpk-connect-run.adoc')).toBe(1)
+      expect(count('rpk-topic/rpk-topic.adoc')).toBe(1)
+    })
+
+    test('protected-plugin preservation is idempotent across runs', () => {
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk-connect/rpk-connect.adoc[]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      const tree = makeTree(['rpk topic', 'rpk topic create'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+
+      updateNavFile(navPath, commands, {}, topLevel, ['connect'])
+      const firstRun = fs.readFileSync(navPath, 'utf8')
+      updateNavFile(navPath, commands, {}, topLevel, ['connect'])
+      const secondRun = fs.readFileSync(navPath, 'utf8')
+
+      expect(firstRun).toBe(secondRun)
+      expect(firstRun.split('\n').filter(l => l.includes('rpk-connect/rpk-connect.adoc')).length).toBe(1)
+    })
+
+    test('splices preserved plugin entries in place under the plugin parent, not at the end', () => {
+      // Realistic pre-GA shim scenario: the previous nav has the full k8s
+      // block; this run's tree has only the k8s shim.
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk.adoc[]',
+        '*** xref:reference:rpk/rpk-commands.adoc[]',
+        '*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]',
+        '*** xref:reference:rpk/rpk-iotune.adoc[]',
+        '*** xref:reference:rpk/rpk-k8s/rpk-k8s.adoc[]',
+        '**** xref:reference:rpk/rpk-k8s/rpk-k8s-install.adoc[]',
+        '**** xref:reference:rpk/rpk-k8s/rpk-k8s-multicluster.adoc[]',
+        '***** xref:reference:rpk/rpk-k8s/rpk-k8s-multicluster-bootstrap.adoc[]',
+        '**** xref:reference:rpk/rpk-k8s/rpk-k8s-uninstall.adoc[]',
+        '*** xref:reference:rpk/rpk-version.adoc[]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      const tree = makeTree([
+        'rpk iotune',
+        'rpk k8s', 'rpk k8s install', 'rpk k8s uninstall', 'rpk k8s upgrade',
+        'rpk version'
+      ])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+      updateNavFile(navPath, commands, {}, topLevel, ['k8s'])
+
+      const written = fs.readFileSync(navPath, 'utf8')
+      const outLines = written.split('\n')
+      const idx = (needle) => outLines.findIndex(l => l.includes(needle))
+
+      // The whole k8s block stays together, in its original position:
+      // directly after rpk-iotune, parent first, children nested under it,
+      // and rpk-version still follows the block — nothing lands at the end.
+      const parentIdx = idx('rpk-k8s/rpk-k8s.adoc')
+      expect(parentIdx).toBe(idx('rpk-iotune.adoc') + 1)
+      expect(idx('rpk-k8s-install.adoc')).toBe(parentIdx + 1)
+      expect(idx('rpk-k8s-multicluster.adoc')).toBe(parentIdx + 2)
+      expect(idx('rpk-k8s-multicluster-bootstrap.adoc')).toBe(parentIdx + 3)
+      expect(idx('rpk-k8s-uninstall.adoc')).toBe(parentIdx + 4)
+      expect(idx('rpk-version.adoc')).toBe(parentIdx + 5)
+
+      // In this scenario the rebuilt nav is byte-identical to the input.
+      expect(written).toBe(nav)
+    })
+
+    test('keeps a fully absent plugin block in its original position', () => {
+      const nav = [
+        '** xref:reference:rpk/index.adoc[rpk Commands]',
+        '*** xref:reference:rpk/rpk.adoc[]',
+        '*** xref:reference:rpk/rpk-commands.adoc[]',
+        '*** xref:reference:rpk/rpk-x-options.adoc[rpk -X]',
+        '*** xref:reference:rpk/rpk-connect/rpk-connect.adoc[]',
+        '**** xref:reference:rpk/rpk-connect/rpk-connect-run.adoc[]',
+        '*** xref:reference:rpk/rpk-topic/rpk-topic.adoc[]',
+        '**** xref:reference:rpk/rpk-topic/rpk-topic-create.adoc[]',
+        '** xref:reference:glossary.adoc[]',
+      ].join('\n')
+
+      const navPath = makeNav(nav)
+      // connect is entirely absent from this run's tree
+      const tree = makeTree(['rpk topic', 'rpk topic create'])
+      const commands = flattenCommands(tree)
+      const topLevel = findTopLevelWithSubcommands(tree)
+      updateNavFile(navPath, commands, {}, topLevel, ['connect'])
+
+      const written = fs.readFileSync(navPath, 'utf8')
+      expect(written).toBe(nav)
+    })
+  })
+
+  describe('stale file cleanup with protected plugins', () => {
+    let tmpDir
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-cleanup-test-'))
+    })
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    const writePage = (...segments) => {
+      const filePath = path.join(tmpDir, ...segments)
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, '= Existing page\n', 'utf8')
+      return filePath
+    }
+
+    const cmd = (name, extra = {}) => ({
+      name,
+      description: `${name} command.`,
+      usage: `rpk ${name} [flags]`,
+      flags: [],
+      ...extra
+    })
+
+    test('pages under a protected plugin dir survive the sweep while a stale non-plugin page is deleted', async () => {
+      // Pre-existing pages from an earlier run where the connect plugin
+      // installed successfully and rpk topic had a "describe" subcommand.
+      const connectRoot = writePage('rpk-connect', 'rpk-connect.adoc')
+      const connectRun = writePage('rpk-connect', 'rpk-connect-run.adoc')
+      const staleTopic = writePage('rpk-topic', 'rpk-topic-describe.adoc')
+
+      // This run's tree: connect is entirely absent (failed plugin install),
+      // and rpk topic no longer has "describe".
+      const tree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          cmd('topic', { commands: [cmd('create')] })
+        ],
+        global_flags: []
+      }
+
+      const result = await generateRpkDocs({
+        tree,
+        outputDir: tmpDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      // Protected plugin pages must survive: connect is a known plugin whose
+      // subtree is absent from this run's tree.
+      expect(fs.existsSync(connectRoot)).toBe(true)
+      expect(fs.existsSync(connectRun)).toBe(true)
+
+      // The genuinely stale non-plugin page must be swept.
+      expect(fs.existsSync(staleTopic)).toBe(false)
+      expect(result.filesDeleted).toBe(1)
+
+      // Regenerated pages exist as usual.
+      expect(fs.existsSync(path.join(tmpDir, 'rpk-topic', 'rpk-topic.adoc'))).toBe(true)
+      expect(fs.existsSync(path.join(tmpDir, 'rpk-topic', 'rpk-topic-create.adoc'))).toBe(true)
+    }, 30000)
+
+    test('shim-only plugin subtree still protects the plugin dir', async () => {
+      // Page from an earlier run where the plugin binary was installed.
+      const connectRun = writePage('rpk-connect', 'rpk-connect-run.adoc')
+
+      // This run's tree has the connect shim (install/uninstall/upgrade)
+      // but none of the real plugin commands: the plugin failed to install.
+      const tree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          cmd('connect', { commands: [cmd('install'), cmd('uninstall'), cmd('upgrade')] }),
+          cmd('topic', { commands: [cmd('create')] })
+        ],
+        global_flags: []
+      }
+
+      const result = await generateRpkDocs({
+        tree,
+        outputDir: tmpDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      // The shim-only subtree marks connect as auto-protected, so the page
+      // written by the earlier (successful) run is not treated as stale.
+      expect(fs.existsSync(connectRun)).toBe(true)
+      expect(result.filesDeleted).toBe(0)
+    }, 30000)
+
+    test('explicitly protected plugins are honored alongside auto-protection', async () => {
+      const aiPage = writePage('rpk-ai', 'rpk-ai-agent.adoc')
+      const stale = writePage('rpk-cluster', 'rpk-cluster-old.adoc')
+
+      const tree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          cmd('cluster', { commands: [cmd('health')] })
+        ],
+        global_flags: []
+      }
+
+      const result = await generateRpkDocs({
+        tree,
+        outputDir: tmpDir,
+        rpkVersion: 'test',
+        pluginVersions: {},
+        protectedPlugins: ['ai']
+      })
+
+      expect(fs.existsSync(aiPage)).toBe(true)
+      expect(fs.existsSync(stale)).toBe(false)
+      expect(result.filesDeleted).toBe(1)
+    }, 30000)
+
+    test('shim-only plugin pages are not rewritten — parent page content stays untouched', async () => {
+      // Pages from an earlier run where the connect plugin was installed:
+      // the parent page documents the full plugin (including `run` in its
+      // Subcommands table) and a child page exists for the real command.
+      const parentContent = '= rpk connect\n\nFull plugin page with run subcommand.\n'
+      const parent = path.join(tmpDir, 'rpk-connect', 'rpk-connect.adoc')
+      fs.mkdirSync(path.dirname(parent), { recursive: true })
+      fs.writeFileSync(parent, parentContent, 'utf8')
+      const childRun = writePage('rpk-connect', 'rpk-connect-run.adoc')
+      const childContent = fs.readFileSync(childRun, 'utf8')
+
+      // This run's tree has only the connect shim.
+      const tree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          cmd('connect', { commands: [cmd('install'), cmd('uninstall'), cmd('upgrade')] }),
+          cmd('topic', { commands: [cmd('create')] })
+        ],
+        global_flags: []
+      }
+
+      await generateRpkDocs({
+        tree,
+        outputDir: tmpDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      // The parent page must not be regenerated with shim-only content, and
+      // the child page must not become an orphan or change.
+      expect(fs.readFileSync(parent, 'utf8')).toBe(parentContent)
+      expect(fs.readFileSync(childRun, 'utf8')).toBe(childContent)
+
+      // No shim pages are written under the protected subtree.
+      expect(fs.existsSync(path.join(tmpDir, 'rpk-connect', 'rpk-connect-install.adoc'))).toBe(false)
+      expect(fs.existsSync(path.join(tmpDir, 'rpk-connect', 'rpk-connect-uninstall.adoc'))).toBe(false)
+      expect(fs.existsSync(path.join(tmpDir, 'rpk-connect', 'rpk-connect-upgrade.adoc'))).toBe(false)
+
+      // Non-plugin pages regenerate as usual.
+      expect(fs.existsSync(path.join(tmpDir, 'rpk-topic', 'rpk-topic.adoc'))).toBe(true)
+      expect(fs.existsSync(path.join(tmpDir, 'rpk-topic', 'rpk-topic-create.adoc'))).toBe(true)
+    }, 30000)
+
+    test('fully installed plugin regenerates pages and sweeps its stale files as usual', async () => {
+      // Previous run left a page for a subcommand that no longer exists.
+      const stale = writePage('rpk-connect', 'rpk-connect-removed.adoc')
+      const parent = path.join(tmpDir, 'rpk-connect', 'rpk-connect.adoc')
+      fs.writeFileSync(parent, '= Old parent page\n', 'utf8')
+
+      // This run's tree has the real plugin commands (beyond the shim), so
+      // connect is NOT protected and generation proceeds normally.
+      const tree = {
+        name: 'rpk',
+        description: 'Root command',
+        commands: [
+          cmd('connect', {
+            commands: [cmd('install'), cmd('uninstall'), cmd('upgrade'), cmd('run')]
+          })
+        ],
+        global_flags: []
+      }
+
+      const result = await generateRpkDocs({
+        tree,
+        outputDir: tmpDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      // Parent page is regenerated (content replaced) and the real
+      // subcommand page is written.
+      expect(fs.readFileSync(parent, 'utf8')).not.toBe('= Old parent page\n')
+      expect(fs.readFileSync(parent, 'utf8')).toContain('rpk connect')
+      expect(fs.existsSync(path.join(tmpDir, 'rpk-connect', 'rpk-connect-run.adoc'))).toBe(true)
+
+      // The genuinely stale page is swept.
+      expect(fs.existsSync(stale)).toBe(false)
+      expect(result.filesDeleted).toBe(1)
+    }, 30000)
+  })
+})
+
+describe('capToTwoSentences with code blocks', () => {
+  const { capToTwoSentences } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  test('ends the summary at a colon that introduces a code block', () => {
+    const input = 'Prints a config according to an expression. The expression takes three lists, divided by slashes:\n\n[,text]\n----\nredpanda-connect create stdin/bloblang,awk/nats\n----\n\nIf omitted a default config is created.'
+    // The block and its dangling colon introducer are both dropped
+    expect(capToTwoSentences(input)).toBe('Prints a config according to an expression.')
+  })
+
+  test('drops a mid-prose block and keeps surrounding sentences', () => {
+    const input = 'Reports progress.\n\n[,bash]\n----\nrpk thing status 4\n----\n\nUse --detailed for more.'
+    expect(capToTwoSentences(input)).toBe('Reports progress. Use --detailed for more.')
+  })
+})
+
+describe('placeholder brace escaping', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  test('escapes template placeholders so Asciidoctor keeps them', () => {
+    const input = 'Enable code mode: adds {name}_search and {name}_execute tools.'
+    const out = formatDescription(input)
+    expect(out).toContain('\\{name}_search')
+    expect(out).toContain('\\{name}_execute')
+  })
+
+  test('leaves a bare vbar attribute in prose alone', () => {
+    // {vbar} in prose is a real attribute (pipe escaping); placeholders in
+    // backtick spans were already escaped by the span-protection step
+    const input = 'Format: `table{vbar}json` uses {vbar} in prose.'
+    const out = formatDescription(input)
+    expect(out).toContain('uses {vbar} in prose')
+    expect(out).toContain('`table\\{vbar}json`')
   })
 })

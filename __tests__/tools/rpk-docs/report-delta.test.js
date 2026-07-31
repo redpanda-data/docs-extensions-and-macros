@@ -197,6 +197,198 @@ describe('rpk Docs Diff Generation', () => {
       expect(diff.comparison.newVersion).toBe('v2.0.0')
       expect(diff.comparison.timestamp).toBeDefined()
     })
+
+    test('detects flag type changes', () => {
+      const diff = generateRpkDiff(oldTree, newTree, { oldVersion: 'v1', newVersion: 'v2' })
+      expect(diff.summary.changedFlagTypes).toBe(1)
+      expect(diff.details.changedFlagTypes[0]).toMatchObject({
+        commandPath: 'rpk topic create',
+        flagName: 'partitions',
+        oldType: 'int',
+        newType: 'int32'
+      })
+    })
+
+    test('detects flag default, requirement, and description changes', () => {
+      const before = {
+        name: 'rpk',
+        commands: [{
+          name: 'topic',
+          flags: [
+            { name: 'timeout', type: 'duration', default: '5s', description: 'Wait time', required: false }
+          ],
+          commands: []
+        }]
+      }
+      const after = {
+        name: 'rpk',
+        commands: [{
+          name: 'topic',
+          flags: [
+            { name: 'timeout', type: 'duration', default: '30s', description: 'Maximum wait time', required: true }
+          ],
+          commands: []
+        }]
+      }
+      const diff = generateRpkDiff(before, after)
+      expect(diff.summary.changedDefaults).toBe(1)
+      expect(diff.details.changedDefaults[0]).toMatchObject({ oldDefault: '5s', newDefault: '30s' })
+      expect(diff.summary.changedFlagRequirements).toBe(1)
+      expect(diff.details.changedFlagRequirements[0]).toMatchObject({ oldRequired: false, newRequired: true })
+      expect(diff.summary.changedFlagDescriptions).toBe(1)
+    })
+  })
+
+  describe('deprecation detection', () => {
+    const oldTreeDep = {
+      name: 'rpk',
+      commands: [
+        { name: 'redpanda', commands: [{ name: 'admin', commands: [{ name: 'brokers', commands: [{ name: 'list', commands: [] }] }] }] },
+        { name: 'gone', commands: [] }
+      ]
+    }
+    const newTreeDep = {
+      name: 'rpk',
+      commands: [
+        { name: 'redpanda', commands: [] }
+      ]
+    }
+    const newDeprecated = {
+      'rpk redpanda admin': {
+        deprecated: true,
+        _note: 'Hidden: true, found by scanning Go source',
+        deprecatedMessage: 'use `rpk cluster` subcommands',
+        replacement: 'Use xref:reference:rpk/rpk-cluster/rpk-cluster.adoc[`rpk cluster`] instead.'
+      }
+    }
+
+    test('reports newly deprecated commands with metadata', () => {
+      const diff = generateRpkDiff(oldTreeDep, newTreeDep, {
+        newVersion: 'v2',
+        oldDeprecatedCommands: {},
+        newDeprecatedCommands: newDeprecated
+      })
+      expect(diff.summary.newlyDeprecatedCommands).toBe(1)
+      const dep = diff.details.newlyDeprecatedCommands[0]
+      expect(dep.path).toBe('rpk redpanda admin')
+      expect(dep.hidden).toBe(true)
+      expect(dep.message).toContain('rpk cluster')
+      expect(dep.replacement).toContain('xref:')
+    })
+
+    test('reclassifies hidden-deprecated subtree removals as deprecations', () => {
+      const diff = generateRpkDiff(oldTreeDep, newTreeDep, {
+        newVersion: 'v2',
+        oldDeprecatedCommands: {},
+        newDeprecatedCommands: newDeprecated
+      })
+      // rpk gone is a genuine removal; the admin family is not
+      expect(diff.details.removedCommands.map(c => c.path)).toEqual(['rpk gone'])
+      const dep = diff.details.newlyDeprecatedCommands[0]
+      expect(dep.affectedSubcommands).toEqual(
+        expect.arrayContaining(['rpk redpanda admin brokers', 'rpk redpanda admin brokers list'])
+      )
+    })
+
+    test('already-deprecated commands do not re-report', () => {
+      const diff = generateRpkDiff(oldTreeDep, newTreeDep, {
+        newVersion: 'v2',
+        oldDeprecatedCommands: newDeprecated,
+        newDeprecatedCommands: newDeprecated
+      })
+      expect(diff.summary.newlyDeprecatedCommands).toBe(0)
+      // Without a NEW deprecation, the subtree disappearance counts as removal
+      expect(diff.summary.removedCommands).toBe(4)
+    })
+  })
+
+  describe('generateWhatsNewSection change coverage', () => {
+    const { generateWhatsNewSection } = require('../../../tools/rpk-docs/report-delta.js')
+
+    const baseDiff = (details) => ({
+      comparison: { oldVersion: 'v1', newVersion: 'v2' },
+      summary: {},
+      details: {
+        newCommands: [],
+        removedCommands: [],
+        newFlags: [],
+        removedFlags: [],
+        changedDefaults: [],
+        changedFlagTypes: [],
+        descriptionChanges: [],
+        ...details
+      }
+    })
+
+    test('renders removed commands and flags', () => {
+      const section = generateWhatsNewSection(baseDiff({
+        removedCommands: [{ path: 'rpk old command' }],
+        removedFlags: [{ commandPath: 'rpk topic create', flagName: 'legacy' }]
+      }))
+      expect(section).toContain('=== Removed commands')
+      expect(section).toContain('`rpk old command`')
+      expect(section).toContain('=== Removed flags')
+      expect(section).toContain('`--legacy`')
+    })
+
+    test('renders changed flag types', () => {
+      const section = generateWhatsNewSection(baseDiff({
+        changedFlagTypes: [{ commandPath: 'rpk topic create', flagName: 'partitions', oldType: 'int', newType: 'int32' }]
+      }))
+      expect(section).toContain('=== Changed flag types')
+      expect(section).toContain('`int32`')
+    })
+
+    test('renders array defaults as JSON, not [object Object]', () => {
+      const section = generateWhatsNewSection(baseDiff({
+        changedDefaults: [{ commandPath: 'rpk topic create', flagName: 'brokers', oldDefault: ['a'], newDefault: ['a', 'b'] }]
+      }))
+      expect(section).toContain('["a","b"]')
+      expect(section).not.toContain('[object Object]')
+    })
+
+    test('returns empty string when nothing changed', () => {
+      expect(generateWhatsNewSection(baseDiff({}))).toBe('')
+    })
+
+    test('routes command-group roots into their directory', () => {
+      const section = generateWhatsNewSection(baseDiff({
+        newCommands: [
+          { path: 'rpk check', description: 'Production readiness checks.' },
+          { path: 'rpk check run', description: 'Run the checks.' },
+          { path: 'rpk version', description: 'Prints the version.' }
+        ]
+      }), { hasSubcommands: (p) => p === 'rpk check' })
+      expect(section).toContain('xref:reference:rpk/rpk-check/rpk-check.adoc[`rpk check`]')
+      expect(section).toContain('xref:reference:rpk/rpk-check/rpk-check-run.adoc[`rpk check run`]')
+      expect(section).toContain('xref:reference:rpk/rpk-version.adoc[`rpk version`]')
+    })
+
+    test('caps bullet descriptions at a sentence boundary', () => {
+      const section = generateWhatsNewSection(baseDiff({
+        newCommands: [{
+          path: 'rpk ai llm-provider diff',
+          description: 'Dry-run of apply for LLM providers. Prints, per manifest, whether apply would\ncreate, update, or leave the resource unchanged.'
+        }]
+      }))
+      expect(section).toContain(' - Dry-run of apply for LLM providers.')
+      expect(section).not.toContain('whether apply would')
+    })
+
+    test('renders deprecated commands with replacement and affected subcommands', () => {
+      const section = generateWhatsNewSection(baseDiff({
+        newlyDeprecatedCommands: [{
+          path: 'rpk redpanda admin',
+          message: 'use `rpk cluster` subcommands',
+          replacement: 'Use xref:reference:rpk/rpk-cluster/rpk-cluster.adoc[`rpk cluster`] instead.',
+          hidden: true,
+          affectedSubcommands: ['rpk redpanda admin brokers']
+        }]
+      }))
+      expect(section).toContain('=== Deprecated commands')
+      expect(section).toContain('xref:reference:rpk/rpk-cluster/rpk-cluster.adoc')
+      expect(section).toContain('rpk redpanda admin brokers')
+    })
   })
 
   describe('generateMarkdownSummary', () => {
@@ -315,5 +507,140 @@ describe('rpk Docs Diff Generation', () => {
       expect(consoleSpy).toHaveBeenCalled()
       consoleSpy.mockRestore()
     })
+  })
+})
+
+describe('firstSentence', () => {
+  const { firstSentence } = require('../../../tools/rpk-docs/report-delta.js')
+
+  test('cuts an unterminated summary at the paragraph break', () => {
+    // cobra descriptions often open with a periodless summary line
+    expect(firstSentence('Install Redpanda Check\n\nThis command installs the latest version by default.'))
+      .toBe('Install Redpanda Check')
+  })
+
+  test('joins hard-wrapped lines within the first paragraph', () => {
+    expect(firstSentence('Collects environment data that can help debug\nissues with a cluster. It then bundles the data.'))
+      .toBe('Collects environment data that can help debug issues with a cluster.')
+  })
+
+  test('keeps decimal numbers intact', () => {
+    expect(firstSentence('Installs version 4.32.0 of the plugin. More text.'))
+      .toBe('Installs version 4.32.0 of the plugin.')
+  })
+})
+
+describe('flag data backfill guard', () => {
+  const { generateRpkDiff } = require('../../../tools/rpk-docs/report-delta.js')
+
+  const tree = (cmds) => ({ name: 'rpk', commands: cmds })
+
+  test('does not report backfilled plugin flags as new', () => {
+    // v26.1.12-style baseline: plugin command exists but no flags captured
+    const oldTree = tree([{ name: 'connect', commands: [{ name: 'streams', flags: [] }] }])
+    const newTree = tree([{
+      name: 'connect',
+      commands: [{
+        name: 'streams',
+        flags: [{ name: 'observability', type: 'string' }, { name: 'chilled', type: 'bool' }]
+      }]
+    }])
+
+    const diff = generateRpkDiff(oldTree, newTree, { oldVersion: 'v1', newVersion: 'v2' })
+    expect(diff.summary.newFlags).toBe(0)
+    expect(diff.summary.flagDataBackfilled).toBe(1)
+    expect(diff.details.flagDataBackfilled).toEqual([
+      { commandPath: 'rpk connect streams', flagCount: 2 }
+    ])
+  })
+
+  test('still detects description changes on backfilled commands', () => {
+    const oldTree = tree([{ name: 'connect', commands: [{ name: 'streams', flags: [], description: 'old' }] }])
+    const newTree = tree([{ name: 'connect', commands: [{ name: 'streams', flags: [{ name: 'x' }], description: 'new' }] }])
+
+    const diff = generateRpkDiff(oldTree, newTree)
+    expect(diff.summary.descriptionChanges).toBe(1)
+  })
+
+  test('reports genuinely new flags when the baseline has flag data', () => {
+    const oldTree = tree([{ name: 'cluster', commands: [{ name: 'info', flags: [{ name: 'brokers', type: 'string' }] }] }])
+    const newTree = tree([{
+      name: 'cluster',
+      commands: [{ name: 'info', flags: [{ name: 'brokers', type: 'string' }, { name: 'detailed', type: 'bool' }] }]
+    }])
+
+    const diff = generateRpkDiff(oldTree, newTree, { newVersion: 'v26.2.1' })
+    expect(diff.summary.flagDataBackfilled).toBe(0)
+    expect(diff.summary.newFlags).toBe(1)
+    expect(diff.details.newFlags[0]).toMatchObject({
+      commandPath: 'rpk cluster info',
+      flagName: 'detailed',
+      introducedInVersion: 'v26.2.1'
+    })
+  })
+
+  test('new commands are unaffected by the guard', () => {
+    const oldTree = tree([])
+    const newTree = tree([{ name: 'policy', flags: [{ name: 'format' }], commands: [] }])
+
+    const diff = generateRpkDiff(oldTree, newTree, { newVersion: 'v26.2.1' })
+    expect(diff.summary.newCommands).toBe(1)
+    expect(diff.summary.flagDataBackfilled).toBe(0)
+  })
+})
+
+describe('flag data backfill guard: group-level baseline detection', () => {
+  const { generateRpkDiff } = require('../../../tools/rpk-docs/report-delta.js')
+  const tree = (cmds) => ({ name: 'rpk', commands: cmds })
+
+  test('a zero-flag core command in a group with baseline data gets genuine new flags', () => {
+    // rpk cluster config status gained --format; the cluster group has
+    // baseline flag data elsewhere, so this is not backfill
+    const oldTree = tree([{
+      name: 'cluster',
+      commands: [
+        { name: 'health', flags: [{ name: 'watch', type: 'bool' }] },
+        { name: 'config', commands: [{ name: 'status', flags: [] }] }
+      ]
+    }])
+    const newTree = tree([{
+      name: 'cluster',
+      commands: [
+        { name: 'health', flags: [{ name: 'watch', type: 'bool' }] },
+        { name: 'config', commands: [{ name: 'status', flags: [{ name: 'format', type: 'string' }] }] }
+      ]
+    }])
+
+    const diff = generateRpkDiff(oldTree, newTree, { newVersion: 'v26.2.1' })
+    expect(diff.summary.flagDataBackfilled).toBe(0)
+    expect(diff.details.newFlags).toEqual([expect.objectContaining({
+      commandPath: 'rpk cluster config status',
+      flagName: 'format'
+    })])
+  })
+
+  test('shim flags do not count as plugin baseline data', () => {
+    // Old connect subtree only has the rpk-native install shim flag; the
+    // plugin commands themselves recorded no flags, so it is backfill
+    const oldTree = tree([{
+      name: 'connect',
+      commands: [
+        { name: 'install', flags: [{ name: 'connect-version', type: 'string' }] },
+        { name: 'streams', flags: [] }
+      ]
+    }])
+    const newTree = tree([{
+      name: 'connect',
+      commands: [
+        { name: 'install', flags: [{ name: 'connect-version', type: 'string' }] },
+        { name: 'streams', flags: [{ name: 'observability', type: 'string' }] }
+      ]
+    }])
+
+    const diff = generateRpkDiff(oldTree, newTree)
+    expect(diff.summary.newFlags).toBe(0)
+    expect(diff.details.flagDataBackfilled).toEqual([
+      { commandPath: 'rpk connect streams', flagCount: 1 }
+    ])
   })
 })

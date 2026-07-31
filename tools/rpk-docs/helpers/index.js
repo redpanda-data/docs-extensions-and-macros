@@ -52,16 +52,26 @@ function shortDescription(str) {
     })
   }
 
-  const sentences = normalized.match(/[^.!?]+[.!?]+(?:\s|$)/g)
+  // Protect decimal points (OAuth 2.0) so version numbers neither split a
+  // sentence nor cause the leading fragment to be dropped
+  normalized = normalized.replace(/(\d)\.(\d)/g, '$1__DECIMAL__$2')
+
+  let sentences = normalized.match(/[^.!?]+[.!?]+(?:\s|$)/g)
   if (!sentences || sentences.length === 0) {
-    let result = normalized
+    let result = normalized.replace(/__DECIMAL__/g, '.')
     placeholders.forEach(({ ph, original }) => {
       result = result.replace(ph, original)
     })
     return result.trim()
   }
 
-  let result = sentences.slice(0, 2).join('')
+  // Never drop an unterminated leading fragment
+  const firstIdx = normalized.indexOf(sentences[0])
+  if (firstIdx > 0) {
+    sentences = [normalized.slice(0, firstIdx) + sentences[0], ...sentences.slice(1)]
+  }
+
+  let result = sentences.slice(0, 2).join('').replace(/__DECIMAL__/g, '.')
   placeholders.forEach(({ ph, original }) => {
     result = result.replace(ph, original)
   })
