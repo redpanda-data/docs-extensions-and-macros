@@ -1000,7 +1000,16 @@ automation
     // the new JSON so they appear in the generated documentation.
     if (needsDiff) {
       const diffOutputDir = overridesPath ? path.dirname(path.resolve(overridesPath)) : outputDir
-      generatePropertyComparisonReport(oldTag, newTag, diffOutputDir)
+      try {
+        generatePropertyComparisonReport(oldTag, newTag, diffOutputDir)
+      } catch (err) {
+        // A missing baseline only warns inside generatePropertyComparisonReport.
+        // Reaching this catch means both inputs existed and the comparison
+        // itself failed, so fail the run: continuing would silently drop
+        // removed-deprecated restoration and "Introduced in" version stamping.
+        console.error(`Error: Property comparison failed: ${err.message}`)
+        process.exit(1)
+      }
 
       try {
         const diffReportPath = path.join(diffOutputDir, `redpanda-property-changes-${oldTag}-to-${newTag}.json`)
@@ -1020,7 +1029,11 @@ automation
           }
         }
       } catch (err) {
-        console.warn(`Warning: Failed to generate PR summary: ${err.message}`)
+        // The diff report exists but could not be read or applied. Fail the
+        // run rather than shipping docs that are missing removed-deprecated
+        // restoration or version stamps.
+        console.error(`Error: Failed to process the property diff report: ${err.message}`)
+        process.exit(1)
       }
 
       cleanupOldDiffs(diffOutputDir)
@@ -1048,15 +1061,32 @@ automation
 
       try {
         const jsonDir = path.resolve(outputDir, 'attachments')
+        // Invariant: always retain the comparison pair this run actually used
+        // (the current tag's JSON and the diff baseline's JSON) in addition to
+        // the 2 newest versioned JSONs. A backport run can compare tags that
+        // are not the 2 newest, and the next run's comparison needs its
+        // baseline JSON to survive. Mirrors the retention in
+        // tools/property-extractor/Makefile (generate-docs cleanup).
+        const parseVersion = f => f.match(/^redpanda-properties-v([\d.]+)\.json$/)[1].split('.').map(Number)
+        const byVersionDesc = (a, b) => {
+          const [va, vb] = [parseVersion(a), parseVersion(b)]
+          for (let i = 0; i < Math.max(va.length, vb.length); i++) {
+            if ((vb[i] || 0) !== (va[i] || 0)) return (vb[i] || 0) - (va[i] || 0)
+          }
+          return 0
+        }
         const propertyFiles = fs.readdirSync(jsonDir)
           .filter(f => /^redpanda-properties-v[\d.]+\.json$/.test(f))
-          .sort()
+          .sort(byVersionDesc)
 
-        const keepFile = `redpanda-properties-${newTag}.json`
-        const filesToDelete = propertyFiles.filter(f => f !== keepFile)
+        const filesToKeep = new Set(propertyFiles.slice(0, 2))
+        for (const tag of [newTag, oldTag]) {
+          if (tag) filesToKeep.add(`redpanda-properties-${tag}.json`)
+        }
+        const filesToDelete = propertyFiles.filter(f => !filesToKeep.has(f))
 
         if (filesToDelete.length > 0) {
-          console.log('🧹 Cleaning up old property JSON files...')
+          console.log('🧹 Cleaning up old property JSON files (keeping the 2 newest plus the comparison pair)...')
           filesToDelete.forEach(file => {
             fs.unlinkSync(path.join(jsonDir, file))
             console.log(`   Deleted: ${file}`)
