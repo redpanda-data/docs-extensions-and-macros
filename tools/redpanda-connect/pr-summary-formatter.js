@@ -122,6 +122,25 @@ function renderBloblangChanges(data, includeVersion = false) {
  * @param {array} draftedConnectors - Array of newly drafted connectors
  * @returns {string} Formatted summary
  */
+/**
+ * Render the content-loss warning block that leads the PR summary. These
+ * warnings exist to stop a merge, so they go at the top of the summary body
+ * rather than into the collapsed workflow log where nobody reads them.
+ * @param {Array<{partial: string, sections: string[]}>} warnings
+ * @returns {string[]} lines (empty when there is nothing to warn about)
+ */
+function renderLostSectionWarnings(warnings) {
+  if (!Array.isArray(warnings) || warnings.length === 0) return [];
+  const lines = [];
+  lines.push('> [!WARNING]');
+  lines.push('> **This update deletes previously published metadata sections.** Review before merging: move the content to the connector page or restore it in the upstream description.');
+  for (const w of warnings) {
+    lines.push(`> - \`${w.partial}\` drops: ${w.sections.map((h) => `"${h}"`).join(', ')}`);
+  }
+  lines.push('');
+  return lines;
+}
+
 function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, draftedConnectors = null) {
   const lines = [];
 
@@ -133,6 +152,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
 
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
+  lines.push(...renderLostSectionWarnings(masterDiff?.lostSectionWarnings));
   lines.push('## Redpanda Connect Documentation Update');
   lines.push('');
   lines.push(`**Multi-Release Update:** ${startVersion} → ${endVersion}`);
@@ -538,6 +558,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   // Header with delimiters for GitHub Action parsing
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
+  lines.push(...renderLostSectionWarnings(diffData.lostSectionWarnings));
 
   // Detect if this is a master diff
   if (!isMultiVersion && diffData.releases && diffData.totalSummary) {

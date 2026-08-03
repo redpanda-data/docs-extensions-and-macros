@@ -377,6 +377,7 @@ async function generateRpcnConnectorDocs(options) {
   }
 
   let partialsWritten = 0;
+  const lostSectionWarnings = [];
   let draftsWritten   = 0;
   const partialFiles  = [];
   const draftFiles    = [];
@@ -445,6 +446,7 @@ async function generateRpcnConnectorDocs(options) {
             // it upstream before merging.
             const lost = lostMetadataSections(fs.readFileSync(mPath, 'utf8'), metadataOut);
             if (lost.length) {
+              lostSectionWarnings.push({ partial: path.relative(process.cwd(), mPath), sections: lost });
               console.warn(
                 `Warning: regenerated metadata partial ${path.relative(process.cwd(), mPath)} ` +
                 `drops previously published section(s): ${lost.map((h) => `"${h}"`).join(', ')}. ` +
@@ -676,7 +678,8 @@ async function generateRpcnConnectorDocs(options) {
     partialsWritten,
     draftsWritten,
     partialFiles,
-    draftFiles
+    draftFiles,
+    lostSectionWarnings
   };
 }
 

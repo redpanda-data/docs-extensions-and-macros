@@ -493,6 +493,36 @@ describe('metadata-utils: sectionHeadings / lostMetadataSections', () => {
     expect(sectionHeadings(text)).toEqual(['Metadata', 'Real subsection']);
   });
 
+  test('a fence-like line inside a ---- literal block does not swallow later headings', () => {
+    // The exact loss case this tripwire exists to catch: a literal block
+    // whose content shows a markdown fence. If the fence check ran first,
+    // the phantom fence state would eat the block closer and every heading
+    // after it, and the generator could overwrite published content with
+    // no warning.
+    const text = [
+      '== Metadata',
+      '',
+      '----',
+      '```yaml',
+      'looks: like a fence',
+      '----',
+      '',
+      '=== Real subsection after the block',
+    ].join('\n');
+    expect(sectionHeadings(text)).toEqual(['Metadata', 'Real subsection after the block']);
+  });
+
+  test('a ---- line inside a ``` fence does not open a literal block', () => {
+    const text = [
+      '```',
+      '----',
+      '```',
+      '',
+      '== Heading after the fence',
+    ].join('\n');
+    expect(sectionHeadings(text)).toEqual(['Heading after the fence']);
+  });
+
   test('returns [] for empty or non-string input', () => {
     expect(sectionHeadings('')).toEqual([]);
     expect(sectionHeadings(null)).toEqual([]);
@@ -585,5 +615,29 @@ describe('generator warns when regeneration drops a published metadata section',
       expect(warnings).toContain('shrunk_meta.adoc');
       expect(warnings).toContain('"Output CSV column order"');
     });
+  });
+});
+describe('PR summary leads with content-loss warnings', () => {
+  const { generatePRSummary } = require('../../tools/redpanda-connect/pr-summary-formatter.js');
+
+  const baseDiff = {
+    comparison: { oldVersion: '4.99.0', newVersion: '4.100.0' },
+    summary: {},
+    details: { newComponents: [], removedComponents: [], updatedComponents: [], newFields: [], removedFields: [], changedDefaults: [] }
+  };
+
+  test('renders the warning block at the top when sections were lost', () => {
+    const diff = { ...baseDiff, lostSectionWarnings: [{ partial: 'modules/components/partials/metadata/inputs/csv.adoc', sections: ['Output CSV column order'] }] };
+    const summary = generatePRSummary(diff);
+    const warnIdx = summary.indexOf('deletes previously published metadata sections');
+    const headerIdx = summary.indexOf('## Redpanda Connect Documentation Update');
+    expect(warnIdx).toBeGreaterThan(-1);
+    expect(warnIdx).toBeLessThan(headerIdx);
+    expect(summary).toContain('"Output CSV column order"');
+  });
+
+  test('emits no warning block when nothing was lost', () => {
+    const summary = generatePRSummary(baseDiff);
+    expect(summary).not.toContain('deletes previously published metadata sections');
   });
 });

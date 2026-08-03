@@ -130,15 +130,22 @@ function sectionHeadings (text) {
   let inBlock = false;
   let fence = null;
   for (const line of text.split('\n')) {
-    const fenceMatch = line.match(FENCE_DELIMITER);
-    if (fenceMatch) {
-      if (!fence) fence = fenceMatch[1][0];
-      else if (fenceMatch[1][0] === fence) fence = null;
+    // Layered state: while inside one delimiter kind, the only thing that
+    // matters is its own closer. A fence-like line inside a ---- literal
+    // block (or a ---- line inside a fence) is content, not a delimiter —
+    // treating it as one leaks the state and swallows every later heading.
+    if (inBlock) {
+      if (BLOCK_DELIMITER.test(line)) inBlock = false;
       continue;
     }
-    if (fence) continue;
-    if (BLOCK_DELIMITER.test(line)) { inBlock = !inBlock; continue; }
-    if (inBlock) continue;
+    if (fence) {
+      const closer = line.match(FENCE_DELIMITER);
+      if (closer && closer[1][0] === fence) fence = null;
+      continue;
+    }
+    const fenceMatch = line.match(FENCE_DELIMITER);
+    if (fenceMatch) { fence = fenceMatch[1][0]; continue; }
+    if (BLOCK_DELIMITER.test(line)) { inBlock = true; continue; }
     const m = line.match(/^=+\s+(\S.*)$/);
     if (m) headings.push(m[1].trim());
   }
