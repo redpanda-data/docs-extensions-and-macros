@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { updatePropertiesJsonWithVersion } = require('../../cli-utils/diff-utils.js');
+const { updatePropertiesJsonWithVersion, resolveDiffBaseline } = require('../../cli-utils/diff-utils.js');
 
 describe('updatePropertiesJsonWithVersion', () => {
   let tmpDir, jsonPath;
@@ -142,5 +142,46 @@ describe('updatePropertiesJsonWithVersion', () => {
     const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
     expect(data.definitions.enable_development_metrics.version).toBeUndefined();
     expect(data.properties.enable_development_metrics.version).toBe('v26.1.13');
+  });
+});
+
+describe('resolveDiffBaseline', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'diff-baseline-'));
+    fs.mkdirSync(path.join(tmpDir, 'attachments'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('uses the committed baseline when the old-tag attachment exists', () => {
+    const baseline = path.join(tmpDir, 'attachments', 'redpanda-properties-v26.1.14.json');
+    fs.writeFileSync(baseline, '{}');
+    const result = resolveDiffBaseline(tmpDir, 'v26.1.14');
+    expect(result.useCommitted).toBe(true);
+    expect(result.baselinePath).toBe(baseline);
+  });
+
+  it('falls back to extraction when no baseline exists', () => {
+    const result = resolveDiffBaseline(tmpDir, 'v26.1.14');
+    expect(result.useCommitted).toBe(false);
+  });
+
+  it('honors the regenerate flag even when a baseline exists', () => {
+    fs.writeFileSync(path.join(tmpDir, 'attachments', 'redpanda-properties-v26.1.14.json'), '{}');
+    const result = resolveDiffBaseline(tmpDir, 'v26.1.14', true);
+    expect(result.useCommitted).toBe(false);
+  });
+
+  it('rejects tags that traverse outside the attachments directory', () => {
+    expect(() => resolveDiffBaseline(tmpDir, '../../etc/passwd')).toThrow(/attachments directory/);
+    expect(() => resolveDiffBaseline(tmpDir, '../secrets')).toThrow(/attachments directory/);
+  });
+
+  it('rejects tags that resolve into a subdirectory of attachments', () => {
+    expect(() => resolveDiffBaseline(tmpDir, 'nested/v26.1.14')).toThrow(/attachments directory/);
   });
 });

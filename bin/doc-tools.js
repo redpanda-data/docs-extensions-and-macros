@@ -27,7 +27,8 @@ const {
   generatePropertyComparisonReport,
   updatePropertyOverridesWithVersion,
   updatePropertiesJsonWithVersion,
-  cleanupOldDiffs
+  cleanupOldDiffs,
+  resolveDiffBaseline
 } = require('../cli-utils/diff-utils')
 
 // Import other utilities
@@ -890,6 +891,7 @@ automation
   .option('-t, --tag <tag>', 'Git tag for released content (GA/beta)')
   .option('-b, --branch <branch>', 'Branch name for in-progress content')
   .option('--diff <oldTag>', 'Diff properties against <oldTag> and restore removed deprecated properties. Recommended for accurate output; falls back to latest-redpanda-tag from antora.yml if not specified')
+  .option('--regenerate-old-baseline', 'Re-extract the --diff tag from source instead of using the committed attachments/redpanda-properties-<oldTag>.json baseline')
   .option('--overrides <path>', 'Optional JSON file with property description overrides', 'docs-data/property-overrides.json')
   .option('--output-dir <dir>', 'Where to write all generated files', 'modules/reference')
   .option('--cloud-support', 'Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. Set the token as an environment variable using GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN', true)
@@ -982,7 +984,13 @@ automation
     // When a diff is needed, skip AsciiDoc generation during extraction so we
     // can merge removed deprecated properties first and generate only once.
     if (needsDiff) {
-      make(oldTag, overridesPath, templates, outputDir, { skipPartials: true })
+      const { useCommitted, baselinePath } = resolveDiffBaseline(outputDir, oldTag, options.regenerateOldBaseline)
+      if (useCommitted) {
+        console.log(`Using committed baseline for ${oldTag}: ${baselinePath}`)
+        console.log('   Pass --regenerate-old-baseline to rebuild it from source instead.')
+      } else {
+        make(oldTag, overridesPath, templates, outputDir, { skipPartials: true })
+      }
       make(newTag, overridesPath, templates, outputDir, { skipPartials: true })
     } else {
       make(newTag, overridesPath, templates, outputDir)

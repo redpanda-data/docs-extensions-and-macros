@@ -525,6 +525,9 @@ Branch name for in-progress content
 `--diff <oldTag>`::
 Diff properties against <oldTag> and restore removed deprecated properties. Recommended for accurate output; falls back to latest-redpanda-tag from antora.yml if not specified
 
+`--regenerate-old-baseline`::
+Re-extract the --diff tag from source instead of using the committed attachments/redpanda-properties-<oldTag>.json baseline
+
 `--overrides <path>`::
 Optional JSON file with property description overrides (default: "docs-data/property-overrides.json")
 
