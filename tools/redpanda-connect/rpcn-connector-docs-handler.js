@@ -519,21 +519,32 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
  * - `batching.processors[]`               -> `batching-processors`
  * - `sasl[].aws.credentials.from_ec2_role` -> `sasl-aws-credentials-from_ec2_role`
  *
+ * Collision caveat: Asciidoctor de-duplicates repeated IDs on a page by
+ * appending `-2`, `-3`, ... to later occurrences. If two fields on one page
+ * normalize to the same anchor, the generated link resolves to the first
+ * heading and the second gets the suffixed ID. This helper cannot detect
+ * that, so a wrong-but-plausible link on a page with near-duplicate field
+ * names should be checked against this behavior first.
+ *
  * @param {string} fieldName - Field name as it appears in the connector data
  * @returns {string} Fragment anchor matching the rendered heading ID
  */
 function fieldAnchor (fieldName) {
-  return String(fieldName)
+  const anchor = String(fieldName)
     .toLowerCase()
     // Characters that are invalid in section IDs (for example, `[` and `]`
-    // array markers) become spaces, mirroring Asciidoctor's substitution.
-    .replace(/[^ \w\-.]+/g, ' ')
+    // array markers) are removed outright, matching Asciidoctor's
+    // InvalidSectionIdCharsRx. The dots still supply the separators, so
+    // every `[]` case stays correct (`sasl[].aws` -> `sasl-aws`).
+    .replace(/[^ \w\-.]+/g, '')
     // idseparator '-' replaces runs of spaces and dots with a single hyphen.
     .replace(/[ .]+/g, '-')
     // idprefix '' means no leading separator, and Asciidoctor chomps a
     // trailing separator.
     .replace(/^-+/, '')
     .replace(/-+$/, '')
+  // A name that normalizes to nothing would emit a malformed `#[...]` xref.
+  return anchor || String(fieldName)
 }
 
 /**

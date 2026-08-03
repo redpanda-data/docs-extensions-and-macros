@@ -276,6 +276,18 @@ describe('fieldAnchor - fragment anchors for field heading IDs', () => {
   test('downcases names, matching Asciidoctor ID generation', () => {
     expect(fieldAnchor('TLS.Enabled')).toBe('tls-enabled');
   });
+
+  test('deletes invalid characters outright, matching InvalidSectionIdCharsRx', () => {
+    // Asciidoctor removes these characters rather than turning them into
+    // separators, so `foo/bar` renders as <h3 id="foobar">.
+    expect(fieldAnchor('foo/bar')).toBe('foobar');
+    expect(fieldAnchor('a:b')).toBe('ab');
+  });
+
+  test('falls back to the raw name when normalization empties it', () => {
+    // A pathological name must not emit a malformed `#[...]` xref fragment.
+    expect(fieldAnchor('///')).toBe('///');
+  });
 });
 
 describe('buildFieldsTable - whats-new field links', () => {
