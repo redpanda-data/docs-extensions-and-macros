@@ -128,7 +128,7 @@ Classify every finding before fixing anything:
 Generator regression:: The defect is new in your branch. Fix it in the generator with a test.
 Pre-existing content defect:: The same defect exists on the consumer repo's published main. Fix it in the consumer repo (usually the overrides file) in its own PR, and reference how you found it.
 +
-"Pre-existing" is a classification, not a disposition. A finding you classify as pre-existing must leave the review with an owner: a fix PR, a ticket, or an explicit named decision to accept it. The 22 broken cloud-docs xrefs (DOC-2407) appeared in every Antora build of the rpk review and were correctly classified as pre-existing — then implicitly treated as out of scope for days, even though the review's own train had already built the fix mechanism and the fix data existed in an open PR.
+"Pre-existing" is a classification, not a disposition. A finding you classify as pre-existing must leave the review with an owner: a fix PR, a ticket, or an explicit named decision to accept it. The 22 broken cloud-docs xrefs (DOC-2407) appeared in every Antora build of the rpk review and were correctly classified as pre-existing, and then implicitly treated as out of scope for days, even though the review's own train had already built the fix mechanism and the fix data existed in an open PR.
 Checker artifact:: Your ground truth or your checker is wrong. Fix the checker and document the benign class.
 
 The fastest classification is checking whether the published page has the same content: `git show origin/main:<path> | grep ...` answers it in seconds.
@@ -156,11 +156,11 @@ For happy paths, use a real `workflow_dispatch` against the production workflow 
 
 Every class below escaped a review that was otherwise thorough, and was caught later by a human reviewer or the first production run. Check your review against each before calling it done.
 
-Totals, not samples:: Spot-checking outputs misses whole categories that silently produce nothing. Every emit loop needs `emitted == independently_counted_eligible` as an assertion. A template gate that skipped summary-only connectors passed a sampled review because 244 partials looked plausible — the real number was 311.
+Totals, not samples:: Spot-checking outputs misses whole categories that silently produce nothing. Every emit loop needs `emitted == independently_counted_eligible` as an assertion. A template gate that skipped summary-only connectors passed a sampled review because 244 partials looked plausible. The real number was 311.
 
 Data shapes your fixtures lack:: Defects live in input shapes you did not think to construct: a connector with a summary but no description, a command tree where the new pages come from an overrides change rather than a tree change. Derive fixture variety from the real data's schema (which fields are optional?) rather than from typical examples.
 
-The consumer's model, not the producer's:: Detection and reporting must key on what the downstream consumer tracks. The adp-docs follow-up flag keyed on command-tree changes, but adp-docs stubs track the page set — three new pages shipped with zero tree changes and the flag stayed silent.
+The consumer's model, not the producer's:: Detection and reporting must key on what the downstream consumer tracks. The adp-docs follow-up flag keyed on command-tree changes, but adp-docs stubs track the page set, so three new pages shipped with zero tree changes and the flag stayed silent.
 
 Cross-repo workflow topology:: Testing that a dispatch step works says nothing about what its failure does to the job around it. Audit every notification step's blast radius: what does `needs:` chain off this job, and is the step `continue-on-error` when its failure must not gate a release? The same template flaw shipped in three sender repos before a reviewer caught one.
 
