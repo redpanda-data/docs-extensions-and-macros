@@ -122,6 +122,29 @@ function renderBloblangChanges(data, includeVersion = false) {
  * @param {array} draftedConnectors - Array of newly drafted connectors
  * @returns {string} Formatted summary
  */
+/**
+ * Render upstream description-structure findings as a collapsed section of
+ * the PR summary. These are advisory (the fix belongs in the Connect
+ * source), but console.warn output dies in the collapsed workflow log, so
+ * they surface here where the PR reviewer actually looks.
+ * @param {Array<{connector: string, message: string}>} reports
+ * @returns {string[]} lines (empty when there is nothing to report)
+ */
+function renderDescriptionReports(reports) {
+  if (!Array.isArray(reports) || reports.length === 0) return [];
+  const lines = [];
+  lines.push('<details>');
+  lines.push(`<summary>:pencil2: ${reports.length} description(s) need structure fixes upstream in the Connect source</summary>`);
+  lines.push('');
+  for (const r of reports) {
+    lines.push(`- ${r.message}`);
+  }
+  lines.push('');
+  lines.push('</details>');
+  lines.push('');
+  return lines;
+}
+
 function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, draftedConnectors = null) {
   const lines = [];
 
@@ -133,6 +156,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
 
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
+  lines.push(...renderDescriptionReports(masterDiff?.descriptionReports));
   lines.push('## Redpanda Connect Documentation Update');
   lines.push('');
   lines.push(`**Multi-Release Update:** ${startVersion} → ${endVersion}`);
@@ -538,6 +562,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   // Header with delimiters for GitHub Action parsing
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
+  lines.push(...renderDescriptionReports(diffData.descriptionReports));
 
   // Detect if this is a master diff
   if (!isMultiVersion && diffData.releases && diffData.totalSummary) {
