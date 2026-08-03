@@ -103,15 +103,18 @@ describe('set-available-attachment-versions extension', () => {
   })
 
   it('sets available-connect-version to the newest connect JSON, comparing numerically', () => {
+    // Production shape: rp-connect-docs is `name: connect` and versionless
+    // (`version: null`), which Antora represents as version '' on both the
+    // component version and the attachment src.
     const compVer = {
-      version: 'current',
+      version: '',
       asciidoc: { attributes: { 'latest-connect-version': '4.102.0' } },
     }
     run(
-      [{ name: 'redpanda-connect', versions: [compVer] }],
+      [{ name: 'connect', versions: [compVer] }],
       [
-        makeAttachment('redpanda-connect', 'current', 'components', 'connect-4.100.0.json'),
-        makeAttachment('redpanda-connect', 'current', 'components', 'connect-4.99.0.json'),
+        makeAttachment('connect', '', 'components', 'connect-4.100.0.json'),
+        makeAttachment('connect', '', 'components', 'connect-4.99.0.json'),
       ]
     )
     expect(compVer.asciidoc.attributes['available-connect-version']).toBe('4.100.0')

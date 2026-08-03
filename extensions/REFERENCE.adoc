@@ -462,8 +462,8 @@ This extension scans the content catalog for generated JSON attachments and sets
 
 It sets the following attributes on component versions (never overwriting a value that is already set, so they can be pinned in `antora.yml`):
 
-* `available-properties-tag`: newest `redpanda-properties-<tag>.json` attachment in the `reference` module of each streaming (`ROOT`) component version.
-* `available-connect-version`: newest `connect-<version>.json` attachment in the `components` module of the `connect` component.
+* `available-properties-tag`: newest `redpanda-properties-<tag>.json` attachment in the `reference` module of each version of the streaming component (`streaming`, or `ROOT` on older branches).
+* `available-connect-version`: newest `connect-<version>.json` attachment in the `components` module of the connect component (`connect`, or `redpanda-connect` on older branches).
 * `page-disable-property-tooltips`: set to `true` on streaming versions that have no properties JSON at all, so browsers never request a URL that cannot exist.
 
 === Environment variables
