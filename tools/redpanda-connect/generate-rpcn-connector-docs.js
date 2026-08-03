@@ -25,7 +25,7 @@ const DEFAULT_METADATA_TEMPLATE = path.resolve(__dirname, './templates/metadata-
 // the metadata partial, this is rewritten on every run so summary/description
 // changes upstream flow into already-published pages that include it.
 const DEFAULT_DESCRIPTION_TEMPLATE = path.resolve(__dirname, './templates/descriptions-partials.hbs');
-const { hasStructuralHeadings, firstHeadingDepth, LONG_HEADINGLESS_THRESHOLD } = require('./helpers/renderConnectDescription.js');
+const { hasStructuralHeadings, hasMarkdownHeadings, firstHeadingDepth, LONG_HEADINGLESS_THRESHOLD } = require('./helpers/renderConnectDescription.js');
 
 // Banner-only content written to a metadata partial when its `== Metadata`
 // section is removed upstream. Kept as an AsciiDoc comment so the file renders
@@ -411,6 +411,7 @@ async function generateRpcnConnectorDocs(options) {
   }
 
   let partialsWritten = 0;
+  const descriptionReports = [];
   let draftsWritten   = 0;
   const partialFiles  = [];
   const draftFiles    = [];
@@ -514,19 +515,24 @@ async function generateRpcnConnectorDocs(options) {
             item.description.length > LONG_HEADINGLESS_THRESHOLD &&
             !hasStructuralHeadings(item.description)
           ) {
-            console.warn(
-              `Long heading-less description: ${typeDir}/${name} ` +
-              `(${item.description.length} chars). Consider adding == sections upstream in the Connect source.`
-            );
+            const md = hasMarkdownHeadings(item.description);
+            const msg = md
+              ? `Markdown-style headings: ${typeDir}/${name} structures its description with ## headings, ` +
+                'which render unreliably. Convert them to == sections upstream in the Connect source.'
+              : `Long heading-less description: ${typeDir}/${name} ` +
+                `(${item.description.length} chars). Consider adding == sections upstream in the Connect source.`;
+            descriptionReports.push({ connector: `${typeDir}/${name}`, message: msg });
+            console.warn(msg);
           }
           // Headings that start deeper than level one render out of
           // sequence on the page. Upstream fix, so report it.
           const headingDepth = typeof item.description === 'string' ? firstHeadingDepth(item.description) : null;
           if (headingDepth !== null && headingDepth > 2) {
-            console.warn(
+            const seqMsg =
               `Out-of-sequence headings: ${typeDir}/${name} starts at level ${headingDepth - 1} ` +
-              `(=== or ### with no parent section). Promote the top headings upstream in the Connect source.`
-            );
+              '(=== or ### with no parent section). Promote the top headings upstream in the Connect source.';
+            descriptionReports.push({ connector: `${typeDir}/${name}`, message: seqMsg });
+            console.warn(seqMsg);
           }
         } else if (fs.existsSync(dPath)) {
           // The upstream description disappeared, but a previously generated
@@ -747,7 +753,8 @@ async function generateRpcnConnectorDocs(options) {
     partialsWritten,
     draftsWritten,
     partialFiles,
-    draftFiles
+    draftFiles,
+    descriptionReports
   };
 }
 

@@ -122,6 +122,23 @@ describe('hasStructuralHeadings', () => {
   test('exports the reporting threshold', () => {
     expect(LONG_HEADINGLESS_THRESHOLD).toBe(1200);
   });
+
+  test('markdown ## headings do not count as structure', () => {
+    // The descriptions that render worst are exactly the ones whose only
+    // structure is markdown headings — they must NOT be exempted from the
+    // long-description report.
+    expect(hasStructuralHeadings('Prose.\n\n## Markdown heading\n\nMore.')).toBe(false);
+  });
+});
+
+describe('hasMarkdownHeadings', () => {
+  const { hasMarkdownHeadings } = renderConnectDescription;
+
+  test('detects markdown headings outside listing blocks only', () => {
+    expect(hasMarkdownHeadings('Prose.\n\n## Section\n\nMore.')).toBe(true);
+    expect(hasMarkdownHeadings('Prose.\n\n----\n## comment in code\n----\n')).toBe(false);
+    expect(hasMarkdownHeadings('Prose.\n\n== AsciiDoc only.')).toBe(false);
+  });
 });
 
 describe('summaryAttribute helper', () => {

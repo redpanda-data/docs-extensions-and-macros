@@ -28,7 +28,25 @@ function hasStructuralHeadings (body) {
   let inBlock = false;
   for (const line of lines) {
     if (BLOCK_DELIMITER.test(line.trim())) { inBlock = !inBlock; continue; }
-    if (!inBlock && /^(?:={2,}|#{2,})\s+\S/.test(line)) return true;
+    // AsciiDoc headings only. Markdown-style ## headings deliberately do NOT
+    // count: the descriptions that render worst are exactly the ones whose
+    // only structure is markdown headings, and counting them here exempted
+    // those from the long-description report (they get their own report).
+    if (!inBlock && /^={2,}\s+\S/.test(line)) return true;
+  }
+  return false;
+}
+
+/**
+ * True when the description contains a markdown-style heading (`##`) outside
+ * listing blocks. These are reported for upstream conversion to `==`.
+ */
+function hasMarkdownHeadings (body) {
+  const lines = body.split('\n');
+  let inBlock = false;
+  for (const line of lines) {
+    if (BLOCK_DELIMITER.test(line.trim())) { inBlock = !inBlock; continue; }
+    if (!inBlock && /^#{2,}\s+\S/.test(line)) return true;
   }
   return false;
 }
@@ -117,6 +135,7 @@ function firstHeadingDepth (body) {
 }
 
 module.exports.hasStructuralHeadings = hasStructuralHeadings;
+module.exports.hasMarkdownHeadings = hasMarkdownHeadings;
 module.exports.escapePlaceholderBraces = escapePlaceholderBraces;
 module.exports.ensureHeadingSeparation = ensureHeadingSeparation;
 module.exports.firstHeadingDepth = firstHeadingDepth;

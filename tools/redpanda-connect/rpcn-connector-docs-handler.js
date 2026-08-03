@@ -1130,6 +1130,7 @@ async function handleRpcnConnectorDocs (options) {
 
   console.log('Generating connector partials...')
   let partialsWritten, partialFiles
+  const descriptionReports = []
 
   try {
     const result = await generateRpcnConnectorDocs({
@@ -1147,6 +1148,7 @@ async function handleRpcnConnectorDocs (options) {
     })
     partialsWritten = result.partialsWritten
     partialFiles = result.partialFiles
+    descriptionReports.push(...(result.descriptionReports || []))
   } catch (err) {
     console.error(`Error: Failed to generate partials: ${err.message}`)
     process.exit(1)
@@ -1987,8 +1989,12 @@ async function handleRpcnConnectorDocs (options) {
   // Generate PR summary
   try {
     const { printPRSummary } = require('./pr-summary-formatter.js')
-    // Use master diff if available, otherwise use single diff
-    printPRSummary(masterDiff || diffJson, binaryAnalysis, draftFiles, masterDiff ? true : false)
+    // Use master diff if available, otherwise use single diff. Structure
+    // reports ride the diff object so they land in the PR summary body
+    // instead of the collapsed workflow log.
+    const summaryDiff = masterDiff || diffJson
+    if (descriptionReports.length) summaryDiff.descriptionReports = descriptionReports
+    printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
   } catch (err) {
     console.error(`Warning: Failed to generate PR summary: ${err.message}`)
   }
