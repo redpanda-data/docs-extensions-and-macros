@@ -3000,6 +3000,21 @@ async function generateRpkDocs(options = {}) {
     }
 
     try {
+      // A page that HAD a Flags section and loses it in this render is the
+      // signature of missing flag data (a snapshot without extraction, or a
+      // curated table removed before the extracted one exists). Nothing else
+      // catches this class: the run exits 0 with a clean log while the
+      // published page silently drops its flag documentation (seen on
+      // rpk connect run).
+      if (fs.existsSync(filePath)) {
+        const previous = fs.readFileSync(filePath, 'utf8')
+        if (/^== Flags$/m.test(previous) && !/^== Flags$/m.test(content)) {
+          console.warn(
+            `⚠️  ${commandPath}: the previously rendered page had a Flags section and this render has none. ` +
+            'The command likely lost its flag data (snapshot without extraction, or a curated Flags override removed too early).'
+          )
+        }
+      }
       fs.writeFileSync(filePath, content, 'utf8')
       writtenFiles.add(filePath)
       filesGenerated++
