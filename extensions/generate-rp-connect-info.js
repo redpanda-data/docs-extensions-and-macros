@@ -428,13 +428,19 @@ module.exports.register = function ({ config }) {
   function buildContextSwitcher (connectorRows, currentRow, variant) {
     const capitalize = (value) => value.charAt(0).toUpperCase() + value.slice(1)
     const orderedRows = [currentRow, ...connectorRows.filter((row) => row !== currentRow)]
-    const data = {}
+    // The process-context-switcher extension and the UI's context-switcher partial
+    // both expect an array of { name, to } items; `to` is a root-relative pub URL.
+    const items = []
     for (const row of orderedRows) {
       const link = (variant === 'cloud' && row.redpandaCloudUrl) || row.redpandaConnectUrl
       if (!link) continue
       const type = row.type.trim()
-      data[type.toLowerCase()] = { name: capitalize(type), to: link }
+      // First occurrence wins: orderedRows puts the current page's row first,
+      // so a connector with duplicate types keeps its own entry. (The old
+      // object-keyed build let later rows overwrite earlier ones.)
+      if (items.some((item) => item.name === capitalize(type))) continue
+      items.push({ name: capitalize(type), to: link })
     }
-    return JSON.stringify(data)
+    return JSON.stringify(items)
   }
 }

@@ -74,6 +74,11 @@ module.exports.register = function ({ config }) {
           item.to = currentResourceId;
           hasChanges = true;
           logger.debug(`Replaced 'current' with '${currentResourceId}' in context-switcher`);
+        } else if (typeof item.to === 'string' && item.to.startsWith('/')) {
+          // Root-relative URLs (e.g. pub.url values set by generate-rp-connect-info)
+          // need no resolution or target injection: the UI's resolve-resource helper
+          // passes them through, and the producer decorates every variant directly.
+          continue;
         } else if (item.to !== currentResourceId) {
           // For non-current items, find and update the target page
           const targetPage = findPageByResourceId(item.to, contentCatalog, page);
