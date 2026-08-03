@@ -15,6 +15,19 @@ Object.entries(helpers).forEach(([name, fn]) => {
 // Template paths
 const TEMPLATES_DIR = path.resolve(__dirname, './templates')
 
+// Full command paths from the tree being generated (e.g. "rpk ai run codex").
+// Registered by generateRpkDocs so formatDescription can wrap real multi-word
+// command paths as a unit instead of heuristically wrapping `rpk` alone.
+let knownCommandPaths = new Set()
+
+/**
+ * Register the set of real command paths for the current generation run.
+ * @param {string[]} paths - Full command paths (e.g. "rpk ai run codex")
+ */
+function registerKnownCommandPaths(paths) {
+  knownCommandPaths = new Set(paths)
+}
+
 /**
  * Register a Handlebars partial from file
  * @param {string} name - Partial name
@@ -1607,6 +1620,25 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     // Fix product name: "Redpanda cloud" → "Redpanda Cloud" (product name)
     .replace(/Redpanda\s+cloud\b/g, 'Redpanda Cloud')
 
+  // === RPK COMMAND FORMATTING (known paths first, ground truth) ===
+  // Wrap full multi-word command paths that exist in the generated tree
+  // (e.g. "rpk ai run codex" -> `rpk ai run codex`). The heuristic formatter
+  // below only ever matches "rpk <word>", so without this pass it wraps
+  // `rpk` alone and splits the command in half. Matching against the real
+  // tree means prose that merely resembles a command is never wrapped.
+  if (knownCommandPaths.size > 0) {
+    result = result.replace(/(?<![`\w])rpk((?: [a-z][-a-z0-9]*)+)/g, (match, rest) => {
+      const tokens = rest.trim().split(' ')
+      for (let n = tokens.length; n >= 2; n--) {
+        const path = `rpk ${tokens.slice(0, n).join(' ')}`
+        if (knownCommandPaths.has(path)) {
+          return `\`${path}\`` + match.slice(path.length)
+        }
+      }
+      return match
+    })
+  }
+
   // === RPK COMMAND FORMATTING (context-aware) ===
   // Process "rpk X" patterns based on what follows
   result = result.replace(/(?<![`\w])rpk(\s+)([a-z][-a-z0-9]*)(?:\s+|(?=[.,;:!?)'"}\]]|$))/gi, (match, space, word, offset, str) => {
@@ -1730,9 +1762,13 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     result = result.replace(`__EARLY_CODE_BLOCK_${i}__`, () => transformed)
   })
 
-  // Restore inline code
+  // Restore inline code. Spans are verbatim, but rules flagged applyToCode
+  // (like the rpai -> rpk ai binary-name rewrite) must reach them the same
+  // way they reach code blocks, or the internal binary name survives in
+  // published spans like `rpai auth token`.
   inlineCode.forEach((code, i) => {
-    result = result.replace(`__INLINE_CODE_${i}__`, () => code)
+    const transformed = applyTextTransformations(code, customTransformations, { code: true })
+    result = result.replace(`__INLINE_CODE_${i}__`, () => transformed)
   })
 
   // Restore xrefs
@@ -2578,6 +2614,9 @@ async function generateRpkDocs(options = {}) {
   // Flatten command tree
   const commands = flattenCommands(tree)
 
+  // Let formatDescription wrap real multi-word command paths as a unit
+  registerKnownCommandPaths(commands.map(c => c.path))
+
   // Determine which managed plugins are protected this run: explicitly
   // passed by the caller (failed installs) merged with auto-detection of
   // absent or shim-only plugin subtrees. Protection covers the whole
@@ -3121,5 +3160,6 @@ module.exports = {
   // Exported for testing
   filterExamples,
   formatExamples,
-  applyTextTransformationsToExamples
+  applyTextTransformationsToExamples,
+  registerKnownCommandPaths
 }

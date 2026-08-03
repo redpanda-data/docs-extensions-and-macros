@@ -146,6 +146,59 @@ describe('applyToCode rules in early code blocks', () => {
   })
 })
 
+describe('applyToCode rules in inline code spans', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  const transforms = {
+    replacements: [
+      { pattern: '\\brpai\\b', replacement: 'rpk ai', flags: 'g', applyToCode: true },
+      { pattern: '(^|\\n\\s*)Note:\\s', replacement: '$1NOTE: ', flags: 'g' }
+    ]
+  }
+
+  test('rewrites the binary name inside protected inline code spans', () => {
+    const out = formatDescription('Run `rpai auth token` to authenticate first.', transforms)
+    expect(out).toContain('`rpk ai auth token`')
+    expect(out).not.toContain('rpai')
+  })
+
+  test('rules without applyToCode never touch inline code spans', () => {
+    const out = formatDescription('The literal `Note: keep this` stays verbatim.', transforms)
+    expect(out).toContain('`Note: keep this`')
+    expect(out).not.toContain('NOTE: keep this')
+  })
+})
+
+describe('known command path formatting', () => {
+  const { formatDescription, registerKnownCommandPaths } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  afterEach(() => registerKnownCommandPaths([]))
+
+  test('wraps a full multi-word command path as a unit', () => {
+    registerKnownCommandPaths(['rpk', 'rpk ai', 'rpk ai run', 'rpk ai run codex'])
+    const out = formatDescription('Use rpk ai run codex to start a session.', null)
+    expect(out).toContain('`rpk ai run codex` to start a session.')
+    expect(out).not.toContain('`rpk` ai')
+  })
+
+  test('prefers the longest registered path over a shorter prefix', () => {
+    registerKnownCommandPaths(['rpk', 'rpk ai', 'rpk ai run', 'rpk ai run claude'])
+    const out = formatDescription('Then rpk ai run claude resumes the session.', null)
+    expect(out).toContain('`rpk ai run claude` resumes')
+  })
+
+  test('leaves prose that resembles a command alone when not in the tree', () => {
+    registerKnownCommandPaths(['rpk', 'rpk cloud'])
+    const out = formatDescription('Manage rpk cloud authentications for details.', null)
+    expect(out).not.toContain('`rpk cloud authentications`')
+  })
+
+  test('is inert when no paths are registered', () => {
+    const out = formatDescription('Use rpk ai run codex to start.', null)
+    expect(out).not.toContain('`rpk ai run codex`')
+  })
+})
+
 describe('applyTextTransformationsToExamples', () => {
   const { applyTextTransformationsToExamples } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
 
