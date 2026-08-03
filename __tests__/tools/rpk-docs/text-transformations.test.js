@@ -190,7 +190,10 @@ describe('known command path formatting', () => {
   test('leaves prose that resembles a command alone when not in the tree', () => {
     registerKnownCommandPaths(['rpk', 'rpk cloud'])
     const out = formatDescription('Manage rpk cloud authentications for details.', null)
-    expect(out).not.toContain('`rpk cloud authentications`')
+    // A registered single-token prefix ("rpk cloud") never matches: the
+    // known-path pass requires two tokens after rpk, so the phrase falls
+    // through to the context-aware heuristic, which wraps rpk alone.
+    expect(out).toBe('Manage `rpk` cloud authentications for details.')
   })
 
   test('is inert when no paths are registered', () => {
