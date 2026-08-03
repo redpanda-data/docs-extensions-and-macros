@@ -133,7 +133,7 @@ describe('process-context-switcher extension', () => {
     // generate-rp-connect-info sets pub.url values (root-relative) for connector
     // Type switchers; these need no resource-ID resolution or target injection.
     mockPage.asciidoc.attributes['page-context-switcher'] =
-      '[{"name": "Cache", "to": "/redpanda-connect/components/caches/aws_dynamodb/"},{"name": "Output", "to": "/redpanda-connect/components/outputs/aws_dynamodb/"}]';
+      '[{"name": "Cache", "to": "/connect/components/caches/aws_dynamodb/"},{"name": "Output", "to": "/connect/components/outputs/aws_dynamodb/"}]';
 
     extension.register.call(extensionContext, { config: {} });
     const handler = extensionContext.on.mock.calls[0][1];
@@ -144,8 +144,8 @@ describe('process-context-switcher extension', () => {
     // Attribute is untouched: no 'current' replacement, no rewritten targets
     const attr = JSON.parse(mockPage.asciidoc.attributes['page-context-switcher']);
     expect(attr).toEqual([
-      { name: 'Cache', to: '/redpanda-connect/components/caches/aws_dynamodb/' },
-      { name: 'Output', to: '/redpanda-connect/components/outputs/aws_dynamodb/' }
+      { name: 'Cache', to: '/connect/components/caches/aws_dynamodb/' },
+      { name: 'Output', to: '/connect/components/outputs/aws_dynamodb/' }
     ]);
   });
 
