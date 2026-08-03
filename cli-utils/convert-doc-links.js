@@ -20,7 +20,9 @@ const COMPONENT_SLUG_MAP = {
   // cloud-docs (antora.yml name: cloud-data-platform)
   'redpanda-cloud': 'cloud-data-platform', // legacy slug
   'cloud-data-platform': 'cloud-data-platform',
-  // redpanda-labs (docs/antora.yml name: labs)
+  // redpanda-labs (docs/antora.yml name: labs on main, the branch the site
+  // playbook builds; live check 2026-08-03: /labs/ serves 200 and
+  // /redpanda-labs/ serves a 301 to it)
   'redpanda-labs': 'labs', // legacy slug
   'labs': 'labs',
   // redpanda-data/docs (antora.yml name: streaming). Self-qualified so that
@@ -33,6 +35,21 @@ const COMPONENT_SLUG_MAP = {
   'home': 'home',
   'data-platform': 'data-platform',
   'self-managed': 'self-managed',
+};
+
+/**
+ * Landing module:page for components whose antora.yml start_page is not the
+ * ROOT module index. A component-only URL such as /connect/ must resolve to
+ * the component's real start page: connect and cloud-data-platform have no
+ * ROOT index.adoc, so xref:<comp>::index.adoc would be a broken xref.
+ * Components absent from this map (labs and the docs-site umbrella
+ * components) have a ROOT index.adoc, where ::index.adoc is correct.
+ */
+const COMPONENT_START_PAGE = {
+  'streaming': 'home:index.adoc',
+  'connect': 'home:index.adoc',
+  'cloud-data-platform': 'home:index.adoc',
+  'agentic-data-plane': 'home:index.adoc',
 };
 
 // Version path segment that can follow a component slug, for example
@@ -104,7 +121,8 @@ function urlToXref(input) {
       segments.shift();
     }
     if (segments.length === 0) {
-      xref = `xref:${component}::index.adoc`;
+      const startPage = COMPONENT_START_PAGE[component];
+      xref = startPage ? `xref:${component}:${startPage}` : `xref:${component}::index.adoc`;
     } else {
       const moduleName = segments.shift();
       const fileName   = (segments.length > 0 ? segments.join('/') : 'index') + '.adoc';

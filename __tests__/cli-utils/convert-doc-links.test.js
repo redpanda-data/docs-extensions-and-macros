@@ -106,10 +106,19 @@ describe('urlToXref', () => {
       ).toBe('xref:connect:configuration:index.adoc');
     });
 
-    it('converts a component-only URL to the component index page', () => {
+    it('converts a component-only URL to the component start page', () => {
+      // connect has no ROOT index.adoc; its antora.yml start_page is
+      // home:index.adoc, so ::index.adoc would be a broken xref.
       expect(
         urlToXref('https://docs.redpanda.com/redpanda-connect/')
-      ).toBe('xref:connect::index.adoc');
+      ).toBe('xref:connect:home:index.adoc');
+      expect(
+        urlToXref('https://docs.redpanda.com/cloud-data-platform/')
+      ).toBe('xref:cloud-data-platform:home:index.adoc');
+    });
+
+    it('keeps ::index.adoc for components that have a ROOT index page', () => {
+      expect(urlToXref('https://docs.redpanda.com/labs/')).toBe('xref:labs::index.adoc');
     });
 
     it('preserves a bracketed label on cross-component URLs', () => {
