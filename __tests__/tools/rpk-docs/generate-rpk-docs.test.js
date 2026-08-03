@@ -1345,3 +1345,35 @@ describe('placeholder brace escaping', () => {
     expect(out).toContain('`table\\{vbar}json`')
   })
 })
+
+describe('vanishing Flags tripwire', () => {
+  const os2 = require('os')
+
+  test('warns when a rerender drops a previously present Flags section', async () => {
+    const tmp = fs.mkdtempSync(path.join(os2.tmpdir(), 'flags-tripwire-'))
+    const tree = {
+      name: 'rpk',
+      commands: [{
+        name: 'widget',
+        description: 'Widget things.',
+        usage: 'rpk widget [flags]',
+        flags: [{ name: 'verbose', type: 'bool', description: 'Louder.' }],
+        commands: []
+      }]
+    }
+    // First render: page has a Flags section
+    await generateRpkDocs({ tree, overrides: { commands: {} }, outputDir: tmp })
+    const page = path.join(tmp, 'rpk-widget.adoc')
+    expect(fs.readFileSync(page, 'utf8')).toContain('== Flags')
+
+    // Second render: flag data gone (the connect run failure shape)
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    tree.commands[0].flags = []
+    await generateRpkDocs({ tree, overrides: { commands: {} }, outputDir: tmp })
+    const warned = warnSpy.mock.calls.map(a => a.join(' ')).join('\n')
+    warnSpy.mockRestore()
+    expect(warned).toContain('rpk widget')
+    expect(warned).toContain('Flags section and this render has none')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+})
