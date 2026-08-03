@@ -894,7 +894,7 @@ function loadVersionedJson(version, dataDir) {
  *   version (the page note renders "introduced in <plugin> version X"), not
  *   the rpk version, because plugins release on their own cadence.
  */
-function updateOverridesWithIntroducedVersions(diffData, overridesPath, version, pluginVersions = {}) {
+function updateOverridesWithIntroducedVersions(diffData, overridesPath, version, pluginVersions = {}, options = {}) {
   const hasNewCommands = diffData.details.newCommands && diffData.details.newCommands.length > 0
   const hasNewFlags = diffData.details.newFlags && diffData.details.newFlags.length > 0
 
@@ -906,6 +906,23 @@ function updateOverridesWithIntroducedVersions(diffData, overridesPath, version,
   const versionFor = (cmdPath) => {
     const topLevel = cmdPath.split(' ')[1]
     return pluginVersions[topLevel] || version
+  }
+
+  // Plugin-owned entries are only stamped when the caller vouches that the
+  // baseline is manifest-adjacent to this run's plugin version (see
+  // isPluginStampAttributable). "New relative to the snapshot" is not "new
+  // in this release" when the snapshot skipped releases. Callers that omit
+  // attributablePlugins keep legacy stamp-everything behavior.
+  const attributable = options.attributablePlugins
+    ? new Set(options.attributablePlugins)
+    : null
+  const skippedByPlugin = new Map()
+  const stampable = (cmdPath) => {
+    const topLevel = cmdPath.split(' ')[1]
+    if (!KNOWN_PLUGINS.includes(topLevel) || !attributable) return true
+    if (attributable.has(topLevel)) return true
+    skippedByPlugin.set(topLevel, (skippedByPlugin.get(topLevel) || 0) + 1)
+    return false
   }
 
   let overrides = {}
@@ -929,6 +946,7 @@ function updateOverridesWithIntroducedVersions(diffData, overridesPath, version,
   if (hasNewCommands) {
     for (const newCmd of diffData.details.newCommands) {
       const cmdPath = newCmd.path
+      if (!stampable(cmdPath)) continue
       if (!overrides.commands[cmdPath]) {
         overrides.commands[cmdPath] = {}
       }
@@ -945,6 +963,7 @@ function updateOverridesWithIntroducedVersions(diffData, overridesPath, version,
     for (const newFlag of diffData.details.newFlags) {
       const cmdPath = newFlag.commandPath
       const flagName = newFlag.flagName
+      if (!stampable(cmdPath)) continue
 
       if (!overrides.commands[cmdPath]) {
         overrides.commands[cmdPath] = {}
@@ -962,6 +981,15 @@ function updateOverridesWithIntroducedVersions(diffData, overridesPath, version,
         flagsUpdated++
       }
     }
+  }
+
+  for (const [plugin, count] of skippedByPlugin) {
+    console.warn(
+      `\u26a0 Skipped stamping introducedInVersion for ${count} new '${plugin}' entr${count === 1 ? 'y' : 'ies'}: ` +
+      `the baseline snapshot's ${plugin} version is not the release immediately before ` +
+      `${pluginVersions[plugin] || version} in the plugin manifest, so the introduction ` +
+      'version cannot be attributed automatically. Attribute manually against released binaries.'
+    )
   }
 
   if (commandsUpdated > 0 || flagsUpdated > 0) {
@@ -1442,6 +1470,75 @@ function fetchLatestPluginVersion(plugin) {
     console.warn(`Could not parse plugin manifest for ${plugin}: ${err.message}`)
     return null
   }
+}
+
+/**
+ * Fetch the ordered list of published versions for a plugin from its
+ * manifest. Cached per plugin for the process lifetime.
+ * @param {string} plugin - rpk command name (ai, connect, k8s, check)
+ * @returns {string[]|null} Versions in manifest (release) order, or null
+ */
+const pluginManifestVersionsCache = new Map()
+function fetchPluginManifestVersions(plugin) {
+  if (pluginManifestVersionsCache.has(plugin)) {
+    return pluginManifestVersionsCache.get(plugin)
+  }
+  const slug = PLUGIN_MANIFEST_SLUGS[plugin] || plugin
+  const result = spawnSync('curl', [
+    '-fsSL', '--retry', '3', '--connect-timeout', '15', '--max-time', '30',
+    `${PLUGIN_MANIFEST_HOST}/${slug}/manifest.json`
+  ], { encoding: 'utf8', timeout: 60000 })
+  let versions = null
+  if (result.status === 0) {
+    try {
+      versions = (JSON.parse(result.stdout).archives || []).map(a => a.version)
+    } catch (err) {
+      console.warn(`Could not parse plugin manifest for ${plugin}: ${err.message}`)
+    }
+  } else {
+    console.warn(`Could not fetch plugin manifest for ${plugin} (slug: ${slug})`)
+  }
+  pluginManifestVersionsCache.set(plugin, versions)
+  return versions
+}
+
+/**
+ * Decide whether new commands under a plugin can truthfully be attributed
+ * to newVersion: only when the baseline snapshot recorded the plugin
+ * version AND that version is the release immediately before newVersion in
+ * the plugin's manifest. Any gap means a "new" command may have shipped in
+ * an intermediate release, so a stamp would fabricate history (30 rpk ai
+ * commands were once labeled 0.2.32 when they shipped in 0.2.26/0.2.28).
+ * @param {string} plugin - rpk command name
+ * @param {string|undefined} oldVersion - Plugin version recorded in the
+ *   baseline snapshot's plugin_versions, if any
+ * @param {string} newVersion - Plugin version in this run
+ * @returns {boolean}
+ */
+function isPluginStampAttributable(plugin, oldVersion, newVersion) {
+  if (!oldVersion || !newVersion) return false
+  if (oldVersion === newVersion) return true
+  const versions = fetchPluginManifestVersions(plugin)
+  if (!versions) return false
+  const oldIdx = versions.indexOf(oldVersion)
+  const newIdx = versions.indexOf(newVersion)
+  return oldIdx !== -1 && newIdx === oldIdx + 1
+}
+
+/**
+ * Compute the set of plugins whose new commands may be stamped this run.
+ * @param {Object} oldPluginVersions - plugin_versions from the baseline snapshot
+ * @param {Object} newPluginVersions - plugin_versions for this run
+ * @returns {Set<string>}
+ */
+function attributablePluginSet(oldPluginVersions = {}, newPluginVersions = {}) {
+  const attributable = new Set()
+  for (const plugin of Object.keys(newPluginVersions)) {
+    if (isPluginStampAttributable(plugin, oldPluginVersions[plugin], newPluginVersions[plugin])) {
+      attributable.add(plugin)
+    }
+  }
+  return attributable
 }
 
 /**
@@ -1952,7 +2049,12 @@ async function handleRpkDocsGeneration(options = {}) {
             pluginDiffData,
             overridesPath || path.join(dataDir, 'rpk-overrides.json'),
             resolvedVersion,
-            { [plugin]: resolvedVersion }
+            { [plugin]: resolvedVersion },
+            {
+              attributablePlugins: isPluginStampAttributable(
+                plugin, (jsonData.plugin_versions || {})[plugin], resolvedVersion
+              ) ? [plugin] : []
+            }
           )
         }
 
@@ -1996,7 +2098,9 @@ async function handleRpkDocsGeneration(options = {}) {
             newDeprecatedCommands: jsonData.deprecated_commands || {}
           })
           if (stampDiff.details.newCommands.length > 0 || stampDiff.details.newFlags.length > 0) {
-            updateOverridesWithIntroducedVersions(stampDiff, effectiveOverridesPath, rpkVersion, pluginVersions)
+            updateOverridesWithIntroducedVersions(stampDiff, effectiveOverridesPath, rpkVersion, pluginVersions, {
+              attributablePlugins: attributablePluginSet(oldDataForStamp.plugin_versions, pluginVersions)
+            })
           }
         }
       }
@@ -2400,7 +2504,9 @@ async function handleRpkDocsGeneration(options = {}) {
         // cadence, so the rpk version would be wrong and the page note would
         // render "introduced in <plugin> version <rpk version>").
         if ((diffData.details.newCommands.length > 0 || diffData.details.newFlags.length > 0) && effectiveOverridesPath) {
-          updateOverridesWithIntroducedVersions(diffData, effectiveOverridesPath, rpkVersion, pluginVersions)
+          updateOverridesWithIntroducedVersions(diffData, effectiveOverridesPath, rpkVersion, pluginVersions, {
+            attributablePlugins: attributablePluginSet(oldData.plugin_versions, pluginVersions)
+          })
         }
 
         // Update what's-new file if requested
@@ -2819,6 +2925,11 @@ module.exports = {
   getPlatformDescription,
   getCurrentPlatform,
   updateOverridesWithIntroducedVersions,
+  isPluginStampAttributable,
+  attributablePluginSet,
+  fetchPluginManifestVersions,
+  // Exported for tests to seed manifest data without network access
+  pluginManifestVersionsCache,
   filterDiffForWhatsNew,
   computeDescriptionCoverage,
   updateWhatsNewFile,

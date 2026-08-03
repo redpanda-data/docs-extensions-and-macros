@@ -977,6 +977,25 @@ Original fields content that should be replaced.`,
       expect(page).toContain('|xref:reference:rpk/rpk-cluster/rpk-cluster-info.adoc[`rpk cluster info`]')
     }, 30000)
 
+    // Availability never wraps the page itself: includes only extract the
+    // single-source tag region (a page-level conditional outside it is dead
+    // code), and a build that did consume it would publish an empty,
+    // untitled page. Row and flag gating inside the tag does the real work.
+    test('selfHostedOnly never wraps the command page in a conditional', async () => {
+      await generateRpkDocs({
+        tree: clusterTree(),
+        overrides: { commands: { 'rpk cluster health': { selfHostedOnly: true } } },
+        outputDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+
+      const page = fs.readFileSync(path.join(outputDir, 'rpk-cluster', 'rpk-cluster-health.adoc'), 'utf8')
+      expect(page.startsWith('= rpk cluster health')).toBe(true)
+      expect(page).not.toMatch(/^ifndef::env-cloud/m)
+      expect(page.trimEnd().endsWith('// end::single-source[]')).toBe(true)
+    }, 30000)
+
     test('wraps cloudOnly subcommand rows in ifdef::env-cloud', async () => {
       await generateRpkDocs({
         tree: clusterTree(),

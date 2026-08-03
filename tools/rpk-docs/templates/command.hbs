@@ -1,11 +1,10 @@
-{{!-- Cloud-only wrapper start --}}
-{{#if cloudOnly}}
-ifdef::env-cloud[]
-{{/if}}
-{{!-- Self-hosted-only wrapper start --}}
-{{#if selfHostedOnly}}
-ifndef::env-cloud[]
-{{/if}}
+{{!-- cloudOnly/selfHostedOnly deliberately do NOT wrap the page. The
+     gating that matters happens inside the single-source tag region
+     (subcommand rows, flags, content items): includes only extract that
+     region, and the docs component never builds with env-cloud set, so a
+     page-level conditional is dead code at best and an empty, untitled
+     page at worst. Availability pages are excluded from cloud by not
+     generating a stub for them in cloud-docs. --}}
 = {{commandPath}}
 :description: {{{wrapDescriptionPassthrough shortDesc}}}
 {{#if pageAliases}}
@@ -583,11 +582,3 @@ include::{{{this}}}[]
 {{> content-item this commandPath=../commandPath}}
 {{/each}}
 // end::single-source[]
-{{!-- Self-hosted-only wrapper end --}}
-{{#if selfHostedOnly}}
-endif::[]
-{{/if}}
-{{!-- Cloud-only wrapper end --}}
-{{#if cloudOnly}}
-endif::[]
-{{/if}}
