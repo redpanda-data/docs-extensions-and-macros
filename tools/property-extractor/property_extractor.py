@@ -321,16 +321,35 @@ _constexpr_cache = ConstexprCache()
 _type_definitions_cache = {}
 
 # Import topic property extractor
+# Set from --path in main() so every consumer of the Redpanda source uses the
+# tree the caller pointed at, regardless of the current working directory. The
+# hardcoded search below is only a fallback for direct module use.
+_redpanda_source_override = None
+
+
+def set_redpanda_source(path):
+    """Record the Redpanda source directory passed via --path."""
+    global _redpanda_source_override
+    _redpanda_source_override = path
+
+
 def find_redpanda_source():
     """
-    Locate the Redpanda source directory by searching standard locations.
-    
-    The property extractor looks for the Redpanda source code in multiple
-    locations to handle different execution contexts (project root, tools directory, etc.).
-    
+    Locate the Redpanda source directory.
+
+    Prefers the path passed via --path (recorded by set_redpanda_source);
+    falls back to searching standard locations relative to the current
+    working directory. Before this preference existed, running the extractor
+    from any directory that did not match a hardcoded guess silently
+    disabled the ConstantResolver: no validator enums, no enterprise enum
+    metadata, no constexpr resolution, with only a debug-level log line.
+
     Returns:
         str or None: Path to the Redpanda source directory if found, None otherwise.
     """
+    if _redpanda_source_override and os.path.exists(_redpanda_source_override):
+        return _redpanda_source_override
+
     redpanda_source_paths = [
         'tmp/redpanda',  # Current directory
         '../tmp/redpanda',  # Parent directory  
@@ -725,6 +744,13 @@ def transform_files_with_properties(files_with_properties):
         if src_v_path.exists():
             constant_resolver = ConstantResolver(src_v_path)
             logger.debug(f"Initialized ConstantResolver with path: {src_v_path}")
+    if constant_resolver is None:
+        logger.warning(
+            "Redpanda source directory not found: validator enum extraction "
+            "and enterprise enum metadata are DISABLED for this run. "
+            "Properties like sasl_mechanisms will be missing items.enum and "
+            "x-enum-metadata. Pass --path to the Redpanda checkout to fix this."
+        )
 
     transformers = [
         EnterpriseTransformer(), ## this must be the first, as it modifies current data
@@ -2908,6 +2934,11 @@ def main():
     treesitter_parser, cpp_language = get_treesitter_cpp_parser_and_language(
         treesitter_dir, destination_path
     )
+
+    # Every consumer of the Redpanda source (ConstantResolver, constexpr
+    # fallback search) must use the tree the caller pointed at, not a
+    # cwd-relative guess.
+    set_redpanda_source(options.path)
 
     # Pre-build constexpr cache for performance
     # This avoids repeated filesystem walks when resolving C++ identifiers and function calls
