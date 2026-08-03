@@ -1,0 +1,177 @@
+= Testing automations end to end
+:toc:
+:toc-title: Contents
+
+Unit tests prove that functions behave. They do not prove that an automation produces correct, well-formed documentation in the consumer repos, or that the workflows driving it actually run. Both failure modes have shipped past green test suites in this repo. This guide describes how to test the whole chain before you merge.
+
+The lessons here come from validating the rpk plugin docs automation (link:https://github.com/redpanda-data/docs-extensions-and-macros/pull/225[#225]), where a full ground-truth review found seven generator defects that 800+ passing unit tests and several expectation-based test runs had missed.
+
+== The core principle: test content against ground truth, not against expectations
+
+Expectation-based checks ("exit 0, 352 files generated, 52 flags extracted") pass while the output is wrong. Every real defect found in the #225 review produced correct counts and a zero exit code: truncated flag descriptions, duplicate headings, mislabeled versions, code samples mangled into prose.
+
+Ground-truth testing means three things:
+
+. Capture the source of truth the automation consumes (CLI `--help` output, source code, a schema, an API response) from *the exact same artifact version* the generation used.
+. Compare the generated output against it.
+. Do the comparison with an *independent parser*. If your checker reuses the generator's own parsing functions, it inherits the generator's bugs and verifies nothing. The truncation bug in #225 was invisible to any check built on the generator's flag parser, because the parser itself was dropping the text.
+
+== The end-to-end loop
+
+Run these stages in order. Each catches a class of defect the previous stages cannot.
+
+=== 1. Generate for real
+
+Run the exact production command on a pristine clone of the consumer repo (`redpanda-data/docs`, `adp-docs`, `cloud-docs`). Not a filtered run, not a fixture, not `--dry-run`. Use the real versions the next production run will use:
+
+[,bash]
+----
+git clone https://github.com/redpanda-data/docs /tmp/docs-e2e
+cd /tmp/docs-e2e
+node /path/to/doc-tools.js generate rpk-docs \
+  --from-json docs-data/rpk-v26.2.1.json --diff v26.1.12 \
+  --update-whats-new --summary-file /tmp/pr-summary.md
+----
+
+Keep the generation log and the PR summary. Warnings you dismiss now are findings someone else reports later.
+
+=== 2. Build a ground-truth corpus
+
+Dump the source of truth per unit of output. For rpk docs that is one `--help` capture per command, from the same binary and the same plugin installs:
+
+[,bash]
+----
+mkdir -p /tmp/helps
+# walk the command tree and capture help for every command
+rpk cluster health --help > /tmp/helps/rpk-cluster-health.txt
+# ...one file per command, named by the dashified command path
+----
+
+[IMPORTANT]
+====
+Your ground truth can be wrong. Help output is often platform and environment dependent:
+
+* `rpk debug bundle` on macOS is a stub with no flags. The Linux binary has 17.
+* Redpanda Connect registers `--chroot` only on Linux.
+* Some flags are hidden unless you run inside Kubernetes.
+
+The docs generate from the Linux tree, which is what users get. Capture ground truth on Linux (or in the same container the generation used), or expect false findings and triage them. In the #225 review, 30 of 32 checker warnings traced back to darwin ground truth, not to the docs.
+====
+
+=== 3. Run mechanical checks
+
+Write a small standalone script (it can live in your scratch area, it does not need to ship) that walks every generated file and checks structure and fidelity. Checks that have caught real bugs:
+
+* Leaked internal markers (`__DECIMAL__`, `[object Object]`, `undefined undefined`, `NaN`).
+* Unbalanced `ifdef`/`endif` conditionals and `tag::`/`end::` pairs.
+* Odd numbers of `|===` table delimiters, and bare `====`/`----` runs outside blocks.
+* Duplicate level-2 headings on one page.
+* Flag fidelity both ways: every flag in the help must appear on the page, and every flag on the page must exist in the help. Count help flags with your own regex, not the generator's parser.
+* Description tails: the last few words of each help description should appear somewhere on the page. Truncation bugs cut descriptions mid-parenthetical, and this check finds them.
+* Version sanity: a page for an independently-versioned plugin must not carry Redpanda-style version numbers, and vice versa.
+
+Expect the first run to be noisy. Iterate on the checker until every warning is either a real defect or a documented benign class (deliberate transforms like `e.g.` becoming `for example,`, escaping like `{vbar}` in table cells, platform gaps in the ground truth). Keep the benign list in the checker so reruns stay quiet.
+
+=== 4. Parse every file with Asciidoctor
+
+Structure checks miss what the parser sees. Load every generated file through `@asciidoctor/core` with a `MemoryLogger` and fail on any warning other than include-not-found (expected when loading files standalone). This is cheap, takes seconds, and catches malformed AsciiDoc that survives regex checks.
+
+=== 5. Build the full Antora site
+
+Some defects only exist at the site level. In #225, the nav rebuild dropped one line, every file-level check passed, and only the Antora build reported the orphaned page:
+
+[,bash]
+----
+npx antora --stacktrace local-antora-playbook.yml
+----
+
+Read the log as JSON lines. Filter to messages whose `source` is your local worktree, because the playbook pulls other repos and their pre-existing errors are not your regression. Zero errors and zero warnings attributable to your content is the bar.
+
+=== 6. Verify claims against history
+
+Anything the output *asserts* needs independent verification, not just format checks:
+
+* A flag labeled `New in v26.2.1` must be absent from the v26.1.12 snapshot for that command. Script it against the old snapshot for every label, not a sample.
+* Release-notes entries must match an independently computed diff of the two snapshots, in both directions: everything claimed is true, and everything true is claimed.
+* Every xref must point at a file that exists.
+
+[IMPORTANT]
+====
+Baseline gaps masquerade as changes. When a new capability starts capturing data the old snapshot never had (for example, flag extraction for plugin commands), diffing against the old snapshot reports all of it as "new". In #225 this stamped 208 wrong `New in` labels on long-standing flags. If your automation gains a data source, decide explicitly how the first diff against a pre-capability baseline should behave, and test that decision.
+====
+
+=== 7. Diff against the consumer repo's main branch
+
+Regeneration must not silently drop curated content. Hand edits inside generated pages are lost by design (curation belongs in the overrides file), so `git diff origin/main` on the consumer repo after generation is a review artifact, not noise. Read the deletions. Every removed line is either expected churn or a curated sentence someone will miss.
+
+=== 8. Check idempotence
+
+Run the same command twice. The second run must change nothing except timestamps. Non-idempotent output means merge conflicts and phantom diffs in every future automated PR.
+
+=== 9. Review meaning, not just structure
+
+Mechanical checks cannot catch swapped definitions, contradictions with the source, or a description that says "identify" where the command actually deletes. Sample the pages with the longest source material and compare the prose against the ground truth by reading both. In the #225 review this judgment pass found factual errors (swapped `%a` and `%%` escape docs) that every mechanical stage had passed over. Budget for it, and prioritize shared partials and high-traffic pages.
+
+== Iterating on fixes
+
+When a stage finds a defect and you fix the generator, do not just rerun the failing check:
+
+. Snapshot the rendered output before the fix (`rsync` the generated directories to a scratch folder).
+. Regenerate and diff the whole corpus against the snapshot.
+. Read every changed file, not only the one you were fixing. In #225, a fix for one page's code-sample handling silently degraded two unrelated pages that had been rendering as tables. The corpus diff caught it, the targeted check did not.
+. Rerun the full battery (mechanical checks, Asciidoctor parse, Antora build) before pushing.
+
+== Triage discipline
+
+Classify every finding before fixing anything:
+
+Generator regression:: The defect is new in your branch. Fix it in the generator with a test.
+Pre-existing content defect:: The same defect exists on the consumer repo's published main. Fix it in the consumer repo (usually the overrides file) in its own PR, and reference how you found it.
++
+"Pre-existing" is a classification, not a disposition. A finding you classify as pre-existing must leave the review with an owner: a fix PR, a ticket, or an explicit named decision to accept it. The 22 broken cloud-docs xrefs (DOC-2407) appeared in every Antora build of the rpk review and were correctly classified as pre-existing — then implicitly treated as out of scope for days, even though the review's own train had already built the fix mechanism and the fix data existed in an open PR.
+Checker artifact:: Your ground truth or your checker is wrong. Fix the checker and document the benign class.
+
+The fastest classification is checking whether the published page has the same content: `git show origin/main:<path> | grep ...` answers it in seconds.
+
+== Testing the workflows
+
+The generator being correct does not mean the automation runs. Workflow defects found the hard way:
+
+* PRs created with the default `GITHUB_TOKEN` do not trigger the repo's own Actions, so the generated PR shows no checks. Use the bot token pattern (`sdlc/prod/github/actions_bot_token` via AWS OIDC) for PR creation, and verify checks actually start on a test PR.
+* `sort -V` misorders prereleases: `26.3.1` sorts below `26.3.1-beta.1`, and an rc snapshot can be chosen over a GA one. Tilde-normalize before sorting (`sed 's/-rc/~rc/' | sort -V`) and test the exact version pairs your release flow produces.
+* Timeouts, retries, and disk are part of the workflow. From-source builds hit flaky module proxies and need retry loops, and the retry must verify the artifact actually exists rather than trusting the exit code.
+
+=== Using act safely
+
+link:https://github.com/nektos/act[act] is useful for guard and validation paths only.
+
+[CAUTION]
+====
+act picks up your local `gh` auth token automatically. A "test" run of a happy path will create a real PR in the real repo. Only run scenarios that must fail fast (bad payloads, guard branches), and keep any event fixtures outside the checkout, mounted read-only, because `actions/checkout` wipes uncommitted files.
+====
+
+For happy paths, use a real `workflow_dispatch` against the production workflow with test inputs, and hold the resulting PR for review instead of merging it.
+
+== Failure modes of the review itself
+
+Every class below escaped a review that was otherwise thorough, and was caught later by a human reviewer or the first production run. Check your review against each before calling it done.
+
+Totals, not samples:: Spot-checking outputs misses whole categories that silently produce nothing. Every emit loop needs `emitted == independently_counted_eligible` as an assertion. A template gate that skipped summary-only connectors passed a sampled review because 244 partials looked plausible — the real number was 311.
+
+Data shapes your fixtures lack:: Defects live in input shapes you did not think to construct: a connector with a summary but no description, a command tree where the new pages come from an overrides change rather than a tree change. Derive fixture variety from the real data's schema (which fields are optional?) rather than from typical examples.
+
+The consumer's model, not the producer's:: Detection and reporting must key on what the downstream consumer tracks. The adp-docs follow-up flag keyed on command-tree changes, but adp-docs stubs track the page set — three new pages shipped with zero tree changes and the flag stayed silent.
+
+Cross-repo workflow topology:: Testing that a dispatch step works says nothing about what its failure does to the job around it. Audit every notification step's blast radius: what does `needs:` chain off this job, and is the step `continue-on-error` when its failure must not gate a release? The same template flaw shipped in three sender repos before a reviewer caught one.
+
+Legacy paths beside the new ones:: New workflows got runtime version pinning; the pre-existing workflow kept installing from the repo lockfile and failed on the first production dispatch. When you harden a pattern, grep for every other place the old pattern still lives.
+
+Scheduled unblocks:: A finding verified as "intentional for now" (an exclusion for stub commands, a hold on a data file) needs a trigger for when it stops being intentional, or it becomes a silent gap. The rpk ai connection exclusion was correct when reviewed and nobody owned lifting it at GA.
+
+Verify your tooling's writes:: `gh pr edit` failed silently twice (a GraphQL deprecation aborts the mutation but exits cleanly), losing a PR-body update that a reviewer then flagged as missing. After any write through a tool you have seen fail, read the result back.
+
+== What to keep when you are done
+
+* The benign-warning classes you triaged, documented in the checker or the PR description. The next person rerunning the harness should not re-triage them.
+* The generation log, PR summary, and checker output attached to the PR, so reviewers can see what was verified rather than taking "tested end-to-end" on faith.
+* Tests in this repo for every generator defect found. The e2e harness catches a class once. The unit test keeps it fixed.
