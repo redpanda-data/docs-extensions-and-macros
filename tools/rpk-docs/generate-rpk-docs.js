@@ -1734,6 +1734,11 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // Add backticks around standalone file names (not inside paths)
   result = result.replace(/(?<![`/])(redpanda\.yaml|rpk\.yaml)(?!`)/gi, '`$1`')
 
+  // Add backticks around internal topic names (_redpanda.transform_logs,
+  // _redpanda.audit_log, ...). The leading underscore is also an AsciiDoc
+  // italics delimiter, so these must never render as bare prose.
+  result = result.replace(/(?<![`\w/])(_redpanda(?:\.[a-z_]+)+)(?!`)/g, '`$1`')
+
   // Add backticks around standalone "rpk" (at end of phrase, before punctuation)
   // Also exclude rpk inside paths (preceded by /)
   result = result.replace(/(?<![`\w/])rpk(?=[\s]*[.,;:!?)'"}\]]|[\s]*$)/g, '`rpk`')
@@ -2209,6 +2214,12 @@ function capToTwoSentences(desc) {
   // The pattern matches: colon, optional whitespace/newlines, then indented content
   cleaned = cleaned.replace(/:\s*\n+[ \t]+.+$/s, ':')
 
+  // A paragraph break is a sentence boundary even when the paragraph has no
+  // terminal punctuation (cobra short descriptions often lack one: "Generate
+  // a trial license\n\nThis command..."). Without this, flattening newlines
+  // glues the paragraphs into one run-on "sentence".
+  cleaned = cleaned.replace(/([^.!?:\s])[ \t]*\n[ \t]*\n/g, '$1.\n\n')
+
   // Normalize newlines to spaces for inline use (like :description: attribute)
   const singleLine = cleaned.replace(/\s*\n+\s*/g, ' ').trim()
 
@@ -2238,6 +2249,14 @@ function capToTwoSentences(desc) {
   // dropped by the sentence matcher
   normalized = normalized.replace(/(\d)\.(\d)/g, '$1__DECIMAL__$2')
 
+  // Protect ALL mid-token periods (no whitespace after): dotted names like
+  // _redpanda.transform_logs or URLs like redpanda.com/contact are not
+  // sentence boundaries. Without this the sentence matcher below cannot
+  // match the sentence containing the token, silently drops everything up
+  // to the mid-token period, and emits the tail fragment as a "sentence"
+  // ("View logs for a transform. transform_logs.").
+  normalized = normalized.replace(/\.(?=\S)/g, '__MIDDOT__')
+
   // Match sentences
   let sentences = normalized.match(/[^.!?]+[.!?]+(?:\s|$)/g)
 
@@ -2253,6 +2272,7 @@ function capToTwoSentences(desc) {
   if (!sentences || sentences.length === 0) {
     // Restore and return
     let result = normalized.replace(/__DECIMAL__/g, '.')
+    result = result.replace(/__MIDDOT__/g, '.')
     placeholders.forEach(({ ph, original }) => {
       result = result.replace(ph, original)
     })
@@ -2266,6 +2286,7 @@ function capToTwoSentences(desc) {
 
   // Restore decimal points
   result = result.replace(/__DECIMAL__/g, '.')
+  result = result.replace(/__MIDDOT__/g, '.')
 
   // Restore abbreviations
   placeholders.forEach(({ ph, original }) => {

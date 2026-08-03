@@ -199,6 +199,43 @@ describe('known command path formatting', () => {
   })
 })
 
+describe('mid-token periods in summaries', () => {
+  const { formatDescription, capToTwoSentences } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  test('dotted topic names never split or drop a sentence', () => {
+    const src = "View logs for a transform.\n\nData transform's STDOUT and STDERR are captured during runtime and written to \nan internally managed topic _redpanda.transform_logs.\nThis command outputs logs for a single transform."
+    const out = capToTwoSentences(formatDescription(src, null, { skipTableConversion: true, skipListConversion: true }))
+    expect(out).not.toBe('View logs for a transform. transform_logs.')
+    expect(out).toContain('`_redpanda.transform_logs`')
+    expect(out).toContain('STDOUT and STDERR are captured')
+  })
+
+  test('URLs never split or drop a sentence', () => {
+    const out = capToTwoSentences('Generate a license. To get one, contact us at redpanda.com/contact for details. The license is saved locally.')
+    expect(out).toBe('Generate a license. To get one, contact us at redpanda.com/contact for details.')
+  })
+
+  test('an unterminated paragraph is a sentence boundary', () => {
+    const out = capToTwoSentences('Generate a trial license\n\nThis command generates a license for a 30-day trial. The license is saved locally.')
+    expect(out).toBe('Generate a trial license. This command generates a license for a 30-day trial.')
+  })
+})
+
+describe('internal topic name backticking', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  test('wraps _redpanda.* topic names in inline code', () => {
+    const out = formatDescription('Logs are written to an internally managed topic _redpanda.transform_logs.\nRead them with the logs command.', null)
+    expect(out).toContain('`_redpanda.transform_logs`.')
+  })
+
+  test('leaves already-backticked topic names alone', () => {
+    const out = formatDescription('Logs go to `_redpanda.transform_logs` always.', null)
+    expect(out).toContain('`_redpanda.transform_logs`')
+    expect(out).not.toContain('``')
+  })
+})
+
 describe('applyTextTransformationsToExamples', () => {
   const { applyTextTransformationsToExamples } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
 
