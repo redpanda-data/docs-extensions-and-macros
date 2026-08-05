@@ -314,4 +314,35 @@ describe('existing-stub upgrade to the meta include', () => {
     expect(run().upgraded).toEqual([])
     fs.rmSync(dir, { recursive: true, force: true })
   })
+
+  test('the upgrade strips a backfilled literal description, which would otherwise win', () => {
+    // Later attribute entries override earlier ones, so a literal below
+    // the inserted include would take precedence and freshness would
+    // never materialize (micheleRP's precedence finding, verified).
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stub-strip-'))
+    const partialsDir = path.join(dir, 'partials')
+    const stubDir = path.join(dir, 'stubs')
+    const navFile = path.join(dir, 'nav.adoc')
+    fs.mkdirSync(partialsDir); fs.mkdirSync(stubDir)
+    fs.writeFileSync(navFile, '* xref:reference:rpk/index.adoc[rpk]\n')
+    const prefix = 'streaming:reference:partial$rpk-ai/'
+    fs.writeFileSync(path.join(partialsDir, 'rpk-ai-run.adoc'),
+      '= rpk ai run\n// tag::single-source[]\n// tag::meta[]\n:description: Fresh.\n// end::meta[]\nBody.\n// end::single-source[]\n')
+    fs.writeFileSync(path.join(stubDir, 'rpk-ai-run.adoc'),
+      `= rpk ai run\n:description: Stale backfilled copy.\n\ninclude::${prefix}rpk-ai-run.adoc[tag=single-source]\n`)
+
+    const result = reconcileStubs({
+      partials: readPartialTitles(partialsDir),
+      stubDir,
+      navFile,
+      plugin: 'ai',
+      includePrefix: prefix,
+      attributes: [],
+      dryRun: false
+    })
+    expect(result.upgraded).toEqual(['rpk-ai-run.adoc'])
+    const content = fs.readFileSync(path.join(stubDir, 'rpk-ai-run.adoc'), 'utf8')
+    expect(content).not.toContain(':description: Stale backfilled copy.')
+    expect(content.split('\n')[1]).toBe(`include::${prefix}rpk-ai-run.adoc[tag=meta]`)
+  })
 })

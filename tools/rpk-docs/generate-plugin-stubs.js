@@ -237,7 +237,15 @@ function reconcileStubs({
         const stubContent = fs.readFileSync(stubPath, 'utf8')
         if (!stubContent.includes('[tag=meta]')) {
           const metaInclude = `include::${includePrefix}${partial.file}[tag=meta]`
-          const upgraded = stubContent.replace(/^(= .+)$/m, `$1\n${metaInclude}`)
+          // A later attribute entry overrides an earlier one (verified
+          // empirically against an Antora build), so a literal
+          // :description: below the include would win and leave the
+          // include dead weight. These are generated reference stubs, so
+          // any literal is a static backfill the include supersedes:
+          // strip it. Hand-maintained prose stubs never pass through this
+          // reconciler, so intentionally curated descriptions are safe.
+          let upgraded = stubContent.replace(/^:description: .*\n/m, '')
+          upgraded = upgraded.replace(/^(= .+)$/m, `$1\n${metaInclude}`)
           if (upgraded !== stubContent) {
             fs.writeFileSync(stubPath, upgraded, 'utf8')
             upgraded_.push(partial.file)
