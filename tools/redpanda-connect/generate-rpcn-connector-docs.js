@@ -738,7 +738,15 @@ function backfillPageDescriptions (connectorData, { pagesRoot, dryRun = false } 
       const header = lines.slice(0, headerEnd === -1 ? lines.length : headerEnd);
       if (header.some((l) => l.startsWith(':description:'))) continue;
 
-      const summary = (item.summary || '').replace(/\s+/g, ' ').trim();
+      // Meta descriptions are read as plain text by search results, link
+      // previews, and assistants, so flatten AsciiDoc markup mechanically:
+      // xrefs and links become their labels, inline code loses its
+      // backticks. No prose is edited.
+      const summary = (item.summary || '')
+        .replace(/(?:xref|link):[^\[\]]+\[([^\]]*)\]/g, '$1')
+        .replace(/`([^`]*)`/g, '$1')
+        .replace(/\s+/g, ' ')
+        .trim();
       if (!summary) {
         results.skippedNoSummary.push(`${typeDir}/${item.name}`);
         continue;

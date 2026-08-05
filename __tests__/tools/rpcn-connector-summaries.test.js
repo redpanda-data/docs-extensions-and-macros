@@ -386,6 +386,20 @@ describe('backfillPageDescriptions - self-healing page headers', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  test('flattens AsciiDoc markup out of the meta text', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'backfill-md-'));
+    fs.mkdirSync(path.join(root, 'processors'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'processors', 'workflow.adoc'),
+      '= workflow\n// tag::single-source[]\n:type: processor\n\nBody.\n');
+    const result = backfillPageDescriptions({
+      processors: [{ name: 'workflow', summary: 'Executes a topology of xref:components:processors/branch.adoc[`branch` processors], in parallel.' }],
+    }, { pagesRoot: root });
+    expect(result.backfilled).toEqual(['processors/workflow']);
+    const page = fs.readFileSync(path.join(root, 'processors', 'workflow.adoc'), 'utf8');
+    expect(page).toContain(':description: Executes a topology of branch processors, in parallel.');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   test('dry run reports without writing', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'backfill-dry-'));
     fs.mkdirSync(path.join(root, 'caches'), { recursive: true });
