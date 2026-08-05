@@ -23,7 +23,7 @@ const { spawnSync } = require('child_process')
  * authoritative: dashified filenames cannot be reversed unambiguously
  * (rpk-ai-llm-provider could be `llm provider` or `llm-provider`).
  * @param {string} partialsDir - Directory of generated .adoc partials
- * @returns {Array<{file: string, title: string, description: string|undefined}>} Sorted by command path
+ * @returns {Array<{file: string, title: string, description: string|undefined, hasMetaTag: boolean}>} Sorted by command path
  */
 function readPartialTitles(partialsDir) {
   const partials = []
@@ -35,11 +35,18 @@ function readPartialTitles(partialsDir) {
       console.warn(`Warning: no title line in ${file}; skipping`)
       continue
     }
-    // The partial repeats :description: inside its single-source tag, but
-    // Antora resolves page metadata with a header-only parse that never sees
-    // the include — the stub must carry the description in its own header.
+    // Antora resolves page metadata with a header-only parse that never
+    // sees the body include, so the stub must carry the description in its
+    // own header. Partials generated with doc-tools >= 5.4 carry a nested
+    // meta tag region around :description: that stubs include dynamically;
+    // older partials fall back to a literal copy of the header description.
     const description = (content.match(/^:description:[ \t]*(.+)$/m) || [])[1]
-    partials.push({ file, title: match[1].trim(), description: description && description.trim() })
+    partials.push({
+      file,
+      title: match[1].trim(),
+      description: description && description.trim(),
+      hasMetaTag: content.includes('tag::meta['),
+    })
   }
   // Hierarchical order: sort by command words so parents precede children
   partials.sort((a, b) => {
@@ -121,11 +128,23 @@ function inferIncludePrefix(stubDir, plugin) {
  * @param {string} [params.description] - Meta description from the partial header
  * @param {string} params.includePrefix - Antora resource prefix
  * @param {Array<string>} params.attributes - Page attribute lines
+ * @param {boolean} [params.hasMetaTag] - Partial carries a tag::meta[] region (doc-tools >= 5.4)
  * @returns {string}
  */
-function renderStub({ title, file, description, includePrefix, attributes }) {
+function renderStub({ title, file, description, includePrefix, attributes, hasMetaTag }) {
   const lines = [`= ${title}`]
-  if (description) lines.push(`:description: ${description}`)
+  // The description mechanism is always the first header line after the
+  // title: a header include for partials with a meta tag region, or a
+  // literal copy as the fallback for partials generated before 5.4. Antora
+  // resolves page metadata with a header-only parse that stops at the first
+  // blank line, so either form must sit above it — an include below the
+  // blank line is never evaluated for attributes and the page ships the
+  // generic site description.
+  if (hasMetaTag) {
+    lines.push(`include::${includePrefix}${file}[tag=meta]`)
+  } else if (description) {
+    lines.push(`:description: ${description}`)
+  }
   for (const attr of attributes) lines.push(attr)
   lines.push('')
   lines.push(`include::${includePrefix}${file}[tag=single-source]`)

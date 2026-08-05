@@ -23,11 +23,26 @@
 {{/each}}
 
 // tag::single-source[]
+// tag::meta[]
 :description: {{{wrapDescriptionPassthrough shortDesc}}}
-{{!-- The description attribute is repeated inside the tagged region so
-     single-sourcing consumers (stub pages that include this tag) inherit
-     the meta description. page-aliases and page-platforms deliberately stay
-     outside the tag: consumers must not inherit alias registrations. --}}
+// end::meta[]
+{{!-- The nested meta tag region lets stub pages inherit the description as
+     a real HEADER attribute. A stub that only includes tag=single-source
+     after a blank line never gets it: Antora resolves page metadata with a
+     header-only parse that stops at the stub's first blank line, so the
+     include is never evaluated for attributes and the page ships the
+     generic site description (verified empirically, 2026-08-05). The
+     working stub shape is two includes:
+
+       = Page title
+       include::...page.adoc[tag=meta]        <- header: no blank line above
+                                              <- blank line ends the header
+       include::...page.adoc[tag=single-source]
+
+     Tag directive lines are stripped from tag-filtered includes, so
+     consumers of tag=single-source are unaffected by the nested region.
+     page-aliases and page-platforms deliberately stay outside the tag:
+     consumers must not inherit alias registrations. --}}
 {{!-- Deprecation notice --}}
 {{#if deprecated}}
 [CAUTION]
