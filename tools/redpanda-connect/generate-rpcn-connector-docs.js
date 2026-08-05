@@ -674,17 +674,99 @@ async function generateRpcnConnectorDocs(options) {
     }
   }
 
+  // Self-heal published page headers: pages are one-time drafts, so pages
+  // created before the template emitted :description: never got one.
+  let descriptionBackfill = { backfilled: [], skippedNoSummary: [] };
+  if (!writeFullDrafts) {
+    descriptionBackfill = backfillPageDescriptions(dataObj);
+  }
+
   return {
     partialsWritten,
     draftsWritten,
     partialFiles,
     draftFiles,
-    lostSectionWarnings
+    lostSectionWarnings,
+    descriptionBackfill
   };
+}
+
+
+// Connector page families that have per-component pages under
+// modules/components/pages/. Other data keys (config, bloblang-functions,
+// bloblang-methods) have no per-component page to backfill.
+const PAGE_TYPE_DIRS = new Set([
+  'inputs', 'outputs', 'processors', 'caches', 'buffers', 'metrics',
+  'tracers', 'scanners', 'rate-limits', 'rate_limits'
+]);
+
+/**
+ * Insert a tagged :description: into existing connector page headers that
+ * lack one, sourced from the component's summary in the connector data.
+ *
+ * Connector pages are one-time first drafts: pages drafted before the
+ * template emitted :description: never got one, and nothing rewrote them,
+ * so hundreds of published pages ship the generic site meta description
+ * even though ~97% of components carry a summary in the source data. This
+ * runs on every generation, so the page set self-heals and stays healed.
+ *
+ * The inserted block matches the connector template's shape: the meta tag
+ * region lets single-source stubs inherit the description as a header
+ * attribute (see the template comment in connector.hbs).
+ *
+ * @param {Object} connectorData - Parsed connector data (typed arrays)
+ * @param {Object} [options]
+ * @param {string} [options.pagesRoot] - Pages directory (default: modules/components/pages under cwd)
+ * @param {boolean} [options.dryRun] - Report without writing
+ * @returns {{backfilled: string[], skippedNoSummary: string[]}}
+ */
+function backfillPageDescriptions (connectorData, { pagesRoot, dryRun = false } = {}) {
+  const root = pagesRoot || path.resolve(process.cwd(), 'modules/components/pages');
+  const results = { backfilled: [], skippedNoSummary: [] };
+  if (!fs.existsSync(root)) return results;
+
+  for (const [typeDir, items] of Object.entries(connectorData)) {
+    if (!PAGE_TYPE_DIRS.has(typeDir) || !Array.isArray(items)) continue;
+    for (const item of items) {
+      if (!item || !item.name) continue;
+      const pagePath = path.join(root, typeDir, `${item.name}.adoc`);
+      if (!fs.existsSync(pagePath)) continue;
+
+      const content = fs.readFileSync(pagePath, 'utf8');
+      const lines = content.split('\n');
+      const headerEnd = lines.findIndex((l) => l.trim() === '');
+      const header = lines.slice(0, headerEnd === -1 ? lines.length : headerEnd);
+      if (header.some((l) => l.startsWith(':description:'))) continue;
+
+      const summary = (item.summary || '').replace(/\s+/g, ' ').trim();
+      if (!summary) {
+        results.skippedNoSummary.push(`${typeDir}/${item.name}`);
+        continue;
+      }
+
+      const insertAt = headerEnd === -1 ? lines.length : headerEnd;
+      lines.splice(insertAt, 0, '// tag::meta[]', `:description: ${summary}`, '// end::meta[]');
+      if (!dryRun) fs.writeFileSync(pagePath, lines.join('\n'), 'utf8');
+      results.backfilled.push(`${typeDir}/${item.name}`);
+    }
+  }
+
+  if (results.backfilled.length) {
+    console.log(`Backfilled :description: into ${results.backfilled.length} connector page header(s) from source summaries`);
+  }
+  if (results.skippedNoSummary.length) {
+    console.warn(
+      `\u26a0 ${results.skippedNoSummary.length} connector page(s) lack both a header description and a source summary: ` +
+      results.skippedNoSummary.join(', ') +
+      '. Author these in the overrides file or upstream.'
+    );
+  }
+  return results;
 }
 
 module.exports = {
   generateRpcnConnectorDocs,
+  backfillPageDescriptions,
   mergeOverrides,
   resolveReferences
 };
