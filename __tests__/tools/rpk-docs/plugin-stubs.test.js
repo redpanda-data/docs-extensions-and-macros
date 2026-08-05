@@ -274,3 +274,44 @@ describe('dynamic description inheritance via the meta tag region', () => {
     fs.rmSync(dir, { recursive: true, force: true })
   })
 })
+
+describe('existing-stub upgrade to the meta include', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const os = require('os')
+  const { reconcileStubs, readPartialTitles } = require('../../../tools/rpk-docs/generate-plugin-stubs.js')
+
+  test('adds the header include to an existing stub when the partial gains the region', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stub-upgrade-'))
+    const partialsDir = path.join(dir, 'partials')
+    const stubDir = path.join(dir, 'stubs')
+    const navFile = path.join(dir, 'nav.adoc')
+    fs.mkdirSync(partialsDir); fs.mkdirSync(stubDir)
+    fs.writeFileSync(navFile, '* xref:reference:rpk/index.adoc[rpk]\n')
+    const prefix = 'streaming:reference:partial$rpk-ai/'
+    fs.writeFileSync(path.join(partialsDir, 'rpk-ai-run.adoc'),
+      '= rpk ai run\n// tag::single-source[]\n// tag::meta[]\n:description: D.\n// end::meta[]\nBody.\n// end::single-source[]\n')
+    fs.writeFileSync(path.join(stubDir, 'rpk-ai-run.adoc'),
+      `= rpk ai run\n\ninclude::${prefix}rpk-ai-run.adoc[tag=single-source]\n`)
+
+    const run = () => reconcileStubs({
+      partials: readPartialTitles(partialsDir),
+      stubDir,
+      navFile,
+      plugin: 'ai',
+      includePrefix: prefix,
+      attributes: [],
+      dryRun: false
+    })
+    const result = run()
+    expect(result.upgraded).toEqual(['rpk-ai-run.adoc'])
+    const lines = fs.readFileSync(path.join(stubDir, 'rpk-ai-run.adoc'), 'utf8').split('\n')
+    expect(lines[0]).toBe('= rpk ai run')
+    expect(lines[1]).toBe(`include::${prefix}rpk-ai-run.adoc[tag=meta]`)
+    expect(lines[2]).toBe('')
+
+    // Idempotent: a second run changes nothing
+    expect(run().upgraded).toEqual([])
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+})

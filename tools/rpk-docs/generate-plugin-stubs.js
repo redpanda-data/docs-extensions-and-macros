@@ -181,6 +181,7 @@ function reconcileStubs({
   const existingStubs = fs.readdirSync(stubDir).filter(f => f.endsWith('.adoc'))
 
   const created = []
+  const upgraded_ = []
   const deleted = []
   const keptNonStub = []
   const skippedAliasTargets = []
@@ -225,7 +226,26 @@ function reconcileStubs({
     fs.existsSync(stubDir) ? fs.readdirSync(stubDir).filter(f => f.endsWith('.adoc')) : []
   )
   for (const partial of partials) {
-    if (remainingStubs.has(partial.file)) continue
+    if (remainingStubs.has(partial.file)) {
+      // Existing stub: upgrade it in place when the partial has gained the
+      // meta tag region and the stub does not yet include it. The header
+      // include is what lets the stub inherit :description: as page
+      // metadata, so upgrading here makes the consumer repo self-heal on
+      // the next sync instead of needing a hand-written migration PR.
+      if (partial.hasMetaTag && !dryRun) {
+        const stubPath = path.join(stubDir, partial.file)
+        const stubContent = fs.readFileSync(stubPath, 'utf8')
+        if (!stubContent.includes('[tag=meta]')) {
+          const metaInclude = `include::${includePrefix}${partial.file}[tag=meta]`
+          const upgraded = stubContent.replace(/^(= .+)$/m, `$1\n${metaInclude}`)
+          if (upgraded !== stubContent) {
+            fs.writeFileSync(stubPath, upgraded, 'utf8')
+            upgraded_.push(partial.file)
+          }
+        }
+      }
+      continue
+    }
     if (aliasClaims.has(partial.file)) {
       skippedAliasTargets.push({ file: partial.file, claimedBy: aliasClaims.get(partial.file) })
       continue
@@ -304,7 +324,7 @@ function reconcileStubs({
     }
   }
 
-  return { created, deleted, keptNonStub, navUpdated, renameCandidates, skippedAliasTargets }
+  return { created, upgraded: upgraded_, deleted, keptNonStub, navUpdated, renameCandidates, skippedAliasTargets }
 }
 
 module.exports = {
