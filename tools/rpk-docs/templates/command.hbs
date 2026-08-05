@@ -6,7 +6,12 @@
      page at worst. Availability pages are excluded from cloud by not
      generating a stub for them in cloud-docs. --}}
 = {{commandPath}}
+{{!-- Comment lines are legal inside an AsciiDoc header, so the meta tag
+     region can wrap the page's single description. Stub pages inherit it
+     with a header include (see the note at the single-source tag). --}}
+// tag::meta[]
 :description: {{{wrapDescriptionPassthrough shortDesc}}}
+// end::meta[]
 {{#if pageAliases}}
 :page-aliases: {{{pageAliases}}}
 {{/if}}
@@ -23,26 +28,24 @@
 {{/each}}
 
 // tag::single-source[]
-// tag::meta[]
-:description: {{{wrapDescriptionPassthrough shortDesc}}}
-// end::meta[]
-{{!-- The nested meta tag region lets stub pages inherit the description as
-     a real HEADER attribute. A stub that only includes tag=single-source
-     after a blank line never gets it: Antora resolves page metadata with a
-     header-only parse that stops at the stub's first blank line, so the
-     include is never evaluated for attributes and the page ships the
-     generic site description (verified empirically, 2026-08-05). The
-     working stub shape is two includes:
+{{!-- Stub pages inherit this page's description by including the header's
+     meta tag region as a HEADER attribute. A stub that only includes
+     tag=single-source after a blank line never gets it: Antora resolves
+     page metadata with a header-only parse that stops at the stub's first
+     blank line, so the include is never evaluated for attributes and the
+     page ships the generic site description (verified empirically,
+     2026-08-05, including that a headerless include destroys the body).
+     The working stub shape is two includes:
 
        = Page title
        include::...page.adoc[tag=meta]        <- header: no blank line above
                                               <- blank line ends the header
        include::...page.adoc[tag=single-source]
 
-     Tag directive lines are stripped from tag-filtered includes, so
-     consumers of tag=single-source are unaffected by the nested region.
-     page-aliases and page-platforms deliberately stay outside the tag:
-     consumers must not inherit alias registrations. --}}
+     Earlier revisions repeated :description: inside this region on the
+     wrong belief that it reached stub metadata by itself; it never did.
+     page-aliases and page-platforms deliberately stay outside both tag
+     regions: consumers must not inherit alias registrations. --}}
 {{!-- Deprecation notice --}}
 {{#if deprecated}}
 [CAUTION]
