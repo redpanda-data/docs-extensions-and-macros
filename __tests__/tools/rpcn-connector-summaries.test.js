@@ -411,3 +411,16 @@ describe('backfillPageDescriptions - self-healing page headers', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 });
+
+describe('mergeOverrides honors summary overrides', () => {
+  const { mergeOverrides } = require('../../tools/redpanda-connect/generate-rpcn-connector-docs');
+
+  test('a top-level summary override reaches the component', () => {
+    // overrides.json has carried summary overrides (zmq4, ffi) that were
+    // silently dropped: 'summary' was missing from scalarKeys and fell
+    // through every merge branch.
+    const data = { inputs: [{ name: 'zmq4', summary: '' }] };
+    mergeOverrides(data, { inputs: [{ name: 'zmq4', summary: 'Consumes messages from a ZeroMQ socket.' }] });
+    expect(data.inputs[0].summary).toBe('Consumes messages from a ZeroMQ socket.');
+  });
+});
