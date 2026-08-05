@@ -400,6 +400,18 @@ describe('backfillPageDescriptions - self-healing page headers', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  test('maps the rate-limits data key to the rate_limits pages directory', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'backfill-rl-'));
+    fs.mkdirSync(path.join(root, 'rate_limits'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'rate_limits', 'local.adoc'),
+      '= local\n// tag::single-source[]\n:type: rate_limit\n\nBody.\n');
+    const result = backfillPageDescriptions({
+      'rate-limits': [{ name: 'local', summary: 'A simple X every Y rate limit.' }],
+    }, { pagesRoot: root });
+    expect(result.backfilled).toEqual(['rate_limits/local']);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   test('dry run reports without writing', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'backfill-dry-'));
     fs.mkdirSync(path.join(root, 'caches'), { recursive: true });
