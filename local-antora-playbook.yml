@@ -49,7 +49,7 @@ antora:
     data:
       sets:
         docker_labs:
-          component: redpanda-labs
+          component: labs
           filter: docker-compose
           env_type: Docker
           attribute_name: docker-labs-index
