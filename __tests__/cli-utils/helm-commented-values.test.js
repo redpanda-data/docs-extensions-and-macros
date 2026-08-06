@@ -193,6 +193,8 @@ describe('injectIntoAsciiDoc', () => {
     expect(enabledIdx).toBeLessThan(typeIdx)
     expect(doc).toContain(`=== link:++${base}external.domain++[external.domain]`)
     expect(doc).toContain('*Default:* `nil`')
+    // AsciiDoc requires a blank line before the next section heading.
+    expect(doc).toMatch(/\*Default:\* `nil`\n\n=== link/)
   })
 
   test('skips keys that are already documented', () => {

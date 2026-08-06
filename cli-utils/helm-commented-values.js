@@ -213,6 +213,7 @@ function injectIntoAsciiDoc (adoc, entries) {
       '',
       `*Default:* ${entry.default}`,
       '',
+      '',
     ].join('\n')
 
     if (after) {
