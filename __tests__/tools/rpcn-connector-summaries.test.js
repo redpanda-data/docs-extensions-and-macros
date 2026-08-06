@@ -340,3 +340,99 @@ describe('buildChangedDefaultsTable - whats-new changed default links', () => {
     expect(table).toContain('|batching.byte_size\n');
   });
 });
+
+describe('backfillPageDescriptions - self-healing page headers', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const { backfillPageDescriptions } = require('../../tools/redpanda-connect/generate-rpcn-connector-docs');
+
+  const data = {
+    caches: [
+      { name: 'multilevel', summary: 'Combines multiple caches as levels,\nacross them.' },
+      { name: 'has_desc', summary: 'Should not be used.' },
+      { name: 'no_summary', summary: '' },
+      { name: 'no_page', summary: 'Page does not exist.' },
+    ],
+    'bloblang-functions': [{ name: 'not_a_page_family', summary: 'Ignored.' }],
+  };
+
+  test('inserts a tagged description into headers that lack one', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'backfill-'));
+    fs.mkdirSync(path.join(root, 'caches'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'caches', 'multilevel.adoc'),
+      '= multilevel\n// tag::single-source[]\n:type: cache\n:status: stable\n\nBody.\n// end::single-source[]\n');
+    fs.writeFileSync(path.join(root, 'caches', 'has_desc.adoc'),
+      '= has_desc\n// tag::single-source[]\n:description: Already here.\n\nBody.\n// end::single-source[]\n');
+    fs.writeFileSync(path.join(root, 'caches', 'no_summary.adoc'),
+      '= no_summary\n// tag::single-source[]\n:type: cache\n\nBody.\n// end::single-source[]\n');
+
+    const result = backfillPageDescriptions(data, { pagesRoot: root });
+    expect(result.backfilled).toEqual(['caches/multilevel']);
+    expect(result.skippedNoSummary).toEqual(['caches/no_summary']);
+
+    const lines = fs.readFileSync(path.join(root, 'caches', 'multilevel.adoc'), 'utf8').split('\n');
+    // Inserted at the end of the header (before the first blank line),
+    // summary flattened to one line, wrapped in the meta tag region.
+    expect(lines[4]).toBe('// tag::meta[]');
+    expect(lines[5]).toBe(':description: Combines multiple caches as levels, across them.');
+    expect(lines[6]).toBe('// end::meta[]');
+    expect(lines[7]).toBe('');
+    // Pages that already have one are untouched
+    expect(fs.readFileSync(path.join(root, 'caches', 'has_desc.adoc'), 'utf8')).toContain(':description: Already here.');
+
+    // Idempotent: second run backfills nothing
+    expect(backfillPageDescriptions(data, { pagesRoot: root }).backfilled).toEqual([]);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('flattens AsciiDoc markup out of the meta text', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'backfill-md-'));
+    fs.mkdirSync(path.join(root, 'processors'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'processors', 'workflow.adoc'),
+      '= workflow\n// tag::single-source[]\n:type: processor\n\nBody.\n');
+    const result = backfillPageDescriptions({
+      processors: [{ name: 'workflow', summary: 'Executes a topology of xref:components:processors/branch.adoc[`branch` processors], in parallel.' }],
+    }, { pagesRoot: root });
+    expect(result.backfilled).toEqual(['processors/workflow']);
+    const page = fs.readFileSync(path.join(root, 'processors', 'workflow.adoc'), 'utf8');
+    expect(page).toContain(':description: Executes a topology of branch processors, in parallel.');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('maps the rate-limits data key to the rate_limits pages directory', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'backfill-rl-'));
+    fs.mkdirSync(path.join(root, 'rate_limits'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'rate_limits', 'local.adoc'),
+      '= local\n// tag::single-source[]\n:type: rate_limit\n\nBody.\n');
+    const result = backfillPageDescriptions({
+      'rate-limits': [{ name: 'local', summary: 'A simple X every Y rate limit.' }],
+    }, { pagesRoot: root });
+    expect(result.backfilled).toEqual(['rate_limits/local']);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('dry run reports without writing', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'backfill-dry-'));
+    fs.mkdirSync(path.join(root, 'caches'), { recursive: true });
+    const page = '= multilevel\n// tag::single-source[]\n:type: cache\n\nBody.\n';
+    fs.writeFileSync(path.join(root, 'caches', 'multilevel.adoc'), page);
+    const result = backfillPageDescriptions(data, { pagesRoot: root, dryRun: true });
+    expect(result.backfilled).toEqual(['caches/multilevel']);
+    expect(fs.readFileSync(path.join(root, 'caches', 'multilevel.adoc'), 'utf8')).toBe(page);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('mergeOverrides honors summary overrides', () => {
+  const { mergeOverrides } = require('../../tools/redpanda-connect/generate-rpcn-connector-docs');
+
+  test('a top-level summary override reaches the component', () => {
+    // overrides.json has carried summary overrides (zmq4, ffi) that were
+    // silently dropped: 'summary' was missing from scalarKeys and fell
+    // through every merge branch.
+    const data = { inputs: [{ name: 'zmq4', summary: '' }] };
+    mergeOverrides(data, { inputs: [{ name: 'zmq4', summary: 'Consumes messages from a ZeroMQ socket.' }] });
+    expect(data.inputs[0].summary).toBe('Consumes messages from a ZeroMQ socket.');
+  });
+});
