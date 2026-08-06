@@ -95,6 +95,10 @@ function extractCommentedValueDocs (yamlText) {
 
     const commentedKey = line.match(COMMENTED_KEY_RE)
     if (commentedKey) {
+      // A commented-out key line terminates an @doc entry rather than being
+      // swallowed into its description, so @doc lines can sit directly above
+      // the commented key they document.
+      flushAtDoc()
       const innerIndent = commentedKey[2].length
       // A previously emitted commented key suppresses its own commented
       // subtree, so nested example structures do not emit bogus paths.

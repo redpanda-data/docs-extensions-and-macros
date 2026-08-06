@@ -60,6 +60,21 @@ describe('extractCommentedValueDocs', () => {
     expect(entries[0].default).toBe('`[]`')
   })
 
+  test('@doc entries terminate at a commented-out key instead of swallowing it', () => {
+    const yaml = [
+      'external:',
+      '  enabled: true',
+      '  # @doc external.addresses -- Optional list of advertised addresses.',
+      '  # addresses:',
+      '  # - redpanda-0',
+    ].join('\n')
+
+    const entries = extractCommentedValueDocs(yaml)
+    expect(entries).toHaveLength(1)
+    expect(entries[0].path).toBe('external.addresses')
+    expect(entries[0].description).toBe('Optional list of advertised addresses.')
+  })
+
   test('honors @default in helm-docs style blocks', () => {
     const yaml = [
       'external:',
