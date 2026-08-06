@@ -1660,6 +1660,27 @@ automation
             return match
           }
         })
+
+      // helm-docs only renders keys that exist in the YAML tree, so optional
+      // values that ship commented out never appear in the reference. Pull
+      // documented commented-out keys from values.yaml and inject them.
+      const valuesFile = path.join(chartPath, 'values.yaml')
+      if (fs.existsSync(valuesFile)) {
+        const { extractCommentedValueDocs, injectIntoAsciiDoc } = require('../cli-utils/helm-commented-values')
+        try {
+          const entries = extractCommentedValueDocs(fs.readFileSync(valuesFile, 'utf8'))
+          if (entries.length > 0) {
+            const { doc: withInjected, injected } = injectIntoAsciiDoc(doc, entries)
+            doc = withInjected
+            if (injected.length > 0) {
+              console.log(`Documented ${injected.length} commented-out value(s): ${injected.join(', ')}`)
+            }
+          }
+        } catch (err) {
+          console.warn(`Warning: Skipping commented-out value docs for ${name}: ${err.message}`)
+        }
+      }
+
       fs.writeFileSync(outFile, doc, 'utf8')
 
       console.log(`Done: Wrote ${outFile}`)
