@@ -21,3 +21,6 @@ mcp-usage-stats.json
 # Development rpk JSON files
 docs-data/rpk-vdev.json
 docs-data/rpk-vlocal.json
+
+# E2E fixture sites are real content trees; keep them tracked despite modules/
+!__tests__/fixtures/**

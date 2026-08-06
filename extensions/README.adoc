@@ -89,6 +89,10 @@ IMPORTANT: Extensions must be registered under the `antora.extensions` key in yo
 * **set-available-attachment-versions** - Point UI templates at the newest generated JSON attachments that exist in the catalog
 * **validate-attributes** - Validate AsciiDoc attributes
 
+=== Link health
+* **url-to-xref** - Convert docs.redpanda.com URLs in content into validated xrefs and warn about URLs that match no published page
+* **external-link-checker** - Verify external URLs respond and report dead links in the build log
+
 === AI-friendly documentation
 * **convert-to-markdown** - Export documentation pages as markdown with frontmatter
 * **convert-llms-to-txt** - Generate llms.txt and component-specific exports for AI agents
