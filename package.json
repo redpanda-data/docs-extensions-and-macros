@@ -60,6 +60,7 @@
     "./extensions/generate-rp-connect-info": "./extensions/generate-rp-connect-info.js",
     "./extensions/generate-fields-only-pages": "./extensions/generate-fields-only-pages.js",
     "./extensions/add-global-attributes": "./extensions/add-global-attributes.js",
+    "./extensions/set-available-attachment-versions": "./extensions/set-available-attachment-versions.js",
     "./extensions/git-full-clone": "./extensions/git-full-clone.js",
     "./extensions/add-git-dates": "./extensions/add-git-dates.js",
     "./extensions/add-faq-structured-data": "./extensions/add-faq-structured-data.js",
