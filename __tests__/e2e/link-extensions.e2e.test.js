@@ -73,7 +73,15 @@ describe('link extensions end-to-end', () => {
     gitInit(path.join(workDir, 'streaming'))
     gitInit(path.join(workDir, 'connect'))
 
+    // Install this repo into the fixture site's node_modules (as a symlink)
+    // and register the extensions by their package specifiers, so the build
+    // exercises the real package.json exports map exactly the way the
+    // docs-site playbook consumes them. A missing exports entry fails here.
     const repoRoot = path.join(__dirname, '..', '..')
+    const packageDir = path.join(workDir, 'node_modules', '@redpanda-data')
+    fs.mkdirSync(packageDir, { recursive: true })
+    fs.symlinkSync(repoRoot, path.join(packageDir, 'docs-extensions-and-macros'), 'dir')
+
     const playbook = [
       'site:',
       '  title: E2E Site',
@@ -93,8 +101,8 @@ describe('link extensions end-to-end', () => {
       `    url: ${path.join(FIXTURE_DIR, 'ui-bundle.zip')}`,
       'antora:',
       '  extensions:',
-      `  - require: ${path.join(repoRoot, 'extensions', 'url-to-xref.js')}`,
-      `  - require: ${path.join(repoRoot, 'extensions', 'external-link-checker.js')}`,
+      "  - require: '@redpanda-data/docs-extensions-and-macros/extensions/url-to-xref'",
+      "  - require: '@redpanda-data/docs-extensions-and-macros/extensions/external-link-checker'",
       '',
     ].join('\n')
     const playbookPath = path.join(workDir, 'antora-playbook.yml')

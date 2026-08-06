@@ -67,6 +67,15 @@ function makeCatalog () {
       relative: 'index.adoc',
       url: '/home/',
     }),
+    // A preview-style build: docs component named ROOT (dropped from URLs)
+    // with no symbolic latest-version segment configured.
+    makePage({
+      component: 'ROOT',
+      version: '25.3',
+      module: 'get-started',
+      relative: 'quick-start.adoc',
+      url: '/25.3/get-started/quick-start/',
+    }),
   ]
   const connectHome = pages[5]
   const homeIndex = pages[6]
@@ -86,6 +95,7 @@ function makeCatalog () {
       { name: 'streaming', latest: { version: '25.3' } },
       { name: 'connect', latest: { version: '' } },
       { name: 'home', latest: { version: '' } },
+      { name: 'ROOT', latest: { version: '25.3' } },
     ],
     getPages: (filter) => (filter ? pages.filter(filter) : pages),
     findBy: ({ family }) => (family === 'alias' ? aliases : family === 'partial' ? partials : []),
@@ -95,6 +105,7 @@ function makeCatalog () {
 function makeResolverContext () {
   return Object.assign(buildUrlMap(makeCatalog()), {
     hostnames: new Set(['docs.redpanda.com']),
+    ignore: [/^\/api\//],
     latestVersionSegment: 'current',
   })
 }
@@ -142,6 +153,7 @@ describe('buildUrlMap', () => {
       streaming: { latestVersion: '25.3' },
       connect: { latestVersion: '' },
       home: { latestVersion: '' },
+      ROOT: { latestVersion: '25.3' },
     })
   })
 })
@@ -222,6 +234,25 @@ describe('convertContent', () => {
     expect(content).toBe(input)
     expect(converted).toBe(0)
     expect(unmapped).toEqual(['https://docs.redpanda.com/no/such/page/'])
+  })
+
+  test('resolves symbolic-segment URLs in builds that publish real version numbers', () => {
+    // Preview builds have no latest_version_segment, so /current/... URLs
+    // must resolve against the latest version's real URL, including for a
+    // ROOT component whose name is dropped from URLs.
+    expect(convert('https://docs.redpanda.com/current/get-started/quick-start/').content).toBe(
+      'xref:ROOT:get-started:quick-start.adoc[]'
+    )
+    expect(convert('https://docs.redpanda.com/docs/get-started/quick-start/').content).toBe(
+      'xref:ROOT:get-started:quick-start.adoc[]'
+    )
+  })
+
+  test('leaves ignored paths untouched without reporting them', () => {
+    const input = 'API: https://docs.redpanda.com/api/doc/cloud-dataplane/operation/listquotas'
+    const { content, unmapped } = convert(input)
+    expect(content).toBe(input)
+    expect(unmapped).toEqual([])
   })
 
   test('leaves external hostnames, code blocks, and attribute entries untouched', () => {

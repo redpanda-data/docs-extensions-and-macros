@@ -54,10 +54,14 @@ module.exports.register = function ({ config = {} }) {
   const logger = this.getLogger('url-to-xref-extension')
   const hostnames = new Set(config.hostnames || ['docs.redpanda.com'])
   const logUnconverted = config.logUnconverted !== false
+  // URL paths that live on the docs domain but outside the Antora catalog
+  // (the API reference is hosted by Bump.sh). Left untouched, no warning.
+  const ignore = (config.ignore || ['^/api/']).map((pattern) => new RegExp(pattern))
 
   this.on('contentClassified', ({ playbook, contentCatalog }) => {
     const resolverContext = Object.assign(buildUrlMap(contentCatalog), {
       hostnames,
+      ignore,
       latestVersionSegment: (playbook.urls || {}).latestVersionSegment || 'current',
     })
     let convertedCount = 0
@@ -148,15 +152,30 @@ function candidatePaths (normalizedPath, { components, latestVersionSegment }) {
   let unprefixed = normalizedPath
   const docsPrefix = unprefixed.match(/^\/docs(\/.*)?$/)
   if (docsPrefix) unprefixed = docsPrefix[1] || '/'
-  const versionPrefix = unprefixed.match(/^\/(?:current|v?(\d+\.\d+(?:\.\d+)?))(\/.*)?$/)
+  const versionPrefix = unprefixed.match(/^\/(?:current|beta|v?(\d+\.\d+(?:\.\d+)?))(\/.*)?$/)
   if (versionPrefix) {
     const [, version, rest = ''] = versionPrefix
     candidates.push(`/${LEGACY_UNPREFIXED_COMPONENT}/${version || latestVersionSegment}${rest}`)
     if (version) candidates.push(`/${LEGACY_UNPREFIXED_COMPONENT}/${latestVersionSegment}${rest}`)
+    // Builds without a symbolic latest-version segment (for example preview
+    // builds) publish the latest version under its real version number, and
+    // may drop the component segment entirely (ROOT component). Substitute
+    // each component's latest version; only verified candidates are used.
+    if (!version) {
+      for (const [name, { latestVersion }] of Object.entries(components)) {
+        if (!latestVersion) continue
+        candidates.push(`/${latestVersion}${rest}`)
+        candidates.push(`/${name}/${latestVersion}${rest}`)
+      }
+    }
   } else if (docsPrefix) {
-    candidates.push(
-      `/${LEGACY_UNPREFIXED_COMPONENT}/${latestVersionSegment}${unprefixed === '/' ? '' : unprefixed}`
-    )
+    const rest = unprefixed === '/' ? '' : unprefixed
+    candidates.push(`/${LEGACY_UNPREFIXED_COMPONENT}/${latestVersionSegment}${rest}`)
+    for (const [name, { latestVersion }] of Object.entries(components)) {
+      if (!latestVersion) continue
+      candidates.push(`/${latestVersion}${rest}`)
+      candidates.push(`/${name}/${latestVersion}${rest}`)
+    }
   }
   for (const [slug, componentName] of Object.entries(LEGACY_SLUG_REWRITES)) {
     if (normalizedPath === `/${slug}` || normalizedPath.startsWith(`/${slug}/`)) {
@@ -195,7 +214,7 @@ function entryToXref (entry, fragment, label) {
  * page.
  */
 function convertContent (content, resolverContext) {
-  const { hostnames } = resolverContext
+  const { hostnames, ignore = [] } = resolverContext
   let result = ''
   let cursor = 0
   let converted = 0
@@ -208,6 +227,7 @@ function convertContent (content, resolverContext) {
       continue
     }
     if (!hostnames.has(url.hostname) || match.inAttributeEntry) continue
+    if (ignore.some((pattern) => pattern.test(url.pathname))) continue
     const entry = resolveUrlPath(url.pathname, resolverContext)
     if (!entry) {
       unmapped.push(match.url)
