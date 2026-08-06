@@ -23,7 +23,7 @@ const { spawnSync } = require('child_process')
  * authoritative: dashified filenames cannot be reversed unambiguously
  * (rpk-ai-llm-provider could be `llm provider` or `llm-provider`).
  * @param {string} partialsDir - Directory of generated .adoc partials
- * @returns {Array<{file: string, title: string}>} Sorted by command path
+ * @returns {Array<{file: string, title: string, description: string|undefined}>} Sorted by command path
  */
 function readPartialTitles(partialsDir) {
   const partials = []
@@ -35,7 +35,11 @@ function readPartialTitles(partialsDir) {
       console.warn(`Warning: no title line in ${file}; skipping`)
       continue
     }
-    partials.push({ file, title: match[1].trim() })
+    // The partial repeats :description: inside its single-source tag, but
+    // Antora resolves page metadata with a header-only parse that never sees
+    // the include — the stub must carry the description in its own header.
+    const description = (content.match(/^:description:[ \t]*(.+)$/m) || [])[1]
+    partials.push({ file, title: match[1].trim(), description: description && description.trim() })
   }
   // Hierarchical order: sort by command words so parents precede children
   partials.sort((a, b) => {
@@ -114,12 +118,14 @@ function inferIncludePrefix(stubDir, plugin) {
  * @param {Object} params
  * @param {string} params.title - Command path (e.g. "rpk ai auth login")
  * @param {string} params.file - Partial filename
+ * @param {string} [params.description] - Meta description from the partial header
  * @param {string} params.includePrefix - Antora resource prefix
  * @param {Array<string>} params.attributes - Page attribute lines
  * @returns {string}
  */
-function renderStub({ title, file, includePrefix, attributes }) {
+function renderStub({ title, file, description, includePrefix, attributes }) {
   const lines = [`= ${title}`]
+  if (description) lines.push(`:description: ${description}`)
   for (const attr of attributes) lines.push(attr)
   lines.push('')
   lines.push(`include::${includePrefix}${file}[tag=single-source]`)
