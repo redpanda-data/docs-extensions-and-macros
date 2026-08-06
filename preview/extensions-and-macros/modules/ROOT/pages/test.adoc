@@ -4,6 +4,7 @@
 :page-categories: some-invalid-category
 :page-topic-type: tutorial
 :page-prerequisites: Basic knowledge of Antora
+:enterprise-licensing-page: streaming:get-started:licensing/overview.adoc
 
 This page is a preview of extensions and macros.
 
@@ -21,6 +22,20 @@ These dates are:
 * Exported to Markdown frontmatter (`git-created-date`, `git-modified-date`)
 * Used in structured data (JSON-LD) for `datePublished` and `dateModified`
 * Available to Handlebars templates as `page.attributes.git-created-date`
+
+== Enterprise macro
+
+The `enterprise` macro marks a feature as an enterprise feature in prose. The feature name renders as a styled term (`enterprise-feature` class) with a tooltip explaining the license requirement, linking to the feature's page or the licensing page.
+
+NOTE: This page sets `:enterprise-licensing-page: streaming:get-started:licensing/overview.adoc` because the default target (`get-started:licensing/overview.adoc`) is only resolvable from inside the docs component itself.
+
+Default, linking to the licensing page: enterprise:Continuous Data Balancing[] in a sentence.
+
+With a feature xref: enterprise:Tiered Storage[xref=streaming:manage:tiered-storage.adoc] in a sentence.
+
+With display text override: enterprise:Audit Logging[text=audit logging] in a sentence.
+
+With tooltip override: enterprise:Iceberg Topics[tooltip=Iceberg Topics requires an Enterprise Edition license and object storage.] in a sentence.
 
 == Terms
 

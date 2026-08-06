@@ -33,6 +33,7 @@ asciidoc:
   - '@asciidoctor/tabs'
   - './macros/glossary'
   - './macros/config-ref'
+  - './macros/enterprise'
   - './macros/helm-ref'
   - './macros/rp-connect-components'
   - './asciidoc-extensions/add-line-numbers-highlights'
