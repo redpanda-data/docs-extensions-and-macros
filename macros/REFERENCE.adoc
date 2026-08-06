@@ -62,6 +62,54 @@ asciidoc:
     - '@redpanda-data/docs-extensions-and-macros/macros/config-ref'
 ----
 
+== enterprise
+
+This inline macro marks a feature as an enterprise feature in prose. The feature name renders as a uniquely styled term with a tooltip explaining that the feature requires an Enterprise Edition license, and links to the feature's documentation or to the licensing page.
+
+=== Usage
+
+[,asciidoc]
+----
+enterprise:Continuous Data Balancing[]
+enterprise:Tiered Storage[xref=manage:tiered-storage/tiered-storage.adoc]
+enterprise:Audit Logging[text=audit logging]
+enterprise:Iceberg Topics[tooltip=Iceberg Topics requires an Enterprise Edition license and object storage.]
+----
+
+The macro target is the feature name, which can contain spaces. Named attributes:
+
+xref::
+Optional Antora resource ID of the feature's documentation page. When set, the term links there. When omitted, the term links to the licensing page.
+
+text::
+Optional display text override. Use it when the sentence needs different casing or phrasing than the feature name.
+
+tooltip::
+Optional tooltip text override. The default is `<feature> requires an Enterprise Edition license.`
+
+=== Configuration options
+
+enterprise-licensing-page::
+Resource ID of the licensing page used when no `xref` attribute is given. The default is `get-started:licensing/overview.adoc`.
+
+enterprise-feature-role::
+CSS class applied to the wrapping span. The default is `enterprise-feature`. Style this class in the UI bundle to give enterprise terms a consistent visual treatment.
+
+enterprise-tooltip::
+Controls the tooltip attribute: `title` (default), `true` (renders `data-enterprise-tooltip` for UI-driven tooltips), any attribute name starting with `data-`, or `false` to disable tooltips.
+
+enterprise-links::
+Set to `false` to render the term without a link.
+
+=== Registration
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/enterprise'
+----
+
 == glossterm
 
 The `glossterm` inline macro provides a way to define and reference glossary terms in your AsciiDoc documents.
