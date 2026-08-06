@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "5.3.7",
+  "version": "5.4.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -24,6 +24,7 @@
     "build": "antora --to-dir docs --fetch local-antora-playbook.yml",
     "serve": "wds --node-resolve --open preview/test/ --watch --root-dir docs",
     "test": "jest",
+    "test:e2e": "jest __tests__/e2e/",
     "test:mcp": "jest __tests__/mcp/",
     "test:mcp:integration": "jest __tests__/mcp/integration.test.js",
     "test:mcp:contract": "jest __tests__/mcp/cli-contract.test.js",
@@ -80,6 +81,8 @@
     "./extensions/resolve-xrefs-in-attachments": "./extensions/resolve-xrefs-in-attachments.js",
     "./extensions/unified-navigation": "./extensions/unified-navigation.js",
     "./extensions/conditional-home-redirect": "./extensions/conditional-home-redirect.js",
+    "./extensions/url-to-xref": "./extensions/url-to-xref.js",
+    "./extensions/external-link-checker": "./extensions/external-link-checker.js",
     "./macros/glossary": "./macros/glossary.js",
     "./macros/rp-connect-components": "./macros/rp-connect-components.js",
     "./macros/config-ref": "./macros/config-ref.js",
