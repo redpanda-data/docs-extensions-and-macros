@@ -25,7 +25,8 @@ const { scanContentUrls } = require('./util/scan-content-urls')
  * - Runs at contentClassified, before AsciiDoc conversion, so emitted xrefs
  *   flow through Antora's normal resolution and broken-xref logging.
  * - URLs inside listing/literal/fenced/passthrough blocks, inline code spans,
- *   and attribute entry lines are left untouched.
+ *   attribute entry lines, and macro attribute values (link=...) are left
+ *   untouched.
  * - Legacy URL shapes (/docs/..., /current/..., /vX.Y/..., pre-rename
  *   component slugs) are rewritten to candidate paths, but a candidate is
  *   only used when it matches a published page.
@@ -226,7 +227,7 @@ function convertContent (content, resolverContext) {
     } catch {
       continue
     }
-    if (!hostnames.has(url.hostname) || match.inAttributeEntry) continue
+    if (!hostnames.has(url.hostname) || match.inAttributeEntry || match.inAttributeValue) continue
     if (ignore.some((pattern) => pattern.test(url.pathname))) continue
     const entry = resolveUrlPath(url.pathname, resolverContext)
     if (!entry) {

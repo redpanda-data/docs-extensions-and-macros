@@ -101,8 +101,10 @@ async function checkUrl (url, { timeout, fetchFn = module.exports._fetch }) {
         signal: AbortSignal.timeout(timeout),
       })
       const status = response.status
-      // HEAD not supported: fall through to GET
-      if (attempt.method === 'HEAD' && (status === 405 || status === 501)) continue
+      // HEAD rejected or unsupported: many CDNs and bot walls refuse HEAD
+      // (403, 404, ...) but answer GET normally, so confirm any HEAD failure
+      // with GET before classifying
+      if (attempt.method === 'HEAD' && status >= 400) continue
       if (status < 400) return { classification: 'ok', status }
       if (status === 404 || status === 410) return { classification: 'broken', status }
       return { classification: 'unverifiable', status }

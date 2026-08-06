@@ -20,6 +20,10 @@
  * - inAttributeEntry: true when the URL appears in an attribute entry line
  *   (for example ":url-docs: https://..."), where a caller may want to leave
  *   the value untouched
+ * - inAttributeValue: true when the URL is a macro attribute value (for
+ *   example image:d.png[alt,link=https://...]); rewriting one of these to an
+ *   xref macro would corrupt the surrounding macro, but the URL is still a
+ *   real link target worth checking
  */
 
 const URL_RX = /(link:)?(https?:\/\/[^\s\][)"'<>]+)(\[[^\]]*\])?/g
@@ -64,6 +68,9 @@ function scanLine (line, offset, matches) {
     const prefixLength = linkPrefix ? linkPrefix.length : 0
     const start = offset + match.index
     const end = start + prefixLength + url.length + (rawLabel ? rawLabel.length : 0)
+    // A URL directly after an attribute assignment (link=, window=, ...) is a
+    // macro attribute value, not a standalone link.
+    const before = line.slice(0, match.index)
     matches.push({
       url,
       label: rawLabel ? rawLabel.slice(1, -1) : null,
@@ -71,6 +78,7 @@ function scanLine (line, offset, matches) {
       end,
       hasLinkPrefix: Boolean(linkPrefix),
       inAttributeEntry,
+      inAttributeValue: /[\w-]=["']?$/.test(before),
     })
   }
 }

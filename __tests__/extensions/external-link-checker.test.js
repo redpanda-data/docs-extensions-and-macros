@@ -70,8 +70,8 @@ describe('checkUrl', () => {
     })
   })
 
-  test('falls back to GET when HEAD returns 405', async () => {
-    const fetchFn = jest.fn((url, { method }) => response(method === 'HEAD' ? 405 : 200))
+  test.each([405, 404, 403])('falls back to GET when HEAD returns %i', async (headStatus) => {
+    const fetchFn = jest.fn((url, { method }) => response(method === 'HEAD' ? headStatus : 200))
     const verdict = await checkUrl('https://example.com/', { timeout: 1000, fetchFn })
     expect(verdict).toMatchObject({ classification: 'ok', status: 200 })
     expect(fetchFn.mock.calls.map(([, { method }]) => method)).toEqual(['HEAD', 'GET'])

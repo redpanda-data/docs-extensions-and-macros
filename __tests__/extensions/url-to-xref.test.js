@@ -248,6 +248,14 @@ describe('convertContent', () => {
     )
   })
 
+  test('leaves macro attribute values untouched', () => {
+    const input = 'image:diagram.png[Alt,link=https://docs.redpanda.com/connect/configuration/secrets/]'
+    const { content, converted, unmapped } = convert(input)
+    expect(content).toBe(input)
+    expect(converted).toBe(0)
+    expect(unmapped).toEqual([])
+  })
+
   test('leaves ignored paths untouched without reporting them', () => {
     const input = 'API: https://docs.redpanda.com/api/doc/cloud-dataplane/operation/listquotas'
     const { content, unmapped } = convert(input)

@@ -101,6 +101,9 @@
     "mcp"
   ],
   "license": "ISC",
+  "engines": {
+    "node": ">=18"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/redpanda-data/docs-extensions-and-macros"

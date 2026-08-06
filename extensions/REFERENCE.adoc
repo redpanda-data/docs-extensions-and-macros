@@ -492,7 +492,7 @@ This extension converts absolute docs.redpanda.com URLs found in page and partia
 Behavior details:
 
 * Runs at `contentClassified`, before AsciiDoc conversion, so emitted xrefs flow through Antora's normal resolution and broken-xref logging.
-* URLs inside listing, literal, fenced, and passthrough blocks, inline code spans, and attribute entry lines are left untouched.
+* URLs inside listing, literal, fenced, and passthrough blocks, inline code spans, attribute entry lines, and macro attribute values (such as `link=` on an image macro) are left untouched.
 * Legacy URL shapes (`/docs/...`, `/current/...`, `/vX.Y/...`, and pre-rename component slugs such as `/redpanda-connect/`) are rewritten to candidate paths, but a candidate is only used when it matches a published page.
 * Fragments (`#anchor`) and link labels are preserved. Unlabeled URLs become `xref:...[]` so Antora fills in the target page title.
 * Targets in the latest version of a component emit an unversioned xref; targets pinned to an older version emit `version@component:module:page`.

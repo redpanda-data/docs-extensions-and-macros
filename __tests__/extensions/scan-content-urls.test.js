@@ -66,6 +66,14 @@ describe('scanContentUrls', () => {
     expect(matches[1].inAttributeEntry).toBe(false)
   })
 
+  test('flags URLs used as macro attribute values', () => {
+    const content = 'image:diagram.png[Alt text,link=https://docs.redpanda.com/current/x/] and https://docs.redpanda.com/current/y/'
+    const matches = scanContentUrls(content)
+    expect(matches).toHaveLength(2)
+    expect(matches[0].inAttributeValue).toBe(true)
+    expect(matches[1].inAttributeValue).toBe(false)
+  })
+
   test('finds multiple URLs on one line with correct offsets', () => {
     const content = 'a https://one.example/x and https://two.example/y[Two] end'
     const matches = scanContentUrls(content)

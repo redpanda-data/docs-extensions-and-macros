@@ -1,0 +1,22 @@
+= Links Test Page
+
+Cross component: https://docs.redpanda.com/connect/configuration/secrets/
+
+Legacy slug: https://docs.redpanda.com/redpanda-connect/configuration/secrets/[Legacy secrets]
+
+Component landing: https://docs.redpanda.com/connect/
+
+Fragment and label: https://docs.redpanda.com/connect/configuration/secrets/#store[Store secrets]
+
+Same component: https://docs.redpanda.com/streaming/current/manage/target/
+
+Unmappable: https://docs.redpanda.com/no/such/page/
+
+External ok: @EXTERNAL_BASE@/ok[External resource]
+
+External missing: @EXTERNAL_BASE@/missing[Gone resource]
+
+[source,bash]
+----
+curl https://docs.redpanda.com/connect/configuration/secrets/
+----
