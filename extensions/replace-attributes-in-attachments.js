@@ -1,5 +1,7 @@
 'use strict';
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 const semver = require('semver');
 const micromatch = require('micromatch');
 const formatVersion = require('./util/format-version.js');
@@ -24,6 +26,7 @@ const sanitize = require('./util/sanitize-attributes.js');
  *         - ...
  */
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('replace-attributes-extension');
   const replacements = config.data?.replacements || [];
 

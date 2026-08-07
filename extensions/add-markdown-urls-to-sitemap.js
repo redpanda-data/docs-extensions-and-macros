@@ -1,5 +1,7 @@
 'use strict'
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 /**
  * Adds markdown URL entries to sitemap.xml files for AI-friendly documentation.
  *
@@ -21,6 +23,7 @@ const { parseStringPromise } = require('xml2js')
 const { toMarkdownUrl } = require('../extension-utils/url-utils')
 
 module.exports.register = function () {
+  raiseListenerLimit(this)
   const logger = this.getLogger('add-markdown-urls-to-sitemap-extension')
 
   this.on('beforePublish', async ({ siteCatalog }) => {

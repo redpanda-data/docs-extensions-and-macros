@@ -1,5 +1,7 @@
 'use strict'
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 /**
  * Adds Git commit dates to pages as attributes.
  *
@@ -179,6 +181,7 @@ async function getTreeFiles (git, gitdir, oid, prefix, cache, treeCache) {
 }
 
 module.exports.register = function () {
+  raiseListenerLimit(this)
   const logger = this.getLogger('add-git-dates-extension')
   const context = this
 
