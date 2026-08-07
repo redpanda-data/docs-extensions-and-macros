@@ -65,6 +65,16 @@ describe('github-token', () => {
       expect(getTokenFromGitCredentials('https://oauth2:glpat-xyz@gitlab.com')).toBeNull();
     });
 
+    it('rejects lookalike hosts that merely contain github.com', () => {
+      expect(getTokenFromGitCredentials('https://tok:@github.com.evil.example')).toBeNull();
+      expect(getTokenFromGitCredentials('https://tok:@notgithub.com')).toBeNull();
+      expect(getTokenFromGitCredentials('https://tok:@api.github.com')).toBeNull();
+    });
+
+    it('accepts github.com with an explicit port', () => {
+      expect(getTokenFromGitCredentials('https://ghp_abc123:@github.com:443')).toBe('ghp_abc123');
+    });
+
     it('returns null when unset', () => {
       expect(getTokenFromGitCredentials(undefined)).toBeNull();
       expect(getTokenFromGitCredentials('')).toBeNull();

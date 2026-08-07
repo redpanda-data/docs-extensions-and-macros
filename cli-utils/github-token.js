@@ -25,7 +25,9 @@ function getTokenFromGitCredentials(credentials = process.env.GIT_CREDENTIALS) {
 
   for (const entry of credentials.split(/[,\n]/)) {
     const match = entry.trim().match(/^https?:\/\/([^@]+)@([^/]+)/);
-    if (!match || !match[2].includes('github.com')) continue;
+    // Exact host match (optional port) so entries for lookalike hosts such as
+    // github.com.evil.example or notgithub.com are never treated as GitHub.
+    if (!match || !/^github\.com(:\d+)?$/i.test(match[2])) continue;
 
     const [username, ...passwordParts] = match[1].split(':');
     const password = passwordParts.join(':');

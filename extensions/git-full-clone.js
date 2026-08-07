@@ -78,8 +78,10 @@ module.exports.register = function ({ config, playbook }) {
     if (token) {
       logger.info('  → Using GitHub token for unshallow fetches')
       gitEnv.GIT_FULL_CLONE_TOKEN = token
+      // The helper is scoped to https://github.com via a URL-specific config
+      // key, so git never offers the token to any other host.
       gitCommand = 'git -c credential.helper= ' +
-        `-c 'credential.helper=!f() { echo "username=x-access-token"; echo "password=$GIT_FULL_CLONE_TOKEN"; }; f' ` +
+        `-c 'credential.https://github.com.helper=!f() { echo "username=x-access-token"; echo "password=$GIT_FULL_CLONE_TOKEN"; }; f' ` +
         'fetch --unshallow'
     } else {
       logger.info('  → No GitHub token found; unshallow may fail for private repos')
