@@ -295,6 +295,13 @@ describe('enterprise macro', () => {
       expect(html).toContain('Topic Deletion Control')
     })
 
+    test('re-emits a block anchor as the table id and resolves crossrefs to it', () => {
+      const html = convert('[[my-table]]\nenterprise_features::redpanda[]\n\nSee <<my-table,the table>>.', { catalog: fakeCatalog() })
+      expect(html).toContain('id="my-table"')
+      expect(html).toContain('href="#my-table"')
+      expect(html).not.toContain('[my-table]')
+    })
+
     test('rejects an unknown scope on the block macro', () => {
       expect(() => convert('enterprise_features::mainframe[]', { catalog: fakeCatalog() }))
         .toThrow(/needs a scope/)
