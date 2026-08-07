@@ -1,5 +1,7 @@
 'use strict'
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 const { execSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
@@ -32,6 +34,7 @@ const path = require('path')
  */
 
 module.exports.register = function ({ config, playbook }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('git-full-clone-extension')
 
   logger.info('✓ git-full-clone extension loaded')
