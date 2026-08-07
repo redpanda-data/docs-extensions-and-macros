@@ -57,6 +57,11 @@ function getTokenFromGitCredentials(credentials = process.env.GIT_CREDENTIALS) {
  * 5. VBOT_GITHUB_API_TOKEN - Legacy bot token
  * 6. GH_TOKEN - GitHub CLI default
  *
+ * Note: this resolver feeds both git clone/fetch auth and GitHub API clients
+ * (Octokit). Wherever GIT_CREDENTIALS is set (for example, Antora builds on
+ * Netlify), API calls authenticate with that same token, whose API scopes may
+ * differ from the token env vars it outranks.
+ *
  * @returns {string|null} GitHub token or null if not found
  */
 function getGitHubToken() {

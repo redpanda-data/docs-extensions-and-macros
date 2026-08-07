@@ -69,20 +69,24 @@ module.exports.register = function ({ config, playbook }) {
 
     // Private repos need credentials: the git CLI does not share Antora's
     // built-in credential manager, so resolve a token (GIT_CREDENTIALS first,
-    // then the common token env vars) and hand it to git through an inline
-    // credential helper. The token stays in the environment: it never appears
-    // in the command line, the remote URL, or the cached .git/config.
+    // then the common token env vars) and hand it to git through a credential
+    // helper. Both the config and the token travel via environment variables
+    // (GIT_CONFIG_* and GIT_FULL_CLONE_TOKEN), so nothing touches the command
+    // line, the remote URL, or the cached .git/config, and there is no shell
+    // quoting to break on other platforms. Config entry 0 clears any inherited
+    // helpers; entry 1 registers a helper scoped to github.com so no other
+    // host is ever offered the token.
     const token = getGitHubToken()
-    let gitCommand = 'git fetch --unshallow'
+    const gitCommand = 'git fetch --unshallow'
     const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
     if (token) {
       logger.info('  → Using GitHub token for unshallow fetches')
       gitEnv.GIT_FULL_CLONE_TOKEN = token
-      // The helper is scoped to https://github.com via a URL-specific config
-      // key, so git never offers the token to any other host.
-      gitCommand = 'git -c credential.helper= ' +
-        `-c 'credential.https://github.com.helper=!f() { echo "username=x-access-token"; echo "password=$GIT_FULL_CLONE_TOKEN"; }; f' ` +
-        'fetch --unshallow'
+      gitEnv.GIT_CONFIG_COUNT = '2'
+      gitEnv.GIT_CONFIG_KEY_0 = 'credential.helper'
+      gitEnv.GIT_CONFIG_VALUE_0 = ''
+      gitEnv.GIT_CONFIG_KEY_1 = 'credential.https://github.com.helper'
+      gitEnv.GIT_CONFIG_VALUE_1 = '!f() { echo "username=x-access-token"; echo "password=$GIT_FULL_CLONE_TOKEN"; }; f'
     } else {
       logger.info('  → No GitHub token found; unshallow may fail for private repos')
     }
