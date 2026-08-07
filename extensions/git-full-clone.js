@@ -3,6 +3,7 @@
 const { execSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
+const { getGitHubToken } = require('../cli-utils/github-token')
 
 /**
  * Configure Antora to use full git clones instead of shallow clones.
@@ -66,6 +67,24 @@ module.exports.register = function ({ config, playbook }) {
     let unshallowedCount = 0
     const unshallowTimeout = config?.unshallowTimeout || 60000 // Default 60 seconds per repo
 
+    // Private repos need credentials: the git CLI does not share Antora's
+    // built-in credential manager, so resolve a token (GIT_CREDENTIALS first,
+    // then the common token env vars) and hand it to git through an inline
+    // credential helper. The token stays in the environment: it never appears
+    // in the command line, the remote URL, or the cached .git/config.
+    const token = getGitHubToken()
+    let gitCommand = 'git fetch --unshallow'
+    const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+    if (token) {
+      logger.info('  → Using GitHub token for unshallow fetches')
+      gitEnv.GIT_FULL_CLONE_TOKEN = token
+      gitCommand = 'git -c credential.helper= ' +
+        `-c 'credential.helper=!f() { echo "username=x-access-token"; echo "password=$GIT_FULL_CLONE_TOKEN"; }; f' ` +
+        'fetch --unshallow'
+    } else {
+      logger.info('  → No GitHub token found; unshallow may fail for private repos')
+    }
+
     for (const aggregate of contentAggregate) {
       for (const origin of aggregate.origins || []) {
         const gitdir = origin.gitdir
@@ -80,11 +99,11 @@ module.exports.register = function ({ config, playbook }) {
             logger.info(`  → Unshallowing ${path.basename(gitdir)}...`)
 
             // Use git fetch --unshallow to convert to full clone
-            execSync('git fetch --unshallow', {
+            execSync(gitCommand, {
               cwd: gitdir,
               stdio: 'pipe',
               timeout: unshallowTimeout,
-              env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+              env: gitEnv
             })
 
             const duration = Date.now() - startTime
