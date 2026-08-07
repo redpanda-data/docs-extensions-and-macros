@@ -292,7 +292,10 @@ function enterpriseFeaturesBlockMacro (config) {
         return self.parseContent(parent, `WARNING: The enterprise features registry is unavailable, so the ${scope} feature table cannot be rendered.`)
       }
       const table = buildFeatureTable(registry.features, scope, { title: attributes.title, heading: attributes.heading })
-      return self.parseContent(parent, table)
+      // A block anchor before the macro call ([[my-id]]) is consumed into the
+      // macro's id attribute. Re-emit it so crossrefs to the table keep working.
+      const source = attributes.id ? `[[${attributes.id}]]\n${table}` : table
+      return self.parseContent(parent, source)
     })
   }
 }
