@@ -66,6 +66,8 @@ asciidoc:
 
 This inline macro marks a feature as an enterprise feature in prose. The feature name renders as a uniquely styled term with a tooltip explaining that the feature requires an Enterprise Edition license, and links to the feature's documentation or to the licensing page.
 
+The macro validates its target against the enterprise features registry: `modules/ROOT/partials/enterprise-features.yml` in the `shared` component (the `shared/` folder of the docs repository). The registry is the canonical list of enterprise features and their approved external names. Targets are matched case-insensitively, including aliases, and the canonical name, feature page link, and tooltip come from the matching entry. A target that matches no entry is reported according to `enterprise-validate`. To mark a new feature as enterprise, add it to the registry first.
+
 === Usage
 
 [,asciidoc]
@@ -79,15 +81,18 @@ enterprise:Iceberg Topics[tooltip=Iceberg Topics requires an Enterprise Edition 
 The macro target is the feature name, which can contain spaces. Named attributes:
 
 xref::
-Optional Antora resource ID of the feature's documentation page. When set, the term links there. When omitted, the term links to the licensing page.
+Optional Antora resource ID of the feature's documentation page. Overrides the registry entry's `xref`. When neither is set, the term links to the licensing page.
 
 text::
 Optional display text override. Use it when the sentence needs different casing or phrasing than the feature name.
 
 tooltip::
-Optional tooltip text override. The default is `<feature> requires an Enterprise Edition license.`
+Optional tooltip text override. Overrides the registry entry's `tooltip`. The default is `<feature> requires an Enterprise Edition license.`
 
 === Configuration options
+
+enterprise-validate::
+How to report a target that does not match any registry entry: `warn` (default) logs a build warning with the file path and close-match suggestions, `error` fails the build, and `off` disables validation. When no registry is available in the build, the macro renders without validation and logs a single warning.
 
 enterprise-licensing-page::
 Resource ID of the licensing page used when no `xref` attribute is given. The default is `get-started:licensing/overview.adoc`.
@@ -109,6 +114,31 @@ asciidoc:
   extensions:
     - '@redpanda-data/docs-extensions-and-macros/macros/enterprise'
 ----
+
+== enterprise_features
+
+This block macro renders the licensing feature table for one scope from the enterprise features registry (see <<enterprise>>). Because the table is generated, it can never drift from the registry.
+
+=== Usage
+
+[,asciidoc]
+----
+enterprise_features::redpanda[]
+enterprise_features::connect[]
+enterprise_features::operator[title=Operator features,heading=What stops working]
+----
+
+The target is the scope: `redpanda`, `console`, `connect`, `operator`, or `cloud`. Rows render alphabetically by feature name with three columns: the feature name (linked to its documentation page when the entry has an `xref` or `url`), the description, and the expiration or restriction behavior. Named attributes:
+
+title::
+Optional table title override. The default is scope-specific, for example `Enterprise features in Redpanda`.
+
+heading::
+Optional third-column heading override. The default is `Behavior Upon Expiration` for the `redpanda` scope and `Restrictions Without Valid License` for the other scopes.
+
+=== Registration
+
+Registered together with the `enterprise` inline macro (see <<enterprise>>).
 
 == glossterm
 

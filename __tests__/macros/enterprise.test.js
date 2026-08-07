@@ -3,8 +3,77 @@
 const {
   register,
   buildEnterpriseContent,
+  buildFeatureTable,
+  parseRegistry,
   resolveTooltipAttribute,
 } = require('../../macros/enterprise')
+
+const REGISTRY_YAML = `
+schema-version: 1
+features:
+  - name: Tiered Storage
+    scope: redpanda
+    xref: manage:tiered-storage.adoc
+    description: |
+      Enables data storage in cloud object storage.
+    expiration: |
+      Topics cannot be created or modified to enable Tiered Storage features.
+    aliases: [cloud_storage]
+    source:
+      kind: core-enum
+      value: cloud_storage
+    gating-property: cloud_storage_enabled
+  - name: Topic Deletion Control
+    scope: redpanda
+    description: |
+      Prevents topic deletion through the Kafka DeleteTopics API.
+    expiration: |
+      Topic deletion reverts to enabled.
+    show-gating-property: true
+    source:
+      kind: core-enum
+      value: topic_deletion_disabled
+    gating-property: delete_topic_enable
+  - name: Enterprise connectors
+    scope: connect
+    url: https://docs.redpanda.com/redpanda-connect/components/catalog/?support=enterprise
+    description: |
+      Connectors available only to enterprise customers.
+    expiration: |
+      All enterprise connectors are blocked.
+    source:
+      kind: manual
+      value: Aggregate entry tracked in info.csv.
+  - name: Stretch Clusters
+    scope: operator
+    xref: deploy:redpanda/kubernetes/k-stretch-clusters.adoc
+    description: |
+      Multi-region clusters.
+    expiration: |
+      The multicluster operator requires a valid license to start.
+    feature-suffix: (StretchCluster resource)
+    source:
+      kind: manual
+      value: License gate in cmd/multicluster.
+`
+
+function fakeCatalog (yamlSource = REGISTRY_YAML) {
+  return {
+    findBy: jest.fn(() => [
+      { path: 'modules/ROOT/partials/enterprise-features.yml', contents: Buffer.from(yamlSource) },
+    ]),
+  }
+}
+
+function convert (input, { catalog, attributes = {}, filePath = 'modules/manage/pages/example.adoc' } = {}) {
+  const Asciidoctor = require('@asciidoctor/core')()
+  const extensionRegistry = Asciidoctor.Extensions.create()
+  register(extensionRegistry, catalog && {
+    contentCatalog: catalog,
+    file: { src: { path: filePath } },
+  })
+  return Asciidoctor.convert(input, { extension_registry: extensionRegistry, attributes })
+}
 
 describe('enterprise macro', () => {
   describe('buildEnterpriseContent', () => {
@@ -30,6 +99,15 @@ describe('enterprise macro', () => {
         xref: 'manage:tiered-storage/tiered-storage.adoc',
       })
       expect(html).toContain('xref:manage:tiered-storage/tiered-storage.adoc[Tiered Storage]')
+    })
+
+    test('links to an absolute URL when only a url is given', () => {
+      const html = buildEnterpriseContent({
+        ...defaults,
+        feature: 'Enterprise connectors',
+        url: 'https://docs.redpanda.com/redpanda-connect/components/catalog/?support=enterprise',
+      })
+      expect(html).toContain('link:https://docs.redpanda.com/redpanda-connect/components/catalog/?support=enterprise[Enterprise connectors]')
     })
 
     test('honors display text and tooltip overrides', () => {
@@ -83,23 +161,173 @@ describe('enterprise macro', () => {
     })
   })
 
+  describe('parseRegistry', () => {
+    test('indexes features by lowercased name and alias', () => {
+      const { lookup } = parseRegistry(REGISTRY_YAML)
+      expect(lookup.get('tiered storage').name).toBe('Tiered Storage')
+      expect(lookup.get('cloud_storage').name).toBe('Tiered Storage')
+    })
+
+    test('throws on duplicate names across entries', () => {
+      const dup = `${REGISTRY_YAML}\n  - name: tiered storage\n    scope: redpanda\n`
+      expect(() => parseRegistry(dup)).toThrow(/Duplicate enterprise feature name 'tiered storage'/)
+    })
+
+    test('throws on an alias that collides with another feature', () => {
+      const dup = `${REGISTRY_YAML}\n  - name: Object Storage Mode\n    scope: redpanda\n    aliases: [Tiered Storage]\n`
+      expect(() => parseRegistry(dup)).toThrow(/Duplicate enterprise feature alias/)
+    })
+
+    test('throws on unknown scope', () => {
+      expect(() => parseRegistry('features:\n  - name: X\n    scope: mainframe\n')).toThrow(/unknown scope 'mainframe'/)
+    })
+
+    test('throws when the features list is missing', () => {
+      expect(() => parseRegistry('schema-version: 1\n')).toThrow(/no 'features' list/)
+    })
+  })
+
+  describe('buildFeatureTable', () => {
+    const { features } = parseRegistry(REGISTRY_YAML)
+
+    test('renders scope rows alphabetically with the scope heading', () => {
+      const table = buildFeatureTable(features, 'redpanda')
+      expect(table).toContain('.Enterprise features in Redpanda')
+      expect(table).toContain('| Feature | Description | Behavior Upon Expiration')
+      expect(table.indexOf('Tiered Storage')).toBeLessThan(table.indexOf('Topic Deletion Control'))
+      expect(table).toContain('| xref:manage:tiered-storage.adoc[Tiered Storage]')
+    })
+
+    test('renders a plain name when the entry has no xref, plus its gating property', () => {
+      const table = buildFeatureTable(features, 'redpanda')
+      expect(table).toContain('| Topic Deletion Control\n(`delete_topic_enable`)')
+    })
+
+    test('renders url links and the non-redpanda third-column heading', () => {
+      const table = buildFeatureTable(features, 'connect')
+      expect(table).toContain('| Feature | Description | Restrictions Without Valid License')
+      expect(table).toContain('link:https://docs.redpanda.com/redpanda-connect/components/catalog/?support=enterprise[Enterprise connectors]')
+      expect(table).not.toContain('Tiered Storage')
+    })
+
+    test('appends the feature suffix after the feature link', () => {
+      const table = buildFeatureTable(features, 'operator')
+      expect(table).toContain('xref:deploy:redpanda/kubernetes/k-stretch-clusters.adoc[Stretch Clusters] (StretchCluster resource)')
+    })
+
+    test('honors title and heading overrides', () => {
+      const table = buildFeatureTable(features, 'connect', { title: 'My Title', heading: 'My Heading' })
+      expect(table).toContain('.My Title')
+      expect(table).toContain('| Feature | Description | My Heading')
+    })
+  })
+
+  describe('registry-backed conversion', () => {
+    test('canonicalizes an alias and links to the registry xref', () => {
+      const html = convert('enterprise:cloud_storage[]', { catalog: fakeCatalog() })
+      expect(html).toContain('Tiered Storage')
+      expect(html).toContain('tiered-storage')
+      expect(html).toContain('class="enterprise-feature"')
+    })
+
+    test('canonicalizes case-insensitive spellings of the name', () => {
+      const html = convert('enterprise:tiered storage[]', { catalog: fakeCatalog() })
+      expect(html).toContain('Tiered Storage requires an Enterprise Edition license.')
+    })
+
+    test('per-use xref overrides the registry xref', () => {
+      const html = convert('enterprise:Tiered Storage[xref=other:page.adoc]', { catalog: fakeCatalog() })
+      expect(html).toContain('other')
+      expect(html).not.toContain('manage:tiered-storage.adoc')
+    })
+
+    test('warns on unknown feature names by default', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Warp Drive[]', { catalog: fakeCatalog() })
+      expect(html).toContain('Warp Drive')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('does not match any feature'))
+      warn.mockRestore()
+    })
+
+    test('fails the conversion in error mode', () => {
+      expect(() => convert('enterprise:Warp Drive[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'enterprise-validate': 'error' },
+      })).toThrow(/does not match any feature/)
+    })
+
+    test('stays silent in off mode', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      convert('enterprise:Warp Drive[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'enterprise-validate': 'off' },
+      })
+      const validationWarnings = warn.mock.calls.filter(([msg]) => String(msg).includes('does not match'))
+      expect(validationWarnings).toHaveLength(0)
+      warn.mockRestore()
+    })
+
+    test('suggests close names in the warning', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      convert('enterprise:Tiered Storage Cache[]', { catalog: fakeCatalog() })
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Did you mean: Tiered Storage'))
+      warn.mockRestore()
+    })
+
+    test('caches the registry on the content catalog across conversions', () => {
+      const catalog = fakeCatalog()
+      convert('enterprise:Tiered Storage[]', { catalog })
+      convert('enterprise:Tiered Storage[]', { catalog })
+      expect(catalog.findBy).toHaveBeenCalledTimes(1)
+    })
+
+    test('renders unvalidated without a catalog (graceful degradation)', () => {
+      const html = convert('enterprise:Anything Goes[]', {})
+      expect(html).toContain('Anything Goes')
+      expect(html).toContain('class="enterprise-feature"')
+    })
+
+    test('renders the feature table through the block macro', () => {
+      const html = convert('enterprise_features::redpanda[]', { catalog: fakeCatalog() })
+      expect(html).toContain('Enterprise features in Redpanda')
+      expect(html).toContain('Behavior Upon Expiration')
+      expect(html).toContain('Tiered Storage')
+      expect(html).toContain('Topic Deletion Control')
+    })
+
+    test('rejects an unknown scope on the block macro', () => {
+      expect(() => convert('enterprise_features::mainframe[]', { catalog: fakeCatalog() }))
+        .toThrow(/needs a scope/)
+    })
+
+    test('renders a warning admonition when the registry is missing', () => {
+      const emptyCatalog = { findBy: jest.fn(() => []) }
+      const html = convert('enterprise_features::redpanda[]', { catalog: emptyCatalog })
+      expect(html).toContain('cannot be rendered')
+    })
+  })
+
   describe('registration', () => {
-    test('registers an inline macro on a plain registry', () => {
+    test('registers inline and block macros on a plain registry', () => {
       const inlineMacro = jest.fn()
-      register({ inlineMacro })
+      const blockMacro = jest.fn()
+      register({ inlineMacro, blockMacro })
       expect(inlineMacro).toHaveBeenCalledTimes(1)
+      expect(blockMacro).toHaveBeenCalledTimes(1)
       expect(typeof inlineMacro.mock.calls[0][0]).toBe('function')
     })
 
     test('uses the group form when the registry supports register()', () => {
       const inlineMacro = jest.fn()
+      const blockMacro = jest.fn()
       const registry = {
         register (group) {
-          group.call({ inlineMacro })
+          group.call({ inlineMacro, blockMacro })
         },
       }
       register(registry)
       expect(inlineMacro).toHaveBeenCalledTimes(1)
+      expect(blockMacro).toHaveBeenCalledTimes(1)
     })
   })
 })

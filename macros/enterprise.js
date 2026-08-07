@@ -1,8 +1,8 @@
 'use strict'
 
-/* Inline macro for marking enterprise features in prose.
+/* Macros for marking and listing enterprise features.
  *
- * Example use in a page:
+ * Inline macro — mark a feature in prose:
  *
  *   enterprise:Continuous Data Balancing[]
  *   enterprise:Tiered Storage[xref=manage:tiered-storage/tiered-storage.adoc]
@@ -15,10 +15,29 @@
  * and otherwise to the licensing page, so readers can always reach an
  * explanation of what having (or not having) a license means.
  *
+ * Block macro — render the licensing feature table for one scope:
+ *
+ *   enterprise_features::redpanda[]
+ *   enterprise_features::connect[title=Enterprise features in Redpanda Connect]
+ *
+ * Registry validation:
+ *
+ * Both macros read the canonical enterprise features registry from the
+ * 'shared' component (modules/ROOT/partials/enterprise-features.yml in the
+ * shared folder of the docs repo). Inline targets are resolved against the
+ * registry case-insensitively, including aliases, and the canonical name,
+ * feature xref, and tooltip come from the matching entry. Unknown targets
+ * are reported according to the enterprise-validate attribute. When no
+ * registry is available (for example, outside an Antora build), the macros
+ * fall back to unvalidated rendering with a single warning.
+ *
  * Document or site attributes:
  *
+ *   enterprise-validate        'warn' (default) to log unknown feature names,
+ *                              'error' to fail the build, 'off' to disable
+ *                              validation.
  *   enterprise-licensing-page  Resource ID of the licensing page used when
- *                              no xref attribute is given
+ *                              no feature page is known
  *                              (default: get-started:licensing/overview.adoc).
  *   enterprise-feature-role    CSS class applied to the wrapping span
  *                              (default: enterprise-feature).
@@ -34,8 +53,106 @@
  *     - '@redpanda-data/docs-extensions-and-macros/macros/enterprise'
  */
 
+const yaml = require('js-yaml')
+const chalk = require('chalk')
+
+const $enterpriseRegistry = Symbol('$enterpriseRegistry')
+
 const DEFAULT_LICENSING_PAGE = 'get-started:licensing/overview.adoc'
 const DEFAULT_ROLE = 'enterprise-feature'
+const REGISTRY_FILENAME = 'enterprise-features.yml'
+const VALID_SCOPES = ['redpanda', 'console', 'connect', 'operator', 'cloud']
+
+const TABLE_TITLES = {
+  redpanda: 'Enterprise features in Redpanda',
+  console: 'Enterprise features in Redpanda Console',
+  connect: 'Enterprise features in Redpanda Connect',
+  operator: 'Enterprise features in the Redpanda Operator',
+  cloud: 'Enterprise features in Redpanda Cloud',
+}
+
+const THIRD_COLUMN_HEADINGS = {
+  redpanda: 'Behavior Upon Expiration',
+  default: 'Restrictions Without Valid License',
+}
+
+let warnedNoRegistry = false
+
+/**
+ * Parse the registry YAML into a lookup structure. Exported for unit testing.
+ *
+ * @param {string} source - Raw YAML from enterprise-features.yml.
+ * @param {string} origin - Human-readable location for error messages.
+ * @returns {{features: object[], lookup: Map<string, object>}}
+ */
+function parseRegistry (source, origin = REGISTRY_FILENAME) {
+  const data = yaml.load(source)
+  if (!data || !Array.isArray(data.features)) {
+    throw new Error(`Enterprise features registry ${origin} has no 'features' list.`)
+  }
+  const lookup = new Map()
+  const claim = (rawKey, feature, kind) => {
+    const key = rawKey.trim().toLowerCase()
+    if (!key) return
+    const existing = lookup.get(key)
+    if (existing && existing !== feature) {
+      throw new Error(`Duplicate enterprise feature ${kind} '${rawKey}' in ${origin}: used by both '${existing.name}' and '${feature.name}'.`)
+    }
+    lookup.set(key, feature)
+  }
+  for (const feature of data.features) {
+    if (!feature || !feature.name) {
+      throw new Error(`Enterprise features registry ${origin} has an entry without a name.`)
+    }
+    if (feature.scope && !VALID_SCOPES.includes(feature.scope)) {
+      throw new Error(`Enterprise feature '${feature.name}' in ${origin} has unknown scope '${feature.scope}'.`)
+    }
+    claim(feature.name, feature, 'name')
+    for (const alias of feature.aliases || []) claim(String(alias), feature, 'alias')
+  }
+  return { features: data.features, lookup }
+}
+
+/**
+ * Load and cache the registry from the shared component in the Antora
+ * content catalog. Returns undefined when no registry is available.
+ */
+function loadRegistry (config) {
+  const contentCatalog = config && config.contentCatalog
+  if (!contentCatalog) return undefined
+  if (contentCatalog[$enterpriseRegistry] !== undefined) return contentCatalog[$enterpriseRegistry] || undefined
+  let registry = null
+  const partials = contentCatalog.findBy({ component: 'shared', module: 'ROOT', family: 'partial' }) || []
+  const registryFile = partials.find((file) => file.path && file.path.endsWith(REGISTRY_FILENAME))
+  if (registryFile) {
+    registry = parseRegistry(registryFile.contents.toString(), registryFile.path)
+  }
+  // Cache null too, so a missing registry is only searched for once per build.
+  contentCatalog[$enterpriseRegistry] = registry
+  return registry || undefined
+}
+
+function warnNoRegistry () {
+  if (warnedNoRegistry) return
+  warnedNoRegistry = true
+  console.warn(chalk.yellow(`Enterprise features registry (${REGISTRY_FILENAME} in the shared component) not found; enterprise: targets are not validated.`))
+}
+
+/**
+ * Report an unknown feature name according to the enterprise-validate mode.
+ */
+function reportUnknownFeature ({ feature, mode, registry, filePath }) {
+  if (mode === 'off') return
+  const candidates = registry.features
+    .map((entry) => entry.name)
+    .filter((name) => name.toLowerCase().includes(feature.trim().toLowerCase().split(/\s+/)[0] || ''))
+    .slice(0, 3)
+  const hint = candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''
+  const where = filePath ? ` in ${filePath}` : ''
+  const message = `enterprise:${feature}[] does not match any feature in the enterprise features registry${where}.${hint} Add the feature to ${REGISTRY_FILENAME} in the shared component first.`
+  if (mode === 'error') throw new Error(message)
+  console.warn(chalk.yellow(message))
+}
 
 /**
  * Resolve the tooltip attribute name from the enterprise-tooltip document
@@ -54,13 +171,14 @@ function resolveTooltipAttribute (raw) {
 }
 
 /**
- * Build the AsciiDoc content emitted for one macro instance. Exported for
- * unit testing.
+ * Build the AsciiDoc content emitted for one inline macro instance. Exported
+ * for unit testing.
  *
  * @param {object} opts
- * @param {string} opts.feature - Feature name from the macro target.
+ * @param {string} opts.feature - Canonical feature name.
  * @param {string} [opts.text] - Display text override.
  * @param {string} [opts.xref] - Resource ID of the feature documentation.
+ * @param {string} [opts.url] - Absolute link used when no xref exists.
  * @param {string} [opts.tooltip] - Tooltip text override.
  * @param {string} opts.licensingPage - Resource ID of the licensing page.
  * @param {string} opts.role - CSS class for the wrapping span.
@@ -68,16 +186,52 @@ function resolveTooltipAttribute (raw) {
  * @param {boolean} opts.links - Whether to render a link.
  * @returns {string}
  */
-function buildEnterpriseContent ({ feature, text, xref, tooltip, licensingPage, role, tooltipAttr, links }) {
+function buildEnterpriseContent ({ feature, text, xref, url, tooltip, licensingPage, role, tooltipAttr, links }) {
   const display = text || feature
   const tooltipText = tooltip || `${feature} requires an Enterprise Edition license.`
   const escapedTooltip = tooltipText.replace(/"/g, '&quot;')
   const tooltipHtml = tooltipAttr ? ` ${tooltipAttr}="${escapedTooltip}"` : ''
-  const inner = links ? `xref:${xref || licensingPage}[${display}]` : display
+  let inner = display
+  if (links) {
+    inner = xref ? `xref:${xref}[${display}]` : (url ? `link:${url}[${display}]` : `xref:${licensingPage}[${display}]`)
+  }
   return `<span class="${role}"${tooltipHtml}>${inner}</span>`
 }
 
-function enterpriseInlineMacro () {
+/**
+ * Build the AsciiDoc source of the licensing feature table for one scope.
+ * Exported for unit testing.
+ *
+ * @param {object[]} features - All registry entries.
+ * @param {string} scope - Scope to render.
+ * @param {object} [opts]
+ * @param {string} [opts.title] - Table title override.
+ * @param {string} [opts.heading] - Third column heading override.
+ * @returns {string}
+ */
+function buildFeatureTable (features, scope, opts = {}) {
+  const rows = features
+    .filter((feature) => feature.scope === scope)
+    .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }))
+  const title = opts.title || TABLE_TITLES[scope]
+  const heading = opts.heading || THIRD_COLUMN_HEADINGS[scope] || THIRD_COLUMN_HEADINGS.default
+  const lines = [`.${title}`, '[cols="1a,2a,2a"]', '|===', `| Feature | Description | ${heading}`, '']
+  for (const feature of rows) {
+    let cell = feature.xref
+      ? `xref:${feature.xref}[${feature.name}]`
+      : (feature.url ? `link:${feature.url}[${feature.name}]` : feature.name)
+    if (feature['feature-suffix']) cell += ` ${feature['feature-suffix']}`
+    if (feature['show-gating-property'] && feature['gating-property']) cell += `\n(\`${feature['gating-property']}\`)`
+    lines.push(`| ${cell}`)
+    lines.push(`| ${(feature.description || '').trim()}`)
+    lines.push(`| ${(feature.expiration || '').trim()}`)
+    lines.push('')
+  }
+  lines.push('|===')
+  return lines.join('\n')
+}
+
+function enterpriseInlineMacro (config) {
   return function () {
     const self = this
     self.named('enterprise')
@@ -85,11 +239,32 @@ function enterpriseInlineMacro () {
     self.$option('regexp', /enterprise:([^[]+)\[(|.*?[^\\])\]/)
     self.process(function (parent, target, attributes) {
       const document = parent.getDocument()
+      let registry
+      if (config && config.contentCatalog) {
+        registry = loadRegistry(config)
+        if (!registry) warnNoRegistry()
+      }
+      let feature = target
+      let entry
+      if (registry) {
+        entry = registry.lookup.get(target.trim().toLowerCase())
+        if (entry) {
+          feature = entry.name
+        } else {
+          reportUnknownFeature({
+            feature: target,
+            mode: document.getAttribute('enterprise-validate', 'warn'),
+            registry,
+            filePath: config && config.file && config.file.src && config.file.src.path,
+          })
+        }
+      }
       const content = buildEnterpriseContent({
-        feature: target,
+        feature,
         text: attributes.text,
-        xref: attributes.xref,
-        tooltip: attributes.tooltip,
+        xref: attributes.xref || (entry && entry.xref),
+        url: entry && entry.url,
+        tooltip: attributes.tooltip || (entry && entry.tooltip) || undefined,
         licensingPage: document.getAttribute('enterprise-licensing-page', DEFAULT_LICENSING_PAGE),
         role: document.getAttribute('enterprise-feature-role', DEFAULT_ROLE),
         tooltipAttr: resolveTooltipAttribute(document.getAttribute('enterprise-tooltip')),
@@ -102,13 +277,35 @@ function enterpriseInlineMacro () {
   }
 }
 
-function register (registry) {
+function enterpriseFeaturesBlockMacro (config) {
+  return function () {
+    const self = this
+    self.named('enterprise_features')
+    self.process(function (parent, target, attributes) {
+      const scope = (target || attributes.scope || '').trim()
+      if (!VALID_SCOPES.includes(scope)) {
+        throw new Error(`enterprise_features::[] needs a scope of ${VALID_SCOPES.join(', ')} as its target, got '${scope}'.`)
+      }
+      const registry = config && config.contentCatalog ? loadRegistry(config) : undefined
+      if (!registry) {
+        warnNoRegistry()
+        return self.parseContent(parent, `WARNING: The enterprise features registry is unavailable, so the ${scope} feature table cannot be rendered.`)
+      }
+      const table = buildFeatureTable(registry.features, scope, { title: attributes.title, heading: attributes.heading })
+      return self.parseContent(parent, table)
+    })
+  }
+}
+
+function register (registry, config = {}) {
   if (typeof registry.register === 'function') {
     registry.register(function () {
-      this.inlineMacro(enterpriseInlineMacro())
+      this.inlineMacro(enterpriseInlineMacro(config))
+      this.blockMacro(enterpriseFeaturesBlockMacro(config))
     })
   } else if (typeof registry.inlineMacro === 'function') {
-    registry.inlineMacro(enterpriseInlineMacro())
+    registry.inlineMacro(enterpriseInlineMacro(config))
+    if (typeof registry.blockMacro === 'function') registry.blockMacro(enterpriseFeaturesBlockMacro(config))
   } else {
     console.warn("no 'inlineMacro' method on alleged registry")
   }
@@ -117,4 +314,6 @@ function register (registry) {
 
 module.exports.register = register
 module.exports.buildEnterpriseContent = buildEnterpriseContent
+module.exports.buildFeatureTable = buildFeatureTable
+module.exports.parseRegistry = parseRegistry
 module.exports.resolveTooltipAttribute = resolveTooltipAttribute

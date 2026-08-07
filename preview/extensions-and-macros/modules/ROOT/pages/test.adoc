@@ -37,6 +37,24 @@ With display text override: enterprise:Audit Logging[text=audit logging] in a se
 
 With tooltip override: enterprise:Iceberg Topics[tooltip=Iceberg Topics requires an Enterprise Edition license and object storage.] in a sentence.
 
+=== Registry validation
+
+The macro resolves its target against the enterprise features registry (`enterprise-features.yml` in the `shared` component). Aliases and case-insensitive spellings canonicalize to the registry name, and the registry supplies the feature link.
+
+From the alias `cloud_storage`: enterprise:cloud_storage[] in a sentence.
+
+From a lowercase spelling: enterprise:continuous data balancing[] in a sentence.
+
+An unknown feature name renders as written but logs a build warning (set `enterprise-validate` to `error` to fail the build instead): enterprise:Warp Drive[] in a sentence.
+
+=== Generated feature tables
+
+The `enterprise_features` block macro renders the licensing feature table for one scope from the same registry:
+
+enterprise_features::redpanda[]
+
+enterprise_features::connect[]
+
 == Terms
 
 Terms must be defined in the `terms` module of the `shared` component (`shared/modules/terms/partials`).

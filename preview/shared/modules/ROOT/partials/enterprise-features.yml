@@ -1,0 +1,73 @@
+# Demo enterprise features registry for the preview site. The production
+# registry lives in the shared/ folder of the docs repo.
+schema-version: 1
+features:
+  - name: Tiered Storage
+    scope: redpanda
+    xref: streaming:manage:tiered-storage.adoc
+    description: |
+      Enables data storage in cloud object storage for long-term retention and retrieval.
+    expiration: |
+      Topics cannot be created or modified to enable Tiered Storage features.
+    aliases: [cloud_storage]
+    source:
+      kind: core-enum
+      value: cloud_storage
+    gating-property: cloud_storage_enabled
+  - name: Continuous Data Balancing
+    scope: redpanda
+    xref: streaming:manage:cluster-maintenance/continuous-data-balancing.adoc
+    description: |
+      Automatically balances partitions across a cluster to optimize resource use and performance.
+    expiration: |
+      Continuous balancing is disabled, reverting to `node_add`.
+    aliases: [CDB, partition_auto_balancing_continuous]
+    source:
+      kind: core-enum
+      value: partition_auto_balancing_continuous
+    gating-property: partition_autobalancing_mode
+  - name: Topic Deletion Control
+    scope: redpanda
+    description: |
+      Prevents all users, including superusers, from deleting topics through the Kafka DeleteTopics API.
+    expiration: |
+      Topic deletion reverts to enabled (`true`).
+    show-gating-property: true
+    source:
+      kind: core-enum
+      value: topic_deletion_disabled
+    gating-property: delete_topic_enable
+  - name: Audit Logging
+    scope: redpanda
+    xref: streaming:manage:audit-logging.adoc
+    description: |
+      Records detailed logs of cluster activities for compliance and monitoring.
+    expiration: |
+      Read access to the audit log topic is denied, but logging continues.
+    aliases: [audit_logging]
+    source:
+      kind: core-enum
+      value: audit_logging
+    gating-property: audit_enabled
+  - name: Iceberg Topics
+    scope: redpanda
+    xref: streaming:manage:iceberg/topic-iceberg-integration.adoc
+    description: |
+      Enables Iceberg integration for Redpanda topics.
+    expiration: |
+      Topics cannot be created or modified with the `redpanda.iceberg.mode` property.
+    aliases: [datalake_iceberg]
+    source:
+      kind: core-enum
+      value: datalake_iceberg
+    gating-property: iceberg_enabled
+  - name: Enterprise connectors
+    scope: connect
+    url: https://docs.redpanda.com/redpanda-connect/components/catalog/?support=enterprise
+    description: |
+      Additional inputs, outputs, and processors available only to enterprise customers.
+    expiration: |
+      All enterprise connectors are blocked.
+    source:
+      kind: manual
+      value: Aggregate entry; individual connectors are tracked in connect internal/plugins/info.csv.
