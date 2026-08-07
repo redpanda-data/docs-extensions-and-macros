@@ -34,9 +34,10 @@ describe('raiseListenerLimit', () => {
 
   // The warning this guards against fires the moment the 11th listener for
   // one event lands on Antora's shared GeneratorContext, so the raise only
-  // works if EVERY listener-adding extension performs it before subscribing.
-  // This test fails when a new extension adds a listener without the call.
-  test('every listener-adding extension raises the limit', () => {
+  // works if EVERY listener-adding extension performs it BEFORE subscribing.
+  // This test fails when a new extension adds a listener without the call,
+  // or with the call placed after its first listener registration.
+  test('every listener-adding extension raises the limit before subscribing', () => {
     const extensionsDir = path.join(__dirname, '..', '..', 'extensions')
     const offenders = []
     const walk = (dir) => {
@@ -45,7 +46,10 @@ describe('raiseListenerLimit', () => {
         if (entry.isDirectory() && entry.name !== 'util') walk(full)
         else if (entry.isFile() && entry.name.endsWith('.js')) {
           const content = fs.readFileSync(full, 'utf8')
-          if (/this\.(on|once)\(/.test(content) && !content.includes('raiseListenerLimit(this)')) {
+          const listenerIndex = content.search(/this\.(on|once)\(/)
+          if (listenerIndex === -1) continue
+          const helperIndex = content.indexOf('raiseListenerLimit(this)')
+          if (helperIndex === -1 || helperIndex > listenerIndex) {
             offenders.push(path.relative(extensionsDir, full))
           }
         }
