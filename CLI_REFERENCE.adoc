@@ -38,6 +38,7 @@ display help for command
 * `validate-mcp` - Validate MCP server configuration (tools, resources)
 * `mcp-version` - Show MCP server version and configuration information
 * `generate` - Run docs automations
+* `validate` - Validate docs data against internal sources of truth
 * `help` - display help for command
 
 == install-test-dependencies
@@ -427,6 +428,7 @@ display help for command
 * `validate-mcp` - Validate MCP server configuration (tools, resources)
 * `mcp-version` - Show MCP server version and configuration information
 * `generate` - Run docs automations
+* `validate` - Validate docs data against internal sources of truth
 * `help` - display help for command
 
 == mcp-version
