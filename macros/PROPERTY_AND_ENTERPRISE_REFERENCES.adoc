@@ -1,0 +1,86 @@
+= How property and enterprise references work
+:toc:
+:toclevels: 2
+
+A plain-English explanation of how the docs mark configuration properties and enterprise features, why it works this way, and what the tooling does for you. For attribute-by-attribute details, see link:REFERENCE.adoc[the macros reference].
+
+== The problem this solves
+
+The docs used to *guess*. Property tooltips decorated every piece of inline code whose text happened to match a property name. That works fine for a name like `cloud_storage_enabled`, but five real property names are ordinary words: `admin`, `brokers`, `rack`, `retries`, and `superusers`. On a Helm chart page, `admin` usually means an audit-logging setting or a listener name -- and readers still got a tooltip describing the Admin API broker property. Wrong information, delivered confidently.
+
+Enterprise feature mentions had the opposite problem: nothing checked them at all. Any writer could mark any feature as enterprise, under any name, and nothing would ever notice a typo, a made-up name, or a feature that isn't actually enterprise.
+
+The fix for both is the same idea: *marking is explicit, and every mark is checked against a source of truth at build time.*
+
+== Property references: the prop macro
+
+To reference a configuration property in prose, write:
+
+[,asciidoc]
+----
+prop:cloud_storage_enabled[]
+----
+
+That's it. Here's what happens for you:
+
+*It's checked.* The name is looked up in the published property data -- the same JSON, generated from Redpanda's source code, that powers the reference pages and tooltips. A typo gets a build warning with the file name and a "did you mean" suggestion. Nothing unverified ships. (A site can turn this up to a hard build failure with the `property-validate` attribute.)
+
+*It gets a tooltip.* The docs UI decorates only elements the macro marked. A plain backticked word never gets a tooltip anymore, so `admin` in a Helm example stays plain text unless a writer deliberately writes `prop:admin[]`.
+
+*It can link itself.* Add `link=true` and the property links to its reference page. You don't say which page -- the build works that out by looking at which reference page actually documents that property (details below). If our property reference is ever reorganized into different pages, every link follows automatically.
+
+*It adapts to Kubernetes pages.* Add `helm-path=auto` and, on pages rendered for Kubernetes, the property displays as the Helm values path readers actually type -- `config.cluster.log_segment_size`, `config.node.fips_mode`, or `storage.tiered.config.cloud_storage_enabled` for tiered storage settings. On Linux pages the same call shows the plain name. One sentence, correct for both audiences.
+
+=== How "the build works out the page" (dynamic discovery)
+
+Rather than hardcoding "cluster properties live on the cluster-properties page," the macro reads the actual docs during the build. Every documented property appears as a heading in the generated property files, and each reference page pulls in one or more of those files. The macro follows that chain -- which pages exist, what they include, which property headings end up where -- and builds a lookup table per doc set.
+
+Because the lookup is done separately for each part of the site, a Cloud page links to Cloud's own property pages and a streaming page to streaming's. Cloud reuses streaming's property files with a filter ("only the cloud-relevant parts"), and the macro applies that same filter, so it never links to a property that a given page doesn't actually document. If a doc set doesn't cover a property at all -- Cloud publishes no topic-properties page, Connect publishes none -- the link borrows the streaming docs instead of pointing nowhere.
+
+Think phone book, not memory: if a property moves, the next build's phone book is already right.
+
+=== What happened to config_ref
+
+The old `config_ref` macro did a smaller version of this job with three problems: you had to tell it which page to link to by hand, it never checked the property name, and on Kubernetes pages it prefixed *every* property with `storage.tiered.config.` -- which is only correct for tiered storage settings. The live docs really did render `storage.tiered.config.log_segment_size`, a path that mislabels where that setting belongs.
+
+`config_ref` is deprecated. Every hand-written call site has been converted, the property extractor now emits `prop` in generated content, and the published JSON was cleaned up (it had been leaking raw macro text into tooltips). The macro stays registered only because older versioned docs, which are frozen, still contain it. Don't write it in new content.
+
+=== Migrating existing content
+
+One command converts a repo's prose:
+
+[,bash]
+----
+npx doc-tools generate migrate-property-refs \
+  --properties modules/reference/attachments/redpanda-properties-<tag>.json \
+  --config-refs
+----
+
+It's a dry run by default; add `--write` to apply. It only converts names it can verify in the published JSON, never touches the five ambiguous word-like names, and skips code blocks, headings, generated content, and anything already inside another macro.
+
+== Enterprise feature references: the enterprise macro
+
+The same explicit-and-checked idea, for licensing:
+
+[,asciidoc]
+----
+enterprise:Tiered Storage[]
+----
+
+The name is validated against the *enterprise features registry* -- a single YAML file in the shared component (`shared/modules/ROOT/partials/enterprise-features.yml` in the docs repo) that is the canonical list of what is enterprise and what each feature is called externally. Writers can't misname a feature (aliases and case differences resolve to the canonical name, and internal engineering names like `cloud_storage` render as their proper external name) and can't mark something enterprise that isn't in the registry. Adding a feature to the registry is a reviewed docs change, and each entry records *why* it's enterprise by pointing at the internal source of truth (a license-gate in Redpanda's source, the Connect plugin catalog, or a written justification).
+
+Two more things come from the same registry:
+
+* The licensing feature tables on the licensing pages are *generated* from it (`enterprise_features::redpanda[]` and friends), so the tables can never disagree with the registry.
+* `doc-tools validate enterprise-features` compares the registry against the actual license gates in Redpanda's source code and Connect's plugin list. When engineering ships a new license-gated feature, CI fails until someone decides its documented name -- naming stays a human decision, but forgetting is no longer possible.
+
+Like properties, feature links adapt to context: registry entries can carry Kubernetes- and Cloud-specific pages, chosen by the page's environment attributes.
+
+== Where to see all of this working
+
+* The extensions preview site's test page demonstrates every form of both macros, including intentional failure cases, and a Kubernetes-environment page shows the environment-specific behavior side by side.
+* The docs-ui preview's `property-tooltips-test` and `enterprise-macro-test` pages show every output shape the UI styles, including the negative cases (unmarked names must get nothing).
+
+== The one-sentence version
+
+Nothing in the docs claims a name is a property or a feature is enterprise unless a writer said so explicitly *and* the build verified it against the source of truth.
