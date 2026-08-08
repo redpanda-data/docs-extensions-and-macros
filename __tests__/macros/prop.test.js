@@ -211,6 +211,19 @@ describe('prop macro', () => {
       expect(fallback).toContain('cluster-properties')
     })
 
+    test('components without property pages get component-qualified links into streaming', () => {
+      const catalog = fakeCatalog({
+        files: [
+          partial('streaming', 'properties/all-properties.adoc', PARTIAL),
+          page('streaming', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/all-properties.adoc[]'),
+        ],
+      })
+      // The preview/connect components publish no property pages at all.
+      const html = convert('prop:cloud_storage_enabled[link=true]', { catalog, component: 'preview' })
+      expect(html).toContain('streaming')
+      expect(html).toContain('cluster-properties')
+    })
+
     test('page= overrides discovery', () => {
       const catalog = fakeCatalog({
         files: [
