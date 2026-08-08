@@ -90,6 +90,16 @@ describe('migrate-property-refs', () => {
       expect(result.skipped).toEqual(['not_in_json'])
     })
 
+    test('drops a payload that just repeats the backticked name', () => {
+      const result = convertConfigRefLine('The config_ref:cloud_storage_enabled,true,properties/object-storage-properties[`cloud_storage_enabled`] property.', known)
+      expect(result.line).toBe('The prop:cloud_storage_enabled[link=true,helm-path=auto] property.')
+    })
+
+    test('preserves a differing payload as a text override', () => {
+      const result = convertConfigRefLine('See config_ref:log_segment_size,true,cluster-properties[segment size limit].', known)
+      expect(result.line).toBe('See prop:log_segment_size[link=true,helm-path=auto,text=segment size limit].')
+    })
+
     test('converts multiple calls on one line', () => {
       const result = convertConfigRefLine('config_ref:fips_mode,true,broker-properties[] and config_ref:log_segment_size,true,cluster-properties[]', known)
       expect(result.count).toBe(2)
