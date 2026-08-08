@@ -365,6 +365,12 @@ describe('buildUrlMap page-aliases', () => {
     expect(urls.has('/streaming/26.2/reference/no-extension')).toBe(true)
   })
 
+  test('maps aliases listed across continuation lines', () => {
+    const urls = mapFor('= T\n:page-aliases: kubernetes/manage-resources.adoc, \\\nkubernetes/old-resources.adoc\n')
+    expect(urls.has('/streaming/26.2/manage/kubernetes/manage-resources')).toBe(true)
+    expect(urls.has('/streaming/26.2/manage/kubernetes/old-resources')).toBe(true)
+  })
+
   test('maps a ROOT-module alias without a module segment', () => {
     const urls = mapFor('= T\n:page-aliases: ROOT:legacy.adoc\n')
     expect(urls.has('/streaming/26.2/legacy')).toBe(true)

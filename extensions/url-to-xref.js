@@ -156,8 +156,22 @@ function buildUrlMap (contentCatalog) {
   return { urls, components }
 }
 
-// Matches a page-aliases attribute entry in a page header.
-const PAGE_ALIASES_RX = /^:page-aliases:(.*)$/m
+const PAGE_ALIASES_ATTRIBUTE = ':page-aliases:'
+
+/**
+ * Returns the raw value of a page's page-aliases attribute, joining the
+ * continuation lines that AsciiDoc allows a long value to span.
+ */
+function extractPageAliases (header) {
+  const lines = header.split('\n')
+  const start = lines.findIndex((line) => line.startsWith(PAGE_ALIASES_ATTRIBUTE))
+  if (start === -1) return
+  let value = lines[start].slice(PAGE_ALIASES_ATTRIBUTE.length)
+  for (let index = start; value.trimEnd().endsWith('\\') && index + 1 < lines.length; index++) {
+    value = `${value.trimEnd().slice(0, -1)} ${lines[index + 1]}`
+  }
+  return value
+}
 
 /**
  * Returns the normalized URL paths that a page's page-aliases attribute makes
@@ -169,8 +183,8 @@ const PAGE_ALIASES_RX = /^:page-aliases:(.*)$/m
 function pageAliasUrls (page) {
   const contents = page.contents && page.contents.toString()
   if (!contents) return []
-  const match = PAGE_ALIASES_RX.exec(contents.slice(0, 4096))
-  if (!match) return []
+  const aliases = extractPageAliases(contents.slice(0, 4096))
+  if (!aliases) return []
   const targetUrl = normalizeUrlPath(page.pub.url)
   const targetSuffix = pageUrlSuffix(page.src)
   // The alias URL differs from the target URL only in the module and page
@@ -178,7 +192,7 @@ function pageAliasUrls (page) {
   if (targetSuffix && !targetUrl.endsWith(`/${targetSuffix}`)) return []
   const base = targetSuffix ? targetUrl.slice(0, -(targetSuffix.length + 1)) : targetUrl
   const keys = []
-  for (const spec of match[1].split(',')) {
+  for (const spec of aliases.split(',')) {
     const aliasSrc = parsePageAliasSpec(spec, page.src)
     if (!aliasSrc) continue
     const suffix = pageUrlSuffix(aliasSrc)
