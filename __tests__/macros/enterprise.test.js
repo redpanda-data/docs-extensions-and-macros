@@ -14,6 +14,8 @@ features:
   - name: Tiered Storage
     scope: redpanda
     xref: manage:tiered-storage.adoc
+    xref-kubernetes: manage:kubernetes/tiered-storage/k-tiered-storage.adoc
+    xref-cloud: cloud-data-platform:manage:tiered-storage.adoc
     description: |
       Enables data storage in cloud object storage.
     expiration: |
@@ -293,6 +295,29 @@ describe('enterprise macro', () => {
       expect(html).toContain('Behavior Upon Expiration')
       expect(html).toContain('Tiered Storage')
       expect(html).toContain('Topic Deletion Control')
+    })
+
+    test('uses the Kubernetes feature page when env-kubernetes is set', () => {
+      const html = convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-kubernetes': '' },
+      })
+      expect(html).toContain('k-tiered-storage')
+    })
+
+    test('uses the Cloud feature page when env-cloud is set', () => {
+      const html = convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '' },
+      })
+      expect(html).toContain('cloud-data-platform')
+    })
+
+    test('falls back to the default xref without env attributes', () => {
+      const html = convert('enterprise:Tiered Storage[]', { catalog: fakeCatalog() })
+      expect(html).not.toContain('k-tiered-storage')
+      expect(html).not.toContain('cloud-data-platform')
+      expect(html).toContain('tiered-storage')
     })
 
     test('re-emits a block anchor as the table id and resolves crossrefs to it', () => {

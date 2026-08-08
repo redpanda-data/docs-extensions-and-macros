@@ -81,7 +81,9 @@ enterprise:Iceberg Topics[tooltip=Iceberg Topics requires an Enterprise Edition 
 The macro target is the feature name, which can contain spaces. Named attributes:
 
 xref::
-Optional Antora resource ID of the feature's documentation page. Overrides the registry entry's `xref`. When neither is set, the term links to the licensing page.
+Optional Antora resource ID of the feature's documentation page. Overrides the registry entry's link. When neither is set, the term links to the licensing page.
++
+Registry entries can carry environment-specific pages: on pages with the `env-cloud` attribute the entry's `xref-cloud` is used, on pages with `env-kubernetes` the entry's `xref-kubernetes` is used, and otherwise the entry's default `xref` (the Linux or generic self-managed page). This mirrors the `config_ref` macro's environment awareness.
 
 text::
 Optional display text override. Use it when the sentence needs different casing or phrasing than the feature name.
