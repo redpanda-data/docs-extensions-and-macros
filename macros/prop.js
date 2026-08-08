@@ -338,8 +338,10 @@ function propInlineMacro (config) {
         }
       }
       // Discover which page documents the property. The current component
-      // wins; when it publishes no property pages at all (for example, the
-      // connect component, or this repo's preview site), fall back to the
+      // wins. When it doesn't document this property -- either because it
+      // publishes no property pages at all (the connect component, this
+      // repo's preview site) or because it publishes only a subset (the
+      // cloud component has no topic-properties page) -- fall back to the
       // streaming (or ROOT) component and emit a component-qualified xref.
       let discoveredPage
       let componentPrefix = ''
@@ -347,14 +349,25 @@ function propInlineMacro (config) {
         const component = (config.file && config.file.src && config.file.src.component) || ''
         const ownIndex = buildPageIndex(config.contentCatalog, component, registry.properties)
         discoveredPage = ownIndex.get(name)
-        if (!discoveredPage && ownIndex.size === 0) {
+        if (!discoveredPage) {
+          let fallbackWithPages
           for (const fallbackComponent of ['streaming', 'ROOT']) {
             if (fallbackComponent === component) continue
             const fallbackIndex = buildPageIndex(config.contentCatalog, fallbackComponent, registry.properties)
             if (fallbackIndex.size === 0) continue
-            discoveredPage = fallbackIndex.get(name)
-            componentPrefix = `${fallbackComponent}:`
-            break
+            if (!fallbackWithPages) fallbackWithPages = fallbackComponent
+            const fallbackPage = fallbackIndex.get(name)
+            if (fallbackPage) {
+              discoveredPage = fallbackPage
+              componentPrefix = `${fallbackComponent}:`
+              break
+            }
+          }
+          // Nothing documents the property anywhere: point the scope-derived
+          // fallback at a component that at least publishes property pages,
+          // unless the current component does.
+          if (!discoveredPage && ownIndex.size === 0 && fallbackWithPages) {
+            componentPrefix = `${fallbackWithPages}:`
           }
         }
       }
