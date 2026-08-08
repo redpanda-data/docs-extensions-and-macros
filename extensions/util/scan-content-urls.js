@@ -29,7 +29,10 @@
  */
 
 const URL_RX = /(link:)?(https?:\/\/[^\s\][)"'<>]+)(\[[^\]]*\])?/g
-const TRAILING_PUNCT_RX = /[.,;:!?]+$/
+// Sentence punctuation, and the AsciiDoc formatting markup that closes around a
+// URL written as *emphasis* or **bold** (`**https://example.com/page**`), which
+// is not part of the URL.
+const TRAILING_PUNCT_RX = /[.,;:!?*_]+$/
 const ATTRIBUTE_ENTRY_RX = /^:!?[a-zA-Z0-9_][a-zA-Z0-9_-]*!?:(?:\s|$)/
 // Cap on how far a wrapped label may run, so an unmatched bracket somewhere in
 // prose cannot swallow the rest of the document.

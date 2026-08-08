@@ -103,10 +103,14 @@ function makeCatalog () {
   }
 }
 
+// Mirrors the extension's default ignore list (see register): docs-domain
+// paths that are not Antora pages.
+const DEFAULT_IGNORE = [/^\/api\//, /^\/mcp(\/|$)/]
+
 function makeResolverContext () {
   return Object.assign(buildUrlMap(makeCatalog()), {
     hostnames: new Set(['docs.redpanda.com']),
-    ignore: [/^\/api\//],
+    ignore: DEFAULT_IGNORE,
     latestVersionSegment: 'current',
   })
 }
@@ -344,8 +348,12 @@ describe('convertContent', () => {
     expect(unmapped).toEqual([])
   })
 
-  test('leaves ignored paths untouched without reporting them', () => {
-    const input = 'API: https://docs.redpanda.com/api/doc/cloud-dataplane/operation/listquotas'
+  test.each([
+    ['the API reference, hosted by Bump.sh', 'https://docs.redpanda.com/api/doc/cloud-dataplane/operation/listquotas'],
+    ['the MCP server endpoint', 'https://docs.redpanda.com/mcp'],
+    ['a path under the MCP endpoint', 'https://docs.redpanda.com/mcp/sse'],
+  ])('leaves %s untouched without reporting it', (_, url) => {
+    const input = `See ${url} for details.`
     const { content, unmapped } = convert(input)
     expect(content).toBe(input)
     expect(unmapped).toEqual([])
@@ -610,6 +618,18 @@ describe('register', () => {
       expect.stringContaining('No published page matches https://docs.redpanda.com/gone/page/')
     )
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining(catalog.pages[0].path))
+  })
+
+  test('applies the default ignore list without configuration', () => {
+    const catalog = makeCatalog()
+    catalog.pages[0].contents = Buffer.from(
+      'API https://docs.redpanda.com/api/doc/x and MCP https://docs.redpanda.com/mcp stay put.'
+    )
+    const logger = run(catalog)
+    expect(catalog.pages[0].contents.toString()).toBe(
+      'API https://docs.redpanda.com/api/doc/x and MCP https://docs.redpanda.com/mcp stay put.'
+    )
+    expect(logger.warn).not.toHaveBeenCalled()
   })
 
   test('honors log_unconverted: false', () => {

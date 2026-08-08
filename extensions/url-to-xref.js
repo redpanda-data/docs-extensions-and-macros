@@ -61,9 +61,10 @@ module.exports.register = function ({ config = {} }) {
   const logger = this.getLogger('url-to-xref-extension')
   const hostnames = new Set(config.hostnames || ['docs.redpanda.com'])
   const logUnconverted = config.logUnconverted !== false
-  // URL paths that live on the docs domain but outside the Antora catalog
-  // (the API reference is hosted by Bump.sh). Left untouched, no warning.
-  const ignore = (config.ignore || ['^/api/']).map((pattern) => new RegExp(pattern))
+  // URL paths that live on the docs domain but outside the Antora catalog: the
+  // API reference is hosted by Bump.sh, and /mcp is the docs MCP server
+  // endpoint. Left untouched, no warning.
+  const ignore = (config.ignore || ['^/api/', '^/mcp(/|$)']).map((pattern) => new RegExp(pattern))
 
   this.on('contentClassified', ({ playbook, contentCatalog }) => {
     const resolverContext = Object.assign(buildUrlMap(contentCatalog), {

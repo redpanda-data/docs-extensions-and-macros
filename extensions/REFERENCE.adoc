@@ -511,7 +511,7 @@ hostnames (optional)::
 List of hostnames treated as internal documentation URLs. Default: `['docs.redpanda.com']`.
 
 ignore (optional)::
-List of regular expressions matched against URL paths. Matching URLs are left untouched with no warning. Use this for paths on the docs domain that live outside the Antora catalog. Default: `['^/api/']` (the API reference is hosted by Bump.sh).
+List of regular expressions matched against URL paths. Matching URLs are left untouched with no warning. Use this for paths on the docs domain that live outside the Antora catalog. Default: `['^/api/', '^/mcp(/|$)']` (the API reference is hosted by Bump.sh, and `/mcp` is the docs MCP server endpoint).
 
 log_unconverted (optional)::
 Whether to log a warning for each internal URL that matches no published page. Default: `true`.

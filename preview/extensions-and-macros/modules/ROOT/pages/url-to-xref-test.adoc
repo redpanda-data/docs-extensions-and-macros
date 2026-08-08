@@ -98,7 +98,7 @@ resource documentation]
 Result: https://docs.redpanda.com/docs/manage/kubernetes/k-manage-resources/#configure-cpu-resources[CPU
 resource documentation]
 
-An unlabeled URL that carries a fragment is given link text explicitly. Antora cannot resolve a section title, so `xref:page.adoc#anchor[]` would render the raw resource ID as the link text. The extension uses the heading the fragment points at, and falls back to the target page title:
+An unlabeled URL that carries a fragment is given link text explicitly. Antora cannot resolve a section title, so `+xref:page.adoc#anchor[]+` would render the raw resource ID as the link text. The extension uses the heading the fragment points at, and falls back to the target page title:
 
 [,asciidoc]
 ----
@@ -125,21 +125,25 @@ Result: https://docs.redpanda.com/docs/reference/cluster-properties/#log_segment
 
 == Broken internal link detection
 
-A URL that matches no published page is left as a raw link and logged as a build warning. This is the notification mechanism: stale internal links surface in the build log instead of silently 404ing for readers.
+A URL that matches no published page is left as a raw link, so it keeps working for readers, and is reported as a build warning. This is the notification mechanism: stale internal links surface in the build log instead of silently 404ing later.
+
+This page deliberately does not contain such a URL, because it would add a warning to every build of this repository. Given a page containing:
 
 [,asciidoc]
 ----
 https://docs.redpanda.com/streaming/current/manage/kubernetes/page-that-does-not-exist/
 ----
 
-Result: https://docs.redpanda.com/streaming/current/manage/kubernetes/page-that-does-not-exist/
-
-The build log for this page reports:
+the link is left exactly as written, and the build log reports:
 
 [,bash]
 ----
-No published page matches https://docs.redpanda.com/streaming/current/manage/kubernetes/page-that-does-not-exist/
+WARN (url-to-xref-extension): No published page matches
+https://docs.redpanda.com/streaming/current/manage/kubernetes/page-that-does-not-exist/
+(found in: modules/ROOT/pages/example.adoc)
 ----
+
+The extension's unit and end-to-end tests cover this case.
 
 == URLs that are deliberately left alone
 

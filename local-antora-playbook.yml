@@ -48,7 +48,7 @@ antora:
     data:
       sets:
         docker_labs:
-          component: redpanda-labs
+          component: labs
           filter: docker-compose
           env_type: Docker
           attribute_name: docker-labs-index
@@ -62,8 +62,8 @@ antora:
     data:
       replacements:
         - components:
-          - 'ROOT'
-          - 'redpanda-labs'
+          - 'streaming'
+          - 'labs'
           file_patterns:
             - '**/docker-compose.yaml'
             - '**/docker-compose.yml'

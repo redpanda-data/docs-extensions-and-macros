@@ -2,6 +2,27 @@
 
 const { scanContentUrls } = require('../../extensions/util/scan-content-urls')
 
+describe('scanContentUrls formatting markup', () => {
+  // A URL wrapped in AsciiDoc bold or emphasis must not absorb the closing
+  // markup: llms.adoc writes **https://docs.redpanda.com/mcp**, which was
+  // scanned as the URL "https://docs.redpanda.com/mcp**".
+  test.each([
+    ['bold', '**https://docs.redpanda.com/mcp** - MCP server', 'https://docs.redpanda.com/mcp'],
+    ['emphasis', '*https://docs.redpanda.com/page* text', 'https://docs.redpanda.com/page'],
+    ['underscore bold', '__https://docs.redpanda.com/page__ text', 'https://docs.redpanda.com/page'],
+    ['plain', 'see https://docs.redpanda.com/page here', 'https://docs.redpanda.com/page'],
+  ])('strips closing %s markup from the URL', (_, line, expected) => {
+    const [match] = scanContentUrls(line)
+    expect(match.url).toBe(expected)
+  })
+
+  test('keeps a label attached to a formatted URL', () => {
+    const [match] = scanContentUrls('*https://docs.redpanda.com/page[Label]*')
+    expect(match.url).toBe('https://docs.redpanda.com/page')
+    expect(match.label).toBe('Label')
+  })
+})
+
 describe('scanContentUrls', () => {
   test('finds a bare URL and trims trailing sentence punctuation', () => {
     const content = 'See https://docs.redpanda.com/connect/configuration/secrets/. Then continue.'
