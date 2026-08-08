@@ -6,6 +6,7 @@ const {
   compareTags,
   extractHeadingsWithTags,
   evaluateTagExpression,
+  helmValuesPath,
 } = require('../../macros/prop')
 
 const PROPERTIES_JSON = JSON.stringify({
@@ -13,6 +14,7 @@ const PROPERTIES_JSON = JSON.stringify({
     cloud_storage_enabled: { name: 'cloud_storage_enabled', config_scope: 'cluster' },
     fips_mode: { name: 'fips_mode', config_scope: 'broker' },
     'redpanda.iceberg.mode': { name: 'redpanda.iceberg.mode', config_scope: 'topic' },
+    iceberg_enabled: { name: 'iceberg_enabled', config_scope: 'cluster' },
     admin: { name: 'admin', config_scope: 'broker' },
   },
 })
@@ -157,6 +159,56 @@ describe('prop macro', () => {
     test('renders unvalidated without a catalog (graceful degradation)', () => {
       const html = convert('prop:anything_goes[]', {})
       expect(html).toContain('data-property-name="anything_goes"')
+    })
+  })
+
+  describe('helm-path display', () => {
+    test.each([
+      ['cloud_storage_enabled', 'cluster', 'storage.tiered.config.cloud_storage_enabled'],
+      ['fips_mode', 'broker', 'config.node.fips_mode'],
+      ['log_segment_size', 'cluster', 'config.cluster.log_segment_size'],
+    ])('%s (%s) -> %s', (name, scope, expected) => {
+      expect(helmValuesPath(name, scope)).toBe(expected)
+    })
+
+    test('helm-path=auto displays the Helm values path on env-kubernetes pages', () => {
+      const html = convert('prop:cloud_storage_enabled[helm-path=auto]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-kubernetes': 'true' },
+      })
+      expect(html).toContain('storage.tiered.config.cloud_storage_enabled')
+      expect(html).toContain('data-property-name="cloud_storage_enabled"')
+    })
+
+    test('non-tiered properties get the config.cluster path, fixing config_ref mislabeling', () => {
+      const html = convert('prop:iceberg_enabled[helm-path=auto]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-kubernetes': 'true' },
+      })
+      expect(html).toContain('config.cluster.iceberg_enabled')
+      expect(html).not.toContain('storage.tiered.config')
+    })
+
+    test('broker properties get the config.node path', () => {
+      const html = convert('prop:fips_mode[helm-path=auto]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-kubernetes': 'true' },
+      })
+      expect(html).toContain('config.node.fips_mode')
+    })
+
+    test('helm-path=auto renders the plain name without env-kubernetes', () => {
+      const html = convert('prop:cloud_storage_enabled[helm-path=auto]', { catalog: fakeCatalog() })
+      expect(html).not.toContain('storage.tiered.config')
+      expect(html).toContain('>cloud_storage_enabled</code>')
+    })
+
+    test('explicit text= wins over the helm path', () => {
+      const html = convert('prop:cloud_storage_enabled[helm-path=auto,text=the tiered flag]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-kubernetes': 'true' },
+      })
+      expect(html).toContain('>the tiered flag</code>')
     })
   })
 

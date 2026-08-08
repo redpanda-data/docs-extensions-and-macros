@@ -847,6 +847,7 @@ automation
   .description('One-time migration of `property_name` prose mentions to prop:property_name[] macros. Dry run unless --write is given.')
   .requiredOption('--properties <path>', 'Path to the published redpanda-properties JSON to validate names against')
   .option('--docs-dir <path>', 'Docs repo root containing modules/', '.')
+  .option('--config-refs', 'Also convert config_ref macro calls to prop macro calls')
   .option('--write', 'Apply changes (default is a dry run that only reports)')
   .action((options) => {
     const { migrate } = require('../tools/migrate-property-refs.js')
@@ -855,12 +856,16 @@ automation
       docsDir: path.resolve(options.docsDir),
       propertiesJson,
       write: Boolean(options.write),
+      configRefs: Boolean(options.configRefs),
     })
     result.changed
       .sort((a, b) => b.count - a.count)
       .forEach(({ file, count }) => console.log(`${String(count).padStart(4)}  ${file}`))
     console.log(`\n${options.write ? 'Converted' : 'Would convert'} ${result.conversions} mention(s) across ${result.changed.length} of ${result.files} files.`)
     console.log(`Left alone (ambiguous, no separator): ${result.ambiguous.join(', ')}`)
+    if (result.skippedConfigRefs && result.skippedConfigRefs.length) {
+      console.log(`config_ref calls left alone (names not in the published JSON): ${result.skippedConfigRefs.join(', ')}`)
+    }
     if (!options.write && result.conversions) console.log('Re-run with --write to apply.')
   })
 

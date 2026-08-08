@@ -113,6 +113,10 @@ An explicit page override skips discovery entirely. The xref stays component-rel
 prop:cloud_storage_cache_size[link=true,page=properties/object-storage-properties]
 ----
 
+=== Kubernetes Helm paths
+
+With `helm-path=auto`, the property renders as its Helm values path on pages with the `env-kubernetes` attribute, and as the plain name elsewhere. On this page (no `env-kubernetes`), it stays plain: prop:cloud_storage_enabled[helm-path=auto] in a sentence. See the same call on the xref:preview:ROOT:enterprise-kubernetes-test.adoc[Kubernetes environment test page].
+
 === Validation
 
 An unknown name renders as written but logs a build warning with did-you-mean suggestions (set `property-validate` to `error` to fail the build instead): prop:not_a_real_property[] in a sentence.

@@ -1,6 +1,6 @@
 'use strict'
 
-const { classifyNames, convertLine, convertDocument } = require('../../tools/migrate-property-refs')
+const { classifyNames, convertLine, convertConfigRefLine, convertDocument } = require('../../tools/migrate-property-refs')
 
 const PROPERTIES = {
   properties: {
@@ -64,6 +64,40 @@ describe('migrate-property-refs', () => {
     })
   })
 
+  describe('convertConfigRefLine', () => {
+    const known = new Set(['cloud_storage_enabled', 'fips_mode', 'log_segment_size'])
+
+    test('converts linked config_ref calls, dropping the manual path', () => {
+      const result = convertConfigRefLine('See config_ref:cloud_storage_enabled,true,properties/object-storage-properties[] for details.', known)
+      expect(result.line).toBe('See prop:cloud_storage_enabled[link=true,helm-path=auto] for details.')
+      expect(result.count).toBe(1)
+    })
+
+    test('converts unlinked config_ref calls', () => {
+      const result = convertConfigRefLine('Set config_ref:log_segment_size,false[] first.', known)
+      expect(result.line).toBe('Set prop:log_segment_size[helm-path=auto] first.')
+    })
+
+    test('converts bare config_ref calls without positional args', () => {
+      const result = convertConfigRefLine('Set config_ref:fips_mode[] on the broker.', known)
+      expect(result.line).toBe('Set prop:fips_mode[helm-path=auto] on the broker.')
+    })
+
+    test('leaves unknown names as config_ref and reports them', () => {
+      const result = convertConfigRefLine('Legacy config_ref:not_in_json,true,cluster-properties[] stays.', known)
+      expect(result.line).toContain('config_ref:not_in_json')
+      expect(result.count).toBe(0)
+      expect(result.skipped).toEqual(['not_in_json'])
+    })
+
+    test('converts multiple calls on one line', () => {
+      const result = convertConfigRefLine('config_ref:fips_mode,true,broker-properties[] and config_ref:log_segment_size,true,cluster-properties[]', known)
+      expect(result.count).toBe(2)
+      expect(result.line).toContain('prop:fips_mode[link=true,helm-path=auto]')
+      expect(result.line).toContain('prop:log_segment_size[link=true,helm-path=auto]')
+    })
+  })
+
   describe('convertDocument', () => {
     test('skips listing, literal, comment, and fenced blocks', () => {
       const doc = [
@@ -101,6 +135,20 @@ describe('migrate-property-refs', () => {
       expect(result.count).toBe(1)
       expect(result.content).toContain('== The `fips_mode` heading')
       expect(result.content).toContain('Prose prop:fips_mode[] converts.')
+    })
+
+    test('converts config_ref calls only when enabled, skipping code blocks', () => {
+      const doc = [
+        'Prose config_ref:fips_mode,true,broker-properties[] converts.',
+        '----',
+        'config_ref:fips_mode,true,broker-properties[] stays',
+        '----',
+      ].join('\n')
+      const off = convertDocument(doc, convertible)
+      expect(off.content).toContain('config_ref:fips_mode,true,broker-properties[] converts')
+      const on = convertDocument(doc, convertible, { configRefs: true, knownNames: new Set(['fips_mode']) })
+      expect(on.content).toContain('prop:fips_mode[link=true,helm-path=auto] converts')
+      expect(on.content).toContain('config_ref:fips_mode,true,broker-properties[] stays')
     })
 
     test('converts inside table cells', () => {
