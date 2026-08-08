@@ -166,6 +166,24 @@ describe('link extensions end-to-end', () => {
     expect(buildOutput).toMatch(/Left 1 docs URL with a query string as raw link \(an xref cannot carry one\)/)
   })
 
+  // Generated content wraps long lines, so a label often opens on one line and
+  // closes on the next. Missing it left the label as literal text in the page.
+  test('captures a link label that wraps across a line break', () => {
+    const html = readLinksPage()
+    expect(html).toMatch(
+      /href="[^"]*\/connect\/configuration\/secrets\/#store" class="xref page">Store secrets across lines</
+    )
+    expect(html).not.toContain('secrets across lines]')
+  })
+
+  // Antora cannot title an xref that carries a fragment, so the extension
+  // supplies the heading text; otherwise the raw resource id is rendered.
+  test('gives an unlabeled fragment URL the heading text as its label', () => {
+    const html = readLinksPage()
+    expect(html).toMatch(/href="[^"]*\/connect\/configuration\/secrets\/#store" class="xref page">Store secrets</)
+    expect(html).not.toContain('secrets.adoc#store')
+  })
+
   test('leaves unmappable internal URLs as raw links and warns', () => {
     const html = readLinksPage()
     expect(html).toContain('href="https://docs.redpanda.com/no/such/page/"')

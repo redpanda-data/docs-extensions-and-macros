@@ -30,8 +30,10 @@ const { scanContentUrls } = require('./util/scan-content-urls')
  * - Legacy URL shapes (/docs/..., /current/..., /vX.Y/..., pre-rename
  *   component slugs) are rewritten to candidate paths, but a candidate is
  *   only used when it matches a published page.
- * - Fragments (#anchor) and link labels are preserved. Unlabeled URLs become
- *   xref:...[] so Antora fills in the target page title.
+ * - Fragments (#anchor) and link labels are preserved, including labels that a
+ *   generator wrapped across a line break. An unlabeled URL becomes xref:...[]
+ *   so Antora fills in the target page title, except when it carries a
+ *   fragment, where link text has to be supplied (see linkTextFor).
  * - Targets in the latest version of a component emit an unversioned xref;
  *   targets pinned to an older version emit version@component:module:page.
  * - URLs pointing at a page's former path resolve through the page-aliases the
@@ -72,6 +74,7 @@ module.exports.register = function ({ config = {} }) {
     let convertedCount = 0
     const unmapped = new Map()
     const withQueryString = new Set()
+    const withoutLinkText = new Set()
     const files = contentCatalog
       .getPages((page) => page.out)
       .concat(contentCatalog.findBy({ family: 'partial' }))
@@ -87,6 +90,7 @@ module.exports.register = function ({ config = {} }) {
         unmapped.get(url).add(file.path)
       }
       for (const url of result.withQueryString) withQueryString.add(url)
+      for (const url of result.withoutLinkText) withoutLinkText.add(url)
     }
     if (logUnconverted) {
       for (const [url, pages] of unmapped) {
@@ -97,6 +101,13 @@ module.exports.register = function ({ config = {} }) {
       logger.info(
         `Left ${withQueryString.size} docs URL${withQueryString.size === 1 ? '' : 's'} with a query string as raw ` +
           `link${withQueryString.size === 1 ? '' : 's'} (an xref cannot carry one): ${[...withQueryString].join(', ')}`
+      )
+    }
+    if (withoutLinkText.size) {
+      logger.info(
+        `Left ${withoutLinkText.size} docs URL${withoutLinkText.size === 1 ? '' : 's'} with a fragment as raw ` +
+          `link${withoutLinkText.size === 1 ? '' : 's'} (no link text could be resolved from the target page): ` +
+          `${[...withoutLinkText].join(', ')}`
       )
     }
     if (convertedCount || unmapped.size) {
@@ -127,17 +138,20 @@ function buildUrlMap (contentCatalog) {
     components[component.name] = { latestVersion: component.latest ? component.latest.version : '' }
   }
   const isLatest = (name, version) => name in components && components[name].latestVersion === version
-  const toEntry = ({ component, version, module: module_, relative }) => ({
+  // The target file travels with the entry so that link text can be resolved
+  // from it later, which an xref with a fragment needs (see linkTextFor).
+  const toEntry = ({ component, version, module: module_, relative }, page) => ({
     component,
     version,
     module: module_,
     relative,
     latest: isLatest(component, version),
+    page,
   })
   const urls = new Map()
   const pages = contentCatalog.getPages((p) => p.out && p.pub && p.pub.url)
   for (const page of pages) {
-    urls.set(normalizeUrlPath(page.pub.url), toEntry(page.src))
+    urls.set(normalizeUrlPath(page.pub.url), toEntry(page.src, page))
   }
   for (const alias of contentCatalog.findBy({ family: 'alias' })) {
     if (!alias.pub || !alias.pub.url || alias.pub.splat) continue
@@ -146,11 +160,11 @@ function buildUrlMap (contentCatalog) {
     while (target && target.src && target.src.family === 'alias' && depth++ < 5) target = target.rel
     if (!target || !target.src || target.src.family !== 'page' || !target.pub) continue
     const key = normalizeUrlPath(alias.pub.url)
-    if (!urls.has(key)) urls.set(key, toEntry(target.src))
+    if (!urls.has(key)) urls.set(key, toEntry(target.src, target))
   }
   for (const page of pages) {
     for (const key of pageAliasUrls(page)) {
-      if (!urls.has(key)) urls.set(key, toEntry(page.src))
+      if (!urls.has(key)) urls.set(key, toEntry(page.src, page))
     }
   }
   return { urls, components }
@@ -321,11 +335,100 @@ function entryToXref (entry, fragment, label) {
   return `xref:${versionPrefix}${entry.component}:${entry.module}:${entry.relative}${fragment || ''}[${label || ''}]`
 }
 
+// Parsed heading id -> heading text, cached per target file.
+const headingsByFile = new WeakMap()
+const EXPLICIT_ANCHOR_PATTERNS = [
+  /^\[\[([\w:.-]+)(?:,.*)?\]\]$/,
+  /^\[#([\w:.-]+)(?:[,.].*)?\]$/,
+  /^\[id="?([\w:.-]+)"?(?:,.*)?\]$/,
+]
+const HEADING_RX = /^(={1,6})\s+(\S.*)$/
+
+/**
+ * Returns the link text for a converted URL, or undefined when the URL should
+ * be left alone.
+ *
+ * A labeled URL keeps its label, and an unlabeled URL without a fragment gets
+ * empty text so that Antora fills in the target page title. An unlabeled URL
+ * *with* a fragment has to be given text explicitly: Antora cannot resolve a
+ * section title, so `xref:page.adoc#anchor[]` renders the raw resource id as
+ * the link text. Prefer the heading the fragment points at, then the page
+ * title; if neither can be read, the caller leaves the URL as a raw link,
+ * which still displays sensibly.
+ */
+function linkTextFor (label, fragment, page) {
+  if (label) return label
+  if (!fragment) return ''
+  const contents = page && page.contents && page.contents.toString()
+  if (!contents) return undefined
+  let headings = headingsByFile.get(page)
+  if (!headings) headingsByFile.set(page, (headings = parseHeadingIds(contents)))
+  return headings.get(fragment.slice(1)) || documentTitle(contents)
+}
+
+/**
+ * Maps every heading id in a page to its text, covering explicit anchors
+ * ([[id]], [#id], [id=...]) and the ids Asciidoctor generates from heading
+ * text. Id generation is approximated: a mismatch only costs the page-title
+ * fallback.
+ */
+function parseHeadingIds (contents) {
+  const ids = new Map()
+  let pendingId
+  for (const rawLine of contents.split('\n')) {
+    const line = rawLine.trim()
+    const anchor = EXPLICIT_ANCHOR_PATTERNS.reduce((found, pattern) => found || pattern.exec(line), null)
+    if (anchor) {
+      pendingId = anchor[1]
+      continue
+    }
+    const heading = HEADING_RX.exec(line)
+    if (heading) {
+      const text = sanitizeLinkText(heading[2])
+      const id = pendingId || autoId(text)
+      if (id && text && !ids.has(id)) ids.set(id, text)
+    }
+    if (line) pendingId = undefined
+  }
+  return ids
+}
+
+/** Returns a page's document title (its level-0 heading), sanitized. */
+function documentTitle (contents) {
+  const match = /^=\s+(\S.*)$/m.exec(contents)
+  return match ? sanitizeLinkText(match[1]) : undefined
+}
+
+/**
+ * Makes text safe to use as an xref label: an unbalanced bracket would end the
+ * macro early, and a nested link macro cannot appear inside one.
+ */
+function sanitizeLinkText (text) {
+  return text
+    .replace(/(?:xref|link|image):[^[\s]*\[([^\]]*)\]/g, '$1')
+    .replace(/[[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** Approximates Asciidoctor id generation with idprefix='' and idseparator='-'. */
+function autoId (text) {
+  return text
+    .replace(/[`*+#^~]/g, '')
+    .toLowerCase()
+    .replace(/[^\w\- .]/g, '')
+    .trim()
+    .replace(/[ .]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
 /**
  * Rewrites every mappable docs URL in content. Returns the updated content,
  * the number of conversions, the internal URLs that matched no published page,
- * and the internal URLs that carry a query string, which an xref cannot
- * express.
+ * the internal URLs that carry a query string (which an xref cannot express),
+ * and the internal URLs left alone because no link text could be resolved for
+ * their fragment.
  */
 function convertContent (content, resolverContext) {
   const { hostnames, ignore = [] } = resolverContext
@@ -334,6 +437,7 @@ function convertContent (content, resolverContext) {
   let converted = 0
   const unmapped = []
   const withQueryString = []
+  const withoutLinkText = []
   for (const match of scanContentUrls(content)) {
     let url
     try {
@@ -356,12 +460,17 @@ function convertContent (content, resolverContext) {
       unmapped.push(match.url)
       continue
     }
-    result += content.slice(cursor, match.start) + entryToXref(entry, url.hash, match.label)
+    const label = linkTextFor(match.label, url.hash, entry.page)
+    if (label === undefined) {
+      withoutLinkText.push(match.url)
+      continue
+    }
+    result += content.slice(cursor, match.start) + entryToXref(entry, url.hash, label)
     cursor = match.end
     converted++
   }
   result += content.slice(cursor)
-  return { content: result, converted, unmapped, withQueryString }
+  return { content: result, converted, unmapped, withQueryString, withoutLinkText }
 }
 
 module.exports.buildUrlMap = buildUrlMap

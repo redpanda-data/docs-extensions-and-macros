@@ -13,7 +13,9 @@
  *
  * Match shape:
  * - url: the URL with any trailing sentence punctuation trimmed
- * - label: text of a directly attached AsciiDoc link label ([...]), or null
+ * - label: text of a directly attached AsciiDoc link label ([...]), or null.
+ *   A label may span line breaks, which is common in generated content where
+ *   long lines are wrapped; its newlines are collapsed to single spaces
  * - start/end: absolute offsets in content covering the whole replaceable
  *   span (including a leading link: macro prefix and the label, if present)
  * - hasLinkPrefix: true when the URL was written as link:https://...[...]
@@ -29,6 +31,9 @@
 const URL_RX = /(link:)?(https?:\/\/[^\s\][)"'<>]+)(\[[^\]]*\])?/g
 const TRAILING_PUNCT_RX = /[.,;:!?]+$/
 const ATTRIBUTE_ENTRY_RX = /^:!?[a-zA-Z0-9_][a-zA-Z0-9_-]*!?:(?:\s|$)/
+// Cap on how far a wrapped label may run, so an unmatched bracket somewhere in
+// prose cannot swallow the rest of the document.
+const MAX_WRAPPED_LABEL_LENGTH = 500
 
 function blockDelimiter (line) {
   if (/^-{4,}$/.test(line)) return '-'
@@ -50,30 +55,57 @@ function scanContentUrls (content) {
       if (openDelimiter === delimiter) openDelimiter = null
       else if (!openDelimiter) openDelimiter = delimiter
     } else if (!openDelimiter) {
-      scanLine(line, offset, matches)
+      scanLine(line, offset, matches, content)
     }
     offset += rawLine.length + 1
   }
   return matches
 }
 
-function scanLine (line, offset, matches) {
+/**
+ * Reads a link label that opens on this line but closes on a later one, which
+ * happens whenever a generator wraps long lines. Returns the label text with
+ * its line breaks collapsed, plus the offset just past the closing bracket.
+ * A blank line ends the search: that is a paragraph break, so the bracket
+ * belongs to something else.
+ */
+function readWrappedLabel (content, openIndex) {
+  if (content[openIndex] !== '[') return
+  const limit = Math.min(content.length, openIndex + MAX_WRAPPED_LABEL_LENGTH)
+  const closeIndex = content.indexOf(']', openIndex + 1)
+  if (closeIndex === -1 || closeIndex > limit) return
+  const raw = content.slice(openIndex + 1, closeIndex)
+  if (/\n[ \t]*\n/.test(raw)) return
+  return { label: raw.replace(/\s*\n\s*/g, ' '), end: closeIndex + 1 }
+}
+
+function scanLine (line, offset, matches, content) {
   const inAttributeEntry = ATTRIBUTE_ENTRY_RX.test(line)
   for (const match of line.matchAll(URL_RX)) {
     const [, linkPrefix, rawUrl, rawLabel] = match
     const backticksBefore = (line.slice(0, match.index).match(/`/g) || []).length
     if (backticksBefore % 2 === 1) continue
-    let url = rawUrl
-    if (!rawLabel) url = url.replace(TRAILING_PUNCT_RX, '')
     const prefixLength = linkPrefix ? linkPrefix.length : 0
     const start = offset + match.index
-    const end = start + prefixLength + url.length + (rawLabel ? rawLabel.length : 0)
+    let url = rawUrl
+    let label = rawLabel ? rawLabel.slice(1, -1) : null
+    let end = start + prefixLength + url.length + (rawLabel ? rawLabel.length : 0)
+    if (!rawLabel) {
+      const wrapped = readWrappedLabel(content, start + prefixLength + url.length)
+      if (wrapped) {
+        label = wrapped.label
+        end = wrapped.end
+      } else {
+        url = url.replace(TRAILING_PUNCT_RX, '')
+        end = start + prefixLength + url.length
+      }
+    }
     // A URL directly after an attribute assignment (link=, window=, ...) is a
     // macro attribute value, not a standalone link.
     const before = line.slice(0, match.index)
     matches.push({
       url,
-      label: rawLabel ? rawLabel.slice(1, -1) : null,
+      label,
       start,
       end,
       hasLinkPrefix: Boolean(linkPrefix),

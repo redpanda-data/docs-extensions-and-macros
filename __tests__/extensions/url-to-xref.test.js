@@ -31,6 +31,7 @@ function makeCatalog () {
       module: 'reference',
       relative: 'properties/cluster-properties.adoc',
       url: '/streaming/current/reference/properties/cluster-properties/',
+      contents: '= Cluster Configuration Properties\n\n=== kafka_batch_max_bytes\n\nA property.\n',
     }),
     makePage({
       component: 'streaming',
@@ -132,7 +133,7 @@ describe('buildUrlMap', () => {
   const { urls, components } = buildUrlMap(makeCatalog())
 
   test('maps page URLs to their source coordinates with latest flags', () => {
-    expect(urls.get('/streaming/current/manage/kubernetes/manage-resources')).toEqual({
+    expect(urls.get('/streaming/current/manage/kubernetes/manage-resources')).toMatchObject({
       component: 'streaming',
       version: '25.3',
       module: 'manage',
@@ -217,8 +218,40 @@ describe('convertContent', () => {
     expect(convert(`${url}[Batch size]`).content).toBe(
       'xref:streaming:reference:properties/cluster-properties.adoc#kafka_batch_max_bytes[Batch size]'
     )
-    expect(convert(url).content).toBe(
-      'xref:streaming:reference:properties/cluster-properties.adoc#kafka_batch_max_bytes[]'
+  })
+
+  // An xref with a fragment and no link text renders the raw resource id, so
+  // the extension has to supply text of its own.
+  test('labels an unlabeled fragment URL with the heading it points at', () => {
+    expect(
+      convert('https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#kafka_batch_max_bytes')
+        .content
+    ).toBe(
+      'xref:streaming:reference:properties/cluster-properties.adoc#kafka_batch_max_bytes[kafka_batch_max_bytes]'
+    )
+  })
+
+  test('falls back to the page title when the fragment matches no heading', () => {
+    expect(
+      convert('https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#no-such-anchor')
+        .content
+    ).toBe(
+      'xref:streaming:reference:properties/cluster-properties.adoc#no-such-anchor[Cluster Configuration Properties]'
+    )
+  })
+
+  test('leaves a fragment URL raw when the target yields no link text', () => {
+    // The manage-resources fixture page has no contents to read a title from.
+    const url = 'https://docs.redpanda.com/streaming/current/manage/kubernetes/manage-resources/#anything'
+    const { content, converted, withoutLinkText } = convert(url)
+    expect(content).toBe(url)
+    expect(converted).toBe(0)
+    expect(withoutLinkText).toEqual([url])
+  })
+
+  test('keeps an unlabeled URL without a fragment as xref:...[] for Antora to title', () => {
+    expect(convert('https://docs.redpanda.com/connect/configuration/secrets/').content).toBe(
+      'xref:connect:configuration:secrets.adoc[]'
     )
   })
 
@@ -439,11 +472,14 @@ describe('generated Helm spec URLs', () => {
     // turned them into catalog alias files yet at contentClassified, so the
     // extension has to read them from the page header.
     manageResources.contents = Buffer.from(
-      '= Manage Pod Resources\n:page-aliases: manage:kubernetes/manage-resources.adoc\n'
+      '= Manage Pod Resources\n' +
+        ':page-aliases: manage:kubernetes/manage-resources.adoc\n' +
+        '\n== Configure CPU resources\n\nHow to configure CPU.\n'
     )
     clusterProperties.contents = Buffer.from(
       '= Cluster Configuration Properties\n' +
-        ':page-aliases: reference:tunable-properties.adoc, reference:cluster-properties.adoc\n'
+        ':page-aliases: reference:tunable-properties.adoc, reference:cluster-properties.adoc\n' +
+        '\n=== log_segment_size_min\n\nA property.\n'
     )
     return Object.assign(
       buildUrlMap({
@@ -458,7 +494,7 @@ describe('generated Helm spec URLs', () => {
   test.each([
     [
       'https://docs.redpanda.com/docs/manage/kubernetes/manage-resources/#configure-cpu-resources',
-      'xref:streaming:manage:kubernetes/k-manage-resources.adoc#configure-cpu-resources[]',
+      'xref:streaming:manage:kubernetes/k-manage-resources.adoc#configure-cpu-resources[Configure CPU resources]',
     ],
     [
       'https://docs.redpanda.com/current/manage/kubernetes/manage-resources/',
@@ -466,7 +502,7 @@ describe('generated Helm spec URLs', () => {
     ],
     [
       'https://docs.redpanda.com/docs/reference/cluster-properties/#log_segment_size_min',
-      'xref:streaming:reference:properties/cluster-properties.adoc#log_segment_size_min[]',
+      'xref:streaming:reference:properties/cluster-properties.adoc#log_segment_size_min[log_segment_size_min]',
     ],
     [
       'https://docs.redpanda.com/docs/reference/tunable-properties/',
@@ -474,6 +510,21 @@ describe('generated Helm spec URLs', () => {
     ],
   ])('converts %s through the target page alias', (url, expected) => {
     expect(convertContent(url, makeHelmSpecContext()).content).toBe(expected)
+  })
+
+  // The generated specs wrap long lines, so nearly every link label in them
+  // opens on one line and closes on the next.
+  test('captures a link label that the generator wrapped across a line break', () => {
+    const input =
+      'For details, see the\n' +
+      'https://docs.redpanda.com/docs/manage/kubernetes/manage-resources/#configure-cpu-resources[CPU\n' +
+      'documentation].\n'
+    const { content, converted } = convertContent(input, makeHelmSpecContext())
+    expect(content).toBe(
+      'For details, see the\n' +
+        'xref:streaming:manage:kubernetes/k-manage-resources.adoc#configure-cpu-resources[CPU documentation].\n'
+    )
+    expect(converted).toBe(1)
   })
 
   test('reports a Helm spec URL whose target no longer exists at any path', () => {

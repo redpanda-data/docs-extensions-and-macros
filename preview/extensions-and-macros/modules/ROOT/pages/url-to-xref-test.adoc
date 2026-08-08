@@ -85,6 +85,28 @@ Result: https://docs.redpanda.com/docs/manage/kubernetes/k-manage-resources/[/do
 
 Result: https://docs.redpanda.com/current/manage/kubernetes/k-manage-resources/[/current/ prefix]
 
+== Wrapped link labels and unlabeled fragments
+
+Generated content such as the Helm and CRD specs wraps long lines, so a link label often opens on one line and closes on the next. The label is still captured, and its line break becomes a space:
+
+[,asciidoc]
+----
+https://docs.redpanda.com/docs/manage/kubernetes/k-manage-resources/#configure-cpu-resources[CPU
+resource documentation]
+----
+
+Result: https://docs.redpanda.com/docs/manage/kubernetes/k-manage-resources/#configure-cpu-resources[CPU
+resource documentation]
+
+An unlabeled URL that carries a fragment is given link text explicitly. Antora cannot resolve a section title, so `xref:page.adoc#anchor[]` would render the raw resource ID as the link text. The extension uses the heading the fragment points at, and falls back to the target page title:
+
+[,asciidoc]
+----
+https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#log_segment_size_min
+----
+
+Result: https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#log_segment_size_min
+
 == Renamed pages
 
 A URL that points at a page's former path resolves through the `page-aliases` attribute that the page declares. Antora does not register those aliases as catalog files until it converts documents, which is after this extension runs, so the extension reads them from the page header.
