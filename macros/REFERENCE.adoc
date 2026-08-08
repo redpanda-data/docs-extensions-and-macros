@@ -163,10 +163,10 @@ prop:write_caching_default[text=write caching]
 The macro target is the property name. Named attributes:
 
 link::
-Set to `true` to also link the property to its reference page. The page is derived from the property's `config_scope` in the published JSON (`cluster`, `broker`, or `topic`), so writers don't need to know the page. This supersedes the `config_ref` macro's linking for most uses.
+Set to `true` to also link the property to its reference page. The page is discovered dynamically: the macro indexes which reference-module page in the current component documents each property, by scanning property headings in the partials each page includes (respecting include tag filters such as `tags=redpanda-cloud`). Links are component-relative, so a Cloud page links to the Cloud component's own property pages, and they keep working if properties are split across different pages in the future. When discovery finds nothing, the page falls back deterministically to the property's `config_scope` (`cluster`, `broker`, or `topic`). This supersedes the `config_ref` macro's linking for most uses.
 
 page::
-Optional reference-page override (module-relative, without `.adoc`), for example `properties/object-storage-properties`.
+Optional reference-page override (module-relative, without `.adoc`), for example `properties/object-storage-properties`. Overrides discovery entirely.
 
 text::
 Optional display text override.
