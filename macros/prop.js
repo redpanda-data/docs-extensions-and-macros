@@ -152,16 +152,21 @@ function parsePartialTarget (target, pageSrc) {
  * @param {object} properties - Known property names from the published JSON.
  * @returns {Map<string, string>} property name -> page path without .adoc
  */
-function buildPageIndex (contentCatalog, component, properties) {
+function buildPageIndex (contentCatalog, component, properties, version) {
   const cache = contentCatalog[$propertyPageIndex] || (contentCatalog[$propertyPageIndex] = {})
-  if (cache[component]) return cache[component]
+  const cacheKey = `${component}@${version || ''}`
+  if (cache[cacheKey]) return cache[cacheKey]
   const index = new Map()
   const partialHeadings = new Map()
   const headingsFor = (file) => {
     if (!partialHeadings.has(file)) partialHeadings.set(file, extractHeadingsWithTags(file.contents.toString()))
     return partialHeadings.get(file)
   }
-  const pages = contentCatalog.findBy({ component, module: 'reference', family: 'page' }) || []
+  // Restrict the index to the page's own component version, so a page on an
+  // older docs branch never links into (or claims pages from) another version.
+  const query = { component, module: 'reference', family: 'page' }
+  if (version !== undefined && version !== '') query.version = version
+  const pages = contentCatalog.findBy(query) || []
   for (const page of pages) {
     const source = page.contents.toString()
     const pagePath = page.src.relative.replace(/\.adoc$/, '')
@@ -178,7 +183,10 @@ function buildPageIndex (contentCatalog, component, properties) {
       const tagsMatch = include[2].match(/tags?=([^,\]]+)/)
       const expression = tagsMatch && tagsMatch[1]
       const partials = contentCatalog.findBy({ component: partialRef.component, module: partialRef.module, family: 'partial' }) || []
-      const partial = partials.find((candidate) => candidate.src.relative === partialRef.relative)
+      const matching = partials.filter((candidate) => candidate.src.relative === partialRef.relative)
+      // Same-component includes resolve within the page's version; for
+      // cross-component includes take whichever version the catalog has.
+      const partial = matching.find((candidate) => candidate.src.version === page.src.version) || matching[0]
       if (!partial) continue
       for (const entry of headingsFor(partial)) {
         if (!Object.prototype.hasOwnProperty.call(properties, entry.name)) continue
@@ -187,7 +195,7 @@ function buildPageIndex (contentCatalog, component, properties) {
       }
     }
   }
-  cache[component] = index
+  cache[cacheKey] = index
   return index
 }
 
@@ -227,30 +235,38 @@ function loadProperties (config) {
   const contentCatalog = config && config.contentCatalog
   if (!contentCatalog) return undefined
   const pageComponent = (config.file && config.file.src && config.file.src.component) || ''
-  const cacheKey = pageComponent || '$any'
+  const pageVersion = (config.file && config.file.src && config.file.src.version) || ''
+  const cacheKey = `${pageComponent}@${pageVersion}` || '$any'
   const cache = contentCatalog[$propertyRegistry] || (contentCatalog[$propertyRegistry] = {})
   if (cache[cacheKey] !== undefined) return cache[cacheKey] || undefined
 
+  // Versioned components publish one properties JSON per version, so a page
+  // must validate against its OWN version's data (a 25.3 page checked
+  // against 26.x data would produce wrong results in both directions).
+  // Priority: own component and version, own component any version (newest
+  // tag), then the streaming/ROOT fallbacks, then anything.
   const attachments = contentCatalog.findBy({ family: 'attachment' }) || []
-  const newestBy = {}
-  let newestAny = null
+  const candidates = []
   for (const attachment of attachments) {
     if (attachment.src.module !== 'reference') continue
     const basename = attachment.src.relative.split('/').pop()
     const match = basename.match(PROPERTIES_JSON_RX)
     if (!match) continue
-    const candidate = { tag: match[1], file: attachment }
-    const component = attachment.src.component
-    if (!newestBy[component] || compareTags(candidate.tag, newestBy[component].tag) > 0) newestBy[component] = candidate
-    if (!newestAny || compareTags(candidate.tag, newestAny.tag) > 0) newestAny = candidate
+    candidates.push({ tag: match[1], file: attachment, component: attachment.src.component, version: attachment.src.version })
   }
-  const newest = newestBy[pageComponent] || newestBy.streaming || newestBy.ROOT || newestAny
+  const newest = (list) => list.reduce((best, entry) => (!best || compareTags(entry.tag, best.tag) > 0 ? entry : best), null)
+  const pick =
+    newest(candidates.filter((c) => c.component === pageComponent && c.version === pageVersion)) ||
+    newest(candidates.filter((c) => c.component === pageComponent)) ||
+    newest(candidates.filter((c) => c.component === 'streaming')) ||
+    newest(candidates.filter((c) => c.component === 'ROOT')) ||
+    newest(candidates)
 
   let registry = null
-  if (newest) {
-    const data = JSON.parse(newest.file.contents.toString())
+  if (pick) {
+    const data = JSON.parse(pick.file.contents.toString())
     if (data && data.properties) {
-      registry = { tag: newest.tag, properties: data.properties }
+      registry = { tag: pick.tag, properties: data.properties }
     }
   }
   // Cache null too, so a missing JSON is only searched for once per build.
@@ -347,13 +363,14 @@ function propInlineMacro (config) {
       let componentPrefix = ''
       if (registry && config.contentCatalog && (attributes.link === 'true' || attributes.link === true) && !attributes.page) {
         const component = (config.file && config.file.src && config.file.src.component) || ''
-        const ownIndex = buildPageIndex(config.contentCatalog, component, registry.properties)
+        const version = (config.file && config.file.src && config.file.src.version) || ''
+        const ownIndex = buildPageIndex(config.contentCatalog, component, registry.properties, version)
         discoveredPage = ownIndex.get(name)
         if (!discoveredPage) {
           let fallbackWithPages
           for (const fallbackComponent of ['streaming', 'ROOT']) {
             if (fallbackComponent === component) continue
-            const fallbackIndex = buildPageIndex(config.contentCatalog, fallbackComponent, registry.properties)
+            const fallbackIndex = buildPageIndex(config.contentCatalog, fallbackComponent, registry.properties, undefined)
             if (fallbackIndex.size === 0) continue
             if (!fallbackWithPages) fallbackWithPages = fallbackComponent
             const fallbackPage = fallbackIndex.get(name)

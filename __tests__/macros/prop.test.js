@@ -19,34 +19,34 @@ const PROPERTIES_JSON = JSON.stringify({
   },
 })
 
-function fakeCatalog ({ json = PROPERTIES_JSON, tag = 'v26.2.1', extraTags = [], files = [] } = {}) {
-  const attachment = (fileTag, contents, component = 'streaming') => ({
-    src: { component, module: 'reference', family: 'attachment', relative: `redpanda-properties-${fileTag}.json` },
+function fakeCatalog ({ json = PROPERTIES_JSON, tag = 'v26.2.1', version = 'current', extraTags = [], files = [] } = {}) {
+  const attachment = (fileTag, contents, component = 'streaming', attachmentVersion = version) => ({
+    src: { component, version: attachmentVersion, module: 'reference', family: 'attachment', relative: `redpanda-properties-${fileTag}.json` },
     contents: Buffer.from(contents),
   })
   const all = [attachment(tag, json), ...files]
   for (const extra of extraTags) all.push(attachment(extra, JSON.stringify({ properties: { stale_property: {} } })))
   return {
     findBy: jest.fn((query) => all.filter((file) =>
-      Object.entries(query).every(([key, value]) => file.src[key] === value || (key === 'family' && file.src.family === value))
+      Object.entries(query).every(([key, value]) => file.src[key] === value)
     )),
   }
 }
 
-function page (component, relative, contents) {
-  return { src: { component, module: 'reference', family: 'page', relative }, contents: Buffer.from(contents) }
+function page (component, relative, contents, version = 'current') {
+  return { src: { component, version, module: 'reference', family: 'page', relative }, contents: Buffer.from(contents) }
 }
 
-function partial (component, relative, contents) {
-  return { src: { component, module: 'reference', family: 'partial', relative }, contents: Buffer.from(contents) }
+function partial (component, relative, contents, version = 'current') {
+  return { src: { component, version, module: 'reference', family: 'partial', relative }, contents: Buffer.from(contents) }
 }
 
-function convert (input, { catalog, attributes = {}, filePath = 'modules/manage/pages/example.adoc', component = 'streaming' } = {}) {
+function convert (input, { catalog, attributes = {}, filePath = 'modules/manage/pages/example.adoc', component = 'streaming', version = 'current' } = {}) {
   const Asciidoctor = require('@asciidoctor/core')()
   const extensionRegistry = Asciidoctor.Extensions.create()
   register(extensionRegistry, catalog && {
     contentCatalog: catalog,
-    file: { src: { path: filePath, component, module: 'manage' } },
+    file: { src: { path: filePath, component, version, module: 'manage' } },
   })
   return Asciidoctor.convert(input, { extension_registry: extensionRegistry, attributes })
 }
@@ -159,6 +159,39 @@ describe('prop macro', () => {
     test('renders unvalidated without a catalog (graceful degradation)', () => {
       const html = convert('prop:anything_goes[]', {})
       expect(html).toContain('data-property-name="anything_goes"')
+    })
+  })
+
+  describe('version awareness', () => {
+    test('a page validates against its own version of the properties JSON', () => {
+      const oldJson = JSON.stringify({ properties: { legacy_only_prop: { name: 'legacy_only_prop', config_scope: 'cluster' } } })
+      const catalog = fakeCatalog({
+        files: [
+          { src: { component: 'streaming', version: '25.3', module: 'reference', family: 'attachment', relative: 'redpanda-properties-v25.3.11.json' }, contents: Buffer.from(oldJson) },
+        ],
+      })
+      // legacy_only_prop exists only in 25.3 data: valid on the 25.3 page...
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      convert('prop:legacy_only_prop[]', { catalog, version: '25.3' })
+      const oldPageWarnings = warn.mock.calls.filter(([m]) => String(m).includes('does not match'))
+      expect(oldPageWarnings).toHaveLength(0)
+      // ...but unknown on the current page.
+      convert('prop:legacy_only_prop[]', { catalog, version: 'current' })
+      expect(warn.mock.calls.some(([m]) => String(m).includes('does not match'))).toBe(true)
+      warn.mockRestore()
+    })
+
+    test('discovery never links a versioned page into another version', () => {
+      const catalog = fakeCatalog({
+        files: [
+          partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n', '25.3'),
+          page('streaming', 'properties/legacy-page.adoc', 'include::reference:partial$properties/all.adoc[]', '25.3'),
+          partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n', 'current'),
+          page('streaming', 'properties/current-page.adoc', 'include::reference:partial$properties/all.adoc[]', 'current'),
+        ],
+      })
+      expect(convert('prop:cloud_storage_enabled[link=true]', { catalog, version: '25.3' })).toContain('legacy-page')
+      expect(convert('prop:cloud_storage_enabled[link=true]', { catalog, version: 'current' })).toContain('current-page')
     })
   })
 
