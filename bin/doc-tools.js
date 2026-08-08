@@ -828,6 +828,43 @@ automation
   })
 
 /**
+ * @description One-time migration of plain-backtick property mentions to the
+ * prop: inline macro, so property tooltips become opt-in. Only names that
+ * exist in the published property reference JSON AND contain a separator
+ * (_ or .) are converted. Separator-free names such as admin, brokers, rack,
+ * retries, and superusers are the ambiguous words that motivated opt-in
+ * marking, so they are always left for a human. Dry run unless --write is given.
+ *
+ * @example
+ * # Preview the conversion from a docs repo checkout
+ * npx doc-tools generate migrate-property-refs --properties modules/reference/attachments/redpanda-properties-v26.2.1.json
+ *
+ * # Apply it
+ * npx doc-tools generate migrate-property-refs --properties modules/reference/attachments/redpanda-properties-v26.2.1.json --write
+ */
+automation
+  .command('migrate-property-refs')
+  .description('One-time migration of `property_name` prose mentions to prop:property_name[] macros. Dry run unless --write is given.')
+  .requiredOption('--properties <path>', 'Path to the published redpanda-properties JSON to validate names against')
+  .option('--docs-dir <path>', 'Docs repo root containing modules/', '.')
+  .option('--write', 'Apply changes (default is a dry run that only reports)')
+  .action((options) => {
+    const { migrate } = require('../tools/migrate-property-refs.js')
+    const propertiesJson = JSON.parse(fs.readFileSync(path.resolve(options.properties), 'utf8'))
+    const result = migrate({
+      docsDir: path.resolve(options.docsDir),
+      propertiesJson,
+      write: Boolean(options.write),
+    })
+    result.changed
+      .sort((a, b) => b.count - a.count)
+      .forEach(({ file, count }) => console.log(`${String(count).padStart(4)}  ${file}`))
+    console.log(`\n${options.write ? 'Converted' : 'Would convert'} ${result.conversions} mention(s) across ${result.changed.length} of ${result.files} files.`)
+    console.log(`Left alone (ambiguous, no separator): ${result.ambiguous.join(', ')}`)
+    if (!options.write && result.conversions) console.log('Re-run with --write to apply.')
+  })
+
+/**
  * generate property-docs
  *
  * @description

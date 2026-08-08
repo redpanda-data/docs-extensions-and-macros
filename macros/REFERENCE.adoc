@@ -20,6 +20,8 @@ antora:
 
 == config_ref
 
+NOTE: For most property references, prefer the newer <<prop>> macro: it validates names against the published property reference, derives the target page automatically, and powers hover tooltips. `config_ref` remains for cases that need its Kubernetes `storage.tiered.config` prefixing or an explicit path.
+
 This inline macro is used to generate a reference to a configuration value in the Redpanda documentation. The macro's parameters allow for control over the generated reference's format and the type of output produced.
 
 === Usage
@@ -141,6 +143,50 @@ Optional third-column heading override. The default is `Behavior Upon Expiration
 === Registration
 
 Registered together with the `enterprise` inline macro (see <<enterprise>>).
+
+== prop
+
+This inline macro references a Redpanda configuration property in prose. The property renders as a marked `<code>` element (`property-ref` class plus a `data-property-name` attribute) that the docs UI decorates with a hover-documentation tooltip. Marking is opt-in: only properties referenced through this macro get tooltips, so ambiguous words such as `admin` or `rack` in unrelated contexts (Helm values, feature settings) are never decorated by mistake.
+
+The macro validates its target against the published property reference: the newest `redpanda-properties-<tag>.json` attachment in the `reference` module of the build, the same data the tooltips fetch at runtime. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`.
+
+=== Usage
+
+[,asciidoc]
+----
+prop:cloud_storage_enabled[]
+prop:iceberg_enabled[link=true]
+prop:retention_ms[link=true,page=properties/topic-properties]
+prop:write_caching_default[text=write caching]
+----
+
+The macro target is the property name. Named attributes:
+
+link::
+Set to `true` to also link the property to its reference page. The page is derived from the property's `config_scope` in the published JSON (`cluster`, `broker`, or `topic`), so writers don't need to know the page. This supersedes the `config_ref` macro's linking for most uses.
+
+page::
+Optional reference-page override (module-relative, without `.adoc`), for example `properties/object-storage-properties`.
+
+text::
+Optional display text override.
+
+=== Configuration options
+
+property-validate::
+How to report a target that does not match any published property: `warn` (default) logs a build warning with the file path and close-match suggestions, `error` fails the build, and `off` disables validation. When no property JSON is available in the build, the macro renders without validation and logs a single warning.
+
+property-ref-role::
+CSS class applied to the code element. The default is `property-ref`.
+
+=== Registration
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/prop'
+----
 
 == glossterm
 

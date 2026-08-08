@@ -76,6 +76,16 @@ enterprise_features::connect[title=Connect features that need a license,heading=
 
 The block anchor re-emitted above keeps crossrefs working: jump to <<demo-redpanda-features,the Redpanda table>>.
 
+== Property references (prop macro)
+
+The `prop` macro marks a configuration property so the docs UI can decorate it with a hover tooltip. Targets are validated against the published property JSON (an attachment in the streaming component's reference module).
+
+A cluster property: prop:cloud_storage_enabled[] in a sentence.
+
+Linked, page derived from the property's scope: prop:iceberg_enabled[link=true] in a sentence.
+
+An unknown name renders as written but logs a build warning: prop:not_a_real_property[] in a sentence.
+
 == Terms
 
 Terms must be defined in the `terms` module of the `shared` component (`shared/modules/terms/partials`).
