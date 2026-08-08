@@ -80,16 +80,22 @@ function convertLine (line, convertible) {
 function convertConfigRefLine (line, knownNames) {
   let count = 0
   const skipped = []
-  const result = line.replace(/config_ref:([^[,]+)(?:,([^[,]*))?(?:,([^[,]*))?\[\]/g, (match, name, isLink) => {
+  const result = line.replace(/config_ref:([^[,]+)(?:,([^[,]*))?(?:,([^[,]*))?\[([^\]]*)\]/g, (match, name, isLink, _path, payload) => {
     const trimmed = name.trim()
     if (!knownNames.has(trimmed)) {
       skipped.push(trimmed)
       return match
     }
+    // A payload of the backticked property name is redundant (the prop macro
+    // renders a code element already); anything else becomes a text override.
+    const display = (payload || '').trim().replace(/^`|`$/g, '')
+    const attrs = [
+      ...(isLink === 'true' ? ['link=true'] : []),
+      'helm-path=auto',
+      ...(display && display !== trimmed ? [`text=${display}`] : []),
+    ]
     count++
-    return isLink === 'true'
-      ? `prop:${trimmed}[link=true,helm-path=auto]`
-      : `prop:${trimmed}[helm-path=auto]`
+    return `prop:${trimmed}[${attrs.join(',')}]`
   })
   return { line: result, count, skipped }
 }
