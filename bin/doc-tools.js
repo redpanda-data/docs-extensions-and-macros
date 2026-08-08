@@ -1634,16 +1634,8 @@ automation
       r = spawnSync('pandoc', [md, '-t', 'asciidoc', '-o', outFile], { stdio: 'inherit' })
       if (r.status !== 0) process.exit(r.status)
 
-      let doc = fs.readFileSync(outFile, 'utf8')
-      // docs.redpanda.com URLs are left as-is: the url-to-xref Antora
-      // extension converts them to validated xrefs at site build time.
-      doc = doc
-        .replace(/(\[\d+\])\]\./g, '$1\\].')
-        .replace(/(\[\d+\])\]\]/g, '$1\\]\\]')
-        .replace(/^=== +(https?:\/\/[^\[]*)\[([^\]]*)\]/gm, '=== link:++$1++[$2]')
-        .replace(/^== # (.*)$/gm, '= $1')
-        .replace(/^== description: (.*)$/gm, ':description: $1')
-      fs.writeFileSync(outFile, doc, 'utf8')
+      const { formatHelmSpec } = require('../cli-utils/format-helm-spec')
+      fs.writeFileSync(outFile, formatHelmSpec(fs.readFileSync(outFile, 'utf8')), 'utf8')
 
       console.log(`Done: Wrote ${outFile}`)
     }
