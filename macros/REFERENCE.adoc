@@ -20,7 +20,7 @@ antora:
 
 == config_ref
 
-NOTE: For most property references, prefer the newer <<prop>> macro: it validates names against the published property reference, derives the target page automatically, and powers hover tooltips. `config_ref` remains for cases that need its Kubernetes `storage.tiered.config` prefixing or an explicit path.
+IMPORTANT: `config_ref` is deprecated. The <<prop>> macro supersedes all of its functionality: it validates names against the published property reference, discovers the target page dynamically instead of taking a manual path, powers hover tooltips, and its `helm-path=auto` attribute replaces `config_ref`'s Kubernetes prefixing with a per-property correct Helm values path (`config_ref` prefixed every property with `storage.tiered.config.`, mislabeling non-tiered properties). Migrate call sites with `doc-tools generate migrate-property-refs --config-refs`. The macro stays registered only because the generated property partials still emit it.
 
 This inline macro is used to generate a reference to a configuration value in the Redpanda documentation. The macro's parameters allow for control over the generated reference's format and the type of output produced.
 
@@ -168,8 +168,11 @@ Set to `true` to also link the property to its reference page. The page is disco
 page::
 Optional reference-page override (module-relative, without `.adoc`), for example `properties/object-storage-properties`. Overrides discovery entirely.
 
+helm-path::
+Set to `auto` to display the property as its Helm values path on pages rendered with the `env-kubernetes` attribute, so single-sourced content reads correctly for both Linux and Kubernetes audiences. The path is derived per property: `storage.tiered.config.<name>` for tiered storage properties, `config.node.<name>` for broker properties, and `config.cluster.<name>` for other cluster properties. On pages without `env-kubernetes`, the plain property name renders. This supersedes the deprecated `config_ref` macro's prefixing.
+
 text::
-Optional display text override.
+Optional display text override. Wins over the Helm path display.
 
 === Configuration options
 

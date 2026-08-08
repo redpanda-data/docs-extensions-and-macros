@@ -35,6 +35,14 @@
  * entirely. This supersedes the config_ref macro's linking for most uses,
  * without requiring writers to know the page.
  *
+ * With helm-path=auto, pages rendered with the env-kubernetes attribute
+ * display the property as its Helm values path (storage.tiered.config.*
+ * for tiered storage properties, config.node.* for broker properties, and
+ * config.cluster.* for other cluster properties), so single-sourced
+ * content reads correctly for both Linux and Kubernetes audiences. This
+ * replaces the config_ref macro's hardcoded storage.tiered.config prefix,
+ * which mislabeled non-tiered properties.
+ *
  * Document or site attributes:
  *
  *   property-validate     'warn' (default) to log unknown property names,
@@ -183,6 +191,17 @@ function buildPageIndex (contentCatalog, component, properties) {
   return index
 }
 
+// Helm values paths for setting properties on Kubernetes. Deterministic:
+// tiered storage properties keep the chart's dedicated storage.tiered.config
+// block (which also wires credentials), broker/node properties map to
+// config.node, and every other cluster property maps to config.cluster --
+// the path the docs recommend for all cluster properties.
+function helmValuesPath (name, scope) {
+  if (name.startsWith('cloud_storage_')) return `storage.tiered.config.${name}`
+  if (scope === 'broker') return `config.node.${name}`
+  return `config.cluster.${name}`
+}
+
 let warnedNoRegistry = false
 
 /**
@@ -284,8 +303,8 @@ function reportUnknownProperty ({ name, mode, registry, filePath }) {
  *   must leave the current component (which publishes no property pages).
  * @returns {string}
  */
-function buildPropContent ({ name, text, link, page, scope, role, componentPrefix = '' }) {
-  const display = text || name
+function buildPropContent ({ name, text, link, page, scope, role, componentPrefix = '', helmPath = false }) {
+  const display = text || (helmPath ? helmValuesPath(name, scope) : name)
   let inner = display
   if (link) {
     const targetPage = page || SCOPE_PAGES[scope] || SCOPE_PAGES.cluster
@@ -339,6 +358,11 @@ function propInlineMacro (config) {
           }
         }
       }
+      // helm-path=auto displays the property as its Helm values path on
+      // pages rendered with env-kubernetes, so single-sourced content reads
+      // correctly for both Linux and Kubernetes audiences (the successor to
+      // the config_ref macro's hardcoded storage.tiered.config prefixing).
+      const helmPath = attributes['helm-path'] === 'auto' && document.getAttribute('env-kubernetes') !== undefined
       const content = buildPropContent({
         name,
         text: attributes.text,
@@ -347,6 +371,7 @@ function propInlineMacro (config) {
         scope: entry && entry.config_scope,
         role: document.getAttribute('property-ref-role', DEFAULT_ROLE),
         componentPrefix,
+        helmPath,
       })
       // The xref inside the code element is resolved by the 'macros'
       // substitution, the same mechanism the enterprise macro relies on.
@@ -370,6 +395,7 @@ function register (registry, config = {}) {
 
 module.exports.register = register
 module.exports.buildPropContent = buildPropContent
+module.exports.helmValuesPath = helmValuesPath
 module.exports.compareTags = compareTags
 module.exports.extractHeadingsWithTags = extractHeadingsWithTags
 module.exports.evaluateTagExpression = evaluateTagExpression
