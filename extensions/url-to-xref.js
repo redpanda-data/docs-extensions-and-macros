@@ -70,6 +70,8 @@ module.exports.register = function ({ config = {} }) {
       hostnames,
       ignore,
       latestVersionSegment: (playbook.urls || {}).latestVersionSegment || 'current',
+      // Used to read heading ids out of the partials a target page includes.
+      resolveInclude: (spec, page) => contentCatalog.resolveResource(spec, page.src, 'partial', ['partial', 'page']),
     })
     let convertedCount = 0
     const unmapped = new Map()
@@ -356,14 +358,46 @@ const HEADING_RX = /^(={1,6})\s+(\S.*)$/
  * title; if neither can be read, the caller leaves the URL as a raw link,
  * which still displays sensibly.
  */
-function linkTextFor (label, fragment, page) {
+function linkTextFor (label, fragment, page, resolveInclude) {
   if (label) return label
   if (!fragment) return ''
   const contents = page && page.contents && page.contents.toString()
   if (!contents) return undefined
   let headings = headingsByFile.get(page)
-  if (!headings) headingsByFile.set(page, (headings = parseHeadingIds(contents)))
+  if (!headings) headingsByFile.set(page, (headings = pageHeadingIds(contents, page, resolveInclude)))
   return headings.get(fragment.slice(1)) || documentTitle(contents)
+}
+
+// Only the first level of includes is followed, and only this many per page:
+// enough for the reference pages that assemble a partial per category, without
+// walking an include tree of unknown depth.
+const MAX_INCLUDES_SEARCHED = 50
+
+/**
+ * Collects the heading ids of a page plus those of the partials it includes.
+ * The reference pages that carry most anchor targets are thin wrappers around
+ * generated partials — every property heading on the cluster and broker
+ * property pages lives in one — and Antora has not resolved includes yet at
+ * contentClassified, so they are resolved here.
+ */
+function pageHeadingIds (contents, page, resolveInclude) {
+  const ids = parseHeadingIds(contents)
+  if (!resolveInclude) return ids
+  let searched = 0
+  for (const match of contents.matchAll(/^include::([^[\s]+)\[/gm)) {
+    if (++searched > MAX_INCLUDES_SEARCHED) break
+    let included
+    try {
+      included = resolveInclude(match[1], page)
+    } catch {
+      continue
+    }
+    if (!included || !included.contents) continue
+    for (const [id, text] of parseHeadingIds(included.contents.toString())) {
+      if (!ids.has(id)) ids.set(id, text)
+    }
+  }
+  return ids
 }
 
 /**
@@ -460,7 +494,7 @@ function convertContent (content, resolverContext) {
       unmapped.push(match.url)
       continue
     }
-    const label = linkTextFor(match.label, url.hash, entry.page)
+    const label = linkTextFor(match.label, url.hash, entry.page, resolverContext.resolveInclude)
     if (label === undefined) {
       withoutLinkText.push(match.url)
       continue

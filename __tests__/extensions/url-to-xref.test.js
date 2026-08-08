@@ -240,6 +240,37 @@ describe('convertContent', () => {
     )
   })
 
+  test('resolves link text from a heading in an included partial', () => {
+    const page = makePage({
+      component: 'streaming',
+      version: '25.3',
+      module: 'reference',
+      relative: 'properties/broker-properties.adoc',
+      url: '/streaming/current/reference/properties/broker-properties/',
+      contents: '= Broker Configuration Properties\n\ninclude::reference:partial$properties/broker.adoc[tags=redpanda]\n',
+    })
+    const partial = { contents: Buffer.from('=== crash_loop_limit\n\nA property.\n') }
+    const context = Object.assign(
+      buildUrlMap({
+        getComponents: () => [{ name: 'streaming', latest: { version: '25.3' } }],
+        getPages: (filter) => (filter ? [page].filter(filter) : [page]),
+        findBy: () => [],
+      }),
+      {
+        hostnames: new Set(['docs.redpanda.com']),
+        ignore: [],
+        latestVersionSegment: 'current',
+        resolveInclude: (spec) => (spec === 'reference:partial$properties/broker.adoc' ? partial : undefined),
+      }
+    )
+    expect(
+      convertContent(
+        'https://docs.redpanda.com/streaming/current/reference/properties/broker-properties/#crash_loop_limit',
+        context
+      ).content
+    ).toBe('xref:streaming:reference:properties/broker-properties.adoc#crash_loop_limit[crash_loop_limit]')
+  })
+
   test('leaves a fragment URL raw when the target yields no link text', () => {
     // The manage-resources fixture page has no contents to read a title from.
     const url = 'https://docs.redpanda.com/streaming/current/manage/kubernetes/manage-resources/#anything'

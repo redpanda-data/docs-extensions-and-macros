@@ -13,6 +13,8 @@ Same component: https://docs.redpanda.com/streaming/current/manage/target/
 Wrapped label: https://docs.redpanda.com/connect/configuration/secrets/#store[Store
 secrets across lines]
 
+Anchor inside an included partial: https://docs.redpanda.com/connect/configuration/properties/#retention_ms
+
 Unlabeled fragment: https://docs.redpanda.com/connect/configuration/secrets/#store
 
 Renamed target, resolved through its page-aliases: https://docs.redpanda.com/connect/configuration/old-secrets/[Renamed secrets]

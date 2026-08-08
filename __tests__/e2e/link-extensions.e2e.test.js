@@ -184,6 +184,15 @@ describe('link extensions end-to-end', () => {
     expect(html).not.toContain('secrets.adoc#store')
   })
 
+  // Reference pages are thin wrappers around generated partials, so the
+  // heading a fragment points at is usually not in the page itself.
+  test('resolves link text from a heading inside an included partial', () => {
+    const html = readLinksPage()
+    expect(html).toMatch(
+      /href="[^"]*\/connect\/configuration\/properties\/#retention_ms" class="xref page">retention_ms</
+    )
+  })
+
   test('leaves unmappable internal URLs as raw links and warns', () => {
     const html = readLinksPage()
     expect(html).toContain('href="https://docs.redpanda.com/no/such/page/"')
