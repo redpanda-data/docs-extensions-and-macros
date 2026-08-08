@@ -276,6 +276,25 @@ describe('prop macro', () => {
       expect(html).toContain('cluster-properties')
     })
 
+    test('a component with SOME property pages still borrows streaming for properties it does not publish', () => {
+      const catalog = fakeCatalog({
+        files: [
+          // Cloud publishes cluster properties but not topic properties.
+          partial('cloud-data-platform', 'properties/cluster.adoc', '=== cloud_storage_enabled\n'),
+          page('cloud-data-platform', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/cluster.adoc[]'),
+          partial('streaming', 'properties/topic.adoc', '=== redpanda.iceberg.mode\n'),
+          page('streaming', 'properties/topic-properties.adoc', 'include::reference:partial$properties/topic.adoc[]'),
+        ],
+      })
+      // Documented in cloud's own pages: component-relative link.
+      const own = convert('prop:cloud_storage_enabled[link=true]', { catalog, component: 'cloud-data-platform' })
+      expect(own).not.toContain('streaming')
+      // Not documented in cloud: component-qualified link into streaming.
+      const borrowed = convert('prop:redpanda.iceberg.mode[link=true]', { catalog, component: 'cloud-data-platform' })
+      expect(borrowed).toContain('streaming')
+      expect(borrowed).toContain('topic-properties')
+    })
+
     test('page= overrides discovery', () => {
       const catalog = fakeCatalog({
         files: [
