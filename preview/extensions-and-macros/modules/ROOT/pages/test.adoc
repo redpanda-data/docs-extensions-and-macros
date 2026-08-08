@@ -25,17 +25,56 @@ These dates are:
 
 == Enterprise macro
 
-The `enterprise` macro marks a feature as an enterprise feature in prose. The feature name renders as a styled term (`enterprise-feature` class) with a tooltip explaining the license requirement, linking to the feature's page or the licensing page.
+The `enterprise` macro marks a feature as an enterprise feature in prose. The feature name renders as a styled term (`enterprise-feature` class) with a tooltip explaining the license requirement, linking to the feature's page or the licensing page. Targets are validated against the enterprise features registry (`enterprise-features.yml` in the `shared` component).
 
 NOTE: This page sets `:enterprise-licensing-page: streaming:get-started:licensing/overview.adoc` because the default target (`get-started:licensing/overview.adoc`) is only resolvable from inside the docs component itself.
 
-Default, linking to the licensing page: enterprise:Continuous Data Balancing[] in a sentence.
+=== Marking forms
 
-With a feature xref: enterprise:Tiered Storage[xref=streaming:manage:tiered-storage.adoc] in a sentence.
+Default, no registry xref, linking to the licensing page: enterprise:Continuous Data Balancing[] in a sentence.
 
-With display text override: enterprise:Audit Logging[text=audit logging] in a sentence.
+Registry-supplied feature link (the Tiered Storage entry carries an xref): enterprise:Tiered Storage[] in a sentence.
 
-With tooltip override: enterprise:Iceberg Topics[tooltip=Iceberg Topics requires an Enterprise Edition license and object storage.] in a sentence.
+Per-use xref, overriding the registry: enterprise:Tiered Storage[xref=streaming:manage:tiered-storage/tiered-storage.adoc] in a sentence.
+
+Display text override (canonical name stays in the tooltip): enterprise:Audit Logging[text=audit logging] in a sentence.
+
+Tooltip override: enterprise:Iceberg Topics[tooltip=Iceberg Topics requires an Enterprise Edition license and object storage.] in a sentence.
+
+Text and tooltip together: enterprise:Audit Logging[text=audit logs,tooltip=Audit logs need an Enterprise Edition license and a SASL listener.] in a sentence.
+
+=== Registry resolution
+
+Aliases and case-insensitive spellings canonicalize to the registry name, and the registry supplies the feature link.
+
+From the alias `cloud_storage` (an internal core name, renders the canonical external name): enterprise:cloud_storage[] in a sentence.
+
+From a lowercase spelling: enterprise:tiered storage[] in a sentence.
+
+An unknown feature name renders as written but logs a build warning with did-you-mean suggestions (set `enterprise-validate` to `error` to fail the build instead): enterprise:Warp Drive[] in a sentence.
+
+=== Environment-specific feature links
+
+Registry entries can carry `xref-kubernetes` and `xref-cloud` for features with separate Kubernetes, Linux, and Cloud documentation. Resolution follows the page's `env-kubernetes`/`env-cloud` attributes, so it applies page-wide: see the xref:preview:ROOT:enterprise-kubernetes-test.adoc[Kubernetes environment test page], where the same `enterprise:Tiered Storage[]` call links to the Kubernetes feature page instead.
+
+=== Generated feature tables
+
+The `enterprise_features` block macro renders the licensing feature table for one scope from the same registry.
+
+Default titles and headings, with a block anchor that survives generation (see the crossref below):
+
+[[demo-redpanda-features]]
+enterprise_features::redpanda[]
+
+The operator scope demonstrates the `feature-suffix` field (resource-name annotation and beta badge after the feature link):
+
+enterprise_features::operator[]
+
+Custom `title` and `heading` overrides:
+
+enterprise_features::connect[title=Connect features that need a license,heading=What stops working]
+
+The block anchor re-emitted above keeps crossrefs working: jump to <<demo-redpanda-features,the Redpanda table>>.
 
 == Terms
 
