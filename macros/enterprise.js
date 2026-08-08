@@ -155,6 +155,25 @@ function reportUnknownFeature ({ feature, mode, registry, filePath }) {
 }
 
 /**
+ * Pick the environment-appropriate feature page from a registry entry.
+ * Some features have separate documentation for Kubernetes, Linux
+ * (self-managed), and Redpanda Cloud. Mirrors the config_ref macro's
+ * environment-awareness: the env-cloud and env-kubernetes page attributes
+ * select the xref-cloud and xref-kubernetes registry fields, falling back
+ * to the default xref.
+ *
+ * @param {object} entry - Registry entry.
+ * @param {object} document - Asciidoctor document (for env attributes).
+ * @returns {string|undefined}
+ */
+function resolveEntryXref (entry, document) {
+  if (!entry) return undefined
+  if (document.getAttribute('env-cloud') !== undefined && entry['xref-cloud']) return entry['xref-cloud']
+  if (document.getAttribute('env-kubernetes') !== undefined && entry['xref-kubernetes']) return entry['xref-kubernetes']
+  return entry.xref
+}
+
+/**
  * Resolve the tooltip attribute name from the enterprise-tooltip document
  * attribute. Mirrors the glossary macro's contract.
  *
@@ -262,7 +281,7 @@ function enterpriseInlineMacro (config) {
       const content = buildEnterpriseContent({
         feature,
         text: attributes.text,
-        xref: attributes.xref || (entry && entry.xref),
+        xref: attributes.xref || resolveEntryXref(entry, document),
         url: entry && entry.url,
         tooltip: attributes.tooltip || (entry && entry.tooltip) || undefined,
         licensingPage: document.getAttribute('enterprise-licensing-page', DEFAULT_LICENSING_PAGE),
@@ -319,4 +338,5 @@ module.exports.register = register
 module.exports.buildEnterpriseContent = buildEnterpriseContent
 module.exports.buildFeatureTable = buildFeatureTable
 module.exports.parseRegistry = parseRegistry
+module.exports.resolveEntryXref = resolveEntryXref
 module.exports.resolveTooltipAttribute = resolveTooltipAttribute
