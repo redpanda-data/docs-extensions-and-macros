@@ -5,6 +5,7 @@ features:
   - name: Tiered Storage
     scope: redpanda
     xref: streaming:manage:tiered-storage.adoc
+    xref-kubernetes: streaming:manage:kubernetes/tiered-storage/k-tiered-storage.adoc
     description: |
       Enables data storage in cloud object storage for long-term retention and retrieval.
     expiration: |
@@ -61,6 +62,17 @@ features:
       kind: core-enum
       value: datalake_iceberg
     gating-property: iceberg_enabled
+  - name: Stretch Clusters
+    scope: operator
+    xref: streaming:deploy:redpanda/kubernetes/k-stretch-clusters.adoc
+    description: |
+      A single logical Redpanda cluster distributed across multiple Kubernetes clusters.
+    expiration: |
+      The multicluster operator requires a valid license to start.
+    feature-suffix: (StretchCluster resource) badge::[label=beta]
+    source:
+      kind: manual
+      value: License gate in operator cmd/multicluster.
   - name: Enterprise connectors
     scope: connect
     url: https://docs.redpanda.com/redpanda-connect/components/catalog/?support=enterprise

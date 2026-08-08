@@ -1,0 +1,11 @@
+= Enterprise Macro: Kubernetes Environment Test
+:env-kubernetes: true
+:enterprise-licensing-page: streaming:get-started:licensing/overview.adoc
+
+This page sets `:env-kubernetes: true`, so the `enterprise` macro resolves each registry entry's `xref-kubernetes` when one exists. Compare with the same calls on the xref:preview:ROOT:test.adoc[main test page], which link to the default (Linux / self-managed) pages.
+
+Tiered Storage's registry entry carries an `xref-kubernetes`, so this links to the Kubernetes feature page: enterprise:Tiered Storage[] in a sentence.
+
+Continuous Data Balancing's entry has no `xref-kubernetes`, so it falls back to the entry's default `xref` (its Linux feature page): enterprise:Continuous Data Balancing[] in a sentence.
+
+The alias `cloud_storage` canonicalizes and gets the environment-specific link too: enterprise:cloud_storage[] in a sentence.
