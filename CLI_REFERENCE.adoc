@@ -38,6 +38,7 @@ display help for command
 * `validate-mcp` - Validate MCP server configuration (tools, resources)
 * `mcp-version` - Show MCP server version and configuration information
 * `generate` - Run docs automations
+* `validate` - Validate docs data against internal sources of truth
 * `help` - display help for command
 
 == install-test-dependencies
@@ -427,6 +428,7 @@ display help for command
 * `validate-mcp` - Validate MCP server configuration (tools, resources)
 * `mcp-version` - Show MCP server version and configuration information
 * `generate` - Run docs automations
+* `validate` - Validate docs data against internal sources of truth
 * `help` - display help for command
 
 == mcp-version
@@ -1244,4 +1246,94 @@ npx doc-tools generate migrate-rpcn-metadata
 # Apply the migration
 npx doc-tools generate migrate-rpcn-metadata --write
 ----
+
+== validate
+
+Validate docs data against internal sources of truth
+
+*Usage:*
+
+[,bash]
+----
+doc-tools validate [options] [command]
+----
+
+*Options:*
+
+`-h, --help`::
+display help for command
+
+*Commands:*
+
+* `enterprise-features` - Check the enterprise features registry against core, connect, and docs sources of truth
+* `help` - display help for command
+
+=== validate enterprise-features
+
+Checks the enterprise features registry (the shared component's enterprise-features.yml in the docs repo) against the internal sources of truth: the license_required_feature enum and config::enterprise<> property wrappers in redpanda core, the enterprise plugins in connect info.csv, and the hand-maintained disable-enterprise-features.adoc table. Exit codes: 0 clean, 1 drift found (error or needs-human findings), 2 execution error.
+
+*Why use it:*
+
+A feature must only be documented as enterprise under its approved external name. This check catches new license-gated features in core that have no registry entry yet, registry pointers that no longer match core, and stale connect enterprise lists.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools validate enterprise-features [options]
+----
+
+*Options:*
+
+`--registry <path>`::
+Local path to enterprise-features.yml (default: fetch from docs repo main)
+
+`--tag <ref>`::
+Redpanda git ref for the core headers (default: "dev")
+
+`--connect-ref <ref>`::
+Connect git ref for info.csv (default: "main")
+
+`--docs-ref <ref>`::
+Docs repo git ref for remote fetches (default: "main")
+
+`--disable-page <path>`::
+Local path to disable-enterprise-features.adoc (default: fetch from docs repo)
+
+`--antora <path>`::
+Local path to rp-connect-docs antora.yml (default: fetch from rp-connect-docs main)
+
+`--properties <path>`::
+Local path to a generated cluster-properties JSON; enables existence checks for gating properties
+
+`--skip-connect`::
+Skip the connect info.csv comparison
+
+`--format <format>`::
+Output format: text or json (default: "text")
+
+`--write-mapping <path>`::
+Write the internal-to-external name mapping partial to this path
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Check everything against the default remote sources
+npx doc-tools validate enterprise-features
+
+# Check a local registry file (for example, in docs repo CI)
+npx doc-tools validate enterprise-features --registry shared/modules/ROOT/partials/enterprise-features.yml
+
+# Regenerate the rpk name-mapping partial
+npx doc-tools validate enterprise-features --write-mapping modules/get-started/partials/licensing/feature-name-mapping.adoc
+----
+
+*Requirements:*
+
+Network access to raw.githubusercontent.com for any source not supplied
+with a local path option.
 
