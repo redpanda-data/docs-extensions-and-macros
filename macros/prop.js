@@ -280,14 +280,16 @@ function reportUnknownProperty ({ name, mode, registry, filePath }) {
  * @param {string} [opts.page] - Reference page override (module-relative, no .adoc).
  * @param {string} [opts.scope] - config_scope from the published JSON.
  * @param {string} opts.role - CSS class for the code element.
+ * @param {string} [opts.componentPrefix] - 'component:' prefix when the link
+ *   must leave the current component (which publishes no property pages).
  * @returns {string}
  */
-function buildPropContent ({ name, text, link, page, scope, role }) {
+function buildPropContent ({ name, text, link, page, scope, role, componentPrefix = '' }) {
   const display = text || name
   let inner = display
   if (link) {
     const targetPage = page || SCOPE_PAGES[scope] || SCOPE_PAGES.cluster
-    inner = `xref:reference:${targetPage}.adoc#${name}[${display}]`
+    inner = `xref:${componentPrefix}reference:${targetPage}.adoc#${name}[${display}]`
   }
   return `<code class="${role}" data-property-name="${name}">${inner}</code>`
 }
@@ -316,10 +318,26 @@ function propInlineMacro (config) {
           })
         }
       }
+      // Discover which page documents the property. The current component
+      // wins; when it publishes no property pages at all (for example, the
+      // connect component, or this repo's preview site), fall back to the
+      // streaming (or ROOT) component and emit a component-qualified xref.
       let discoveredPage
+      let componentPrefix = ''
       if (registry && config.contentCatalog && (attributes.link === 'true' || attributes.link === true) && !attributes.page) {
         const component = (config.file && config.file.src && config.file.src.component) || ''
-        discoveredPage = buildPageIndex(config.contentCatalog, component, registry.properties).get(name)
+        const ownIndex = buildPageIndex(config.contentCatalog, component, registry.properties)
+        discoveredPage = ownIndex.get(name)
+        if (!discoveredPage && ownIndex.size === 0) {
+          for (const fallbackComponent of ['streaming', 'ROOT']) {
+            if (fallbackComponent === component) continue
+            const fallbackIndex = buildPageIndex(config.contentCatalog, fallbackComponent, registry.properties)
+            if (fallbackIndex.size === 0) continue
+            discoveredPage = fallbackIndex.get(name)
+            componentPrefix = `${fallbackComponent}:`
+            break
+          }
+        }
       }
       const content = buildPropContent({
         name,
@@ -328,6 +346,7 @@ function propInlineMacro (config) {
         page: attributes.page || discoveredPage,
         scope: entry && entry.config_scope,
         role: document.getAttribute('property-ref-role', DEFAULT_ROLE),
+        componentPrefix,
       })
       // The xref inside the code element is resolved by the 'macros'
       // substitution, the same mechanism the enterprise macro relies on.
