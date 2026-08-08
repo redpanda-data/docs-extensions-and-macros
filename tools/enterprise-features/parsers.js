@@ -104,7 +104,7 @@ function parseDisableTable (source) {
       const properties = [...new Set(
         [...actionCell.matchAll(/[Ss]et\s+`([a-z][a-z0-9_]+)`|config set ([a-z][a-z0-9_]+)/g)]
           .map((m) => m[1] || m[2])
-          .filter((p) => p && p.includes('_'))
+          .filter(Boolean)
       )]
       if (feature) rows.push({ feature, properties })
     }
