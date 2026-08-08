@@ -22,11 +22,18 @@
  * JSON is available in the build, the macro renders unvalidated with a
  * single warning.
  *
- * With link=true, the property also links to its reference page, derived
- * from the property's config_scope in the published JSON (cluster, broker,
- * or topic). Use page= to override the target page (for example,
- * properties/object-storage-properties). This supersedes the config_ref
- * macro's linking for most uses, without requiring writers to know the page.
+ * With link=true, the property also links to its reference page. The page
+ * is discovered dynamically: the macro indexes which reference-module page
+ * in the current component documents each property, by scanning property
+ * headings in the partials each page includes (respecting include tag
+ * filters such as tags=redpanda-cloud). Links therefore stay correct per
+ * component (streaming, cloud, agentic-data-plane, connect) and keep
+ * working if properties are split across different pages in the future.
+ * When discovery finds nothing, the page falls back deterministically to
+ * the property's config_scope (cluster, broker, or topic). The xref is
+ * component-relative (no component ID). Use page= to override the target
+ * entirely. This supersedes the config_ref macro's linking for most uses,
+ * without requiring writers to know the page.
  *
  * Document or site attributes:
  *
@@ -50,10 +57,130 @@ const $propertyRegistry = Symbol('$propertyRegistry')
 const DEFAULT_ROLE = 'property-ref'
 const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
 
+// Deterministic fallback only. The primary mechanism is dynamic discovery:
+// the macro indexes which reference-module page actually documents each
+// property (by scanning property headings in the partials each page
+// includes, respecting include tag filters), so links keep working if
+// properties are ever split across different pages.
 const SCOPE_PAGES = {
   cluster: 'properties/cluster-properties',
   broker: 'properties/broker-properties',
   topic: 'properties/topic-properties',
+}
+
+const $propertyPageIndex = Symbol('$propertyPageIndex')
+const HEADING_RX = /^=+\s+(\S+)\s*$/
+const TAG_MARKER_RX = /^\/\/\s*(tag|end)::([\w-]+)\[\]\s*$/
+const INCLUDE_RX = /^include::([^[]+)\[([^\]]*)\]/
+
+/**
+ * Extract property-style headings from AsciiDoc source together with the
+ * include tags that enclose them.
+ *
+ * @param {string} source
+ * @returns {{name: string, tags: string[]}[]}
+ */
+function extractHeadingsWithTags (source) {
+  const headings = []
+  const open = []
+  for (const line of source.split('\n')) {
+    const marker = line.match(TAG_MARKER_RX)
+    if (marker) {
+      if (marker[1] === 'tag') open.push(marker[2])
+      else {
+        const at = open.lastIndexOf(marker[2])
+        if (at !== -1) open.splice(at, 1)
+      }
+      continue
+    }
+    const heading = line.match(HEADING_RX)
+    if (heading) headings.push({ name: heading[1], tags: [...open] })
+  }
+  return headings
+}
+
+/**
+ * Evaluate an include tags= expression against the tags enclosing a heading.
+ * Supports the forms used by the property pages: a semicolon-separated list
+ * of tag names, each optionally negated with '!'.
+ *
+ * @param {string[]} headingTags
+ * @param {string|undefined} expression
+ * @returns {boolean} Whether the heading survives the include.
+ */
+function evaluateTagExpression (headingTags, expression) {
+  if (!expression) return true
+  const items = expression.split(/[;,]/).map((item) => item.trim()).filter(Boolean)
+  const positives = items.filter((item) => !item.startsWith('!'))
+  const negatives = items.filter((item) => item.startsWith('!')).map((item) => item.slice(1))
+  if (negatives.some((tag) => headingTags.includes(tag))) return false
+  if (positives.length > 0) return positives.some((tag) => headingTags.includes(tag))
+  return true
+}
+
+/**
+ * Resolve an include target such as
+ * 'streaming:reference:partial$properties/cluster-properties.adoc' into its
+ * component, module, and relative path. Component and module default to the
+ * including page's.
+ */
+function parsePartialTarget (target, pageSrc) {
+  const at = target.indexOf('partial$')
+  if (at === -1) return undefined
+  const prefix = target.slice(0, at).replace(/:$/, '')
+  const relative = target.slice(at + 'partial$'.length)
+  const parts = prefix ? prefix.split(':') : []
+  if (parts.length === 2) return { component: parts[0], module: parts[1], relative }
+  if (parts.length === 1) return { component: pageSrc.component, module: parts[0], relative }
+  return { component: pageSrc.component, module: pageSrc.module, relative }
+}
+
+/**
+ * Build (and cache) the property -> page index for one component by scanning
+ * the reference-module pages and the partials they include.
+ *
+ * @param {object} contentCatalog
+ * @param {string} component
+ * @param {object} properties - Known property names from the published JSON.
+ * @returns {Map<string, string>} property name -> page path without .adoc
+ */
+function buildPageIndex (contentCatalog, component, properties) {
+  const cache = contentCatalog[$propertyPageIndex] || (contentCatalog[$propertyPageIndex] = {})
+  if (cache[component]) return cache[component]
+  const index = new Map()
+  const partialHeadings = new Map()
+  const headingsFor = (file) => {
+    if (!partialHeadings.has(file)) partialHeadings.set(file, extractHeadingsWithTags(file.contents.toString()))
+    return partialHeadings.get(file)
+  }
+  const pages = contentCatalog.findBy({ component, module: 'reference', family: 'page' }) || []
+  for (const page of pages) {
+    const source = page.contents.toString()
+    const pagePath = page.src.relative.replace(/\.adoc$/, '')
+    for (const line of source.split('\n')) {
+      const heading = line.match(HEADING_RX)
+      if (heading && Object.prototype.hasOwnProperty.call(properties, heading[1])) {
+        index.set(heading[1], pagePath)
+        continue
+      }
+      const include = line.match(INCLUDE_RX)
+      if (!include) continue
+      const partialRef = parsePartialTarget(include[1].trim(), page.src)
+      if (!partialRef) continue
+      const tagsMatch = include[2].match(/tags?=([^,\]]+)/)
+      const expression = tagsMatch && tagsMatch[1]
+      const partials = contentCatalog.findBy({ component: partialRef.component, module: partialRef.module, family: 'partial' }) || []
+      const partial = partials.find((candidate) => candidate.src.relative === partialRef.relative)
+      if (!partial) continue
+      for (const entry of headingsFor(partial)) {
+        if (!Object.prototype.hasOwnProperty.call(properties, entry.name)) continue
+        if (!evaluateTagExpression(entry.tags, expression)) continue
+        if (!index.has(entry.name)) index.set(entry.name, pagePath)
+      }
+    }
+  }
+  cache[component] = index
+  return index
 }
 
 let warnedNoRegistry = false
@@ -71,22 +198,36 @@ function compareTags (a, b) {
 
 /**
  * Load and cache the property map from the newest published properties JSON
- * attachment in the content catalog. Returns undefined when unavailable.
+ * attachment in the content catalog. Properties are published per component
+ * (streaming, cloud, sometimes agentic-data-plane and connect), so the JSON
+ * from the page's own component wins, falling back to the streaming (or
+ * ROOT) component, then to the newest JSON anywhere in the catalog. Returns
+ * undefined when unavailable.
  */
 function loadProperties (config) {
   const contentCatalog = config && config.contentCatalog
   if (!contentCatalog) return undefined
-  if (contentCatalog[$propertyRegistry] !== undefined) return contentCatalog[$propertyRegistry] || undefined
-  let registry = null
+  const pageComponent = (config.file && config.file.src && config.file.src.component) || ''
+  const cacheKey = pageComponent || '$any'
+  const cache = contentCatalog[$propertyRegistry] || (contentCatalog[$propertyRegistry] = {})
+  if (cache[cacheKey] !== undefined) return cache[cacheKey] || undefined
+
   const attachments = contentCatalog.findBy({ family: 'attachment' }) || []
-  let newest = null
+  const newestBy = {}
+  let newestAny = null
   for (const attachment of attachments) {
     if (attachment.src.module !== 'reference') continue
     const basename = attachment.src.relative.split('/').pop()
     const match = basename.match(PROPERTIES_JSON_RX)
     if (!match) continue
-    if (!newest || compareTags(match[1], newest.tag) > 0) newest = { tag: match[1], file: attachment }
+    const candidate = { tag: match[1], file: attachment }
+    const component = attachment.src.component
+    if (!newestBy[component] || compareTags(candidate.tag, newestBy[component].tag) > 0) newestBy[component] = candidate
+    if (!newestAny || compareTags(candidate.tag, newestAny.tag) > 0) newestAny = candidate
   }
+  const newest = newestBy[pageComponent] || newestBy.streaming || newestBy.ROOT || newestAny
+
+  let registry = null
   if (newest) {
     const data = JSON.parse(newest.file.contents.toString())
     if (data && data.properties) {
@@ -94,7 +235,7 @@ function loadProperties (config) {
     }
   }
   // Cache null too, so a missing JSON is only searched for once per build.
-  contentCatalog[$propertyRegistry] = registry
+  cache[cacheKey] = registry
   return registry || undefined
 }
 
@@ -175,11 +316,16 @@ function propInlineMacro (config) {
           })
         }
       }
+      let discoveredPage
+      if (registry && config.contentCatalog && (attributes.link === 'true' || attributes.link === true) && !attributes.page) {
+        const component = (config.file && config.file.src && config.file.src.component) || ''
+        discoveredPage = buildPageIndex(config.contentCatalog, component, registry.properties).get(name)
+      }
       const content = buildPropContent({
         name,
         text: attributes.text,
         link: attributes.link === 'true' || attributes.link === true,
-        page: attributes.page,
+        page: attributes.page || discoveredPage,
         scope: entry && entry.config_scope,
         role: document.getAttribute('property-ref-role', DEFAULT_ROLE),
       })
@@ -206,3 +352,6 @@ function register (registry, config = {}) {
 module.exports.register = register
 module.exports.buildPropContent = buildPropContent
 module.exports.compareTags = compareTags
+module.exports.extractHeadingsWithTags = extractHeadingsWithTags
+module.exports.evaluateTagExpression = evaluateTagExpression
+module.exports.buildPageIndex = buildPageIndex

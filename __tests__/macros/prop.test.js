@@ -1,6 +1,12 @@
 'use strict'
 
-const { register, buildPropContent, compareTags } = require('../../macros/prop')
+const {
+  register,
+  buildPropContent,
+  compareTags,
+  extractHeadingsWithTags,
+  evaluateTagExpression,
+} = require('../../macros/prop')
 
 const PROPERTIES_JSON = JSON.stringify({
   properties: {
@@ -11,22 +17,34 @@ const PROPERTIES_JSON = JSON.stringify({
   },
 })
 
-function fakeCatalog ({ json = PROPERTIES_JSON, tag = 'v26.2.1', extraTags = [] } = {}) {
-  const attachment = (fileTag, contents) => ({
-    src: { module: 'reference', relative: `redpanda-properties-${fileTag}.json` },
+function fakeCatalog ({ json = PROPERTIES_JSON, tag = 'v26.2.1', extraTags = [], files = [] } = {}) {
+  const attachment = (fileTag, contents, component = 'streaming') => ({
+    src: { component, module: 'reference', family: 'attachment', relative: `redpanda-properties-${fileTag}.json` },
     contents: Buffer.from(contents),
   })
-  const files = [attachment(tag, json)]
-  for (const extra of extraTags) files.push(attachment(extra, JSON.stringify({ properties: { stale_property: {} } })))
-  return { findBy: jest.fn(() => files) }
+  const all = [attachment(tag, json), ...files]
+  for (const extra of extraTags) all.push(attachment(extra, JSON.stringify({ properties: { stale_property: {} } })))
+  return {
+    findBy: jest.fn((query) => all.filter((file) =>
+      Object.entries(query).every(([key, value]) => file.src[key] === value || (key === 'family' && file.src.family === value))
+    )),
+  }
 }
 
-function convert (input, { catalog, attributes = {}, filePath = 'modules/manage/pages/example.adoc' } = {}) {
+function page (component, relative, contents) {
+  return { src: { component, module: 'reference', family: 'page', relative }, contents: Buffer.from(contents) }
+}
+
+function partial (component, relative, contents) {
+  return { src: { component, module: 'reference', family: 'partial', relative }, contents: Buffer.from(contents) }
+}
+
+function convert (input, { catalog, attributes = {}, filePath = 'modules/manage/pages/example.adoc', component = 'streaming' } = {}) {
   const Asciidoctor = require('@asciidoctor/core')()
   const extensionRegistry = Asciidoctor.Extensions.create()
   register(extensionRegistry, catalog && {
     contentCatalog: catalog,
-    file: { src: { path: filePath } },
+    file: { src: { path: filePath, component, module: 'manage' } },
   })
   return Asciidoctor.convert(input, { extension_registry: extensionRegistry, attributes })
 }
@@ -118,7 +136,7 @@ describe('prop macro', () => {
       warn.mockRestore()
     })
 
-    test('link=true resolves the scope from the published JSON', () => {
+    test('link=true falls back to the scope-derived page when nothing is discovered', () => {
       const html = convert('prop:fips_mode[link=true]', { catalog: fakeCatalog() })
       expect(html).toContain('broker-properties')
       expect(html).toContain('data-property-name="fips_mode"')
@@ -139,6 +157,101 @@ describe('prop macro', () => {
     test('renders unvalidated without a catalog (graceful degradation)', () => {
       const html = convert('prop:anything_goes[]', {})
       expect(html).toContain('data-property-name="anything_goes"')
+    })
+  })
+
+  describe('dynamic page discovery', () => {
+    const PARTIAL = [
+      '=== cloud_storage_enabled',
+      'Enables tiered storage.',
+      '// tag::redpanda-cloud[]',
+      '=== fips_mode',
+      'FIPS.',
+      '// end::redpanda-cloud[]',
+    ].join('\n')
+
+    test('links to the page that includes the partial documenting the property', () => {
+      const catalog = fakeCatalog({
+        files: [
+          partial('streaming', 'properties/all-properties.adoc', PARTIAL),
+          page('streaming', 'properties/custom-page.adoc', 'include::reference:partial$properties/all-properties.adoc[]'),
+        ],
+      })
+      const html = convert('prop:cloud_storage_enabled[link=true]', { catalog })
+      expect(html).toContain('properties/custom-page')
+      expect(html).not.toContain('cluster-properties')
+    })
+
+    test('follows a future split of properties across pages', () => {
+      const catalog = fakeCatalog({
+        files: [
+          partial('streaming', 'properties/storage.adoc', '=== cloud_storage_enabled\n'),
+          partial('streaming', 'properties/security.adoc', '=== fips_mode\n'),
+          page('streaming', 'properties/storage-props.adoc', 'include::reference:partial$properties/storage.adoc[]'),
+          page('streaming', 'properties/security-props.adoc', 'include::reference:partial$properties/security.adoc[]'),
+        ],
+      })
+      expect(convert('prop:cloud_storage_enabled[link=true]', { catalog })).toContain('storage-props')
+      expect(convert('prop:fips_mode[link=true]', { catalog })).toContain('security-props')
+    })
+
+    test('cloud pages discover their own page through cross-component tag-filtered includes', () => {
+      const catalog = fakeCatalog({
+        files: [
+          partial('streaming', 'properties/all-properties.adoc', PARTIAL),
+          page('cloud-data-platform', 'properties/cloud-cluster.adoc',
+            'include::streaming:reference:partial$properties/all-properties.adoc[tags=redpanda-cloud]'),
+        ],
+      })
+      // fips_mode is inside the redpanda-cloud tag: discovered on the cloud page.
+      const linked = convert('prop:fips_mode[link=true]', { catalog, component: 'cloud-data-platform' })
+      expect(linked).toContain('cloud-cluster')
+      // cloud_storage_enabled is outside the tag: not on the cloud page, falls back to scope.
+      const fallback = convert('prop:cloud_storage_enabled[link=true]', { catalog, component: 'cloud-data-platform' })
+      expect(fallback).toContain('cluster-properties')
+    })
+
+    test('page= overrides discovery', () => {
+      const catalog = fakeCatalog({
+        files: [
+          partial('streaming', 'properties/all-properties.adoc', PARTIAL),
+          page('streaming', 'properties/custom-page.adoc', 'include::reference:partial$properties/all-properties.adoc[]'),
+        ],
+      })
+      const html = convert('prop:cloud_storage_enabled[link=true,page=properties/object-storage-properties]', { catalog })
+      expect(html).toContain('object-storage-properties')
+    })
+  })
+
+  describe('extractHeadingsWithTags', () => {
+    test('records the open tags around each heading', () => {
+      const headings = extractHeadingsWithTags([
+        '=== plain_prop',
+        '// tag::redpanda-cloud[]',
+        '=== cloud_prop',
+        '// tag::deprecated[]',
+        '=== old_cloud_prop',
+        '// end::deprecated[]',
+        '// end::redpanda-cloud[]',
+      ].join('\n'))
+      expect(headings).toEqual([
+        { name: 'plain_prop', tags: [] },
+        { name: 'cloud_prop', tags: ['redpanda-cloud'] },
+        { name: 'old_cloud_prop', tags: ['redpanda-cloud', 'deprecated'] },
+      ])
+    })
+  })
+
+  describe('evaluateTagExpression', () => {
+    test.each([
+      [[], undefined, true],
+      [['deprecated'], '!deprecated;!exclude-from-docs', false],
+      [[], '!deprecated;!exclude-from-docs', true],
+      [['redpanda-cloud'], 'redpanda-cloud;!deprecated', true],
+      [[], 'redpanda-cloud;!deprecated', false],
+      [['redpanda-cloud', 'deprecated'], 'redpanda-cloud;!deprecated', false],
+    ])('tags %j with expression %j -> %s', (tags, expression, expected) => {
+      expect(evaluateTagExpression(tags, expression)).toBe(expected)
     })
   })
 
