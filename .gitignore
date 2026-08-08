@@ -24,3 +24,6 @@ docs-data/rpk-vlocal.json
 
 # E2E fixture sites are real content trees; keep them tracked despite modules/
 !__tests__/fixtures/**
+
+# The preview site is a real content tree too; keep it tracked despite modules/
+!preview/**

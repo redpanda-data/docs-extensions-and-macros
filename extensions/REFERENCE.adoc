@@ -496,6 +496,9 @@ Behavior details:
 * Legacy URL shapes (`/docs/...`, `/current/...`, `/vX.Y/...`, and pre-rename component slugs such as `/redpanda-connect/`) are rewritten to candidate paths, but a candidate is only used when it matches a published page.
 * Fragments (`#anchor`) and link labels are preserved. Unlabeled URLs become `xref:...[]` so Antora fills in the target page title.
 * Targets in the latest version of a component emit an unversioned xref; targets pinned to an older version emit `version@component:module:page`.
+* A URL that points at a page's former path resolves through the `page-aliases` attribute that the page declares. Antora does not register those aliases as catalog files until it converts documents, which is after this extension runs, so the extension reads them from the page header. Only aliases in the same component and version as the page that declares them are mapped.
+* A URL that carries a query string is left as a raw link, because an xref cannot express one and dropping it would change the link (for example `?platform=kubernetes`, which the UI reads to preselect a tab). These are reported at info level, not as warnings.
+* Builds that publish the latest version under its real version number instead of a symbolic segment (such as this repository's preview build) still resolve `/current/...` URLs, so the same content works in both.
 
 === Environment variables
 

@@ -10,6 +10,10 @@ Fragment and label: https://docs.redpanda.com/connect/configuration/secrets/#sto
 
 Same component: https://docs.redpanda.com/streaming/current/manage/target/
 
+Renamed target, resolved through its page-aliases: https://docs.redpanda.com/connect/configuration/old-secrets/[Renamed secrets]
+
+Query string: https://docs.redpanda.com/connect/configuration/secrets/?platform=kubernetes[Query string]
+
 Unmappable: https://docs.redpanda.com/no/such/page/
 
 External ok: @EXTERNAL_BASE@/ok[External resource]

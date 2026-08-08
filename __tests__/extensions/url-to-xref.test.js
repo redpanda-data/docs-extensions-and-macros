@@ -248,6 +248,30 @@ describe('convertContent', () => {
     )
   })
 
+  test('resolves component-prefixed symbolic-segment URLs against real version numbers', () => {
+    // The preview site publishes the versioned streaming component under its
+    // real version, so live-site /streaming/current/... URLs have to fall back
+    // to the component's latest version.
+    const page = makePage({
+      component: 'streaming',
+      version: '26.2',
+      module: 'get-started',
+      relative: 'quick-start.adoc',
+      url: '/streaming/26.2/get-started/quick-start/',
+    })
+    const previewContext = Object.assign(
+      buildUrlMap({
+        getComponents: () => [{ name: 'streaming', latest: { version: '26.2' } }],
+        getPages: (filter) => (filter ? [page].filter(filter) : [page]),
+        findBy: () => [],
+      }),
+      { hostnames: new Set(['docs.redpanda.com']), ignore: [], latestVersionSegment: 'current' }
+    )
+    expect(
+      convertContent('https://docs.redpanda.com/streaming/current/get-started/quick-start/', previewContext).content
+    ).toBe('xref:streaming:get-started:quick-start.adoc[]')
+  })
+
   test('leaves macro attribute values untouched', () => {
     const input = 'image:diagram.png[Alt,link=https://docs.redpanda.com/connect/configuration/secrets/]'
     const { content, converted, unmapped } = convert(input)
@@ -277,12 +301,180 @@ describe('convertContent', () => {
     expect(converted).toBe(0)
   })
 
+  test('leaves URLs that carry a query string as raw links', () => {
+    // An xref cannot express ?platform=kubernetes, which the docs UI reads to
+    // preselect a tab, so the raw URL is kept instead of converted lossily.
+    // This shape appears in the generated Helm specs in the docs repo.
+    const input = 'https://docs.redpanda.com/connect/configuration/secrets/?platform=kubernetes#store[Licenses]'
+    const { content, converted, unmapped, withQueryString } = convert(input)
+    expect(content).toBe(input)
+    expect(converted).toBe(0)
+    expect(unmapped).toEqual([])
+    expect(withQueryString).toEqual([
+      'https://docs.redpanda.com/connect/configuration/secrets/?platform=kubernetes#store',
+    ])
+  })
+
   test('converts multiple URLs in one document', () => {
     const input =
       'A https://docs.redpanda.com/connect/configuration/secrets/ B https://docs.redpanda.com/connect/components/inputs/kafka/[Kafka] C'
     expect(convert(input).content).toBe(
       'A xref:connect:configuration:secrets.adoc[] B xref:connect:components:inputs/kafka.adoc[Kafka] C'
     )
+  })
+})
+
+// The generated Helm and CRD specs in redpanda-data/docs carry raw
+// docs.redpanda.com URLs, now that doc-tools no longer rewrites them at
+// generation time. Most use the pre-umbrella /docs/... shape and point at
+// pages that have since been renamed, so they only resolve through the
+// page-aliases those pages declare.
+describe('buildUrlMap page-aliases', () => {
+  function mapFor (contents, src = {}) {
+    const page = makePage(
+      Object.assign(
+        {
+          component: 'streaming',
+          version: '26.2',
+          module: 'manage',
+          relative: 'kubernetes/k-manage-resources.adoc',
+          url: '/streaming/26.2/manage/kubernetes/k-manage-resources/',
+        },
+        src,
+        { contents }
+      )
+    )
+    return buildUrlMap({
+      getComponents: () => [{ name: 'streaming', latest: { version: '26.2' } }],
+      getPages: (filter) => (filter ? [page].filter(filter) : [page]),
+      findBy: () => [],
+    }).urls
+  }
+
+  test('maps a same-module alias', () => {
+    const urls = mapFor('= T\n:page-aliases: kubernetes/manage-resources.adoc\n')
+    expect(urls.get('/streaming/26.2/manage/kubernetes/manage-resources')).toMatchObject({
+      relative: 'kubernetes/k-manage-resources.adoc',
+    })
+  })
+
+  test('maps a module-qualified alias, a bare alias, and one without the file extension', () => {
+    const urls = mapFor('= T\n:page-aliases: reference:old-spec.adoc, other.adoc, reference:no-extension\n')
+    expect(urls.has('/streaming/26.2/reference/old-spec')).toBe(true)
+    expect(urls.has('/streaming/26.2/manage/other')).toBe(true)
+    expect(urls.has('/streaming/26.2/reference/no-extension')).toBe(true)
+  })
+
+  test('maps a ROOT-module alias without a module segment', () => {
+    const urls = mapFor('= T\n:page-aliases: ROOT:legacy.adoc\n')
+    expect(urls.has('/streaming/26.2/legacy')).toBe(true)
+  })
+
+  test('maps aliases of an index page against the module root', () => {
+    const urls = mapFor('= T\n:page-aliases: home/old-index.adoc\n', {
+      module: 'home',
+      relative: 'index.adoc',
+      url: '/streaming/26.2/home/',
+    })
+    expect(urls.has('/streaming/26.2/home/home/old-index')).toBe(true)
+  })
+
+  test('ignores aliases that name another component or version', () => {
+    const urls = mapFor('= T\n:page-aliases: connect:configuration:secrets.adoc, 24.3@manage:old.adoc\n')
+    expect(urls.size).toBe(1)
+  })
+
+  test('never lets an alias shadow a real page', () => {
+    const real = makePage({
+      component: 'streaming',
+      version: '26.2',
+      module: 'manage',
+      relative: 'kubernetes/manage-resources.adoc',
+      url: '/streaming/26.2/manage/kubernetes/manage-resources/',
+    })
+    const aliasing = makePage({
+      component: 'streaming',
+      version: '26.2',
+      module: 'manage',
+      relative: 'kubernetes/k-manage-resources.adoc',
+      url: '/streaming/26.2/manage/kubernetes/k-manage-resources/',
+      contents: '= T\n:page-aliases: kubernetes/manage-resources.adoc\n',
+    })
+    const pages = [real, aliasing]
+    const { urls } = buildUrlMap({
+      getComponents: () => [{ name: 'streaming', latest: { version: '26.2' } }],
+      getPages: (filter) => (filter ? pages.filter(filter) : pages),
+      findBy: () => [],
+    })
+    expect(urls.get('/streaming/26.2/manage/kubernetes/manage-resources')).toMatchObject({
+      relative: 'kubernetes/manage-resources.adoc',
+    })
+  })
+})
+
+describe('generated Helm spec URLs', () => {
+  function makeHelmSpecContext () {
+    const manageResources = makePage({
+      component: 'streaming',
+      version: '26.2',
+      module: 'manage',
+      relative: 'kubernetes/k-manage-resources.adoc',
+      url: '/streaming/current/manage/kubernetes/k-manage-resources/',
+    })
+    const clusterProperties = makePage({
+      component: 'streaming',
+      version: '26.2',
+      module: 'reference',
+      relative: 'properties/cluster-properties.adoc',
+      url: '/streaming/current/reference/properties/cluster-properties/',
+    })
+    const pages = [manageResources, clusterProperties]
+    // The aliases these pages declare in the docs repo today. Antora has not
+    // turned them into catalog alias files yet at contentClassified, so the
+    // extension has to read them from the page header.
+    manageResources.contents = Buffer.from(
+      '= Manage Pod Resources\n:page-aliases: manage:kubernetes/manage-resources.adoc\n'
+    )
+    clusterProperties.contents = Buffer.from(
+      '= Cluster Configuration Properties\n' +
+        ':page-aliases: reference:tunable-properties.adoc, reference:cluster-properties.adoc\n'
+    )
+    return Object.assign(
+      buildUrlMap({
+        getComponents: () => [{ name: 'streaming', latest: { version: '26.2' } }],
+        getPages: (filter) => (filter ? pages.filter(filter) : pages),
+        findBy: () => [],
+      }),
+      { hostnames: new Set(['docs.redpanda.com']), ignore: [/^\/api\//], latestVersionSegment: 'current' }
+    )
+  }
+
+  test.each([
+    [
+      'https://docs.redpanda.com/docs/manage/kubernetes/manage-resources/#configure-cpu-resources',
+      'xref:streaming:manage:kubernetes/k-manage-resources.adoc#configure-cpu-resources[]',
+    ],
+    [
+      'https://docs.redpanda.com/current/manage/kubernetes/manage-resources/',
+      'xref:streaming:manage:kubernetes/k-manage-resources.adoc[]',
+    ],
+    [
+      'https://docs.redpanda.com/docs/reference/cluster-properties/#log_segment_size_min',
+      'xref:streaming:reference:properties/cluster-properties.adoc#log_segment_size_min[]',
+    ],
+    [
+      'https://docs.redpanda.com/docs/reference/tunable-properties/',
+      'xref:streaming:reference:properties/cluster-properties.adoc[]',
+    ],
+  ])('converts %s through the target page alias', (url, expected) => {
+    expect(convertContent(url, makeHelmSpecContext()).content).toBe(expected)
+  })
+
+  test('reports a Helm spec URL whose target no longer exists at any path', () => {
+    const url = 'https://docs.redpanda.com/docs/cluster-administration/configuration/'
+    const { content, unmapped } = convertContent(url, makeHelmSpecContext())
+    expect(content).toBe(url)
+    expect(unmapped).toEqual([url])
   })
 })
 

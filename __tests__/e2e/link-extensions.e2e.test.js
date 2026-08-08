@@ -152,6 +152,20 @@ describe('link extensions end-to-end', () => {
     expect(html).toMatch(/href="[^"]*target\/" class="xref page">Target Page</)
   })
 
+  // Antora does not register page-aliases as catalog aliases until it converts
+  // documents, which is after url-to-xref runs, so the extension reads them
+  // from the page header itself. Only a real build proves that works.
+  test('converts a URL that points at a renamed page through its page-aliases', () => {
+    const html = readLinksPage()
+    expect(html).toMatch(/href="[^"]*\/connect\/configuration\/secrets\/" class="xref page">Renamed secrets</)
+  })
+
+  test('leaves a URL that carries a query string as a raw link and reports it at info level', () => {
+    const html = readLinksPage()
+    expect(html).toContain('href="https://docs.redpanda.com/connect/configuration/secrets/?platform=kubernetes"')
+    expect(buildOutput).toMatch(/Left 1 docs URL with a query string as raw link \(an xref cannot carry one\)/)
+  })
+
   test('leaves unmappable internal URLs as raw links and warns', () => {
     const html = readLinksPage()
     expect(html).toContain('href="https://docs.redpanda.com/no/such/page/"')

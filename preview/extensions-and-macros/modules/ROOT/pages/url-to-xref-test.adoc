@@ -1,0 +1,152 @@
+= URL to Xref Test Page
+:description: Test page for the url-to-xref extension
+:url-attribute-entry: https://docs.redpanda.com/connect/configuration/secrets/
+
+This page tests the `url-to-xref` extension against the real content sources in this preview build (`streaming`, `connect`, `cloud-data-platform`, and `redpanda-labs`).
+
+The extension runs at `contentClassified` and rewrites absolute `docs.redpanda.com` URLs in page and partial content into xrefs, using the content catalog as the source of truth. A URL is converted only when it maps to a page that is actually published in this build, so every link below either becomes a real xref (validated by Antora, and highlighted in the UI as an internal link) or stays a raw URL and is reported as a build warning.
+
+In each section, the code block shows the AsciiDoc source as it was written, and the line under it shows what the build produced. Code blocks are never touched by the extension, which is why the source stays visible.
+
+== Cross-component URL
+
+[,asciidoc]
+----
+https://docs.redpanda.com/connect/components/inputs/kafka/
+----
+
+Result: https://docs.redpanda.com/connect/components/inputs/kafka/
+
+An unlabeled URL becomes `xref:...[]`, so Antora fills in the target page title.
+
+== Legacy component slug
+
+The `connect` component was served under `/redpanda-connect/` before the site rename, and the cloud docs under `/redpanda-cloud/`. Both slugs are rewritten to candidate paths that are verified against the catalog before use.
+
+[,asciidoc]
+----
+https://docs.redpanda.com/redpanda-connect/components/inputs/kafka/[Legacy Connect slug]
+https://docs.redpanda.com/redpanda-cloud/get-started/cluster-types/byoc/aws/[Legacy Cloud slug]
+----
+
+Result: https://docs.redpanda.com/redpanda-connect/components/inputs/kafka/[Legacy Connect slug]
+
+Result: https://docs.redpanda.com/redpanda-cloud/get-started/cluster-types/byoc/aws/[Legacy Cloud slug]
+
+This is the redpanda-data/docs#1830 class of broken link: the generated docs shipped a raw URL for another component, and the build now upgrades it instead of a hardcoded slug map guessing at it.
+
+== Component landing page and site root
+
+Component landing URLs and the site root resolve through the synthetic start-page aliases that Antora registers during classification.
+
+[,asciidoc]
+----
+https://docs.redpanda.com/connect/
+https://docs.redpanda.com/
+----
+
+Result: https://docs.redpanda.com/connect/
+
+Result: https://docs.redpanda.com/[Site root]
+
+== Versioned URL, fragment, and label
+
+The `streaming` component is versioned. A URL that points at the latest version emits an unversioned xref; the fragment and the link label are preserved.
+
+[,asciidoc]
+----
+https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#kafka_batch_max_bytes[Batch size limit]
+----
+
+Result: https://docs.redpanda.com/streaming/current/reference/properties/cluster-properties/#kafka_batch_max_bytes[Batch size limit]
+
+The live site publishes the latest version under the symbolic `current` segment, while this preview build publishes it under its real version number. Both shapes resolve to the same page, so the link above works in either build.
+
+A URL pinned to an older version emits a version-qualified xref (`25.3@streaming:...`) and stays on that version:
+
+[,asciidoc]
+----
+https://docs.redpanda.com/streaming/25.3/manage/kubernetes/k-manage-resources/
+----
+
+Result: https://docs.redpanda.com/streaming/25.3/manage/kubernetes/k-manage-resources/
+
+== Legacy unprefixed URLs
+
+Pre-umbrella URLs (`/docs/...` and `/current/...`) belong to the `streaming` component. These are the shapes that the generated Helm and CRD specs in the docs repo still contain, now that `doc-tools` no longer rewrites URLs at generation time.
+
+[,asciidoc]
+----
+https://docs.redpanda.com/docs/manage/kubernetes/k-manage-resources/[/docs/ prefix]
+https://docs.redpanda.com/current/manage/kubernetes/k-manage-resources/[/current/ prefix]
+----
+
+Result: https://docs.redpanda.com/docs/manage/kubernetes/k-manage-resources/[/docs/ prefix]
+
+Result: https://docs.redpanda.com/current/manage/kubernetes/k-manage-resources/[/current/ prefix]
+
+== Renamed pages
+
+A URL that points at a page's former path resolves through the `page-aliases` attribute that the page declares. Antora does not register those aliases as catalog files until it converts documents, which is after this extension runs, so the extension reads them from the page header.
+
+This matters most for the generated Helm and CRD specs in the docs repo: they were written before the Kubernetes pages were renamed with the `k-` prefix, so almost every URL in them points at a former path.
+
+[,asciidoc]
+----
+https://docs.redpanda.com/docs/manage/kubernetes/manage-resources/#configure-cpu-resources[Configure CPU resources]
+https://docs.redpanda.com/docs/reference/cluster-properties/#log_segment_size_min[log_segment_size_min]
+----
+
+Result: https://docs.redpanda.com/docs/manage/kubernetes/manage-resources/#configure-cpu-resources[Configure CPU resources]
+
+Result: https://docs.redpanda.com/docs/reference/cluster-properties/#log_segment_size_min[log_segment_size_min]
+
+== Broken internal link detection
+
+A URL that matches no published page is left as a raw link and logged as a build warning. This is the notification mechanism: stale internal links surface in the build log instead of silently 404ing for readers.
+
+[,asciidoc]
+----
+https://docs.redpanda.com/streaming/current/manage/kubernetes/page-that-does-not-exist/
+----
+
+Result: https://docs.redpanda.com/streaming/current/manage/kubernetes/page-that-does-not-exist/
+
+The build log for this page reports:
+
+[,bash]
+----
+No published page matches https://docs.redpanda.com/streaming/current/manage/kubernetes/page-that-does-not-exist/
+----
+
+== URLs that are deliberately left alone
+
+The API reference is hosted outside the Antora catalog (Bump.sh), so `/api/` paths are ignored without a warning:
+
+[,asciidoc]
+----
+https://docs.redpanda.com/api/doc/cloud-controlplane/
+----
+
+Result: https://docs.redpanda.com/api/doc/cloud-controlplane/
+
+A URL in a macro attribute value is left alone, because `link=xref:...[]` would corrupt the macro. This one is covered by unit tests rather than shown here, because the rendered page cannot distinguish it from a link that was never converted:
+
+[,asciidoc]
+----
+image:test.png[Alt text,link=https://docs.redpanda.com/connect/configuration/secrets/]
+----
+
+A URL in an attribute entry is left alone, because the attribute may be used in a context where an xref is invalid. This page sets `url-attribute-entry` in its header, and the reference resolves to a plain link: {url-attribute-entry}[Attribute entry link]
+
+An external hostname is never converted: https://redpanda.com/blog[Redpanda blog]
+
+== Partials
+
+Partials are converted too:
+
+include::preview:ROOT:partial$url-to-xref-partial.adoc[]
+
+== External link checking
+
+The `external-link-checker` extension is not registered in this preview playbook, because it makes a network request for every external URL in the site. It runs on the docs-site nightly build, where it reports `404` and `410` responses as warnings, treats `401`, `403`, and `429` as unverifiable rather than broken, and can fail the build with `fail_on_broken`.

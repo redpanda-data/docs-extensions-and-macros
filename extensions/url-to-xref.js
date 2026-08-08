@@ -34,6 +34,10 @@ const { scanContentUrls } = require('./util/scan-content-urls')
  *   xref:...[] so Antora fills in the target page title.
  * - Targets in the latest version of a component emit an unversioned xref;
  *   targets pinned to an older version emit version@component:module:page.
+ * - URLs pointing at a page's former path resolve through the page-aliases the
+ *   page declares (see buildUrlMap).
+ * - URLs carrying a query string are left raw, because an xref cannot express
+ *   one; they are reported at info level rather than as warnings.
  */
 
 // Rewrites for URL shapes that predate the current docs.redpanda.com site
@@ -67,6 +71,7 @@ module.exports.register = function ({ config = {} }) {
     })
     let convertedCount = 0
     const unmapped = new Map()
+    const withQueryString = new Set()
     const files = contentCatalog
       .getPages((page) => page.out)
       .concat(contentCatalog.findBy({ family: 'partial' }))
@@ -81,11 +86,18 @@ module.exports.register = function ({ config = {} }) {
         if (!unmapped.has(url)) unmapped.set(url, new Set())
         unmapped.get(url).add(file.path)
       }
+      for (const url of result.withQueryString) withQueryString.add(url)
     }
     if (logUnconverted) {
       for (const [url, pages] of unmapped) {
         logger.warn(`No published page matches ${url} (found in: ${[...pages].join(', ')})`)
       }
+    }
+    if (withQueryString.size) {
+      logger.info(
+        `Left ${withQueryString.size} docs URL${withQueryString.size === 1 ? '' : 's'} with a query string as raw ` +
+          `link${withQueryString.size === 1 ? '' : 's'} (an xref cannot carry one): ${[...withQueryString].join(', ')}`
+      )
     }
     if (convertedCount || unmapped.size) {
       logger.info(
@@ -98,10 +110,16 @@ module.exports.register = function ({ config = {} }) {
 
 /**
  * Builds a lookup of published URL path -> resource coordinates from the
- * content catalog. Covers regular pages plus the synthetic alias files Antora
- * registers during classification for component start pages and the site
- * start page, so component landing URLs (/connect/) and the site root (/)
- * resolve too.
+ * content catalog. Covers regular pages, the synthetic alias files Antora
+ * registers during classification for component start pages and the site start
+ * page (so component landing URLs like /connect/ and the site root resolve),
+ * and the page-aliases each page declares in its header.
+ *
+ * page-aliases have to be read from the page header here because Antora does
+ * not register them as catalog alias files until it converts documents, which
+ * is after this extension runs. Without them, a URL that points at a page's
+ * former path (the majority of the raw URLs in generated Helm and CRD specs)
+ * would be reported as broken even though the site redirects it.
  */
 function buildUrlMap (contentCatalog) {
   const components = {}
@@ -117,7 +135,8 @@ function buildUrlMap (contentCatalog) {
     latest: isLatest(component, version),
   })
   const urls = new Map()
-  for (const page of contentCatalog.getPages((p) => p.out && p.pub && p.pub.url)) {
+  const pages = contentCatalog.getPages((p) => p.out && p.pub && p.pub.url)
+  for (const page of pages) {
     urls.set(normalizeUrlPath(page.pub.url), toEntry(page.src))
   }
   for (const alias of contentCatalog.findBy({ family: 'alias' })) {
@@ -129,7 +148,81 @@ function buildUrlMap (contentCatalog) {
     const key = normalizeUrlPath(alias.pub.url)
     if (!urls.has(key)) urls.set(key, toEntry(target.src))
   }
+  for (const page of pages) {
+    for (const key of pageAliasUrls(page)) {
+      if (!urls.has(key)) urls.set(key, toEntry(page.src))
+    }
+  }
   return { urls, components }
+}
+
+// Matches a page-aliases attribute entry in a page header.
+const PAGE_ALIASES_RX = /^:page-aliases:(.*)$/m
+
+/**
+ * Returns the normalized URL paths that a page's page-aliases attribute makes
+ * available. Only aliases in the same component and version as the target page
+ * are mapped, because their URL is derived from the target page's own
+ * published URL; a cross-component or cross-version alias is left to Antora's
+ * own redirect handling.
+ */
+function pageAliasUrls (page) {
+  const contents = page.contents && page.contents.toString()
+  if (!contents) return []
+  const match = PAGE_ALIASES_RX.exec(contents.slice(0, 4096))
+  if (!match) return []
+  const targetUrl = normalizeUrlPath(page.pub.url)
+  const targetSuffix = pageUrlSuffix(page.src)
+  // The alias URL differs from the target URL only in the module and page
+  // segments, so everything before them is a shared prefix.
+  if (targetSuffix && !targetUrl.endsWith(`/${targetSuffix}`)) return []
+  const base = targetSuffix ? targetUrl.slice(0, -(targetSuffix.length + 1)) : targetUrl
+  const keys = []
+  for (const spec of match[1].split(',')) {
+    const aliasSrc = parsePageAliasSpec(spec, page.src)
+    if (!aliasSrc) continue
+    const suffix = pageUrlSuffix(aliasSrc)
+    keys.push(normalizeUrlPath(suffix ? `${base}/${suffix}` : base || '/'))
+  }
+  return keys
+}
+
+/**
+ * Returns the module and page portion of a page's URL, which is the part that
+ * follows the component and version segments. A module named ROOT and an
+ * index page contribute no segment of their own.
+ */
+function pageUrlSuffix ({ module: module_, relative }) {
+  let stem = relative.replace(/\.adoc$/, '')
+  if (stem === 'index') stem = ''
+  else if (stem.endsWith('/index')) stem = stem.slice(0, -'/index'.length)
+  const segments = []
+  if (module_ && module_ !== 'ROOT') segments.push(module_)
+  if (stem) segments.push(stem)
+  return segments.join('/')
+}
+
+/**
+ * Parses one page-aliases entry ([version@][component:][module:]relative) into
+ * a resource id, inheriting anything it leaves out from the page that declares
+ * it. Returns undefined for an entry that names another component or version.
+ */
+function parsePageAliasSpec (spec, targetSrc) {
+  let rest = spec.trim()
+  if (!rest) return
+  const versionSeparator = rest.indexOf('@')
+  if (versionSeparator !== -1) {
+    if (rest.slice(0, versionSeparator) !== targetSrc.version) return
+    rest = rest.slice(versionSeparator + 1)
+  }
+  const parts = rest.split(':')
+  if (parts.length > 3) return
+  const relative = parts.pop()
+  if (!relative) return
+  const module_ = parts.length ? parts.pop() : targetSrc.module
+  if (parts.length && parts[0] !== targetSrc.component) return
+  // Antora still accepts an alias spec without the file extension.
+  return { module: module_ || targetSrc.module, relative: relative.endsWith('.adoc') ? relative : `${relative}.adoc` }
 }
 
 /** Normalizes a URL path for map lookup: drops the query string, an
@@ -183,14 +276,19 @@ function candidatePaths (normalizedPath, { components, latestVersionSegment }) {
       candidates.push(`/${componentName}${normalizedPath.slice(slug.length + 1)}`)
     }
   }
-  // An explicitly versioned URL whose version is the component's latest is
-  // published under the symbolic segment instead (redirect:to strategy).
   const segments = normalizedPath.split('/')
   const component = components[segments[1]]
   if (component && segments[2]) {
     const version = segments[2].replace(/^v/, '')
     if (version === component.latestVersion) {
+      // An explicitly versioned URL whose version is the component's latest is
+      // published under the symbolic segment instead (redirect:to strategy).
       candidates.push(['', segments[1], latestVersionSegment, ...segments.slice(3)].join('/'))
+    } else if (segments[2] === latestVersionSegment && component.latestVersion) {
+      // The reverse: a symbolic latest-version URL in a build that publishes
+      // the latest version under its real number (for example the preview
+      // site, which sets no latest-version segment).
+      candidates.push(['', segments[1], component.latestVersion, ...segments.slice(3)].join('/'))
     }
   }
   return candidates
@@ -211,8 +309,9 @@ function entryToXref (entry, fragment, label) {
 
 /**
  * Rewrites every mappable docs URL in content. Returns the updated content,
- * the number of conversions, and the internal URLs that matched no published
- * page.
+ * the number of conversions, the internal URLs that matched no published page,
+ * and the internal URLs that carry a query string, which an xref cannot
+ * express.
  */
 function convertContent (content, resolverContext) {
   const { hostnames, ignore = [] } = resolverContext
@@ -220,6 +319,7 @@ function convertContent (content, resolverContext) {
   let cursor = 0
   let converted = 0
   const unmapped = []
+  const withQueryString = []
   for (const match of scanContentUrls(content)) {
     let url
     try {
@@ -229,6 +329,14 @@ function convertContent (content, resolverContext) {
     }
     if (!hostnames.has(url.hostname) || match.inAttributeEntry || match.inAttributeValue) continue
     if (ignore.some((pattern) => pattern.test(url.pathname))) continue
+    // An xref target cannot carry a query string, and dropping one would
+    // change the link: the docs UI reads parameters such as
+    // ?platform=kubernetes to preselect a tab. Leave the raw URL, which still
+    // works, rather than converting it lossily.
+    if (url.search) {
+      withQueryString.push(match.url)
+      continue
+    }
     const entry = resolveUrlPath(url.pathname, resolverContext)
     if (!entry) {
       unmapped.push(match.url)
@@ -239,7 +347,7 @@ function convertContent (content, resolverContext) {
     converted++
   }
   result += content.slice(cursor)
-  return { content: result, converted, unmapped }
+  return { content: result, converted, unmapped, withQueryString }
 }
 
 module.exports.buildUrlMap = buildUrlMap
