@@ -12,7 +12,7 @@ module.exports.register = function ({ config }) {
       if (!pageCategories) return;
       const sourceCategoryList = pageCategories.split(',').map(c => c.trim());
       const sourceDeploymentType = getDeploymentType(sourceAttributes)
-      const labs = contentCatalog.findBy({ component: 'redpanda-labs', family: 'page' });
+      const labs = contentCatalog.findBy({ component: 'labs', family: 'page' });
       labs.forEach((labPage) => {
         const related = findRelated(labPage, sourceCategoryList, sourceDeploymentType, logger)
         related && relatedLabs.push(related)

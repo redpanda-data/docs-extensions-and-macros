@@ -1,4 +1,5 @@
 {
+  "$schema": "https://raw.githubusercontent.com/redpanda-data/docs-extensions-and-macros/main/docs-data/schemas/property-overrides.schema.json",
   "properties": {
     "abort_index_segment_size": {
       "description": "Capacity (in number of txns) of an abort index segment.\n\nEach partition tracks the aborted transaction offset ranges to help service client requests. If the number of transactions increases beyond this threshold, they are flushed to disk to ease memory pressure. Then they're loaded on demand. This configuration controls the maximum number of aborted transactions before they are flushed to disk.",

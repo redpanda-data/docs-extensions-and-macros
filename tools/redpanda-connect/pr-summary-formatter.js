@@ -4,21 +4,575 @@
  */
 
 /**
- * Generate a PR-friendly summary for connector changes
- * @param {object} diffData - Diff data from generateConnectorDiffJson
- * @param {object} binaryAnalysis - Cloud support data from getCloudSupport
+ * Render Bloblang changes section for PR summary
+ * @param {object} data - Bloblang change data
+ * @param {array} data.newMethods - Array of new methods (with .name and optional .version)
+ * @param {array} data.newFunctions - Array of new functions (with .name and optional .version)
+ * @param {array} data.removedMethods - Array of removed methods
+ * @param {array} data.removedFunctions - Array of removed functions
+ * @param {array} data.deprecatedMethods - Array of deprecated methods
+ * @param {array} data.deprecatedFunctions - Array of deprecated functions
+ * @param {boolean} includeVersion - Whether to include version info in output
+ * @returns {array} Array of lines to add to the summary
+ */
+function renderBloblangChanges(data, includeVersion = false) {
+  const lines = [];
+  const {
+    newMethods = [],
+    newFunctions = [],
+    removedMethods = [],
+    removedFunctions = [],
+    deprecatedMethods = [],
+    deprecatedFunctions = []
+  } = data;
+
+  const hasChanges = newMethods.length > 0 || newFunctions.length > 0 ||
+                     removedMethods.length > 0 || removedFunctions.length > 0 ||
+                     deprecatedMethods.length > 0 || deprecatedFunctions.length > 0;
+
+  if (!hasChanges) {
+    return lines;
+  }
+
+  lines.push('**Update Bloblang Guide Pages:**');
+  lines.push('');
+
+  if (newMethods.length > 0) {
+    lines.push(`New methods to add to \`modules/guides/pages/bloblang/methods.adoc\` (${newMethods.length}):`);
+    newMethods.forEach(method => {
+      const versionInfo = includeVersion && method.version ? ` — introduced in **${method.version}**` : '';
+      const name = typeof method === 'string' ? method : method.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (newFunctions.length > 0) {
+    lines.push(`New functions to add to \`modules/guides/pages/bloblang/functions.adoc\` (${newFunctions.length}):`);
+    newFunctions.forEach(func => {
+      const versionInfo = includeVersion && func.version ? ` — introduced in **${func.version}**` : '';
+      const name = typeof func === 'string' ? func : func.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (removedMethods.length > 0) {
+    lines.push(`Removed methods to delete from \`modules/guides/pages/bloblang/methods.adoc\` (${removedMethods.length}):`);
+    removedMethods.forEach(method => {
+      const versionInfo = includeVersion && method.version ? ` — removed in **${method.version}**` : '';
+      const name = typeof method === 'string' ? method : method.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (removedFunctions.length > 0) {
+    lines.push(`Removed functions to delete from \`modules/guides/pages/bloblang/functions.adoc\` (${removedFunctions.length}):`);
+    removedFunctions.forEach(func => {
+      const versionInfo = includeVersion && func.version ? ` — removed in **${func.version}**` : '';
+      const name = typeof func === 'string' ? func : func.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (deprecatedMethods.length > 0) {
+    lines.push(`Deprecated methods - add deprecation notice to \`modules/guides/pages/bloblang/methods.adoc\` (${deprecatedMethods.length}):`);
+    deprecatedMethods.forEach(method => {
+      const versionInfo = includeVersion && method.version ? ` — deprecated in **${method.version}**` : '';
+      const name = typeof method === 'string' ? method : method.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  if (deprecatedFunctions.length > 0) {
+    lines.push(`Deprecated functions - add deprecation notice to \`modules/guides/pages/bloblang/functions.adoc\` (${deprecatedFunctions.length}):`);
+    deprecatedFunctions.forEach(func => {
+      const versionInfo = includeVersion && func.version ? ` — deprecated in **${func.version}**` : '';
+      const name = typeof func === 'string' ? func : func.name;
+      lines.push(`- [ ] \`${name}\`${versionInfo}`);
+    });
+    lines.push('');
+  }
+
+  lines.push('**How to add includes:**');
+  lines.push('');
+  lines.push('For methods, find the appropriate category section in `methods.adoc` and add:');
+  lines.push('```asciidoc');
+  lines.push('include::connect:partial$bloblang-methods/method_name.adoc[leveloffset=+2]');
+  lines.push('```');
+  lines.push('');
+  lines.push('For functions, add to the Functions section in `functions.adoc`:');
+  lines.push('```asciidoc');
+  lines.push('include::connect:partial$bloblang-functions/function_name.adoc[leveloffset=+2]');
+  lines.push('```');
+  lines.push('');
+  lines.push('**Note:** Partials are auto-generated. Includes must be added manually in alphabetical order within their section.');
+  lines.push('');
+
+  return lines;
+}
+
+/**
+ * Generate PR summary for multiple releases
+ * @param {object} masterDiff - Master diff with releases array
+ * @param {object} binaryAnalysis - Cloud support data (from latest release)
  * @param {array} draftedConnectors - Array of newly drafted connectors
  * @returns {string} Formatted summary
  */
-function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = null) {
+/**
+ * Render the content-loss warning block that leads the PR summary. These
+ * warnings exist to stop a merge, so they go at the top of the summary body
+ * rather than into the collapsed workflow log where nobody reads them.
+ * @param {Array<{partial: string, sections: string[]}>} warnings
+ * @returns {string[]} lines (empty when there is nothing to warn about)
+ */
+function renderLostSectionWarnings(warnings) {
+  if (!Array.isArray(warnings) || warnings.length === 0) return [];
+  const lines = [];
+  lines.push('> [!WARNING]');
+  lines.push('> **This update deletes previously published metadata sections.** Review before merging: move the content to the connector page or restore it in the upstream description.');
+  for (const w of warnings) {
+    lines.push(`> - \`${w.partial}\` drops: ${w.sections.map((h) => `"${h}"`).join(', ')}`);
+  }
+  lines.push('');
+  return lines;
+}
+
+function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, draftedConnectors = null) {
+  const lines = [];
+
+  // Defensive: ensure metadata exists
+  const metadata = masterDiff?.metadata || {};
+  const startVersion = metadata.startVersion || 'unknown';
+  const endVersion = metadata.endVersion || 'unknown';
+  const processedReleases = metadata.processedReleases || 0;
+
+  lines.push('<!-- PR_SUMMARY_START -->');
+  lines.push('');
+  lines.push(...renderLostSectionWarnings(masterDiff?.lostSectionWarnings));
+  lines.push('## Redpanda Connect Documentation Update');
+  lines.push('');
+  lines.push(`**Multi-Release Update:** ${startVersion} → ${endVersion}`);
+  lines.push(`**Releases Processed:** ${processedReleases}`);
+
+  if (binaryAnalysis) {
+    lines.push(`**Cloud Version:** ${binaryAnalysis.cloudVersion}`);
+  }
+
+  lines.push('');
+
+  // Total summary across all releases
+  lines.push('### Total Changes Across All Releases');
+  lines.push('');
+  const total = masterDiff?.totalSummary || {};
+
+  if (total.newComponents > 0) {
+    lines.push(`- **${total.newComponents}** new connectors`);
+  }
+  if (total.newFields > 0) {
+    lines.push(`- **${total.newFields}** new fields across ${total.releaseCount || 0} release(s)`);
+  }
+  if (total.removedComponents > 0) {
+    lines.push(`- **${total.removedComponents}** removed connectors`);
+  }
+  if (total.removedFields > 0) {
+    lines.push(`- **${total.removedFields}** removed fields`);
+  }
+  if (total.deprecatedComponents > 0) {
+    lines.push(`- **${total.deprecatedComponents}** deprecated connectors`);
+  }
+  if (total.deprecatedFields > 0) {
+    lines.push(`- **${total.deprecatedFields}** deprecated fields`);
+  }
+  if (total.changedDefaults > 0) {
+    lines.push(`- **${total.changedDefaults}** changed default values`);
+  }
+  if (total.newBloblangMethods > 0) {
+    lines.push(`- **${total.newBloblangMethods}** new Bloblang methods`);
+  }
+  if (total.removedBloblangMethods > 0) {
+    lines.push(`- **${total.removedBloblangMethods}** removed Bloblang methods`);
+  }
+  if (total.newBloblangFunctions > 0) {
+    lines.push(`- **${total.newBloblangFunctions}** new Bloblang functions`);
+  }
+  if (total.removedBloblangFunctions > 0) {
+    lines.push(`- **${total.removedBloblangFunctions}** removed Bloblang functions`);
+  }
+
+  lines.push('');
+
+  // Guard: ensure releases array exists
+  const releases = masterDiff?.releases || [];
+  if (releases.length === 0) {
+    lines.push('_No releases to process_');
+    lines.push('');
+    lines.push('<!-- PR_SUMMARY_END -->');
+    return lines.join('\n');
+  }
+
+  // Per-release detailed breakdown
+  lines.push('### Changes Per Release');
+  lines.push('');
+
+  for (const release of releases) {
+    const releaseNotesUrl = `https://github.com/redpanda-data/connect/releases/tag/v${release.toVersion}`;
+    lines.push(`#### Version ${release.toVersion}`);
+    lines.push(`> [Release notes](${releaseNotesUrl})`);
+    lines.push('');
+
+    const summary = release.summary || {};
+    const details = release.details || {};
+    const hasChanges = Object.values(summary).some(v => v > 0);
+
+    if (!hasChanges) {
+      lines.push('_No documentation changes in this release_');
+      lines.push('');
+      continue;
+    }
+
+    // New connectors with descriptions
+    const newComponents = details.newComponents || [];
+    if (summary.newComponents > 0 && newComponents.length > 0) {
+      lines.push(`**New Connectors (${summary.newComponents}):**`);
+      lines.push('');
+      const inCloud = release.binaryAnalysis?.comparison?.inCloud || [];
+      const cloudOnly = release.binaryAnalysis?.comparison?.cloudOnly || [];
+      const notInCloud = release.binaryAnalysis?.comparison?.notInCloud || [];
+      const cgoOnly = release.binaryAnalysis?.cgoOnly || [];
+
+      newComponents.forEach(comp => {
+        const isInCloud = inCloud.some(c => c.type === comp.type && c.name === comp.name) ||
+          cloudOnly.some(c => c.type === comp.type && c.name === comp.name);
+        const isSelfHostedOnly = notInCloud.some(c => c.type === comp.type && c.name === comp.name);
+        const isCgoOnly = cgoOnly.some(c => c.type === comp.type && c.name === comp.name);
+
+        let platformIndicator = '';
+        if (isInCloud) platformIndicator = ' ☁️';
+        else if (isSelfHostedOnly) platformIndicator = ' 🖥️';
+        if (isCgoOnly) platformIndicator += ' 🔧';
+
+        lines.push(`##### \`${comp.name}\` (${comp.status ? `${comp.type}, ${comp.status}` : comp.type})${platformIndicator}`);
+
+        // Add description (truncated to 2 sentences)
+        if (comp.description) {
+          const shortDesc = truncateToSentence(comp.description, 2);
+          lines.push(`> ${shortDesc}`);
+        }
+        lines.push('');
+      });
+    }
+
+    // New fields with details
+    const newFields = details.newFields || [];
+    if (summary.newFields > 0 && newFields.length > 0) {
+      lines.push(`**New Fields (${summary.newFields}):**`);
+      lines.push('');
+      lines.push('| Component | Field | Description |');
+      lines.push('|-----------|-------|-------------|');
+
+      newFields.forEach(field => {
+        const desc = field.description ? truncateToSentence(field.description, 1).replace(/\|/g, '\\|') : '_No description_';
+        lines.push(`| \`${field.component}\` | \`${field.field}\` | ${desc} |`);
+      });
+      lines.push('');
+    }
+
+    // Removed components
+    const removedComponents = details.removedComponents || [];
+    if (summary.removedComponents > 0 && removedComponents.length > 0) {
+      lines.push(`**Removed Connectors (${summary.removedComponents}):**`);
+      lines.push('');
+      removedComponents.forEach(comp => {
+        lines.push(`- \`${comp.name}\` (${comp.type})`);
+      });
+      lines.push('');
+    }
+
+    // Removed fields
+    const removedFields = details.removedFields || [];
+    if (summary.removedFields > 0 && removedFields.length > 0) {
+      lines.push(`**Removed Fields (${summary.removedFields}):**`);
+      lines.push('');
+      lines.push('| Component | Field |');
+      lines.push('|-----------|-------|');
+      removedFields.forEach(field => {
+        lines.push(`| \`${field.component}\` | \`${field.field}\` |`);
+      });
+      lines.push('');
+    }
+
+    // Deprecated fields with migration guidance
+    const deprecatedFields = details.deprecatedFields || [];
+    if (summary.deprecatedFields > 0 && deprecatedFields.length > 0) {
+      lines.push(`**Deprecated Fields (${summary.deprecatedFields}):**`);
+      lines.push('');
+      deprecatedFields.forEach(field => {
+        const guidance = field.description ? ` — ${truncateToSentence(field.description, 1)}` : '';
+        lines.push(`- \`${field.component}.${field.field}\`${guidance}`);
+      });
+      lines.push('');
+    }
+
+    // Changed defaults
+    const changedDefaults = details.changedDefaults || [];
+    if (summary.changedDefaults > 0 && changedDefaults.length > 0) {
+      lines.push(`**Changed Defaults (${summary.changedDefaults}):**`);
+      lines.push('');
+      lines.push('| Component | Field | Old Default | New Default |');
+      lines.push('|-----------|-------|-------------|-------------|');
+      changedDefaults.forEach(change => {
+        const oldVal = change.oldDefault !== undefined ? `\`${JSON.stringify(change.oldDefault)}\`` : '_none_';
+        const newVal = change.newDefault !== undefined ? `\`${JSON.stringify(change.newDefault)}\`` : '_none_';
+        lines.push(`| \`${change.component}\` | \`${change.field}\` | ${oldVal} | ${newVal} |`);
+      });
+      lines.push('');
+    }
+  }
+
+  // Writer action items (aggregate)
+  lines.push('---');
+  lines.push('');
+  lines.push('### Writer Action Items');
+  lines.push('');
+
+  // Collect all new connectors across all releases with full details
+  const allNewConnectors = [];
+  const allRemovedConnectors = [];
+  const allDeprecatedFields = [];
+  const allChangedDefaults = [];
+  const allNewBloblangMethods = [];
+  const allRemovedBloblangMethods = [];
+  const allNewBloblangFunctions = [];
+  const allRemovedBloblangFunctions = [];
+  const allDeprecatedBloblangMethods = [];
+  const allDeprecatedBloblangFunctions = [];
+
+  releases.forEach(release => {
+    const details = release.details || {};
+    const releaseInCloud = release.binaryAnalysis?.comparison?.inCloud || [];
+    const releaseCloudOnly = release.binaryAnalysis?.comparison?.cloudOnly || [];
+    const releaseNotInCloud = release.binaryAnalysis?.comparison?.notInCloud || [];
+
+    // New connectors
+    (details.newComponents || []).forEach(comp => {
+      const isCloud = releaseInCloud.some(c => c.type === comp.type && c.name === comp.name) ||
+        releaseCloudOnly.some(c => c.type === comp.type && c.name === comp.name);
+      const isSelfHostedOnly = releaseNotInCloud.some(c => c.type === comp.type && c.name === comp.name);
+
+      allNewConnectors.push({
+        name: comp.name,
+        type: comp.type,
+        status: comp.status,
+        description: comp.description,
+        version: release.toVersion,
+        isCloud,
+        isSelfHostedOnly
+      });
+    });
+
+    // Removed connectors
+    (details.removedComponents || []).forEach(comp => {
+      allRemovedConnectors.push({
+        name: comp.name,
+        type: comp.type,
+        version: release.toVersion
+      });
+    });
+
+    // Deprecated fields
+    (details.deprecatedFields || []).forEach(field => {
+      allDeprecatedFields.push({
+        component: field.component,
+        field: field.field,
+        description: field.description,
+        version: release.toVersion
+      });
+    });
+
+    // Changed defaults
+    (details.changedDefaults || []).forEach(change => {
+      allChangedDefaults.push({
+        component: change.component,
+        field: change.field,
+        oldDefault: change.oldDefault,
+        newDefault: change.newDefault,
+        version: release.toVersion
+      });
+    });
+
+    // New/removed Bloblang methods
+    (details.newBloblangMethods || []).forEach(methodName => {
+      allNewBloblangMethods.push({
+        name: methodName,
+        version: release.toVersion
+      });
+    });
+    (details.removedBloblangMethods || []).forEach(methodName => {
+      allRemovedBloblangMethods.push({
+        name: methodName,
+        version: release.toVersion
+      });
+    });
+
+    // New/removed Bloblang functions
+    (details.newBloblangFunctions || []).forEach(funcName => {
+      allNewBloblangFunctions.push({
+        name: funcName,
+        version: release.toVersion
+      });
+    });
+    (details.removedBloblangFunctions || []).forEach(funcName => {
+      allRemovedBloblangFunctions.push({
+        name: funcName,
+        version: release.toVersion
+      });
+    });
+
+    // Deprecated Bloblang methods/functions
+    (details.deprecatedBloblangMethods || []).forEach(methodName => {
+      allDeprecatedBloblangMethods.push({
+        name: methodName,
+        version: release.toVersion
+      });
+    });
+    (details.deprecatedBloblangFunctions || []).forEach(funcName => {
+      allDeprecatedBloblangFunctions.push({
+        name: funcName,
+        version: release.toVersion
+      });
+    });
+  });
+
+  // Priority 1: New connectors needing documentation
+  if (allNewConnectors.length > 0) {
+    lines.push('**📝 Document New Connectors:**');
+    lines.push('');
+
+    // Group by cloud vs self-hosted
+    const cloudConnectors = allNewConnectors.filter(c => c.isCloud);
+    const selfHostedConnectors = allNewConnectors.filter(c => c.isSelfHostedOnly);
+    const otherConnectors = allNewConnectors.filter(c => !c.isCloud && !c.isSelfHostedOnly);
+
+    if (cloudConnectors.length > 0) {
+      lines.push('_Cloud-supported (higher priority):_');
+      cloudConnectors.forEach(conn => {
+        lines.push(`- [ ] \`${conn.name}\` ${conn.type} ☁️ — introduced in **${conn.version}**`);
+      });
+      lines.push('');
+    }
+
+    if (selfHostedConnectors.length > 0) {
+      lines.push('_Self-hosted only:_');
+      selfHostedConnectors.forEach(conn => {
+        lines.push(`- [ ] \`${conn.name}\` ${conn.type} 🖥️ — introduced in **${conn.version}**`);
+      });
+      lines.push('');
+    }
+
+    if (otherConnectors.length > 0) {
+      lines.push('_Other connectors:_');
+      otherConnectors.forEach(conn => {
+        lines.push(`- [ ] \`${conn.name}\` ${conn.type} — introduced in **${conn.version}**`);
+      });
+      lines.push('');
+    }
+  }
+
+  // Priority 2: Removed connectors needing migration docs
+  if (allRemovedConnectors.length > 0) {
+    lines.push('**Update Migration Guide for Removed Connectors:**');
+    lines.push('');
+    allRemovedConnectors.forEach(conn => {
+      lines.push(`- [ ] \`${conn.name}\` ${conn.type} — removed in **${conn.version}**`);
+    });
+    lines.push('');
+  }
+
+  // Priority 3: Deprecated fields needing docs update
+  if (allDeprecatedFields.length > 0) {
+    lines.push('**Update Docs for Deprecated Fields:**');
+    lines.push('');
+    allDeprecatedFields.forEach(field => {
+      const guidance = field.description ? ` (${truncateToSentence(field.description, 1)})` : '';
+      lines.push(`- [ ] \`${field.component}.${field.field}\`${guidance} — deprecated in **${field.version}**`);
+    });
+    lines.push('');
+  }
+
+  // Priority 4: Changed defaults that may affect users
+  if (allChangedDefaults.length > 0) {
+    lines.push('**Review Changed Defaults for Breaking Changes:**');
+    lines.push('');
+    allChangedDefaults.forEach(change => {
+      const oldVal = change.oldDefault !== undefined ? JSON.stringify(change.oldDefault) : 'none';
+      const newVal = change.newDefault !== undefined ? JSON.stringify(change.newDefault) : 'none';
+      lines.push(`- [ ] \`${change.component}.${change.field}\`: \`${oldVal}\` → \`${newVal}\` — changed in **${change.version}**`);
+    });
+    lines.push('');
+  }
+
+  // Bloblang methods and functions
+  const bloblangLines = renderBloblangChanges({
+    newMethods: allNewBloblangMethods,
+    newFunctions: allNewBloblangFunctions,
+    removedMethods: allRemovedBloblangMethods,
+    removedFunctions: allRemovedBloblangFunctions,
+    deprecatedMethods: allDeprecatedBloblangMethods,
+    deprecatedFunctions: allDeprecatedBloblangFunctions
+  }, true); // includeVersion = true for multi-version summaries
+  lines.push(...bloblangLines);
+
+  // Add commercial name reminder if there are new connectors
+  if (allNewConnectors.length > 0) {
+    lines.push('---');
+    lines.push('');
+    lines.push('**💡 Reminder:** For each new connector, add the `:page-commercial-names:` attribute:');
+    lines.push('');
+    lines.push('```asciidoc');
+    lines.push('= Connector Name');
+    lines.push(':type: input');
+    lines.push(':page-commercial-names: Commercial Name, Alternative Name');
+    lines.push('```');
+    lines.push('');
+  }
+
+  lines.push('<!-- PR_SUMMARY_END -->');
+  return lines.join('\n');
+}
+
+/**
+ * Generate a PR-friendly summary for connector changes
+ * @param {object} diffData - Diff data from generateConnectorDiffJson OR master diff with multiple releases
+ * @param {object} binaryAnalysis - Cloud support data from getCloudSupport
+ * @param {array} draftedConnectors - Array of newly drafted connectors
+ * @param {boolean} isMultiVersion - Whether diffData is a master diff with multiple releases
+ * @returns {string} Formatted summary
+ */
+function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = null, isMultiVersion = false) {
   const lines = [];
 
   // Header with delimiters for GitHub Action parsing
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
+  lines.push(...renderLostSectionWarnings(diffData.lostSectionWarnings));
 
+  // Detect if this is a master diff
+  if (!isMultiVersion && diffData.releases && diffData.totalSummary) {
+    isMultiVersion = true;
+  }
+
+  if (isMultiVersion) {
+    // Multi-version format
+    return generateMultiVersionPRSummary(diffData, binaryAnalysis, draftedConnectors);
+  }
+
+  // Single version format (original logic)
   // Quick Summary Section
-  lines.push('## 📊 Redpanda Connect Documentation Update');
+  lines.push('## Redpanda Connect Documentation Update');
   lines.push('');
   lines.push(`**OSS Version:** ${diffData.comparison.oldVersion} → ${diffData.comparison.newVersion}`);
 
@@ -33,7 +587,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   const hasChanges = Object.values(stats).some(v => v > 0) || (draftedConnectors && draftedConnectors.length > 0);
 
   if (!hasChanges) {
-    lines.push('✅ **No changes detected** - Documentation is up to date');
+    lines.push('**No changes detected** - Documentation is up to date');
     lines.push('');
     lines.push('<!-- PR_SUMMARY_END -->');
     return lines.join('\n');
@@ -45,11 +599,13 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   if (stats.newComponents > 0) {
     lines.push(`- **${stats.newComponents}** new connector${stats.newComponents !== 1 ? 's' : ''}`);
 
-    if (binaryAnalysis) {
+    if (binaryAnalysis && binaryAnalysis.comparison) {
       const newConnectorKeys = diffData.details.newComponents.map(c => `${c.type}:${c.name}`);
       const cloudSupported = newConnectorKeys.filter(key => {
         const inCloud = binaryAnalysis.comparison.inCloud.some(c => `${c.type}:${c.name}` === key);
-        return inCloud;
+        const cloudOnly = binaryAnalysis.comparison.cloudOnly &&
+                         binaryAnalysis.comparison.cloudOnly.some(c => `${c.type}:${c.name}` === key);
+        return inCloud || cloudOnly;
       }).length;
 
       const needsCloudDocs = cloudSupported;
@@ -66,11 +622,11 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   }
 
   if (stats.removedComponents > 0) {
-    lines.push(`- **${stats.removedComponents}** removed connector${stats.removedComponents !== 1 ? 's' : ''} ⚠️`);
+    lines.push(`- **${stats.removedComponents}** removed connector${stats.removedComponents !== 1 ? 's' : ''}`);
   }
 
   if (stats.removedFields > 0) {
-    lines.push(`- **${stats.removedFields}** removed field${stats.removedFields !== 1 ? 's' : ''} ⚠️`);
+    lines.push(`- **${stats.removedFields}** removed field${stats.removedFields !== 1 ? 's' : ''}`);
   }
 
   if (stats.deprecatedComponents > 0) {
@@ -81,15 +637,39 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
     lines.push(`- **${stats.deprecatedFields}** deprecated field${stats.deprecatedFields !== 1 ? 's' : ''}`);
   }
 
+  if (stats.newBloblangMethods > 0) {
+    lines.push(`- **${stats.newBloblangMethods}** new Bloblang method${stats.newBloblangMethods !== 1 ? 's' : ''}`);
+  }
+
+  if (stats.newBloblangFunctions > 0) {
+    lines.push(`- **${stats.newBloblangFunctions}** new Bloblang function${stats.newBloblangFunctions !== 1 ? 's' : ''}`);
+  }
+
+  if (stats.removedBloblangMethods > 0) {
+    lines.push(`- **${stats.removedBloblangMethods}** removed Bloblang method${stats.removedBloblangMethods !== 1 ? 's' : ''}`);
+  }
+
+  if (stats.removedBloblangFunctions > 0) {
+    lines.push(`- **${stats.removedBloblangFunctions}** removed Bloblang function${stats.removedBloblangFunctions !== 1 ? 's' : ''}`);
+  }
+
+  if (stats.deprecatedBloblangMethods > 0) {
+    lines.push(`- **${stats.deprecatedBloblangMethods}** deprecated Bloblang method${stats.deprecatedBloblangMethods !== 1 ? 's' : ''}`);
+  }
+
+  if (stats.deprecatedBloblangFunctions > 0) {
+    lines.push(`- **${stats.deprecatedBloblangFunctions}** deprecated Bloblang function${stats.deprecatedBloblangFunctions !== 1 ? 's' : ''}`);
+  }
+
   if (stats.changedDefaults > 0) {
-    lines.push(`- **${stats.changedDefaults}** default value change${stats.changedDefaults !== 1 ? 's' : ''} ⚠️`);
+    lines.push(`- **${stats.changedDefaults}** default value change${stats.changedDefaults !== 1 ? 's' : ''}`);
   }
 
   lines.push('');
 
   // Writer Reminder for Commercial Names
   if (stats.newComponents > 0) {
-    lines.push('### ✍️ Writer Action Required');
+    lines.push('### Writer Action Required');
     lines.push('');
     lines.push('For each new connector, add the `:page-commercial-names:` attribute to the frontmatter:');
     lines.push('');
@@ -141,7 +721,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
           lines.push('```asciidoc');
           lines.push('= Connector Name');
           lines.push('');
-          lines.push('include::redpanda-connect:components:page$type/connector-name.adoc[tag=single-source]');
+          lines.push('include::connect:components:page$type/connector-name.adoc[tag=single-source]');
           lines.push('```');
           lines.push('');
         }
@@ -151,7 +731,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
           lines.push('```asciidoc');
           lines.push('= Connector Name');
           lines.push('');
-          lines.push('include::redpanda-connect:components:partial$components/cloud-only/type/connector-name.adoc[tag=single-source]');
+          lines.push('include::connect:components:partial$components/cloud-only/type/connector-name.adoc[tag=single-source]');
           lines.push('```');
           lines.push('');
         }
@@ -172,7 +752,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   if (stats.changedDefaults > 0) breakingChanges.push('changed defaults');
 
   if (breakingChanges.length > 0) {
-    lines.push('### ⚠️ Breaking Changes Detected');
+    lines.push('### Breaking Changes Detected');
     lines.push('');
     lines.push(`This update includes **${breakingChanges.join(', ')}** that may affect existing configurations.`);
     lines.push('');
@@ -199,9 +779,15 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
     Object.entries(draftsByType).forEach(([type, drafts]) => {
       lines.push(`**${type}:**`);
       drafts.forEach(draft => {
-        const cloudIndicator = binaryAnalysis?.comparison.inCloud.some(c =>
+        // Check both inCloud (OSS+Cloud) and cloudOnly (Cloud-only)
+        const isInCloud = binaryAnalysis?.comparison.inCloud.some(c =>
           c.type === type && c.name === draft.name
-        ) ? ' ☁️' : '';
+        );
+        const isCloudOnly = binaryAnalysis?.comparison.cloudOnly &&
+          binaryAnalysis.comparison.cloudOnly.some(c =>
+            c.type === type && c.name === draft.name
+          );
+        const cloudIndicator = (isInCloud || isCloudOnly) ? ' ☁️' : '';
         const cgoIndicator = draft.requiresCgo ? ' 🔧' : '';
         const statusBadge = draft.status && draft.status !== 'stable' ? ` (${draft.status})` : '';
         lines.push(`- \`${draft.name}\`${statusBadge}${cloudIndicator}${cgoIndicator} → \`${draft.path}\``);
@@ -240,7 +826,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   }
 
   if (missingDescriptions.length > 0) {
-    lines.push('### ⚠️ Missing Descriptions');
+    lines.push('### Missing Descriptions');
     lines.push('');
     lines.push(`**${missingDescriptions.length}** item${missingDescriptions.length !== 1 ? 's' : ''} missing descriptions - these need writer attention:`);
     lines.push('');
@@ -285,7 +871,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   if (missingDescriptions.length > 0) {
     actionItems.push({
       priority: 0,
-      text: `⚠️ Add descriptions for ${missingDescriptions.length} component${missingDescriptions.length !== 1 ? 's' : ''}/field${missingDescriptions.length !== 1 ? 's' : ''} (see Missing Descriptions section)`
+      text: `Add descriptions for ${missingDescriptions.length} component${missingDescriptions.length !== 1 ? 's' : ''}/field${missingDescriptions.length !== 1 ? 's' : ''} (see Missing Descriptions section)`
     });
   }
 
@@ -304,13 +890,16 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
     });
   }
 
-  // New connectors without cloud support
-  if (stats.newComponents > 0) {
+  // New connectors without cloud support (self-hosted only)
+  if (binaryAnalysis && stats.newComponents > 0) {
     diffData.details.newComponents.forEach(connector => {
       const key = `${connector.type}:${connector.name}`;
-      const inCloud = binaryAnalysis?.comparison.inCloud.some(c => `${c.type}:${c.name}` === key);
 
-      if (!inCloud) {
+      // Check if it's explicitly in the self-hosted only list
+      const isSelfHostedOnly = binaryAnalysis.comparison.notInCloud &&
+        binaryAnalysis.comparison.notInCloud.some(c => `${c.type}:${c.name}` === key);
+
+      if (isSelfHostedOnly) {
         actionItems.push({
           priority: 2,
           text: `Document new \`${connector.name}\` ${connector.type} (self-hosted only)`
@@ -360,9 +949,20 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   lines.push('');
 
+  // Bloblang methods and functions
+  const bloblangLines = renderBloblangChanges({
+    newMethods: diffData.details.newBloblangMethods || [],
+    newFunctions: diffData.details.newBloblangFunctions || [],
+    removedMethods: diffData.details.removedBloblangMethods || [],
+    removedFunctions: diffData.details.removedBloblangFunctions || [],
+    deprecatedMethods: diffData.details.deprecatedBloblangMethods || [],
+    deprecatedFunctions: diffData.details.deprecatedBloblangFunctions || []
+  }, false); // includeVersion = false for single-version summaries
+  lines.push(...bloblangLines);
+
   // Detailed breakdown (expandable)
   lines.push('<details>');
-  lines.push('<summary><strong>📋 Detailed Changes</strong> (click to expand)</summary>');
+  lines.push('<summary><strong>Detailed Changes</strong> (click to expand)</summary>');
   lines.push('');
 
   // New Connectors
@@ -376,7 +976,13 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
       diffData.details.newComponents.forEach(connector => {
         const key = `${connector.type}:${connector.name}`;
+
+        // Check explicit categories
         const inCloud = binaryAnalysis.comparison.inCloud.some(c => `${c.type}:${c.name}` === key);
+        const isSelfHostedOnly = binaryAnalysis.comparison.notInCloud &&
+          binaryAnalysis.comparison.notInCloud.some(c => `${c.type}:${c.name}` === key);
+        const isCloudOnly = binaryAnalysis.comparison.cloudOnly &&
+          binaryAnalysis.comparison.cloudOnly.some(c => `${c.type}:${c.name}` === key);
 
         const entry = {
           name: connector.name,
@@ -385,9 +991,10 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
           description: connector.description
         };
 
-        if (inCloud) {
+        // Use explicit positive checks instead of !inCloud
+        if (inCloud || isCloudOnly) {
           cloudSupportedNew.push(entry);
-        } else {
+        } else if (isSelfHostedOnly) {
           selfHostedOnlyNew.push(entry);
         }
       });
@@ -396,7 +1003,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
         lines.push('**☁️ Cloud Supported:**');
         lines.push('');
         cloudSupportedNew.forEach(c => {
-          lines.push(`- **${c.name}** (${c.type}, ${c.status})`);
+          lines.push(`- **${c.name}** (${c.status ? `${c.type}, ${c.status}` : c.type})`);
           const desc = c.summary || c.description;
           if (desc) {
             const shortDesc = truncateToSentence(desc, 2);
@@ -410,7 +1017,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
         lines.push('**Self-Hosted Only:**');
         lines.push('');
         selfHostedOnlyNew.forEach(c => {
-          lines.push(`- **${c.name}** (${c.type}, ${c.status})`);
+          lines.push(`- **${c.name}** (${c.status ? `${c.type}, ${c.status}` : c.type})`);
           const desc = c.summary || c.description;
           if (desc) {
             const shortDesc = truncateToSentence(desc, 2);
@@ -422,7 +1029,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
     } else {
       // No cloud support info, just list all
       diffData.details.newComponents.forEach(c => {
-        lines.push(`- **${c.name}** (${c.type}, ${c.status})`);
+        lines.push(`- **${c.name}** (${c.status ? `${c.type}, ${c.status}` : c.type})`);
         const desc = c.summary || c.description;
         if (desc) {
           const shortDesc = truncateToSentence(desc, 2);
@@ -493,7 +1100,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // Removed Connectors
   if (stats.removedComponents > 0) {
-    lines.push('#### ⚠️ Removed Connectors');
+    lines.push('#### Removed Connectors');
     lines.push('');
     diffData.details.removedComponents.forEach(c => {
       lines.push(`- **${c.name}** (${c.type})`);
@@ -503,7 +1110,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // Removed Fields
   if (stats.removedFields > 0) {
-    lines.push('#### ⚠️ Removed Fields');
+    lines.push('#### Removed Fields');
     lines.push('');
 
     const fieldsByComponent = {};
@@ -559,7 +1166,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
 
   // Changed Defaults
   if (stats.changedDefaults > 0) {
-    lines.push('#### ⚠️ Changed Default Values');
+    lines.push('#### Changed Default Values');
     lines.push('');
 
     const changesByComponent = {};
@@ -582,6 +1189,66 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
     });
   }
 
+  // New Bloblang Methods
+  if (stats.newBloblangMethods > 0 && diffData.details.newBloblangMethods) {
+    lines.push('#### New Bloblang Methods');
+    lines.push('');
+    diffData.details.newBloblangMethods.forEach(methodName => {
+      lines.push(`- \`${methodName}\``);
+    });
+    lines.push('');
+  }
+
+  // New Bloblang Functions
+  if (stats.newBloblangFunctions > 0 && diffData.details.newBloblangFunctions) {
+    lines.push('#### New Bloblang Functions');
+    lines.push('');
+    diffData.details.newBloblangFunctions.forEach(funcName => {
+      lines.push(`- \`${funcName}\``);
+    });
+    lines.push('');
+  }
+
+  // Removed Bloblang Methods
+  if (stats.removedBloblangMethods > 0 && diffData.details.removedBloblangMethods) {
+    lines.push('#### Removed Bloblang Methods');
+    lines.push('');
+    diffData.details.removedBloblangMethods.forEach(methodName => {
+      lines.push(`- \`${methodName}\``);
+    });
+    lines.push('');
+  }
+
+  // Removed Bloblang Functions
+  if (stats.removedBloblangFunctions > 0 && diffData.details.removedBloblangFunctions) {
+    lines.push('#### Removed Bloblang Functions');
+    lines.push('');
+    diffData.details.removedBloblangFunctions.forEach(funcName => {
+      lines.push(`- \`${funcName}\``);
+    });
+    lines.push('');
+  }
+
+  // Deprecated Bloblang Methods
+  if (stats.deprecatedBloblangMethods > 0 && diffData.details.deprecatedBloblangMethods) {
+    lines.push('#### Deprecated Bloblang Methods');
+    lines.push('');
+    diffData.details.deprecatedBloblangMethods.forEach(methodName => {
+      lines.push(`- \`${methodName}\``);
+    });
+    lines.push('');
+  }
+
+  // Deprecated Bloblang Functions
+  if (stats.deprecatedBloblangFunctions > 0 && diffData.details.deprecatedBloblangFunctions) {
+    lines.push('#### Deprecated Bloblang Functions');
+    lines.push('');
+    diffData.details.deprecatedBloblangFunctions.forEach(funcName => {
+      lines.push(`- \`${funcName}\``);
+    });
+    lines.push('');
+  }
+
   // Cloud Support Gap Analysis
   if (binaryAnalysis && binaryAnalysis.comparison.notInCloud.length > 0) {
     lines.push('#### 🔍 Cloud Support Gap Analysis');
@@ -601,7 +1268,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
     Object.entries(gapsByType).forEach(([type, connectors]) => {
       lines.push(`**${type}:**`);
       connectors.forEach(c => {
-        lines.push(`- ${c.name} (${c.status})`);
+        lines.push(`- ${c.name}${c.status ? ` (${c.status})` : ''}`);
       });
       lines.push('');
     });
@@ -661,6 +1328,7 @@ function printPRSummary(diffData, binaryAnalysis = null, draftedConnectors = nul
 
 module.exports = {
   generatePRSummary,
+  generateMultiVersionPRSummary,
   printPRSummary,
   truncateToSentence
 };

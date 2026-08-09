@@ -65,9 +65,16 @@ function cleanupOldDiffs (diffDir) {
 /**
  * Generate a detailed JSON report describing property changes between two releases.
  *
+ * When either input JSON is missing the comparison is skipped with a warning
+ * (a genuinely new oldest tag legitimately has no baseline). When both inputs
+ * exist but the comparison itself fails, this throws so callers fail loudly
+ * instead of silently dropping removed-deprecated restoration and version
+ * stamping.
+ *
  * @param {string} oldTag - Release tag or identifier for the "old" properties set.
  * @param {string} newTag - Release tag or identifier for the "new" properties set.
  * @param {string} outputDir - Directory where the comparison report will be written.
+ * @throws {Error} When both input JSONs exist but the comparison fails to run or exits non-zero.
  */
 function generatePropertyComparisonReport (oldTag, newTag, outputDir) {
   try {
@@ -81,13 +88,14 @@ function generatePropertyComparisonReport (oldTag, newTag, outputDir) {
 
     if (!fs.existsSync(oldJsonPath)) {
       console.log(`Warning: Old properties JSON not found at: ${oldJsonPath}`)
-      console.log('   Skipping detailed property comparison.')
+      console.log('   Skipping detailed property comparison: no diff report will be generated, so removed deprecated properties are not restored and new properties are not stamped with "Introduced in" versions.')
+      console.log(`   This is expected only when ${oldTag} has never been extracted (for example, the oldest supported release).`)
       return
     }
 
     if (!fs.existsSync(newJsonPath)) {
       console.log(`Warning: New properties JSON not found at: ${newJsonPath}`)
-      console.log('   Skipping detailed property comparison.')
+      console.log('   Skipping detailed property comparison: no diff report will be generated, so removed deprecated properties are not restored and new properties are not stamped with "Introduced in" versions.')
       return
     }
 
@@ -107,15 +115,19 @@ function generatePropertyComparisonReport (oldTag, newTag, outputDir) {
       cwd: propertyExtractorDir
     })
 
+    // Both inputs exist, so a failed comparison is a hard error: continuing
+    // would silently skip removed-deprecated restoration and version stamping
     if (result.error) {
-      console.error(`Error: Property comparison failed: ${result.error.message}`)
-    } else if (result.status !== 0) {
-      console.error(`Error: Property comparison exited with code: ${result.status}`)
-    } else {
-      console.log(`Done: Property comparison report saved to: ${reportPath}`)
+      throw new Error(`Property comparison failed to run: ${result.error.message}`)
     }
+    if (result.status !== 0) {
+      throw new Error(`Property comparison exited with code ${result.status}`)
+    }
+    console.log(`Done: Property comparison report saved to: ${reportPath}`)
   } catch (error) {
     console.error(`Error: Error generating property comparison: ${error.message}`)
+    // Propagate so callers fail loudly instead of shipping incomplete docs
+    throw error
   }
 }
 
@@ -194,6 +206,88 @@ function updatePropertyOverridesWithVersion (overridesPath, diffData, newTag) {
 }
 
 /**
+ * Stamp version information for new properties directly into an extracted
+ * properties JSON file (redpanda-properties-<tag>.json).
+ *
+ * Overrides are baked into this JSON during extraction, which happens before
+ * updatePropertyOverridesWithVersion stamps new properties into the overrides
+ * file — so without this step the AsciiDoc rendered from the JSON misses the
+ * "Introduced in" line for properties added in the release being generated
+ * (it would only appear on the next release's run).
+ *
+ * @param {string} jsonPath - Path to the extracted properties JSON file
+ * @param {object} diffData - Diff data from property comparison
+ * @param {string} newTag - Version tag for new properties (e.g., "v26.1.13")
+ */
+function updatePropertiesJsonWithVersion (jsonPath, diffData, newTag) {
+  try {
+    const newProperties = diffData.details?.newProperties || []
+    if (newProperties.length === 0) return
+    if (!fs.existsSync(jsonPath)) {
+      console.warn(`Warning: Cannot stamp versions: ${jsonPath} does not exist`)
+      return
+    }
+
+    // The stamp is a textual insertion, NOT a parse/re-serialize round-trip:
+    // JSON.stringify would corrupt values JavaScript numbers cannot represent
+    // (uint64 maxima like 18446744073709551615) and reformat floats (0.0 → 0)
+    // throughout the Python-generated file.
+    let raw = fs.readFileSync(jsonPath, 'utf8')
+    const indentUnit = (raw.match(/^([ \t]+)"/m) || [null, '    '])[1]
+
+    let stampedCount = 0
+    newProperties.forEach(prop => {
+      const updated = insertVersionIntoRawJson(raw, prop.name, newTag, indentUnit)
+      if (updated) {
+        raw = updated
+        stampedCount++
+      }
+    })
+
+    if (stampedCount > 0) {
+      JSON.parse(raw) // validate the surgical edits before touching the file
+      fs.writeFileSync(jsonPath, raw, 'utf8')
+      console.log(`Done: Stamped "Introduced in ${newTag}" on ${stampedCount} new ${stampedCount === 1 ? 'property' : 'properties'} in ${path.basename(jsonPath)}`)
+    }
+  } catch (error) {
+    console.error(`Warning: Failed to stamp versions into properties JSON: ${error.message}`)
+  }
+}
+
+/**
+ * Insert a `"version": "<newTag>",` field at the top of one property's object
+ * in the raw JSON text, leaving every other byte untouched.
+ *
+ * @param {string} raw - Full JSON file content
+ * @param {string} propName - Property key to stamp
+ * @param {string} newTag - Version tag to insert
+ * @param {string} indentUnit - One level of the file's indentation
+ * @returns {string|null} Updated content, or null when the property was not
+ *   found or already carries a version field.
+ */
+function insertVersionIntoRawJson (raw, propName, newTag, indentUnit) {
+  // Anchor the search to the top-level "properties" section when present, so
+  // an identically named key elsewhere (e.g. under "definitions") is not hit.
+  const sectionMatch = raw.match(new RegExp(`^${indentUnit}"properties": \\{`, 'm'))
+  const searchFrom = sectionMatch ? raw.indexOf(sectionMatch[0]) : 0
+
+  const escapedName = propName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const keyMatch = new RegExp(`^([ \t]+)"${escapedName}": \\{[ \t]*$`, 'm').exec(raw.slice(searchFrom))
+  if (!keyMatch) return null
+
+  const keyIndent = keyMatch[1]
+  const objStart = searchFrom + keyMatch.index + keyMatch[0].length
+
+  // Skip when the object already has a version field (scan up to its closing brace).
+  const close = new RegExp(`^${keyIndent}\\}`, 'm').exec(raw.slice(objStart))
+  const objBody = raw.slice(objStart, close ? objStart + close.index : raw.length)
+  if (new RegExp(`^${keyIndent}${indentUnit}"version":`, 'm').test(objBody)) return null
+
+  const insertion = `\n${keyIndent}${indentUnit}"version": ${JSON.stringify(newTag)},`
+  return raw.slice(0, objStart) + insertion + raw.slice(objStart)
+}
+
+/**
  * Create a unified diff patch between two directories and clean them up.
  *
  * @param {string} kind - Logical category for the diff (for example, "metrics" or "rpk")
@@ -264,10 +358,34 @@ function diffDirs (kind, oldTag, newTag, oldTempDir, newTempDir) {
   }
 }
 
+/**
+ * Decide whether a committed baseline attachment can serve as the old side of
+ * a property diff. Rebuilding the old tag in place overwrites the committed
+ * attachment with a fresh extraction, so any contamination in that extraction
+ * silently becomes both the stored baseline and the diff input (the diff then
+ * compares the run against its own output and reports no new properties).
+ * @param {string} outputDir - Docs output dir that contains attachments/
+ * @param {string} oldTag - Old version tag (for example, v26.1.14)
+ * @param {boolean} [regenerate=false] - Force re-extraction even if a baseline exists
+ * @returns {{useCommitted: boolean, baselinePath: string}}
+ */
+function resolveDiffBaseline (outputDir, oldTag, regenerate = false) {
+  const attachmentsDir = path.resolve(outputDir, 'attachments')
+  const baselinePath = path.resolve(attachmentsDir, `redpanda-properties-${oldTag}.json`)
+  const relativePath = path.relative(attachmentsDir, baselinePath)
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath) || relativePath.includes(path.sep)) {
+    throw new Error(`Invalid old tag "${oldTag}": baseline must resolve within the attachments directory`)
+  }
+  return { useCommitted: !regenerate && fs.existsSync(baselinePath), baselinePath }
+}
+
 module.exports = {
+  resolveDiffBaseline,
+
   runClusterDocs,
   cleanupOldDiffs,
   generatePropertyComparisonReport,
   updatePropertyOverridesWithVersion,
+  updatePropertiesJsonWithVersion,
   diffDirs
 }

@@ -154,3 +154,61 @@ describe('absolute-links rule (from extension)', () => {
     expect(result).toBe('[GitHub](https://github.com/redpanda-data)')
   })
 })
+
+describe('H1 and frontmatter placement', () => {
+  function processMarkdownWithFrontmatter(markdown, frontmatter) {
+    // Simulate the logic from convert-to-markdown.js lines 493-513
+    const h1Match = markdown.match(/^(#\s+.+?)(\n|$)/)
+    let h1Heading = ''
+    let restOfMarkdown = markdown
+
+    if (h1Match) {
+      h1Heading = h1Match[0]
+      restOfMarkdown = markdown.substring(h1Match[0].length).trimStart()
+    }
+
+    // Simplified: just frontmatter placement (matches line 513 logic)
+    let result
+    if (frontmatter) {
+      result = `${h1Heading}\n${frontmatter}${restOfMarkdown}`
+    } else {
+      result = markdown
+    }
+
+    // Apply cleanup logic (lines 517-523)
+    if (result) {
+      result = result.replace(/\n{3,}/g, '\n\n')
+      result = result.replace(/[ \t]+$/gm, '')
+      result = result.trim()
+    }
+
+    return result
+  }
+
+  const frontmatter = '---\ntitle: Test\n---\n'
+
+  test('places frontmatter after H1 at document start', () => {
+    const markdown = '# Heading\n\nSome content'
+    const result = processMarkdownWithFrontmatter(markdown, frontmatter)
+    expect(result).toBe('# Heading\n\n---\ntitle: Test\n---\nSome content')
+  })
+
+  test('places frontmatter at top when no H1', () => {
+    const markdown = 'Some content without heading'
+    const result = processMarkdownWithFrontmatter(markdown, frontmatter)
+    expect(result).toBe('---\ntitle: Test\n---\nSome content without heading')
+  })
+
+  test('does not match H1 later in document (bug fix)', () => {
+    const markdown = 'Intro text\n\n# Heading Later\n\nMore content'
+    const result = processMarkdownWithFrontmatter(markdown, frontmatter)
+    // Should place frontmatter at top since H1 is not at document start
+    expect(result).toBe('---\ntitle: Test\n---\nIntro text\n\n# Heading Later\n\nMore content')
+  })
+
+  test('handles H1 with double newline separator', () => {
+    const markdown = '# Heading\n\nParagraph one\n\nParagraph two'
+    const result = processMarkdownWithFrontmatter(markdown, frontmatter)
+    expect(result).toBe('# Heading\n\n---\ntitle: Test\n---\nParagraph one\n\nParagraph two')
+  })
+})

@@ -1,4 +1,5 @@
 {
+  "$schema": "https://raw.githubusercontent.com/redpanda-data/docs-extensions-and-macros/main/docs-data/schemas/rpcn-overrides.schema.json",
   "outputs": [
     {
       "name": "amqp_0_9",

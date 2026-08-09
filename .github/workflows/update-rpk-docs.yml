@@ -1,0 +1,319 @@
+name: Update rpk Documentation
+
+# This workflow automates rpk CLI documentation updates when new Redpanda
+# versions are released. It uses the `rpk --print-tree` JSON output to
+# generate accurate, structured documentation.
+#
+# Requirements:
+# - rpk v26.2.0 or later (includes --print-tree support)
+# - This workflow will fail gracefully for older versions
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Redpanda version to document (e.g., v26.2.0)'
+        required: false
+        type: string
+      diff_from:
+        description: 'Previous version to diff against (e.g., v26.1.9)'
+        required: false
+        type: string
+      dry_run:
+        description: 'Dry run - generate docs but do not create PR'
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # DISABLED: This cron uses February 31st (a non-existent date) to effectively
+    # disable scheduled runs. This is a GitHub Actions pattern since you cannot
+    # have an empty schedule array.
+    #
+    # To enable weekly checks on Mondays at 6:00 UTC, replace with:
+    #   - cron: '0 6 * * 1'
+    #
+    # Currently disabled until rpk --print-tree is in a GA release.
+    - cron: '0 6 31 2 *'
+
+permissions: {}  # Minimal workflow-level permissions; jobs define their own
+
+env:
+  # Minimum rpk version that supports --print-tree
+  MIN_RPK_VERSION: '26.2.0'
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      should_update: ${{ steps.check.outputs.should_update }}
+      target_version: ${{ steps.check.outputs.target_version }}
+      diff_version: ${{ steps.check.outputs.diff_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Determine versions
+        id: check
+        run: |
+          # Validate version input (semver format: optional v prefix, digits and dots only)
+          validate_version() {
+            local ver="$1"
+            local name="$2"
+            # Strip whitespace
+            ver=$(echo "$ver" | tr -d '[:space:]')
+            # Check format: optional v, then digits and dots only (e.g., v26.2.0 or 26.2.0)
+            if ! echo "$ver" | grep -qE '^v?[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "ERROR: Invalid $name format: '$ver'"
+              echo "Expected semver format like 'v26.2.0' or '26.2.0'"
+              exit 1
+            fi
+            # Return sanitized version with v prefix
+            echo "v${ver#v}"
+          }
+
+          # Use input version or fetch latest
+          if [ -n "${{ inputs.version }}" ]; then
+            TARGET_VERSION=$(validate_version "${{ inputs.version }}" "version")
+          else
+            TARGET_VERSION=$(npx doc-tools get-redpanda-version)
+          fi
+          echo "target_version=${TARGET_VERSION}" >> $GITHUB_OUTPUT
+
+          # Check if version meets minimum requirement
+          TARGET_NUMERIC="${TARGET_VERSION#v}"
+          MIN_NUMERIC="${MIN_RPK_VERSION}"
+
+          # Full semver comparison (MAJOR.MINOR.PATCH)
+          TARGET_MAJOR=$(echo "$TARGET_NUMERIC" | cut -d. -f1)
+          TARGET_MINOR=$(echo "$TARGET_NUMERIC" | cut -d. -f2)
+          TARGET_PATCH=$(echo "$TARGET_NUMERIC" | cut -d. -f3)
+          MIN_MAJOR=$(echo "$MIN_NUMERIC" | cut -d. -f1)
+          MIN_MINOR=$(echo "$MIN_NUMERIC" | cut -d. -f2)
+          MIN_PATCH=$(echo "$MIN_NUMERIC" | cut -d. -f3)
+
+          # Compare: MAJOR < MIN_MAJOR, or
+          #          MAJOR == MIN_MAJOR && MINOR < MIN_MINOR, or
+          #          MAJOR == MIN_MAJOR && MINOR == MIN_MINOR && PATCH < MIN_PATCH
+          if [ "$TARGET_MAJOR" -lt "$MIN_MAJOR" ] || \
+             ([ "$TARGET_MAJOR" -eq "$MIN_MAJOR" ] && [ "$TARGET_MINOR" -lt "$MIN_MINOR" ]) || \
+             ([ "$TARGET_MAJOR" -eq "$MIN_MAJOR" ] && [ "$TARGET_MINOR" -eq "$MIN_MINOR" ] && [ "$TARGET_PATCH" -lt "$MIN_PATCH" ]); then
+            echo "Target version $TARGET_VERSION is below minimum required version v$MIN_RPK_VERSION"
+            echo "The --print-tree feature requires rpk v$MIN_RPK_VERSION or later"
+            echo "should_update=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check if we already have docs for this version
+          if [ -f "docs-data/rpk-${TARGET_VERSION}.json" ]; then
+            echo "Documentation already exists for ${TARGET_VERSION}"
+            echo "should_update=false" >> $GITHUB_OUTPUT
+          else
+            echo "New version detected: ${TARGET_VERSION}"
+            echo "should_update=true" >> $GITHUB_OUTPUT
+          fi
+
+          # Determine diff version from antora.yml (latest documented rpk version)
+          if [ -n "${{ inputs.diff_from }}" ]; then
+            DIFF_VERSION=$(validate_version "${{ inputs.diff_from }}" "diff_from")
+          else
+            # Read latest-rpk-version from antora.yml in the docs repo
+            # This is separate from latest-redpanda-tag because rpk docs require
+            # --print-tree support (v26.2.0+) and may lag behind property docs
+            DIFF_VERSION=$(npx doc-tools get-antora-value asciidoc.attributes.latest-rpk-version 2>/dev/null || echo "")
+
+            # Fallback to latest-redpanda-tag if latest-rpk-version not set yet
+            if [ -z "$DIFF_VERSION" ]; then
+              DIFF_VERSION=$(npx doc-tools get-antora-value asciidoc.attributes.latest-redpanda-tag 2>/dev/null || echo "")
+            fi
+
+            # Final fallback to JSON files if antora.yml not available
+            if [ -z "$DIFF_VERSION" ]; then
+              DIFF_VERSION=$(ls -1 docs-data/rpk-v*.json 2>/dev/null | \
+                sed 's/.*rpk-//' | sed 's/.json//' | \
+                sort -V | tail -1 || echo "")
+            fi
+          fi
+
+          if [ -n "$DIFF_VERSION" ]; then
+            echo "diff_version=${DIFF_VERSION}" >> $GITHUB_OUTPUT
+            echo "Will diff against: ${DIFF_VERSION} (currently documented rpk version)"
+          else
+            echo "No previous version found for diff (first run?)"
+          fi
+
+  generate-docs:
+    needs: check-version
+    if: needs.check-version.outputs.should_update == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download rpk binary
+        id: download
+        run: |
+          VERSION="${{ needs.check-version.outputs.target_version }}"
+          VERSION_NUMERIC="${VERSION#v}"
+
+          echo "Downloading rpk ${VERSION}..."
+
+          # Download from GitHub releases
+          DOWNLOAD_URL="https://github.com/redpanda-data/redpanda/releases/download/${VERSION}/rpk-linux-amd64.zip"
+          CHECKSUM_URL="https://github.com/redpanda-data/redpanda/releases/download/${VERSION}/rpk-linux-amd64.zip.sha256sum"
+
+          # Download binary with timeout
+          curl -L --max-time 300 "$DOWNLOAD_URL" -o rpk.zip || {
+            echo "Failed to download rpk binary"
+            echo "URL: $DOWNLOAD_URL"
+            exit 1
+          }
+
+          # Download and verify checksum (if available)
+          if curl -L --max-time 30 "$CHECKSUM_URL" -o rpk.zip.sha256sum 2>/dev/null; then
+            echo "Verifying SHA256 checksum..."
+            # The checksum file format is: <hash>  <filename>
+            # We need to check just the hash against our downloaded file
+            EXPECTED_HASH=$(cat rpk.zip.sha256sum | awk '{print $1}')
+            ACTUAL_HASH=$(sha256sum rpk.zip | awk '{print $1}')
+            if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+              echo "ERROR: Checksum verification failed!"
+              echo "Expected: $EXPECTED_HASH"
+              echo "Actual:   $ACTUAL_HASH"
+              exit 1
+            fi
+            echo "Checksum verified successfully"
+          else
+            echo "WARNING: Checksum file not available for this release, skipping verification"
+          fi
+
+          unzip -q rpk.zip -d rpk-bin
+          chmod +x rpk-bin/rpk
+          echo "rpk_path=$(pwd)/rpk-bin/rpk" >> $GITHUB_OUTPUT
+
+          # Verify --print-tree support
+          ./rpk-bin/rpk --print-tree > /dev/null 2>&1 || {
+            echo "Downloaded rpk does not support --print-tree"
+            echo "This version may be too old. Minimum required: v${MIN_RPK_VERSION}"
+            exit 1
+          }
+
+          echo "rpk binary ready with --print-tree support"
+
+      - name: Generate rpk documentation
+        env:
+          RPK_PATH: ${{ steps.download.outputs.rpk_path }}
+        run: |
+          VERSION="${{ needs.check-version.outputs.target_version }}"
+          DIFF_VERSION="${{ needs.check-version.outputs.diff_version }}"
+
+          echo "Generating rpk documentation for ${VERSION}..."
+
+          # Build command
+          CMD="npx doc-tools generate rpk-docs --tag ${VERSION}"
+
+          if [ -n "$DIFF_VERSION" ]; then
+            CMD="$CMD --diff ${DIFF_VERSION}"
+          fi
+
+          # Run generation (uses rpk in PATH or RPK_PATH environment variable)
+          PATH="$(dirname $RPK_PATH):$PATH" $CMD
+
+          echo "Documentation generation complete"
+
+      - name: Show generated changes
+        run: |
+          echo "=== Generated Files ==="
+          git status --short
+
+          echo ""
+          echo "=== Diff Summary ==="
+          VERSION="${{ needs.check-version.outputs.target_version }}"
+          if [ -f "docs-data/rpk-diff-*.json" ]; then
+            cat docs-data/rpk-diff-*.json | head -100
+          fi
+
+      - name: Update latest-rpk-version in antora.yml
+        run: |
+          VERSION="${{ needs.check-version.outputs.target_version }}"
+
+          # Update latest-rpk-version attribute in antora.yml
+          # This tracks the rpk docs version separately from latest-redpanda-tag
+          # because rpk docs require --print-tree support (v26.2.0+)
+          npx doc-tools set-antora-value asciidoc.attributes.latest-rpk-version "${VERSION}"
+
+          echo "Updated latest-rpk-version to ${VERSION}"
+
+      - name: Create Pull Request
+        if: ${{ !inputs.dry_run }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "docs: Update rpk CLI reference for ${{ needs.check-version.outputs.target_version }}"
+          title: "docs: Update rpk CLI reference for ${{ needs.check-version.outputs.target_version }}"
+          body: |
+            ## Summary
+
+            Auto-generated rpk CLI documentation update for Redpanda ${{ needs.check-version.outputs.target_version }}.
+
+            This PR was generated using the new `rpk --print-tree` JSON output, which provides
+            structured command tree data including all plugins (connect, ai, check, etc.).
+
+            ## Changes
+
+            - Updated rpk command documentation from JSON tree
+            - Generated versioned JSON: `docs-data/rpk-${{ needs.check-version.outputs.target_version }}.json`
+            ${{ needs.check-version.outputs.diff_version && format('- Diff from {0}: `docs-data/rpk-diff-*.json`', needs.check-version.outputs.diff_version) || '' }}
+
+            ## Verification Checklist
+
+            - [ ] Review generated AsciiDoc files in `modules/reference/pages/rpk/`
+            - [ ] Check diff JSON for new/removed commands and flags
+            - [ ] Verify plugin commands (rpk connect, rpk ai, etc.) are documented
+            - [ ] Review any overrides that may need updating in `docs-data/rpk-overrides.json`
+
+            ---
+            Generated by GitHub Actions ([workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}))
+          branch: docs/rpk-${{ needs.check-version.outputs.target_version }}
+          delete-branch: true
+          labels: |
+            auto-generated
+            documentation
+            rpk
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "=== DRY RUN COMPLETE ==="
+          echo "Would have created PR with the following files:"
+          git status --short
+          echo ""
+          echo "To create the PR, run this workflow again without dry_run enabled."

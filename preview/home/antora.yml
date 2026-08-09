@@ -1,0 +1,6 @@
+name: home
+title: Home
+version: ~
+asciidoc:
+  attributes:
+    test-attribute: Test Value

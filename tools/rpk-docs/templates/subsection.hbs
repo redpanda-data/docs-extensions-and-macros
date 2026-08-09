@@ -1,0 +1,37 @@
+{{!-- Recursively render a subsection --}}
+{{!-- Default to === for first level subsections, increase for nested --}}
+{{#if headingLevel}}{{#repeat headingLevel}}={{/repeat}} {{title}}{{else}}=== {{title}}{{/if}}
+
+{{#if content}}
+{{{content}}}
+
+{{/if}}
+{{#if items}}
+{{!-- Render items as examples --}}
+{{#each items}}
+{{#if description}}
+{{{description}}}
+
+{{/if}}
+[,{{#if language}}{{language}}{{else}}bash{{/if}}]
+----
+{{{code}}}
+----
+{{#if output}}
+
+Output:
+
+[.no-wrap,{{#if outputLanguage}}{{outputLanguage}}{{else}}bash{{/if}}]
+----
+{{{output}}}
+----
+{{/if}}
+
+{{/each}}
+{{/if}}
+{{#if subsections}}
+{{!-- Recursively render nested subsections with increased heading level --}}
+{{#each subsections}}
+{{> subsection this headingLevel=(add ../headingLevel 1)}}
+{{/each}}
+{{/if}}

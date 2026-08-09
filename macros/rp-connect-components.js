@@ -1,7 +1,5 @@
 'use strict';
-
-const fs = require('fs');
-const path = require('path');
+const { posix: path } = require('path')
 
 /**
  * Registers macros for use in Redpanda Connect contexts in the Redpanda documentation.
@@ -2363,22 +2361,32 @@ module.exports.register = function (registry, context) {
       // Filter for the specific connector by name
       const componentRows = csvData.data.filter(row => row.connector.trim().toLowerCase() === name.trim().toLowerCase());
       if (componentRows.length === 0) {
-        console.error(`No data found for connector: ${name}`);
-      }
-      // Process types and metadata from CSV
-      const types = componentRows.map(row => ({
-        type: row.type.trim(),
-        support: row.support_level.trim(),
-        isCloudSupported: row.is_cloud_supported === 'y',
-        redpandaConnectUrl: row.redpandaConnectUrl,
-        redpandaCloudUrl: row.redpandaCloudUrl
-      }));
-      // Move the current page's type to the first position in the dropdown
-      const sortedTypes = [...types];
-      const currentTypeIndex = sortedTypes.findIndex(typeObj => typeObj.type === type);
-      if (currentTypeIndex !== -1) {
-        const [currentType] = sortedTypes.splice(currentTypeIndex, 1);
-        sortedTypes.unshift(currentType);
+        console.warn(`No CSV data found for connector: ${name}. The connector may have been removed or renamed.`);
+        // Build link to release notes using content catalog for proper URL resolution
+        const isCloud = attributes['env-cloud'] !== undefined;
+        let whatsNewUrl = isCloud
+          ? '/cloud-data-platform/get-started/whats-new-cloud/'
+          : '/connect/get-started/whats-new/';
+
+        // Try to resolve the page from the content catalog for accurate URLs
+        if (context.contentCatalog && context.file) {
+          const pageSpec = isCloud
+            ? 'cloud-data-platform:get-started:whats-new-cloud.adoc'
+            : 'connect:get-started:whats-new.adoc';
+          const page = context.contentCatalog.resolvePage(pageSpec, context.file.src);
+          if (page) {
+            // For directory-style URLs like /a/b/c/, use the URL directly as the base
+            whatsNewUrl = path.relative(context.file.pub.url, page.pub.url);
+          }
+        }
+
+        // Return a notice for removed/unknown connectors
+        return self.createBlock(parent, 'pass', `
+          <div class="metadata-block">
+            <div class="metadata-content">
+              <p><strong>Available in:</strong> <em>This connector is no longer available. Check the <a href="${whatsNewUrl}">release notes</a> for migration guidance.</em></p>
+            </div>
+          </div>`);
       }
       // Check if the component requires an Enterprise license (based on support level)
       let enterpriseLicenseInfo = '';
@@ -2389,101 +2397,23 @@ module.exports.register = function (registry, context) {
             <p><strong>License</strong>: This component requires an <a href="https://docs.redpanda.com/redpanda-connect/get-started/licensing/" target="_blank">enterprise license</a>. You can either <a href="https://www.redpanda.com/upgrade" target="_blank">upgrade to an Enterprise Edition license</a>, or <a href="http://redpanda.com/try-enterprise" target="_blank" rel="noopener">generate a trial license key</a> that's valid for 30 days.</p>`;
         }
       }
-      const isCloudSupported = componentRows.some(row => row.is_cloud_supported === 'y');
-      let availableInInfo = '';
-
-      if (isCloudSupported) {
-        const availableInLinks = [];
-
-        // Check if the component is Cloud and apply the `current-version` class
-        if (sortedTypes[0].redpandaCloudUrl) {
-          if (component === 'Cloud') {
-            availableInLinks.push('<span title="You are viewing the Cloud version of this component" class="current-version">Cloud</span>'); // Highlight the current version
-          } else {
-            availableInLinks.push(`<a title="View the Cloud version of this component" href="${sortedTypes[0].redpandaCloudUrl}">Cloud</a>`);
-          }
-        }
-
-        // Check if the component is Connect and apply the `current-version` class
-        if (sortedTypes[0].redpandaConnectUrl) {
-          if (component === 'Connect') {
-            availableInLinks.push('<span title="You are viewing the Self-Managed version of this component" class="current-version">Self-Managed</span>'); // Highlight the current version
-          } else {
-            availableInLinks.push(`<a title="View the Self-Managed version of this component" href="${sortedTypes[0].redpandaConnectUrl}">Self-Managed</a>`);
-          }
-        }
-        availableInInfo = `<p><strong>Available in:</strong> ${availableInLinks.join(', ')}</p>`;
-      } else {
-        availableInInfo = `<p><strong>Available in:</strong> <span title="You are viewing the Self-Managed version of this component" class="current-version">Self-Managed</span></p>`;
+      // The Type dropdown and availability info are rendered server-side in the sticky bar by the
+      // UI (article.hbs) from page attributes (page-context-switcher, page-cloud-available, and
+      // so on). Those attributes cannot be set from this macro: Antora extracts page attributes
+      // for UI templates in a header-only parse that runs before conversion with Asciidoctor
+      // extensions disabled, so anything set here never reaches the templates. The
+      // generate-rp-connect-info extension sets them on page.asciidoc.attributes on the
+      // documentsConverted event instead. Only the license notice belongs in the page body,
+      // where it must stay visible.
+      if (!enterpriseLicenseInfo) {
+        return self.createBlock(parent, 'pass', '');
       }
-      // Build the dropdown for types with links depending on the current component
-      let typeDropdown = '';
-      if (sortedTypes.length > 1) {
-        const dropdownOptions = sortedTypes.map(typeObj => {
-          const link = (component === 'Cloud' && typeObj.redpandaCloudUrl) || typeObj.redpandaConnectUrl;
-          return `<a href="${link}" class="dropdown-option" role="menuitem" tabindex="-1">${capitalize(typeObj.type)}</a>`;
-        }).join('');
-        typeDropdown = `
-          <div class="dropdown-wrapper">
-            <p class="type-dropdown-container"><strong>Type:</strong>
-              <button type="button" class="dropdown-toggle" id="componentTypeDropdownToggle"  aria-expanded="false" aria-haspopup="true" aria-controls="componentTypeDropdownMenu">
-                <span class="dropdown-text">${capitalize(sortedTypes[0].type)}</span>
-                <span class="dropdown-arrow">▼</span>
-              </button>
-              <div class="dropdown-menu" id="componentTypeDropdownMenu" role="menu" aria-labelledby="componentTypeDropdownToggle">
-                ${dropdownOptions}
-              </div>
-            </p>
-          </div>`;
-      }
-      // Return the metadata block with consistent layout
       return self.createBlock(parent, 'pass', `
         <div class="metadata-block">
           <div class="metadata-content">
-          ${typeDropdown}
-          ${availableInInfo}
           ${enterpriseLicenseInfo}
           </div>
-        </div>
-        <script>
-          // Define global dropdown functions directly (shared between macros)
-          if (!window.toggleComponentTypeDropdown) {
-            window.toggleComponentTypeDropdown = function() {
-              const toggle = document.getElementById('componentTypeDropdownToggle');
-              const menu = document.getElementById('componentTypeDropdownMenu');
-              
-              if (!toggle || !menu) return;
-              
-              const isOpen = menu.classList.contains('show');
-              
-              // Close all other dropdowns first (including filter dropdowns)
-              document.querySelectorAll('.dropdown-checkbox-menu.show, .dropdown-menu.show').forEach(dropdown => {
-                if (dropdown !== menu) {
-                  dropdown.classList.remove('show');
-                  const otherToggle = dropdown.parentNode.querySelector('.dropdown-checkbox-toggle, .dropdown-toggle');
-                  if (otherToggle) {
-                    otherToggle.classList.remove('open');
-                    otherToggle.setAttribute('aria-expanded', 'false');
-                  }
-                }
-              });
-              
-              // Toggle current dropdown
-              if (isOpen) {
-                menu.classList.remove('show');
-                toggle.classList.remove('open');
-                toggle.setAttribute('aria-expanded', 'false');
-              } else {
-                menu.classList.add('show');
-                toggle.classList.add('open');
-                toggle.setAttribute('aria-expanded', 'true');
-                // Focus first option
-                const firstOption = menu.querySelector('.dropdown-option');
-                if (firstOption) firstOption.focus();
-              }
-            };
-          }
-        </script>`);
+        </div>`);
     });
   });
 

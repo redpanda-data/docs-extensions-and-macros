@@ -8,6 +8,10 @@ const { getAntoraValue, setAntoraValue } = require('../../cli-utils/antora-utils
 const fetchFromGithub = require('../fetch-from-github.js')
 const { generateRpcnConnectorDocs } = require('./generate-rpcn-connector-docs.js')
 const { getRpkConnectVersion, printDeltaReport } = require('./report-delta')
+const { discoverIntermediateReleases, findCloudVersionForDate } = require('./github-release-utils')
+const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
+const parseCSVConnectors = require('./parse-csv-connectors.js')
+const semver = require('semver')
 
 /**
  * Cap description to two sentences
@@ -25,6 +29,9 @@ function capToTwoSentences (description) {
   }
 
   const abbreviations = [
+    /https?:\/\/[^\s]+?(?=[.!?](?:\s|$)|\s|$)/gi,  // Protect URLs from being split by sentence detection (non-greedy, preserve trailing punctuation)
+    /\bxref:[^\s[\]]+\[[^\]]*\]/g,  // Protect Antora xref macros (e.g. xref:components:processors/try.adoc[`try`]) whose targets contain periods
+    /\b[\w/-]+\.(?:adoc|md|ya?ml|json|html)\b/gi,  // Protect bare doc/config filenames (try.adoc, config.yaml) from splitting
     /\bv\d+\.\d+(?:\.\d+)?/gi,
     /\d+\.\d+/g,
     /\be\.g\./gi,
@@ -59,6 +66,16 @@ function capToTwoSentences (description) {
   const sentenceRegex = /[^.!?]+[.!?]+(?:\s|$)/g
   const sentences = normalized.match(sentenceRegex)
 
+  // If an unprotected mid-token period prevented the leading text from
+  // forming a complete match, merge that dropped prefix into the first
+  // sentence rather than silently discarding it.
+  if (sentences && sentences.length > 0) {
+    const firstIndex = normalized.indexOf(sentences[0])
+    if (firstIndex > 0) {
+      sentences[0] = normalized.slice(0, firstIndex) + sentences[0]
+    }
+  }
+
   if (!sentences || sentences.length === 0) {
     let result = normalized
     placeholders.forEach(({ placeholder, original }) => {
@@ -87,6 +104,148 @@ function capToTwoSentences (description) {
   })
 
   return result.trim()
+}
+
+/**
+ * Remove platform metadata fields from connectors
+ * @param {Array} connectors - Array of connector objects
+ */
+function stripPlatformMetadata (connectors) {
+  if (!Array.isArray(connectors)) return
+  connectors.forEach(c => {
+    delete c.cloudSupported
+    delete c.requiresCgo
+    delete c.cloudOnly
+  })
+}
+
+/**
+ * Augment connector data with platform metadata from binary analysis.
+ * This adds cloudSupported/requiresCgo flags and includes CGO-only and cloud-only connectors.
+ *
+ * @param {Object} connectorData - Connector index object with arrays for each component type
+ * @param {Object} binaryAnalysis - Binary analysis results from analyzeAllBinaries()
+ * @returns {Object} Object with augmentedData, augmentedCount, addedCgoCount, addedCloudOnlyCount
+ */
+function augmentConnectorData (connectorData, binaryAnalysis) {
+  if (!binaryAnalysis) {
+    return { augmentedData: connectorData, augmentedCount: 0, addedCgoCount: 0, addedCloudOnlyCount: 0 }
+  }
+
+  // Deep clone to avoid mutating original
+  const augmentedData = JSON.parse(JSON.stringify(connectorData))
+
+  const cloudSet = new Set(
+    (binaryAnalysis.comparison?.inCloud || []).map(c => `${c.type}:${c.name}`)
+  )
+  const cgoOnlySet = new Set(
+    (binaryAnalysis.cgoOnly || []).map(c => `${c.type}:${c.name}`)
+  )
+
+  let augmentedCount = 0
+  let addedCgoCount = 0
+  let addedCloudOnlyCount = 0
+
+  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
+    'buffers', 'metrics', 'scanners', 'tracers', 'config']
+
+  for (const type of connectorTypes) {
+    if (!Array.isArray(augmentedData[type])) {
+      augmentedData[type] = []
+    }
+
+    // Add cloudSupported and requiresCgo flags to existing connectors
+    for (const connector of augmentedData[type]) {
+      const key = `${type}:${connector.name}`
+      connector.cloudSupported = cloudSet.has(key)
+      connector.requiresCgo = cgoOnlySet.has(key)
+      augmentedCount++
+    }
+
+    // Add CGO-only connectors that aren't in the OSS list
+    if (binaryAnalysis.cgoOnly) {
+      for (const cgoConn of binaryAnalysis.cgoOnly) {
+        if (cgoConn.type === type) {
+          const exists = augmentedData[type].some(c => c.name === cgoConn.name)
+          if (!exists) {
+            // Singularize type for consistency with stored data (except "metrics" which stays plural)
+            const componentType = cgoConn.type === 'metrics' ? 'metrics' : cgoConn.type.replace(/s$/, '')
+            augmentedData[type].push({
+              ...cgoConn,
+              type: componentType,
+              cloudSupported: false,
+              requiresCgo: true
+            })
+            addedCgoCount++
+          }
+        }
+      }
+    }
+
+    // Add cloud-only connectors that aren't in the OSS list
+    if (binaryAnalysis.comparison?.cloudOnly) {
+      for (const cloudConn of binaryAnalysis.comparison.cloudOnly) {
+        if (cloudConn.type === type) {
+          const exists = augmentedData[type].some(c => c.name === cloudConn.name)
+          if (!exists) {
+            // Singularize type for consistency with stored data (except "metrics" which stays plural)
+            const componentType = cloudConn.type === 'metrics' ? 'metrics' : cloudConn.type.replace(/s$/, '')
+            augmentedData[type].push({
+              ...cloudConn,
+              type: componentType,
+              cloudSupported: true,
+              requiresCgo: false,
+              cloudOnly: true
+            })
+            addedCloudOnlyCount++
+          }
+        }
+      }
+    }
+  }
+
+  return { augmentedData, augmentedCount, addedCgoCount, addedCloudOnlyCount }
+}
+
+/**
+ * Build a pure-OSS snapshot from a (possibly augmented) connector index, for use
+ * as the baseline in binary analysis. Removes augmentation-only entries (the
+ * cloud-only and cgo-only connectors that augmentConnectorData() adds and persists
+ * back into the data file) and strips platform metadata so the snapshot reflects
+ * only what the standard OSS rpk build reports.
+ *
+ * @param {Object} connectorIndex - Connector index object with arrays per type
+ * @returns {Object} Deep-cloned clean copy safe to diff as pure OSS data
+ */
+function buildCleanOssData (connectorIndex) {
+  const cleanData = JSON.parse(JSON.stringify(connectorIndex))
+  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
+    'buffers', 'metrics', 'scanners', 'tracers']
+
+  for (const type of connectorTypes) {
+    if (Array.isArray(cleanData[type])) {
+      // Keep only connectors from OSS rpk (have config/fields)
+      // Remove augmentation-only connectors (added by previous binary analysis)
+      cleanData[type] = cleanData[type].filter(c => c.config || c.fields)
+
+      // Remove platform metadata from remaining connectors
+      stripPlatformMetadata(cleanData[type])
+    }
+  }
+
+  // Config components have no config/fields wrappers, so the filter above
+  // can't distinguish OSS entries from augmentation-only ones. augmentConnectorData()
+  // adds cloud-only and cgo-only config entries and persists them back to the data
+  // file, so on subsequent runs they would otherwise be copied into the clean OSS
+  // snapshot and pollute binary analysis. Drop those augmentation-only entries by
+  // their platform markers (genuine OSS config entries never carry cloudOnly, and
+  // a standard-build component is never cgo-only) before stripping metadata.
+  if (Array.isArray(cleanData.config)) {
+    cleanData.config = cleanData.config.filter(c => c.cloudOnly !== true && c.requiresCgo !== true)
+    stripPlatformMetadata(cleanData.config)
+  }
+
+  return cleanData
 }
 
 /**
@@ -343,6 +502,52 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
 }
 
 /**
+ * Derive the fragment anchor for a connector field heading.
+ *
+ * Field docs render each field as a section heading (for example,
+ * `=== \`batching.byte_size\``), and the docs site builds section IDs with
+ * `idprefix: ''` and `idseparator: '-'` (set in the shared global-attributes
+ * component loaded by the Antora playbook). Under those settings Asciidoctor
+ * derives IDs by downcasing the heading text, dropping characters that are
+ * not word characters, hyphens, dots, or spaces (so `[]` array markers are
+ * discarded), converting runs of dots and spaces to a single `-`, and
+ * trimming any leading or trailing separator.
+ *
+ * Examples of rendered IDs this must match:
+ * - `checkpoint_limit`                    -> `checkpoint_limit`
+ * - `batching.byte_size`                  -> `batching-byte_size`
+ * - `batching.processors[]`               -> `batching-processors`
+ * - `sasl[].aws.credentials.from_ec2_role` -> `sasl-aws-credentials-from_ec2_role`
+ *
+ * Collision caveat: Asciidoctor de-duplicates repeated IDs on a page by
+ * appending `-2`, `-3`, ... to later occurrences. If two fields on one page
+ * normalize to the same anchor, the generated link resolves to the first
+ * heading and the second gets the suffixed ID. This helper cannot detect
+ * that, so a wrong-but-plausible link on a page with near-duplicate field
+ * names should be checked against this behavior first.
+ *
+ * @param {string} fieldName - Field name as it appears in the connector data
+ * @returns {string} Fragment anchor matching the rendered heading ID
+ */
+function fieldAnchor (fieldName) {
+  const anchor = String(fieldName)
+    .toLowerCase()
+    // Characters that are invalid in section IDs (for example, `[` and `]`
+    // array markers) are removed outright, matching Asciidoctor's
+    // InvalidSectionIdCharsRx. The dots still supply the separators, so
+    // every `[]` case stays correct (`sasl[].aws` -> `sasl-aws`).
+    .replace(/[^ \w\-.]+/g, '')
+    // idseparator '-' replaces runs of spaces and dots with a single hyphen.
+    .replace(/[ .]+/g, '-')
+    // idprefix '' means no leading separator, and Asciidoctor chomps a
+    // trailing separator.
+    .replace(/^-+/, '')
+    .replace(/-+$/, '')
+  // A name that normalizes to nothing would emit a malformed `#[...]` xref.
+  return anchor || String(fieldName)
+}
+
+/**
  * Build a fields table for whats-new.adoc
  * @param {Array} fields - Field data
  * @param {Function} capFn - Caption function
@@ -382,7 +587,7 @@ function buildFieldsTable (fields, capFn) {
 
       componentList += `*${typeLabel}:*\n\n`
       names.forEach(name => {
-        componentList += `* xref:components:${type}/${name}.adoc#${fieldName}[${name}]\n`
+        componentList += `* xref:components:${type}/${name}.adoc#${fieldAnchor(fieldName)}[${name}]\n`
       })
     }
 
@@ -452,7 +657,7 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
 
       componentList += `*${typeLabel}:*\n\n`
       names.forEach(name => {
-        componentList += `* xref:components:${type}/${name}.adoc#${info.field}[${name}]\n`
+        componentList += `* xref:components:${type}/${name}.adoc#${fieldAnchor(info.field)}[${name}]\n`
       })
     }
 
@@ -484,6 +689,67 @@ function logCollapsed (label, filesArray, maxToShow = 10) {
   console.log('')
 }
 
+
+/**
+ * Load or fetch connector data for a specific version
+ * @param {string} version - Version to load (e.g., "4.50.0")
+ * @param {string} dataDir - Directory where JSON files are stored
+ * @param {Object} options - Options for fetching if needed
+ * @returns {Promise<Object>} Parsed connector data
+ */
+async function loadConnectorDataForVersion(version, dataDir, options = {}) {
+  const dataFile = path.join(dataDir, `connect-${version}.json`);
+
+  // If forceFresh is set, always fetch even if file exists
+  // This ensures we have accurate connector lists for diff comparison
+  if (!options.forceFresh && fs.existsSync(dataFile)) {
+    console.log(`✓ Using existing data file: connect-${version}.json`);
+    const data = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    return data;
+  }
+
+  // Fetch fresh data
+  const reason = options.forceFresh ? 'force refresh requested' : 'file not found';
+  console.log(`📥 Fetching data for ${version} (${reason})...`);
+
+  try {
+    // Try installing that specific version and fetching data
+    console.log(`   Installing Redpanda Connect version ${version}...`);
+    const installResult = spawnSync('rpk', ['connect', 'install', '--connect-version', version, '--force'], {
+      stdio: 'pipe'
+    });
+
+    if (installResult.status !== 0) {
+      throw new Error(`Failed to install Connect version ${version}`);
+    }
+
+    // Fetch connector list
+    const tmpFile = path.join(dataDir, `connect-${version}.tmp.json`);
+    const fd = fs.openSync(tmpFile, 'w');
+    const listResult = spawnSync('rpk', ['connect', 'list', '--format', 'json-full'], {
+      stdio: ['ignore', fd, 'pipe']
+    });
+    fs.closeSync(fd);
+
+    if (listResult.status !== 0) {
+      throw new Error(`Failed to fetch connector list for version ${version}`);
+    }
+
+    // Parse and validate
+    const rawJson = fs.readFileSync(tmpFile, 'utf8');
+    const parsed = JSON.parse(rawJson);
+
+    // Move to final location
+    fs.renameSync(tmpFile, dataFile);
+
+    console.log(`✓ Successfully fetched data for version ${version}`);
+    return parsed;
+  } catch (error) {
+    console.error(`❌ Failed to fetch data for version ${version}: ${error.message}`);
+    throw new Error(`Cannot process version ${version} - data unavailable`);
+  }
+}
+
 /**
  * Main handler for rpcn-connector-docs command
  * @param {Object} options - Command options
@@ -500,10 +766,16 @@ async function handleRpcnConnectorDocs (options) {
   let draftsWritten = 0
   let draftFiles = []
   let needsAugmentation = false
+  let csvMetadata = []
 
   if (options.fetchConnectors) {
     try {
       if (options.connectVersion) {
+        if (!semver.valid(options.connectVersion)) {
+          console.error(`Error: Invalid --connect-version format: ${options.connectVersion}`)
+          console.error('Expected format: X.Y.Z (e.g., 4.50.0)')
+          process.exit(1)
+        }
         console.log(`Installing Redpanda Connect version ${options.connectVersion}...`)
         const installResult = spawnSync('rpk', ['connect', 'install', '--connect-version', options.connectVersion, '--force'], {
           stdio: 'inherit'
@@ -555,6 +827,16 @@ async function handleRpcnConnectorDocs (options) {
         console.warn(`Warning: Failed to fetch info.csv: ${csvErr.message}`)
       }
 
+      // Parse CSV metadata
+      try {
+        const csvFile = path.join(dataDir, `connect-info-${newVersion}.csv`)
+        if (fs.existsSync(csvFile)) {
+          csvMetadata = await parseCSVConnectors(csvFile, console)
+        }
+      } catch (csvParseErr) {
+        console.warn(`Warning: Failed to parse info.csv: ${csvParseErr.message}`)
+      }
+
       // Fetch Bloblang examples
       try {
         console.log(`Fetching Bloblang playground examples for Connect v${newVersion}...`)
@@ -601,18 +883,254 @@ async function handleRpcnConnectorDocs (options) {
       process.exit(1)
     }
   } else {
-    const candidates = fs.readdirSync(dataDir).filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
+    const candidates = fs.readdirSync(dataDir)
+      .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
+      .map(f => {
+        const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
+        return match ? match[1] : null
+      })
+      .filter(v => v && semver.valid(v))
+
     if (candidates.length === 0) {
-      console.error('Error: No connect-<version>.json found. Use --fetch-connectors.')
+      console.error('Error: No valid connect-<version>.json found. Use --fetch-connectors.')
       process.exit(1)
     }
-    candidates.sort()
-    dataFile = path.join(dataDir, candidates[candidates.length - 1])
-    newVersion = candidates[candidates.length - 1].match(/connect-(\d+\.\d+\.\d+)\.json/)[1]
+
+    const sortedVersions = semver.rsort(candidates)
+    newVersion = sortedVersions[0]
+    dataFile = path.join(dataDir, `connect-${newVersion}.json`)
   }
+
+  // ========================================================================
+  // Multi-Release Processing: Discover and process intermediate releases
+  // ========================================================================
+
+  const processIntermediate = !options.skipIntermediate && !options.oldData
+  let versionsToProcess = []
+  let intermediateProcessingResults = []
+
+  if (processIntermediate) {
+    // Determine starting version
+    let startVersion = options.fromVersion
+
+    if (startVersion && !semver.valid(startVersion)) {
+      console.error(`Error: Invalid --from-version format: ${startVersion}`)
+      console.error('Expected format: X.Y.Z (e.g., 4.50.0)')
+      process.exit(1)
+    }
+
+    if (!startVersion) {
+      // Try antora.yml first
+      startVersion = getAntoraValue('asciidoc.attributes.latest-connect-version')
+
+      // Fallback: check existing data files
+      if (!startVersion) {
+        const existingVersions = fs.readdirSync(dataDir)
+          .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
+          .filter(f => f !== path.basename(dataFile))
+          .map(f => {
+            const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
+            return match ? match[1] : null
+          })
+          .filter(v => v && semver.valid(v))
+
+        if (existingVersions.length > 0) {
+          const sortedVersions = semver.rsort(existingVersions)
+          startVersion = sortedVersions[0]
+        }
+      }
+    }
+
+    if (startVersion && startVersion !== newVersion) {
+      console.log(`\n${'='.repeat(80)}`)
+      console.log(`🔍 Checking for intermediate releases between ${startVersion} and ${newVersion}...`)
+      console.log('='.repeat(80))
+
+      try {
+        const intermediateReleases = await discoverIntermediateReleases(
+          startVersion,
+          newVersion,
+          { includePrerelease: false, useCache: true }
+        )
+
+        versionsToProcess = intermediateReleases.map(r => r.version)
+
+        // Process all version pairs EXCEPT the last one (which will be handled by the main flow)
+        if (versionsToProcess.length > 2) {
+          console.log(`\n📦 Processing ${versionsToProcess.length - 2} intermediate release(s)...\n`)
+
+          for (let i = 0; i < versionsToProcess.length - 2; i++) {
+            const fromVer = versionsToProcess[i]
+            const toVer = versionsToProcess[i + 1]
+
+            console.log(`\n${'─'.repeat(80)}`)
+            console.log(`📋 Processing intermediate release: ${fromVer} → ${toVer}`)
+            console.log('─'.repeat(80) + '\n')
+
+            try {
+              // Load data for both versions - FORCE FRESH to avoid stale/incomplete data
+              // This ensures we have accurate connector lists for both versions
+              console.log(`Loading connector data for ${fromVer} (fresh fetch)...`)
+              const oldData = await loadConnectorDataForVersion(fromVer, dataDir, { forceFresh: true })
+
+              console.log(`Loading connector data for ${toVer} (fresh fetch)...`)
+              const newData = await loadConnectorDataForVersion(toVer, dataDir, { forceFresh: true })
+
+              const analysisOptions = {
+                skipCloud: false,
+                skipCgo: false,
+                cgoVersion: options.cgoVersion || null
+              }
+
+              // Determine cloud version for OLD release date
+              const oldReleaseInfo = intermediateReleases.find(r => r.version === fromVer)
+              let cloudVersionForOldRelease = options.cloudVersion || null
+
+              if (!options.cloudVersion && oldReleaseInfo && oldReleaseInfo.date) {
+                cloudVersionForOldRelease = await findCloudVersionForDate(oldReleaseInfo.date, { useCache: true })
+                if (cloudVersionForOldRelease) {
+                  console.log(`   Using cloud version ${cloudVersionForOldRelease} for old release ${fromVer}`)
+                } else {
+                  cloudVersionForOldRelease = fromVer
+                }
+              }
+
+              // Determine cloud version for NEW release date
+              const newReleaseInfo = intermediateReleases.find(r => r.version === toVer)
+              let cloudVersionForRelease = options.cloudVersion || null
+
+              if (!options.cloudVersion && newReleaseInfo && newReleaseInfo.date) {
+                cloudVersionForRelease = await findCloudVersionForDate(newReleaseInfo.date, { useCache: true })
+                if (cloudVersionForRelease) {
+                  console.log(`   Using cloud version ${cloudVersionForRelease} for new release ${toVer}`)
+                } else {
+                  cloudVersionForRelease = toVer
+                }
+              }
+
+              // Run binary analysis for BOTH versions to ensure symmetric comparison
+              console.log(`\nAnalyzing binaries for OLD version ${fromVer}...`)
+              const oldAnalysis = await analyzeAllBinaries(
+                fromVer,
+                cloudVersionForOldRelease,
+                dataDir,
+                analysisOptions
+              )
+
+              console.log(`Done: Binary analysis for ${fromVer}:`)
+              console.log(`   - OSS version: ${oldAnalysis.ossVersion}`)
+              if (oldAnalysis.cgoOnly && oldAnalysis.cgoOnly.length > 0) {
+                console.log(`   - CGO-only connectors: ${oldAnalysis.cgoOnly.length}`)
+              }
+
+              console.log(`\nAnalyzing binaries for NEW version ${toVer}...`)
+              const intermediateAnalysis = await analyzeAllBinaries(
+                toVer,
+                cloudVersionForRelease,
+                dataDir,
+                analysisOptions
+              )
+
+              console.log(`Done: Binary analysis for ${toVer}:`)
+              console.log(`   - OSS version: ${intermediateAnalysis.ossVersion}`)
+              if (intermediateAnalysis.cloudVersion) {
+                console.log(`   - Cloud version: ${intermediateAnalysis.cloudVersion}`)
+              }
+              if (intermediateAnalysis.comparison) {
+                console.log(`   - Connectors in cloud: ${intermediateAnalysis.comparison.inCloud.length}`)
+                console.log(`   - Self-hosted only: ${intermediateAnalysis.comparison.notInCloud.length}`)
+                if (intermediateAnalysis.comparison.cloudOnly) {
+                  console.log(`   - Cloud-only: ${intermediateAnalysis.comparison.cloudOnly.length}`)
+                }
+              }
+              if (intermediateAnalysis.cgoOnly && intermediateAnalysis.cgoOnly.length > 0) {
+                console.log(`   - CGO-only connectors: ${intermediateAnalysis.cgoOnly.length}`)
+              }
+
+              // Augment BOTH oldData and newData with their respective binary analysis
+              // This ensures symmetric comparison - both have CGO/cloud connectors and metadata
+              const { augmentedData: augmentedOldData, addedCgoCount: oldCgoCount, addedCloudOnlyCount: oldCloudOnlyCount } =
+                augmentConnectorData(oldData, oldAnalysis)
+
+              const { augmentedData: augmentedNewData, addedCgoCount: newCgoCount, addedCloudOnlyCount: newCloudOnlyCount } =
+                augmentConnectorData(newData, intermediateAnalysis)
+
+              console.log(`   - Augmented oldData: +${oldCgoCount} CGO-only, +${oldCloudOnlyCount} cloud-only`)
+              console.log(`   - Augmented newData: +${newCgoCount} CGO-only, +${newCloudOnlyCount} cloud-only`)
+
+              // Generate diff with BOTH augmented (symmetric comparison)
+              console.log(`\nGenerating diff: ${fromVer} -> ${toVer}...`)
+              const { generateConnectorDiffJson } = require('./report-delta.js')
+
+              const diffData = generateConnectorDiffJson(
+                augmentedOldData,
+                augmentedNewData,
+                {
+                  oldVersion: fromVer,
+                  newVersion: toVer,
+                  timestamp,
+                  binaryAnalysis: intermediateAnalysis,
+                  oldBinaryAnalysis: oldAnalysis
+                }
+              )
+
+              // Save diff
+              const diffPath = path.join(dataDir, `connect-diff-${fromVer}_to_${toVer}.json`)
+              fs.writeFileSync(diffPath, JSON.stringify(diffData, null, 2), 'utf8')
+              console.log(`✓ Diff saved: ${path.basename(diffPath)}`)
+
+              // Save augmented data back to file for subsequent iterations
+              // This ensures the next version pair has consistent metadata when loading this version as oldData
+              const augmentedDataPath = path.join(dataDir, `connect-${toVer}.json`)
+              fs.writeFileSync(augmentedDataPath, JSON.stringify(augmentedNewData, null, 2), 'utf8')
+              console.log(`✓ Augmented data saved: connect-${toVer}.json`)
+
+              // Update what's-new if requested
+              if (options.updateWhatsNew) {
+                console.log(`Updating what's-new.adoc for ${toVer}...`)
+                updateWhatsNew({ dataDir, oldVersion: fromVer, newVersion: toVer, binaryAnalysis: intermediateAnalysis })
+              }
+
+              intermediateProcessingResults.push({
+                fromVersion: fromVer,
+                toVersion: toVer,
+                diffPath,
+                success: true
+              })
+
+              console.log(`✅ Completed processing: ${fromVer} → ${toVer}\n`)
+            } catch (err) {
+              console.error(`❌ Error processing ${fromVer} → ${toVer}: ${err.message}`)
+              console.error('   Continuing with next version...\n')
+
+              intermediateProcessingResults.push({
+                fromVersion: fromVer,
+                toVersion: toVer,
+                error: err.message,
+                success: false
+              })
+            }
+          }
+
+          console.log(`\n${'='.repeat(80)}`)
+          console.log(`✓ Intermediate release processing complete`)
+          console.log(`   Processed: ${intermediateProcessingResults.filter(r => r.success).length}/${intermediateProcessingResults.length} version pairs`)
+          console.log('='.repeat(80) + '\n')
+        }
+      } catch (err) {
+        console.warn(`\n⚠️  Warning: Failed to discover intermediate releases: ${err.message}`)
+        console.warn('   Falling back to single version comparison...\n')
+      }
+    }
+  }
+
+  // ========================================================================
+  // Main Processing: Handle the latest version (final iteration)
+  // ========================================================================
 
   console.log('Generating connector partials...')
   let partialsWritten, partialFiles
+  const lostSectionWarnings = []
 
   try {
     const result = await generateRpcnConnectorDocs({
@@ -622,12 +1140,15 @@ async function handleRpcnConnectorDocs (options) {
       templateIntro: options.templateIntro,
       templateFields: options.templateFields,
       templateExamples: options.templateExamples,
+      templateMetadata: options.templateMetadata,
       templateBloblang: options.templateBloblang,
       writeFullDrafts: false,
-      includeBloblang: !!options.includeBloblang
+      includeBloblang: !!options.includeBloblang,
+      csvMetadata
     })
     partialsWritten = result.partialsWritten
     partialFiles = result.partialFiles
+    lostSectionWarnings.push(...(result.lostSectionWarnings || []))
   } catch (err) {
     console.error(`Error: Failed to generate partials: ${err.message}`)
     process.exit(1)
@@ -636,19 +1157,26 @@ async function handleRpcnConnectorDocs (options) {
   let oldIndex = {}
   let oldVersion = null
   if (options.oldData && fs.existsSync(options.oldData)) {
+    // Load with platform metadata intact for accurate diff
     oldIndex = JSON.parse(fs.readFileSync(options.oldData, 'utf8'))
     const m = options.oldData.match(/connect-([\d.]+)\.json$/)
     if (m) oldVersion = m[1]
   } else {
-    const existingDataFiles = fs.readdirSync(dataDir)
-      .filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
+    const existingVersions = fs.readdirSync(dataDir)
+      .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
       .filter(f => f !== path.basename(dataFile))
-      .sort()
+      .map(f => {
+        const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
+        return match ? match[1] : null
+      })
+      .filter(v => v && semver.valid(v))
 
-    if (existingDataFiles.length > 0) {
-      const oldFile = existingDataFiles[existingDataFiles.length - 1]
-      oldVersion = oldFile.match(/connect-(\d+\.\d+\.\d+)\.json/)[1]
+    if (existingVersions.length > 0) {
+      const sortedVersions = semver.rsort(existingVersions)
+      oldVersion = sortedVersions[0]
+      const oldFile = `connect-${oldVersion}.json`
       const oldPath = path.join(dataDir, oldFile)
+      // Load with platform metadata intact for accurate diff
       oldIndex = JSON.parse(fs.readFileSync(oldPath, 'utf8'))
       console.log(`📋 Using old version data: ${oldFile}`)
     } else {
@@ -656,32 +1184,22 @@ async function handleRpcnConnectorDocs (options) {
       if (oldVersion) {
         const oldPath = path.join(dataDir, `connect-${oldVersion}.json`)
         if (fs.existsSync(oldPath)) {
+          // Load with platform metadata intact for accurate diff
           oldIndex = JSON.parse(fs.readFileSync(oldPath, 'utf8'))
         }
       }
     }
   }
 
+  // Load with platform metadata intact for accurate diff
   let newIndex = JSON.parse(fs.readFileSync(dataFile, 'utf8'))
 
-  // Save a clean copy of OSS data for binary analysis (before augmentation)
-  // This ensures the binary analyzer compares actual binaries, not augmented data
+  // Save a clean copy of OSS data for binary analysis
+  // Binary analyzer needs pure OSS data without augmented CGO/cloud connectors
   const cleanOssDataPath = path.join(dataDir, `._connect-${newVersion}-clean.json`)
 
-  // Strip augmentation fields to create clean data for comparison
-  const cleanData = JSON.parse(JSON.stringify(newIndex))
-  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers']
-
-  for (const type of connectorTypes) {
-    if (Array.isArray(cleanData[type])) {
-      cleanData[type] = cleanData[type].filter(c => !c.cloudOnly) // Remove cloud-only connectors added by augmentation
-      cleanData[type].forEach(c => {
-        delete c.cloudSupported
-        delete c.requiresCgo
-        delete c.cloudOnly
-      })
-    }
-  }
+  // Create clean version by removing augmented connectors
+  const cleanData = buildCleanOssData(newIndex)
 
   fs.writeFileSync(cleanOssDataPath, JSON.stringify(cleanData, null, 2), 'utf8')
 
@@ -690,40 +1208,6 @@ async function handleRpcnConnectorDocs (options) {
     console.log(`\n✓ Already at version ${newVersion}`)
     console.log('  Skipping diff generation, but will run binary analysis.\n')
   }
-
-  // Publish merged version
-  if (options.overrides && fs.existsSync(options.overrides)) {
-    try {
-      const { mergeOverrides, resolveReferences } = require('./generate-rpcn-connector-docs.js')
-
-      const mergedData = JSON.parse(JSON.stringify(newIndex))
-      const ovRaw = fs.readFileSync(options.overrides, 'utf8')
-      const ovObj = JSON.parse(ovRaw)
-      const resolvedOverrides = resolveReferences(ovObj, ovObj)
-      mergeOverrides(mergedData, resolvedOverrides)
-
-      const attachmentsRoot = path.resolve(process.cwd(), 'modules/components/attachments')
-      fs.mkdirSync(attachmentsRoot, { recursive: true })
-
-      const existingFiles = fs.readdirSync(attachmentsRoot)
-        .filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
-        .sort()
-
-      for (const oldFile of existingFiles) {
-        const oldFilePath = path.join(attachmentsRoot, oldFile)
-        fs.unlinkSync(oldFilePath)
-        console.log(`🧹 Deleted old version: ${oldFile}`)
-      }
-
-      const destFile = path.join(attachmentsRoot, `connect-${newVersion}.json`)
-      fs.writeFileSync(destFile, JSON.stringify(mergedData, null, 2), 'utf8')
-      console.log(`Done: Published merged version to: ${path.relative(process.cwd(), destFile)}`)
-    } catch (err) {
-      console.error(`Error: Failed to publish merged version: ${err.message}`)
-    }
-  }
-
-  printDeltaReport(oldIndex, newIndex)
 
   // Binary analysis
   let oldBinaryAnalysis = null
@@ -767,14 +1251,13 @@ async function handleRpcnConnectorDocs (options) {
     }
   }
 
+  // Always use clean OSS data for comparison
+  // Temporarily rename the file so the analyzer finds it
+  const expectedPath = path.join(dataDir, `connect-${newVersion}.json`)
+  let tempRenamed = false
+
   try {
     console.log('\nAnalyzing connector binaries...')
-    const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
-
-    // Always use clean OSS data for comparison
-    // Temporarily rename the file so the analyzer finds it
-    const expectedPath = path.join(dataDir, `connect-${newVersion}.json`)
-    let tempRenamed = false
 
     if (fs.existsSync(cleanOssDataPath)) {
       if (fs.existsSync(expectedPath)) {
@@ -797,13 +1280,6 @@ async function handleRpcnConnectorDocs (options) {
       analysisOptions
     )
 
-    // Restore the augmented file
-    if (tempRenamed) {
-      const expectedPath = path.join(dataDir, `connect-${newVersion}.json`)
-      fs.unlinkSync(expectedPath)
-      fs.renameSync(path.join(dataDir, `._connect-${newVersion}-augmented.json.tmp`), expectedPath)
-    }
-
     console.log('Done: Binary analysis complete:')
     console.log(`   • OSS version: ${binaryAnalysis.ossVersion}`)
 
@@ -825,6 +1301,17 @@ async function handleRpcnConnectorDocs (options) {
   } catch (err) {
     console.error(`Warning: Binary analysis failed: ${err.message}`)
     console.error('   Continuing without binary analysis data...')
+  } finally {
+    // Restore the augmented file regardless of success or failure
+    if (tempRenamed) {
+      if (fs.existsSync(expectedPath)) {
+        fs.unlinkSync(expectedPath)
+      }
+      const tmpPath = path.join(dataDir, `._connect-${newVersion}-augmented.json.tmp`)
+      if (fs.existsSync(tmpPath)) {
+        fs.renameSync(tmpPath, expectedPath)
+      }
+    }
   }
 
   // Augment data file
@@ -834,69 +1321,10 @@ async function handleRpcnConnectorDocs (options) {
 
       const connectorData = JSON.parse(fs.readFileSync(dataFile, 'utf8'))
 
-      const cloudSet = new Set(
-        (binaryAnalysis.comparison?.inCloud || []).map(c => `${c.type}:${c.name}`)
-      )
-      const cgoOnlySet = new Set(
-        (binaryAnalysis.cgoOnly || []).map(c => `${c.type}:${c.name}`)
-      )
+      const { augmentedData, augmentedCount, addedCgoCount, addedCloudOnlyCount } =
+        augmentConnectorData(connectorData, binaryAnalysis)
 
-      let augmentedCount = 0
-      let addedCgoCount = 0
-      let addedCloudOnlyCount = 0
-
-      const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-        'buffers', 'metrics', 'scanners', 'tracers']
-
-      for (const type of connectorTypes) {
-        if (!Array.isArray(connectorData[type])) {
-          connectorData[type] = []
-        }
-
-        for (const connector of connectorData[type]) {
-          const key = `${type}:${connector.name}`
-          connector.cloudSupported = cloudSet.has(key)
-          connector.requiresCgo = cgoOnlySet.has(key)
-          augmentedCount++
-        }
-
-        if (binaryAnalysis.cgoOnly) {
-          for (const cgoConn of binaryAnalysis.cgoOnly) {
-            if (cgoConn.type === type) {
-              const exists = connectorData[type].some(c => c.name === cgoConn.name)
-              if (!exists) {
-                connectorData[type].push({
-                  ...cgoConn,
-                  type: cgoConn.type.replace(/s$/, ''),
-                  cloudSupported: false,
-                  requiresCgo: true
-                })
-                addedCgoCount++
-              }
-            }
-          }
-        }
-
-        if (binaryAnalysis.comparison?.cloudOnly) {
-          for (const cloudConn of binaryAnalysis.comparison.cloudOnly) {
-            if (cloudConn.type === type) {
-              const exists = connectorData[type].some(c => c.name === cloudConn.name)
-              if (!exists) {
-                connectorData[type].push({
-                  ...cloudConn,
-                  type: cloudConn.type.replace(/s$/, ''),
-                  cloudSupported: true,
-                  requiresCgo: false,
-                  cloudOnly: true
-                })
-                addedCloudOnlyCount++
-              }
-            }
-          }
-        }
-      }
-
-      fs.writeFileSync(dataFile, JSON.stringify(connectorData, null, 2), 'utf8')
+      fs.writeFileSync(dataFile, JSON.stringify(augmentedData, null, 2), 'utf8')
       console.log(`Done: Augmented ${augmentedCount} connectors with cloud/cgo fields`)
       if (addedCgoCount > 0) {
         console.log(`   • Added ${addedCgoCount} cgo-only connectors to data file`)
@@ -905,22 +1333,98 @@ async function handleRpcnConnectorDocs (options) {
         console.log(`   • Added ${addedCloudOnlyCount} cloud-only connectors to data file`)
       }
 
-      // Keep only 2 most recent versions
-      const dataFiles = fs.readdirSync(dataDir)
-        .filter(f => /^connect-\d+\.\d+\.\d+\.json$/.test(f))
-        .sort()
+      // Keep only the latest 2 versions (by semver), delete all others
+      const dataVersions = fs.readdirSync(dataDir)
+        .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
+        .map(f => {
+          const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
+          return match ? match[1] : null
+        })
+        .filter(v => v && semver.valid(v))
+        .sort((a, b) => semver.rcompare(a, b)) // Sort descending (newest first)
 
-      while (dataFiles.length > 2) {
-        const oldestFile = dataFiles.shift()
-        const oldestPath = path.join(dataDir, oldestFile)
-        fs.unlinkSync(oldestPath)
-        console.log(`🧹 Deleted old version from docs-data: ${oldestFile}`)
+      // Keep only the latest 2 versions
+      const versionsToKeep = new Set(dataVersions.slice(0, 2))
+
+      // Delete all older versions
+      for (const version of dataVersions) {
+        if (!versionsToKeep.has(version)) {
+          const dataFile = `connect-${version}.json`
+          const dataPath = path.join(dataDir, dataFile);
+          fs.unlinkSync(dataPath);
+          console.log(`🧹 Deleted old version from docs-data: ${dataFile}`);
+        }
       }
 
-      // Reload newIndex after augmentation so diff generation uses augmented data
-      newIndex = JSON.parse(fs.readFileSync(dataFile, 'utf8'))
+      // Also clean up old CSV files (keep latest 2)
+      const csvVersions = fs.readdirSync(dataDir)
+        .filter(f => /^connect-info-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.csv$/.test(f))
+        .map(f => {
+          const match = f.match(/^connect-info-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.csv$/)
+          return match ? match[1] : null
+        })
+        .filter(v => v && semver.valid(v))
+        .sort((a, b) => semver.rcompare(a, b))
+
+      const csvToKeep = new Set(csvVersions.slice(0, 2))
+      for (const version of csvVersions) {
+        if (!csvToKeep.has(version)) {
+          const csvFile = `connect-info-${version}.csv`
+          const csvPath = path.join(dataDir, csvFile);
+          fs.unlinkSync(csvPath);
+          console.log(`🧹 Deleted old CSV from docs-data: ${csvFile}`);
+        }
+      }
+
+      // IMPORTANT: Reload newIndex with augmented data for unified diff
+      // The unified diff approach compares platform metadata to detect transitions
+      newIndex = augmentedData
+      console.log(`✓ Reloaded newIndex with augmented data for diff comparison`)
     } catch (err) {
       console.error(`Warning: Failed to augment data file: ${err.message}`)
+    }
+  }
+
+  // Publish merged version to attachments
+  // IMPORTANT: This must run AFTER binary analysis and augmentation to include CGO-only connectors
+  if (options.overrides && fs.existsSync(options.overrides)) {
+    try {
+      const { mergeOverrides, resolveReferences } = require('./generate-rpcn-connector-docs.js')
+
+      // Use the augmented newIndex which now includes CGO-only and cloud-only connectors
+      const mergedData = JSON.parse(JSON.stringify(newIndex))
+
+      const ovRaw = fs.readFileSync(options.overrides, 'utf8')
+      const ovObj = JSON.parse(ovRaw)
+      const resolvedOverrides = resolveReferences(ovObj, ovObj)
+
+      mergeOverrides(mergedData, resolvedOverrides)
+
+      const attachmentsRoot = path.resolve(process.cwd(), 'modules/components/attachments')
+      fs.mkdirSync(attachmentsRoot, { recursive: true })
+
+      const existingVersions = fs.readdirSync(attachmentsRoot)
+        .filter(f => /^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/.test(f))
+        .map(f => {
+          const match = f.match(/^connect-(\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?)\.json$/)
+          return match ? match[1] : null
+        })
+        .filter(v => v && semver.valid(v))
+
+      const sortedVersions = semver.sort(existingVersions) // ascending order
+
+      for (const version of sortedVersions) {
+        const oldFile = `connect-${version}.json`
+        const oldFilePath = path.join(attachmentsRoot, oldFile)
+        fs.unlinkSync(oldFilePath)
+        console.log(`🧹 Deleted old version from attachments: ${oldFile}`)
+      }
+
+      const destFile = path.join(attachmentsRoot, `connect-${newVersion}.json`)
+      fs.writeFileSync(destFile, JSON.stringify(mergedData, null, 2), 'utf8')
+      console.log(`✓ Published merged version to: ${path.relative(process.cwd(), destFile)}`)
+    } catch (err) {
+      console.error(`Error: Failed to publish merged version: ${err.message}`)
     }
   }
 
@@ -931,9 +1435,51 @@ async function handleRpcnConnectorDocs (options) {
   } else if (versionsMatch) {
     console.log(`⏭️  Skipping diff generation: versions match (${oldVersion} === ${newVersion})`)
   } else {
+    // FALLBACK: If binary analysis failed, strip CGO/cloud augmentation from old data
+    // to prevent false "removed" reports when comparing augmented old vs non-augmented new
+    let oldIndexForDiff = oldIndex
+    // Check if CGO analysis specifically failed (cgoIndex will be undefined if CGO binary couldn't be analyzed)
+    const cgoAnalysisFailed = !binaryAnalysis || !binaryAnalysis.ossVersion || !binaryAnalysis.cgoIndex
+    if (cgoAnalysisFailed) {
+      console.log('⚠️  Binary analysis unavailable - stripping CGO/cloud metadata from old data for clean comparison')
+
+      // Strip CGO/cloud-only connectors and metadata from old data
+      oldIndexForDiff = JSON.parse(JSON.stringify(oldIndex))
+      const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
+        'buffers', 'metrics', 'scanners', 'tracers', 'config']
+
+      let totalStripped = 0
+      for (const type of connectorTypes) {
+        if (Array.isArray(oldIndexForDiff[type])) {
+          const originalCount = oldIndexForDiff[type].length
+
+          // Remove connectors marked as CGO-only or cloud-only
+          // These shouldn't appear as "removed" when binary analysis is unavailable
+          oldIndexForDiff[type] = oldIndexForDiff[type].filter(c => {
+            return !(c.requiresCgo || c.cloudOnly)
+          })
+
+          const removed = originalCount - oldIndexForDiff[type].length
+          if (removed > 0) {
+            console.log(`   • Stripped ${removed} CGO/cloud connectors from ${type}`)
+            totalStripped += removed
+          }
+
+          // Remove platform metadata from remaining connectors
+          stripPlatformMetadata(oldIndexForDiff[type])
+        }
+      }
+
+      if (totalStripped > 0) {
+        console.log(`   ✓ Total stripped: ${totalStripped} CGO/cloud connectors`)
+      }
+    }
+
+    printDeltaReport(oldIndexForDiff, newIndex)
+
     const { generateConnectorDiffJson } = require('./report-delta.js')
     diffJson = generateConnectorDiffJson(
-      oldIndex,
+      oldIndexForDiff,
       newIndex,
       {
         oldVersion: oldVersion,
@@ -998,8 +1544,14 @@ async function handleRpcnConnectorDocs (options) {
           return !wasInOldOss && !wasInOldCgo && !docsExist
         })
       } else {
+        // Fallback when oldBinaryAnalysis is unavailable
+        // NOTE: oldIndex is loaded from saved JSON files that have platform metadata stripped
+        // (see stripPlatformMetadata() call before saving). This means checking requiresCgo === true
+        // will always fail. We rely on the name match and docs existence check as a heuristic.
+        // If a component with the same name exists in oldIndex OR docs exist, treat it as existing.
         newCgoComponents = binaryAnalysis.cgoOnly.filter(cgoComp => {
-          const wasInOldOss = oldIndex[cgoComp.type]?.some(c => c.name === cgoComp.name)
+          // Check if component with same name existed in old index (metadata unavailable, just name match)
+          const wasInOldIndex = oldIndex[cgoComp.type]?.some(c => c.name === cgoComp.name)
 
           // Check if docs already exist
           const typePlural = cgoComp.type.endsWith('s') ? cgoComp.type : `${cgoComp.type}s`
@@ -1008,7 +1560,8 @@ async function handleRpcnConnectorDocs (options) {
             fs.existsSync(path.join(root, relPath))
           )
 
-          return !wasInOldOss && !docsExist
+          // Only treat as new if it wasn't in the old index AND docs don't exist
+          return !wasInOldIndex && !docsExist
         })
         if (newCgoComponents.length > 0) {
           console.log(`   ℹ️  No old binary analysis found - treating ${newCgoComponents.length} cgo components not in old OSS data as new`)
@@ -1038,21 +1591,40 @@ async function handleRpcnConnectorDocs (options) {
       console.log(`   • Includes binary analysis: OSS ${diffJson.binaryAnalysis.versions.oss}, Cloud ${diffJson.binaryAnalysis.versions.cloud || 'N/A'}, cgo ${diffJson.binaryAnalysis.versions.cgo || 'N/A'}`)
     }
 
-    // Cleanup old diff files
+    // Cleanup only individual diff files from THIS run (not master diff or diffs from intermediate processing)
+    // We keep intermediate diffs to build the master diff at the end
     try {
+      const currentRunDiffs = new Set();
+
+      // Collect diffs from this run
+      if (intermediateProcessingResults.length > 0) {
+        intermediateProcessingResults.forEach(r => {
+          if (r.diffPath) {
+            currentRunDiffs.add(path.basename(r.diffPath));
+          }
+        });
+      }
+      currentRunDiffs.add(path.basename(diffPath)); // Current final diff
+
+      // Find old diff files (not from this run, not master-diff)
       const oldDiffFiles = fs.readdirSync(dataDir)
-        .filter(f => f.startsWith('connect-diff-') && f.endsWith('.json') && f !== path.basename(diffPath))
+        .filter(f =>
+          f.startsWith('connect-diff-') &&
+          f.endsWith('.json') &&
+          !f.startsWith('connect-diff-master-') &&
+          !currentRunDiffs.has(f)
+        );
 
       if (oldDiffFiles.length > 0) {
-        console.log(`🧹 Cleaning up ${oldDiffFiles.length} old diff files...`)
+        console.log(`🧹 Cleaning up ${oldDiffFiles.length} old diff file(s) from previous runs...`);
         oldDiffFiles.forEach(f => {
-          const oldDiffPath = path.join(dataDir, f)
-          fs.unlinkSync(oldDiffPath)
-          console.log(`   • Deleted: ${f}`)
-        })
+          const oldDiffPath = path.join(dataDir, f);
+          fs.unlinkSync(oldDiffPath);
+          console.log(`   • Deleted: ${f}`);
+        });
       }
     } catch (err) {
-      console.warn(`Warning: Failed to clean up old diff files: ${err.message}`)
+      console.warn(`Warning: Failed to clean up old diff files: ${err.message}`);
     }
   }
 
@@ -1359,15 +1931,18 @@ async function handleRpcnConnectorDocs (options) {
           template: options.templateMain,
           templateFields: options.templateFields,
           templateExamples: options.templateExamples,
+          templateMetadata: options.templateMetadata,
           templateIntro: options.templateIntro,
           writeFullDrafts: true,
           cgoOnly: binaryAnalysis?.cgoOnly || [],
-          cloudOnly: binaryAnalysis?.comparison?.cloudOnly || []
+          cloudOnly: binaryAnalysis?.comparison?.cloudOnly || [],
+          csvMetadata
         })
 
         fs.unlinkSync(tempDataPath)
         draftsWritten = draftResult.draftsWritten
         draftFiles = draftResult.draftFiles
+        lostSectionWarnings.push(...(draftResult.lostSectionWarnings || []))
       }
     } catch (err) {
       console.error(`Error: Could not draft missing: ${err.message}`)
@@ -1399,12 +1974,42 @@ async function handleRpcnConnectorDocs (options) {
     }
   }
 
+  // Create master diff if we processed intermediate releases
+  let masterDiff = null
+  if (intermediateProcessingResults.length > 0) {
+    try {
+      const { createMasterDiff } = require('./multi-version-summary.js')
+      const masterDiffPath = path.join(dataDir, `connect-diff-master-${intermediateProcessingResults[0].fromVersion}_to_${newVersion}.json`)
+      const finalDiffPath = path.join(dataDir, `connect-diff-${oldVersion}_to_${newVersion}.json`)
+      masterDiff = createMasterDiff(intermediateProcessingResults, finalDiffPath, masterDiffPath)
+    } catch (err) {
+      console.error(`Warning: Failed to create master diff: ${err.message}`)
+    }
+  }
+
   // Generate PR summary
   try {
     const { printPRSummary } = require('./pr-summary-formatter.js')
-    printPRSummary(diffJson, binaryAnalysis, draftFiles)
+    // Use master diff if available, otherwise use single diff. Content-loss
+    // warnings ride the diff object so they lead the PR summary body instead
+    // of dying in the collapsed workflow log.
+    const summaryDiff = masterDiff || diffJson
+    if (lostSectionWarnings.length) summaryDiff.lostSectionWarnings = lostSectionWarnings
+    printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
   } catch (err) {
     console.error(`Warning: Failed to generate PR summary: ${err.message}`)
+  }
+
+  // Check for failures in intermediate processing before updating Antora version
+  if (intermediateProcessingResults.length > 0) {
+    const failures = intermediateProcessingResults.filter(r => !r.success)
+    if (failures.length > 0) {
+      console.error(`\n❌ Cannot update Antora version: ${failures.length} intermediate release(s) failed to process`)
+      failures.forEach(f => {
+        console.error(`   • ${f.fromVersion} → ${f.toVersion}: ${f.error}`)
+      })
+      process.exit(1)
+    }
   }
 
   const wrote = setAntoraValue('asciidoc.attributes.latest-connect-version', newVersion)
@@ -1438,11 +2043,32 @@ async function handleRpcnConnectorDocs (options) {
   console.log('\n📄 Summary:')
   console.log(`   • Run time: ${timestamp}`)
   console.log(`   • Version used: ${newVersion}`)
+
+  if (intermediateProcessingResults.length > 0) {
+    const successCount = intermediateProcessingResults.filter(r => r.success).length
+    console.log(`   • Intermediate releases processed: ${successCount}/${intermediateProcessingResults.length}`)
+
+    if (successCount < intermediateProcessingResults.length) {
+      console.log('   ⚠️  Some intermediate releases failed:')
+      intermediateProcessingResults.filter(r => !r.success).forEach(r => {
+        console.log(`      - ${r.fromVersion} → ${r.toVersion}: ${r.error}`)
+      })
+    }
+  }
+
+  // Note: Version cleanup is handled earlier in the augmentation phase (versionsToKeep logic)
+  // This preserves intermediate versions needed for diff generation while removing unneeded files
+
   process.exit(0)
 }
 
 module.exports = {
   handleRpcnConnectorDocs,
   updateWhatsNew,
-  capToTwoSentences
+  capToTwoSentences,
+  augmentConnectorData,
+  buildCleanOssData,
+  fieldAnchor,
+  buildFieldsTable,
+  buildChangedDefaultsTable
 }

@@ -20,7 +20,7 @@
  *
  * Input format (diff data from compare-properties.js):
  *   {
- *     comparison: { oldVersion, newVersion, timestamp },
+ *     comparison: { oldVersion, newVersion },
  *     summary: { newProperties, changedDefaults, ... },
  *     details: { newProperties: [...], changedDefaults: [...], ... }
  *   }
@@ -278,11 +278,14 @@ function generatePRSummary(diffData) {
   lines.push('</details>');
   lines.push('');
 
-  // Footer
+  // Footer. The timestamp only appears in reports generated before the
+  // field was removed to keep committed diff reports deterministic.
   lines.push('---');
   lines.push('');
-  lines.push(`*Generated: ${diffData.comparison.timestamp}*`);
-  lines.push('');
+  if (diffData.comparison.timestamp) {
+    lines.push(`*Generated: ${diffData.comparison.timestamp}*`);
+    lines.push('');
+  }
   lines.push('<!-- PR_SUMMARY_END -->');
 
   return lines.join('\n');

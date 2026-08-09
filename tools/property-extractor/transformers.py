@@ -639,8 +639,9 @@ class BasicInfoTransformer:
     
     NAME RESOLUTION PRIORITY:
     1. Pre-existing property["name"] (from previous processing)
-    2. info["name_in_file"] (C++ variable name from Tree-sitter)  
-    3. First parameter value if it looks like an identifier
+    2. First string-literal parameter if it looks like an identifier
+       (the name argument passed to the property constructor)
+    3. info["name_in_file"] (C++ member name from Tree-sitter) as fallback
     
     DESCRIPTION EXTRACTION LOGIC:
     1. If first parameter is a string and differs from name → use as description
@@ -673,29 +674,44 @@ class BasicInfoTransformer:
             return property
 
         # --- Step 1: find the "real" start of the property definition ---
-        # Skip lambdas, validators, and non-string literals at the start
-        start_idx = 0
+        # Skip lambdas, validators, and non-string literals at the start.
+        # The parser normalizes string_literal values to unquoted strings, so
+        # select by parameter type rather than by surrounding quotes.
+        start_idx = None
         for i, p in enumerate(params):
-            val = str(p.get("value", ""))
-            typ = p.get("type", "")
             if is_validator_param(p):
                 continue
-            if typ in ("lambda_expression", "qualified_identifier", "unresolved_identifier"):
-                continue
-            if not (val.startswith('"') and val.endswith('"')):
+            if p.get("type") != "string_literal":
                 continue
             # First string literal we hit is the name
             start_idx = i
             break
 
         # --- Step 2: extract name and description robustly ---
-        name = property.get("name") or info.get("name_in_file")
-        if not name and len(params) > start_idx:
-            name = params[start_idx].get("value", "").strip('"')
+        # The property's registered name is the first string-literal constructor
+        # argument, NOT the C++ member identifier. They usually match, but not
+        # always: for example, the member `default_topic_replication` registers
+        # the name "default_topic_replications". info["name_in_file"] (the
+        # member identifier) is only a fallback.
+        name = property.get("name")
+        if not name:
+            for p in params:
+                if p.get("type") != "string_literal":
+                    continue
+                candidate = str(p.get("value", "")).strip().strip('"')
+                # The name literal is a single identifier with no whitespace.
+                # If the first string literal looks like a description instead
+                # (for example, the name was passed as a constant), fall back
+                # to the member identifier below.
+                if candidate and not re.search(r"\s", candidate):
+                    name = candidate
+                break  # only the first string literal can be the name
+        if not name:
+            name = info.get("name_in_file")
         property["name"] = name
 
         desc = None
-        if len(params) > start_idx + 1:
+        if start_idx is not None and len(params) > start_idx + 1:
             v0 = params[start_idx].get("value")
             v1 = params[start_idx + 1].get("value")
             if isinstance(v1, str) and len(v1) > 10 and " " in v1:
@@ -1570,9 +1586,12 @@ class FriendlyDefaultTransformer:
     NUMERIC_LIMITS_PATTERN = r"std::numeric_limits<[^>]+>::max\(\)"
     LEGACY_DEFAULT_PATTERN = r"legacy_default<[^>]+>\(([^,]+)"
     BRACED_LIST_PATTERN = r"^\{(.*)\}$"
+    # Pattern for identifiers that look like C++ constants (ALL_CAPS with underscores)
+    CONSTANT_IDENTIFIER_PATTERN = r'^[A-Z][A-Z0-9_]*$'
 
-    def __init__(self):
+    def __init__(self, constant_resolver=None):
         self._resolver = None
+        self._constant_resolver = constant_resolver
 
     def accepts(self, info, file_pair):
         return bool(info.get("params") and len(info["params"]) > 2)
@@ -1591,6 +1610,40 @@ class FriendlyDefaultTransformer:
             except Exception:
                 return identifier
         return identifier
+
+    def _resolve_numeric_constant(self, identifier):
+        """
+        Try to resolve a C++ numeric constant using the ConstantResolver.
+
+        Args:
+            identifier: The constant name (e.g., "DEFAULT_TOPIC_MEMORY_PER_PARTITION")
+
+        Returns:
+            The friendly formatted value (e.g., "256 MiB (268435456)"), or None if not resolved
+        """
+        if not self._constant_resolver:
+            return None
+
+        try:
+            result = self._constant_resolver.resolve_numeric_constant(identifier)
+            if result:
+                return result.get('friendly')
+        except Exception as e:
+            logger.debug(f"Error resolving numeric constant {identifier}: {e}")
+
+        return None
+
+    def _looks_like_constant(self, identifier):
+        """
+        Check if an identifier looks like a C++ constant (ALL_CAPS_WITH_UNDERSCORES).
+
+        Args:
+            identifier: The identifier to check
+
+        Returns:
+            True if it looks like a constant, False otherwise
+        """
+        return bool(re.match(self.CONSTANT_IDENTIFIER_PATTERN, identifier))
 
     def _parse_initializer_list(self, text):
         """Handle braced lists like {"a", "b"}."""
@@ -1779,9 +1832,25 @@ class FriendlyDefaultTransformer:
             return property
 
         # ------------------------------------------------------------------
+        # ALL_CAPS numeric constants (DEFAULT_TOPIC_MEMORY_PER_PARTITION, etc.)
+        # Try to resolve via ConstantResolver before falling back
+        # ------------------------------------------------------------------
+        if self._looks_like_constant(d):
+            resolved = self._resolve_numeric_constant(d)
+            if resolved:
+                property["default"] = resolved
+                return property
+            # If not resolved, fall through to normalized string fallback
+
+        # ------------------------------------------------------------------
         # Constant-like or symbolic identifiers (model::..., net::..., etc.)
         # ------------------------------------------------------------------
         if "::" in d and not d.startswith("std::"):
+            # Try numeric resolution first for namespace-qualified constants
+            resolved = self._resolve_numeric_constant(d)
+            if resolved:
+                property["default"] = resolved
+                return property
             # Try to resolve to string enum if possible
             resolved = self._resolve_identifier(d)
             property["default"] = resolved or d
@@ -2483,8 +2552,10 @@ class RuntimeValidationEnumExtractor:
         )
 
         if enum_results:
-            # Extract just the values for the enum field
-            property["enum"] = [result["value"] for result in enum_results]
+            # Skip if enum was already set by an override (accepted_values)
+            if "enum" not in property:
+                # Extract just the values for the enum field
+                property["enum"] = [result["value"] for result in enum_results]
 
             # Add metadata about which enum values are enterprise-only
             enum_metadata = {}

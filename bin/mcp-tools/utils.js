@@ -117,6 +117,100 @@ function formatDate(date = new Date()) {
   return date.toISOString().split('T')[0];
 }
 
+/**
+ * Serialize an Error object to a plain object
+ * Prevents circular reference errors when JSON.stringify'ing results
+ * @param {Error} error - The error to serialize
+ * @returns {Object|string|null} Plain object with error properties, string, or null
+ */
+function serializeError(error) {
+  if (!error) return null;
+
+  // If it's already a string, return as-is
+  if (typeof error === 'string') return error;
+
+  // If it's not an Error object, try to convert to string
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  // Serialize Error object - use try-catch in case any property access fails
+  try {
+    const serialized = {
+      name: error.name || 'Error',
+      message: error.message || String(error)
+    };
+
+    // Safely add stack if available
+    if (error.stack) {
+      serialized.stack = String(error.stack);
+    }
+
+    // Include any additional properties (like stdout, stderr from exec errors)
+    // Use hasOwnProperty to avoid accessing inherited properties that might cause issues
+    for (const key of ['stdout', 'stderr', 'code', 'status']) {
+      if (Object.prototype.hasOwnProperty.call(error, key) && error[key] != null) {
+        // Convert to string to ensure serializability
+        serialized[key] = String(error[key]);
+      }
+    }
+
+    return serialized;
+  } catch (err) {
+    // If serialization fails for any reason, return a safe fallback
+    return {
+      name: 'Error',
+      message: 'Error object could not be fully serialized',
+      originalError: String(error)
+    };
+  }
+}
+
+/**
+ * Deep serialize a result object, converting any Error objects to plain objects
+ * Handles circular references by tracking visited objects
+ * @param {*} obj - The object to serialize
+ * @param {WeakSet} [visited] - Set of visited objects (for circular reference detection)
+ * @returns {*} Object with all errors serialized
+ */
+function serializeResult(obj, visited = new WeakSet()) {
+  if (!obj || typeof obj !== 'object') {
+    return obj;
+  }
+
+  // Check for circular references
+  if (visited.has(obj)) {
+    return '[Circular]';
+  }
+
+  // Handle Error objects first
+  if (obj instanceof Error) {
+    return serializeError(obj);
+  }
+
+  // Add to visited set
+  visited.add(obj);
+
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj.map(item => serializeResult(item, visited));
+  }
+
+  // Handle plain objects
+  const result = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value instanceof Error) {
+      result[key] = serializeError(value);
+    } else if (value && typeof value === 'object') {
+      result[key] = serializeResult(value, visited);
+    } else {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
 module.exports = {
   MAX_RECURSION_DEPTH,
   MAX_EXEC_BUFFER_SIZE,
@@ -127,5 +221,7 @@ module.exports = {
   getDocToolsCommand,
   executeCommand,
   normalizeVersion,
-  formatDate
+  formatDate,
+  serializeError,
+  serializeResult
 };

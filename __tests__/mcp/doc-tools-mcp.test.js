@@ -912,7 +912,8 @@ describe('MCP Server Library - Repository Detection', () => {
         const result = generateRpkDocs({ tag: '25.3.1' });
 
         expect(result.success).toBe(true);
-        expect(result.tag).toBe('v25.3.1');
+        expect(result.version).toBe('v25.3.1');
+        expect(result.ref_type).toBe('tag');
         expect(result.commands_documented).toBe(87);
       });
 
@@ -930,7 +931,7 @@ describe('MCP Server Library - Repository Detection', () => {
 
         const result = generateRpkDocs({ tag: '25.3.1' });
 
-        expect(result.tag).toBe('v25.3.1');
+        expect(result.version).toBe('v25.3.1');
       });
 
       it('should return error when doc-tools not found', () => {
@@ -960,10 +961,14 @@ describe('MCP Server Library - Repository Detection', () => {
 
         const result = generateRpkDocs({});
 
-        expect(result.branch).toBe('dev');
+        // When no ref, tag, or branch is specified, it defaults to 'dev'
+        expect(result.version).toBe('dev');
+        expect(result.ref_type).toBe('branch');
+        expect(result.ref).toBe('dev');
+        // Should use --ref dev
         expect(spawnSync).toHaveBeenCalledWith(
           'node',
-          expect.arrayContaining(['--branch', 'dev']),
+          expect.arrayContaining(['--ref', 'dev']),
           expect.any(Object)
         );
       });

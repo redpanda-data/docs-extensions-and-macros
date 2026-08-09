@@ -1,11 +1,14 @@
 const renderLeafField = require('./renderLeafField');
 const renderObjectField = require('./renderObjectField');
 
+// Component types that support the 'label' field
+const TYPES_WITH_LABEL = new Set(['inputs', 'outputs', 'processors']);
+
 /**
- * Builds either “Common” or “Advanced” YAML for one connector.
+ * Builds either "Common" or "Advanced" YAML for one connector.
  *
- * - type            = “input” or “output” (or whatever type)
- * - connectorName   = such as “amqp_1”
+ * - type            = "input" or "output" (or whatever type)
+ * - connectorName   = such as "amqp_1"
  * - children        = the array of field‐definitions (entry.config.children)
  * - includeAdvanced = if false → only fields where is_advanced !== true
  *                      if true  → all fields (except deprecated)
@@ -13,32 +16,39 @@ const renderObjectField = require('./renderObjectField');
  * Structure produced:
  *
  *   type:
- *     label: ""
+ *     label: ""          (only for inputs, outputs, processors)
  *     connectorName:
- *       ...child fields (with comments for “no default”)
+ *       ...child fields (with comments for "no default")
  */
 module.exports = function buildConfigYaml(type, connectorName, children, includeAdvanced) {
   const lines = [];
 
-  // “type:” top‐level
+  // "type:" top‐level
   lines.push(`${type}:`);
 
-  // Two‐space indent for “label”
-  lines.push(`  label: ""`);
+  // Two‐space indent for "label" (only for types that support it)
+  if (TYPES_WITH_LABEL.has(type)) {
+    lines.push(`  label: ""`);
+  }
+
+  // Count how many fields will be rendered to determine if we need {}
+  const fieldsToRender = children.filter(field => {
+    if (field.is_deprecated) return false;
+    if (!includeAdvanced && field.is_advanced) return false;
+    return true;
+  });
 
   // Two‐space indent for connectorName heading
-  lines.push(`  ${connectorName}:`);
+  // If no fields will be rendered, use {} for valid YAML
+  if (fieldsToRender.length === 0) {
+    lines.push(`  ${connectorName}: {}`);
+  } else {
+    lines.push(`  ${connectorName}:`);
+  }
 
   // Four‐space indent for children
   const baseIndent = 4;
-  children.forEach(field => {
-    if (field.is_deprecated) {
-      return; // skip deprecated fields
-    }
-    if (!includeAdvanced && field.is_advanced) {
-      return; // skip advanced fields in "common" mode
-    }
-
+  fieldsToRender.forEach(field => {
     // Check if this is an array-of-objects (e.g., client_certs[])
     // These should render as empty arrays, not expanded object structures
     if (field.kind === 'array' && field.type === 'object' && Array.isArray(field.children)) {

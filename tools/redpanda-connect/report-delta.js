@@ -2,6 +2,7 @@ const { execSync } = require('child_process');
 
 /**
  * Generate a JSON diff report between two connector index objects.
+ * Includes platform metadata (CGO, cloud-only) to detect transitions.
  * @param {object} oldIndex - Previous version connector index
  * @param {object} newIndex - Current version connector index
  * @param {object} opts - { oldVersion, newVersion, timestamp, binaryAnalysis, oldBinaryAnalysis }
@@ -11,31 +12,39 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
   const oldMap = buildComponentMap(oldIndex);
   const newMap = buildComponentMap(newIndex);
 
-  // New components
+  // New components (include platform metadata)
   const newComponentKeys = Object.keys(newMap).filter(k => !(k in oldMap));
   const newComponents = newComponentKeys.map(key => {
     const [type, name] = key.split(':');
     const raw = newMap[key].raw;
+    const metadata = newMap[key].metadata || {};
     return {
       name,
       type,
-      status: raw.status || raw.type || '',
+      status: raw.status || '',
       version: raw.version || raw.introducedInVersion || '',
-      description: raw.description || ''
+      description: raw.description || '',
+      requiresCgo: metadata.requiresCgo || false,
+      cloudOnly: metadata.cloudOnly || false,
+      cloudSupported: metadata.cloudSupported || false
     };
   });
 
-  // Removed components
+  // Removed components (include platform metadata to understand why removed)
   const removedComponentKeys = Object.keys(oldMap).filter(k => !(k in newMap));
   const removedComponents = removedComponentKeys.map(key => {
     const [type, name] = key.split(':');
     const raw = oldMap[key].raw;
+    const metadata = oldMap[key].metadata || {};
     return {
       name,
       type,
-      status: raw.status || raw.type || '',
+      status: raw.status || '',
       version: raw.version || raw.introducedInVersion || '',
-      description: raw.description || ''
+      description: raw.description || '',
+      requiresCgo: metadata.requiresCgo || false,
+      cloudOnly: metadata.cloudOnly || false,
+      cloudSupported: metadata.cloudSupported || false
     };
   });
 
@@ -92,9 +101,60 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       deprecatedComponents.push({
         name,
         type,
-        status: raw.status || raw.type || '',
+        status: raw.status || '',
         version: raw.version || raw.introducedInVersion || '',
         description: raw.description || ''
+      });
+    }
+  });
+
+  // Platform transitions (CGO, cloud support changes)
+  const platformTransitions = [];
+  Object.keys(newMap).forEach(cKey => {
+    if (!(cKey in oldMap)) return;
+
+    const oldMeta = oldMap[cKey].metadata || {};
+    const newMeta = newMap[cKey].metadata || {};
+    const [type, name] = cKey.split(':');
+
+    const transitions = [];
+
+    // CGO requirement changes
+    if (!oldMeta.requiresCgo && newMeta.requiresCgo) {
+      transitions.push('became_cgo_only');
+    } else if (oldMeta.requiresCgo && !newMeta.requiresCgo) {
+      transitions.push('no_longer_cgo_only');
+    }
+
+    // Cloud support changes
+    if (!oldMeta.cloudSupported && newMeta.cloudSupported) {
+      transitions.push('added_cloud_support');
+    } else if (oldMeta.cloudSupported && !newMeta.cloudSupported) {
+      transitions.push('removed_cloud_support');
+    }
+
+    // Cloud-only status changes
+    if (!oldMeta.cloudOnly && newMeta.cloudOnly) {
+      transitions.push('became_cloud_only');
+    } else if (oldMeta.cloudOnly && !newMeta.cloudOnly) {
+      transitions.push('no_longer_cloud_only');
+    }
+
+    if (transitions.length > 0) {
+      platformTransitions.push({
+        name,
+        type,
+        transitions,
+        oldPlatform: {
+          requiresCgo: oldMeta.requiresCgo || false,
+          cloudSupported: oldMeta.cloudSupported || false,
+          cloudOnly: oldMeta.cloudOnly || false
+        },
+        newPlatform: {
+          requiresCgo: newMeta.requiresCgo || false,
+          cloudSupported: newMeta.cloudSupported || false,
+          cloudOnly: newMeta.cloudOnly || false
+        }
       });
     }
   });
@@ -163,6 +223,50 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     });
   });
 
+  // Detect new/removed Bloblang methods and functions
+  const oldMethods = new Set((oldIndex['bloblang-methods'] || []).filter(Boolean).map(m => m.name).filter(Boolean));
+  const newMethods = new Set((newIndex['bloblang-methods'] || []).filter(Boolean).map(m => m.name).filter(Boolean));
+  const oldFunctions = new Set((oldIndex['bloblang-functions'] || []).filter(Boolean).map(f => f.name).filter(Boolean));
+  const newFunctions = new Set((newIndex['bloblang-functions'] || []).filter(Boolean).map(f => f.name).filter(Boolean));
+
+  const newBloblangMethods = Array.from(newMethods).filter(m => !oldMethods.has(m)).sort();
+  const removedBloblangMethods = Array.from(oldMethods).filter(m => !newMethods.has(m)).sort();
+  const newBloblangFunctions = Array.from(newFunctions).filter(f => !oldFunctions.has(f)).sort();
+  const removedBloblangFunctions = Array.from(oldFunctions).filter(f => !newFunctions.has(f)).sort();
+
+  // Detect deprecated Bloblang methods and functions
+  const deprecatedBloblangMethods = [];
+  const deprecatedBloblangFunctions = [];
+
+  const oldMethodsMap = new Map((oldIndex['bloblang-methods'] || []).filter(Boolean).filter(m => m.name).map(m => [m.name, m]));
+  const newMethodsMap = new Map((newIndex['bloblang-methods'] || []).filter(Boolean).filter(m => m.name).map(m => [m.name, m]));
+  const oldFunctionsMap = new Map((oldIndex['bloblang-functions'] || []).filter(Boolean).filter(f => f.name).map(f => [f.name, f]));
+  const newFunctionsMap = new Map((newIndex['bloblang-functions'] || []).filter(Boolean).filter(f => f.name).map(f => [f.name, f]));
+
+  // Check methods for newly deprecated status
+  newMethodsMap.forEach((newMethod, name) => {
+    const oldMethod = oldMethodsMap.get(name);
+    if (oldMethod) {
+      const oldStatus = (oldMethod.status || '').toLowerCase();
+      const newStatus = (newMethod.status || '').toLowerCase();
+      if (oldStatus !== 'deprecated' && newStatus === 'deprecated') {
+        deprecatedBloblangMethods.push(name);
+      }
+    }
+  });
+
+  // Check functions for newly deprecated status
+  newFunctionsMap.forEach((newFunction, name) => {
+    const oldFunction = oldFunctionsMap.get(name);
+    if (oldFunction) {
+      const oldStatus = (oldFunction.status || '').toLowerCase();
+      const newStatus = (newFunction.status || '').toLowerCase();
+      if (oldStatus !== 'deprecated' && newStatus === 'deprecated') {
+        deprecatedBloblangFunctions.push(name);
+      }
+    }
+  });
+
   const result = {
     comparison: {
       oldVersion: opts.oldVersion || '',
@@ -176,7 +280,14 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       removedFields: removedFields.length,
       deprecatedComponents: deprecatedComponents.length,
       deprecatedFields: deprecatedFields.length,
-      changedDefaults: changedDefaults.length
+      changedDefaults: changedDefaults.length,
+      platformTransitions: platformTransitions.length,
+      newBloblangMethods: newBloblangMethods.length,
+      removedBloblangMethods: removedBloblangMethods.length,
+      newBloblangFunctions: newBloblangFunctions.length,
+      removedBloblangFunctions: removedBloblangFunctions.length,
+      deprecatedBloblangMethods: deprecatedBloblangMethods.length,
+      deprecatedBloblangFunctions: deprecatedBloblangFunctions.length
     },
     details: {
       newComponents,
@@ -185,7 +296,14 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       removedFields,
       deprecatedComponents,
       deprecatedFields,
-      changedDefaults
+      changedDefaults,
+      platformTransitions,
+      newBloblangMethods,
+      removedBloblangMethods,
+      newBloblangFunctions,
+      removedBloblangFunctions,
+      deprecatedBloblangMethods,
+      deprecatedBloblangFunctions
     }
   };
 
@@ -285,7 +403,19 @@ function buildComponentMap(indexObj) {
       }
 
       const fieldNames = childArray.map(f => f.name);
-      map[lookupKey] = { raw: component, fields: fieldNames };
+
+      // Preserve platform metadata for accurate diff comparison
+      const metadata = {
+        requiresCgo: component.requiresCgo || false,
+        cloudSupported: component.cloudSupported || false,
+        cloudOnly: component.cloudOnly || false
+      };
+
+      map[lookupKey] = {
+        raw: component,
+        fields: fieldNames,
+        metadata: metadata
+      };
     });
   });
 
@@ -431,7 +561,7 @@ function printDeltaReport(oldIndex, newIndex) {
     newComponentKeys.forEach(key => {
       const [type, name] = key.split(':');
       const raw = newMap[key].raw;
-      const status = raw.status || raw.type || '';
+      const status = raw.status || '';
       const version = raw.version || raw.introducedInVersion || '';
       console.log(
         `   • ${type}/${name}${

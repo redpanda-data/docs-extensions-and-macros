@@ -48,6 +48,7 @@ async function parseCSVConnectors(localCsvPath, logger) {
         return {
           name: trimmed.name,
           type: trimmed.type,
+          support: trimmed.support || 'community', // certified, community, enterprise
           is_cloud_supported: (trimmed.cloud || '').toLowerCase() === 'y' ? 'y' : 'n'
         };
       })
