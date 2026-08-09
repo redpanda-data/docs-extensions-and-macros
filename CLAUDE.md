@@ -317,6 +317,30 @@ Run tests and see how much code is covered by tests:
 npm run test:coverage
 ```
 
+## Releasing a new version
+
+This package publishes to npm automatically. The `publish-to-npm` GitHub Action runs on every push to `main` and publishes a new release **whenever the `version` in `package.json` is higher than the version already on npm**. There is no separate tag or release step.
+
+Because of that, a change to the tools only reaches documentation repositories once a new version is published. So when your pull request changes the tools (not just docs), bump the version as part of the same PR:
+
+```bash
+# In your branch, after making your changes:
+# 1. Bump the version in package.json following semver:
+#    - patch (5.2.2 -> 5.2.3) for bug fixes
+#    - minor (5.2.2 -> 5.3.0) for new, backward-compatible features
+#    - major (5.2.2 -> 6.0.0) for breaking changes
+# 2. Refresh the lockfile so it matches:
+npm install --package-lock-only
+
+# 3. Commit both files:
+git add package.json package-lock.json
+git commit -m "chore: bump version to <new-version>"
+```
+
+When the PR merges to `main`, the Action publishes the new version. Consuming repositories (such as `rp-connect-docs`) then pick it up the next time they update their `@redpanda-data/docs-extensions-and-macros` dependency.
+
+If two PRs bump to the same version, whichever merges second must rebase and bump again — the publish step is skipped if the version already exists on npm.
+
 ## How this repository is organized
 
 ```

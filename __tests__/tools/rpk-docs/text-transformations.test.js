@@ -125,3 +125,140 @@ describe('Text Transformations', () => {
     }, 30000)
   })
 })
+
+describe('applyToCode rules in early code blocks', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  const transforms = {
+    replacements: [
+      { pattern: '\\brpai\\b', replacement: 'rpk ai', flags: 'g', applyToCode: true },
+      { pattern: '(^|\\n\\s*)Note:\\s', replacement: '$1NOTE: ', flags: 'g' }
+    ]
+  }
+
+  test('applies only code-safe rules inside captured code blocks', () => {
+    const input = 'Run the agent, e.g.:\n\n  rpai run claude -L anthropic\n  Note: output follows\n\nDone.'
+    const out = formatDescription(input, transforms)
+    expect(out).toContain('rpk ai run claude -L anthropic')
+    // The admonition rule must NOT rewrite text inside the code block
+    expect(out).toContain('Note: output follows')
+    expect(out).not.toContain('NOTE: output follows')
+  })
+})
+
+describe('applyToCode rules in inline code spans', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  const transforms = {
+    replacements: [
+      { pattern: '\\brpai\\b', replacement: 'rpk ai', flags: 'g', applyToCode: true },
+      { pattern: '(^|\\n\\s*)Note:\\s', replacement: '$1NOTE: ', flags: 'g' }
+    ]
+  }
+
+  test('rewrites the binary name inside protected inline code spans', () => {
+    const out = formatDescription('Run `rpai auth token` to authenticate first.', transforms)
+    expect(out).toContain('`rpk ai auth token`')
+    expect(out).not.toContain('rpai')
+  })
+
+  test('rules without applyToCode never touch inline code spans', () => {
+    const out = formatDescription('The literal `Note: keep this` stays verbatim.', transforms)
+    expect(out).toContain('`Note: keep this`')
+    expect(out).not.toContain('NOTE: keep this')
+  })
+})
+
+describe('known command path formatting', () => {
+  const { formatDescription, registerKnownCommandPaths } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  afterEach(() => registerKnownCommandPaths([]))
+
+  test('wraps a full multi-word command path as a unit', () => {
+    registerKnownCommandPaths(['rpk', 'rpk ai', 'rpk ai run', 'rpk ai run codex'])
+    const out = formatDescription('Use rpk ai run codex to start a session.', null)
+    expect(out).toContain('`rpk ai run codex` to start a session.')
+    expect(out).not.toContain('`rpk` ai')
+  })
+
+  test('prefers the longest registered path over a shorter prefix', () => {
+    registerKnownCommandPaths(['rpk', 'rpk ai', 'rpk ai run', 'rpk ai run claude'])
+    const out = formatDescription('Then rpk ai run claude resumes the session.', null)
+    expect(out).toContain('`rpk ai run claude` resumes')
+  })
+
+  test('leaves prose that resembles a command alone when not in the tree', () => {
+    registerKnownCommandPaths(['rpk', 'rpk cloud'])
+    const out = formatDescription('Manage rpk cloud authentications for details.', null)
+    // A registered single-token prefix ("rpk cloud") never matches: the
+    // known-path pass requires two tokens after rpk, so the phrase falls
+    // through to the context-aware heuristic, which wraps rpk alone.
+    expect(out).toBe('Manage `rpk` cloud authentications for details.')
+  })
+
+  test('is inert when no paths are registered', () => {
+    const out = formatDescription('Use rpk ai run codex to start.', null)
+    expect(out).not.toContain('`rpk ai run codex`')
+  })
+})
+
+describe('mid-token periods in summaries', () => {
+  const { formatDescription, capToTwoSentences } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  test('dotted topic names never split or drop a sentence', () => {
+    const src = "View logs for a transform.\n\nData transform's STDOUT and STDERR are captured during runtime and written to \nan internally managed topic _redpanda.transform_logs.\nThis command outputs logs for a single transform."
+    const out = capToTwoSentences(formatDescription(src, null, { skipTableConversion: true, skipListConversion: true }))
+    expect(out).not.toBe('View logs for a transform. transform_logs.')
+    expect(out).toContain('`_redpanda.transform_logs`')
+    expect(out).toContain('STDOUT and STDERR are captured')
+  })
+
+  test('URLs never split or drop a sentence', () => {
+    const out = capToTwoSentences('Generate a license. To get one, contact us at redpanda.com/contact for details. The license is saved locally.')
+    expect(out).toBe('Generate a license. To get one, contact us at redpanda.com/contact for details.')
+  })
+
+  test('an unterminated paragraph is a sentence boundary', () => {
+    const out = capToTwoSentences('Generate a trial license\n\nThis command generates a license for a 30-day trial. The license is saved locally.')
+    expect(out).toBe('Generate a trial license. This command generates a license for a 30-day trial.')
+  })
+})
+
+describe('internal topic name backticking', () => {
+  const { formatDescription } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  test('wraps _redpanda.* topic names in inline code', () => {
+    const out = formatDescription('Logs are written to an internally managed topic _redpanda.transform_logs.\nRead them with the logs command.', null)
+    expect(out).toContain('`_redpanda.transform_logs`.')
+  })
+
+  test('leaves already-backticked topic names alone', () => {
+    const out = formatDescription('Logs go to `_redpanda.transform_logs` always.', null)
+    expect(out).toContain('`_redpanda.transform_logs`')
+    expect(out).not.toContain('``')
+  })
+})
+
+describe('applyTextTransformationsToExamples', () => {
+  const { applyTextTransformationsToExamples } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
+
+  const transforms = {
+    replacements: [
+      { pattern: '"([a-z]{1,20})"', replacement: '`$1`', flags: 'g' },
+      { pattern: '\\brpai\\b', replacement: 'rpk ai', flags: 'g', applyToCode: true }
+    ]
+  }
+
+  test('caption rules never rewrite quoted strings inside command lines', () => {
+    const input = 'Import client "quotas" from a string:\n  rpk cluster quotas import --from \'{"quotas":...}\''
+    const out = applyTextTransformationsToExamples(input, transforms)
+    expect(out).toContain('`quotas` from a string')
+    expect(out).toContain(String.raw`'{"quotas":...}'`)
+  })
+
+  test('code-safe rules still apply to command lines', () => {
+    const input = 'Send a task:\n  rpai agent a2a send hello'
+    const out = applyTextTransformationsToExamples(input, transforms)
+    expect(out).toContain('  rpk ai agent a2a send hello')
+  })
+})

@@ -502,6 +502,52 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
 }
 
 /**
+ * Derive the fragment anchor for a connector field heading.
+ *
+ * Field docs render each field as a section heading (for example,
+ * `=== \`batching.byte_size\``), and the docs site builds section IDs with
+ * `idprefix: ''` and `idseparator: '-'` (set in the shared global-attributes
+ * component loaded by the Antora playbook). Under those settings Asciidoctor
+ * derives IDs by downcasing the heading text, dropping characters that are
+ * not word characters, hyphens, dots, or spaces (so `[]` array markers are
+ * discarded), converting runs of dots and spaces to a single `-`, and
+ * trimming any leading or trailing separator.
+ *
+ * Examples of rendered IDs this must match:
+ * - `checkpoint_limit`                    -> `checkpoint_limit`
+ * - `batching.byte_size`                  -> `batching-byte_size`
+ * - `batching.processors[]`               -> `batching-processors`
+ * - `sasl[].aws.credentials.from_ec2_role` -> `sasl-aws-credentials-from_ec2_role`
+ *
+ * Collision caveat: Asciidoctor de-duplicates repeated IDs on a page by
+ * appending `-2`, `-3`, ... to later occurrences. If two fields on one page
+ * normalize to the same anchor, the generated link resolves to the first
+ * heading and the second gets the suffixed ID. This helper cannot detect
+ * that, so a wrong-but-plausible link on a page with near-duplicate field
+ * names should be checked against this behavior first.
+ *
+ * @param {string} fieldName - Field name as it appears in the connector data
+ * @returns {string} Fragment anchor matching the rendered heading ID
+ */
+function fieldAnchor (fieldName) {
+  const anchor = String(fieldName)
+    .toLowerCase()
+    // Characters that are invalid in section IDs (for example, `[` and `]`
+    // array markers) are removed outright, matching Asciidoctor's
+    // InvalidSectionIdCharsRx. The dots still supply the separators, so
+    // every `[]` case stays correct (`sasl[].aws` -> `sasl-aws`).
+    .replace(/[^ \w\-.]+/g, '')
+    // idseparator '-' replaces runs of spaces and dots with a single hyphen.
+    .replace(/[ .]+/g, '-')
+    // idprefix '' means no leading separator, and Asciidoctor chomps a
+    // trailing separator.
+    .replace(/^-+/, '')
+    .replace(/-+$/, '')
+  // A name that normalizes to nothing would emit a malformed `#[...]` xref.
+  return anchor || String(fieldName)
+}
+
+/**
  * Build a fields table for whats-new.adoc
  * @param {Array} fields - Field data
  * @param {Function} capFn - Caption function
@@ -541,7 +587,7 @@ function buildFieldsTable (fields, capFn) {
 
       componentList += `*${typeLabel}:*\n\n`
       names.forEach(name => {
-        componentList += `* xref:components:${type}/${name}.adoc#${fieldName}[${name}]\n`
+        componentList += `* xref:components:${type}/${name}.adoc#${fieldAnchor(fieldName)}[${name}]\n`
       })
     }
 
@@ -611,7 +657,7 @@ function buildChangedDefaultsTable (changedDefaults, capFn) {
 
       componentList += `*${typeLabel}:*\n\n`
       names.forEach(name => {
-        componentList += `* xref:components:${type}/${name}.adoc#${info.field}[${name}]\n`
+        componentList += `* xref:components:${type}/${name}.adoc#${fieldAnchor(info.field)}[${name}]\n`
       })
     }
 
@@ -1084,6 +1130,7 @@ async function handleRpcnConnectorDocs (options) {
 
   console.log('Generating connector partials...')
   let partialsWritten, partialFiles
+  const lostSectionWarnings = []
 
   try {
     const result = await generateRpcnConnectorDocs({
@@ -1101,6 +1148,7 @@ async function handleRpcnConnectorDocs (options) {
     })
     partialsWritten = result.partialsWritten
     partialFiles = result.partialFiles
+    lostSectionWarnings.push(...(result.lostSectionWarnings || []))
   } catch (err) {
     console.error(`Error: Failed to generate partials: ${err.message}`)
     process.exit(1)
@@ -1894,6 +1942,7 @@ async function handleRpcnConnectorDocs (options) {
         fs.unlinkSync(tempDataPath)
         draftsWritten = draftResult.draftsWritten
         draftFiles = draftResult.draftFiles
+        lostSectionWarnings.push(...(draftResult.lostSectionWarnings || []))
       }
     } catch (err) {
       console.error(`Error: Could not draft missing: ${err.message}`)
@@ -1941,8 +1990,12 @@ async function handleRpcnConnectorDocs (options) {
   // Generate PR summary
   try {
     const { printPRSummary } = require('./pr-summary-formatter.js')
-    // Use master diff if available, otherwise use single diff
-    printPRSummary(masterDiff || diffJson, binaryAnalysis, draftFiles, masterDiff ? true : false)
+    // Use master diff if available, otherwise use single diff. Content-loss
+    // warnings ride the diff object so they lead the PR summary body instead
+    // of dying in the collapsed workflow log.
+    const summaryDiff = masterDiff || diffJson
+    if (lostSectionWarnings.length) summaryDiff.lostSectionWarnings = lostSectionWarnings
+    printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
   } catch (err) {
     console.error(`Warning: Failed to generate PR summary: ${err.message}`)
   }
@@ -2014,5 +2067,8 @@ module.exports = {
   updateWhatsNew,
   capToTwoSentences,
   augmentConnectorData,
-  buildCleanOssData
+  buildCleanOssData,
+  fieldAnchor,
+  buildFieldsTable,
+  buildChangedDefaultsTable
 }

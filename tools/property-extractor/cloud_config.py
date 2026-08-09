@@ -434,6 +434,22 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
         raise CloudConfigError(error_msg) from e
 
 
+def _match_name_or_alias(prop_name: str, prop_data: Dict, cloud_set: Set[str]) -> Optional[str]:
+    """
+    Return the name under which a property appears in a cloud property set.
+
+    Checks the property's own name first, then each entry in its `aliases`
+    array. Returns the matching name, or None when neither the name nor any
+    alias is in the set.
+    """
+    if prop_name in cloud_set:
+        return prop_name
+    for alias in prop_data.get('aliases') or []:
+        if alias in cloud_set:
+            return alias
+    return None
+
+
 def add_cloud_support_metadata(properties: Dict, cloud_config: CloudConfig) -> Dict:
     """
     Annotate property definitions with cloud-support metadata derived from a CloudConfig.
@@ -492,29 +508,39 @@ def add_cloud_support_metadata(properties: Dict, cloud_config: CloudConfig) -> D
                 continue
             
             processed_count += 1
-            
+
             # Initialize cloud metadata with defaults
             prop_data['cloud_editable'] = False
             prop_data['cloud_readonly'] = False
             prop_data['cloud_supported'] = False
             prop_data['cloud_byoc_only'] = False
-            
-            # Determine cloud support status
-            if prop_name in editable_props:
+
+            # Determine cloud support status. Match on the property's current
+            # name or any of its aliases, so a property renamed in Redpanda
+            # still picks up cloud metadata when the cloud configuration
+            # references the old name.
+            editable_match = _match_name_or_alias(prop_name, prop_data, editable_props)
+            readonly_match = None if editable_match else _match_name_or_alias(prop_name, prop_data, readonly_props)
+
+            if editable_match:
+                if editable_match != prop_name:
+                    logger.info(f"Property '{prop_name}' matched cloud editable configuration via alias '{editable_match}'")
                 prop_data['cloud_editable'] = True
                 prop_data['cloud_readonly'] = False
                 prop_data['cloud_supported'] = True
                 cloud_supported_count += 1
                 editable_count += 1
-                
-                # Check if BYOC only
-                if cloud_config.is_byoc_only(prop_name):
+
+                # Check if BYOC only, using the name the cloud configuration knows
+                if cloud_config.is_byoc_only(editable_match):
                     prop_data['cloud_byoc_only'] = True
                     byoc_only_count += 1
                 else:
                     prop_data['cloud_byoc_only'] = False
-                    
-            elif prop_name in readonly_props:
+
+            elif readonly_match:
+                if readonly_match != prop_name:
+                    logger.info(f"Property '{prop_name}' matched cloud readonly configuration via alias '{readonly_match}'")
                 prop_data['cloud_editable'] = False
                 prop_data['cloud_readonly'] = True
                 prop_data['cloud_supported'] = True
@@ -565,11 +591,14 @@ def add_cloud_support_metadata(properties: Dict, cloud_config: CloudConfig) -> D
         logger.warning("  2. Property names don't match between sources")
         logger.warning("  3. All properties are self-managed only")
     
-    # Check for potential mismatches
-    unmatched_cloud_props = (editable_props | readonly_props) - {
-        name for name, data in properties.items() 
-        if isinstance(data, dict) and data.get('config_scope') in ['cluster', 'broker', 'topic']
-    }
+    # Check for potential mismatches, counting aliases as known names so a
+    # renamed property does not show up as missing
+    extracted_cloud_names = set()
+    for name, data in properties.items():
+        if isinstance(data, dict) and data.get('config_scope') in ['cluster', 'broker', 'topic']:
+            extracted_cloud_names.add(name)
+            extracted_cloud_names.update(data.get('aliases') or [])
+    unmatched_cloud_props = (editable_props | readonly_props) - extracted_cloud_names
     
     if unmatched_cloud_props:
         logger.info(f"Cloud configuration contains {len(unmatched_cloud_props)} properties not found in extracted properties:")

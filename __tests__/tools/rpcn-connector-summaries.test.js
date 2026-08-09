@@ -18,7 +18,7 @@
 // Jest); stub it out since these tests never touch GitHub.
 jest.mock('../../cli-utils/octokit-client', () => ({}));
 
-const { capToTwoSentences, augmentConnectorData, buildCleanOssData } = require('../../tools/redpanda-connect/rpcn-connector-docs-handler');
+const { capToTwoSentences, augmentConnectorData, buildCleanOssData, fieldAnchor, buildFieldsTable, buildChangedDefaultsTable } = require('../../tools/redpanda-connect/rpcn-connector-docs-handler');
 const { generateConnectorDiffJson } = require('../../tools/redpanda-connect/report-delta');
 
 describe('capToTwoSentences - xref and filename protection', () => {
@@ -235,5 +235,108 @@ describe('buildCleanOssData - pure OSS snapshot for binary analysis', () => {
     const clean = buildCleanOssData(raw);
     expect(clean.config.map(c => c.name)).toEqual(['error_handling']);
     expect(clean.processors.map(c => c.name)).toEqual(['mapping']);
+  });
+});
+
+describe('fieldAnchor - fragment anchors for field heading IDs', () => {
+  // Connector field docs render fields as section headings (for example,
+  // `=== `batching.byte_size``) and the docs site sets idprefix: '' and
+  // idseparator: '-', so the rendered heading IDs replace dots with hyphens
+  // and drop `[]` array markers. Verified against Asciidoctor.js 2.x with
+  // those attributes and against the published pages (for example,
+  // <h3 id="batching-byte_size"> and <h3 id="credentials-host_public_key">).
+
+  test('leaves simple field names unchanged', () => {
+    expect(fieldAnchor('checkpoint_limit')).toBe('checkpoint_limit');
+    expect(fieldAnchor('use_batch')).toBe('use_batch');
+  });
+
+  test('replaces dots in nested field names with hyphens', () => {
+    expect(fieldAnchor('batching.byte_size')).toBe('batching-byte_size');
+    expect(fieldAnchor('credentials.host_public_key')).toBe('credentials-host_public_key');
+  });
+
+  test('drops array markers', () => {
+    expect(fieldAnchor('sasl[]')).toBe('sasl');
+    expect(fieldAnchor('regexp_topics_exclude[]')).toBe('regexp_topics_exclude');
+  });
+
+  test('handles deep paths that mix array markers and dots', () => {
+    expect(fieldAnchor('sasl[].aws.credentials.from_ec2_role')).toBe('sasl-aws-credentials-from_ec2_role');
+    expect(fieldAnchor('batching.processors[]')).toBe('batching-processors');
+  });
+
+  test('collapses consecutive separators into a single hyphen', () => {
+    // A mid-path array marker produces adjacent invalid characters and a
+    // dot; Asciidoctor squeezes the run into one separator.
+    expect(fieldAnchor('foo[].bar')).toBe('foo-bar');
+    expect(fieldAnchor('foo..bar')).toBe('foo-bar');
+  });
+
+  test('downcases names, matching Asciidoctor ID generation', () => {
+    expect(fieldAnchor('TLS.Enabled')).toBe('tls-enabled');
+  });
+
+  test('deletes invalid characters outright, matching InvalidSectionIdCharsRx', () => {
+    // Asciidoctor removes these characters rather than turning them into
+    // separators, so `foo/bar` renders as <h3 id="foobar">.
+    expect(fieldAnchor('foo/bar')).toBe('foobar');
+    expect(fieldAnchor('a:b')).toBe('ab');
+  });
+
+  test('falls back to the raw name when normalization empties it', () => {
+    // A pathological name must not emit a malformed `#[...]` xref fragment.
+    expect(fieldAnchor('///')).toBe('///');
+  });
+});
+
+describe('buildFieldsTable - whats-new field links', () => {
+  const cap = (s) => s;
+
+  test('links simple fields with the bare field name as the fragment', () => {
+    const table = buildFieldsTable([
+      { component: 'processors:aws_dynamodb_partiql', field: 'use_batch', description: 'Batch mode.' }
+    ], cap);
+
+    expect(table).toContain('* xref:components:processors/aws_dynamodb_partiql.adoc#use_batch[aws_dynamodb_partiql]');
+  });
+
+  test('links nested fields with a hyphenated fragment matching the rendered heading ID', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:sftp', field: 'credentials.host_public_key', description: 'Host key.' }
+    ], cap);
+
+    expect(table).toContain('* xref:components:inputs/sftp.adoc#credentials-host_public_key[sftp]');
+    // The visible field name in the table keeps its original dotted form.
+    expect(table).toContain('|credentials.host_public_key\n');
+    expect(table).not.toContain('adoc#credentials.host_public_key[');
+  });
+
+  test('links array fields without the [] marker in the fragment', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:kafka_franz', field: 'regexp_topics_exclude[]', description: 'Exclusions.' }
+    ], cap);
+
+    expect(table).toContain('* xref:components:inputs/kafka_franz.adoc#regexp_topics_exclude[kafka_franz]');
+  });
+});
+
+describe('buildChangedDefaultsTable - whats-new changed default links', () => {
+  const cap = (s) => s;
+
+  test('uses the derived anchor for nested fields', () => {
+    const table = buildChangedDefaultsTable([
+      {
+        component: 'outputs:kafka_franz',
+        field: 'batching.byte_size',
+        oldDefault: 0,
+        newDefault: 1024,
+        description: 'Batch size in bytes.'
+      }
+    ], cap);
+
+    expect(table).toContain('* xref:components:outputs/kafka_franz.adoc#batching-byte_size[kafka_franz]');
+    // The visible field name in the table keeps its original dotted form.
+    expect(table).toContain('|batching.byte_size\n');
   });
 });

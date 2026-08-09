@@ -6,6 +6,9 @@ const os = require('os')
 
 const {
   updateOverridesWithIntroducedVersions,
+  isPluginStampAttributable,
+  attributablePluginSet,
+  pluginManifestVersionsCache,
   detectLinuxOnlyFromSource,
   addPlatformMarkersFromSource,
   countCommands,
@@ -75,6 +78,110 @@ describe('rpk Docs Handler', () => {
 
         const result = JSON.parse(fs.readFileSync(overridesPath, 'utf8'))
         expect(result.commands['rpk topic existing'].introducedInVersion).toBe('v26.1.0')
+      })
+
+      test('stamps plugin commands with the plugin version, core commands with the rpk version', () => {
+        fs.writeFileSync(overridesPath, JSON.stringify({ commands: {} }))
+
+        const diffData = {
+          summary: { newCommands: 2 },
+          details: {
+            newCommands: [
+              { path: 'rpk connect new-subcommand' },
+              { path: 'rpk cluster new-command' }
+            ],
+            newFlags: [
+              { commandPath: 'rpk connect run', flagName: 'new-flag' }
+            ],
+            removedCommands: [],
+            removedFlags: [],
+            changedDefaults: []
+          }
+        }
+
+        updateOverridesWithIntroducedVersions(diffData, overridesPath, 'v26.2.0', { connect: '4.103.0' })
+
+        const result = JSON.parse(fs.readFileSync(overridesPath, 'utf8'))
+        expect(result.commands['rpk connect new-subcommand'].introducedInVersion).toBe('4.103.0')
+        expect(result.commands['rpk cluster new-command'].introducedInVersion).toBe('v26.2.0')
+        expect(result.commands['rpk connect run'].flags['new-flag'].introducedInVersion).toBe('4.103.0')
+      })
+    })
+
+    describe('introduction-version attribution', () => {
+      // Mirrors a real incident: 30 rpk ai commands shipped in 0.2.26 and
+      // 0.2.28 were stamped "introduced in 0.2.32" because the baseline
+      // snapshot was several plugin releases stale.
+      afterEach(() => pluginManifestVersionsCache.clear())
+
+      test('skips plugin entries when the plugin is not attributable, stamps core', () => {
+        fs.writeFileSync(overridesPath, JSON.stringify({ commands: {} }))
+
+        const diffData = {
+          summary: { newCommands: 2 },
+          details: {
+            newCommands: [
+              { path: 'rpk ai policy create' },
+              { path: 'rpk cluster new-command' }
+            ],
+            newFlags: [{ commandPath: 'rpk ai policy', flagName: 'new-flag' }],
+            removedCommands: [],
+            removedFlags: [],
+            changedDefaults: []
+          }
+        }
+
+        updateOverridesWithIntroducedVersions(diffData, overridesPath, 'v26.2.1', { ai: '0.2.32' }, {
+          attributablePlugins: []
+        })
+
+        const result = JSON.parse(fs.readFileSync(overridesPath, 'utf8'))
+        expect(result.commands['rpk ai policy create']).toBeUndefined()
+        expect(result.commands['rpk ai policy']).toBeUndefined()
+        expect(result.commands['rpk cluster new-command'].introducedInVersion).toBe('v26.2.1')
+      })
+
+      test('stamps plugin entries when the plugin is attributable', () => {
+        fs.writeFileSync(overridesPath, JSON.stringify({ commands: {} }))
+
+        const diffData = {
+          summary: { newCommands: 1 },
+          details: {
+            newCommands: [{ path: 'rpk ai policy create' }],
+            newFlags: [],
+            removedCommands: [],
+            removedFlags: [],
+            changedDefaults: []
+          }
+        }
+
+        updateOverridesWithIntroducedVersions(diffData, overridesPath, 'v26.2.1', { ai: '0.2.32' }, {
+          attributablePlugins: ['ai']
+        })
+
+        const result = JSON.parse(fs.readFileSync(overridesPath, 'utf8'))
+        expect(result.commands['rpk ai policy create'].introducedInVersion).toBe('0.2.32')
+      })
+
+      test('isPluginStampAttributable requires a manifest-adjacent baseline', () => {
+        pluginManifestVersionsCache.set('ai', ['0.2.30', '0.2.31', '0.2.32'])
+        expect(isPluginStampAttributable('ai', '0.2.31', '0.2.32')).toBe(true)
+        expect(isPluginStampAttributable('ai', '0.2.32', '0.2.32')).toBe(true)
+        // A gap means intermediate releases may own the "new" commands
+        expect(isPluginStampAttributable('ai', '0.2.30', '0.2.32')).toBe(false)
+        // Unknown baseline can never be attributed
+        expect(isPluginStampAttributable('ai', undefined, '0.2.32')).toBe(false)
+      })
+
+      test('attributablePluginSet evaluates each plugin independently', () => {
+        pluginManifestVersionsCache.set('ai', ['0.2.31', '0.2.32'])
+        pluginManifestVersionsCache.set('connect', ['4.101.0', '4.102.0', '4.103.1'])
+        const set = attributablePluginSet(
+          { ai: '0.2.31', connect: '4.101.0' },
+          { ai: '0.2.32', connect: '4.103.1' }
+        )
+        expect(set.has('ai')).toBe(true)
+        expect(set.has('connect')).toBe(false)
       })
     })
 

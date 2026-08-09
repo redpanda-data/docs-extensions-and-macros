@@ -31,14 +31,26 @@ module.exports = function renderConnectFields(children, prefix = '') {
     const isArrayTitle = typeof child.name === 'string' && child.name.endsWith('[]');
     if (isArrayTitle) {
       displayType = 'array<object>';
-    } else if (child.type === 'string' && child.kind === 'array') {
-      displayType = 'array';
-    } else if (child.type === 'unknown' && child.kind === 'map') {
+    } else if (child.kind === 'map') {
+      // Maps always render as `object`, regardless of value type.
       displayType = 'object';
-    } else if (child.type === 'unknown' && child.kind === 'array') {
-      displayType = 'array';
-    } else if (child.type === 'unknown' && child.kind === 'list') {
-      displayType = 'array';
+    } else if (child.kind === 'array' || child.kind === 'list' || child.kind === '2darray') {
+      // Arrays render as `array<element>` when the element type is known,
+      // for example `array<string>`. 2D arrays nest the element type, for
+      // example `array<array<string>>`. Unknown element types render as
+      // plain `array`. A `type` of `array` (used by some overrides to force
+      // the old plain-array display) is treated as unknown so the field
+      // renders as `array` rather than the degenerate `array<array>`.
+      const elementType = (typeof child.type === 'string' && child.type !== '' && child.type !== 'unknown' && child.type !== 'array')
+        ? child.type
+        : null;
+      if (elementType) {
+        displayType = child.kind === '2darray'
+          ? `array<array<${elementType}>>`
+          : `array<${elementType}>`;
+      } else {
+        displayType = 'array';
+      }
     } else {
       displayType = child.type;
     }

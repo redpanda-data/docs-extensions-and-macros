@@ -429,6 +429,71 @@ describe('Utility Helpers', () => {
       expect(result).toContain("*Default*: `30`");
     });
 
+    it.each(['string', 'int', 'unknown'])(
+      'renders a %s-valued map field as object',
+      (type) => {
+        const mapField = [
+          { name: 'headers', type, kind: 'map', description: 'Custom headers keyed by name.' },
+        ];
+        const result = renderConnectFields(mapField).toString();
+        expect(result).toContain('=== `headers`');
+        expect(result).toContain('*Type*: `object`');
+        expect(result).not.toContain(`*Type*: \`${type}\``);
+      }
+    );
+
+    it.each([
+      ['array', 'int', 'array<int>'],
+      ['array', 'string', 'array<string>'],
+      ['array', 'object', 'array<object>'],
+      ['list', 'int', 'array<int>'],
+      ['2darray', 'string', 'array<array<string>>'],
+      ['2darray', 'object', 'array<array<object>>'],
+    ])(
+      'renders a field of kind %s with element type %s as %s',
+      (kind, type, expected) => {
+        const listField = [
+          { name: 'ports', type, kind, description: 'Ports.' },
+        ];
+        const result = renderConnectFields(listField).toString();
+        expect(result).toContain(`*Type*: \`${expected}\``);
+        expect(result).not.toContain(`*Type*: \`${type}\``);
+      }
+    );
+
+    it.each(['array', 'list', '2darray'])(
+      'falls back to plain array for kind %s when the element type is unknown',
+      (kind) => {
+        const listField = [
+          { name: 'ports', type: 'unknown', kind, description: 'Ports.' },
+        ];
+        const result = renderConnectFields(listField).toString();
+        expect(result).toContain('*Type*: `array`');
+        expect(result).not.toContain('*Type*: `unknown`');
+        expect(result).not.toContain('array<');
+      }
+    );
+
+    it('falls back to plain array when the element type is absent', () => {
+      const listField = [
+        { name: 'ports', kind: 'array', description: 'Ports.' },
+      ];
+      const result = renderConnectFields(listField).toString();
+      expect(result).toContain('*Type*: `array`');
+      expect(result).not.toContain('array<');
+    });
+
+    it('falls back to plain array when the element type is itself array (override-forced types)', () => {
+      // docs-data/overrides.json in rp-connect-docs sets `type: "array"` on
+      // some fields (for example, NATS `urls`) to force a plain-array display.
+      const listField = [
+        { name: 'urls', type: 'array', kind: 'array', description: 'URLs.' },
+      ];
+      const result = renderConnectFields(listField).toString();
+      expect(result).toContain('*Type*: `array`');
+      expect(result).not.toContain('array<');
+    });
+
     it('recursively renders nested children with correct path', () => {
       const result = renderConnectFields(nestedField).toString();
       expect(result).toContain("=== `parent`");

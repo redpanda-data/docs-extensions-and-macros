@@ -14,10 +14,17 @@
  */
 
 const METADATA_HEADING = /^==\s+Metadata\s*$/;
-const LEVEL2_HEADING = /^==\s+\S/;
 // AsciiDoc listing/literal block delimiter (`----`, possibly longer). Lines
 // inside such blocks must not be treated as headings.
 const BLOCK_DELIMITER = /^-{4,}$/;
+// The metadata block ends at the next structural element. Besides the next
+// level-2 heading, this also covers page-level constructs that follow the
+// section when locateMetadata runs against a full reference page (not just a
+// connector description): Antora include directives (for example the fields or
+// examples partials) and single-source tag comments. Without these, a metadata
+// section that is the last heading on a page would run to end-of-string and
+// swallow the trailing `include::...partial$fields[]` and `// end::single-source[]`.
+const SECTION_END = /^(?:==\s+\S|include::|\/\/\s*(?:tag|end)::)/;
 
 /**
  * Locate the `== Metadata` section within a description.
@@ -38,12 +45,13 @@ function locateMetadata (description) {
   }
   if (headingLine === -1) return null;
 
-  // Find the terminating heading (next level-2 heading after the metadata one).
+  // Find the terminating element after the metadata heading: the next level-2
+  // heading, an Antora include directive, or a single-source tag comment.
   let endLine = lines.length;
   inBlock = false;
   for (let i = headingLine + 1; i < lines.length; i++) {
     if (BLOCK_DELIMITER.test(lines[i])) { inBlock = !inBlock; continue; }
-    if (!inBlock && LEVEL2_HEADING.test(lines[i])) { endLine = i; break; }
+    if (!inBlock && SECTION_END.test(lines[i])) { endLine = i; break; }
   }
 
   // Trim trailing blank lines inside the section so the block ends cleanly.
@@ -103,10 +111,69 @@ function descriptionWithMetadataInclude (item) {
   return description.slice(0, found.start) + metadataIncludeLine(item) + description.slice(found.end);
 }
 
+// Markdown-style fence delimiter (``` or ~~~, possibly with a language tag).
+// Metadata blocks can carry fenced examples alongside AsciiDoc ---- blocks.
+const FENCE_DELIMITER = /^(`{3,}|~{3,})/;
+
+/**
+ * Collect the section heading titles in an AsciiDoc block, ignoring lines
+ * inside `----` literal blocks and ```/~~~ fenced blocks. Titles are returned
+ * without their `=` markers so callers can compare sections across heading
+ * levels (the same section may be `==` in a connector description but `===`
+ * in a partial migrated from a page).
+ * @param {string} text
+ * @returns {string[]}
+ */
+function sectionHeadings (text) {
+  if (!text || typeof text !== 'string') return [];
+  const headings = [];
+  let inBlock = false;
+  let fence = null;
+  for (const line of text.split('\n')) {
+    // Layered state: while inside one delimiter kind, the only thing that
+    // matters is its own closer. A fence-like line inside a ---- literal
+    // block (or a ---- line inside a fence) is content, not a delimiter —
+    // treating it as one leaks the state and swallows every later heading.
+    if (inBlock) {
+      if (BLOCK_DELIMITER.test(line)) inBlock = false;
+      continue;
+    }
+    if (fence) {
+      const closer = line.match(FENCE_DELIMITER);
+      if (closer && closer[1][0] === fence) fence = null;
+      continue;
+    }
+    const fenceMatch = line.match(FENCE_DELIMITER);
+    if (fenceMatch) { fence = fenceMatch[1][0]; continue; }
+    if (BLOCK_DELIMITER.test(line)) { inBlock = true; continue; }
+    const m = line.match(/^=+\s+(\S.*)$/);
+    if (m) headings.push(m[1].trim());
+  }
+  return headings;
+}
+
+/**
+ * Report the section headings present in a previously generated metadata
+ * partial that are missing from its regenerated replacement. Regeneration is
+ * authoritative, but published content silently disappearing is how docs lose
+ * examples: a section that lives outside the upstream description's
+ * `== Metadata` block (or was hand-migrated from a page) is dropped without a
+ * trace on the next run. Callers use this to warn before overwriting.
+ * @param {string} oldContent existing partial on disk
+ * @param {string} newContent regenerated partial about to be written
+ * @returns {string[]} heading titles present in oldContent but not newContent
+ */
+function lostMetadataSections (oldContent, newContent) {
+  const newHeadings = new Set(sectionHeadings(newContent));
+  return sectionHeadings(oldContent).filter((h) => !newHeadings.has(h));
+}
+
 module.exports = {
   locateMetadata,
   extractMetadata,
   typeDirFor,
   metadataIncludeLine,
   descriptionWithMetadataInclude,
+  sectionHeadings,
+  lostMetadataSections,
 };

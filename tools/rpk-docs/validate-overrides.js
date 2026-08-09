@@ -465,8 +465,24 @@ function validatePlatforms(commandOverride, context) {
 function validateFlags(commandOverride, context) {
   const result = new ValidationResult()
 
+  // cloudOnly and selfHostedOnly are mutually exclusive: setting both wraps
+  // the row in an ifdef::env-cloud + ifndef::env-cloud pair that no build
+  // can satisfy, so the row silently vanishes from BOTH sites.
+  if (commandOverride.cloudOnly && commandOverride.selfHostedOnly) {
+    result.addError(
+      'cloudOnly and selfHostedOnly are both set: the command row is unsatisfiable and disappears from every build. Set at most one.',
+      context
+    )
+  }
+
   if (commandOverride.flags) {
     for (const [flagName, flagOverride] of Object.entries(commandOverride.flags)) {
+      if (flagOverride.cloudOnly && flagOverride.selfHostedOnly) {
+        result.addError(
+          `cloudOnly and selfHostedOnly are both set on flag "${flagName}": the flag row is unsatisfiable and disappears from every build. Set at most one.`,
+          `${context}.flags.${flagName}`
+        )
+      }
       // Validate flag name format
       if (!flagName.match(/^[a-zA-Z][-a-zA-Z0-9]*$/)) {
         result.addWarning(

@@ -13,6 +13,8 @@ const {
   typeDirFor,
   metadataIncludeLine,
   descriptionWithMetadataInclude,
+  sectionHeadings,
+  lostMetadataSections,
 } = require('../../tools/redpanda-connect/metadata-utils.js');
 
 const { generateRpcnConnectorDocs } = require('../../tools/redpanda-connect/generate-rpcn-connector-docs.js');
@@ -94,6 +96,72 @@ describe('metadata-utils: locateMetadata', () => {
     expect(found.block).toContain('- a: 1');
     // The real terminator is the heading outside the block.
     expect(found.block.endsWith('- a: 1')).toBe(true);
+  });
+
+  test('on a full page, the block ends at the fields include, not end-of-string', () => {
+    // Regression: when == Metadata is the last heading on a reference page, the
+    // block must terminate at the trailing partial include / single-source tag,
+    // not run to EOF and swallow them (which deleted the fields table and the
+    // // end::single-source[] close tag from migrated pages).
+    const page = [
+      '= aws_s3',
+      '// tag::single-source[]',
+      '',
+      'Consumes objects from an S3 bucket.',
+      '',
+      '== Metadata',
+      '',
+      '- s3_key',
+      '- s3_bucket',
+      '',
+      'include::connect:components:partial$fields/inputs/aws_s3.adoc[]',
+      '',
+      '// end::single-source[]',
+    ].join('\n');
+    const found = locateMetadata(page);
+    expect(found.block).toContain('- s3_bucket');
+    expect(found.block).not.toContain('partial$fields');
+    expect(found.block).not.toContain('end::single-source');
+    // The content outside the located block is preserved on replacement.
+    const rest = page.slice(0, found.start) + page.slice(found.end);
+    expect(rest).toContain('include::connect:components:partial$fields/inputs/aws_s3.adoc[]');
+    expect(rest).toContain('// end::single-source[]');
+  });
+
+  test('the block terminates directly at // end::single-source[] with no include between', () => {
+    // Exercises the `// end::` arm of SECTION_END on its own: a page whose
+    // metadata section is followed immediately by the close tag (no fields
+    // include). Without `// end::` in SECTION_END the block would run to EOF
+    // and swallow the closing tag.
+    const page = [
+      '= thing',
+      '// tag::single-source[]',
+      '',
+      '== Metadata',
+      '',
+      '- thing_id',
+      '',
+      '// end::single-source[]',
+    ].join('\n');
+    const found = locateMetadata(page);
+    expect(found.block).toContain('- thing_id');
+    expect(found.block).not.toContain('end::single-source');
+    const rest = page.slice(0, found.start) + page.slice(found.end);
+    expect(rest).toContain('// end::single-source[]');
+  });
+
+  test('an examples include between the heading and fields include terminates the block', () => {
+    const page = [
+      'Intro.', '',
+      '== Metadata', '',
+      '- activity_id', '',
+      'include::connect:components:partial$examples/inputs/azure_cosmosdb.adoc[]', '',
+      'include::connect:components:partial$fields/inputs/azure_cosmosdb.adoc[]', '',
+      '// end::single-source[]',
+    ].join('\n');
+    const found = locateMetadata(page);
+    expect(found.block.endsWith('- activity_id')).toBe(true);
+    expect(found.block).not.toContain('partial$examples');
   });
 });
 
@@ -200,6 +268,41 @@ describe('normalize-metadata: normalizeMetadataBlock', () => {
     // The YAML block keeps its fences and content.
     expect(out).toContain('```yaml');
     expect(out).toContain('    parse_header_row: true');
+  });
+
+  test('passes an AsciiDoc ---- literal block through verbatim (no inline-coding)', () => {
+    const block = [
+      '== Metadata', '',
+      '- real_field', '',
+      'Example output:', '',
+      '----',
+      '- looks_like_a_field',
+      '----',
+    ].join('\n');
+    const out = normalizeMetadataBlock(block);
+    // Real bullet outside the literal block is coded.
+    expect(out).toContain('- `real_field`');
+    // Content inside the ---- block is untouched (no backticks added — they
+    // would render literally inside a listing block).
+    expect(out).toContain('- looks_like_a_field');
+    expect(out).not.toContain('`looks_like_a_field`');
+  });
+
+  test('does not treat a ~~~ line as closing a ```-opened fence', () => {
+    // Mismatched fences: the ``` block is never validly closed, so it must be
+    // passed through verbatim rather than de-fenced.
+    const block = ['```text', '- foo_field', '~~~'].join('\n');
+    const out = normalizeMetadataBlock(block);
+    expect(out).toContain('```text');
+    expect(out).toContain('- foo_field');
+  });
+
+  test('preserves fences around a fenced block of purely descriptive bullets', () => {
+    // No snake_case field name, so it is not a field list and must keep fences.
+    const block = ['```', '- All headers', '- All cookies', '```'].join('\n');
+    const out = normalizeMetadataBlock(block);
+    expect(out).toContain('```');
+    expect(out).toContain('- All headers');
   });
 });
 
@@ -364,5 +467,177 @@ describe('generator empties a stale metadata partial when the section is removed
       expect(content).toContain('This content is autogenerated. Do not edit manually.');
       expect(content).toContain('intentionally empty');
     });
+  });
+});
+
+describe('metadata-utils: sectionHeadings / lostMetadataSections', () => {
+  test('collects heading titles without their = markers', () => {
+    const text = '== Metadata\n\n- a: b\n\n=== Grouped fields\n\n- c: d\n';
+    expect(sectionHeadings(text)).toEqual(['Metadata', 'Grouped fields']);
+  });
+
+  test('ignores heading-like lines inside ---- literal blocks and ``` fences', () => {
+    const text = [
+      '== Metadata',
+      '',
+      '----',
+      '== not a heading',
+      '----',
+      '',
+      '```yaml',
+      '== also not a heading',
+      '```',
+      '',
+      '=== Real subsection',
+    ].join('\n');
+    expect(sectionHeadings(text)).toEqual(['Metadata', 'Real subsection']);
+  });
+
+  test('a fence-like line inside a ---- literal block does not swallow later headings', () => {
+    // The exact loss case this tripwire exists to catch: a literal block
+    // whose content shows a markdown fence. If the fence check ran first,
+    // the phantom fence state would eat the block closer and every heading
+    // after it, and the generator could overwrite published content with
+    // no warning.
+    const text = [
+      '== Metadata',
+      '',
+      '----',
+      '```yaml',
+      'looks: like a fence',
+      '----',
+      '',
+      '=== Real subsection after the block',
+    ].join('\n');
+    expect(sectionHeadings(text)).toEqual(['Metadata', 'Real subsection after the block']);
+  });
+
+  test('a ---- line inside a ``` fence does not open a literal block', () => {
+    const text = [
+      '```',
+      '----',
+      '```',
+      '',
+      '== Heading after the fence',
+    ].join('\n');
+    expect(sectionHeadings(text)).toEqual(['Heading after the fence']);
+  });
+
+  test('returns [] for empty or non-string input', () => {
+    expect(sectionHeadings('')).toEqual([]);
+    expect(sectionHeadings(null)).toEqual([]);
+    expect(sectionHeadings(undefined)).toEqual([]);
+  });
+
+  test('reports sections present in the old partial but missing from the new one', () => {
+    const oldPartial = '== Metadata\n\n- a: b\n\n=== Output CSV column order\n\nHow to keep column order.\n';
+    const newPartial = '== Metadata\n\n- a: b\n';
+    expect(lostMetadataSections(oldPartial, newPartial)).toEqual(['Output CSV column order']);
+  });
+
+  test('compares titles across heading levels, so a level change is not a loss', () => {
+    const oldPartial = '== Metadata\n\n=== Grouped fields\n\n- a: b\n';
+    const newPartial = '== Metadata\n\n== Grouped fields\n\n- a: b\n';
+    expect(lostMetadataSections(oldPartial, newPartial)).toEqual([]);
+  });
+
+  test('reports nothing when the new partial keeps every section', () => {
+    const partial = '== Metadata\n\n- a: b\n\n=== Grouped fields\n\n- c: d\n';
+    expect(lostMetadataSections(partial, partial)).toEqual([]);
+  });
+});
+
+describe('generator warns when regeneration drops a published metadata section', () => {
+  const tmpDir = path.join(__dirname, 'tmp-metadata-loss-warning');
+  let originalCwd, dataFile, templateFile, warnSpy;
+  const metaPath = path.join(
+    tmpDir, 'modules', 'components', 'partials', 'metadata', 'inputs', 'shrunk_meta.adoc'
+  );
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+
+    // Seed a previously published partial that carries an extra section beyond
+    // the upstream description's `== Metadata` block (the csv input case:
+    // migrated from a hand-maintained page, with a fenced example).
+    fs.mkdirSync(path.dirname(metaPath), { recursive: true });
+    fs.writeFileSync(metaPath, [
+      '== Metadata',
+      '',
+      '- `header`: A list of values from the header row.',
+      '',
+      '=== Output CSV column order',
+      '',
+      'Use the `header` metadata field to retrieve the column order:',
+      '',
+      '```yaml',
+      'input:',
+      '  csv: {}',
+      '```',
+      '',
+    ].join('\n'), 'utf8');
+
+    const data = {
+      inputs: [
+        {
+          name: 'shrunk_meta',
+          type: 'input',
+          description: 'Reads CSV files.\n\n== Metadata\n\n- header: A list of values from the header row.\n',
+          config: { children: [{ name: 'foo', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterAll(() => {
+    warnSpy.mockRestore();
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('overwrites the partial but names the dropped section in a warning', () => {
+    return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
+      const content = fs.readFileSync(metaPath, 'utf8');
+      // Regeneration stays authoritative: the extra section is gone from disk.
+      expect(content).toContain('== Metadata');
+      expect(content).not.toContain('Output CSV column order');
+      // ...but the loss is loud, so the auto-docs PR reviewer can act on it.
+      const warnings = warnSpy.mock.calls.map((args) => args.join(' ')).join('\n');
+      expect(warnings).toContain('shrunk_meta.adoc');
+      expect(warnings).toContain('"Output CSV column order"');
+    });
+  });
+});
+describe('PR summary leads with content-loss warnings', () => {
+  const { generatePRSummary } = require('../../tools/redpanda-connect/pr-summary-formatter.js');
+
+  const baseDiff = {
+    comparison: { oldVersion: '4.99.0', newVersion: '4.100.0' },
+    summary: {},
+    details: { newComponents: [], removedComponents: [], updatedComponents: [], newFields: [], removedFields: [], changedDefaults: [] }
+  };
+
+  test('renders the warning block at the top when sections were lost', () => {
+    const diff = { ...baseDiff, lostSectionWarnings: [{ partial: 'modules/components/partials/metadata/inputs/csv.adoc', sections: ['Output CSV column order'] }] };
+    const summary = generatePRSummary(diff);
+    const warnIdx = summary.indexOf('deletes previously published metadata sections');
+    const headerIdx = summary.indexOf('## Redpanda Connect Documentation Update');
+    expect(warnIdx).toBeGreaterThan(-1);
+    expect(warnIdx).toBeLessThan(headerIdx);
+    expect(summary).toContain('"Output CSV column order"');
+  });
+
+  test('emits no warning block when nothing was lost', () => {
+    const summary = generatePRSummary(baseDiff);
+    expect(summary).not.toContain('deletes previously published metadata sections');
   });
 });

@@ -27,7 +27,8 @@ const {
   generatePropertyComparisonReport,
   updatePropertyOverridesWithVersion,
   updatePropertiesJsonWithVersion,
-  cleanupOldDiffs
+  cleanupOldDiffs,
+  resolveDiffBaseline
 } = require('../cli-utils/diff-utils')
 
 // Import other utilities
@@ -890,6 +891,7 @@ automation
   .option('-t, --tag <tag>', 'Git tag for released content (GA/beta)')
   .option('-b, --branch <branch>', 'Branch name for in-progress content')
   .option('--diff <oldTag>', 'Diff properties against <oldTag> and restore removed deprecated properties. Recommended for accurate output; falls back to latest-redpanda-tag from antora.yml if not specified')
+  .option('--regenerate-old-baseline', 'Re-extract the --diff tag from source instead of using the committed attachments/redpanda-properties-<oldTag>.json baseline')
   .option('--overrides <path>', 'Optional JSON file with property description overrides', 'docs-data/property-overrides.json')
   .option('--output-dir <dir>', 'Where to write all generated files', 'modules/reference')
   .option('--cloud-support', 'Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. Set the token as an environment variable using GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN', true)
@@ -982,7 +984,13 @@ automation
     // When a diff is needed, skip AsciiDoc generation during extraction so we
     // can merge removed deprecated properties first and generate only once.
     if (needsDiff) {
-      make(oldTag, overridesPath, templates, outputDir, { skipPartials: true })
+      const { useCommitted, baselinePath } = resolveDiffBaseline(outputDir, oldTag, options.regenerateOldBaseline)
+      if (useCommitted) {
+        console.log(`Using committed baseline for ${oldTag}: ${baselinePath}`)
+        console.log('   Pass --regenerate-old-baseline to rebuild it from source instead.')
+      } else {
+        make(oldTag, overridesPath, templates, outputDir, { skipPartials: true })
+      }
       make(newTag, overridesPath, templates, outputDir, { skipPartials: true })
     } else {
       make(newTag, overridesPath, templates, outputDir)
@@ -992,7 +1000,16 @@ automation
     // the new JSON so they appear in the generated documentation.
     if (needsDiff) {
       const diffOutputDir = overridesPath ? path.dirname(path.resolve(overridesPath)) : outputDir
-      generatePropertyComparisonReport(oldTag, newTag, diffOutputDir)
+      try {
+        generatePropertyComparisonReport(oldTag, newTag, diffOutputDir)
+      } catch (err) {
+        // A missing baseline only warns inside generatePropertyComparisonReport.
+        // Reaching this catch means both inputs existed and the comparison
+        // itself failed, so fail the run: continuing would silently drop
+        // removed-deprecated restoration and "Introduced in" version stamping.
+        console.error(`Error: Property comparison failed: ${err.message}`)
+        process.exit(1)
+      }
 
       try {
         const diffReportPath = path.join(diffOutputDir, `redpanda-property-changes-${oldTag}-to-${newTag}.json`)
@@ -1012,7 +1029,11 @@ automation
           }
         }
       } catch (err) {
-        console.warn(`Warning: Failed to generate PR summary: ${err.message}`)
+        // The diff report exists but could not be read or applied. Fail the
+        // run rather than shipping docs that are missing removed-deprecated
+        // restoration or version stamps.
+        console.error(`Error: Failed to process the property diff report: ${err.message}`)
+        process.exit(1)
       }
 
       cleanupOldDiffs(diffOutputDir)
@@ -1040,15 +1061,32 @@ automation
 
       try {
         const jsonDir = path.resolve(outputDir, 'attachments')
+        // Invariant: always retain the comparison pair this run actually used
+        // (the current tag's JSON and the diff baseline's JSON) in addition to
+        // the 2 newest versioned JSONs. A backport run can compare tags that
+        // are not the 2 newest, and the next run's comparison needs its
+        // baseline JSON to survive. Mirrors the retention in
+        // tools/property-extractor/Makefile (generate-docs cleanup).
+        const parseVersion = f => f.match(/^redpanda-properties-v([\d.]+)\.json$/)[1].split('.').map(Number)
+        const byVersionDesc = (a, b) => {
+          const [va, vb] = [parseVersion(a), parseVersion(b)]
+          for (let i = 0; i < Math.max(va.length, vb.length); i++) {
+            if ((vb[i] || 0) !== (va[i] || 0)) return (vb[i] || 0) - (va[i] || 0)
+          }
+          return 0
+        }
         const propertyFiles = fs.readdirSync(jsonDir)
           .filter(f => /^redpanda-properties-v[\d.]+\.json$/.test(f))
-          .sort()
+          .sort(byVersionDesc)
 
-        const keepFile = `redpanda-properties-${newTag}.json`
-        const filesToDelete = propertyFiles.filter(f => f !== keepFile)
+        const filesToKeep = new Set(propertyFiles.slice(0, 2))
+        for (const tag of [newTag, oldTag]) {
+          if (tag) filesToKeep.add(`redpanda-properties-${tag}.json`)
+        }
+        const filesToDelete = propertyFiles.filter(f => !filesToKeep.has(f))
 
         if (filesToDelete.length > 0) {
-          console.log('🧹 Cleaning up old property JSON files...')
+          console.log('🧹 Cleaning up old property JSON files (keeping the 2 newest plus the comparison pair)...')
           filesToDelete.forEach(file => {
             fs.unlinkSync(path.join(jsonDir, file))
             console.log(`   Deleted: ${file}`)
@@ -1109,6 +1147,17 @@ automation
   .option('-r, --ref <ref>', 'Git branch or tag to document (e.g., dev, v26.2.0). Clones from GitHub.')
   .option('--from-source <path>', 'Path to local rpk source (src/go/rpk directory)')
   .option('--from-json <path>', 'Regenerate docs from an existing versioned JSON file (skips building)')
+  .option('--plugin <name>', 'Refresh a single rpk plugin\'s docs (ai, connect, k8s, check). Requires --from-json. Installs the plugin, splices its fresh subtree into the snapshot, and re-renders.')
+  .option('--plugin-version <version>', 'Plugin version to install and record (for example, 4.102.0). Defaults to the latest published version.')
+  .option('--plugin-pin <name=version>', 'Pin a plugin version for the installs during full generation (repeatable, for example --plugin-pin k8s=26.3.1-beta.1). Required for pre-GA plugins with no promoted latest version.', (value, pins) => {
+    const eq = value.indexOf('=')
+    if (eq < 1 || eq === value.length - 1) {
+      throw new Error(`Invalid --plugin-pin '${value}': expected <name>=<version>`)
+    }
+    pins[value.slice(0, eq)] = value.slice(eq + 1)
+    return pins
+  }, {})
+  .option('--rpk-bin <path>', 'Path to an existing rpk binary for the plugin refresh (skips download/build)')
   .option('--overrides <path>', 'Path to overrides JSON file', 'docs-data/rpk-overrides.json')
   .option('--diff <oldVersion>', 'Generate diff against previous version')
   .option('--update-whats-new [path]', 'Update what\'s-new file with rpk changes from diff (default: modules/get-started/pages/release-notes/redpanda.adoc)')
@@ -1124,6 +1173,12 @@ automation
     try {
       const { handleRpkDocsGeneration } = require('../tools/rpk-docs/rpk-docs-handler.js')
 
+      if (options.plugin && !options.fromJson) {
+        console.error('Error: --plugin requires --from-json <snapshot>')
+        console.error('A plugin refresh splices the fresh subtree into an existing committed snapshot.')
+        process.exit(1)
+      }
+
       // Handle --update-whats-new with optional path
       let whatsNewPath = null
       if (options.updateWhatsNew !== undefined) {
@@ -1137,6 +1192,10 @@ automation
         ref: options.ref,
         fromSource: options.fromSource,
         fromJson: options.fromJson,
+        plugin: options.plugin,
+        pluginVersion: options.pluginVersion,
+        pluginPins: options.pluginPin,
+        rpkBin: options.rpkBin,
         overrides: options.overrides,
         diff: options.diff,
         updateWhatsNew: whatsNewPath,
@@ -1150,6 +1209,10 @@ automation
       })
 
       if (result.success) {
+        if (result.skipped) {
+          console.log(`\n✓ Skipped: ${result.reason}`)
+          process.exit(0)
+        }
         console.log('\n✓ rpk documentation generated successfully')
 
         // Write PR summary to file if requested (useful for GitHub Actions)
@@ -1169,6 +1232,140 @@ automation
         console.error('Error: Generation failed')
         process.exit(1)
       }
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
+ * generate rpk-plugin-stubs
+ *
+ * @description
+ * Reconciles a consumer repo's single-source stub pages and nav section
+ * against the rpk plugin partials generated in the docs repo. Run from the
+ * consumer repo root (for example, adp-docs for rpk ai). Creates stubs for
+ * new partials, deletes managed stubs whose partial is gone, rebuilds the
+ * plugin's nav block, and proposes page aliases for likely renames.
+ * Full reconcile, so it is idempotent and heals pre-existing drift.
+ */
+automation
+  .command('rpk-plugin-stubs')
+  .description('Reconcile single-source stub pages and nav against the docs repo\'s rpk plugin partials. Run from the consumer repo root.')
+  .option('--plugin <name>', 'rpk plugin command name', 'ai')
+  .option('--docs-repo <owner/repo>', 'Docs repo that owns the partials', 'redpanda-data/docs')
+  .option('--docs-ref <ref>', 'Branch or tag to read partials from', 'main')
+  .option('--partials-dir <path>', 'Local partials directory (skips cloning the docs repo)')
+  .option('--source-path <path>', 'Path in the docs repo to read from (default: modules/reference/partials/rpk-<plugin>; use modules/reference/pages/rpk/rpk-connect for page-family content)')
+  .option('--stub-dir <path>', 'Stub pages directory in the consumer repo (default: modules/reference/pages/rpk/rpk-<plugin>)')
+  .option('--nav-file <path>', 'Nav file whose plugin block is rebuilt', 'modules/ROOT/nav.adoc')
+  .option('--include-prefix <prefix>', 'Antora resource prefix for stub includes. Default: inferred from an existing stub.')
+  .option('--attribute <line>', 'Page attribute line added to new stubs (repeatable)', (value, acc) => { acc.push(value); return acc }, [])
+  .option('--summary-file <path>', 'Write a markdown summary (for PR bodies)')
+  .option('--dry-run', 'Report what would change without writing')
+  .action(async (options) => {
+    try {
+      const {
+        readPartialTitles, fetchPartialsDir, inferIncludePrefix, reconcileStubs
+      } = require('../tools/rpk-docs/generate-plugin-stubs.js')
+
+      const plugin = options.plugin
+      const stubDir = options.stubDir || `modules/reference/pages/rpk/rpk-${plugin}`
+      const partialsDir = options.partialsDir || fetchPartialsDir({
+        docsRepo: options.docsRepo,
+        docsRef: options.docsRef,
+        plugin,
+        sourcePath: options.sourcePath
+      })
+
+      const includePrefix = options.includePrefix || inferIncludePrefix(stubDir, plugin)
+      if (!includePrefix) {
+        console.error('Error: could not infer the include prefix (no existing stubs). Pass --include-prefix, for example: streaming:reference:partial$rpk-ai/')
+        process.exit(1)
+      }
+
+      const partials = readPartialTitles(partialsDir)
+      console.log(`Reconciling ${partials.length} partial(s) against ${stubDir}`)
+
+      const result = reconcileStubs({
+        partials,
+        stubDir,
+        navFile: options.navFile,
+        plugin,
+        includePrefix,
+        ...(options.attribute.length > 0 ? { attributes: options.attribute } : {}),
+        dryRun: options.dryRun
+      })
+
+      console.log(`  Created: ${result.created.length}, deleted: ${result.deleted.length}, nav updated: ${result.navUpdated}`)
+      for (const f of result.created) console.log(`  + ${f}`)
+      for (const f of result.deleted) console.log(`  - ${f}`)
+      for (const f of result.keptNonStub) console.log(`  ! kept (not a managed stub): ${f}`)
+
+      const lines = []
+      lines.push(`## rpk ${plugin} stub reconciliation`)
+      lines.push('')
+      lines.push(`Reconciled against \`${options.partialsDir ? partialsDir : `${options.docsRepo}@${options.docsRef}`}\`.`)
+      lines.push('')
+      if (result.created.length + result.deleted.length === 0 && !result.navUpdated) {
+        lines.push('No changes: stubs and nav already match the partials.')
+      }
+      if (result.created.length > 0) {
+        lines.push(`### New stubs (${result.created.length})`)
+        lines.push('')
+        result.created.forEach(f => lines.push(`- \`${f}\``))
+        lines.push('')
+      }
+      if (result.deleted.length > 0) {
+        lines.push(`### Deleted stubs (${result.deleted.length})`)
+        lines.push('')
+        result.deleted.forEach(f => lines.push(`- \`${f}\``))
+        lines.push('')
+      }
+      if ((result.skippedAliasTargets || []).length > 0) {
+        lines.push('### Skipped: names claimed as page aliases')
+        lines.push('')
+        lines.push('These partials exist upstream, but a page here already claims the name as a `:page-aliases:` target — creating the stub would make the Antora build fatal. Usually this means a rename alias exists while the upstream partial for the old name has not been cleaned up yet:')
+        lines.push('')
+        for (const t of result.skippedAliasTargets) {
+          lines.push(`- \`${t.file}\` (claimed by \`${t.claimedBy}\`)`)
+        }
+        lines.push('')
+      }
+      const straightDeletions = result.deleted.filter(d => !result.renameCandidates.some(rc => rc.deleted === d))
+      if (straightDeletions.length > 0) {
+        lines.push('### Deletions with no rename partner')
+        lines.push('')
+        lines.push('These pages were removed with no successor detected. Their published URLs will 404 — consider adding a redirect or an alias on a related page:')
+        lines.push('')
+        straightDeletions.forEach(f => lines.push(`- \`${f}\``))
+        lines.push('')
+      }
+      if (result.renameCandidates.length > 0) {
+        lines.push('### Possible renames — reviewer decision needed')
+        lines.push('')
+        lines.push('These deleted/created pairs look like renames. If so, add `:page-aliases:` for the old page name to the new stub so published URLs keep working:')
+        lines.push('')
+        for (const rc of result.renameCandidates) {
+          lines.push(`- \`${rc.deleted}\` → \`${rc.created}\`: add \`:page-aliases: reference:rpk/rpk-${plugin}/${rc.deleted}\` to the new stub`)
+        }
+        lines.push('')
+      }
+      if (result.keptNonStub.length > 0) {
+        lines.push('### Kept (not managed stubs)')
+        lines.push('')
+        lines.push('These pages do not match the managed stub shape, so they were not touched:')
+        lines.push('')
+        result.keptNonStub.forEach(f => lines.push(`- \`${f}\``))
+        lines.push('')
+      }
+      const summary = lines.join('\n')
+      if (options.summaryFile) {
+        fs.writeFileSync(options.summaryFile, summary, 'utf8')
+        console.log(`Summary written to: ${options.summaryFile}`)
+      }
+
+      process.exit(0)
     } catch (err) {
       console.error(`Error: ${err.message}`)
       process.exit(1)

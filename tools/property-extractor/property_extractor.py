@@ -79,7 +79,7 @@ ENUM_PATTERN = re.compile(r'^[a-zA-Z0-9_:]+::([a-zA-Z0-9_]+)$')  # Match full qu
 CONSTRUCTOR_PATTERN = re.compile(r'([a-zA-Z0-9_:]+)\((.*)\)')
 BRACED_CONSTRUCTOR_PATTERN = re.compile(r'([a-zA-Z0-9_:]+)\{(.*)\}')
 DIGIT_SEPARATOR_PATTERN = re.compile(r"(?<=\d)'(?=\d)")
-FUNCTION_CALL_PATTERN = re.compile(r'([a-zA-Z0-9_:]+)\(\)')
+FUNCTION_CALL_PATTERN = re.compile(r'([a-zA-Z0-9_:.]+)\(\)$')
 CHRONO_PATTERN = re.compile(r'std::chrono::([a-zA-Z]+)\s*\{\s*(\d+)\s*\}')
 CHRONO_PAREN_PATTERN = re.compile(r'(?:std::)?chrono::([a-zA-Z]+)\s*\(\s*([^)]+)\s*\)')
 TIME_UNIT_PATTERN = re.compile(r'(\d+)\s*(min|s|ms|h)')
@@ -159,6 +159,15 @@ class ConstexprCache:
             re.compile(r'const\s+model::ns\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*"([^"]+)"\s*\)'),
         ]
 
+        # Member accessors on inline constants used in property defaults,
+        # for example model::schema_registry_internal_tp.topic() -> "_schemas".
+        # Each entry maps a variable declaration to the member name whose call
+        # returns the captured string, cached under "<variable>.<member>".
+        member_accessor_patterns = [
+            # Pattern: inline const model::topic_partition name{model::topic{"value"}, ...}
+            (re.compile(r'inline\s+const\s+(?:model::)?topic_partition\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{\s*(?:model::)?topic\{\s*"([^"]+)"\s*\}'), 'topic'),
+        ]
+
         # Legacy specific patterns (kept for compatibility, but general patterns should cover these)
         function_patterns = {}
 
@@ -205,6 +214,17 @@ class ConstexprCache:
                                     if namespace:
                                         qualified_name = f"{namespace}::{func_name}"
                                         self.function_cache[qualified_name] = func_value
+
+                            # Extract member accessors on inline constants
+                            for pattern, member in member_accessor_patterns:
+                                for match in pattern.finditer(content):
+                                    var_name = match.group(1)
+                                    value = match.group(2)
+                                    key = f"{var_name}.{member}"
+                                    namespace = self._extract_namespace_for_function(content, match.start())
+                                    self.function_cache[key] = value
+                                    if namespace:
+                                        self.function_cache[f"{namespace}::{key}"] = value
 
                             # Legacy: Extract function definitions from hardcoded patterns (if any)
                             for func_name, patterns in function_patterns.items():
@@ -301,16 +321,35 @@ _constexpr_cache = ConstexprCache()
 _type_definitions_cache = {}
 
 # Import topic property extractor
+# Set from --path in main() so every consumer of the Redpanda source uses the
+# tree the caller pointed at, regardless of the current working directory. The
+# hardcoded search below is only a fallback for direct module use.
+_redpanda_source_override = None
+
+
+def set_redpanda_source(path):
+    """Record the Redpanda source directory passed via --path."""
+    global _redpanda_source_override
+    _redpanda_source_override = path
+
+
 def find_redpanda_source():
     """
-    Locate the Redpanda source directory by searching standard locations.
-    
-    The property extractor looks for the Redpanda source code in multiple
-    locations to handle different execution contexts (project root, tools directory, etc.).
-    
+    Locate the Redpanda source directory.
+
+    Prefers the path passed via --path (recorded by set_redpanda_source);
+    falls back to searching standard locations relative to the current
+    working directory. Before this preference existed, running the extractor
+    from any directory that did not match a hardcoded guess silently
+    disabled the ConstantResolver: no validator enums, no enterprise enum
+    metadata, no constexpr resolution, with only a debug-level log line.
+
     Returns:
         str or None: Path to the Redpanda source directory if found, None otherwise.
     """
+    if _redpanda_source_override and os.path.exists(_redpanda_source_override):
+        return _redpanda_source_override
+
     redpanda_source_paths = [
         'tmp/redpanda',  # Current directory
         '../tmp/redpanda',  # Parent directory  
@@ -705,6 +744,13 @@ def transform_files_with_properties(files_with_properties):
         if src_v_path.exists():
             constant_resolver = ConstantResolver(src_v_path)
             logger.debug(f"Initialized ConstantResolver with path: {src_v_path}")
+    if constant_resolver is None:
+        logger.warning(
+            "Redpanda source directory not found: validator enum extraction "
+            "and enterprise enum metadata are DISABLED for this run. "
+            "Properties like sasl_mechanisms will be missing items.enum and "
+            "x-enum-metadata. Pass --path to the Redpanda checkout to fix this."
+        )
 
     transformers = [
         EnterpriseTransformer(), ## this must be the first, as it modifies current data
@@ -753,7 +799,24 @@ def transform_files_with_properties(files_with_properties):
                 continue
 
             if len(property_definition) > 0:
-                all_properties[name] = property_definition
+                # Key the output by the property's registered name (the string
+                # literal passed to the constructor), which can differ from the
+                # C++ member identifier used as the parser key. For example,
+                # the member `default_topic_replication` registers the name
+                # "default_topic_replications".
+                output_key = property_definition.get("name") or name
+                existing = all_properties.get(output_key)
+                if existing is not None and existing.get("defined_in") == property_definition.get("defined_in"):
+                    # Two members of the same config store register the same
+                    # property name. config_store registers properties with
+                    # emplace(), so the first registration wins at runtime.
+                    # Match that behavior and keep the first definition.
+                    logging.warning(
+                        f"Duplicate property name '{output_key}' (member '{name}') in "
+                        f"{property_definition.get('defined_in')}: keeping the first definition."
+                    )
+                    continue
+                all_properties[output_key] = property_definition
 
     return all_properties
 
@@ -905,6 +968,32 @@ def merge_properties_and_definitions(properties, definitions):
     return dict(properties=properties, definitions=definitions)
 
 
+# Phantom stub entries created by apply_property_overrides during the current
+# run. An entry is recorded whenever an override key matches no extracted
+# property and a placeholder doc entry is fabricated from the override alone.
+# Tracked at module level so the run summary in main() can report them all in
+# one place at the end of the run.
+phantom_stub_entries = []
+
+
+def report_phantom_stubs():
+    """Log one prominent warning block listing every phantom stub created from overrides."""
+    if not phantom_stub_entries:
+        return
+    logger.warning("=" * 70)
+    logger.warning(
+        f"⚠️  {len(phantom_stub_entries)} override "
+        f"{'entry' if len(phantom_stub_entries) == 1 else 'entries'} matched no extracted property"
+    )
+    for entry in phantom_stub_entries:
+        logger.warning(
+            f"Override key '{entry['name']}' matched no extracted property — created a stub entry "
+            f"with config_scope '{entry['config_scope']}'. If the property was renamed or removed, "
+            f"update docs-data/property-overrides.json."
+        )
+    logger.warning("=" * 70)
+
+
 def apply_property_overrides(properties, overrides, overrides_file_path=None):
     """
     Apply overrides from an overrides mapping to the extracted properties, mutating and returning the properties dictionary.
@@ -924,6 +1013,7 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
     Returns:
         dict: The same properties mapping with overrides applied and any new properties created.
     """
+    phantom_stub_entries.clear()
     if overrides and "properties" in overrides:
         for prop, override in overrides["properties"].items():
             # First check if property exists by key
@@ -945,7 +1035,13 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
                 else:
                     # Create new property from override
                     logger.info(f"Creating new property from override: {prop}")
-                    properties[prop] = _create_property_from_override(prop, override, overrides_file_path)
+                    new_property = _create_property_from_override(prop, override, overrides_file_path)
+                    properties[prop] = new_property
+                    # Record the phantom stub so the run summary can flag it loudly
+                    phantom_stub_entries.append({
+                        "name": prop,
+                        "config_scope": new_property.get("config_scope"),
+                    })
     return properties
 
 
@@ -2839,6 +2935,11 @@ def main():
         treesitter_dir, destination_path
     )
 
+    # Every consumer of the Redpanda source (ConstantResolver, constexpr
+    # fallback search) must use the tree the caller pointed at, not a
+    # cwd-relative guess.
+    set_redpanda_source(options.path)
+
     # Pre-build constexpr cache for performance
     # This avoids repeated filesystem walks when resolving C++ identifiers and function calls
     logger.info("🔧 Building constexpr identifier cache...")
@@ -3035,6 +3136,17 @@ def main():
         except IOError as e:
             logging.error(f"Failed to write enhanced output file: {e}")
             sys.exit(1)
+
+    # Surface phantom stubs prominently at the end of the run. These are
+    # override keys that matched no extracted property, so a placeholder doc
+    # entry was fabricated from the override alone.
+    if phantom_stub_entries:
+        report_phantom_stubs()
+        phantom_names = ", ".join(entry["name"] for entry in phantom_stub_entries)
+        print(
+            f"⚠️  Phantom stub entries created from overrides: "
+            f"{len(phantom_stub_entries)} ({phantom_names})"
+        )
 
 if __name__ == "__main__":
     main()

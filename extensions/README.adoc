@@ -86,6 +86,7 @@ IMPORTANT: Extensions must be registered under the `antora.extensions` key in yo
 * **add-global-attributes** - Add attributes globally to all pages
 * **add-pages-to-root** - Add pages to the root navigation
 * **process-context-switcher** - Handle context-dependent content
+* **set-available-attachment-versions** - Point UI templates at the newest generated JSON attachments that exist in the catalog
 * **validate-attributes** - Validate AsciiDoc attributes
 
 === AI-friendly documentation
