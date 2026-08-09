@@ -1131,6 +1131,7 @@ async function handleRpcnConnectorDocs (options) {
   console.log('Generating connector partials...')
   let partialsWritten, partialFiles
   const descriptionReports = []
+  const lostSectionWarnings = []
 
   try {
     const result = await generateRpcnConnectorDocs({
@@ -1149,6 +1150,7 @@ async function handleRpcnConnectorDocs (options) {
     partialsWritten = result.partialsWritten
     partialFiles = result.partialFiles
     descriptionReports.push(...(result.descriptionReports || []))
+    lostSectionWarnings.push(...(result.lostSectionWarnings || []))
   } catch (err) {
     console.error(`Error: Failed to generate partials: ${err.message}`)
     process.exit(1)
@@ -1942,6 +1944,7 @@ async function handleRpcnConnectorDocs (options) {
         fs.unlinkSync(tempDataPath)
         draftsWritten = draftResult.draftsWritten
         draftFiles = draftResult.draftFiles
+        lostSectionWarnings.push(...(draftResult.lostSectionWarnings || []))
       }
     } catch (err) {
       console.error(`Error: Could not draft missing: ${err.message}`)
@@ -1989,10 +1992,11 @@ async function handleRpcnConnectorDocs (options) {
   // Generate PR summary
   try {
     const { printPRSummary } = require('./pr-summary-formatter.js')
-    // Use master diff if available, otherwise use single diff. Structure
-    // reports ride the diff object so they land in the PR summary body
-    // instead of the collapsed workflow log.
+    // Use master diff if available, otherwise use single diff. Content-loss
+    // warnings and structure reports ride the diff object so they land in the
+    // PR summary body instead of dying in the collapsed workflow log.
     const summaryDiff = masterDiff || diffJson
+    if (lostSectionWarnings.length) summaryDiff.lostSectionWarnings = lostSectionWarnings
     if (descriptionReports.length) summaryDiff.descriptionReports = descriptionReports
     printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
   } catch (err) {

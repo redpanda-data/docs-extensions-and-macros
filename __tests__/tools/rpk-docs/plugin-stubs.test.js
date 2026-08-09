@@ -70,6 +70,31 @@ describe('plugin stub reconciler', () => {
     expect(stub).toContain('include::streaming:reference:partial$rpk-ai/rpk-ai-auth-login.adoc[tag=single-source]')
   })
 
+  test('copies the partial description into created stub headers', () => {
+    fs.writeFileSync(path.join(partialsDir, 'rpk-ai-agent-create.adoc'),
+      '= rpk ai agent create\n:description: Create an agent.\n:page-platforms: linux,darwin\n\n// tag::single-source[]\n:description: Create an agent.\nBody.\n// end::single-source[]\n')
+
+    const result = run()
+
+    expect(result.created).toEqual(['rpk-ai-agent-create.adoc'])
+    const stub = fs.readFileSync(path.join(stubDir, 'rpk-ai-agent-create.adoc'), 'utf8').split('\n')
+    expect(stub[0]).toBe('= rpk ai agent create')
+    expect(stub[1]).toBe(':description: Create an agent.')
+    expect(stub[2]).toBe(':page-preview: true')
+  })
+
+  test('creates stubs without a description line when the partial has none', () => {
+    fs.writeFileSync(path.join(partialsDir, 'rpk-ai-bare.adoc'),
+      '= rpk ai bare\n\n// tag::single-source[]\nBody.\n// end::single-source[]\n')
+
+    const result = run()
+
+    expect(result.created).toEqual(['rpk-ai-bare.adoc'])
+    const stub = fs.readFileSync(path.join(stubDir, 'rpk-ai-bare.adoc'), 'utf8')
+    expect(stub).not.toContain(':description:')
+    expect(stub).toContain(':page-preview: true')
+  })
+
   test('rebuilds the nav block hierarchically and preserves surrounding nav', () => {
     writePartial('rpk-ai.adoc', 'rpk ai')
     writePartial('rpk-ai-auth.adoc', 'rpk ai auth')
