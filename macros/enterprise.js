@@ -5,7 +5,7 @@
  * Example use in a page:
  *
  *   enterprise:Continuous Data Balancing[]
- *   enterprise:Tiered Storage[xref=manage:tiered-storage/tiered-storage.adoc]
+ *   enterprise:Tiered Storage[xref=manage:tiered-storage.adoc]
  *   enterprise:Audit Logging[text=audit logging]
  *   enterprise:Iceberg Topics[tooltip=Iceberg Topics requires an Enterprise Edition license and object storage.]
  *

@@ -71,7 +71,7 @@ This inline macro marks a feature as an enterprise feature in prose. The feature
 [,asciidoc]
 ----
 enterprise:Continuous Data Balancing[]
-enterprise:Tiered Storage[xref=manage:tiered-storage/tiered-storage.adoc]
+enterprise:Tiered Storage[xref=manage:tiered-storage.adoc]
 enterprise:Audit Logging[text=audit logging]
 enterprise:Iceberg Topics[tooltip=Iceberg Topics requires an Enterprise Edition license and object storage.]
 ----

@@ -27,9 +27,9 @@ describe('enterprise macro', () => {
       const html = buildEnterpriseContent({
         ...defaults,
         feature: 'Tiered Storage',
-        xref: 'manage:tiered-storage/tiered-storage.adoc',
+        xref: 'manage:tiered-storage.adoc',
       })
-      expect(html).toContain('xref:manage:tiered-storage/tiered-storage.adoc[Tiered Storage]')
+      expect(html).toContain('xref:manage:tiered-storage.adoc[Tiered Storage]')
     })
 
     test('honors display text and tooltip overrides', () => {
