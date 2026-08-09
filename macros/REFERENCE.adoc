@@ -161,6 +161,67 @@ asciidoc:
     - '@redpanda-data/docs-extensions-and-macros/macros/helm-ref'
 ----
 
+== iceberg-explorer
+
+This macro registers an `[iceberg-explorer]` block that emits a version-aware mount point for the interactive Iceberg Mode Explorer:
+
+[,html]
+----
+<div class="iceberg-explorer" data-version="26.2"><noscript>...</noscript></div>
+----
+
+The block renders the container only. The explorer UI and its translation engine live in the docs-ui bundle, which hydrates any `.iceberg-explorer` element on the page, so the block is inert unless the site uses a docs-ui build that includes the explorer. This is the same "macro emits container, docs-ui hydrates it" handshake used by the Redpanda Connect component metadata block.
+
+The page's component version (`page-version`, falling back to `page-component-version`) is stamped onto the mount point as `data-version` so the UI can load the engine build that matches the doc version. If neither attribute is set, `data-version` is omitted.
+
+=== Usage
+
+```asciidoc
+[iceberg-explorer]
+--
+--
+```
+
+Set the initial configuration with the `config` attribute:
+
+```asciidoc
+[iceberg-explorer,config="key:mode=binary;value:mode=binary"]
+--
+--
+```
+
+Or pass a JSON object as the block body to supply author-defined defaults:
+
+```asciidoc
+[iceberg-explorer]
+----
+{
+  "config": "value:mode=schema_latest"
+}
+----
+```
+
+The JSON is attribute-escaped and emitted as `data-defaults`. If the body is not valid JSON, the macro logs a warning, omits `data-defaults`, and still renders the mount point.
+
+|===
+| Attribute | Description
+
+| `config`
+| Initial configuration string. Emitted as `data-config`. Falls back to the `config` key of the JSON body.
+
+| `height`
+| Minimum height for the container, emitted as an inline `min-height` style.
+|===
+
+=== Registration
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/iceberg-explorer'
+----
+
 == components_by_category
 
 This macro generates a tabbed interface to display Redpanda Connect components by category.
