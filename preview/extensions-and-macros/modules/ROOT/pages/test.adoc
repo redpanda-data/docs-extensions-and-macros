@@ -35,7 +35,7 @@ Default, no registry xref, linking to the licensing page: enterprise:Continuous 
 
 Registry-supplied feature link (the Tiered Storage entry carries an xref): enterprise:Tiered Storage[] in a sentence.
 
-Per-use xref, overriding the registry: enterprise:Tiered Storage[xref=streaming:manage:tiered-storage/tiered-storage.adoc] in a sentence.
+Per-use xref, overriding the registry (here, the Kubernetes variant of the feature page): enterprise:Tiered Storage[xref=streaming:manage:kubernetes/tiered-storage/k-tiered-storage.adoc] in a sentence.
 
 Display text override (canonical name stays in the tooltip): enterprise:Audit Logging[text=audit logging] in a sentence.
 
