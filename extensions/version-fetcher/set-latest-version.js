@@ -146,12 +146,17 @@ module.exports.register = function ({ config }) {
     }
   });
 
-  // Helper function to set both latest-*version and latest-*tag attributes
+  // Helper function to set latest-*version, latest-*tag, and latest-*version-short attributes
   function setVersionAndTagAttributes(asciidoc, baseName, versionData, name = '', version = '') {
     if (versionData) {
       const versionWithoutPrefix = sanitizeVersion(versionData);
       asciidoc.attributes[`${baseName}-version`] = versionWithoutPrefix; // Without "v" prefix
       asciidoc.attributes[`${baseName}-tag`] = `${versionData}`;
+
+      const shortVersion = toShortVersion(versionWithoutPrefix);
+      if (shortVersion) {
+        asciidoc.attributes[`${baseName}-version-short`] = shortVersion; // major.minor only
+      }
 
       if (name && version) {
         logger.debug(`Set ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to ${versionData} in ${name} ${version}`);
@@ -159,6 +164,12 @@ module.exports.register = function ({ config }) {
         logger.debug(`Updated ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to ${versionData}`);
       }
     }
+  }
+
+  // Helper function to derive the major.minor short version (for example, 26.2.1 -> 26.2)
+  function toShortVersion(version) {
+    const match = /^(\d+)\.(\d+)/.exec(version);
+    return match ? `${match[1]}.${match[2]}` : null;
   }
 
   // Helper function to sanitize version by removing "v" prefix
