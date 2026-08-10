@@ -2891,6 +2891,7 @@ function runValidation(outputDir, options = {}) {
 
 module.exports = {
   handleRpkDocsGeneration,
+  prepareSourceFromRef,
   fetchRpkTreeFromSource,
   fetchRpkTreeFromLinuxSource,
   acquireRpkBinary,

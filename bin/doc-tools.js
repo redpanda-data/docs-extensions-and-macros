@@ -1239,6 +1239,47 @@ automation
   })
 
 /**
+ * generate rpk-env-partial
+ *
+ * @description
+ * Generates the -X option -> RPK_* environment variable mapping table as an
+ * AsciiDoc partial from rpk's own `-X list` output, so the table cannot
+ * drift from the CLI. The partial is included by both the rpk-x-options
+ * page and the environment-variables reference in the docs repo. Hidden
+ * -X options never appear in `-X list`, so they are excluded automatically.
+ *
+ * @example
+ * # Generate for a release tag (sparse-clones redpanda, builds rpk with Go)
+ * npx doc-tools generate rpk-env-partial --ref v26.2.1 --output modules/reference/partials/rpk-env-vars.adoc
+ *
+ * # Use a local source checkout or an existing rpk binary
+ * npx doc-tools generate rpk-env-partial --from-source ~/redpanda/src/go/rpk --output modules/reference/partials/rpk-env-vars.adoc
+ * npx doc-tools generate rpk-env-partial --rpk-bin "$(command -v rpk)" --output modules/reference/partials/rpk-env-vars.adoc
+ */
+automation
+  .command('rpk-env-partial')
+  .description('Generate the -X -> RPK_* env var mapping partial from rpk -X list output.')
+  .option('-r, --ref <ref>', 'Git branch or tag to build rpk from (e.g., dev, v26.2.1). Clones from GitHub.')
+  .option('--from-source <path>', 'Path to local rpk source (src/go/rpk directory)')
+  .option('--rpk-bin <path>', 'Path to an existing rpk binary (skips clone and build)')
+  .option('--output <path>', 'Path to write the partial to', 'modules/reference/partials/rpk-env-vars.adoc')
+  .action((options) => {
+    try {
+      const { handleXEnvPartialGeneration } = require('../tools/rpk-docs/generate-x-env-partial.js')
+      const result = handleXEnvPartialGeneration({
+        ref: options.ref,
+        fromSource: options.fromSource,
+        rpkBin: options.rpkBin,
+        output: options.output
+      })
+      console.log(`Wrote ${result.keyCount} -X option mappings to ${result.output}`)
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
  * generate rpk-plugin-stubs
  *
  * @description
