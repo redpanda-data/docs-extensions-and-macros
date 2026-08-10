@@ -361,6 +361,7 @@ function propInlineMacro (config) {
       // streaming (or ROOT) component and emit a component-qualified xref.
       let discoveredPage
       let componentPrefix = ''
+      let suppressLink = false
       if (registry && config.contentCatalog && (attributes.link === 'true' || attributes.link === true) && !attributes.page) {
         const component = (config.file && config.file.src && config.file.src.component) || ''
         const version = (config.file && config.file.src && config.file.src.version) || ''
@@ -386,6 +387,15 @@ function propInlineMacro (config) {
           if (!discoveredPage && ownIndex.size === 0 && fallbackWithPages) {
             componentPrefix = `${fallbackWithPages}:`
           }
+          // Property pages exist but none of them documents this property
+          // (for example, a cloud-only topic property when no site publishes
+          // a cloud topic-properties page). Linking would produce a broken
+          // xref, so render the marker without a link and say why.
+          if (!discoveredPage && (ownIndex.size > 0 || fallbackWithPages)) {
+            const where = (config.file && config.file.src && config.file.src.path) || 'unknown file'
+            console.warn(chalk.yellow(`prop:${name}[link=true] in ${where}: no property reference page documents '${name}' in this build, so it renders without a link. Check the property's include tags on the reference pages.`))
+            suppressLink = true
+          }
         }
       }
       // helm-path=auto displays the property as its Helm values path on
@@ -396,7 +406,7 @@ function propInlineMacro (config) {
       const content = buildPropContent({
         name,
         text: attributes.text,
-        link: attributes.link === 'true' || attributes.link === true,
+        link: (attributes.link === 'true' || attributes.link === true) && !suppressLink,
         page: attributes.page || discoveredPage,
         scope: entry && entry.config_scope,
         role: document.getAttribute('property-ref-role', DEFAULT_ROLE),

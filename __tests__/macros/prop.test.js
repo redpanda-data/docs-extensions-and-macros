@@ -291,9 +291,14 @@ describe('prop macro', () => {
       // fips_mode is inside the redpanda-cloud tag: discovered on the cloud page.
       const linked = convert('prop:fips_mode[link=true]', { catalog, component: 'cloud-data-platform' })
       expect(linked).toContain('cloud-cluster')
-      // cloud_storage_enabled is outside the tag: not on the cloud page, falls back to scope.
+      // cloud_storage_enabled is outside the tag: the cloud page doesn't
+      // render it, and no streaming page exists in this fixture, so it is
+      // documented nowhere -- the marker renders without a link.
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
       const fallback = convert('prop:cloud_storage_enabled[link=true]', { catalog, component: 'cloud-data-platform' })
-      expect(fallback).toContain('cluster-properties')
+      expect(fallback).toContain('data-property-name="cloud_storage_enabled"')
+      expect(fallback).not.toContain('xref:')
+      warn.mockRestore()
     })
 
     test('components without property pages get component-qualified links into streaming', () => {
@@ -326,6 +331,23 @@ describe('prop macro', () => {
       const borrowed = convert('prop:redpanda.iceberg.mode[link=true]', { catalog, component: 'cloud-data-platform' })
       expect(borrowed).toContain('streaming')
       expect(borrowed).toContain('topic-properties')
+    })
+
+    test('renders without a link when no reference page documents the property', () => {
+      const catalog = fakeCatalog({
+        files: [
+          // Pages exist, but none of them includes a partial documenting admin.
+          partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n'),
+          page('streaming', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/all.adoc[]'),
+        ],
+      })
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('prop:admin[link=true]', { catalog })
+      expect(html).toContain('data-property-name="admin"')
+      expect(html).not.toContain('href')
+      expect(html).not.toContain('xref:')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('renders without a link'))
+      warn.mockRestore()
     })
 
     test('page= overrides discovery', () => {
