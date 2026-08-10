@@ -65,7 +65,7 @@ function validateCategories(pageCategoryList, pageInfo, categoryMap, logger) {
   });
 
   if (!isValid) {
-      logger.warn(`Invalid categories detected. For a list of valid categories, see https://github.com/redpanda-data/docs/tree/shared/modules/ROOT/partials/valid-categories.yml`);
+      logger.warn(`Invalid categories detected. For a list of valid categories, see https://github.com/redpanda-data/docs/blob/main/shared/modules/ROOT/partials/valid-categories.yml`);
   }
   return Array.from(adjustedCategories).join(', ');
 }
