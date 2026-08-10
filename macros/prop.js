@@ -167,6 +167,13 @@ function buildPageIndex (contentCatalog, component, properties, version) {
   const query = { component, module: 'reference', family: 'page' }
   if (version !== undefined && version !== '') query.version = version
   const pages = contentCatalog.findBy(query) || []
+  // Antora replaces each page's contents with converted HTML as it goes, so
+  // an index built lazily mid-conversion can miss includes on pages that
+  // already converted. The property-page-index extension warms this cache
+  // before conversion starts; warn when that safety net is absent.
+  if (pages.some((candidate) => candidate.contents.toString('utf8', 0, 200).trimStart().startsWith('<'))) {
+    console.warn(chalk.yellow(`prop macro: building the property page index for ${component}@${version || 'any'} after conversion started; some pages are already HTML and their properties may not be indexed. Register '@redpanda-data/docs-extensions-and-macros/extensions/property-page-index' under antora.extensions to build the index up front.`))
+  }
   for (const page of pages) {
     const source = page.contents.toString()
     const pagePath = page.src.relative.replace(/\.adoc$/, '')
@@ -236,6 +243,14 @@ function loadProperties (config) {
   if (!contentCatalog) return undefined
   const pageComponent = (config.file && config.file.src && config.file.src.component) || ''
   const pageVersion = (config.file && config.file.src && config.file.src.version) || ''
+  return loadPropertiesFor(contentCatalog, pageComponent, pageVersion)
+}
+
+/**
+ * Same as loadProperties, addressable by component and version so the
+ * property-page-index extension can warm the caches before conversion.
+ */
+function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
   const cacheKey = `${pageComponent}@${pageVersion}` || '$any'
   const cache = contentCatalog[$propertyRegistry] || (contentCatalog[$propertyRegistry] = {})
   if (cache[cacheKey] !== undefined) return cache[cacheKey] || undefined
@@ -436,6 +451,7 @@ function register (registry, config = {}) {
 module.exports.register = register
 module.exports.buildPropContent = buildPropContent
 module.exports.helmValuesPath = helmValuesPath
+module.exports.loadPropertiesFor = loadPropertiesFor
 module.exports.compareTags = compareTags
 module.exports.extractHeadingsWithTags = extractHeadingsWithTags
 module.exports.evaluateTagExpression = evaluateTagExpression

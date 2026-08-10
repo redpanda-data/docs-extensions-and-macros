@@ -86,7 +86,8 @@
     "./macros/helm-ref": "./macros/helm-ref.js",
     "./macros/badge": "./macros/badge.js",
     "./macros/enterprise": "./macros/enterprise.js",
-    "./macros/prop": "./macros/prop.js"
+    "./macros/prop": "./macros/prop.js",
+    "./extensions/property-page-index": "./extensions/property-page-index.js"
   },
   "files": [
     "extensions",

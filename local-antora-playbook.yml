@@ -98,4 +98,5 @@ antora:
   - require: './extensions/generate-fields-only-pages'
     enabled: true
   - require: './extensions/aggregate-terms'
+  - require: './extensions/property-page-index'
 
