@@ -386,7 +386,13 @@ function propInlineMacro (config) {
           let fallbackWithPages
           for (const fallbackComponent of ['streaming', 'ROOT']) {
             if (fallbackComponent === component) continue
-            const fallbackIndex = buildPageIndex(config.contentCatalog, fallbackComponent, registry.properties, undefined)
+            // A component-qualified xref without a version resolves to the
+            // fallback component's latest version, so consult exactly that
+            // version's index (which the property-page-index extension warms).
+            const latest = typeof config.contentCatalog.getComponent === 'function' &&
+              config.contentCatalog.getComponent(fallbackComponent)
+            const fallbackVersion = (latest && latest.latest && latest.latest.version) || undefined
+            const fallbackIndex = buildPageIndex(config.contentCatalog, fallbackComponent, registry.properties, fallbackVersion)
             if (fallbackIndex.size === 0) continue
             if (!fallbackWithPages) fallbackWithPages = fallbackComponent
             const fallbackPage = fallbackIndex.get(name)
