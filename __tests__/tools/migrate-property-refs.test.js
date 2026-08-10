@@ -147,6 +147,34 @@ describe('migrate-property-refs', () => {
       expect(result.content).toContain('Prose prop:fips_mode[] converts.')
     })
 
+    test('converts only the first mention of a property per paragraph', () => {
+      const doc = [
+        'Set `fips_mode` on. When `fips_mode` is on, `cloud_storage_enabled` applies.',
+        'Still the same paragraph, so `fips_mode` stays plain.',
+        '',
+        'New paragraph, so `fips_mode` converts again.',
+        '* List item mentions `fips_mode`.',
+        '* Each item is its own paragraph: `fips_mode` converts.',
+      ].join('\n')
+      const result = convertDocument(doc, convertible)
+      expect(result.count).toBe(5)
+      expect(result.content).toContain('Set prop:fips_mode[] on. When `fips_mode` is on, prop:cloud_storage_enabled[] applies.')
+      expect(result.content).toContain('same paragraph, so `fips_mode` stays plain')
+      expect(result.content).toContain('New paragraph, so prop:fips_mode[] converts again.')
+      expect(result.content).toContain('* List item mentions prop:fips_mode[].')
+      expect(result.content).toContain('* Each item is its own paragraph: prop:fips_mode[] converts.')
+    })
+
+    test('an existing prop macro counts as the paragraph mention', () => {
+      const doc = [
+        'Already marked prop:fips_mode[] here.',
+        'So `fips_mode` stays plain but `cloud_storage_enabled` converts.',
+      ].join('\n')
+      const result = convertDocument(doc, convertible)
+      expect(result.count).toBe(1)
+      expect(result.content).toContain('So `fips_mode` stays plain but prop:cloud_storage_enabled[] converts.')
+    })
+
     test('converts config_ref calls only when enabled, skipping code blocks', () => {
       const doc = [
         'Prose config_ref:fips_mode,true,broker-properties[] converts.',

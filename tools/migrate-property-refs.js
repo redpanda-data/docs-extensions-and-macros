@@ -48,18 +48,23 @@ function classifyNames (propertiesJson) {
  *
  * @param {string} line
  * @param {Set<string>} convertible - Names eligible for conversion.
+ * @param {Set<string>} [seen] - Names already marked in the current
+ *   paragraph. Repeat mentions stay as plain backticks: one tooltip per
+ *   property per paragraph is enough.
  * @returns {{line: string, count: number}}
  */
-function convertLine (line, convertible) {
+function convertLine (line, convertible, seen) {
   let count = 0
   // `name` spans: backtick, name, backtick, not adjacent to more backticks.
   const result = line.replace(/(^|[^`\\])`([A-Za-z][A-Za-z0-9_.]*)`(?!`)/g, (match, prefix, name, offset) => {
     if (!convertible.has(name)) return match
+    if (seen && seen.has(name)) return match
     // Skip mentions inside another macro's [...] payload.
     const before = line.slice(0, offset + prefix.length)
     const opens = (before.match(/\[/g) || []).length
     const closes = (before.match(/\]/g) || []).length
     if (opens > closes) return match
+    if (seen) seen.add(name)
     count++
     return `${prefix}prop:${name}[]`
   })
@@ -112,14 +117,24 @@ function convertDocument (content, convertible, options = {}) {
   const open = {}
   let total = 0
   const skippedConfigRefs = []
+  // One prop macro per property per paragraph. Blank lines and list items
+  // start a new paragraph; existing prop: calls count as the mention.
+  let paragraphSeen = new Set()
   const converted = lines.map((line) => {
     const delimiter = DELIMITERS.find((d) => d.rx.test(line))
     if (delimiter) {
       open[delimiter.key] = !open[delimiter.key]
+      paragraphSeen = new Set()
       return line
     }
     if (Object.values(open).some(Boolean)) return line
-    if (SKIP_LINE_RX.test(line)) return line
+    if (line.trim() === '' || /^\s*(?:[*\-.]+|\d+\.)\s/.test(line)) {
+      paragraphSeen = new Set()
+    }
+    if (SKIP_LINE_RX.test(line)) {
+      paragraphSeen = new Set()
+      return line
+    }
     let current = line
     if (options.configRefs && options.knownNames) {
       const refResult = convertConfigRefLine(current, options.knownNames)
@@ -127,7 +142,8 @@ function convertDocument (content, convertible, options = {}) {
       skippedConfigRefs.push(...refResult.skipped)
       current = refResult.line
     }
-    const result = convertLine(current, convertible)
+    for (const m of current.matchAll(/prop:([A-Za-z][A-Za-z0-9_.]*)\[/g)) paragraphSeen.add(m[1])
+    const result = convertLine(current, convertible, paragraphSeen)
     total += result.count
     return result.line
   })

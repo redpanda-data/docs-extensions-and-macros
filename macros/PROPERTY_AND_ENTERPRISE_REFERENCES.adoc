@@ -31,6 +31,8 @@ That's it. Here's what happens for you:
 
 *It adapts to Kubernetes pages.* Add `helm-path=auto` and, on pages rendered for Kubernetes, the property displays as the Helm values path readers actually type -- `config.cluster.log_segment_size`, `config.node.fips_mode`, or `storage.tiered.config.cloud_storage_enabled` for tiered storage settings. On Linux pages the same call shows the plain name. One sentence, correct for both audiences.
 
+*Once per paragraph is enough.* Mark the first mention of a property in a paragraph and leave later mentions as plain backticks -- a paragraph doesn't need three identical tooltips. The migration tool follows this rule, and the UI enforces it as a backstop: even if every mention is marked, only the first one per paragraph gets the tooltip.
+
 === How "the build works out the page" (dynamic discovery)
 
 Rather than hardcoding "cluster properties live on the cluster-properties page," the macro reads the actual docs during the build. Every documented property appears as a heading in the generated property files, and each reference page pulls in one or more of those files. The macro follows that chain -- which pages exist, what they include, which property headings end up where -- and builds a lookup table per doc set.
