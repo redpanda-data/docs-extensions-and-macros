@@ -17,6 +17,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { spawnSync } = require('child_process')
+const { getGitHubToken } = require('../../cli-utils/github-token')
 
 /**
  * Read command titles from generated partials. The title line is
@@ -72,11 +73,25 @@ function fetchPartialsDir({ docsRepo, docsRef, plugin, sourcePath }) {
   const sparsePath = sourcePath || `modules/reference/partials/rpk-${plugin}`
 
   console.log(`Fetching ${sparsePath} from ${docsRepo}@${docsRef}...`)
+  // The docs repo may be private: resolve a token (GIT_CREDENTIALS first,
+  // then the common token env vars) and hand it to git through a
+  // github.com-scoped credential helper passed via GIT_CONFIG_* env vars,
+  // keeping the token out of argv and the clone's .git/config.
+  const cloneEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+  const token = getGitHubToken()
+  if (token) {
+    cloneEnv.PLUGIN_STUBS_TOKEN = token
+    cloneEnv.GIT_CONFIG_COUNT = '2'
+    cloneEnv.GIT_CONFIG_KEY_0 = 'credential.helper'
+    cloneEnv.GIT_CONFIG_VALUE_0 = ''
+    cloneEnv.GIT_CONFIG_KEY_1 = 'credential.https://github.com.helper'
+    cloneEnv.GIT_CONFIG_VALUE_1 = '!f() { echo "username=x-access-token"; echo "password=$PLUGIN_STUBS_TOKEN"; }; f'
+  }
   const cloneResult = spawnSync('git', [
     'clone', '--depth', '1', '--filter=blob:none', '--sparse',
     '--branch', docsRef,
     `https://github.com/${docsRepo}.git`, repoDir
-  ], { encoding: 'utf8', timeout: 180000 })
+  ], { encoding: 'utf8', timeout: 180000, env: cloneEnv })
   if (cloneResult.status !== 0) {
     throw new Error(`Failed to clone ${docsRepo}@${docsRef}: ${cloneResult.stderr}`)
   }
