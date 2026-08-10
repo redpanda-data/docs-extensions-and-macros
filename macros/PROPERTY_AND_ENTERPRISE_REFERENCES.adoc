@@ -58,6 +58,8 @@ npx doc-tools generate migrate-property-refs \
 
 It's a dry run by default; add `--write` to apply. It only converts names it can verify in the published JSON, never touches the five ambiguous word-like names, and skips code blocks, headings, generated content, and anything already inside another macro.
 
+One thing no tool can check: *meaning*. Marking a name asserts "this mention refers to the Redpanda property" -- and even distinctive names collide in foreign-vocabulary contexts. A Terraform provider table's `replication.factor` argument, a SQL statement's `cluster_id` parameter, or an infrastructure checklist's `cloud_storage_bucket` are other systems' identifiers that happen to share a spelling. When reviewing a migration, unmark those. When writing, only reach for `prop:` when a tooltip describing the Redpanda property would help the reader in that sentence.
+
 == Enterprise feature references: the enterprise macro
 
 The same explicit-and-checked idea, for licensing:
