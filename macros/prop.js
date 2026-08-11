@@ -177,10 +177,11 @@ function buildPageIndex (contentCatalog, component, properties, version) {
   for (const page of pages) {
     const source = page.contents.toString()
     const pagePath = page.src.relative.replace(/\.adoc$/, '')
+    const pageUrl = (page.pub && page.pub.url) || undefined
     for (const line of source.split('\n')) {
       const heading = line.match(HEADING_RX)
       if (heading && Object.prototype.hasOwnProperty.call(properties, heading[1])) {
-        index.set(heading[1], pagePath)
+        index.set(heading[1], { page: pagePath, url: pageUrl })
         continue
       }
       const include = line.match(INCLUDE_RX)
@@ -198,12 +199,23 @@ function buildPageIndex (contentCatalog, component, properties, version) {
       for (const entry of headingsFor(partial)) {
         if (!Object.prototype.hasOwnProperty.call(properties, entry.name)) continue
         if (!evaluateTagExpression(entry.tags, expression)) continue
-        if (!index.has(entry.name)) index.set(entry.name, pagePath)
+        if (!index.has(entry.name)) index.set(entry.name, { page: pagePath, url: pageUrl })
       }
     }
   }
   cache[cacheKey] = index
   return index
+}
+
+/**
+ * The anchor Asciidoctor generates for a property heading. With the docs'
+ * idseparator '-', invalid id characters (dots) become hyphens while
+ * underscores are valid and stay: '=== cloud_storage_enabled' gets the id
+ * 'cloud_storage_enabled', '=== redpanda.storage.mode' gets
+ * 'redpanda-storage-mode'.
+ */
+function propertyAnchor (name) {
+  return name.replace(/\./g, '-')
 }
 
 // Helm values paths for setting properties on Kubernetes. Deterministic:
@@ -334,14 +346,19 @@ function reportUnknownProperty ({ name, mode, registry, filePath }) {
  *   must leave the current component (which publishes no property pages).
  * @returns {string}
  */
-function buildPropContent ({ name, text, link, page, scope, role, componentPrefix = '', helmPath = false }) {
+function buildPropContent ({ name, text, link, page, scope, role, componentPrefix = '', helmPath = false, docUrl }) {
   const display = text || (helmPath ? helmValuesPath(name, scope) : name)
   let inner = display
   if (link) {
     const targetPage = page || SCOPE_PAGES[scope] || SCOPE_PAGES.cluster
-    inner = `xref:${componentPrefix}reference:${targetPage}.adoc#${name}[${display}]`
+    inner = `xref:${componentPrefix}reference:${targetPage}.adoc#${propertyAnchor(name)}[${display}]`
   }
-  return `<code class="${role}" data-property-name="${name}">${inner}</code>`
+  // The published URL of the page that documents this property, discovered
+  // at build time. The docs UI prefers it for the tooltip's documentation
+  // link -- the client can't know which scopes a component publishes or
+  // which page a shared property landed on.
+  const docAttr = docUrl ? ` data-doc-url="${docUrl}"` : ''
+  return `<code class="${role}" data-property-name="${name}"${docAttr}>${inner}</code>`
 }
 
 function propInlineMacro (config) {
@@ -375,14 +392,19 @@ function propInlineMacro (config) {
       // cloud component has no topic-properties page) -- fall back to the
       // streaming (or ROOT) component and emit a component-qualified xref.
       let discoveredPage
+      let discoveredUrl
       let componentPrefix = ''
       let suppressLink = false
-      if (registry && config.contentCatalog && (attributes.link === 'true' || attributes.link === true) && !attributes.page) {
+      const linkRequested = attributes.link === 'true' || attributes.link === true
+      if (registry && config.contentCatalog && !attributes.page) {
         const component = (config.file && config.file.src && config.file.src.component) || ''
         const version = (config.file && config.file.src && config.file.src.version) || ''
         const ownIndex = buildPageIndex(config.contentCatalog, component, registry.properties, version)
-        discoveredPage = ownIndex.get(name)
-        if (!discoveredPage) {
+        const ownEntry = ownIndex.get(name)
+        if (ownEntry) {
+          discoveredPage = ownEntry.page
+          discoveredUrl = ownEntry.url
+        } else {
           let fallbackWithPages
           for (const fallbackComponent of ['streaming', 'ROOT']) {
             if (fallbackComponent === component) continue
@@ -395,9 +417,10 @@ function propInlineMacro (config) {
             const fallbackIndex = buildPageIndex(config.contentCatalog, fallbackComponent, registry.properties, fallbackVersion)
             if (fallbackIndex.size === 0) continue
             if (!fallbackWithPages) fallbackWithPages = fallbackComponent
-            const fallbackPage = fallbackIndex.get(name)
-            if (fallbackPage) {
-              discoveredPage = fallbackPage
+            const fallbackEntry = fallbackIndex.get(name)
+            if (fallbackEntry) {
+              discoveredPage = fallbackEntry.page
+              discoveredUrl = fallbackEntry.url
               componentPrefix = `${fallbackComponent}:`
               break
             }
@@ -411,8 +434,10 @@ function propInlineMacro (config) {
           // Property pages exist but none of them documents this property
           // (for example, a cloud-only topic property when no site publishes
           // a cloud topic-properties page). Linking would produce a broken
-          // xref, so render the marker without a link and say why.
-          if (!discoveredPage && (ownIndex.size > 0 || fallbackWithPages)) {
+          // xref, so render the marker without a link and say why. A plain
+          // tooltip marker for an undocumented property is fine -- only an
+          // explicit link request warrants the warning.
+          if (linkRequested && !discoveredPage && (ownIndex.size > 0 || fallbackWithPages)) {
             const where = (config.file && config.file.src && config.file.src.path) || 'unknown file'
             console.warn(chalk.yellow(`prop:${name}[link=true] in ${where}: no property reference page documents '${name}' in this build, so it renders without a link. Check the property's include tags on the reference pages.`))
             suppressLink = true
@@ -427,12 +452,13 @@ function propInlineMacro (config) {
       const content = buildPropContent({
         name,
         text: attributes.text,
-        link: (attributes.link === 'true' || attributes.link === true) && !suppressLink,
+        link: linkRequested && !suppressLink,
         page: attributes.page || discoveredPage,
         scope: entry && entry.config_scope,
         role: document.getAttribute('property-ref-role', DEFAULT_ROLE),
         componentPrefix,
         helmPath,
+        docUrl: discoveredUrl ? `${discoveredUrl}#${propertyAnchor(name)}` : undefined,
       })
       // The xref inside the code element is resolved by the 'macros'
       // substitution, the same mechanism the enterprise macro relies on.
@@ -456,6 +482,7 @@ function register (registry, config = {}) {
 
 module.exports.register = register
 module.exports.buildPropContent = buildPropContent
+module.exports.propertyAnchor = propertyAnchor
 module.exports.helmValuesPath = helmValuesPath
 module.exports.loadPropertiesFor = loadPropertiesFor
 module.exports.compareTags = compareTags

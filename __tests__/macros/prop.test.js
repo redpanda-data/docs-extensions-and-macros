@@ -151,9 +151,12 @@ describe('prop macro', () => {
 
     test('caches the property data on the content catalog across conversions', () => {
       const catalog = fakeCatalog()
+      // The first conversion scans the catalog (properties JSON plus one
+      // page-index scan per candidate component); repeats hit the caches.
       convert('prop:admin[]', { catalog })
+      const scansAfterFirst = catalog.findBy.mock.calls.length
       convert('prop:admin[]', { catalog })
-      expect(catalog.findBy).toHaveBeenCalledTimes(1)
+      expect(catalog.findBy.mock.calls.length).toBe(scansAfterFirst)
     })
 
     test('renders unvalidated without a catalog (graceful degradation)', () => {
@@ -278,6 +281,20 @@ describe('prop macro', () => {
       })
       expect(convert('prop:cloud_storage_enabled[link=true]', { catalog })).toContain('storage-props')
       expect(convert('prop:fips_mode[link=true]', { catalog })).toContain('security-props')
+    })
+
+    test('stamps the discovered documentation URL and Asciidoctor anchor on every marker', () => {
+      const withPub = page('streaming', 'properties/topic-properties.adoc', '=== redpanda.iceberg.mode\n')
+      withPub.pub = { url: '/current/reference/properties/topic-properties/' }
+      const catalog = fakeCatalog({ files: [withPub] })
+      // Tooltip-only markers carry the stamp too (no link requested), and the
+      // anchor is what Asciidoctor generates: dots become hyphens,
+      // underscores stay.
+      const plain = convert('prop:redpanda.iceberg.mode[]', { catalog })
+      expect(plain).toContain('data-doc-url="/current/reference/properties/topic-properties/#redpanda-iceberg-mode"')
+      expect(plain).not.toContain('xref:')
+      const linked = convert('prop:redpanda.iceberg.mode[link=true]', { catalog })
+      expect(linked).toContain('topic-properties.html#redpanda-iceberg-mode')
     })
 
     test('cloud pages discover their own page through cross-component tag-filtered includes', () => {
