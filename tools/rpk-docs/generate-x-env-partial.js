@@ -35,10 +35,12 @@ const GENERATED_BANNER = `// tag::generated[]
 `
 
 /**
- * Extract -X option names from `rpk --print-tree` JSON.
+ * Extract -X options from `rpk --print-tree` JSON.
  * @param {string} output - Raw stdout from `rpk --print-tree`
- * @returns {Array<string>|null} option names in display order, or null when
- *   the tree has no x_options (rpk predates redpanda#31520)
+ * @returns {Array<{name: string, env: string}>|null} options in display
+ *   order, or null when the tree has no x_options (rpk predates
+ *   redpanda#31520). The env name comes from rpk itself when present
+ *   (the tree's env field is produced by the same derivation rpk reads).
  */
 function xOptionsFromTree (output) {
   let tree
@@ -48,7 +50,7 @@ function xOptionsFromTree (output) {
     return null
   }
   if (!Array.isArray(tree.x_options) || tree.x_options.length === 0) return null
-  return tree.x_options.map(o => o.name)
+  return tree.x_options.map(o => ({ name: o.name, env: o.env || keyToEnvVar(o.name) }))
 }
 
 /**
@@ -92,13 +94,13 @@ function keyToAnchor (key) {
 
 /**
  * Render the partial's AsciiDoc content.
- * @param {Array<string>} keys - -X option keys
+ * @param {Array<{name: string, env: string}>} options - -X options
  * @returns {string}
  */
-function renderPartial (keys) {
-  const rows = keys.map(key => {
-    const xrefTarget = `xref:reference:rpk/rpk-x-options.adoc#${keyToAnchor(key)}[${key}]`
-    return `|${xrefTarget} |${keyToEnvVar(key)}`
+function renderPartial (options) {
+  const rows = options.map(({ name, env }) => {
+    const xrefTarget = `xref:reference:rpk/rpk-x-options.adoc#${keyToAnchor(name)}[${name}]`
+    return `|${xrefTarget} |${env}`
   })
   return `${GENERATED_BANNER}
 Every \`-X\` option has a corresponding \`RPK_*\` environment variable. Convert by prefixing with \`RPK_\` and replacing dots with underscores:
@@ -173,24 +175,25 @@ function handleXEnvPartialGeneration (options) {
   }
 
   // Preferred: structured x_options from the command tree JSON.
-  let keys = xOptionsFromTree(run(['--print-tree']))
+  let xopts = xOptionsFromTree(run(['--print-tree']))
   let source = 'print-tree x_options'
-  if (!keys) {
+  if (!xopts) {
     // Fallback for rpk versions that predate x_options in --print-tree.
-    keys = parseXList(run(['-X', 'list']))
+    // The env name is derived locally with the documented mapping rule.
+    xopts = parseXList(run(['-X', 'list'])).map(name => ({ name, env: keyToEnvVar(name) }))
     source = '-X list (fallback)'
   }
 
-  if (keys.length < MIN_OPTIONS) {
+  if (xopts.length < MIN_OPTIONS) {
     throw new Error(
-      `Parsed only ${keys.length} -X options from ${source} (expected at least ${MIN_OPTIONS}); ` +
+      `Parsed only ${xopts.length} -X options from ${source} (expected at least ${MIN_OPTIONS}); ` +
       'refusing to write a suspiciously small partial. The output format may have changed.'
     )
   }
 
   fs.mkdirSync(path.dirname(output), { recursive: true })
-  fs.writeFileSync(output, renderPartial(keys))
-  return { keyCount: keys.length, output, source }
+  fs.writeFileSync(output, renderPartial(xopts))
+  return { keyCount: xopts.length, output, source }
 }
 
 module.exports = {
