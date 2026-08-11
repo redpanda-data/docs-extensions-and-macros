@@ -3155,6 +3155,18 @@ async function generateRpkDocs(options = {}) {
     navResult = updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands, effectiveProtectedPlugins)
   }
 
+  // Regenerate the shared -X -> RPK_* env vars partial from the same tree,
+  // so it always matches the rpk build the command pages came from. Trees
+  // from rpk versions that predate x_options (redpanda#31520) skip with a
+  // note; `doc-tools generate rpk-env-partial` covers those via its
+  // -X list fallback.
+  const envPartialResult = writeEnvVarsPartial(tree, outputDir)
+  if (envPartialResult.written) {
+    console.log(`  Regenerated env vars partial (${envPartialResult.keyCount} -X options): ${envPartialResult.output}`)
+  } else {
+    console.log('  Env vars partial not regenerated: tree has no x_options (rpk predates redpanda#31520)')
+  }
+
   return {
     commandCount: commands.length,
     filesGenerated,
@@ -3162,12 +3174,35 @@ async function generateRpkDocs(options = {}) {
     filesFailed,
     filesDeleted,
     subdirectoriesCreated: createdSubdirs.size,
+    envPartial: envPartialResult,
     ...navResult
   }
 }
 
+/**
+ * Write the -X -> RPK_* env vars partial from a command tree's x_options.
+ * The partial lives in the partials dir of the module that owns the rpk
+ * pages (outputDir is modules/reference/pages/rpk, so the partial goes to
+ * modules/reference/partials/rpk-env-vars.adoc).
+ * @param {Object} tree - Parsed rpk command tree
+ * @param {string} outputDir - The rpk pages output directory
+ * @returns {{written: boolean, keyCount?: number, output?: string}}
+ */
+function writeEnvVarsPartial (tree, outputDir) {
+  if (!Array.isArray(tree.x_options) || tree.x_options.length === 0) {
+    return { written: false }
+  }
+  const { renderPartial, keyToEnvVar } = require('./generate-x-env-partial.js')
+  const options = tree.x_options.map(o => ({ name: o.name, env: o.env || keyToEnvVar(o.name) }))
+  const output = path.join(outputDir, '..', '..', 'partials', 'rpk-env-vars.adoc')
+  fs.mkdirSync(path.dirname(output), { recursive: true })
+  fs.writeFileSync(output, renderPartial(options))
+  return { written: true, keyCount: options.length, output }
+}
+
 module.exports = {
   generateRpkDocs,
+  writeEnvVarsPartial,
   mergeCommandOverrides,
   applyOverridesToTree,
   resolveReferences,
