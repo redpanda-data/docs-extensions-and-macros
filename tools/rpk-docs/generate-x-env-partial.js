@@ -83,13 +83,16 @@ function keyToEnvVar (key) {
 }
 
 /**
- * Convert an -X option key to its section anchor on the rpk-x-options page
- * (AsciiDoc section IDs there turn both dots and underscores into hyphens).
+ * Convert an -X option key to its section anchor on the rpk-x-options page.
+ * The docs repo's AsciiDoc ID convention turns dots into hyphens but keeps
+ * underscores (tls.insecure_skip_verify -> tls-insecure_skip_verify),
+ * verified against the rendered page IDs. The previous hand-written table
+ * hyphenated underscores too, which left 12 of its 31 in-page links dead.
  * @param {string} key
  * @returns {string}
  */
 function keyToAnchor (key) {
-  return key.replace(/[._]/g, '-')
+  return key.replace(/\./g, '-')
 }
 
 /**
