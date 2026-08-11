@@ -19,6 +19,7 @@
  */
 
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 
@@ -156,6 +157,39 @@ function runRpkBinary (rpkBin, args) {
 }
 
 /**
+ * Resolve a local rpk source path (repo root or src/go/rpk) without
+ * touching the checkout.
+ * @param {string} p - User-supplied path
+ * @returns {string} Path to src/go/rpk
+ */
+function resolveRpkSourcePath (p) {
+  const abs = path.resolve(p)
+  if (abs.endsWith(path.join('src', 'go', 'rpk'))) return abs
+  const nested = path.join(abs, 'src', 'go', 'rpk')
+  if (fs.existsSync(nested)) return nested
+  throw new Error(`Cannot find rpk source under ${abs}: pass the repo root or the src/go/rpk directory`)
+}
+
+/**
+ * Find the temp sparse-clone root that prepareSourceFromRef created
+ * (os.tmpdir()/rpk-source-<random>/redpanda/src/go/rpk), or null when the path is
+ * not one of ours — never delete anything outside the temp dir.
+ * @param {string} sourcePath - The src/go/rpk path returned by prepareSourceFromRef
+ * @returns {string|null}
+ */
+function tempCloneRoot (sourcePath) {
+  let dir = sourcePath
+  const tmp = fs.realpathSync(os.tmpdir())
+  const real = fs.realpathSync(dir)
+  dir = real
+  while (dir.startsWith(tmp) && dir !== tmp) {
+    if (path.basename(dir).startsWith('rpk-source-') && path.dirname(dir) === tmp) return dir
+    dir = path.dirname(dir)
+  }
+  return null
+}
+
+/**
  * Generate the partial and write it to disk.
  * @param {Object} options
  * @param {string} [options.ref] - Git ref of redpanda to build rpk from
@@ -191,22 +225,40 @@ function handleXEnvPartialGeneration (options) {
     source = `snapshot ${path.basename(fromJson)}`
   } else {
     let run
+    let cleanupDir = null
     if (rpkBin) {
       run = args => runRpkBinary(rpkBin, args)
+    } else if (fromSource && !ref) {
+      // Local-source mode with no explicit ref: use the checkout exactly as
+      // it stands. prepareSourceFromRef would fetch and check out a ref,
+      // silently moving the user's working tree.
+      const sourcePath = resolveRpkSourcePath(fromSource)
+      run = args => runRpkFromSource(sourcePath, args)
     } else {
       const { prepareSourceFromRef } = require('./rpk-docs-handler.js')
       const sourcePath = prepareSourceFromRef(ref || 'dev', fromSource || null)
+      if (!fromSource) {
+        // prepareSourceFromRef sparse-cloned into a temp dir this run owns;
+        // remove it when done so repeated runs don't accumulate clones.
+        cleanupDir = tempCloneRoot(sourcePath)
+      }
       run = args => runRpkFromSource(sourcePath, args)
     }
 
-    // Preferred: structured x_options from the command tree JSON.
-    xopts = xOptionsFromTree(run(['--print-tree']))
-    source = 'print-tree x_options'
-    if (!xopts) {
-      // Fallback for rpk versions that predate x_options in --print-tree.
-      // The env name is derived locally with the documented mapping rule.
-      xopts = parseXList(run(['-X', 'list'])).map(name => ({ name, env: keyToEnvVar(name) }))
-      source = '-X list (fallback)'
+    try {
+      // Preferred: structured x_options from the command tree JSON.
+      xopts = xOptionsFromTree(run(['--print-tree']))
+      source = 'print-tree x_options'
+      if (!xopts) {
+        // Fallback for rpk versions that predate x_options in --print-tree.
+        // The env name is derived locally with the documented mapping rule.
+        xopts = parseXList(run(['-X', 'list'])).map(name => ({ name, env: keyToEnvVar(name) }))
+        source = '-X list (fallback)'
+      }
+    } finally {
+      if (cleanupDir) {
+        fs.rmSync(cleanupDir, { recursive: true, force: true })
+      }
     }
   }
 

@@ -771,6 +771,51 @@ npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
 - Go must be installed (https://go.dev/)
 - Git must be installed (for cloning source)
 
+=== generate rpk-env-partial
+
+Generates the -X option -> RPK_* environment variable mapping table as an AsciiDoc partial from rpk's own -X option data, so the table cannot drift from the CLI. Prefers the structured x_options array in `rpk --print-tree` (which carries the env var names rpk itself derives) and falls back to parsing `-X list` text for rpk versions that predate it. Hidden -X options appear in neither source, so they are excluded automatically. The main rpk-docs pipeline also writes this partial from the tree it already holds; this standalone command is for targeted refreshes without a full generation run.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate rpk-env-partial [options]
+----
+
+*Options:*
+
+`-r, --ref <ref>`::
+Git branch or tag to build rpk from (e.g., dev, v26.2.1). Clones from GitHub.
+
+`--from-source <path>`::
+Path to local rpk source (src/go/rpk directory)
+
+`--rpk-bin <path>`::
+Path to an existing rpk binary (skips clone and build)
+
+`--from-json <path>`::
+Versioned tree snapshot from docs-data (skips clone and build; requires a snapshot with x_options)
+
+`--output <path>`::
+Path to write the partial to (default: "modules/reference/partials/rpk-env-vars.adoc")
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Generate for a release tag (sparse-clones redpanda, builds rpk with Go)
+npx doc-tools generate rpk-env-partial --ref v26.2.1 --output modules/reference/partials/rpk-env-vars.adoc
+
+# Use a local source checkout (as-is, no checkout changes), an existing
+# rpk binary, or a versioned tree snapshot (no clone or build at all)
+npx doc-tools generate rpk-env-partial --from-source ~/redpanda --output modules/reference/partials/rpk-env-vars.adoc
+npx doc-tools generate rpk-env-partial --rpk-bin "$(command -v rpk)" --output modules/reference/partials/rpk-env-vars.adoc
+npx doc-tools generate rpk-env-partial --from-json docs-data/rpk-v26.2.1.json --output modules/reference/partials/rpk-env-vars.adoc
+----
+
 === generate rpcn-connector-docs
 
 Generates complete reference documentation for Redpanda Connect (formerly Benthos) connectors, processors, and components. Parses component templates and configuration schemas, reads connector metadata from CSV, and generates AsciiDoc documentation for each component. Supports diffing changes between versions and automatically updating what's new documentation. Can also generate Bloblang function documentation.

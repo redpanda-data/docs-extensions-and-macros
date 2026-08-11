@@ -1243,18 +1243,25 @@ automation
  *
  * @description
  * Generates the -X option -> RPK_* environment variable mapping table as an
- * AsciiDoc partial from rpk's own `-X list` output, so the table cannot
- * drift from the CLI. The partial is included by both the rpk-x-options
- * page and the environment-variables reference in the docs repo. Hidden
- * -X options never appear in `-X list`, so they are excluded automatically.
+ * AsciiDoc partial from rpk's own -X option data, so the table cannot drift
+ * from the CLI. Prefers the structured x_options array in `rpk --print-tree`
+ * (which carries the env var names rpk itself derives) and falls back to
+ * parsing `-X list` text for rpk versions that predate it. Hidden -X options
+ * appear in neither source, so they are excluded automatically.
+ *
+ * The main rpk-docs pipeline also writes this partial from the tree it
+ * already holds; this standalone command is for targeted refreshes without
+ * a full generation run.
  *
  * @example
  * # Generate for a release tag (sparse-clones redpanda, builds rpk with Go)
  * npx doc-tools generate rpk-env-partial --ref v26.2.1 --output modules/reference/partials/rpk-env-vars.adoc
  *
- * # Use a local source checkout or an existing rpk binary
- * npx doc-tools generate rpk-env-partial --from-source ~/redpanda/src/go/rpk --output modules/reference/partials/rpk-env-vars.adoc
+ * # Use a local source checkout (as-is, no checkout changes), an existing
+ * # rpk binary, or a versioned tree snapshot (no clone or build at all)
+ * npx doc-tools generate rpk-env-partial --from-source ~/redpanda --output modules/reference/partials/rpk-env-vars.adoc
  * npx doc-tools generate rpk-env-partial --rpk-bin "$(command -v rpk)" --output modules/reference/partials/rpk-env-vars.adoc
+ * npx doc-tools generate rpk-env-partial --from-json docs-data/rpk-v26.2.1.json --output modules/reference/partials/rpk-env-vars.adoc
  */
 automation
   .command('rpk-env-partial')
