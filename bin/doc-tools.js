@@ -1272,7 +1272,7 @@ automation
         rpkBin: options.rpkBin,
         output: options.output
       })
-      console.log(`Wrote ${result.keyCount} -X option mappings to ${result.output}`)
+      console.log(`Wrote ${result.keyCount} -X option mappings to ${result.output} (source: ${result.source})`)
     } catch (err) {
       console.error(`Error: ${err.message}`)
       process.exit(1)
