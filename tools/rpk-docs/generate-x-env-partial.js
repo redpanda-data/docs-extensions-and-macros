@@ -158,30 +158,53 @@ function runRpkBinary (rpkBin, args) {
  * @param {string} [options.ref] - Git ref of redpanda to build rpk from
  * @param {string} [options.fromSource] - Local src/go/rpk path (skips clone)
  * @param {string} [options.rpkBin] - Existing rpk binary (skips build)
+ * @param {string} [options.fromJson] - Versioned tree snapshot from docs-data
+ *   (skips clone and build; the snapshot must carry x_options)
  * @param {string} options.output - Path to write the partial to
  * @returns {{keyCount: number, output: string, source: string}}
  */
 function handleXEnvPartialGeneration (options) {
-  const { ref, fromSource, rpkBin, output } = options
+  const { ref, fromSource, rpkBin, fromJson, output } = options
   if (!output) throw new Error('Missing required --output path')
 
-  let run
-  if (rpkBin) {
-    run = args => runRpkBinary(rpkBin, args)
+  let xopts
+  let source
+  if (fromJson) {
+    // Snapshots saved by the rpk-docs handler wrap the tree in raw_tree/tree;
+    // accept a bare tree too. There is no rpk to run in this mode, so a
+    // snapshot from before x_options existed (redpanda#31520) cannot be used.
+    const j = JSON.parse(fs.readFileSync(fromJson, 'utf8'))
+    for (const candidate of [j.raw_tree, j.tree, j]) {
+      if (!candidate) continue
+      xopts = xOptionsFromTree(JSON.stringify(candidate))
+      if (xopts) break
+    }
+    if (!xopts) {
+      throw new Error(
+        `${fromJson} has no x_options; the snapshot predates redpanda#31520. ` +
+        'Regenerate with --ref/--from-source/--rpk-bin instead.'
+      )
+    }
+    source = `snapshot ${path.basename(fromJson)}`
   } else {
-    const { prepareSourceFromRef } = require('./rpk-docs-handler.js')
-    const sourcePath = prepareSourceFromRef(ref || 'dev', fromSource || null)
-    run = args => runRpkFromSource(sourcePath, args)
-  }
+    let run
+    if (rpkBin) {
+      run = args => runRpkBinary(rpkBin, args)
+    } else {
+      const { prepareSourceFromRef } = require('./rpk-docs-handler.js')
+      const sourcePath = prepareSourceFromRef(ref || 'dev', fromSource || null)
+      run = args => runRpkFromSource(sourcePath, args)
+    }
 
-  // Preferred: structured x_options from the command tree JSON.
-  let xopts = xOptionsFromTree(run(['--print-tree']))
-  let source = 'print-tree x_options'
-  if (!xopts) {
-    // Fallback for rpk versions that predate x_options in --print-tree.
-    // The env name is derived locally with the documented mapping rule.
-    xopts = parseXList(run(['-X', 'list'])).map(name => ({ name, env: keyToEnvVar(name) }))
-    source = '-X list (fallback)'
+    // Preferred: structured x_options from the command tree JSON.
+    xopts = xOptionsFromTree(run(['--print-tree']))
+    source = 'print-tree x_options'
+    if (!xopts) {
+      // Fallback for rpk versions that predate x_options in --print-tree.
+      // The env name is derived locally with the documented mapping rule.
+      xopts = parseXList(run(['-X', 'list'])).map(name => ({ name, env: keyToEnvVar(name) }))
+      source = '-X list (fallback)'
+    }
   }
 
   if (xopts.length < MIN_OPTIONS) {

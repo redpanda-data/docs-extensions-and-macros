@@ -1262,6 +1262,7 @@ automation
   .option('-r, --ref <ref>', 'Git branch or tag to build rpk from (e.g., dev, v26.2.1). Clones from GitHub.')
   .option('--from-source <path>', 'Path to local rpk source (src/go/rpk directory)')
   .option('--rpk-bin <path>', 'Path to an existing rpk binary (skips clone and build)')
+  .option('--from-json <path>', 'Versioned tree snapshot from docs-data (skips clone and build; requires a snapshot with x_options)')
   .option('--output <path>', 'Path to write the partial to', 'modules/reference/partials/rpk-env-vars.adoc')
   .action((options) => {
     try {
@@ -1270,6 +1271,7 @@ automation
         ref: options.ref,
         fromSource: options.fromSource,
         rpkBin: options.rpkBin,
+        fromJson: options.fromJson,
         output: options.output
       })
       console.log(`Wrote ${result.keyCount} -X option mappings to ${result.output} (source: ${result.source})`)
