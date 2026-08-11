@@ -400,6 +400,26 @@ describe('backfillPageDescriptions - self-healing page headers', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  test('flattens bare URL macros and internal xref shorthand out of the meta text', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'backfill-url-'));
+    fs.mkdirSync(path.join(root, 'tracers'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'tracers', 'open_telemetry_collector.adoc'),
+      '= open_telemetry_collector\n// tag::single-source[]\n:type: tracer\n\nBody.\n');
+    fs.mkdirSync(path.join(root, 'outputs'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'outputs', 'broker.adoc'),
+      '= broker\n// tag::single-source[]\n:type: output\n\nBody.\n');
+    const result = backfillPageDescriptions({
+      tracers: [{ name: 'open_telemetry_collector', summary: 'Send tracing events to an https://opentelemetry.io/docs/collector/[Open Telemetry collector^].' }],
+      outputs: [{ name: 'broker', summary: 'Allows you to route messages to multiple child outputs using a range of brokering <<patterns>>.' }],
+    }, { pagesRoot: root });
+    expect(result.backfilled).toEqual(['tracers/open_telemetry_collector', 'outputs/broker']);
+    expect(fs.readFileSync(path.join(root, 'tracers', 'open_telemetry_collector.adoc'), 'utf8'))
+      .toContain(':description: Send tracing events to an Open Telemetry collector.');
+    expect(fs.readFileSync(path.join(root, 'outputs', 'broker.adoc'), 'utf8'))
+      .toContain(':description: Allows you to route messages to multiple child outputs using a range of brokering patterns.');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   test('maps the rate-limits data key to the rate_limits pages directory', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'backfill-rl-'));
     fs.mkdirSync(path.join(root, 'rate_limits'), { recursive: true });

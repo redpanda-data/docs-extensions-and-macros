@@ -752,6 +752,14 @@ function backfillPageDescriptions (connectorData, { pagesRoot, dryRun = false } 
       // backticks. No prose is edited.
       const summary = (item.summary || '')
         .replace(/(?:xref|link):[^\[\]]+\[([^\]]*)\]/g, '$1')
+        // Bare URL macros (no xref:/link: prefix) and internal xref shorthand
+        // also appear in source summaries and render literally if left in place.
+        .replace(/https?:\/\/[^\s\[\]]+\[([^\]]*)\]/g, '$1')
+        .replace(/<<[^,>]+,([^>]+)>>/g, '$1')
+        .replace(/<<([^>]+)>>/g, '$1')
+        // Strip the "open in new tab" caret that AsciiDoc URL macros carry
+        // inside the link text, e.g. [Open Telemetry collector^].
+        .replace(/\^/g, '')
         .replace(/`([^`]*)`/g, '$1')
         .replace(/\s+/g, ' ')
         .trim();
