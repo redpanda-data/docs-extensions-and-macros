@@ -1660,10 +1660,27 @@ automation
             return match
           }
         })
+      // Antora resolves page metadata with a header-only parse that stops at
+      // the first blank line. The chart README templates emit :description:
+      // below the title's blank line, so the page shipped the generic site
+      // meta description despite carrying one (found on k-connect-helm-spec,
+      // DOC-2414 investigation). Relocate the first :description: into the
+      // header, directly under the title.
+      const descMatch = doc.match(/^:description:[^\n]*$/m)
+      if (descMatch) {
+        const headerEnd = doc.indexOf('\n\n')
+        if (headerEnd !== -1 && doc.indexOf(descMatch[0]) > headerEnd) {
+          doc = doc.replace(descMatch[0] + '\n', '')
+          doc = doc.replace(/^(= .+)$/m, `$1\n${descMatch[0]}`)
+          doc = doc.replace(/\n{3,}/g, '\n\n')
+        }
+      }
 
       // helm-docs only renders keys that exist in the YAML tree, so optional
       // values that ship commented out never appear in the reference. Pull
-      // documented commented-out keys from values.yaml and inject them.
+      // documented commented-out keys from values.yaml and inject them. This
+      // runs after the header fix above so the injected body sections are not
+      // affected by the blank-line normalization that fix performs.
       const valuesFile = path.join(chartPath, 'values.yaml')
       if (fs.existsSync(valuesFile)) {
         const { extractCommentedValueDocs, injectIntoAsciiDoc } = require('../cli-utils/helm-commented-values')

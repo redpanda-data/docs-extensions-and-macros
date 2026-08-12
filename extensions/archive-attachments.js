@@ -1,3 +1,4 @@
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
 "use strict";
 
 const fs = require("fs");
@@ -35,6 +36,7 @@ async function createTarInMemory(tempDir) {
 }
 
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger("archive-attachments-extension");
   const archives = config.data?.archives || [];
 

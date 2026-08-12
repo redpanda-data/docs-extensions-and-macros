@@ -1,5 +1,7 @@
 'use strict'
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 /**
  * Resolves AsciiDoc xrefs in JSON attachment files to HTML links.
  *
@@ -19,6 +21,7 @@
  */
 
 module.exports.register = function () {
+  raiseListenerLimit(this)
   const logger = this.getLogger('resolve-xrefs-in-attachments')
 
   this.on('contentClassified', ({ contentCatalog }) => {

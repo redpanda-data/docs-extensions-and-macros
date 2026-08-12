@@ -977,6 +977,31 @@ Original fields content that should be replaced.`,
       expect(page).toContain('|xref:reference:rpk/rpk-cluster/rpk-cluster-info.adoc[`rpk cluster info`]')
     }, 30000)
 
+    test('the single-source region nests a meta tag around the description', async () => {
+      await generateRpcDocsForMetaTest()
+      const page = fs.readFileSync(path.join(outputDir, 'rpk-cluster', 'rpk-cluster-health.adoc'), 'utf8')
+      const lines = page.split('\n')
+      // The single description lives in the page header, wrapped by the
+      // meta tag region so stubs can inherit it as a header attribute.
+      expect(lines[0]).toBe('= rpk cluster health')
+      expect(lines[1]).toBe('// tag::meta[]')
+      expect(lines[2]).toMatch(/^:description: /)
+      expect(lines[3]).toBe('// end::meta[]')
+      // No duplicate description inside the single-source region.
+      const tagIdx = lines.indexOf('// tag::single-source[]')
+      expect(lines.slice(tagIdx).filter((l) => l.startsWith(':description:'))).toHaveLength(0)
+    }, 30000)
+
+    async function generateRpcDocsForMetaTest () {
+      await generateRpkDocs({
+        tree: clusterTree(),
+        overrides: {},
+        outputDir,
+        rpkVersion: 'test',
+        pluginVersions: {}
+      })
+    }
+
     // Availability never wraps the page itself: includes only extract the
     // single-source tag region (a page-level conditional outside it is dead
     // code), and a build that did consume it would publish an empty,
