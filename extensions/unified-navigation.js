@@ -1,5 +1,7 @@
 'use strict'
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 const yaml = require('js-yaml')
 
 /**
@@ -35,6 +37,7 @@ const yaml = require('js-yaml')
  */
 
 module.exports.register = function () {
+  raiseListenerLimit(this)
   const logger = this.getLogger('unified-navigation-extension')
 
   this.on('navigationBuilt', ({ contentCatalog }) => {

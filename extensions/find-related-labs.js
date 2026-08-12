@@ -1,6 +1,9 @@
 'use strict';
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('related-labs-extension');
 
   this.on('documentsConverted', async ({ contentCatalog, siteCatalog }) => {

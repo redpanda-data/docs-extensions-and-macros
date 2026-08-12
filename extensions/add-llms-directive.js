@@ -1,5 +1,7 @@
 'use strict'
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 /**
  * Adds llms.txt directive to HTML pages for agent-friendly documentation.
  *
@@ -16,6 +18,7 @@
 const { formatLlmsDirective } = require('../extension-utils/llms-utils')
 
 module.exports.register = function () {
+  raiseListenerLimit(this)
   const logger = this.getLogger('add-llms-directive-extension')
 
   this.on('pagesComposed', ({ contentCatalog }) => {
