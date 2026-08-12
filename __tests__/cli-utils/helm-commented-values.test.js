@@ -137,6 +137,31 @@ describe('extractCommentedValueDocs', () => {
     expect(entries[0].path).toBe('service')
   })
 
+  test('suppresses a nested subtree indented before the comment marker', () => {
+    // The same nesting as the test above, written with the indentation before
+    // the '#' instead of after it. Counting only the spaces after the marker
+    // let 'name' escape the subtree and emit as a bogus top-level path.
+    const yaml = [
+      '# -- Redpanda Service settings.',
+      '# service:',
+      '  # -- set service.name to override the default service name',
+      '  # name: redpanda',
+      '  # internal:',
+      '    # annotations: {}',
+    ].join('\n')
+
+    const entries = extractCommentedValueDocs(yaml)
+    expect(entries.map((e) => e.path)).toEqual(['service'])
+  })
+
+  test('treats indentation before and after the comment marker as equivalent', () => {
+    const before = ['parent:', '  # -- A documented child.', '  # child: value'].join('\n')
+    const after = ['parent:', '  # -- A documented child.', '  #   child: value'].join('\n')
+
+    expect(extractCommentedValueDocs(before)).toEqual(extractCommentedValueDocs(after))
+    expect(extractCommentedValueDocs(before)[0].path).toBe('parent.child')
+  })
+
   test('ignores block scalar bodies', () => {
     const yaml = [
       'statefulset:',

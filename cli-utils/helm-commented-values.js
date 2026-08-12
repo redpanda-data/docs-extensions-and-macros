@@ -99,10 +99,17 @@ function extractCommentedValueDocs (yamlText) {
       // swallowed into its description, so @doc lines can sit directly above
       // the commented key they document.
       flushAtDoc()
-      const innerIndent = commentedKey[2].length
+      // Authors indent a commented key either before the marker ("  # child:")
+      // or after it ("#   child:"), and the two forms mean the same nesting.
+      // Counting only one side made them disagree: a child indented before the
+      // marker escaped its parent's subtree and was emitted as a top-level
+      // path. Fold both sides into one depth, treating the single space that
+      // separates "#" from its text as punctuation rather than indentation, so
+      // the result lines up with the real-key indents held on the stack.
+      const effIndent = commentedKey[1].length + Math.max(0, commentedKey[2].length - 1)
       // A previously emitted commented key suppresses its own commented
       // subtree, so nested example structures do not emit bogus paths.
-      if (suppressInnerIndent >= 0 && innerIndent > suppressInnerIndent) {
+      if (suppressInnerIndent >= 0 && effIndent > suppressInnerIndent) {
         block = null
         continue
       }
@@ -116,14 +123,13 @@ function extractCommentedValueDocs (yamlText) {
       const simpleValue = (value === '' || !/\s/.test(value)) && !value.startsWith('/')
       if (block && block.hasMarker && simpleValue) {
         flushAtDoc()
-        const indent = commentedKey[1].length
-        const parents = stack.filter((k) => k.indent < indent).map((k) => k.name)
+        const parents = stack.filter((k) => k.indent < effIndent).map((k) => k.name)
         entries.push({
           path: [...parents, commentedKey[3]].join('.'),
           description: block.descLines.join('\n').trim(),
           default: block.default || '`nil`',
         })
-        suppressInnerIndent = innerIndent
+        suppressInnerIndent = effIndent
         block = null
         continue
       }
