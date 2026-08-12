@@ -8,7 +8,10 @@
 
 'use strict'
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 module.exports.register = function () {
+  raiseListenerLimit(this)
   const logger = this.getLogger('conditional-home-redirect')
   let shouldRedirect = false
 

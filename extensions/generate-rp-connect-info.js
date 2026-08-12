@@ -1,4 +1,6 @@
 'use strict'
+
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const fs = require('fs')
 const path = require('path')
 const Papa = require('papaparse')
@@ -11,6 +13,7 @@ const DEFAULTS = {
 }
 
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('redpanda-connect-info-extension')
   const { getAntoraValue } = require('../cli-utils/antora-utils')
 

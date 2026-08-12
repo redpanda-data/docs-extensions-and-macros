@@ -20,8 +20,10 @@
  */
 
 const { buildPageIndex, loadPropertiesFor } = require('../macros/prop')
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 module.exports.register = function () {
+  raiseListenerLimit(this)
   const logger = this.getLogger('property-page-index-extension')
 
   this.once('contentClassified', ({ contentCatalog }) => {

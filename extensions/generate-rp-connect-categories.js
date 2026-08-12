@@ -1,5 +1,7 @@
 'use strict'
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 /**
  * Redpanda Connect Category Aggregation Extension
  *
@@ -11,6 +13,7 @@
  * Ensure generate-rp-connect-info is listed BEFORE this extension in your playbook.
  */
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('redpanda-connect-category-aggregation-extension')
 
   this.on('contentClassified', ({ contentCatalog }) => {

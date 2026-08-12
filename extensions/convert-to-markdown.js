@@ -1,3 +1,4 @@
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const path = require('path')
 const os = require('os')
 const yaml = require('js-yaml')
@@ -187,6 +188,7 @@ function generateFrontmatter(page) {
 }
 
 module.exports.register = function () {
+  raiseListenerLimit(this)
   const logger = this.getLogger('convert-to-markdown-extension')
   let playbook
 
