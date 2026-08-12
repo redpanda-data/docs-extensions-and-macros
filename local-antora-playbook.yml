@@ -33,6 +33,7 @@ asciidoc:
   - '@asciidoctor/tabs'
   - './macros/glossary'
   - './macros/config-ref'
+  - './macros/badge'
   - './macros/enterprise'
   - './macros/prop'
   - './macros/helm-ref'

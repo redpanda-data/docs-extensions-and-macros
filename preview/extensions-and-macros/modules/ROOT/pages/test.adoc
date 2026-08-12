@@ -77,7 +77,7 @@ Default titles and headings, with a block anchor that survives generation (see t
 [[demo-redpanda-features]]
 enterprise_features::redpanda[]
 
-The operator scope demonstrates the `feature-suffix` field (resource-name annotation and beta badge after the feature link):
+The operator scope demonstrates the `feature-suffix` field (a resource-name annotation) and the `beta: true` field, which renders the beta badge after the feature link. The badge is emitted as a passthrough rather than a `badge:` macro call, so it renders even though a playbook may not register that macro, and it degrades to the text `(beta)` in Markdown:
 
 enterprise_features::operator[]
 

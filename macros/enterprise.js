@@ -55,11 +55,50 @@
 
 const yaml = require('js-yaml')
 const chalk = require('chalk')
+const { buildBadgeHtml } = require('./badge')
 
 const $enterpriseRegistry = Symbol('$enterpriseRegistry')
 
 const DEFAULT_LICENSING_PAGE = 'get-started:licensing/overview.adoc'
 const DEFAULT_ROLE = 'enterprise-feature'
+const BETA_LABEL = 'beta'
+
+/**
+ * Render the beta badge for a registry entry marked `beta: true`.
+ *
+ * The badge HTML is built directly rather than emitted as `badge:[...]`
+ * AsciiDoc, so it renders whether or not the consuming playbook registers the
+ * badge macro. Writing the macro call into a registry field used to be the only
+ * way to flag a beta feature, and it silently produced the literal text
+ * `badge::[label=beta]` in any build without that macro registered.
+ *
+ * @param {object} entry - Registry entry.
+ * @returns {string} Badge HTML, or an empty string when the entry is not beta.
+ */
+function buildBetaBadge (entry) {
+  if (!entry || entry.beta !== true) return ''
+  return buildBadgeHtml({
+    label: BETA_LABEL,
+    tooltip: entry['beta-tooltip'] || undefined,
+  })
+}
+
+/**
+ * The badge for a registry entry, wrapped for use in generated AsciiDoc.
+ *
+ * The block macro returns AsciiDoc source that Asciidoctor then parses, so raw
+ * HTML placed in a table cell is escaped and the reader sees the markup as
+ * text. An inline passthrough emits it verbatim instead, and unlike a
+ * `badge:[...]` macro call it does not require the badge macro to be registered
+ * in the consuming playbook.
+ *
+ * @param {object} entry - Registry entry.
+ * @returns {string} Passthrough-wrapped badge, or an empty string.
+ */
+function buildBetaBadgeAsciiDoc (entry) {
+  const html = buildBetaBadge(entry)
+  return html ? `pass:[${html}]` : ''
+}
 const REGISTRY_FILENAME = 'enterprise-features.yml'
 const VALID_SCOPES = ['redpanda', 'console', 'connect', 'operator', 'cloud']
 
@@ -240,6 +279,8 @@ function buildFeatureTable (features, scope, opts = {}) {
       ? `xref:${feature.xref}[${feature.name}]`
       : (feature.url ? `link:${feature.url}[${feature.name}]` : feature.name)
     if (feature['feature-suffix']) cell += ` ${feature['feature-suffix']}`
+    const betaBadge = buildBetaBadgeAsciiDoc(feature)
+    if (betaBadge) cell += ` ${betaBadge}`
     if (feature['show-gating-property'] && feature['gating-property']) cell += `\n(\`${feature['gating-property']}\`)`
     lines.push(`| ${cell}`)
     lines.push(`| ${(feature.description || '').trim()}`)
@@ -278,7 +319,7 @@ function enterpriseInlineMacro (config) {
           })
         }
       }
-      const content = buildEnterpriseContent({
+      let content = buildEnterpriseContent({
         feature,
         text: attributes.text,
         xref: attributes.xref || resolveEntryXref(entry, document),
@@ -289,6 +330,13 @@ function enterpriseInlineMacro (config) {
         tooltipAttr: resolveTooltipAttribute(document.getAttribute('enterprise-tooltip')),
         links: document.getAttribute('enterprise-links', 'true') === 'true',
       })
+      // A feature marked beta in the registry is beta wherever it is
+      // referenced, so prose gets the same badge as the generated tables.
+      // Set enterprise-beta-badge to false to suppress it in prose only.
+      if (document.getAttribute('enterprise-beta-badge', 'true') === 'true') {
+        const betaBadge = buildBetaBadge(entry)
+        if (betaBadge) content += ` ${betaBadge}`
+      }
       // The xref inside the span is resolved by the 'macros' substitution,
       // the same mechanism the config_ref macro relies on.
       return self.createInline(parent, 'quoted', content, { attributes: { subs: 'macros' } })

@@ -69,7 +69,8 @@ features:
       A single logical Redpanda cluster distributed across multiple Kubernetes clusters.
     expiration: |
       The multicluster operator requires a valid license to start.
-    feature-suffix: (StretchCluster resource) badge::[label=beta]
+    feature-suffix: (StretchCluster resource)
+    beta: true
     source:
       kind: manual
       value: License gate in operator cmd/multicluster.

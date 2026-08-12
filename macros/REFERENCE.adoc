@@ -110,6 +110,26 @@ Controls the tooltip attribute: `title` (default), `true` (renders `data-enterpr
 enterprise-links::
 Set to `false` to render the term without a link.
 
+enterprise-beta-badge::
+Set to `false` to suppress the beta badge in prose. Generated tables always show it. See <<beta-features>>.
+
+[[beta-features]]
+=== Beta features
+
+Add `beta: true` to a registry entry to mark the feature as beta. The macro then renders a beta badge after the feature name, both in prose and in the generated `enterprise_features` tables, so one registry field keeps every reference consistent:
+
+[,yaml]
+----
+- name: Stretch Clusters
+  scope: operator
+  beta: true
+  feature-suffix: (StretchCluster resource)
+----
+
+Add `beta-tooltip` to give the badge hover text.
+
+Do not write a `badge:` macro call into `feature-suffix` to achieve this. The badge is emitted as an inline passthrough, so it renders whether or not the consuming playbook registers the `badge` macro, and it degrades to the text `(beta)` in Markdown. A hand-written macro call renders as literal source text in any build that does not register that macro.
+
 === Markdown output
 
 In HTML, the enterprise signal is carried by the span's CSS class and its tooltip attribute. Both are attributes, so an HTML-to-Markdown conversion drops them and the term arrives as an ordinary feature name. To keep the signal for readers of the Markdown pages, including AI agents, the `convert-to-markdown` extension appends an explicit `(enterprise)` marker and preserves any link:
@@ -120,6 +140,8 @@ Enable [Tiered Storage](../manage/tiered-storage.md) (enterprise) today.
 ----
 
 This applies to the inline macro. The tables from `enterprise_features` need no marker, because their expiration column already states the licensing behavior as text.
+
+The beta badge needs no special handling either: its label is real text content, so it converts to `(beta)`.
 
 === Registration
 

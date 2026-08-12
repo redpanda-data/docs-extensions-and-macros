@@ -54,6 +54,7 @@ features:
     expiration: |
       The multicluster operator requires a valid license to start.
     feature-suffix: (StretchCluster resource)
+    beta: true
     source:
       kind: manual
       value: License gate in cmd/multicluster.
@@ -222,6 +223,31 @@ describe('enterprise macro', () => {
       expect(table).toContain('.My Title')
       expect(table).toContain('| Feature | Description | My Heading')
     })
+
+    // A registry entry used to flag beta by embedding a badge macro call in
+    // feature-suffix, which rendered as the literal text 'badge::[label=beta]'
+    // in any build that did not register the badge macro. The badge is now
+    // derived from `beta: true` and emitted as a passthrough, so it does not
+    // depend on that registration.
+    test('renders a beta badge for entries marked beta', () => {
+      const table = buildFeatureTable(features, 'operator')
+      expect(table).toContain('pass:[<span class="badge badge--beta ">(beta)</span>]')
+      expect(table).not.toContain('badge::[')
+      expect(table).not.toContain('badge:[label')
+    })
+
+    test('places the beta badge after the feature suffix', () => {
+      const table = buildFeatureTable(features, 'operator')
+      expect(table).toContain(
+        'xref:deploy:redpanda/kubernetes/k-stretch-clusters.adoc[Stretch Clusters] ' +
+        '(StretchCluster resource) pass:[<span class="badge badge--beta ">(beta)</span>]'
+      )
+    })
+
+    test('omits the badge for entries that are not beta', () => {
+      const table = buildFeatureTable(features, 'connect')
+      expect(table).not.toContain('badge--beta')
+    })
   })
 
   describe('registry-backed conversion', () => {
@@ -230,6 +256,29 @@ describe('enterprise macro', () => {
       expect(html).toContain('Tiered Storage')
       expect(html).toContain('tiered-storage')
       expect(html).toContain('class="enterprise-feature"')
+    })
+
+    test('adds the beta badge in prose for a feature marked beta', () => {
+      const html = convert('enterprise:Stretch Clusters[]', { catalog: fakeCatalog() })
+      expect(html).toContain('class="enterprise-feature"')
+      expect(html).toContain('class="badge badge--beta ">(beta)</span>')
+      // The badge must be real markup, never the escaped source of a macro call.
+      expect(html).not.toContain('badge::[')
+      expect(html).not.toContain('&lt;span')
+    })
+
+    test('leaves prose for a non-beta feature unbadged', () => {
+      const html = convert('enterprise:Tiered Storage[]', { catalog: fakeCatalog() })
+      expect(html).not.toContain('badge--beta')
+    })
+
+    test('enterprise-beta-badge=false suppresses the badge in prose', () => {
+      const html = convert('enterprise:Stretch Clusters[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'enterprise-beta-badge': 'false' },
+      })
+      expect(html).toContain('class="enterprise-feature"')
+      expect(html).not.toContain('badge--beta')
     })
 
     test('canonicalizes case-insensitive spellings of the name', () => {
