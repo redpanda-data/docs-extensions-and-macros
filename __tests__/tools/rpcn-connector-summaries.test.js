@@ -156,6 +156,88 @@ describe('generateConnectorDiffJson - config component status and cloud support'
     expect(inDetails).toBe(true);
     expect(added.cloudSupported).toBe(true);
   });
+
+  test('detects a new field nested under an existing group, not just new top-level fields', () => {
+    // aws_s3's "sqs" group already exists in both versions; only a field
+    // nested inside it is new. A diff that only compares top-level field
+    // names would see "sqs" unchanged and report zero new fields, even
+    // though sqs.zero_key_warn_interval is genuinely new.
+    const oldIndex = {
+      inputs: [
+        {
+          name: 'aws_s3',
+          config: {
+            children: [
+              { name: 'bucket', description: 'Bucket name.' },
+              {
+                name: 'sqs',
+                children: [
+                  { name: 'url', description: 'Queue URL.' }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    };
+    const newIndex = {
+      inputs: [
+        {
+          name: 'aws_s3',
+          config: {
+            children: [
+              { name: 'bucket', description: 'Bucket name.' },
+              {
+                name: 'sqs',
+                children: [
+                  { name: 'url', description: 'Queue URL.' },
+                  { name: 'zero_key_warn_interval', description: 'Warn interval.' }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.103.1',
+      newVersion: '4.104.0'
+    });
+
+    expect(diff.summary.newFields).toBe(1);
+    const added = diff.details.newFields.find(f => f.field === 'sqs.zero_key_warn_interval');
+    expect(added).toBeDefined();
+    expect(added.component).toBe('inputs:aws_s3');
+  });
+
+  test('stamps the diff target version onto a new field when the source data carries none', () => {
+    const oldIndex = { inputs: [{ name: 'foo', config: { children: [] } }] };
+    const newIndex = {
+      inputs: [{ name: 'foo', config: { children: [{ name: 'bar', description: 'A field.' } ] } }]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.103.1',
+      newVersion: '4.104.0'
+    });
+
+    expect(diff.details.newFields[0].introducedIn).toBe('4.104.0');
+  });
+
+  test('prefers a field-level version over the diff target version, when the source data has one', () => {
+    const oldIndex = { inputs: [{ name: 'foo', config: { children: [] } }] };
+    const newIndex = {
+      inputs: [{ name: 'foo', config: { children: [{ name: 'bar', introducedInVersion: '4.99.0' }] } }]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.103.1',
+      newVersion: '4.104.0'
+    });
+
+    expect(diff.details.newFields[0].introducedIn).toBe('4.99.0');
+  });
 });
 
 describe('buildCleanOssData - pure OSS snapshot for binary analysis', () => {
@@ -318,6 +400,31 @@ describe('buildFieldsTable - whats-new field links', () => {
     ], cap);
 
     expect(table).toContain('* xref:components:inputs/kafka_franz.adoc#regexp_topics_exclude[kafka_franz]');
+  });
+
+  test('omits the "Introduced in" column by default', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:aws_s3', field: 'sqs.zero_key_warn_interval', description: 'Warn interval.', introducedIn: '4.104.0' }
+    ], cap);
+
+    expect(table).not.toContain('Introduced in');
+  });
+
+  test('adds an "Introduced in" column when showIntroducedIn is set', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:aws_s3', field: 'sqs.zero_key_warn_interval', description: 'Warn interval.', introducedIn: '4.104.0' }
+    ], cap, { showIntroducedIn: true });
+
+    expect(table).toContain('|Field |Description |Affected components |Introduced in');
+    expect(table).toContain('|4.104.0');
+  });
+
+  test('"Introduced in" column falls back to a dash when a field has no version', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:aws_s3', field: 'sqs.zero_key_warn_interval', description: 'Warn interval.' }
+    ], cap, { showIntroducedIn: true });
+
+    expect(table).toContain('|-\n');
   });
 });
 

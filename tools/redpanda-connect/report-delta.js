@@ -56,17 +56,15 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     const newFieldsArr = newMap[cKey].fields || [];
     newFieldsArr.forEach(fName => {
       if (!oldFields.has(fName)) {
-        const [type, compName] = cKey.split(':');
-        let rawFieldObj = null;
-        if (type === 'config') {
-          rawFieldObj = (newMap[cKey].raw.children || []).find(f => f.name === fName);
-        } else {
-          rawFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
-        }
+        const rawFieldObj = newMap[cKey].fieldMap.get(fName) || null;
         newFields.push({
           component: cKey,
           field: fName,
-          introducedIn: rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version),
+          // The source data carries no per-field version metadata today, so
+          // fall back to the version this diff is comparing against — it's
+          // still an accurate "introduced in" answer, since this field is
+          // new as of exactly that release.
+          introducedIn: (rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version)) || opts.newVersion || null,
           description: rawFieldObj && rawFieldObj.description
         });
       }
@@ -172,23 +170,8 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     // Check fields that exist in both versions
     const commonFields = oldFieldsArr.filter(f => newFieldsArr.includes(f));
     commonFields.forEach(fName => {
-      const [type, compName] = cKey.split(':');
-
-      // Get old field object
-      let oldFieldObj = null;
-      if (type === 'config') {
-        oldFieldObj = (oldMap[cKey].raw.children || []).find(f => f.name === fName);
-      } else {
-        oldFieldObj = (oldMap[cKey].raw.config?.children || []).find(f => f.name === fName);
-      }
-
-      // Get new field object
-      let newFieldObj = null;
-      if (type === 'config') {
-        newFieldObj = (newMap[cKey].raw.children || []).find(f => f.name === fName);
-      } else {
-        newFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
-      }
+      const oldFieldObj = oldMap[cKey].fieldMap.get(fName) || null;
+      const newFieldObj = newMap[cKey].fieldMap.get(fName) || null;
 
       const oldDeprecated = oldFieldObj && (oldFieldObj.is_deprecated === true || oldFieldObj.deprecated === true || (oldFieldObj.status || '').toLowerCase() === 'deprecated');
       const newDeprecated = newFieldObj && (newFieldObj.is_deprecated === true || newFieldObj.deprecated === true || (newFieldObj.status || '').toLowerCase() === 'deprecated');
@@ -380,6 +363,29 @@ function discoverComponentKeys(obj) {
   return Object.keys(obj).filter(key => Array.isArray(obj[key]));
 }
 
+/**
+ * Recursively flatten a field tree into dotted-path entries, so a field
+ * added under an existing nested group (e.g. "sqs.zero_key_warn_interval"
+ * added under aws_s3's pre-existing "sqs" group) is visible to a diff that
+ * compares field-name sets. A flat map of top-level names alone treats that
+ * as no change at all, because "sqs" itself isn't new.
+ * @param {Array} children - field definitions (each may itself have `children`)
+ * @param {string} [prefix] - dotted path of the parent, if any
+ * @returns {Array<{path: string, field: object}>}
+ */
+function flattenFields(children, prefix = '') {
+  const result = [];
+  (children || []).forEach(f => {
+    if (!f || !f.name) return;
+    const path = prefix ? `${prefix}.${f.name}` : f.name;
+    result.push({ path, field: f });
+    if (Array.isArray(f.children)) {
+      result.push(...flattenFields(f.children, path));
+    }
+  });
+  return result;
+}
+
 function buildComponentMap(indexObj) {
   const map = {};
   const types = discoverComponentKeys(indexObj);
@@ -402,7 +408,9 @@ function buildComponentMap(indexObj) {
         }
       }
 
-      const fieldNames = childArray.map(f => f.name);
+      const flattened = flattenFields(childArray);
+      const fieldNames = flattened.map(f => f.path);
+      const fieldMap = new Map(flattened.map(f => [f.path, f.field]));
 
       // Preserve platform metadata for accurate diff comparison
       const metadata = {
@@ -414,6 +422,7 @@ function buildComponentMap(indexObj) {
       map[lookupKey] = {
         raw: component,
         fields: fieldNames,
+        fieldMap: fieldMap,
         metadata: metadata
       };
     });
@@ -469,17 +478,9 @@ function printDeltaReport(oldIndex, newIndex) {
     const newFieldsArr = newMap[cKey].fields || [];
     newFieldsArr.forEach(fName => {
       if (!oldFields.has(fName)) {
-        // fetch raw field metadata if available
-        const [type, compName] = cKey.split(':');
-        let rawFieldObj = null;
-        if (type === 'config') {
-          rawFieldObj = (newMap[cKey].raw.children || []).find(f => f.name === fName);
-        } else {
-          rawFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
-        }
-
-        let introducedIn = rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version);
-        let requiresVer = rawFieldObj && rawFieldObj.requiresVersion;
+        const rawFieldObj = newMap[cKey].fieldMap.get(fName) || null;
+        const introducedIn = rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version);
+        const requiresVer = rawFieldObj && rawFieldObj.requiresVersion;
 
         newFields.push({
           component: cKey,
@@ -514,19 +515,8 @@ function printDeltaReport(oldIndex, newIndex) {
     const commonFields = oldFieldsArr.filter(f => newFieldsArr.includes(f));
 
     commonFields.forEach(fName => {
-      const [type, compName] = cKey.split(':');
-      let oldFieldObj = null;
-      if (type === 'config') {
-        oldFieldObj = (oldMap[cKey].raw.children || []).find(f => f.name === fName);
-      } else {
-        oldFieldObj = (oldMap[cKey].raw.config?.children || []).find(f => f.name === fName);
-      }
-      let newFieldObj = null;
-      if (type === 'config') {
-        newFieldObj = (newMap[cKey].raw.children || []).find(f => f.name === fName);
-      } else {
-        newFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
-      }
+      const oldFieldObj = oldMap[cKey].fieldMap.get(fName) || null;
+      const newFieldObj = newMap[cKey].fieldMap.get(fName) || null;
       const oldDeprecated = oldFieldObj && (oldFieldObj.is_deprecated === true || oldFieldObj.deprecated === true || (oldFieldObj.status || '').toLowerCase() === 'deprecated');
       const newDeprecated = newFieldObj && (newFieldObj.is_deprecated === true || newFieldObj.deprecated === true || (newFieldObj.status || '').toLowerCase() === 'deprecated');
       if (!oldDeprecated && newDeprecated) {

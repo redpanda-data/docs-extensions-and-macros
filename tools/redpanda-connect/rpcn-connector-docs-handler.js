@@ -413,7 +413,7 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
       if (regularFields.length > 0) {
         section += '\n=== New field support\n\n'
         section += 'This release adds support for the following new fields:\n\n'
-        section += buildFieldsTable(regularFields, capToTwoSentences)
+        section += buildFieldsTable(regularFields, capToTwoSentences, { showIntroducedIn: true })
       }
     }
 
@@ -553,22 +553,24 @@ function fieldAnchor (fieldName) {
  * @param {Function} capFn - Caption function
  * @returns {string} AsciiDoc table
  */
-function buildFieldsTable (fields, capFn) {
+function buildFieldsTable (fields, capFn, opts = {}) {
+  const { showIntroducedIn = false } = opts
   const byField = {}
   for (const field of fields) {
     const [type, compName] = field.component.split(':')
     if (!byField[field.field]) {
       byField[field.field] = {
         description: field.description,
+        introducedIn: field.introducedIn,
         components: []
       }
     }
     byField[field.field].components.push({ type, name: compName })
   }
 
-  let section = '[cols="1m,3,2a"]\n'
+  let section = showIntroducedIn ? '[cols="1m,3,2a,1m"]\n' : '[cols="1m,3,2a"]\n'
   section += '|===\n'
-  section += '|Field |Description |Affected components\n\n'
+  section += showIntroducedIn ? '|Field |Description |Affected components |Introduced in\n\n' : '|Field |Description |Affected components\n\n'
 
   for (const [fieldName, info] of Object.entries(byField)) {
     const byType = {}
@@ -595,7 +597,9 @@ function buildFieldsTable (fields, capFn) {
 
     section += `|${fieldName}\n`
     section += `|${desc}\n`
-    section += `|${componentList}\n\n`
+    section += `|${componentList}\n`
+    if (showIntroducedIn) section += `|${info.introducedIn || '-'}\n`
+    section += '\n'
   }
 
   section += '|===\n\n'
