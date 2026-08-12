@@ -34,7 +34,6 @@ const {
 // Import other utilities
 const { determineDocsBranch } = require('../cli-utils/self-managed-docs-branch.js')
 const fetchFromGithub = require('../tools/fetch-from-github.js')
-const { urlToXref } = require('../cli-utils/convert-doc-links.js')
 const { getAntoraValue, setAntoraValue } = require('../cli-utils/antora-utils')
 
 // --------------------------------------------------------------------
@@ -1677,47 +1676,8 @@ automation
       r = spawnSync('pandoc', [md, '-t', 'asciidoc', '-o', outFile], { stdio: 'inherit' })
       if (r.status !== 0) process.exit(r.status)
 
-      let doc = fs.readFileSync(outFile, 'utf8')
-      const xrefRe = /https:\/\/docs\.redpanda\.com[^\s\]\[\)"]+(?:\[[^\]]*\])?/g
-      doc = doc
-        .replace(/(\[\d+\])\]\./g, '$1\\].')
-        .replace(/(\[\d+\])\]\]/g, '$1\\]\\]')
-        .replace(/^=== +(https?:\/\/[^\[]*)\[([^\]]*)\]/gm, '=== link:++$1++[$2]')
-        .replace(/^== # (.*)$/gm, '= $1')
-        .replace(/^== description: (.*)$/gm, ':description: $1')
-        .replace(xrefRe, (match) => {
-          let urlPart = match
-          let bracketPart = ''
-          const m = match.match(/^([^\[]+)(\[[^\]]*\])$/)
-          if (m) {
-            urlPart = m[1]
-            bracketPart = m[2]
-          }
-          if (urlPart.endsWith('#')) return match
-          try {
-            const xref = urlToXref(urlPart)
-            return bracketPart ? `${xref}${bracketPart}` : `${xref}[]`
-          } catch (err) {
-            console.warn(`⚠️ urlToXref failed on ${urlPart}: ${err.message}`)
-            return match
-          }
-        })
-      // Antora resolves page metadata with a header-only parse that stops at
-      // the first blank line. The chart README templates emit :description:
-      // below the title's blank line, so the page shipped the generic site
-      // meta description despite carrying one (found on k-connect-helm-spec,
-      // DOC-2414 investigation). Relocate the first :description: into the
-      // header, directly under the title.
-      const descMatch = doc.match(/^:description:[^\n]*$/m)
-      if (descMatch) {
-        const headerEnd = doc.indexOf('\n\n')
-        if (headerEnd !== -1 && doc.indexOf(descMatch[0]) > headerEnd) {
-          doc = doc.replace(descMatch[0] + '\n', '')
-          doc = doc.replace(/^(= .+)$/m, `$1\n${descMatch[0]}`)
-          doc = doc.replace(/\n{3,}/g, '\n\n')
-        }
-      }
-      fs.writeFileSync(outFile, doc, 'utf8')
+      const { formatHelmSpec } = require('../cli-utils/format-helm-spec')
+      fs.writeFileSync(outFile, formatHelmSpec(fs.readFileSync(outFile, 'utf8')), 'utf8')
 
       console.log(`Done: Wrote ${outFile}`)
     }
@@ -1989,26 +1949,8 @@ automation
       process.exit(1)
     }
 
-    let doc = fs.readFileSync(opts.output, 'utf8')
-    const xrefRe = /https:\/\/docs\.redpanda\.com[^\s\]\[\)"]+(?:\[[^\]]*\])?/g
-    doc = doc.replace(xrefRe, (match) => {
-      let urlPart = match
-      let bracketPart = ''
-      const m = match.match(/^([^\[]+)(\[[^\]]*\])$/)
-      if (m) {
-        urlPart = m[1]
-        bracketPart = m[2]
-      }
-      if (urlPart.endsWith('#')) return match
-      try {
-        const xref = urlToXref(urlPart)
-        return bracketPart ? `${xref}${bracketPart}` : `${xref}[]`
-      } catch (err) {
-        console.warn(`⚠️ urlToXref failed on ${urlPart}: ${err.message}`)
-        return match
-      }
-    })
-    fs.writeFileSync(opts.output, doc, 'utf8')
+    // docs.redpanda.com URLs are left as-is: the url-to-xref Antora
+    // extension converts them to validated xrefs at site build time.
 
     if (tmpSrc) fs.rmSync(tmpSrc, { recursive: true, force: true })
     fs.rmSync(configTmp, { recursive: true, force: true })

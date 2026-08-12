@@ -65,8 +65,8 @@ antora:
     data:
       replacements:
         - components:
-          - 'ROOT'
-          - 'redpanda-labs'
+          - 'streaming'
+          - 'labs'
           file_patterns:
             - '**/docker-compose.yaml'
             - '**/docker-compose.yml'
@@ -75,6 +75,7 @@ antora:
           file_patterns:
             - '**/llms.adoc'
   - require: './extensions/resolve-xrefs-in-attachments'
+  - require: './extensions/url-to-xref'
   - require: './extensions/convert-llms-to-txt.js'
   - require: './extensions/convert-sitemap-to-markdown'
   - require: './extensions/archive-attachments'
