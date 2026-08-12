@@ -187,6 +187,51 @@ function generateFrontmatter(page) {
   return `---\n${yamlContent}---\n\n`
 }
 
+// Default class the enterprise inline macro puts on its wrapping span. The
+// macro lets a playbook override it via the enterprise-feature-role document
+// attribute, so match on a substring rather than the exact value.
+const ENTERPRISE_FEATURE_CLASS = 'enterprise-feature'
+
+// Explicit textual marker for enterprise features in Markdown output.
+const ENTERPRISE_MARKER = '(enterprise)'
+
+/**
+ * Turndown rule that keeps the enterprise signal in Markdown output.
+ *
+ * In HTML the enterprise macro conveys "this needs a license" two ways, and a
+ * plain HTML-to-Markdown pass loses both: the badge is drawn by CSS on the
+ * span's class, and the explanatory text sits in a title tooltip. Turndown
+ * keeps neither attribute, so `enterprise:Tiered Storage[]` arrives in
+ * Markdown as the bare words "Tiered Storage" with nothing marking it as an
+ * enterprise feature. Readers of the Markdown, including agents, cannot tell
+ * it apart from any other feature name.
+ *
+ * Appending an explicit marker fixes that. The span's already-converted inner
+ * Markdown is passed through untouched, so a linked feature keeps its link.
+ *
+ * @returns {{filter: Function, replacement: Function}} Turndown rule.
+ */
+function createEnterpriseFeatureRule () {
+  return {
+    filter: (node) => {
+      if (!node || node.nodeName !== 'SPAN') return false
+      const classAttr = node.getAttribute?.('class') || node.className || ''
+      return typeof classAttr === 'string' && classAttr.includes(ENTERPRISE_FEATURE_CLASS)
+    },
+    replacement: (content) => {
+      const inner = (content || '').trim()
+      // An empty span carries no feature to mark.
+      if (!inner) return ''
+      // Nested or already-marked content must not collect a second marker.
+      if (inner.toLowerCase().endsWith(ENTERPRISE_MARKER)) return inner
+      return `${inner} ${ENTERPRISE_MARKER}`
+    },
+  }
+}
+
+module.exports.createEnterpriseFeatureRule = createEnterpriseFeatureRule
+module.exports.ENTERPRISE_MARKER = ENTERPRISE_MARKER
+
 module.exports.register = function () {
   raiseListenerLimit(this)
   const logger = this.getLogger('convert-to-markdown-extension')
@@ -406,6 +451,9 @@ module.exports.register = function () {
       })
 
       // Markdown table conversion
+      // Keep the enterprise-license signal, which is otherwise CSS-only.
+      turndownInstance.addRule('enterprise-feature', createEnterpriseFeatureRule())
+
       turndownInstance.addRule('tables', {
         filter: (node) => {
           if (node.nodeName !== 'TABLE') return false

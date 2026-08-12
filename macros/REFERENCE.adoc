@@ -110,6 +110,17 @@ Controls the tooltip attribute: `title` (default), `true` (renders `data-enterpr
 enterprise-links::
 Set to `false` to render the term without a link.
 
+=== Markdown output
+
+In HTML, the enterprise signal is carried by the span's CSS class and its tooltip attribute. Both are attributes, so an HTML-to-Markdown conversion drops them and the term arrives as an ordinary feature name. To keep the signal for readers of the Markdown pages, including AI agents, the `convert-to-markdown` extension appends an explicit `(enterprise)` marker and preserves any link:
+
+[,markdown]
+----
+Enable [Tiered Storage](../manage/tiered-storage.md) (enterprise) today.
+----
+
+This applies to the inline macro. The tables from `enterprise_features` need no marker, because their expiration column already states the licensing behavior as text.
+
 === Registration
 
 [,yaml]
