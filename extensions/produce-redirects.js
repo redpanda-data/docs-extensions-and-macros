@@ -1,11 +1,14 @@
 'use strict';
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 const File = require('vinyl')
 const { posix: path } = require('path')
 
 const ENCODED_SPACE_RX = /%20/g
 
 module.exports.register = function () {
+  raiseListenerLimit(this)
   this.once('contextStarted', () => {
     const { publishFiles: produceRedirectsDelegate } = this.getFunctions()
     this.replaceFunctions({

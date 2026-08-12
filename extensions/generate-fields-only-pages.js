@@ -1,5 +1,7 @@
 'use strict'
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
@@ -121,6 +123,7 @@ const DEFAULTS = {
 }
 
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('generate-fields-only-pages-extension')
 
   // Merge config with defaults
