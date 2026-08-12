@@ -424,8 +424,15 @@ function buildComponentMap(indexObj) {
 
 function getRpkConnectVersion() {
   try {
-    // Make sure the connect plugin is upgraded first (silent)
-    execSync('rpk connect upgrade', { stdio: 'ignore' });
+    // Ensure the connect plugin is current (silent). Deliberately "install
+    // --force", not "upgrade": upgrade's version comparison parses the
+    // currently-installed version through a regex capped at two digits per
+    // segment (redpanda.VersionFromString in rpk/pkg/redpanda/version.go),
+    // which throws for any Connect version >= 4.100.0 — the same bug class
+    // as CON-529, in a different function that its fix didn't touch, and
+    // still unfixed as of rpk dev. install's "latest" path (the default)
+    // skips that regex entirely, so it isn't exposed to the bug.
+    execSync('rpk connect install --force', { stdio: 'ignore' });
 
     // Now capture the --version output
     const raw = execSync('rpk connect --version', {
