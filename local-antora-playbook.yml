@@ -34,6 +34,7 @@ asciidoc:
   - './macros/glossary'
   - './macros/config-ref'
   - './macros/enterprise'
+  - './macros/prop'
   - './macros/helm-ref'
   - './macros/rp-connect-components'
   - './asciidoc-extensions/add-line-numbers-highlights'
@@ -97,4 +98,5 @@ antora:
   - require: './extensions/generate-fields-only-pages'
     enabled: true
   - require: './extensions/aggregate-terms'
+  - require: './extensions/property-page-index'
 

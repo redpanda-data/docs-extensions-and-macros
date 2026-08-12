@@ -76,6 +76,51 @@ enterprise_features::connect[title=Connect features that need a license,heading=
 
 The block anchor re-emitted above keeps crossrefs working: jump to <<demo-redpanda-features,the Redpanda table>>.
 
+== Property references (prop macro)
+
+The `prop` macro marks a configuration property so the docs UI can decorate it with a hover tooltip. Targets are validated against the published property JSON (an attachment in the streaming component's reference module). Marking is opt-in: plain backticked words never get tooltips, so ambiguous names like `admin` in Helm or feature contexts stay undecorated unless a writer marks them deliberately.
+
+=== Marking only
+
+A cluster property: prop:cloud_storage_enabled[] in a sentence.
+
+A broker property: prop:fips_mode[] in a sentence.
+
+A dotted topic property: prop:redpanda.iceberg.mode[] in a sentence.
+
+An ambiguous name, marked deliberately (this is the opt-in fix in action, plain `admin` elsewhere stays untouched): prop:admin[] in a sentence.
+
+=== Linked, page discovered dynamically
+
+The target page is discovered by indexing which reference page documents each property. This preview component publishes no property pages, so links resolve cross-component into the streaming component:
+
+A cluster property: prop:iceberg_enabled[link=true] in a sentence.
+
+A broker property: prop:empty_seed_starts_cluster[link=true] in a sentence.
+
+A topic property: prop:retention.ms[link=true] in a sentence.
+
+=== Overrides
+
+Display text: prop:write_caching_default[text=write caching] in a sentence.
+
+Display text and a link together: prop:log_segment_size[link=true,text=segment size] in a sentence.
+
+An explicit page override skips discovery entirely. The xref stays component-relative, so it only resolves in components that publish the page and can't be demonstrated live from this preview component:
+
+[,asciidoc]
+----
+prop:cloud_storage_cache_size[link=true,page=properties/object-storage-properties]
+----
+
+=== Kubernetes Helm paths
+
+With `helm-path=auto`, the property renders as its Helm values path on pages with the `env-kubernetes` attribute, and as the plain name elsewhere. On this page (no `env-kubernetes`), it stays plain: prop:cloud_storage_enabled[helm-path=auto] in a sentence. See the same call on the xref:preview:ROOT:enterprise-kubernetes-test.adoc[Kubernetes environment test page].
+
+=== Validation
+
+An unknown name renders as written but logs a build warning with did-you-mean suggestions (set `property-validate` to `error` to fail the build instead): prop:not_a_real_property[] in a sentence.
+
 == Terms
 
 Terms must be defined in the `terms` module of the `shared` component (`shared/modules/terms/partials`).
