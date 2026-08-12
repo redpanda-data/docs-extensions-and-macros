@@ -17,7 +17,10 @@
 
 'use strict';
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('context-switcher-extension');
 
   this.on('documentsConverted', async ({ contentCatalog }) => {

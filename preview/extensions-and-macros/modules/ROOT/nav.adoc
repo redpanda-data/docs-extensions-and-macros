@@ -1,4 +1,5 @@
 * xref:preview:ROOT:test.adoc[]
+* xref:preview:ROOT:enterprise-kubernetes-test.adoc[]
 * xref:preview:ROOT:docker-labs.adoc[]
 * xref:preview:ROOT:url-to-xref-test.adoc[]
 * xref:preview:ROOT:faq-test.adoc[]

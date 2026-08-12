@@ -213,3 +213,136 @@ describe('alias-collision guard', () => {
     fs2.rmSync(dir, { recursive: true, force: true })
   })
 })
+
+describe('dynamic description inheritance via the meta tag region', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const os = require('os')
+  const { readPartialTitles, renderStub } = require('../../../tools/rpk-docs/generate-plugin-stubs.js')
+
+  // Antora resolves page metadata with a header-only parse that stops at the
+  // stub's first blank line, so a description can only reach the rendered
+  // page's <meta> tag as a header attribute: either a literal line or an
+  // include placed above the first blank line. Verified empirically against
+  // an Antora build with the production UI bundle (2026-08-05): the naive
+  // no-blank-line body include inherits the description but destroys the
+  // page body, and the two-include shape delivers both.
+
+  test('stubs for partials with a meta tag region get the header include', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stub-meta-'))
+    fs.writeFileSync(path.join(dir, 'rpk-ai-run.adoc'), [
+      '= rpk ai run',
+      ':description: Run things.',
+      '',
+      '// tag::single-source[]',
+      '// tag::meta[]',
+      ':description: Run things.',
+      '// end::meta[]',
+      'Body.',
+      '// end::single-source[]',
+    ].join('\n'))
+    const [partial] = readPartialTitles(dir)
+    expect(partial.hasMetaTag).toBe(true)
+
+    const stub = renderStub({ ...partial, includePrefix: 'streaming:reference:partial$rpk-ai/', attributes: [] })
+    const lines = stub.split('\n')
+    // The meta include sits in the header: directly under the title with no
+    // blank line before it, and the body include after the blank line.
+    expect(lines[0]).toBe('= rpk ai run')
+    expect(lines[1]).toBe('include::streaming:reference:partial$rpk-ai/rpk-ai-run.adoc[tag=meta]')
+    expect(lines[2]).toBe('')
+    expect(lines[3]).toBe('include::streaming:reference:partial$rpk-ai/rpk-ai-run.adoc[tag=single-source]')
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('stubs for older partials without the region keep the plain shape', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stub-nometa-'))
+    fs.writeFileSync(path.join(dir, 'rpk-ai-old.adoc'), [
+      '= rpk ai old',
+      '',
+      '// tag::single-source[]',
+      'Body.',
+      '// end::single-source[]',
+    ].join('\n'))
+    const [partial] = readPartialTitles(dir)
+    expect(partial.hasMetaTag).toBe(false)
+
+    const stub = renderStub({ ...partial, includePrefix: 'p$/', attributes: [] })
+    // No tag=meta include, so the build never warns about a missing tag.
+    expect(stub).not.toContain('[tag=meta]')
+    expect(stub.split('\n')[1]).toBe('')
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('existing-stub upgrade to the meta include', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const os = require('os')
+  const { reconcileStubs, readPartialTitles } = require('../../../tools/rpk-docs/generate-plugin-stubs.js')
+
+  test('adds the header include to an existing stub when the partial gains the region', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stub-upgrade-'))
+    const partialsDir = path.join(dir, 'partials')
+    const stubDir = path.join(dir, 'stubs')
+    const navFile = path.join(dir, 'nav.adoc')
+    fs.mkdirSync(partialsDir); fs.mkdirSync(stubDir)
+    fs.writeFileSync(navFile, '* xref:reference:rpk/index.adoc[rpk]\n')
+    const prefix = 'streaming:reference:partial$rpk-ai/'
+    fs.writeFileSync(path.join(partialsDir, 'rpk-ai-run.adoc'),
+      '= rpk ai run\n// tag::single-source[]\n// tag::meta[]\n:description: D.\n// end::meta[]\nBody.\n// end::single-source[]\n')
+    fs.writeFileSync(path.join(stubDir, 'rpk-ai-run.adoc'),
+      `= rpk ai run\n\ninclude::${prefix}rpk-ai-run.adoc[tag=single-source]\n`)
+
+    const run = () => reconcileStubs({
+      partials: readPartialTitles(partialsDir),
+      stubDir,
+      navFile,
+      plugin: 'ai',
+      includePrefix: prefix,
+      attributes: [],
+      dryRun: false
+    })
+    const result = run()
+    expect(result.upgraded).toEqual(['rpk-ai-run.adoc'])
+    const lines = fs.readFileSync(path.join(stubDir, 'rpk-ai-run.adoc'), 'utf8').split('\n')
+    expect(lines[0]).toBe('= rpk ai run')
+    expect(lines[1]).toBe(`include::${prefix}rpk-ai-run.adoc[tag=meta]`)
+    expect(lines[2]).toBe('')
+
+    // Idempotent: a second run changes nothing
+    expect(run().upgraded).toEqual([])
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('the upgrade strips a backfilled literal description, which would otherwise win', () => {
+    // Later attribute entries override earlier ones, so a literal below
+    // the inserted include would take precedence and freshness would
+    // never materialize (micheleRP's precedence finding, verified).
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stub-strip-'))
+    const partialsDir = path.join(dir, 'partials')
+    const stubDir = path.join(dir, 'stubs')
+    const navFile = path.join(dir, 'nav.adoc')
+    fs.mkdirSync(partialsDir); fs.mkdirSync(stubDir)
+    fs.writeFileSync(navFile, '* xref:reference:rpk/index.adoc[rpk]\n')
+    const prefix = 'streaming:reference:partial$rpk-ai/'
+    fs.writeFileSync(path.join(partialsDir, 'rpk-ai-run.adoc'),
+      '= rpk ai run\n// tag::single-source[]\n// tag::meta[]\n:description: Fresh.\n// end::meta[]\nBody.\n// end::single-source[]\n')
+    fs.writeFileSync(path.join(stubDir, 'rpk-ai-run.adoc'),
+      `= rpk ai run\n:description: Stale backfilled copy.\n\ninclude::${prefix}rpk-ai-run.adoc[tag=single-source]\n`)
+
+    const result = reconcileStubs({
+      partials: readPartialTitles(partialsDir),
+      stubDir,
+      navFile,
+      plugin: 'ai',
+      includePrefix: prefix,
+      attributes: [],
+      dryRun: false
+    })
+    expect(result.upgraded).toEqual(['rpk-ai-run.adoc'])
+    const content = fs.readFileSync(path.join(stubDir, 'rpk-ai-run.adoc'), 'utf8')
+    expect(content).not.toContain(':description: Stale backfilled copy.')
+    expect(content.split('\n')[1]).toBe(`include::${prefix}rpk-ai-run.adoc[tag=meta]`)
+  })
+})

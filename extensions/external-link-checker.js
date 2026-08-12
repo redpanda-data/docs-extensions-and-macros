@@ -1,6 +1,7 @@
 'use strict'
 
 const { scanContentUrls } = require('./util/scan-content-urls')
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 /**
  * External Link Checker Extension
@@ -34,6 +35,7 @@ const { scanContentUrls } = require('./util/scan-content-urls')
 const USER_AGENT = 'redpanda-docs-link-checker'
 
 module.exports.register = function ({ config = {} }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('external-link-checker-extension')
   const internalHostnames = new Set(config.internalHostnames || ['docs.redpanda.com'])
   const include = (config.include || []).map((pattern) => new RegExp(pattern))

@@ -27,3 +27,6 @@ docs-data/rpk-vlocal.json
 
 # The preview site is a real content tree too; keep it tracked despite modules/
 !preview/**
+# Property extractor working data (cloned/built at run time)
+tools/property-extractor/tmp/
+tools/property-extractor/tree-sitter/tree-sitter-cpp/

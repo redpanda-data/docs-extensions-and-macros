@@ -1,6 +1,7 @@
 'use strict'
 
 const { scanContentUrls } = require('./util/scan-content-urls')
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 /**
  * URL to Xref Extension
@@ -58,6 +59,7 @@ const LEGACY_SLUG_REWRITES = {
 const LEGACY_UNPREFIXED_COMPONENT = 'streaming'
 
 module.exports.register = function ({ config = {} }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('url-to-xref-extension')
   const hostnames = new Set(config.hostnames || ['docs.redpanda.com'])
   const logUnconverted = config.logUnconverted !== false

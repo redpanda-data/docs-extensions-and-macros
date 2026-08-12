@@ -1,3 +1,4 @@
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
 /* Example use in the playbook
 * antora:
     extensions:
@@ -12,6 +13,7 @@ const _ = require('lodash');
 const ATTRIBUTES_PATH = 'modules/ROOT/partials/';  // Default path within the 'shared' component
 
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('global-attributes-extension');
 
   /**

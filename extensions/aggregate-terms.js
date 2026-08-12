@@ -1,3 +1,4 @@
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
 /* Example use in the playbook
 * antora:
     extensions:
@@ -10,6 +11,7 @@ const path = require('path');
 const TERMS_PATH = 'modules/terms/partials/';  // Default path within the 'shared' component
 
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('term-aggregation-extension');
 
   /**
