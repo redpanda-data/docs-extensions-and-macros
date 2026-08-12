@@ -219,7 +219,7 @@ describe('H1 and frontmatter placement', () => {
 // reproduction, so they fail if the real rule regresses.
 describe('enterprise feature marker in Markdown', () => {
   const {
-    createEnterpriseFeatureRule,
+    createEnterpriseFeatureRules,
   } = require('../../extensions/convert-to-markdown')
 
   function convert(html) {
@@ -229,7 +229,9 @@ describe('enterprise feature marker in Markdown', () => {
       bulletListMarker: '-',
     })
     td.use(gfm)
-    td.addRule('enterprise-feature', createEnterpriseFeatureRule())
+    const rules = createEnterpriseFeatureRules()
+    td.addRule('enterprise-feature', rules.enterpriseFeature)
+    td.addRule('beta-badge', rules.betaBadge)
     return td.turndown(html)
   }
 
@@ -272,5 +274,69 @@ describe('enterprise feature marker in Markdown', () => {
   test('leaves ordinary spans untouched', () => {
     const html = '<p>Just <span class="other">text</span> here.</p>'
     expect(convert(html)).toBe('Just text here.')
+  })
+})
+
+// A beta enterprise feature carries two markers in HTML. Emitting them
+// separately read as "Stretch Clusters (enterprise) (beta)", so they collapse
+// into one parenthetical.
+describe('combined status markers in Markdown', () => {
+  const {
+    createEnterpriseFeatureRules,
+    formatStatusMarker,
+  } = require('../../extensions/convert-to-markdown')
+
+  function convert(html) {
+    const td = new TurndownService({
+      headingStyle: 'atx',
+      codeBlockStyle: 'fenced',
+      bulletListMarker: '-',
+    })
+    td.use(gfm)
+    const rules = createEnterpriseFeatureRules()
+    td.addRule('enterprise-feature', rules.enterpriseFeature)
+    td.addRule('beta-badge', rules.betaBadge)
+    return td.turndown(html)
+  }
+
+  const betaBadge = '<span class="badge badge--beta ">(beta)</span>'
+
+  test('merges an enterprise feature and a following beta badge', () => {
+    const html =
+      '<p>Enable <span class="enterprise-feature" title="x">' +
+      '<a href="../stretch/">Stretch Clusters</a></span> ' + betaBadge + ' today.</p>'
+    expect(convert(html)).toBe(
+      'Enable [Stretch Clusters](../stretch/) (enterprise, beta) today.'
+    )
+  })
+
+  test('leaves exactly one space around the merged marker', () => {
+    const html =
+      '<p>Enable <span class="enterprise-feature">Stretch Clusters</span> ' +
+      betaBadge + ' today.</p>'
+    // Suppressing the badge and marking the span instead left a doubled space.
+    expect(convert(html)).not.toMatch(/ {2}/)
+  })
+
+  test('marks a beta badge that stands alone', () => {
+    expect(convert('<p>Feature ' + betaBadge + ' here.</p>')).toBe(
+      'Feature (beta) here.'
+    )
+  })
+
+  test('does not merge a badge that is not adjacent to the feature', () => {
+    const html =
+      '<p><span class="enterprise-feature">Tiered Storage</span> and other text ' +
+      betaBadge + '.</p>'
+    expect(convert(html)).toBe(
+      'Tiered Storage (enterprise) and other text (beta).'
+    )
+  })
+
+  test('formatStatusMarker joins statuses and drops empties', () => {
+    expect(formatStatusMarker(['enterprise', 'beta'])).toBe('(enterprise, beta)')
+    expect(formatStatusMarker(['enterprise'])).toBe('(enterprise)')
+    expect(formatStatusMarker([])).toBe('')
+    expect(formatStatusMarker([null, 'beta'])).toBe('(beta)')
   })
 })

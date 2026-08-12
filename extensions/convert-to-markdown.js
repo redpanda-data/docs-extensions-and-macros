@@ -192,44 +192,109 @@ function generateFrontmatter(page) {
 // attribute, so match on a substring rather than the exact value.
 const ENTERPRISE_FEATURE_CLASS = 'enterprise-feature'
 
+// Status words collected into the single trailing parenthetical.
+const ENTERPRISE_STATUS = 'enterprise'
+const BETA_STATUS = 'beta'
+
+// Class the badge macro puts on a beta badge.
+const BETA_BADGE_CLASS = 'badge--beta'
+
 // Explicit textual marker for enterprise features in Markdown output.
-const ENTERPRISE_MARKER = '(enterprise)'
+const ENTERPRISE_MARKER = `(${ENTERPRISE_STATUS})`
 
 /**
- * Turndown rule that keeps the enterprise signal in Markdown output.
+ * Format one parenthetical from the status words that apply to a feature.
  *
- * In HTML the enterprise macro conveys "this needs a license" two ways, and a
- * plain HTML-to-Markdown pass loses both: the badge is drawn by CSS on the
- * span's class, and the explanatory text sits in a title tooltip. Turndown
- * keeps neither attribute, so `enterprise:Tiered Storage[]` arrives in
- * Markdown as the bare words "Tiered Storage" with nothing marking it as an
- * enterprise feature. Readers of the Markdown, including agents, cannot tell
- * it apart from any other feature name.
+ * A beta enterprise feature carries two markers, and emitting them separately
+ * reads as "Stretch Clusters (enterprise) (beta)". One list avoids the stutter.
  *
- * Appending an explicit marker fixes that. The span's already-converted inner
- * Markdown is passed through untouched, so a linked feature keeps its link.
- *
- * @returns {{filter: Function, replacement: Function}} Turndown rule.
+ * @param {string[]} statuses - Status words, in display order.
+ * @returns {string} Parenthetical, or an empty string when there are none.
  */
-function createEnterpriseFeatureRule () {
-  return {
-    filter: (node) => {
-      if (!node || node.nodeName !== 'SPAN') return false
-      const classAttr = node.getAttribute?.('class') || node.className || ''
-      return typeof classAttr === 'string' && classAttr.includes(ENTERPRISE_FEATURE_CLASS)
-    },
-    replacement: (content) => {
+function formatStatusMarker (statuses) {
+  const words = statuses.filter(Boolean)
+  return words.length ? `(${words.join(', ')})` : ''
+}
+
+function hasClass (node, className) {
+  if (!node || node.nodeName !== 'SPAN') return false
+  const classAttr = node.getAttribute?.('class') || node.className || ''
+  return typeof classAttr === 'string' && classAttr.includes(className)
+}
+
+/**
+ * The next sibling element, skipping the whitespace text nodes that sit between
+ * the enterprise span and a badge that follows it.
+ */
+function nextElementSibling (node) {
+  let sibling = node && node.nextSibling
+  while (sibling && sibling.nodeType === 3 && !(sibling.textContent || '').trim()) {
+    sibling = sibling.nextSibling
+  }
+  return sibling && sibling.nodeType === 1 ? sibling : null
+}
+
+/**
+ * Turndown rules that keep the enterprise and beta signals in Markdown output.
+ *
+ * In HTML both signals are carried by things Turndown discards. The enterprise
+ * badge is drawn by CSS from the span's class and explained by a title tooltip,
+ * so `enterprise:Tiered Storage[]` would arrive in Markdown as the bare words
+ * "Tiered Storage", indistinguishable from any other feature name. The beta
+ * badge does survive, because its label keeps real bracketed text, but it lands
+ * as a second parenthetical right after the first.
+ *
+ * These rules emit one trailing parenthetical instead, listing every status
+ * that applies, and pass the span's already-converted inner Markdown through
+ * untouched so a linked feature keeps its link:
+ *
+ *   [Stretch Clusters](../deploy/stretch-clusters.md) (enterprise, beta)
+ *
+ * The beta badge is a sibling of the enterprise span rather than a child. The
+ * enterprise rule looks ahead for it and, when it finds one, emits no marker of
+ * its own and hands the combined marker to the badge. Emitting it there rather
+ * than on the enterprise span reuses the whitespace already between the two
+ * elements, instead of suppressing the badge and leaving a doubled space.
+ *
+ * @returns {{enterpriseFeature: object, betaBadge: object}} Turndown rules,
+ *   both of which must be registered.
+ */
+function createEnterpriseFeatureRules () {
+  // Scoped per call so each converter tracks its own deferred markers.
+  const deferredToBadge = new WeakSet()
+
+  const enterpriseFeature = {
+    filter: (node) => hasClass(node, ENTERPRISE_FEATURE_CLASS),
+    replacement: (content, node) => {
       const inner = (content || '').trim()
       // An empty span carries no feature to mark.
       if (!inner) return ''
       // Nested or already-marked content must not collect a second marker.
       if (inner.toLowerCase().endsWith(ENTERPRISE_MARKER)) return inner
+
+      const sibling = nextElementSibling(node)
+      if (hasClass(sibling, BETA_BADGE_CLASS)) {
+        // The badge renders "(enterprise, beta)" for both of us.
+        deferredToBadge.add(sibling)
+        return inner
+      }
       return `${inner} ${ENTERPRISE_MARKER}`
     },
   }
+
+  const betaBadge = {
+    filter: (node) => hasClass(node, BETA_BADGE_CLASS),
+    replacement: (content, node) =>
+      deferredToBadge.has(node)
+        ? formatStatusMarker([ENTERPRISE_STATUS, BETA_STATUS])
+        : formatStatusMarker([BETA_STATUS]),
+  }
+
+  return { enterpriseFeature, betaBadge }
 }
 
-module.exports.createEnterpriseFeatureRule = createEnterpriseFeatureRule
+module.exports.createEnterpriseFeatureRules = createEnterpriseFeatureRules
+module.exports.formatStatusMarker = formatStatusMarker
 module.exports.ENTERPRISE_MARKER = ENTERPRISE_MARKER
 
 module.exports.register = function () {
@@ -452,7 +517,9 @@ module.exports.register = function () {
 
       // Markdown table conversion
       // Keep the enterprise-license signal, which is otherwise CSS-only.
-      turndownInstance.addRule('enterprise-feature', createEnterpriseFeatureRule())
+      const enterpriseRules = createEnterpriseFeatureRules()
+      turndownInstance.addRule('enterprise-feature', enterpriseRules.enterpriseFeature)
+      turndownInstance.addRule('beta-badge', enterpriseRules.betaBadge)
 
       turndownInstance.addRule('tables', {
         filter: (node) => {

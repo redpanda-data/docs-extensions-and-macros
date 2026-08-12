@@ -139,9 +139,14 @@ In HTML, the enterprise signal is carried by the span's CSS class and its toolti
 Enable [Tiered Storage](../manage/tiered-storage.md) (enterprise) today.
 ----
 
-This applies to the inline macro. The tables from `enterprise_features` need no marker, because their expiration column already states the licensing behavior as text.
+A feature that is also marked `beta: true` gets one combined marker rather than two adjacent parentheticals:
 
-The beta badge needs no special handling either: its label is real text content, so it converts to `(beta)`.
+[,markdown]
+----
+Enable [Stretch Clusters](../deploy/stretch-clusters.md) (enterprise, beta) today.
+----
+
+This applies to the inline macro. The tables from `enterprise_features` need no enterprise marker, because their expiration column already states the licensing behavior as text. A beta badge in a table converts to `(beta)` on its own.
 
 === Registration
 
