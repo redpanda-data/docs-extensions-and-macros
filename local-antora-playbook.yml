@@ -33,6 +33,9 @@ asciidoc:
   - '@asciidoctor/tabs'
   - './macros/glossary'
   - './macros/config-ref'
+  - './macros/badge'
+  - './macros/enterprise'
+  - './macros/prop'
   - './macros/helm-ref'
   - './macros/rp-connect-components'
   - './asciidoc-extensions/add-line-numbers-highlights'
@@ -48,7 +51,7 @@ antora:
     data:
       sets:
         docker_labs:
-          component: redpanda-labs
+          component: labs
           filter: docker-compose
           env_type: Docker
           attribute_name: docker-labs-index
@@ -96,4 +99,5 @@ antora:
   - require: './extensions/generate-fields-only-pages'
     enabled: true
   - require: './extensions/aggregate-terms'
+  - require: './extensions/property-page-index'
 

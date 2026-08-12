@@ -828,6 +828,48 @@ automation
   })
 
 /**
+ * @description One-time migration of plain-backtick property mentions to the
+ * prop: inline macro, so property tooltips become opt-in. Only names that
+ * exist in the published property reference JSON AND contain a separator
+ * (_ or .) are converted. Separator-free names such as admin, brokers, rack,
+ * retries, and superusers are the ambiguous words that motivated opt-in
+ * marking, so they are always left for a human. Dry run unless --write is given.
+ *
+ * @example
+ * # Preview the conversion from a docs repo checkout
+ * npx doc-tools generate migrate-property-refs --properties modules/reference/attachments/redpanda-properties-v26.2.1.json
+ *
+ * # Apply it
+ * npx doc-tools generate migrate-property-refs --properties modules/reference/attachments/redpanda-properties-v26.2.1.json --write
+ */
+automation
+  .command('migrate-property-refs')
+  .description('One-time migration of `property_name` prose mentions to prop:property_name[] macros. Dry run unless --write is given.')
+  .requiredOption('--properties <path>', 'Path to the published redpanda-properties JSON to validate names against')
+  .option('--docs-dir <path>', 'Docs repo root containing modules/', '.')
+  .option('--config-refs', 'Also convert config_ref macro calls to prop macro calls')
+  .option('--write', 'Apply changes (default is a dry run that only reports)')
+  .action((options) => {
+    const { migrate } = require('../tools/migrate-property-refs.js')
+    const propertiesJson = JSON.parse(fs.readFileSync(path.resolve(options.properties), 'utf8'))
+    const result = migrate({
+      docsDir: path.resolve(options.docsDir),
+      propertiesJson,
+      write: Boolean(options.write),
+      configRefs: Boolean(options.configRefs),
+    })
+    result.changed
+      .sort((a, b) => b.count - a.count)
+      .forEach(({ file, count }) => console.log(`${String(count).padStart(4)}  ${file}`))
+    console.log(`\n${options.write ? 'Converted' : 'Would convert'} ${result.conversions} mention(s) across ${result.changed.length} of ${result.files} files.`)
+    console.log(`Left alone (ambiguous, no separator): ${result.ambiguous.join(', ')}`)
+    if (result.skippedConfigRefs && result.skippedConfigRefs.length) {
+      console.log(`config_ref calls left alone (names not in the published JSON): ${result.skippedConfigRefs.join(', ')}`)
+    }
+    if (!options.write && result.conversions) console.log('Re-run with --write to apply.')
+  })
+
+/**
  * generate property-docs
  *
  * @description
@@ -2133,5 +2175,131 @@ automation
     }
   })
 
+const validation = new Command('validate').description('Validate docs data against internal sources of truth')
+
+/**
+ * @description Checks the enterprise features registry (the shared component's
+ * enterprise-features.yml in the docs repo) against the internal sources of
+ * truth: the license_required_feature enum and config::enterprise<> property
+ * wrappers in redpanda core, the enterprise plugins in connect info.csv, and
+ * the hand-maintained disable-enterprise-features.adoc table.
+ * Exit codes: 0 clean, 1 drift found (error or needs-human findings), 2 execution error.
+ *
+ * @why A feature must only be documented as enterprise under its approved
+ * external name. This check catches new license-gated features in core that
+ * have no registry entry yet, registry pointers that no longer match core,
+ * and stale connect enterprise lists.
+ *
+ * @example
+ * # Check everything against the default remote sources
+ * npx doc-tools validate enterprise-features
+ *
+ * # Check a local registry file (for example, in docs repo CI)
+ * npx doc-tools validate enterprise-features --registry shared/modules/ROOT/partials/enterprise-features.yml
+ *
+ * # Regenerate the rpk name-mapping partial
+ * npx doc-tools validate enterprise-features --write-mapping modules/get-started/partials/licensing/feature-name-mapping.adoc
+ *
+ * @requirements
+ * Network access to raw.githubusercontent.com for any source not supplied
+ * with a local path option.
+ */
+validation
+  .command('enterprise-features')
+  .description('Check the enterprise features registry against core, connect, and docs sources of truth')
+  .option('--registry <path>', 'Local path to enterprise-features.yml (default: fetch from docs repo main)')
+  .option('--tag <ref>', 'Redpanda git ref for the core headers', 'dev')
+  .option('--connect-ref <ref>', 'Connect git ref for info.csv', 'main')
+  .option('--docs-ref <ref>', 'Docs repo git ref for remote fetches', 'main')
+  .option('--disable-page <path>', 'Local path to disable-enterprise-features.adoc (default: fetch from docs repo)')
+  .option('--antora <path>', 'Local path to rp-connect-docs antora.yml (default: fetch from rp-connect-docs main)')
+  .option('--properties <path>', 'Local path to a generated cluster-properties JSON; enables existence checks for gating properties')
+  .option('--skip-connect', 'Skip the connect info.csv comparison')
+  .option('--format <format>', 'Output format: text or json', 'text')
+  .option('--write-mapping <path>', 'Write the internal-to-external name mapping partial to this path')
+  .action(async (options) => {
+    const { runChecks, buildMappingPartial } = require('../tools/enterprise-features/verify')
+    const { extractAntoraEnterpriseComponents } = require('../tools/enterprise-features/parsers')
+    const yamlLib = require('js-yaml')
+
+    const RAW = 'https://raw.githubusercontent.com'
+    // Sources that fail to load are reported as error-level findings rather
+    // than silently skipped, so CI cannot pass on a check that never ran.
+    const failedSources = []
+    async function fetchText (url, sourceName) {
+      const resp = await fetch(url)
+      if (!resp.ok) {
+        if (sourceName) {
+          failedSources.push({ level: 'error', check: 'fetch', message: `Could not load ${sourceName} (${url}): ${resp.status} ${resp.statusText}. The related checks did not run.` })
+          return undefined
+        }
+        throw new Error(`Failed to fetch ${url}: ${resp.status} ${resp.statusText}`)
+      }
+      return resp.text()
+    }
+    const readLocal = (p) => fs.readFileSync(path.resolve(p), 'utf8')
+
+    try {
+      const registryYaml = options.registry
+        ? readLocal(options.registry)
+        : await fetchText(`${RAW}/redpanda-data/docs/${options.docsRef}/shared/modules/ROOT/partials/enterprise-features.yml`)
+      const coreHeader = await fetchText(`${RAW}/redpanda-data/redpanda/${options.tag}/src/v/features/enterprise_features.h`, 'core enterprise_features.h')
+      const configurationHeader = await fetchText(`${RAW}/redpanda-data/redpanda/${options.tag}/src/v/config/configuration.h`, 'core configuration.h')
+      const infoCsv = options.skipConnect
+        ? undefined
+        : await fetchText(`${RAW}/redpanda-data/connect/${options.connectRef}/internal/plugins/info.csv`, 'connect info.csv')
+      const disablePage = options.disablePage
+        ? readLocal(options.disablePage)
+        : await fetchText(`${RAW}/redpanda-data/docs/${options.docsRef}/modules/get-started/pages/licensing/disable-enterprise-features.adoc`, 'disable-enterprise-features.adoc')
+      const antoraYaml = options.antora
+        ? readLocal(options.antora)
+        : await fetchText(`${RAW}/redpanda-data/rp-connect-docs/main/antora.yml`, 'rp-connect-docs antora.yml')
+      const antoraEnterpriseComponents = antoraYaml
+        ? extractAntoraEnterpriseComponents(yamlLib.load(antoraYaml))
+        : undefined
+
+      let allPropertyNames
+      if (options.properties) {
+        const propertyData = JSON.parse(readLocal(options.properties))
+        allPropertyNames = Object.keys(propertyData.properties || propertyData)
+      }
+
+      const { findings, features, enumValues } = runChecks({
+        registryYaml,
+        coreHeader,
+        configurationHeader,
+        infoCsv,
+        antoraEnterpriseComponents,
+        disablePage,
+        allPropertyNames,
+      })
+      findings.push(...failedSources)
+
+      if (options.writeMapping) {
+        const partial = buildMappingPartial(features, enumValues)
+        fs.mkdirSync(path.dirname(path.resolve(options.writeMapping)), { recursive: true })
+        fs.writeFileSync(path.resolve(options.writeMapping), `${partial}\n`)
+        console.log(`Wrote name mapping partial to ${options.writeMapping}`)
+      }
+
+      const drift = findings.filter((f) => f.level === 'error' || f.level === 'needs-human')
+      if (options.format === 'json') {
+        console.log(JSON.stringify({ findings, drift: drift.length > 0 }, null, 2))
+      } else {
+        for (const level of ['error', 'needs-human', 'info']) {
+          for (const f of findings.filter((entry) => entry.level === level)) {
+            console.log(`${level.toUpperCase()} [${f.check}] ${f.message}`)
+          }
+        }
+        console.log(drift.length ? `\n${drift.length} finding(s) need attention.` : '\nRegistry is in sync with all checked sources.')
+      }
+      process.exit(drift.length ? 1 : 0)
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(2)
+    }
+  })
+
 programCli.addCommand(automation)
+programCli.addCommand(validation)
 programCli.parse(process.argv)
