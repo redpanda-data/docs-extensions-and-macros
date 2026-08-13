@@ -7,7 +7,7 @@ const fs = require('fs')
 const os = require('os')
 const semver = require('semver')
 const { findRepoRoot } = require('../../cli-utils/doc-tools-utils')
-const { generateRpkDocs, applyOverridesToTree, resolveReferences, shouldExcludeCommand, shouldUsePartialDir } = require('./generate-rpk-docs')
+const { generateRpkDocs, applyOverridesToTree, resolveReferences, shouldExcludeCommand, shouldUsePartialDir, derivePartialsDir } = require('./generate-rpk-docs')
 const { detectLinuxOnlyFromSource, warnIfDetectionLooksBroken } = require('./detect-platform-commands')
 const { generateRpkDiff, printDiffReport, generateWhatsNewSection, flattenToMap } = require('./report-delta')
 const { loadAndValidateOverrides, ValidationResult } = require('./validate-overrides')
@@ -1914,26 +1914,14 @@ async function handleRpkDocsGeneration(options = {}) {
   const defaultOutputDir = path.join(repoRoot, 'modules', 'reference', 'pages', 'rpk')
   const finalOutputDir = outputDir || defaultOutputDir
 
-  // cloudSecretDir should be relative to outputDir, not repoRoot
-  // If outputDir is .../modules/reference/pages/rpk, cloudSecretDir should be .../modules/reference/partials
-  let defaultCloudSecretDir
-  if (outputDir) {
-    // Check if outputDir follows docs repo structure (ends with pages/rpk or similar)
-    const normalizedOutput = finalOutputDir.replace(/\\/g, '/')
-    if (normalizedOutput.includes('/pages/')) {
-      // Derive cloudSecretDir from outputDir by going up from pages/rpk to partials
-      const pagesIndex = normalizedOutput.lastIndexOf('/pages/')
-      const referenceDir = normalizedOutput.substring(0, pagesIndex)
-      defaultCloudSecretDir = path.join(referenceDir, 'partials')
-    } else {
-      // Arbitrary output directory - use sibling partials directory
-      const outputParent = path.dirname(finalOutputDir)
-      defaultCloudSecretDir = path.join(outputParent, 'partials')
-    }
-  } else {
-    defaultCloudSecretDir = path.join(repoRoot, 'modules', 'reference', 'partials')
-  }
-  const finalCloudSecretDir = cloudSecretDir || defaultCloudSecretDir
+  // Partials live relative to outputDir, not repoRoot: for the docs layout
+  // (.../modules/reference/pages/rpk) that is .../modules/reference/partials,
+  // and for an arbitrary --output-dir it is a partials dir beside the output.
+  // derivePartialsDir owns that rule so each consumer does not re-derive it.
+  const derivedPartialsDir = outputDir
+    ? derivePartialsDir(finalOutputDir)
+    : path.join(repoRoot, 'modules', 'reference', 'partials')
+  const finalCloudSecretDir = cloudSecretDir || derivedPartialsDir
 
   // nav.adoc lives at modules/ROOT/nav.adoc relative to the repo root
   const navFile = path.join(repoRoot, 'modules', 'ROOT', 'nav.adoc')
@@ -2139,6 +2127,7 @@ async function handleRpkDocsGeneration(options = {}) {
         overrides: overridesData,
         outputDir: finalOutputDir,
         cloudSecretDir: finalCloudSecretDir,
+        envPartialDir: derivedPartialsDir,
         rpkVersion,
         pluginVersions,
         draftMissing,
@@ -2526,6 +2515,7 @@ async function handleRpkDocsGeneration(options = {}) {
       overrides: overridesData,
       outputDir: finalOutputDir,
       cloudSecretDir: finalCloudSecretDir,
+      envPartialDir: derivedPartialsDir,
       rpkVersion,
       pluginVersions,
       draftMissing,
