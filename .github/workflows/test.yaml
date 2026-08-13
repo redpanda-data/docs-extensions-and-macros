@@ -287,8 +287,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # A CLI --testPathIgnorePatterns REPLACES the array in jest.config.js, it
+      # does not add to it. So this list has to repeat the config's own entries:
+      # without /node_modules/ jest walks dependency test files, and without
+      # cgo-detection.test.js the network-dependent CGO end-to-end test runs
+      # here, where a GitHub download hiccup fails PRs that never touched it.
+      # That test has its own workflow (test-cgo-detection.yml) and npm script
+      # (npm run test:cgo), which run it as a node script.
       - name: Run all tests
-        run: npm test -- --testPathIgnorePatterns="cli-contract.test.js|integration.test.js" --maxWorkers=2
+        run: npm test -- --testPathIgnorePatterns="/node_modules/|cli-contract.test.js|integration.test.js|cgo-detection.test.js" --maxWorkers=2
 
   # Summary job that all other jobs depend on
   test-summary:

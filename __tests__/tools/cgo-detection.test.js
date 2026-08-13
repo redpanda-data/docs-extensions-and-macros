@@ -14,6 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execSync, spawnSync } = require('child_process');
 const os = require('os');
 
@@ -74,6 +75,41 @@ function getPlatformInfo() {
   };
 }
 
+/**
+ * Verify a downloaded asset against the .sha256 published beside it.
+ *
+ * Catches a truncated or substituted download before tar reports it as a
+ * generic archive error. Hashing in node keeps this working on both Linux
+ * (sha256sum) and macOS (shasum), which have different CLIs.
+ */
+function verifyChecksum(filePath, sha256Url, assetName) {
+  let published;
+  try {
+    published = execSync(`curl -sSL --fail --retry 3 --retry-delay 2 "${sha256Url}"`, {
+      stdio: ['pipe', 'pipe', 'pipe']
+    }).toString();
+  } catch (err) {
+    // No checksum published for this asset: keep going rather than fail the
+    // run over a missing side file, since the archive itself still has to
+    // extract and execute below.
+    log(`  Warning: no checksum available at ${sha256Url}, skipping verification`);
+    return;
+  }
+
+  // Format is "<hash>  <filename>"; take the first token.
+  const expected = published.trim().split(/\s+/)[0];
+  const actual = crypto
+    .createHash('sha256')
+    .update(fs.readFileSync(filePath))
+    .digest('hex');
+
+  if (expected && expected !== actual) {
+    throw new Error(
+      `checksum mismatch for ${assetName}\n  expected: ${expected}\n  actual:   ${actual}`
+    );
+  }
+}
+
 function downloadBinary(version, type) {
   const platform = getPlatformInfo();
   const binaryName = type === 'cgo' ? 'redpanda-connect-cgo' : 'redpanda-connect-cloud';
@@ -85,7 +121,18 @@ function downloadBinary(version, type) {
   const tarPath = path.join(TEST_DIR, `${type}.tar.gz`);
 
   try {
-    execSync(`curl -sL "${url}" -o "${tarPath}"`, { stdio: 'pipe' });
+    // --fail matters: without it curl exits 0 on an HTTP error, writes the
+    // error body into the .tar.gz, and the failure surfaces from tar as
+    // "gzip: stdin: not in gzip format" -- which reads like a corrupt archive
+    // rather than a 404 or a rate limit. --retry covers the transient statuses
+    // (429, 5xx) that GitHub returns when throttling release downloads.
+    execSync(
+      `curl -sSL --fail --retry 3 --retry-delay 2 "${url}" -o "${tarPath}"`,
+      { stdio: 'pipe' }
+    );
+
+    verifyChecksum(tarPath, `${url}.sha256`, assetName);
+
     execSync(`tar -xzf "${tarPath}" -C "${TEST_DIR}"`, { stdio: 'pipe' });
 
     // Find extracted binary
