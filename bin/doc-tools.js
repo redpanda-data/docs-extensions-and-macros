@@ -2165,17 +2165,28 @@ validation
     const yamlLib = require('js-yaml')
 
     const RAW = 'https://raw.githubusercontent.com'
+    // Some sources live in private repos (docs, rp-connect-docs), which
+    // raw.githubusercontent serves as 404 rather than 401 when unauthenticated
+    // — indistinguishable from a genuinely missing file. Send a token when one
+    // is available so those fetches resolve; public sources are unaffected.
+    const { getGitHubToken } = require('../cli-utils/github-token')
+    const ghToken = getGitHubToken()
     // Sources that fail to load are reported as error-level findings rather
     // than silently skipped, so CI cannot pass on a check that never ran.
     const failedSources = []
     async function fetchText (url, sourceName) {
-      const resp = await fetch(url)
+      const resp = await fetch(url, ghToken ? { headers: { Authorization: `Bearer ${ghToken}` } } : undefined)
       if (!resp.ok) {
+        // A 404 with no token is the signature of an unauthenticated private
+        // repo, so say so instead of leaving it to look like a missing file.
+        const hint = resp.status === 404 && !ghToken
+          ? ' If this source is in a private repository, set GITHUB_TOKEN (or REDPANDA_GITHUB_TOKEN / ACTIONS_BOT_TOKEN) so the fetch can authenticate.'
+          : ''
         if (sourceName) {
-          failedSources.push({ level: 'error', check: 'fetch', message: `Could not load ${sourceName} (${url}): ${resp.status} ${resp.statusText}. The related checks did not run.` })
+          failedSources.push({ level: 'error', check: 'fetch', message: `Could not load ${sourceName} (${url}): ${resp.status} ${resp.statusText}. The related checks did not run.${hint}` })
           return undefined
         }
-        throw new Error(`Failed to fetch ${url}: ${resp.status} ${resp.statusText}`)
+        throw new Error(`Failed to fetch ${url}: ${resp.status} ${resp.statusText}.${hint}`)
       }
       return resp.text()
     }
@@ -2193,9 +2204,14 @@ validation
       const disablePage = options.disablePage
         ? readLocal(options.disablePage)
         : await fetchText(`${RAW}/redpanda-data/docs/${options.docsRef}/modules/get-started/pages/licensing/disable-enterprise-features.adoc`, 'disable-enterprise-features.adoc')
-      const antoraYaml = options.antora
-        ? readLocal(options.antora)
-        : await fetchText(`${RAW}/redpanda-data/rp-connect-docs/main/antora.yml`, 'rp-connect-docs antora.yml')
+      // Only checkConnect consumes this, so --skip-connect has to skip it too.
+      // Fetching it anyway meant --skip-connect still reached a private repo
+      // and failed the run on a source none of the enabled checks used.
+      const antoraYaml = options.skipConnect
+        ? undefined
+        : options.antora
+          ? readLocal(options.antora)
+          : await fetchText(`${RAW}/redpanda-data/rp-connect-docs/main/antora.yml`, 'rp-connect-docs antora.yml')
       const antoraEnterpriseComponents = antoraYaml
         ? extractAntoraEnterpriseComponents(yamlLib.load(antoraYaml))
         : undefined
