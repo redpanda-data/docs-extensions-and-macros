@@ -1280,6 +1280,56 @@ automation
   })
 
 /**
+ * generate rpk-env-partial
+ *
+ * @description
+ * Generates the -X option -> RPK_* environment variable mapping table as an
+ * AsciiDoc partial from rpk's own -X option data, so the table cannot drift
+ * from the CLI. Prefers the structured x_options array in `rpk --print-tree`
+ * (which carries the env var names rpk itself derives) and falls back to
+ * parsing `-X list` text for rpk versions that predate it. Hidden -X options
+ * appear in neither source, so they are excluded automatically.
+ *
+ * The main rpk-docs pipeline also writes this partial from the tree it
+ * already holds; this standalone command is for targeted refreshes without
+ * a full generation run.
+ *
+ * @example
+ * # Generate for a release tag (sparse-clones redpanda, builds rpk with Go)
+ * npx doc-tools generate rpk-env-partial --ref v26.2.1 --output modules/reference/partials/rpk-env-vars.adoc
+ *
+ * # Use a local source checkout (as-is, no checkout changes), an existing
+ * # rpk binary, or a versioned tree snapshot (no clone or build at all)
+ * npx doc-tools generate rpk-env-partial --from-source ~/redpanda --output modules/reference/partials/rpk-env-vars.adoc
+ * npx doc-tools generate rpk-env-partial --rpk-bin "$(command -v rpk)" --output modules/reference/partials/rpk-env-vars.adoc
+ * npx doc-tools generate rpk-env-partial --from-json docs-data/rpk-v26.2.1.json --output modules/reference/partials/rpk-env-vars.adoc
+ */
+automation
+  .command('rpk-env-partial')
+  .description('Generate the -X -> RPK_* env var mapping partial from rpk -X list output.')
+  .option('-r, --ref <ref>', 'Git branch or tag to build rpk from (e.g., dev, v26.2.1). Clones from GitHub.')
+  .option('--from-source <path>', 'Path to local rpk source (src/go/rpk directory)')
+  .option('--rpk-bin <path>', 'Path to an existing rpk binary (skips clone and build)')
+  .option('--from-json <path>', 'Versioned tree snapshot from docs-data (skips clone and build; requires a snapshot with x_options)')
+  .option('--output <path>', 'Path to write the partial to', 'modules/reference/partials/rpk-env-vars.adoc')
+  .action((options) => {
+    try {
+      const { handleXEnvPartialGeneration } = require('../tools/rpk-docs/generate-x-env-partial.js')
+      const result = handleXEnvPartialGeneration({
+        ref: options.ref,
+        fromSource: options.fromSource,
+        rpkBin: options.rpkBin,
+        fromJson: options.fromJson,
+        output: options.output
+      })
+      console.log(`Wrote ${result.keyCount} -X option mappings to ${result.output} (source: ${result.source})`)
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
  * generate rpk-plugin-stubs
  *
  * @description

@@ -299,6 +299,7 @@ IMPORTANT: This documentation is auto-generated. Do not edit manually. Run \`npm
     'property-docs',
     'metrics-docs',
     'rpk-docs',
+    'rpk-env-partial',
     'rpcn-connector-docs',
     'helm-spec',
     'cloud-regions',
