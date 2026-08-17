@@ -85,6 +85,7 @@ const SHA256_RE = /^[0-9a-f]{64}$/i;
  * to the caller: a 404 and a 500 need different handling here.
  */
 function fetchWithStatus(url) {
+  fs.mkdirSync(TEST_DIR, { recursive: true });
   const bodyPath = path.join(TEST_DIR, `.fetch-${crypto.randomBytes(6).toString('hex')}`);
   try {
     const status = execFileSync(
