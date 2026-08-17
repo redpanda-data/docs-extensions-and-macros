@@ -1,0 +1,32 @@
+{
+  "name": "doc-tools",
+  "version": "1.0.0",
+  "description": "Official alias for the Redpanda doc-tools CLI. Delegates to @redpanda-data/docs-extensions-and-macros, which owns the doc-tools and doc-tools-mcp bins.",
+  "keywords": [
+    "redpanda",
+    "doc-tools",
+    "documentation"
+  ],
+  "license": "ISC",
+  "author": {
+    "name": "Redpanda Docs Team"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/redpanda-data/docs-extensions-and-macros",
+    "directory": "doc-tools-alias"
+  },
+  "bin": {
+    "doc-tools": "./bin/doc-tools.js",
+    "doc-tools-mcp": "./bin/doc-tools-mcp.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@redpanda-data/docs-extensions-and-macros": "^5.11.0"
+  }
+}

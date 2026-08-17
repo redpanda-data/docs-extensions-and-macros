@@ -44,8 +44,10 @@ jobs:
               - 'tools/**'
               - 'cli-utils/**'
               - 'bin/**'
+              - 'doc-tools-alias/**'
               - '__tests__/tools/**'
               - '__tests__/cli-utils/**'
+              - '__tests__/doc-tools-alias/**'
               - '__tests__/**/*tool*.test.js'
             property_extractor:
               - 'tools/property-extractor/**/*.py'
@@ -208,7 +210,7 @@ jobs:
         run: npm ci
 
       - name: Run tools tests
-        run: npm test -- __tests__/tools/ __tests__/cli-utils/ __tests__/mcp/ --passWithNoTests
+        run: npm test -- __tests__/tools/ __tests__/cli-utils/ __tests__/doc-tools-alias/ __tests__/mcp/ --passWithNoTests
 
   test-property-extractor:
     needs: detect-changes
