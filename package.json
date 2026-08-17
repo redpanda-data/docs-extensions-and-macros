@@ -24,6 +24,7 @@
     "build": "antora --to-dir docs --fetch local-antora-playbook.yml",
     "serve": "wds --node-resolve --open preview/test/ --watch --root-dir docs",
     "test": "jest",
+    "test:unit": "jest --config jest.unit.config.js",
     "test:e2e": "jest __tests__/e2e/",
     "test:mcp": "jest __tests__/mcp/",
     "test:mcp:integration": "jest __tests__/mcp/integration.test.js",
