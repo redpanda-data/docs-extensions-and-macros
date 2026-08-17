@@ -458,3 +458,61 @@ describe('ensureHeadingSeparation', () => {
     expect(ensureHeadingSeparation(ok)).toBe(ok);
   });
 });
+
+describe('markdown fence awareness: fence interiors pass through byte-identical', () => {
+  const {
+    escapePlaceholderBraces,
+    ensureHeadingSeparation,
+    hasStructuralHeadings,
+    hasMarkdownHeadings,
+    firstHeadingDepth,
+  } = renderConnectDescription;
+
+  // A fenced example whose interior exercises every rewriter: a glued
+  // #-comment line (ensureHeadingSeparation must NOT push a blank line into
+  // the example), a {token} placeholder (escapePlaceholderBraces must NOT
+  // prepend a backslash — `\{endpoint}` renders with a literal backslash),
+  // and a `==` line (the scanners must not count it as a heading).
+  const fenceInterior = [
+    '## endpoint config',
+    'url: {endpoint}/v1/logs',
+    '== not a heading',
+  ].join('\n');
+  const body = [
+    'Prose with a real {placeholder} outside.',
+    '```yaml',
+    fenceInterior,
+    '```',
+    '',
+    'Trailing prose {token}.',
+  ].join('\n');
+
+  test('escapePlaceholderBraces and ensureHeadingSeparation leave the fence interior untouched, prose still escaped (otlp_http corruption case)', () => {
+    const out = escapePlaceholderBraces(ensureHeadingSeparation(body));
+    // Byte-identical passthrough of the whole fenced block.
+    expect(out).toContain('```yaml\n' + fenceInterior + '\n```');
+    // Prose outside the fence still gets the escape.
+    expect(out).toContain('Prose with a real \\{placeholder} outside.');
+    expect(out).toContain('Trailing prose \\{token}.');
+  });
+
+  test('renderConnectDescription end-to-end never corrupts a fenced example', () => {
+    const out = renderConnectDescription({ type: 'output', name: 'otlp_http', description: body });
+    expect(out).toContain('url: {endpoint}/v1/logs');
+    expect(out).not.toContain('\\{endpoint}');
+    expect(out).toContain('```yaml\n## endpoint config');
+  });
+
+  test('the heading scanners ignore fence interiors (``` and ~~~)', () => {
+    expect(hasStructuralHeadings(body)).toBe(false);
+    expect(hasMarkdownHeadings(body)).toBe(false);
+    expect(firstHeadingDepth(body)).toBe(null);
+    expect(hasMarkdownHeadings('Prose.\n\n~~~\n## a comment\n~~~')).toBe(false);
+  });
+
+  test('delimiters keep layered state: a ---- inside a fence is content, not a block opener', () => {
+    // If the ---- leaked into block state, the real heading after the fence
+    // would be swallowed as "inside a listing block".
+    expect(hasStructuralHeadings('```\n----\n```\n\n== Real heading\n\nProse.')).toBe(true);
+  });
+});

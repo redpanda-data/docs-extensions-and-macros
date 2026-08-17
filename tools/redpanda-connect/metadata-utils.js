@@ -189,4 +189,5 @@ module.exports = {
   descriptionIncludeLine,
   sectionHeadings,
   lostMetadataSections,
+  FENCE_DELIMITER,
 };
