@@ -1,6 +1,8 @@
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const yaml = require('js-yaml');
 
 module.exports.register = function () {
+  raiseListenerLimit(this)
   const logger = this.getLogger('collect-bloblang-samples');
 
   this.on('contentClassified', ({ contentCatalog }) => {

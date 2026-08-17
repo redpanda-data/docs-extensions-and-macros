@@ -3,7 +3,19 @@
 :type: {{type}}
 {{#if support}}:support: {{support}}{{/if}}
 :categories: [{{join categories ", "}}]
-:description: {{#if summary}}{{{summary}}}{{else if description}}{{description}}{{else}}// TODO: Missing description. Add a description in the overrides file or source data.{{/if}}
+{{#if summary}}
+// tag::meta[]
+:description: {{{summary}}}
+// end::meta[]
+{{else if description}}
+// tag::meta[]
+:description: {{description}}
+// end::meta[]
+{{/if}}
+{{!-- No fallback line when neither exists: an emitted TODO would become
+     the attribute VALUE and stubs would inherit it into their meta tags.
+     Missing descriptions are the tracked editorial backlog
+     (cloud-docs .github/description-allowlist.txt). --}}
 
 component_type_dropdown::[]
 

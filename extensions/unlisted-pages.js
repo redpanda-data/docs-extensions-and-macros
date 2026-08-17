@@ -1,6 +1,9 @@
 'use strict';
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const { addToNavigation, unlistedPagesHeading = 'Unlisted Pages' } = config;
   const logger = this.getLogger('unlisted-pages-extension');
 

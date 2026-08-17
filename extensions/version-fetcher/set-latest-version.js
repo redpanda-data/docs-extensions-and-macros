@@ -1,6 +1,9 @@
 'use strict';
 
+const { raiseListenerLimit } = require('../util/raise-listener-limit')
+
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const GetLatestRedpandaVersion = require('./get-latest-redpanda-version');
   const GetLatestConsoleVersion = require('./get-latest-console-version');
   const GetLatestDockerTag = require('./fetch-latest-docker-tag');

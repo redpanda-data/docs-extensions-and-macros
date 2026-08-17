@@ -22,3 +22,12 @@ mcp-usage-stats.json
 # Development rpk JSON files
 docs-data/rpk-vdev.json
 docs-data/rpk-vlocal.json
+
+# E2E fixture sites are real content trees; keep them tracked despite modules/
+!__tests__/fixtures/**
+
+# The preview site is a real content tree too; keep it tracked despite modules/
+!preview/**
+# Property extractor working data (cloned/built at run time)
+tools/property-extractor/tmp/
+tools/property-extractor/tree-sitter/tree-sitter-cpp/

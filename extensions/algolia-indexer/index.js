@@ -1,6 +1,7 @@
 'use strict'
 
 const generateIndex = require('./generate-index')
+const { raiseListenerLimit } = require('../util/raise-listener-limit')
 const algoliasearch = require('algoliasearch')
 const http = require('http')
 const https = require('https')
@@ -21,6 +22,7 @@ function register ({
     ...unknownOptions
   }
 }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('algolia-indexer-extension')
 
   // Validate required environment variables

@@ -1,5 +1,7 @@
 'use strict'
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 /**
  * Generates FAQPage JSON-LD structured data for SEO.
  *
@@ -147,6 +149,7 @@ function generateFaqJsonLd(faqs, baseUrl) {
 }
 
 module.exports.register = function () {
+  raiseListenerLimit(this)
   const logger = this.getLogger('add-faq-structured-data-extension')
   let playbook
 
