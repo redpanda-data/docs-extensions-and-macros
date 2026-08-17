@@ -601,3 +601,66 @@ describe('generator blanks description partials orphaned by connectors deleted u
     expect(fs.readFileSync(orphanPath, 'utf8')).toContain('intentionally empty');
   });
 });
+
+describe('summaries are brace-escaped like description bodies', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-summary-braces');
+  let originalCwd, templateFile, dataFile;
+  const dPath = path.join(
+    tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'braced_summary.adoc'
+  );
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+    const data = {
+      outputs: [
+        {
+          name: 'braced_summary',
+          type: 'output',
+          summary: 'Sends batches to {endpoint} for processing.',
+          description: 'Longer prose.',
+          config: { children: [{ name: 'x', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('the emitted partial escapes {placeholder} in both the body summary and the :description: attribute', () => {
+    return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
+      const content = fs.readFileSync(dPath, 'utf8');
+      // Body copy of the summary.
+      expect(content).toContain('Sends batches to \\{endpoint} for processing.');
+      // Attribute copy: without the escape Asciidoctor consumes {endpoint}
+      // as a missing attribute reference and drops it from search snippets.
+      expect(content).toContain(':description: Sends batches to \\{endpoint} for processing.');
+      expect(content).not.toContain(':description: Sends batches to {endpoint}');
+    });
+  });
+
+  renderTest('Asciidoctor round-trips the escaped summary back to literal braces', () => {
+    return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
+      const page = [
+        '= braced_summary',
+        `include::${dPath}[tag=attrs]`,
+        '',
+        `include::${dPath}[tag=body]`,
+      ].join('\n');
+      const pagePath = path.join(tmpDir, 'page.adoc');
+      fs.writeFileSync(pagePath, page, 'utf8');
+      const doc = asciidoctor.loadFile(pagePath, { safe: 'unsafe' });
+      expect(doc.getAttribute('description')).toBe('Sends batches to {endpoint} for processing.');
+      expect(doc.convert()).toContain('{endpoint}');
+    });
+  });
+});

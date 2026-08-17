@@ -26,7 +26,7 @@ const DEFAULT_METADATA_TEMPLATE = path.resolve(__dirname, './templates/metadata-
 // the metadata partial, this is rewritten on every run so summary/description
 // changes upstream flow into already-published pages that include it.
 const DEFAULT_DESCRIPTION_TEMPLATE = path.resolve(__dirname, './templates/descriptions-partials.hbs');
-const { hasStructuralHeadings, hasMarkdownHeadings, firstHeadingDepth, LONG_HEADINGLESS_THRESHOLD } = require('./helpers/renderConnectDescription.js');
+const { hasStructuralHeadings, hasMarkdownHeadings, firstHeadingDepth, escapePlaceholderBraces, LONG_HEADINGLESS_THRESHOLD } = require('./helpers/renderConnectDescription.js');
 
 // Banner-only content written to a metadata partial when its `== Metadata`
 // section is removed upstream. Kept as an AsciiDoc comment so the file renders
@@ -521,9 +521,16 @@ async function generateRpcnConnectorDocs(options) {
       // the `== Metadata` block replaced by its own partial include). Emitted
       // for every connector type that has reference pages so a page that
       // includes it always shows the current summary/description instead of
-      // first-draft text.
+      // first-draft text. The summary is brace-escaped here, the same way
+      // renderConnectDescription escapes the description body: the template
+      // emits it raw in both the body and the :description: attribute, where
+      // an unescaped {placeholder} is silently consumed as a missing
+      // attribute reference.
+      const descriptionItem = typeof item.summary === 'string'
+        ? { ...item, summary: escapePlaceholderBraces(item.summary) }
+        : item;
       const descriptionOut = handlebars
-        .compile('{{> description summary=summary version=version description=description type=type typeDir=typeDir name=name}}')(item);
+        .compile('{{> description summary=summary version=version description=description type=type typeDir=typeDir name=name}}')(descriptionItem);
 
       if (CONNECTOR_DESCRIPTION_TYPE_DIRS.has(typeDir)) {
         visitedDescriptionPartials.add(`${typeDir}/${name}`);
