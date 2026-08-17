@@ -1,0 +1,99 @@
+const { describe, it, expect } = require('@jest/globals')
+const { execFileSync } = require('child_process')
+const path = require('path')
+
+// The set-latest-version extension loads @octokit/rest, @octokit/plugin-retry,
+// and semver via dynamic import(), which Jest cannot evaluate without
+// --experimental-vm-modules. These tests therefore drive the extension in a
+// plain Node child process through a fixture harness that mocks all
+// version-fetcher modules (no network access).
+const harnessPath = path.join(__dirname, 'fixtures', 'set-latest-version-harness.js')
+
+function runExtension (scenario = {}) {
+  const stdout = execFileSync(process.execPath, [harnessPath, JSON.stringify(scenario)], {
+    encoding: 'utf8',
+  })
+  return JSON.parse(stdout)
+}
+
+describe('set-latest-version extension', () => {
+  it('emits -version-short (major.minor) alongside -version and -tag for semver versions', () => {
+    const { versionAttributes, latestAttributes, errors } = runExtension()
+
+    expect(errors).toEqual([])
+
+    // Redpanda GA attributes are set on the latest component version.
+    expect(latestAttributes['latest-redpanda-version']).toBe('26.2.1')
+    expect(latestAttributes['latest-redpanda-tag']).toBe('v26.2.1')
+    expect(latestAttributes['latest-redpanda-version-short']).toBe('26.2')
+
+    // Console and Connect attributes are set on every component version.
+    expect(versionAttributes['latest-console-version']).toBe('3.2.5')
+    expect(versionAttributes['latest-console-tag']).toBe('v3.2.5')
+    expect(versionAttributes['latest-console-version-short']).toBe('3.2')
+
+    expect(versionAttributes['latest-connect-version']).toBe('4.37.0')
+    expect(versionAttributes['latest-connect-tag']).toBe('4.37.0')
+    expect(versionAttributes['latest-connect-version-short']).toBe('4.37')
+  })
+
+  it('emits -version-short for beta variants', () => {
+    const { versionAttributes } = runExtension({
+      dockerTags: {
+        console: { latestStableRelease: 'v3.2.5', latestBetaRelease: 'v3.3.0-beta.1' },
+        'redpanda-operator': { latestStableRelease: 'v25.1.3', latestBetaRelease: 'v25.2.1-beta1' },
+      },
+      helmChart: { latestStableRelease: '5.10.1', latestBetaRelease: '5.11.0-beta1' },
+    })
+
+    expect(versionAttributes['redpanda-beta-version']).toBe('26.3.1-rc1')
+    expect(versionAttributes['redpanda-beta-tag']).toBe('v26.3.1-rc1')
+    expect(versionAttributes['redpanda-beta-version-short']).toBe('26.3')
+
+    expect(versionAttributes['console-beta-version']).toBe('3.3.0-beta.1')
+    expect(versionAttributes['console-beta-version-short']).toBe('3.3')
+
+    expect(versionAttributes['operator-beta-version']).toBe('25.2.1-beta1')
+    expect(versionAttributes['operator-beta-version-short']).toBe('25.2')
+
+    expect(versionAttributes['helm-beta-version']).toBe('5.11.0-beta1')
+    expect(versionAttributes['helm-beta-version-short']).toBe('5.11')
+  })
+
+  it('does not emit -version-short for non-semver values', () => {
+    const { versionAttributes } = runExtension({ connect: 'nightly' })
+
+    // -version and -tag are still set for non-semver values.
+    expect(versionAttributes['latest-connect-version']).toBe('nightly')
+    expect(versionAttributes['latest-connect-tag']).toBe('nightly')
+    // But no short version is derived.
+    expect(versionAttributes).not.toHaveProperty('latest-connect-version-short')
+  })
+
+  it('leaves pre-existing attributes unchanged by the short-version feature', () => {
+    const { versionAttributes, latestAttributes } = runExtension()
+
+    // Existing behavior on the latest component version is preserved.
+    expect(latestAttributes['full-version']).toBe('26.2.1')
+    expect(latestAttributes['latest-release-commit']).toBe('abc123')
+
+    // Operator and Helm chart attributes keep their original names and values.
+    expect(versionAttributes['latest-operator-version']).toBe('v25.1.3')
+    expect(versionAttributes['latest-redpanda-helm-chart-version']).toBe('5.10.1')
+    expect(versionAttributes['redpanda-beta-commit']).toBe('rc456')
+
+    // No stray -version-short attributes for keys that never had version/tag pairs.
+    expect(versionAttributes).not.toHaveProperty('latest-operator-version-short')
+    expect(versionAttributes).not.toHaveProperty('latest-redpanda-helm-chart-version-short')
+  })
+
+  it('does not overwrite a newer existing full-version on the latest component version', () => {
+    const { latestAttributes } = runExtension({
+      latestAttributes: { 'full-version': '99.0.0' },
+    })
+
+    expect(latestAttributes['full-version']).toBe('99.0.0')
+    expect(latestAttributes).not.toHaveProperty('latest-redpanda-version')
+    expect(latestAttributes).not.toHaveProperty('latest-redpanda-version-short')
+  })
+})
