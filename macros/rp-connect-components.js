@@ -956,31 +956,25 @@ module.exports.register = function (registry, context) {
               toggle.classList.add('open');
               toggle.setAttribute('aria-expanded', 'true');
 
-              // TEMPORARILY DISABLED FOR NAV TOGGLE DEBUGGING
               // Add click outside handler (only once)
-              // if (!window.dropdownClickOutsideHandler) {
-              //   window.dropdownClickOutsideHandler = function(event) {
-              //     // Only handle clicks outside dropdown wrappers - ignore everything else
-              //     if (!event.target.closest('.component-catalog-section')) {
-              //       // Click is completely outside component catalog, do nothing
-              //       return;
-              //     }
-              //     // Check if click is inside a dropdown wrapper
-              //     if (event.target.closest('.dropdown-checkbox-wrapper')) {
-              //       // Click is inside dropdown, do nothing
-              //       return;
-              //     }
-              //     // Click is outside dropdowns but inside catalog - close dropdowns
-              //     document.querySelectorAll('.dropdown-checkbox-menu.show').forEach(window.closeDropdown);
-              //     // Remove this handler
-              //     document.removeEventListener('click', window.dropdownClickOutsideHandler);
-              //     window.dropdownClickOutsideHandler = null;
-              //   };
-              //   // Add on next tick so this click doesn't trigger it
-              //   setTimeout(() => {
-              //     document.addEventListener('click', window.dropdownClickOutsideHandler, { capture: false, passive: true });
-              //   }, 0);
-              // }
+              if (!window.dropdownClickOutsideHandler) {
+                window.dropdownClickOutsideHandler = function(event) {
+                  // Check if click is inside a dropdown wrapper
+                  if (event.target.closest('.dropdown-checkbox-wrapper')) {
+                    // Click is inside dropdown, do nothing
+                    return;
+                  }
+                  // Click is outside dropdowns - close them
+                  document.querySelectorAll('.dropdown-checkbox-menu.show').forEach(window.closeDropdown);
+                  // Remove this handler
+                  document.removeEventListener('click', window.dropdownClickOutsideHandler);
+                  window.dropdownClickOutsideHandler = null;
+                };
+                // Add on next tick so this click doesn't trigger it
+                setTimeout(() => {
+                  document.addEventListener('click', window.dropdownClickOutsideHandler, { capture: false, passive: true });
+                }, 0);
+              }
             }
           };
 
@@ -1024,11 +1018,23 @@ module.exports.register = function (registry, context) {
             }
           };
 
+          // Returns the focusable elements inside the badge legend modal (for the focus trap)
+          window.getBadgeLegendFocusableElements = function(modal) {
+            return Array.from(modal.querySelectorAll(
+              'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+            ));
+          };
+
           window.openBadgeLegend = function() {
             const modal = document.getElementById('badgeLegendModal');
             if (modal) {
+              // Remember the trigger so focus can be restored on close
+              window.badgeLegendTriggerElement = document.activeElement;
               modal.classList.add('show');
               document.body.style.overflow = 'hidden';
+              // Move focus into the modal
+              const focusable = window.getBadgeLegendFocusableElements(modal);
+              if (focusable.length > 0) focusable[0].focus();
             }
           };
 
@@ -1036,14 +1042,15 @@ module.exports.register = function (registry, context) {
             const modal = document.getElementById('badgeLegendModal');
             if (modal) {
               modal.classList.remove('show');
-              document.body.style.overflow = '';
             }
+            // Always restore page scrolling, whichever path closed the modal
+            document.body.style.overflow = '';
+            // Return focus to the element that opened the modal
+            if (window.badgeLegendTriggerElement && typeof window.badgeLegendTriggerElement.focus === 'function') {
+              window.badgeLegendTriggerElement.focus();
+            }
+            window.badgeLegendTriggerElement = null;
           };
-
-              // Ensure no interference with other scripts
-              if (typeof window !== 'undefined') {
-                console.log('[Component Catalog] Functions loaded successfully');
-              }
             } catch (error) {
               console.error('[Component Catalog] Error loading functions:', error);
             }
@@ -1793,26 +1800,41 @@ module.exports.register = function (registry, context) {
         <script>
           (function() {
             try {
-              console.log('[Component Catalog] Loading dropdown and filter functions...');
+              // Close modal when clicking on the backdrop
+              document.addEventListener('click', function(event) {
+                const modal = document.getElementById('badgeLegendModal');
+                // Only handle clicks on the modal backdrop itself, nothing else
+                if (modal && modal.classList.contains('show') && event.target === modal) {
+                  window.closeBadgeLegend();
+                }
+              }, { capture: false, passive: true });
 
-              // TEMPORARILY DISABLED FOR NAV TOGGLE DEBUGGING
-              // Close modal when clicking outside
-              // document.addEventListener('click', function(event) {
-              //   const modal = document.getElementById('badgeLegendModal');
-              //   // Only handle clicks on the modal backdrop itself, nothing else
-              //   if (modal && modal.classList.contains('show') && event.target === modal) {
-              //     closeBadgeLegend();
-              //   }
-              // }, { capture: false, passive: true });
-
-              // Close modal with Escape key
-              // document.addEventListener('keydown', function(event) {
-              //   const modal = document.getElementById('badgeLegendModal');
-              //   // Only handle Escape if modal is actually open
-              //   if (event.key === 'Escape' && modal && modal.classList.contains('show')) {
-              //     closeBadgeLegend();
-              //   }
-              // }, { capture: false, passive: true });
+              // Close modal with Escape key and trap Tab focus inside the open modal
+              document.addEventListener('keydown', function(event) {
+                const modal = document.getElementById('badgeLegendModal');
+                if (!modal || !modal.classList.contains('show')) return;
+                if (event.key === 'Escape') {
+                  window.closeBadgeLegend();
+                  return;
+                }
+                if (event.key === 'Tab') {
+                  const focusable = window.getBadgeLegendFocusableElements(modal);
+                  if (focusable.length === 0) {
+                    event.preventDefault();
+                    return;
+                  }
+                  const first = focusable[0];
+                  const last = focusable[focusable.length - 1];
+                  // Cycle focus within the modal
+                  if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+                    event.preventDefault();
+                    last.focus();
+                  } else if (!event.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) {
+                    event.preventDefault();
+                    first.focus();
+                  }
+                }
+              }, { capture: false });
 
               // Define global dropdown functions (shared between macros)
               window.initializeDropdownFunctions = window.initializeDropdownFunctions || function() {
@@ -1860,8 +1882,6 @@ module.exports.register = function (registry, context) {
           } catch (e) {
             console.error('[Component Catalog] Error initializing dropdown functions:', e);
           }
-
-          // TEMPORARILY DISABLED ALL EVENT LISTENERS TO TEST NAV BUTTON
 
           // Initialize filters from URL parameters
           function initializeFilters() {
@@ -1978,8 +1998,6 @@ module.exports.register = function (registry, context) {
                   document.querySelectorAll('.dropdown-checkbox-menu input[type="checkbox"]').forEach(checkbox => {
                     checkbox.addEventListener('change', window.filterComponentTable);
                   });
-
-                  console.log('[Component Catalog] Event listeners attached successfully');
                 } catch (error) {
                   console.error('[Component Catalog] Error attaching event listeners:', error);
                 }
@@ -1995,8 +2013,6 @@ module.exports.register = function (registry, context) {
                 initializeFilters();
                 attachEventListeners();
               }
-
-              console.log('[Component Catalog] All functions loaded successfully');
             } catch (error) {
               console.error('[Component Catalog] Error loading dropdown/filter functions:', error);
             }
