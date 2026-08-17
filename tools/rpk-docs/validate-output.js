@@ -23,12 +23,13 @@ const VALIDATION_RULES = [
       let match
       while ((match = urlPattern.exec(content)) !== null) {
         const url = match[1]
-        // Check if it's a docs.redpanda.com URL (should always be xref)
+        // docs.redpanda.com URLs are converted to xrefs at site build time
+        // by the url-to-xref Antora extension, so a raw one is informational
         if (url.includes('docs.redpanda.com')) {
           issues.push({
             line: getLineNumber(content, match.index),
-            message: `Raw docs.redpanda.com URL should be an xref: ${url}`,
-            severity: 'error'
+            message: `Raw docs.redpanda.com URL (converted to an xref by the url-to-xref extension at build time): ${url}`,
+            severity: 'info'
           })
         }
       }

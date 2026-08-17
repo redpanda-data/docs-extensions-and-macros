@@ -302,12 +302,38 @@ function generateErrorReports(properties, documentedProperties = []) {
 }
 
 /**
+ * Rewrite legacy config_ref macro calls in a description to prop macro
+ * calls. The prop macro validates names against the published property
+ * JSON, discovers the target page dynamically (config_ref's manual path is
+ * dropped), and powers hover tooltips. A payload that just repeats the
+ * backticked property name is redundant; anything else becomes text=.
+ */
+function convertConfigRefsToProp(text) {
+  if (!text || typeof text !== 'string') return text;
+  return text.replace(/config_ref:([^[,]+)(?:,([^[,]*))?(?:,([^[,]*))?\[([^\]]*)\]/g, (match, name, isLink, _path, payload) => {
+    const trimmed = name.trim();
+    const display = (payload || '').trim().replace(/^`|`$/g, '');
+    const attrs = [
+      ...(isLink === 'true' ? ['link=true'] : []),
+      ...(display && display !== trimmed ? [`text=${display}`] : []),
+    ];
+    return `prop:${trimmed}[${attrs.join(',')}]`;
+  });
+}
+
+/**
  * Main generator
  */
 function generateAllDocs(inputFile, outputDir) {
   const data = JSON.parse(fs.readFileSync(inputFile, 'utf8'));
   // Support both 'properties' (from property_extractor.py) and 'topic_properties' (from topic_property_extractor.py)
   const properties = data.properties || data.topic_properties || {};
+
+  // Generated output must emit the prop macro, never the deprecated
+  // config_ref, regardless of what the input JSON or overrides carry.
+  Object.values(properties).forEach((prop) => {
+    if (prop && prop.description) prop.description = convertConfigRefsToProp(prop.description);
+  });
 
   registerPartials();
 
@@ -361,7 +387,8 @@ function generateAllDocs(inputFile, outputDir) {
 module.exports = {
   generateAllDocs,
   generateDeprecatedDocs,
-  generatePropertyPartials
+  generatePropertyPartials,
+  convertConfigRefsToProp
 };
 
 // CLI

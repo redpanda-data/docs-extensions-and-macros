@@ -10,6 +10,8 @@ AsciiDoc macros are custom inline and block elements that extend AsciiDoc syntax
 
 == Documentation
 
+link:PROPERTY_AND_ENTERPRISE_REFERENCES.adoc[**How property and enterprise references work**]:: Plain-English explanation of the prop and enterprise macros: explicit marking, build-time validation against sources of truth, dynamic link discovery, and why config_ref was deprecated
+
 link:USER_GUIDE.adoc[**User guide**]:: How to use AsciiDoc macros in your documentation
 +
 * Installation and setup

@@ -1,4 +1,6 @@
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   this.on('beforePublish', ({ siteCatalog, contentCatalog }) => {
     const logger = this.getLogger('add-pages-to-site-root');
     if (!config || !config.files || !config.files.length) {

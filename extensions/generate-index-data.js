@@ -1,7 +1,10 @@
 'use strict';
+
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const _ = require('lodash');
 
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('generate-index-data-extension');
 
   this.on('documentsConverted', async ({ contentCatalog, siteCatalog }) => {

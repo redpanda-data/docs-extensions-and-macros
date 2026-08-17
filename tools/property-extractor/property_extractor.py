@@ -1013,6 +1013,36 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
     Returns:
         dict: The same properties mapping with overrides applied and any new properties created.
     """
+    def _normalize_config_ref_macros(text):
+        """Rewrite legacy config_ref macro calls to prop macro calls.
+
+        The prop macro validates names against the published property JSON,
+        discovers the target page dynamically (config_ref's manual path is
+        dropped), and powers hover tooltips. A payload that just repeats the
+        backticked property name is redundant; anything else becomes text=.
+        Applied to every description so neither upstream source text nor
+        overrides can reintroduce the deprecated macro into published JSON.
+        """
+        if not isinstance(text, str) or "config_ref:" not in text:
+            return text
+
+        def _replace(match):
+            name = match.group(1).strip()
+            is_link = (match.group(2) or "").strip() == "true"
+            display = (match.group(4) or "").strip().strip("`")
+            attrs = []
+            if is_link:
+                attrs.append("link=true")
+            if display and display != name:
+                attrs.append(f"text={display}")
+            return f"prop:{name}[{','.join(attrs)}]"
+
+        return re.sub(
+            r"config_ref:([^\[,]+)(?:,([^\[,]*))?(?:,([^\[,]*))?\[([^\]]*)\]",
+            _replace,
+            text,
+        )
+
     phantom_stub_entries.clear()
     if overrides and "properties" in overrides:
         for prop, override in overrides["properties"].items():
@@ -1042,6 +1072,10 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
                         "name": prop,
                         "config_scope": new_property.get("config_scope"),
                     })
+
+    for property_data in properties.values():
+        if hasattr(property_data, "get") and property_data.get("description"):
+            property_data["description"] = _normalize_config_ref_macros(property_data["description"])
     return properties
 
 

@@ -1,8 +1,11 @@
 'use strict';
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 const GetLatestConnectTag = require('./version-fetcher/get-latest-connect');
 
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('modify-connect-tag-playbook-extension');
 
   this.on('contextStarted', async ({ playbook }) => {

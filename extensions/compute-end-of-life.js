@@ -1,8 +1,11 @@
 'use strict';
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 const calculateEOL = require('./util/calculate-eol.js');
 
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   this.on('contentClassified', ({ contentCatalog }) => {
     const logger = this.getLogger("compute-end-of-life-extension");
 

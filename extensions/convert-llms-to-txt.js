@@ -1,5 +1,7 @@
 'use strict';
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 const { toMarkdownUrl } = require('../extension-utils/url-utils');
 const { stripMarkdownMetadata } = require('../extension-utils/llms-utils');
 
@@ -20,6 +22,7 @@ const { stripMarkdownMetadata } = require('../extension-utils/llms-utils');
  * Must run after convert-to-markdown extension to access page.markdownContents.
  */
 module.exports.register = function () {
+  raiseListenerLimit(this)
   const logger = this.getLogger('convert-llms-to-txt-extension');
   let siteUrl = '';
 

@@ -1,27 +1,35 @@
-= Iceberg Explorer Block
-:description: Test to make sure that the iceberg-explorer block emits a hydration mount point.
+= Iceberg Mode Explorer Block Test
+:description: Test that the [iceberg-explorer] block emits a version-aware mount point that docs-ui hydrates.
 
 {description}
 
-The block emits a `div.iceberg-explorer` mount point only. The interactive UI and its translation engine live in the docs-ui bundle, which hydrates the element at runtime, so this page shows the `<noscript>` fallback until a docs-ui build that includes the explorer is in use.
+== Default explorer
 
-== Empty block
+The simplest usage renders the explorer with built-in sample data:
 
 [iceberg-explorer]
 --
 --
 
-== With an initial config attribute
+== With author-supplied defaults
 
-[iceberg-explorer,config="key:mode=binary;value:mode=binary"]
---
---
-
-== With JSON defaults in the block body
+An author can seed the initial config and sample data by passing a JSON body:
 
 [iceberg-explorer]
 ----
 {
-  "config": "value:mode=schema_latest"
+  "config": "key:mode=schema_id_prefix;value:mode=schema_latest,layout=flat;headers:value_type=string",
+  "schema": {
+    "key": [
+      { "name": "user_id", "type": "long" },
+      { "name": "region", "type": "string" }
+    ]
+  }
 }
 ----
+
+== With a pinned initial config attribute
+
+[iceberg-explorer,config="value:mode=binary"]
+--
+--
