@@ -3,6 +3,8 @@
 const {
   extractCommentedValueDocs,
   injectIntoAsciiDoc,
+  filterEntriesBySchema,
+  isPathAllowedBySchema,
 } = require('../../cli-utils/helm-commented-values')
 
 describe('extractCommentedValueDocs', () => {
@@ -259,5 +261,287 @@ describe('injectIntoAsciiDoc', () => {
 
     expect(injected).toEqual([])
     expect(doc).toBe('= Empty\n')
+  })
+})
+
+// Each test in the regression suites below reproduces a defect found in
+// review; keep them green on any change to this tooling.
+
+describe('extractCommentedValueDocs regressions', () => {
+  test('a prose line shaped like a key does not steal the block from the documented key', () => {
+    const yaml = [
+      'external:',
+      '  # -- The domain.',
+      '  # example:',
+      '  #   domain: foo.com',
+      '  # domain: ""',
+    ].join('\n')
+
+    const entries = extractCommentedValueDocs(yaml)
+    expect(entries.map((e) => e.path)).toEqual(['external.domain'])
+    expect(entries[0].description).toBe('The domain.')
+  })
+
+  test('a "# default: value" prose line does not steal the block from the documented key', () => {
+    const yaml = [
+      'gateway:',
+      '  # -- Request timeout.',
+      '  # default: 30s',
+      '  # timeout: null',
+    ].join('\n')
+
+    const entries = extractCommentedValueDocs(yaml)
+    expect(entries.map((e) => e.path)).toEqual(['gateway.timeout'])
+    expect(entries[0].description).toBe('Request timeout.')
+  })
+
+  test('a wrapped URL in a description is not treated as a key (operator chart shape)', () => {
+    const yaml = [
+      'connectController:',
+      '  enabled: false',
+      '  # -- Default Redpanda Connect image applied to every Pipeline CR that',
+      '  # does not pin its own `.spec.image`; the operator falls back to the',
+      '  # constant baked into the binary (currently',
+      '  # docker.redpanda.com/redpandadata/connect:4.101.0).',
+      '  # image:',
+      '  #   repository: docker.redpanda.com/redpandadata/connect',
+      '  #   tag: "4.101.0"',
+      '  # -- Monitoring configuration for Connect pipeline pods.',
+      '  monitoring:',
+      '    enabled: false',
+    ].join('\n')
+
+    const entries = extractCommentedValueDocs(yaml)
+    expect(entries.map((e) => e.path)).toEqual(['connectController.image'])
+    expect(entries[0].description).toContain('Default Redpanda Connect image')
+    expect(entries[0].description).toContain('docker.redpanda.com/redpandadata/connect:4.101.0')
+  })
+
+  test('a blank line inside a commented-out example subtree does not fabricate a path from a stale parent', () => {
+    const yaml = [
+      'image:',
+      '  spec: onRootMismatch',
+      '# -- Redpanda Service settings.',
+      '# service:',
+      '',
+      '#   -- set service.name to override the default service name',
+      '#   name: redpanda',
+    ].join('\n')
+
+    const entries = extractCommentedValueDocs(yaml)
+    expect(entries.map((e) => e.path)).toEqual(['service'])
+  })
+
+  test('the last shallowest key line wins in a deprecation-notice block', () => {
+    const yaml = [
+      'storage:',
+      '  tiered:',
+      '    credentialsSecretRef:',
+      '      accessKey:',
+      '        configurationKey: cloud_storage_access_key',
+      '      # -- DEPRECATED `configurationKey`, `name` and `key`. Please use `accessKey` and `secretKey`',
+      '      # configurationKey: cloud_storage_secret_key',
+      '      # name:',
+      '      # key:',
+    ].join('\n')
+
+    const entries = extractCommentedValueDocs(yaml)
+    expect(entries).toHaveLength(1)
+    expect(entries[0].path).toBe('storage.tiered.credentialsSecretRef.key')
+  })
+
+  test('skips block scalar bodies that use an explicit indentation indicator', () => {
+    for (const indicator of ['|2', '>2', '|-2', '|2-']) {
+      const yaml = [
+        `banner: ${indicator}`,
+        '  # -- Fake doc from scalar content',
+        '  # fake: value',
+        'real: 1',
+      ].join('\n')
+
+      expect(extractCommentedValueDocs(yaml)).toEqual([])
+    }
+  })
+
+  test('comment dividers made of dashes are not description markers', () => {
+    const yaml = [
+      'external:',
+      '  # ----------------',
+      '  # domain: local',
+    ].join('\n')
+
+    expect(extractCommentedValueDocs(yaml)).toEqual([])
+  })
+
+  test('honors @default written after the commented-out key', () => {
+    const yaml = [
+      'external:',
+      '  # -- Optional domain.',
+      '  # domain: local',
+      '  # @default -- `"local"`',
+    ].join('\n')
+
+    const entries = extractCommentedValueDocs(yaml)
+    expect(entries).toHaveLength(1)
+    expect(entries[0].default).toBe('`"local"`')
+  })
+
+  test('handles CRLF line endings', () => {
+    const yaml = [
+      'external:',
+      '  # -- Optional domain.',
+      '  # domain: local',
+    ].join('\r\n')
+
+    const entries = extractCommentedValueDocs(yaml)
+    expect(entries.map((e) => e.path)).toEqual(['external.domain'])
+  })
+})
+
+describe('filterEntriesBySchema', () => {
+  const schema = {
+    type: 'object',
+    properties: {
+      storage: {
+        type: 'object',
+        properties: {
+          tiered: {
+            type: 'object',
+            properties: {
+              credentialsSecretRef: {
+                type: 'object',
+                additionalProperties: false,
+                properties: { accessKey: {}, secretKey: {} },
+              },
+            },
+          },
+        },
+      },
+      external: { type: 'object' },
+      certs: {
+        type: 'object',
+        additionalProperties: false,
+        patternProperties: { '^rp-': { type: 'object' } },
+      },
+      referenced: { $ref: '#/definitions/something' },
+    },
+  }
+
+  test('rejects paths forbidden by additionalProperties: false', () => {
+    expect(isPathAllowedBySchema(schema, 'storage.tiered.credentialsSecretRef.configurationKey')).toBe(false)
+    expect(isPathAllowedBySchema(schema, 'storage.tiered.credentialsSecretRef.key')).toBe(false)
+  })
+
+  test('accepts declared properties, open objects, pattern matches, and unresolvable nodes', () => {
+    expect(isPathAllowedBySchema(schema, 'storage.tiered.credentialsSecretRef.accessKey')).toBe(true)
+    expect(isPathAllowedBySchema(schema, 'external.domain')).toBe(true)
+    expect(isPathAllowedBySchema(schema, 'certs.rp-default')).toBe(true)
+    expect(isPathAllowedBySchema(schema, 'certs.other')).toBe(false)
+    expect(isPathAllowedBySchema(schema, 'referenced.anything')).toBe(true)
+    expect(isPathAllowedBySchema(schema, 'undeclaredTopLevel')).toBe(true)
+  })
+
+  test('splits entries into accepted and rejected', () => {
+    const entries = [
+      { path: 'external.domain' },
+      { path: 'storage.tiered.credentialsSecretRef.configurationKey' },
+    ]
+    const { accepted, rejected } = filterEntriesBySchema(entries, schema)
+    expect(accepted.map((e) => e.path)).toEqual(['external.domain'])
+    expect(rejected.map((e) => e.path)).toEqual(['storage.tiered.credentialsSecretRef.configurationKey'])
+  })
+})
+
+describe('injectIntoAsciiDoc regressions', () => {
+  const base = 'https://artifacthub.io/packages/helm/redpanda-data/redpanda?modal=values&path='
+
+  test('neutralizes description lines that would parse as AsciiDoc structure', () => {
+    const adoc = [
+      `=== link:++${base}alpha++[alpha]`,
+      '',
+      'Alpha.',
+      '',
+      '*Default:* `nil`',
+      '',
+    ].join('\n')
+
+    const { doc } = injectIntoAsciiDoc(adoc, [
+      {
+        path: 'beta',
+        description: 'Optional domain.\n\n==== Advanced usage ====\nMore text.\n----',
+        default: '`nil`',
+      },
+    ])
+
+    expect(doc).toContain('{empty}==== Advanced usage ====')
+    expect(doc).toContain('{empty}----')
+    expect(doc).not.toMatch(/^==== Advanced usage ====$/m)
+    expect(doc).not.toMatch(/^----$/m)
+  })
+
+  test('scans section headings whose key label contains brackets', () => {
+    const adoc = [
+      `=== link:++${base}storage.tiered++[storage.tiered]`,
+      '',
+      'Tiered.',
+      '',
+      `=== link:++${base}storage.volume%5B0%5D.name++[storage.volume[0].name]`,
+      '',
+      'Volume name.',
+      '',
+      `=== link:++${base}test.create++[test.create]`,
+      '',
+      'Test hook.',
+      '',
+    ].join('\n')
+
+    const { doc, injected, sectionsFound } = injectIntoAsciiDoc(adoc, [
+      { path: 'storage.uvw', description: 'New value.', default: '`nil`' },
+    ])
+
+    expect(sectionsFound).toBe(3)
+    expect(injected).toEqual(['storage.uvw'])
+    expect(doc.indexOf('path=storage.uvw')).toBeGreaterThan(doc.indexOf('path=storage.tiered'))
+    expect(doc.indexOf('path=storage.uvw')).toBeLessThan(doc.indexOf('path=storage.volume%5B0%5D.name'))
+  })
+
+  test('reports zero sections when value headings are at an unexpected level', () => {
+    const adoc = [
+      `==== link:++${base}external++[external]`,
+      '',
+      'External.',
+      '',
+    ].join('\n')
+
+    const { doc, injected, sectionsFound } = injectIntoAsciiDoc(adoc, [
+      { path: 'external.domain', description: 'Domain.', default: '`nil`' },
+    ])
+
+    expect(sectionsFound).toBe(0)
+    expect(injected).toEqual([])
+    expect(doc).toBe(adoc)
+  })
+
+  test('appends a last-sorting key before a trailing level-3 heading', () => {
+    const adoc = [
+      `=== link:++${base}alpha++[alpha]`,
+      '',
+      'Alpha.',
+      '',
+      '*Default:* `nil`',
+      '',
+      '=== Chart Requirements',
+      '',
+      'Some requirements body.',
+      '',
+    ].join('\n')
+
+    const { doc, injected } = injectIntoAsciiDoc(adoc, [
+      { path: 'zeta', description: 'Last key.', default: '`nil`' },
+    ])
+
+    expect(injected).toEqual(['zeta'])
+    expect(doc.indexOf('path=zeta')).toBeGreaterThan(doc.indexOf('path=alpha'))
+    expect(doc.indexOf('path=zeta')).toBeLessThan(doc.indexOf('=== Chart Requirements'))
   })
 })
