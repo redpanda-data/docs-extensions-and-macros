@@ -417,6 +417,9 @@ async function generateRpcnConnectorDocs(options) {
   let partialsWritten = 0;
   const descriptionReports = [];
   const lostSectionWarnings = [];
+  // typeDir/name keys handled this run; used after the loop to blank
+  // description partials orphaned by a connector deleted upstream.
+  const visitedDescriptionPartials = new Set();
   let draftsWritten   = 0;
   const partialFiles  = [];
   const draftFiles    = [];
@@ -523,6 +526,7 @@ async function generateRpcnConnectorDocs(options) {
         .compile('{{> description summary=summary version=version description=description type=type typeDir=typeDir name=name}}')(item);
 
       if (CONNECTOR_DESCRIPTION_TYPE_DIRS.has(typeDir)) {
+        visitedDescriptionPartials.add(`${typeDir}/${name}`);
         const dPath = path.join(descriptionOutRoot, typeDir, `${name}.adoc`);
         if (descriptionOut.trim()) {
           fs.mkdirSync(path.dirname(dPath), { recursive: true });
@@ -770,6 +774,36 @@ async function generateRpcnConnectorDocs(options) {
   fs.writeFileSync(advPath, advYaml.toString(), 'utf8');
   partialsWritten++;
   partialFiles.push(path.relative(process.cwd(), advPath));
+    }
+  }
+
+  // A connector deleted upstream leaves no dataset entry at all, so the
+  // in-loop stale-partial blanking above never sees it and its description
+  // partial would keep serving deleted-connector text forever, silently.
+  // Sweep the description output root for partials no connector claimed this
+  // run and blank them the same way. Skipped in draft mode: drafts run on a
+  // filtered dataset (missing connectors only), so "not visited" there means
+  // "already documented", not "deleted upstream".
+  if (!writeFullDrafts && fs.existsSync(descriptionOutRoot)) {
+    for (const typeDirName of fs.readdirSync(descriptionOutRoot)) {
+      const typeDirPath = path.join(descriptionOutRoot, typeDirName);
+      if (!fs.statSync(typeDirPath).isDirectory()) continue;
+      for (const file of fs.readdirSync(typeDirPath)) {
+        if (!file.endsWith('.adoc')) continue;
+        const key = `${typeDirName}/${file.slice(0, -'.adoc'.length)}`;
+        if (visitedDescriptionPartials.has(key)) continue;
+        const orphanPath = path.join(typeDirPath, file);
+        // Already blanked on an earlier run: leave it alone so it is not
+        // re-reported forever.
+        if (fs.readFileSync(orphanPath, 'utf8') === STALE_DESCRIPTION_PARTIAL) continue;
+        fs.writeFileSync(orphanPath, STALE_DESCRIPTION_PARTIAL);
+        const msg =
+          `Connector removed upstream: emptied orphaned description partial ` +
+          `${path.relative(process.cwd(), orphanPath)} ` +
+          `(remove its include directive and retire the ${key} page)`;
+        descriptionReports.push({ connector: key, message: msg });
+        console.log(msg);
+      }
     }
   }
 

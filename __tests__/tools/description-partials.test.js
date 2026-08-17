@@ -516,3 +516,88 @@ describe('markdown fence awareness: fence interiors pass through byte-identical'
     expect(hasStructuralHeadings('```\n----\n```\n\n== Real heading\n\nProse.')).toBe(true);
   });
 });
+
+describe('generator blanks description partials orphaned by connectors deleted upstream', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-orphan');
+  let originalCwd, templateFile;
+  const keptPath = path.join(
+    tmpDir, 'modules', 'components', 'partials', 'descriptions', 'inputs', 'still_here.adoc'
+  );
+  const orphanPath = path.join(
+    tmpDir, 'modules', 'components', 'partials', 'descriptions', 'inputs', 'deleted_upstream.adoc'
+  );
+
+  function writeData (names) {
+    const data = {
+      inputs: names.map((name) => ({
+        name,
+        type: 'input',
+        description: `Reads things for ${name}.`,
+        config: { children: [{ name: 'foo', type: 'string', kind: 'scalar', description: 'A field.' }] },
+      })),
+    };
+    const dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    return dataFile;
+  }
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('a partial whose connector vanished from the dataset is blanked and reported', async () => {
+    // First run: both connectors exist.
+    await generateRpcnConnectorDocs({ data: writeData(['still_here', 'deleted_upstream']), template: templateFile });
+    expect(fs.readFileSync(orphanPath, 'utf8')).toContain('Reads things for deleted_upstream.');
+
+    // Second run: deleted_upstream is gone from the dataset entirely, so the
+    // in-loop stale handling never sees it. The post-loop sweep must.
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    let result, logged;
+    try {
+      result = await generateRpcnConnectorDocs({ data: writeData(['still_here']), template: templateFile });
+      logged = logSpy.mock.calls.map(args => args.join(' ')).join('\n');
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    // The orphan survives as a file (includes stay resolvable) but is blanked.
+    expect(fs.existsSync(orphanPath)).toBe(true);
+    const content = fs.readFileSync(orphanPath, 'utf8');
+    expect(content).not.toContain('Reads things for deleted_upstream.');
+    expect(content).toContain('intentionally empty');
+
+    // The surviving connector's partial is untouched.
+    expect(fs.readFileSync(keptPath, 'utf8')).toContain('Reads things for still_here.');
+
+    // Reported in descriptionReports (surfaces in the PR summary) and logged.
+    expect(result.descriptionReports).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        connector: 'inputs/deleted_upstream',
+        message: expect.stringContaining('Connector removed upstream'),
+      }),
+    ]));
+    expect(logged).toContain(path.join('descriptions', 'inputs', 'deleted_upstream.adoc'));
+
+    // Merged-return sanity: this PR's report key coexists with the keys main
+    // added for lost sections and description backfill.
+    expect(result).toHaveProperty('lostSectionWarnings');
+    expect(result).toHaveProperty('descriptionBackfill');
+  });
+
+  test('an already-blanked orphan is not re-reported on the next run', async () => {
+    const result = await generateRpcnConnectorDocs({ data: writeData(['still_here']), template: templateFile });
+    expect(result.descriptionReports).toEqual([]);
+    expect(fs.readFileSync(orphanPath, 'utf8')).toContain('intentionally empty');
+  });
+});
