@@ -162,6 +162,16 @@ module.exports.register = function (registry, context) {
   const capitalize = s => s && s[0].toUpperCase() + s.slice(1);
 
   /**
+   * Escapes HTML special characters so CSV-sourced values can be safely
+   * interpolated into element content and double-quoted attribute values.
+   */
+  const escapeHtml = s => String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  /**
    * Processes the parsed CSV data and returns a data structure organized by connector.
    *
    * This function processes each row in the CSV data to create a nested object where the key is the connector name.
@@ -399,6 +409,7 @@ module.exports.register = function (registry, context) {
       json_array: `${uiRootPath}/img/logos/json.svg`,
       json_documents: `${uiRootPath}/img/logos/json.svg`,
       json_schema: `${uiRootPath}/img/logos/json.svg`,
+      kafka: `${uiRootPath}/img/logos/apache-kafka.svg`,
       memcached: `${uiRootPath}/img/logos/memcached.svg`,
       microsoft_sql_server_cdc: `${uiRootPath}/img/logos/microsoftsqlserver.svg`,
       mongodb: `${uiRootPath}/img/logos/mongo-db.svg`,
@@ -438,6 +449,8 @@ module.exports.register = function (registry, context) {
       sentry: `${uiRootPath}/img/logos/sentry.svg`,
       slack: `${uiRootPath}/img/logos/slack.svg`,
       snowflake: `${uiRootPath}/img/logos/snowflake.svg`,
+      snowflake_put: `${uiRootPath}/img/logos/snowflake.svg`,
+      snowflake_streaming: `${uiRootPath}/img/logos/snowflake.svg`,
       websocket: `${uiRootPath}/img/logos/web-socket.svg`,
       };
     }
@@ -463,8 +476,14 @@ module.exports.register = function (registry, context) {
     }
 
     // Emoji fallbacks for generic types
+    const redpandaLogo = 'https://cdn.prod.website-files.com/68ed36e99e31581dedf5dc7c/68ed91d74b9cd10c98cb8e6e_footer-logo.svg';
     const emojiFallback = {
-      redpanda: 'https://cdn.prod.website-files.com/68ed36e99e31581dedf5dc7c/68ed91d74b9cd10c98cb8e6e_footer-logo.svg',
+      redpanda: redpandaLogo,
+      redpanda_common: redpandaLogo,
+      redpanda_data_transform: redpandaLogo,
+      redpanda_migrator: redpandaLogo,
+      redpanda_migrator_bundle: redpandaLogo,
+      redpanda_migrator_offsets: redpandaLogo,
       http_server: '🌐',
       http_client: '🌐',
       tcp: '🔌',
@@ -737,30 +756,30 @@ module.exports.register = function (registry, context) {
           });
         }
         const commercialNamesText = allCommercialNames.size > 0
-          ? `<span class="search-terms">${Array.from(allCommercialNames).join(' ')}</span>`
+          ? `<span class="search-terms">${escapeHtml(Array.from(allCommercialNames).join(' '))}</span>`
           : '';
 
         // Generate the card HTML
         return `
           <div class="component-card"
                id="component-${id}"
-               data-name="${connector.toLowerCase()} ${Array.from(allCommercialNames).join(' ').toLowerCase()}"
-               data-types="${typesDataAttr.toLowerCase()}"
-               data-support="${supportDataAttr.toLowerCase()}"
-               data-licensed="${isLicensed.toLowerCase()}"
+               data-name="${escapeHtml(`${connector.toLowerCase()} ${Array.from(allCommercialNames).join(' ').toLowerCase()}`)}"
+               data-types="${escapeHtml(typesDataAttr.toLowerCase())}"
+               data-support="${escapeHtml(supportDataAttr.toLowerCase())}"
+               data-licensed="${escapeHtml(isLicensed.toLowerCase())}"
                data-cloud="${isCloudConnectorSupported ? 'yes' : 'no'}">
             <div class="card-header">
               <div class="card-header-content">
                 <a href="${firstUrl}" class="card-title-link">
-                  <h3 class="card-title"><code>${connector}</code></h3>
+                  <h3 class="card-title"><code>${escapeHtml(connector)}</code></h3>
                 </a>
-                <p class="card-description">${details.description || generateDescription(connector, types)}</p>
+                <p class="card-description">${escapeHtml(details.description || generateDescription(connector, types))}</p>
               </div>
               <div class="card-icon">
                 ${(() => {
                   const icon = getConnectorIcon(connector, types, uiRootPath);
                   return (icon.startsWith('http') || icon.startsWith('data:image') || icon.startsWith('/') || icon.startsWith('..'))
-                    ? `<img src="${icon}" alt="${connector} logo" />`
+                    ? `<img src="${icon}" alt="${escapeHtml(connector)} logo" />`
                     : `<span class="card-icon-emoji">${icon}</span>`;
                 })()}
               </div>
