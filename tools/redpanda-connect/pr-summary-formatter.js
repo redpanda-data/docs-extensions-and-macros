@@ -116,13 +116,6 @@ function renderBloblangChanges(data, includeVersion = false) {
 }
 
 /**
- * Generate PR summary for multiple releases
- * @param {object} masterDiff - Master diff with releases array
- * @param {object} binaryAnalysis - Cloud support data (from latest release)
- * @param {array} draftedConnectors - Array of newly drafted connectors
- * @returns {string} Formatted summary
- */
-/**
  * Render upstream description-structure findings as a collapsed section of
  * the PR summary. These are advisory (the fix belongs in the Connect
  * source), but console.warn output dies in the collapsed workflow log, so
@@ -145,6 +138,13 @@ function renderDescriptionReports(reports) {
   return lines;
 }
 
+/**
+ * Generate PR summary for multiple releases
+ * @param {object} masterDiff - Master diff with releases array
+ * @param {object} binaryAnalysis - Cloud support data (from latest release)
+ * @param {array} draftedConnectors - Array of newly drafted connectors
+ * @returns {string} Formatted summary
+ */
 /**
  * Render the content-loss warning block that leads the PR summary. These
  * warnings exist to stop a merge, so they go at the top of the summary body
