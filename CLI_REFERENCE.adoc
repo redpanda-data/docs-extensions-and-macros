@@ -1354,7 +1354,7 @@ Local path to rp-connect-docs antora.yml (default: fetch from rp-connect-docs ma
 Local path to a generated cluster-properties JSON; enables existence checks for gating properties
 
 `--skip-connect`::
-Skip the connect info.csv comparison
+Skip the connect check entirely: neither the connect info.csv nor the rp-connect-docs antora.yml is fetched (overrides --antora)
 
 `--format <format>`::
 Output format: text or json (default: "text")
