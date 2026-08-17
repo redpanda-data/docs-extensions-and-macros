@@ -1727,7 +1727,50 @@ automation
       if (r.status !== 0) process.exit(r.status)
 
       const { formatHelmSpec } = require('../cli-utils/format-helm-spec')
-      fs.writeFileSync(outFile, formatHelmSpec(fs.readFileSync(outFile, 'utf8')), 'utf8')
+      let doc = formatHelmSpec(fs.readFileSync(outFile, 'utf8'))
+
+      // helm-docs only renders keys that exist in the YAML tree, so optional
+      // values that ship commented out never appear in the reference. Pull
+      // documented commented-out keys from values.yaml and inject them. This
+      // runs after formatHelmSpec so the injected body sections are not affected
+      // by the blank-line normalization that its header fix performs.
+      const valuesFile = path.join(chartPath, 'values.yaml')
+      if (fs.existsSync(valuesFile)) {
+        const { extractCommentedValueDocs, injectIntoAsciiDoc, filterEntriesBySchema } = require('../cli-utils/helm-commented-values')
+        try {
+          let entries = extractCommentedValueDocs(fs.readFileSync(valuesFile, 'utf8'))
+
+          // Deprecation notices and other prose can produce paths the chart
+          // no longer accepts (for example the removed
+          // storage.tiered.credentialsSecretRef.configurationKey). When the
+          // chart ships a values schema, drop any path it provably rejects.
+          const schemaFile = path.join(chartPath, 'values.schema.json')
+          if (entries.length > 0 && fs.existsSync(schemaFile)) {
+            const schema = JSON.parse(fs.readFileSync(schemaFile, 'utf8'))
+            const { accepted, rejected } = filterEntriesBySchema(entries, schema)
+            if (rejected.length > 0) {
+              console.warn(`Warning: Skipping ${rejected.length} commented-out value(s) rejected by values.schema.json: ${rejected.map((e) => e.path).join(', ')}`)
+            }
+            entries = accepted
+          }
+
+          if (entries.length > 0) {
+            const { doc: withInjected, injected, sectionsFound } = injectIntoAsciiDoc(doc, entries)
+            doc = withInjected
+            if (injected.length > 0) {
+              console.log(`Documented ${injected.length} commented-out value(s): ${injected.join(', ')}`)
+            } else if (sectionsFound === 0) {
+              // Without this, a heading-level change upstream would silently
+              // drop every documented commented-out value from the reference.
+              console.warn(`Warning: No value section headings found in ${name} to anchor commented-out value docs; dropped: ${entries.map((e) => e.path).join(', ')}`)
+            }
+          }
+        } catch (err) {
+          console.warn(`Warning: Skipping commented-out value docs for ${name}: ${err.message}`)
+        }
+      }
+
+      fs.writeFileSync(outFile, doc, 'utf8')
 
       console.log(`Done: Wrote ${outFile}`)
     }
