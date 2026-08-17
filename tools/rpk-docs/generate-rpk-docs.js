@@ -2588,6 +2588,10 @@ async function generateRpkDocs(options = {}) {
     overrides,
     outputDir,
     cloudSecretDir, // Directory for rpk cloud and rpk security secret commands
+    // Directory for the shared -X -> RPK_* env vars partial. The handler passes
+    // the partials dir it already derived; when absent (direct callers, tests)
+    // it is derived from outputDir the same way.
+    envPartialDir,
     rpkVersion,
     pluginVersions = {},
     draftMissing = false,
@@ -3155,6 +3159,21 @@ async function generateRpkDocs(options = {}) {
     navResult = updateNavFile(navFile, commands, resolvedOverrides, topLevelWithSubcommands, effectiveProtectedPlugins)
   }
 
+  // Regenerate the shared -X -> RPK_* env vars partial from the same tree,
+  // so it always matches the rpk build the command pages came from. Trees
+  // from rpk versions that predate x_options (redpanda#31520) skip with a
+  // note; `doc-tools generate rpk-env-partial` covers those via its
+  // -X list fallback.
+  const envPartialResult = writeEnvVarsPartial(
+    tree,
+    envPartialDir || derivePartialsDir(outputDir)
+  )
+  if (envPartialResult.written) {
+    console.log(`  Regenerated env vars partial (${envPartialResult.keyCount} -X options): ${envPartialResult.output}`)
+  } else {
+    console.log('  Env vars partial not regenerated: tree has no x_options (rpk predates redpanda#31520)')
+  }
+
   return {
     commandCount: commands.length,
     filesGenerated,
@@ -3162,12 +3181,55 @@ async function generateRpkDocs(options = {}) {
     filesFailed,
     filesDeleted,
     subdirectoriesCreated: createdSubdirs.size,
+    envPartial: envPartialResult,
     ...navResult
   }
 }
 
+/**
+ * Resolve the partials directory of the Antora module that owns the rpk pages.
+ *
+ * For the docs layout (`.../modules/reference/pages/rpk`) this is the sibling
+ * of `pages`, so `.../modules/reference/partials`. For an arbitrary
+ * `--output-dir` there is no `pages` segment to anchor on, so fall back to a
+ * `partials` directory beside the output. Walking a fixed number of levels up
+ * from outputDir is wrong for arbitrary paths: it escapes the output tree and
+ * can land on an unrelated directory.
+ *
+ * @param {string} outputDir - The rpk pages output directory
+ * @returns {string} Absolute or relative path to the partials directory
+ */
+function derivePartialsDir (outputDir) {
+  const normalized = String(outputDir).replace(/\\/g, '/')
+  const pagesIndex = normalized.lastIndexOf('/pages/')
+  if (pagesIndex !== -1) {
+    return path.join(normalized.substring(0, pagesIndex), 'partials')
+  }
+  return path.join(path.dirname(normalized), 'partials')
+}
+
+/**
+ * Write the -X -> RPK_* env vars partial from a command tree's x_options.
+ * @param {Object} tree - Parsed rpk command tree
+ * @param {string} partialsDir - Directory the partial is written into
+ * @returns {{written: boolean, keyCount?: number, output?: string}}
+ */
+function writeEnvVarsPartial (tree, partialsDir) {
+  if (!Array.isArray(tree.x_options) || tree.x_options.length === 0) {
+    return { written: false }
+  }
+  const { renderPartial, keyToEnvVar } = require('./generate-x-env-partial.js')
+  const options = tree.x_options.map(o => ({ name: o.name, env: o.env || keyToEnvVar(o.name) }))
+  const output = path.join(partialsDir, 'rpk-env-vars.adoc')
+  fs.mkdirSync(path.dirname(output), { recursive: true })
+  fs.writeFileSync(output, renderPartial(options))
+  return { written: true, keyCount: options.length, output }
+}
+
 module.exports = {
   generateRpkDocs,
+  writeEnvVarsPartial,
+  derivePartialsDir,
   mergeCommandOverrides,
   applyOverridesToTree,
   resolveReferences,

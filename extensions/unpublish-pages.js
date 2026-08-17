@@ -1,6 +1,9 @@
 'use strict';
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 module.exports.register = function () {
+  raiseListenerLimit(this)
   const logger = this.getLogger('unpublish-pages-extension');
 
   this.on('documentsConverted', ({ siteCatalog, contentCatalog }) => {

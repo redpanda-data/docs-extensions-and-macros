@@ -1,6 +1,7 @@
 name: home
 title: Home
 version: ~
+start_page: ROOT:index.adoc
 asciidoc:
   attributes:
     test-attribute: Test Value
