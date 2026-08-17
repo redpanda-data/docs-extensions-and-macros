@@ -869,6 +869,9 @@ Examples section partial template (default: "<repository-root>/tools/redpanda-co
 `--template-metadata <path>`::
 Metadata section partial template (default: "<repository-root>/tools/redpanda-connect/templates/metadata-partials.hbs")
 
+`--template-description <path>`::
+Description section partial template (default: "<repository-root>/tools/redpanda-connect/templates/descriptions-partials.hbs")
+
 `--template-bloblang <path>`::
 Custom Handlebars template for bloblang function/method partials
 
