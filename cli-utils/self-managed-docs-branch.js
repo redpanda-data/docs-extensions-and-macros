@@ -1,37 +1,45 @@
-const https = require('https');
 const yaml = require('js-yaml');
 const { spawnSync } = require('child_process');
+const { getGitHubToken } = require('./github-token');
+
+const ANTORA_URL = 'https://raw.githubusercontent.com/redpanda-data/docs/main/antora.yml'
+
+const TOKEN_HINT = ' The docs repository is private, so set GIT_CREDENTIALS (or GITHUB_TOKEN / REDPANDA_GITHUB_TOKEN / ACTIONS_BOT_TOKEN) so the fetch can authenticate.'
+const REJECTED_HINT = ' A GitHub token was sent but rejected, so it may be expired or not grant access to the docs repository (the default Actions GITHUB_TOKEN is scoped to its own repository).'
 
 /**
  * Retrieves the current Self-Managed documentation version from the remote antora.yml file.
  *
+ * The docs repository is private, and raw.githubusercontent serves private
+ * content as 404 rather than 401 when unauthenticated, so the fetch sends a
+ * Bearer token when one is available. It also returns 404 (not 401) for a
+ * REJECTED token, so a 404 with a token is retried once without
+ * authentication before being treated as real.
+ *
+ * @param {object} [deps] - Injectable for tests: { fetchImpl, token }.
  * @returns {Promise<string>} Resolves with the version string (for example, "25.1").
  *
  * @throws {Error} If the antora.yml file cannot be fetched, parsed, or if the version field is missing.
  */
-function fetchRemoteAntoraVersion() {
-  const url = 'https://raw.githubusercontent.com/redpanda-data/docs/main/antora.yml'
-  return new Promise((resolve, reject) => {
-    https.get(url, res => {
-      if (res.statusCode !== 200) {
-        return reject(new Error(`Failed to fetch antora.yml: ${res.statusCode}`))
-      }
-      let body = ''
-      res.on('data', chunk => (body += chunk))
-      res.on('end', () => {
-        try {
-          const cfg = yaml.load(body)
-          if (cfg.version == null) {
-            throw new Error('version field missing')
-          }
-          const version = String(cfg.version).trim()
-          resolve(version)
-        } catch (err) {
-          reject(err)
-        }
-      })
-    }).on('error', reject)
-  })
+async function fetchRemoteAntoraVersion(deps = {}) {
+  const fetchImpl = deps.fetchImpl || fetch
+  const ghToken = 'token' in deps ? deps.token : getGitHubToken()
+
+  let resp = await fetchImpl(ANTORA_URL, ghToken ? { headers: { Authorization: `Bearer ${ghToken}` } } : undefined)
+  const hint = ghToken ? REJECTED_HINT : TOKEN_HINT
+  if (resp.status === 404 && ghToken) {
+    await resp.body?.cancel().catch(() => {})
+    resp = await fetchImpl(ANTORA_URL)
+  }
+  if (!resp.ok) {
+    await resp.body?.cancel().catch(() => {})
+    throw new Error(`Failed to fetch antora.yml: ${resp.status}${resp.status === 404 ? hint : ''}`)
+  }
+  const cfg = yaml.load(await resp.text())
+  if (cfg.version == null) {
+    throw new Error('version field missing')
+  }
+  return String(cfg.version).trim()
 }
 
 /**
