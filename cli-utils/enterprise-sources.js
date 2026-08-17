@@ -16,8 +16,8 @@ const { getGitHubToken } = require('./github-token')
 
 const RAW = 'https://raw.githubusercontent.com'
 
-const TOKEN_HINT = ' If this source is in a private repository, set GITHUB_TOKEN (or REDPANDA_GITHUB_TOKEN / ACTIONS_BOT_TOKEN) so the fetch can authenticate.'
-const REJECTED_HINT = ' A GitHub token was sent but rejected, so it may be expired or lack access to this repository if the repository is private.'
+const TOKEN_HINT = ' If this source is in a private repository, set GIT_CREDENTIALS (or GITHUB_TOKEN / REDPANDA_GITHUB_TOKEN / ACTIONS_BOT_TOKEN) so the fetch can authenticate.'
+const REJECTED_HINT = ' A GitHub token was sent but rejected, so it may be expired or not grant access to this repository if the repository is private (the default Actions GITHUB_TOKEN is scoped to its own repository).'
 
 // The response body of a failed fetch is never read; cancel it so the
 // underlying connection is released instead of lingering until GC.

@@ -2249,7 +2249,7 @@ validation
   .option('--disable-page <path>', 'Local path to disable-enterprise-features.adoc (default: fetch from docs repo)')
   .option('--antora <path>', 'Local path to rp-connect-docs antora.yml (default: fetch from rp-connect-docs main)')
   .option('--properties <path>', 'Local path to a generated cluster-properties JSON; enables existence checks for gating properties')
-  .option('--skip-connect', 'Skip the connect info.csv comparison')
+  .option('--skip-connect', 'Skip the connect check entirely: neither the connect info.csv nor the rp-connect-docs antora.yml is fetched (overrides --antora)')
   .option('--format <format>', 'Output format: text or json', 'text')
   .option('--write-mapping <path>', 'Write the internal-to-external name mapping partial to this path')
   .action(async (options) => {

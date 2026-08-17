@@ -105,7 +105,7 @@ describe('enterprise-sources', () => {
       expect(failedSources[0].level).toBe('error');
       expect(failedSources[0].message).toMatch(/404 Not Found/);
       expect(failedSources[0].message).toMatch(/token was sent but rejected/i);
-      expect(failedSources[0].message).toMatch(/expired or lack access/i);
+      expect(failedSources[0].message).toMatch(/expired or not grant access/i);
     });
 
     it('throws with the rejected-token hint for unnamed sources when the retry also fails', async () => {
@@ -123,7 +123,7 @@ describe('enterprise-sources', () => {
       await expect(fetchText('https://example.test/file', 'some source')).resolves.toBeUndefined();
       // No token, so no retry.
       expect(fetchImpl).toHaveBeenCalledTimes(1);
-      expect(failedSources[0].message).toMatch(/set GITHUB_TOKEN \(or REDPANDA_GITHUB_TOKEN \/ ACTIONS_BOT_TOKEN\)/);
+      expect(failedSources[0].message).toMatch(/set GIT_CREDENTIALS \(or GITHUB_TOKEN \/ REDPANDA_GITHUB_TOKEN \/ ACTIONS_BOT_TOKEN\)/);
     });
 
     it('does not retry or hint on non-404 failures', async () => {
@@ -200,7 +200,7 @@ describe('enterprise-sources', () => {
     it('throws with the token hint when the registry fetch 404s without a token', async () => {
       const fetchImpl = jest.fn(async () => errorResponse(404));
       await expect(loadEnterpriseSources(baseOptions, { fetchImpl, token: null }))
-        .rejects.toThrow(/404 Not Found.*set GITHUB_TOKEN/);
+        .rejects.toThrow(/404 Not Found.*set GIT_CREDENTIALS/);
     });
 
     it('collects named-source failures instead of throwing', async () => {
