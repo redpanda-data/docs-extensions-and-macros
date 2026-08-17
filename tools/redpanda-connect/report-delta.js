@@ -429,9 +429,11 @@ function getRpkConnectVersion() {
     // currently-installed version through a regex capped at two digits per
     // segment (redpanda.VersionFromString in rpk/pkg/redpanda/version.go),
     // which throws for any Connect version >= 4.100.0 — the same bug class
-    // as CON-529, in a different function that its fix didn't touch, and
-    // still unfixed as of rpk dev. install's "latest" path (the default)
-    // skips that regex entirely, so it isn't exposed to the bug.
+    // as CON-529, in a different function that its fix didn't touch. Fixed
+    // upstream on dev (redpanda commit 8fc022e7) but present in all rpk
+    // releases up to at least v26.2.1; keep this workaround until a fixed
+    // rpk release ships. install's "latest" path (the default) skips that
+    // regex entirely, so it isn't exposed to the bug.
     execSync('rpk connect install --force', { stdio: 'ignore' });
 
     // Now capture the --version output
