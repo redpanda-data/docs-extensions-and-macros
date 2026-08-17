@@ -11,3 +11,9 @@ test/
 /modules/
 cloud-controlplane/
 node_modules
+
+# Generated cloud tier discrepancy reports (contain internal per-tier config; never commit)
+tier-discrepancy-report.md
+tier-discrepancy-report.json
+cloud-tier-discrepancy-report.md
+cloud-tier-discrepancy-report.json
