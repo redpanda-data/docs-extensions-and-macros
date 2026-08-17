@@ -231,6 +231,18 @@ describe('injectIntoAsciiDoc', () => {
     expect(doc).toBe(adoc)
   })
 
+  test('injects a path extracted twice only once, keeping the first entry', () => {
+    const { doc, injected } = injectIntoAsciiDoc(adoc, [
+      { path: 'external.domain', description: 'From @doc comment.', default: '`nil`' },
+      { path: 'external.domain', description: 'From helm-docs comment.', default: '`""`' },
+    ])
+
+    expect(injected).toEqual(['external.domain'])
+    expect(doc.match(/path=external\.domain/g)).toHaveLength(1)
+    expect(doc).toContain('From @doc comment.')
+    expect(doc).not.toContain('From helm-docs comment.')
+  })
+
   test('appends keys that sort after every existing section', () => {
     const { doc, injected } = injectIntoAsciiDoc(adoc, [
       { path: 'external.zzz', description: 'Last key.', default: '`nil`' },

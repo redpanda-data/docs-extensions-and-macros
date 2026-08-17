@@ -195,10 +195,17 @@ function injectIntoAsciiDoc (adoc, entries) {
   }
 
   const urlPrefix = sections[0].urlPrefix
+  // Tracks both keys present in the document and keys queued for injection,
+  // so a path extracted twice (for example, from both @doc and # -- comments
+  // for the same key) is only injected once.
   const existingKeys = new Set(sections.map((s) => s.key))
-  const additions = entries
-    .filter((e) => !existingKeys.has(e.path))
-    .sort((a, b) => a.path.localeCompare(b.path))
+  const additions = []
+  for (const entry of entries) {
+    if (existingKeys.has(entry.path)) continue
+    existingKeys.add(entry.path)
+    additions.push(entry)
+  }
+  additions.sort((a, b) => a.path.localeCompare(b.path))
 
   let doc = adoc
   const injected = []
