@@ -3,6 +3,74 @@ const path = require('path');
 const yaml = require('js-yaml');
 const fetch = globalThis.fetch;
 
+// Default source URLs (shared with the CLI in bin/doc-tools.js)
+const CLOUD_TIER_DEFAULTS = {
+  INPUT_URL: 'https://api.github.com/repos/redpanda-data/cloudv2/contents/install-pack',
+  MASTER_DATA_URL: 'https://api.github.com/repos/redpanda-data/cloudv2-infra/contents/apps/master-data-reconciler/manifests/overlays/production/master-data.yaml?ref=integration'
+};
+
+// Hosts that are allowed to receive the GitHub token. Never attach the
+// Authorization header to any other host, or the token leaks to arbitrary
+// servers passed via --input/--master-data.
+const TRUSTED_GITHUB_HOSTS = new Set([
+  'api.github.com',
+  'raw.githubusercontent.com',
+  'objects.githubusercontent.com'
+]);
+
+// Pattern matching the private repos our default URLs point at.
+const PRIVATE_REPO_PATH_PATTERN = /^\/repos\/redpanda-data\/cloudv2(?:-infra)?\//;
+
+/**
+ * Resolve the GitHub token from the supported environment variables.
+ * Matches the chain used by the `cloud-docs regions` command.
+ * @returns {string|undefined} The token, or undefined if none is set.
+ */
+function getGithubToken() {
+  return process.env.GITHUB_TOKEN || process.env.GH_TOKEN || process.env.REDPANDA_GITHUB_TOKEN;
+}
+
+/**
+ * Build fetch headers for a URL, attaching the GitHub token only when the
+ * URL's host is a trusted GitHub host.
+ * @param {string} url - The URL about to be fetched.
+ * @returns {Object} Headers object (possibly empty).
+ */
+function buildRequestHeaders(url) {
+  const headers = { 'User-Agent': 'cloud-tier-table-tool' };
+  const token = getGithubToken();
+  if (token) {
+    try {
+      const host = new URL(url).hostname;
+      if (TRUSTED_GITHUB_HOSTS.has(host)) {
+        headers['Authorization'] = `token ${token}`;
+      }
+    } catch (error) {
+      // Invalid URL: no Authorization header. fetch() will surface the error.
+    }
+  }
+  return headers;
+}
+
+/**
+ * Fail fast with a clear message when a URL points at the private
+ * cloudv2/cloudv2-infra repos but no GitHub token is available.
+ * @param {string} url - The URL about to be fetched.
+ * @throws {Error} If the URL targets a private redpanda-data repo and no token is set.
+ */
+function requireTokenForPrivateRepo(url) {
+  if (typeof url !== 'string' || !url.startsWith('http') || getGithubToken()) return;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (error) {
+    return; // Not a parseable URL; let fetch() report it.
+  }
+  if (parsed.hostname === 'api.github.com' && PRIVATE_REPO_PATH_PATTERN.test(parsed.pathname)) {
+    throw new Error('GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN environment variable is required to fetch from the private cloudv2/cloudv2-infra repos.');
+  }
+}
+
 // Hardcoded list of keys to extract (top-level and cluster_config)
 const LIMIT_KEYS = [
   // Top-level
@@ -59,16 +127,11 @@ async function fetchPublicTiers(masterDataUrl) {
       throw new Error('masterDataUrl must be a valid string');
     }
 
-    const headers = {};
-    if (process.env.GITHUB_TOKEN) {
-      headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
-      headers['User-Agent'] = 'cloud-tier-table-tool';
-    }
-    
     let masterDataYaml;
     if (masterDataUrl.startsWith('http')) {
+      requireTokenForPrivateRepo(masterDataUrl);
       // Fetch from GitHub API
-      const response = await fetch(masterDataUrl, { headers });
+      const response = await fetch(masterDataUrl, { headers: buildRequestHeaders(masterDataUrl) });
       if (!response.ok) {
         throw new Error(`Failed to fetch master data: ${response.status} ${response.statusText}`);
       }
@@ -174,17 +237,13 @@ async function parseYaml(input) {
     }
 
     // If input is the special API directory, fetch the latest version YAML
-    const apiDir = 'https://api.github.com/repos/redpanda-data/cloudv2/contents/install-pack';
+    const apiDir = CLOUD_TIER_DEFAULTS.INPUT_URL;
     if (input === apiDir) {
-      const headers = {};
-      if (process.env.GITHUB_TOKEN) {
-        headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
-        headers['User-Agent'] = 'cloud-tier-table-tool';
-      }
-      
+      requireTokenForPrivateRepo(apiDir);
+
       let res;
       try {
-        res = await fetch(apiDir, { headers });
+        res = await fetch(apiDir, { headers: buildRequestHeaders(apiDir) });
       } catch (error) {
         throw new Error(`Network error fetching install-pack directory: ${error.message}`);
       }
@@ -242,7 +301,7 @@ async function parseYaml(input) {
       
       let yamlResponse;
       try {
-        yamlResponse = await fetch(latestFile.download_url, { headers });
+        yamlResponse = await fetch(latestFile.download_url, { headers: buildRequestHeaders(latestFile.download_url) });
       } catch (error) {
         throw new Error(`Network error fetching ${latestFile.name}: ${error.message}`);
       }
@@ -268,15 +327,11 @@ async function parseYaml(input) {
     // Handle URL or local file
     let yamlText;
     if (input.startsWith('http')) {
-      const headers = {};
-      if (process.env.GITHUB_TOKEN) {
-        headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
-        headers['User-Agent'] = 'cloud-tier-table-tool';
-      }
-      
+      requireTokenForPrivateRepo(input);
+
       let response;
       try {
-        response = await fetch(input, { headers });
+        response = await fetch(input, { headers: buildRequestHeaders(input) });
       } catch (error) {
         throw new Error(`Network error fetching ${input}: ${error.message}`);
       }
@@ -467,7 +522,8 @@ function buildTableRows(tiers, publicTiers, customLimits) {
               
               // Check if this is a master data field first
               if (['advertisedMaxIngress', 'advertisedMaxEgress', 'advertisedMaxPartitionCount', 'advertisedMaxClientCount'].includes(key)) {
-                value = publicTier[key] || 'N/A';
+                // Explicit check so legitimate falsy values (e.g. 0) are kept
+                value = (publicTier[key] === undefined || publicTier[key] === null) ? 'N/A' : publicTier[key];
               } else if (configProfile[key] !== undefined) {
                 value = configProfile[key];
               } else if (configProfile.cluster_config && configProfile.cluster_config[key] !== undefined) {
@@ -725,10 +781,12 @@ async function generateCloudTierTable({
   }
 }
 
-module.exports = { 
-  generateCloudTierTable, 
-  extractVersion, 
-  findHighestVersionProfile, 
-  parseYaml, 
-  fetchPublicTiers 
+module.exports = {
+  generateCloudTierTable,
+  extractVersion,
+  findHighestVersionProfile,
+  parseYaml,
+  fetchPublicTiers,
+  CLOUD_TIER_DEFAULTS,
+  LIMIT_KEYS
 };

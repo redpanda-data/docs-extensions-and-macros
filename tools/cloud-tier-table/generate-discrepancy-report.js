@@ -1,7 +1,30 @@
 #!/usr/bin/env node
 
-const { generateCloudTierTable } = require('./generate-cloud-tier-table.js');
+const { generateCloudTierTable, CLOUD_TIER_DEFAULTS } = require('./generate-cloud-tier-table.js');
 const Papa = require('papaparse');
+
+// Every column analyzeTierDiscrepancies() reads from the CSV. The default
+// LIMIT_KEYS in generate-cloud-tier-table.js omit the four actual-config
+// keys (kafka_throughput_limit_node_in_bps, kafka_throughput_limit_node_out_bps,
+// topic_partitions_per_shard, kafka_connections_max), so the table generation
+// for this report must request them explicitly or every "actual" value parses
+// as 0 and every metric is reported as a critical -100% discrepancy.
+const DISCREPANCY_LIMIT_KEYS = [
+  // Tier metadata
+  'cloud_provider',
+  'machine_type',
+  'nodes_count',
+  // Advertised limits from master data
+  'advertisedMaxIngress',
+  'advertisedMaxEgress',
+  'advertisedMaxPartitionCount',
+  'advertisedMaxClientCount',
+  // Actual values from the tier config profiles (cluster_config)
+  'kafka_throughput_limit_node_in_bps',
+  'kafka_throughput_limit_node_out_bps',
+  'topic_partitions_per_shard',
+  'kafka_connections_max'
+];
 
 /**
  * Compute the percentage difference from an advertised value to an actual value.
@@ -15,18 +38,18 @@ function calculatePercentageDiff(advertised, actual) {
 }
 
 /**
- * Convert a bytes-per-second value into a human-readable Mbps or Kbps string.
- * @param {number} bps - Bytes per second; falsy values (e.g., 0, null, undefined) produce `'N/A'`.
- * @returns {string} A formatted throughput string like `"<n.n> Mbps"` or `"<n.n> Kbps"`, or `'N/A'` when input is falsy.
+ * Convert a bytes-per-second value into a human-readable MiB/s or KiB/s string.
+ * @param {number} bytesPerSecond - Bytes per second; falsy values (e.g., 0, null, undefined) produce `'N/A'`.
+ * @returns {string} A formatted throughput string like `"<n.n> MiB/s"` or `"<n.n> KiB/s"`, or `'N/A'` when input is falsy.
  */
-function formatThroughput(bps) {
-  if (!bps) return 'N/A';
-  const mbps = bps / (1024 * 1024);
-  if (mbps < 1) {
-    const kbps = bps / 1024;
-    return `${kbps.toFixed(1)} Kbps`;
+function formatThroughput(bytesPerSecond) {
+  if (!bytesPerSecond) return 'N/A';
+  const mib = bytesPerSecond / (1024 * 1024);
+  if (mib < 1) {
+    const kib = bytesPerSecond / 1024;
+    return `${kib.toFixed(1)} KiB/s`;
   }
-  return `${mbps.toFixed(1)} Mbps`;
+  return `${mib.toFixed(1)} MiB/s`;
 }
 
 /**
@@ -204,18 +227,20 @@ function analyzeTierDiscrepancies(tier) {
  */
 async function generateDiscrepancyReport(options = {}) {
   const {
-    input = 'https://api.github.com/repos/redpanda-data/cloudv2/contents/install-pack',
-    masterData = 'https://api.github.com/repos/redpanda-data/cloudv2-infra/contents/master-data.yaml',
+    input = CLOUD_TIER_DEFAULTS.INPUT_URL,
+    masterData = CLOUD_TIER_DEFAULTS.MASTER_DATA_URL,
     format = 'markdown'
   } = options;
 
   try {
-    // Get the raw data by generating table with CSV format
+    // Get the raw data by generating table with CSV format, requesting every
+    // column the analyzer reads (advertised limits AND actual config values).
     const tableData = await generateCloudTierTable({
       input,
       masterData,
       format: 'csv',
-      output: null
+      output: null,
+      limits: DISCREPANCY_LIMIT_KEYS
     });
 
     // Parse CSV data using papaparse for robust handling of quotes, commas, and newlines

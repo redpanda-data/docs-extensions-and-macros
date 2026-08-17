@@ -18,11 +18,8 @@ const {
   printDeltaReport
 } = require('../tools/redpanda-connect/report-delta');
 
-// Cloud tier table default URLs
-const CLOUD_TIER_DEFAULTS = {
-  INPUT_URL: 'https://api.github.com/repos/redpanda-data/cloudv2/contents/install-pack',
-  MASTER_DATA_URL: 'https://api.github.com/repos/redpanda-data/cloudv2-infra/contents/apps/master-data-reconciler/manifests/overlays/production/master-data.yaml?ref=integration'
-};
+// Cloud tier table default URLs (single source of truth lives in the tool module)
+const { CLOUD_TIER_DEFAULTS } = require('../tools/cloud-tier-table/generate-cloud-tier-table.js');
 
 /**
  * Searches upward from a starting directory to locate the repository root.
