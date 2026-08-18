@@ -2335,6 +2335,47 @@ validation
     }
   })
 
+/**
+ * lint-strings
+ *
+ * @description
+ * Deterministic lint for user-facing doc strings embedded in engineering
+ * source code (property descriptions, metric help strings, ...). These
+ * strings ship verbatim to docs.redpanda.com, so this command surfaces
+ * quality problems (empty descriptions, broken markup, name-echo
+ * tautologies, convention drift) at write time, with exact file:line spans
+ * for each declaration.
+ *
+ * @why
+ * The docs team currently patches bad source strings after the fact via
+ * override files. Linting where engineers write the strings - including a
+ * declaration-anchored --diff mode for PR reviews - retires that drift debt.
+ *
+ * @example
+ * # Lint all supported surfaces in a local redpanda checkout
+ * npx doc-tools lint-strings --repo ~/redpanda
+ *
+ * # Lint only properties, machine-readable
+ * npx doc-tools lint-strings --repo ~/redpanda --surface properties --format json
+ *
+ * # PR mode: only declarations whose span intersects the diff
+ * npx doc-tools lint-strings --repo ~/redpanda --diff origin/dev
+ */
+programCli
+  .command('lint-strings')
+  .description('Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)')
+  .requiredOption('--repo <path>', 'Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned.')
+  .option('--surface <list>', 'Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics')
+  .option('--diff <base>', 'Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD')
+  .option('--format <format>', 'Output format: human or json', 'human')
+  .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
+  .option('--only-rules <list>', 'Comma-separated rule ids to run exclusively')
+  .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
+  .action((options) => {
+    const { runCli } = require('../tools/lint-strings')
+    runCli(options)
+  })
+
 programCli.addCommand(automation)
 programCli.addCommand(validation)
 programCli.parse(process.argv)
