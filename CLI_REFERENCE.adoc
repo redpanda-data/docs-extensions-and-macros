@@ -1339,7 +1339,7 @@ Local path to enterprise-features.yml (default: fetch from docs repo main)
 Redpanda git ref for the core headers (default: "dev")
 
 `--connect-ref <ref>`::
-Connect git ref for info.csv (default: "main")
+Connect git ref for info.csv ('latest' resolves the newest release tag; the registry documents released state) (default: "latest")
 
 `--docs-ref <ref>`::
 Docs repo git ref for remote fetches (default: "main")
