@@ -1,0 +1,85 @@
+---
+# Reusable workflow: block hand edits to generated files.
+#
+# Content repos call this from a thin wrapper to fail any PR that modifies
+# generated files without carrying the label their generation workflows apply
+# (auto-docs by convention). This keeps "generated" meaning generated: the only
+# path to changing those files is through the generator.
+#
+# Example caller (.github/workflows/lint-generated-content.yml in a docs repo):
+#
+#   name: lint-generated-content
+#   on:
+#     pull_request:
+#       types: [opened, synchronize, reopened, labeled, unlabeled]
+#   jobs:
+#     guard:
+#       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/guard-generated-files.yml@main
+#       with:
+#         generated-paths: |
+#           modules/reference/partials/generated/
+#
+name: guard-generated-files
+on:
+  workflow_call:
+    inputs:
+      generated-paths:
+        description: >-
+          Newline-separated path prefixes (relative to the repo root) of
+          generated files, for example "modules/reference/partials/generated/".
+        required: true
+        type: string
+      allow-label:
+        description: PR label that marks generator-produced changes as allowed.
+        required: false
+        type: string
+        default: auto-docs
+
+jobs:
+  block-manual-edits:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if generated files are edited without the allow label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GENERATED_PATHS: ${{ inputs.generated-paths }}
+          ALLOW_LABEL: ${{ inputs.allow-label }}
+          HAS_ALLOW_LABEL: ${{ contains(github.event.pull_request.labels.*.name, inputs.allow-label) }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t prefixes < <(printf '%s\n' "$GENERATED_PATHS" | sed '/^[[:space:]]*$/d')
+          if [ "${#prefixes[@]}" -eq 0 ]; then
+            echo "::error::generated-paths input is empty."
+            exit 1
+          fi
+
+          violations=()
+          while IFS= read -r file; do
+            for prefix in "${prefixes[@]}"; do
+              if [[ "$file" == "$prefix"* ]]; then
+                violations+=("$file")
+                break
+              fi
+            done
+          done < <(gh api "repos/${REPO}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')
+
+          if [ "${#violations[@]}" -eq 0 ]; then
+            echo "No generated files changed."
+            exit 0
+          fi
+
+          if [ "$HAS_ALLOW_LABEL" = "true" ]; then
+            echo "PR has the '${ALLOW_LABEL}' label; generated-file changes are allowed:"
+            printf '  %s\n' "${violations[@]}"
+            exit 0
+          fi
+
+          echo "::error::This PR modifies auto-generated files without the '${ALLOW_LABEL}' label:"
+          printf '%s\n' "${violations[@]}" | while IFS= read -r f; do
+            echo "::error file=${f}::Auto-generated file edited by hand: ${f}"
+          done
+          echo "::error::These files are produced by a generation workflow. Update the source data or the generator template instead, or add the '${ALLOW_LABEL}' label if this change genuinely comes from the generator."
+          exit 1
