@@ -30,3 +30,6 @@ docs-data/rpk-vlocal.json
 # Property extractor working data (cloned/built at run time)
 tools/property-extractor/tmp/
 tools/property-extractor/tree-sitter/tree-sitter-cpp/
+
+# Doc-strings eval harness output (real model runs; never committed)
+evals/doc-strings/results/

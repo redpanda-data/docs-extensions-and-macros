@@ -1,0 +1,180 @@
+= Doc-strings evals: execution-verified model behaviors
+:toc:
+:toc-placement!:
+
+Evals for the three MODEL-DRIVEN behaviors that the doc-strings GitHub
+workflows delegate to Claude. The deterministic tools themselves
+(`tools/lint-strings`, `tools/preview-string`, `tools/overrides-audit`) are
+covered by the jest suite and are NOT re-tested here - they are the
+*measuring instruments* these evals use to grade the model.
+
+toc::[]
+
+== The philosophy: execute, never grade prose
+
+The failure mode this harness exists to avoid: evals whose assertions are
+regex matches over model prose. Those pass without exercising anything and
+cannot meaningfully fail.
+
+Every verdict here is computed by *executing* the model's output against the
+real machinery:
+
+1. A fixture mini-repo (shaped like redpanda: `src/v/config/`, `*probe.cc`,
+   `src/go/rpk/pkg/cli/`) is materialized in a temp dir.
+2. The real tools produce the genuine input the production workflow would
+   feed the model (`doc-tools lint-strings --format json` findings, or a
+   `doc-tools overrides audit` candidate row).
+3. The model is called headless (`claude -p`, no tools, prompt on stdin,
+   300s timeout) with a prompt that mirrors the production workflow prompt
+   plus a machine-parsed output contract.
+4. The harness *applies* the output - a GitHub `+```suggestion+` block
+   replacing the finding's `line_start..line_end`, or a `LINES a-b` +
+   `+```replacement+` span edit - to the fixture file.
+5. The verdict is re-computed mechanically:
+   * re-run `lint-strings`: the rewritten declaration must have **zero
+     findings of any severity**, and every untouched declaration must keep
+     exactly the findings it had (fingerprint compare);
+   * re-run the surface extractor (the real Python property extractor, the
+     metrics scanner, the rpk scanner): the target must still parse, every
+     other declaration must be byte-identical, and every non-description
+     field of the target must be unchanged;
+   * for upstream ports, re-run `overrides audit`: the classification must
+     flip (`UPSTREAMABLE -> REDUNDANT`, `SPLIT -> KEEP`), which is the
+     production definition of "the port worked";
+   * blanked-literal structural compare: string-literal contents are
+     blanked, adjacent literals merged, whitespace neutralized - the result
+     must be identical before/after, proving the model changed *no token
+     outside the doc string* while still allowing clang-format re-wrapping;
+   * C++ suggestions must keep every line within 80 columns.
+
+No check ever asks "does the model's answer *sound* right". The only prose
+inspection anywhere is fence parsing and the literal `NO_SUGGESTIONS`
+sentinel in a negative control - both structural.
+
+== The three behaviors under test
+
+[cols="1,2,3"]
+|===
+|Behavior |Production home |Eval cases
+
+|A. Suggestion rewrite
+|`doc-strings-review.yml` (redpanda, redpanda-operator): Claude turns
+deterministic lint findings into GitHub suggestion blocks
+|`prop-empty-description`, `prop-tautology-no-period`, `metric-name-echo`
+(rewrite must carry NO terminal period), `rpk-flag-lowercase-period` (only
+the usage literal may change - the rest of the line is byte-compared)
+
+|B. Upstream port
+|`upstream-doc-strings.yml` (docs repo): Claude ports override prose into
+the C++ source string it masks
+|`upstream-clean` (UPSTREAMABLE text lands verbatim), `upstream-split`
+(SPLIT candidate: stripped prose lands, the xref must NOT reappear -
+`detectDocsMarkup` over the re-extracted string must be empty)
+
+|C. False-positive guard
+|Both workflows' suggest-only posture
+|`negative-property-diff` (conforming rewording diff -> zero suggestions,
+zero doc-impact claims), `negative-metrics-file` (conforming probe file ->
+the model must claim `{"findings": []}`). *Any* invention fails the case.
+|===
+
+== Negative controls that provably can fail
+
+A negative control that cannot fail is decoration. `--sabotage <id>` re-runs
+a negative control against a deliberately violating fixture (defined per
+case as `sabotageEdits`), skips the zero-findings precondition, and *expects
+the case to FAIL*:
+
+[source,bash]
+----
+node evals/doc-strings/run-evals.js --sabotage negative-property-diff
+node evals/doc-strings/run-evals.js --sabotage negative-metrics-file
+----
+
+Exit 0 means the proof succeeded (the model flagged the planted violation
+and the harness caught it as a FAIL verdict); exit 1 means the harness can
+no longer catch invented findings and must be fixed. Nothing is edited on
+disk, so there is nothing to restore afterwards.
+
+Both proofs were run against the live model when this harness landed; both
+controls demonstrably fail on violating input.
+
+== Running
+
+[source,bash]
+----
+npm run eval:doc-strings                     # full suite (8 cases)
+node evals/doc-strings/run-evals.js --case metric-name-echo
+node evals/doc-strings/run-evals.js --model opus
+node evals/doc-strings/run-evals.js --keep-temp   # keep fixture repos
+----
+
+Requirements:
+
+* The `claude` CLI on PATH and authenticated. When it is missing the suite
+  prints `SKIPPED` and exits with code 3 - a skipped run never looks green.
+* The property-extractor venv (`tools/property-extractor/tmp/...`). It is
+  created automatically on the first properties run (see
+  `tools/lint-strings/surfaces/properties.js`).
+
+Exit codes: `0` all pass (or sabotage proven), `1` failures, `2` harness
+error, `3` skipped.
+
+Deliberately **not wired into CI**: a full run makes eight real model calls
+(a few minutes of wall time and real tokens). Run it when the workflow
+prompts, the lint rules, or the extraction change.
+
+Each run writes `results/<timestamp>/<case>/` with the exact prompt, the raw
+model output, before/after fixture snapshots, and `evidence.json` (every
+mechanical check with its measured detail). `results/` is gitignored.
+
+== Anatomy
+
+[cols="1,3"]
+|===
+|`run-evals.js` |Driver + per-kind executors (rewrite, upstream,
+negative-review, negative-audit). CommonJS, zero new dependencies.
+|`cases.js` |Declarative case table. Every positive case pins
+`expectRules` / `expectClassBefore` preconditions that are asserted against
+the REAL tool output before the model is called - fixture drift aborts as
+`HARNESS_ERROR` instead of silently testing something else.
+|`prompts.js` |Prompt templates mirroring the production workflow prompts
+(`doc-strings-review.yml`, `upstream-doc-strings.yml`) plus the per-surface
+contract from the doc-strings skill, and a machine-parsed OUTPUT CONTRACT
+section (the one deliberate delta from production, which posts via MCP
+instead).
+|`lib.js` |Fixture materialization, real doc-tools invocations, fence
+parsing, and the mechanical comparators (blanked-literal normalization,
+extraction diffing, finding fingerprints).
+|`fixtures/conforming_probe.cc` |Fully conforming metrics file for the
+negative control. The harness asserts its zero-findings precondition on
+every run, so drift cannot silently blunt the control.
+|===
+
+Fixture mini-repos are copied from `tools/lint-strings/fixtures/` (the same
+known-bad/conforming sources the jest suite pins) and edited per case with
+exact-match `find`/`replace` pairs that throw when they no longer match.
+
+== Adding a case
+
+1. Add an entry to `cases.js`:
+   * `rewrite` kind: pick (or `edits`-create) a declaration in a fixture
+     that the real linter flags, set `target` and `expectRules`, and for Go
+     one-liners set `singleLine: true` (enables the byte-identical
+     prefix/suffix check).
+   * `upstream` kind: provide the `overrides` document, `expectClassBefore`
+     (what the real audit must say going in) and `expectClassAfter` (what it
+     must say after a correct port).
+   * negative kinds: provide a conforming fixture (or `diffEdits`) AND
+     `sabotageEdits` that plant a violation - a negative control without a
+     sabotage path is not accepted, because it cannot prove it can fail.
+2. Run the single case: `node evals/doc-strings/run-evals.js --case <id>`.
+3. If it is a negative control, prove it: `--sabotage <id>` must exit 0.
+
+Iteration rule (the honest-eval contract): when a positive case fails on a
+legitimate model shortcoming, tighten the *prompt template* - that is the
+eval doing its job of hardening the production prompt. Never weaken a
+mechanical assertion to make a case pass. Comparator changes are only
+acceptable when the assertion was measuring something the contract
+explicitly permits (for example, clang-format re-wrapping), and must keep
+every genuine token change failing.
