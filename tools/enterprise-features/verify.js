@@ -122,22 +122,35 @@ function checkCoreProperties (features, enterpriseProperties, allPropertyNames) 
 }
 
 /**
- * Compare connect info.csv enterprise plugins against the stale
- * enterprise-components list in rp-connect-docs antora.yml (when given).
+ * Validate registry connect-plugin pointers against the enterprise plugins
+ * in connect's info.csv.
+ *
+ * This used to diff info.csv against the hand-maintained
+ * enterprise-components list in rp-connect-docs antora.yml, but
+ * rp-connect-docs#485 removed that list (it had gone stale — the exact drift
+ * this validator exists to catch). Per-plugin enterprise status in the docs
+ * now comes from the generated connector catalog, which is built from the
+ * same connect metadata as info.csv, so it cannot drift by construction.
+ * What can still go stale is the registry itself: any entry that pins a
+ * specific plugin via `source: {kind: connect-plugin}` must name a plugin
+ * that info.csv actually marks enterprise.
+ *
+ * The check also reports what it verified, so a run with zero pinned
+ * plugins is visibly a shallow pass rather than a silent one.
  */
-function checkConnect (infoCsvPlugins, antoraList) {
+function checkConnect (infoCsvPlugins, features) {
   const findings = []
-  if (!antoraList) return findings
-  for (const plugin of infoCsvPlugins) {
-    if (!antoraList.includes(plugin)) {
-      findings.push(finding('error', 'connect-list', `Plugin '${plugin}' is enterprise in info.csv but missing from the enterprise-components list in rp-connect-docs antora.yml.`))
+  const pinned = []
+  for (const feature of features) {
+    if (feature.source && feature.source.kind === 'connect-plugin') {
+      const value = String(feature.source.value).trim()
+      pinned.push(value)
+      if (!infoCsvPlugins.includes(value)) {
+        findings.push(finding('error', 'connect-list', `'${feature.name}' points at connect plugin '${value}', which is not an enterprise plugin in info.csv (renamed, removed, or no longer enterprise).`))
+      }
     }
   }
-  for (const plugin of antoraList) {
-    if (!infoCsvPlugins.includes(plugin)) {
-      findings.push(finding('error', 'connect-list', `Plugin '${plugin}' is in the enterprise-components list in rp-connect-docs antora.yml but not enterprise in info.csv.`))
-    }
-  }
+  findings.push(finding('info', 'connect-list', `info.csv lists ${infoCsvPlugins.length} enterprise plugin(s); ${pinned.length} pinned by registry connect-plugin entries. Individual plugins are documented by the generated connector catalog; the licensing table covers them through the aggregate connect-scope entries.`))
   return findings
 }
 
@@ -200,7 +213,6 @@ function buildMappingPartial (features, enumValues) {
  * @param {string} [sources.coreHeader] - enterprise_features.h contents.
  * @param {string} [sources.configurationHeader] - configuration.h contents.
  * @param {string} [sources.infoCsv] - connect info.csv contents.
- * @param {string[]} [sources.antoraEnterpriseComponents]
  * @param {string} [sources.disablePage] - disable-enterprise-features.adoc contents.
  * @param {string[]} [sources.allPropertyNames] - full property list for gating checks.
  * @returns {{findings: object[], features: object[], enumValues: string[]}}
@@ -223,7 +235,7 @@ function runChecks (sources) {
   }
   if (sources.infoCsv) {
     const plugins = parsers.parseConnectEnterprisePlugins(sources.infoCsv)
-    findings.push(...checkConnect(plugins, sources.antoraEnterpriseComponents))
+    findings.push(...checkConnect(plugins, features))
   } else {
     findings.push(finding('info', 'connect-list', 'Skipped: no connect info.csv provided.'))
   }

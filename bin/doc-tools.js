@@ -2223,7 +2223,7 @@ const validation = new Command('validate').description('Validate docs data again
  * @why A feature must only be documented as enterprise under its approved
  * external name. This check catches new license-gated features in core that
  * have no registry entry yet, registry pointers that no longer match core,
- * and stale connect enterprise lists.
+ * and registry connect-plugin entries that no longer match info.csv.
  *
  * @example
  * # Check everything against the default remote sources
@@ -2247,26 +2247,20 @@ validation
   .option('--connect-ref <ref>', 'Connect git ref for info.csv', 'main')
   .option('--docs-ref <ref>', 'Docs repo git ref for remote fetches', 'main')
   .option('--disable-page <path>', 'Local path to disable-enterprise-features.adoc (default: fetch from docs repo)')
-  .option('--antora <path>', 'Local path to rp-connect-docs antora.yml (default: fetch from rp-connect-docs main)')
   .option('--properties <path>', 'Local path to a generated cluster-properties JSON; enables existence checks for gating properties')
-  .option('--skip-connect', 'Skip the connect check entirely: neither the connect info.csv nor the rp-connect-docs antora.yml is fetched (overrides --antora)')
+  .option('--skip-connect', 'Skip the connect check (info.csv is not fetched, so registry connect-plugin entries go unverified)')
   .option('--format <format>', 'Output format: text or json', 'text')
   .option('--write-mapping <path>', 'Write the internal-to-external name mapping partial to this path')
   .action(async (options) => {
     const { runChecks, buildMappingPartial } = require('../tools/enterprise-features/verify')
-    const { extractAntoraEnterpriseComponents } = require('../tools/enterprise-features/parsers')
-    // Fetch wiring (GitHub auth, rejected-token retry, --skip-connect
-    // short-circuits) lives in cli-utils/enterprise-sources so it is
-    // testable without a network.
+    // Fetch wiring (GitHub auth, rejected-token retry, transient-failure
+    // retries, --skip-connect short-circuits) lives in
+    // cli-utils/enterprise-sources so it is testable without a network.
     const { loadEnterpriseSources } = require('../cli-utils/enterprise-sources')
-    const yamlLib = require('js-yaml')
 
     try {
-      const { registryYaml, coreHeader, configurationHeader, infoCsv, disablePage, antoraYaml, failedSources } =
+      const { registryYaml, coreHeader, configurationHeader, infoCsv, disablePage, failedSources } =
         await loadEnterpriseSources(options)
-      const antoraEnterpriseComponents = antoraYaml
-        ? extractAntoraEnterpriseComponents(yamlLib.load(antoraYaml))
-        : undefined
 
       let allPropertyNames
       if (options.properties) {
@@ -2279,7 +2273,6 @@ validation
         coreHeader,
         configurationHeader,
         infoCsv,
-        antoraEnterpriseComponents,
         disablePage,
         allPropertyNames,
       })
