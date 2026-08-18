@@ -138,19 +138,20 @@ function checkCoreProperties (features, enterpriseProperties, allPropertyNames) 
  * The check also reports what it verified, so a run with zero pinned
  * plugins is visibly a shallow pass rather than a silent one.
  */
-function checkConnect (infoCsvPlugins, features) {
+function checkConnect (infoCsvPlugins, features, connectRef) {
   const findings = []
   const pinned = []
+  const source = connectRef ? `info.csv@${connectRef}` : 'info.csv'
   for (const feature of features) {
     if (feature.source && feature.source.kind === 'connect-plugin') {
       const value = String(feature.source.value).trim()
       pinned.push(value)
       if (!infoCsvPlugins.includes(value)) {
-        findings.push(finding('error', 'connect-list', `'${feature.name}' points at connect plugin '${value}', which is not an enterprise plugin in info.csv (renamed, removed, or no longer enterprise).`))
+        findings.push(finding('error', 'connect-list', `'${feature.name}' points at connect plugin '${value}', which is not an enterprise plugin in ${source} (renamed, removed, or no longer enterprise).`))
       }
     }
   }
-  findings.push(finding('info', 'connect-list', `info.csv lists ${infoCsvPlugins.length} enterprise plugin(s); ${pinned.length} pinned by registry connect-plugin entries. Individual plugins are documented by the generated connector catalog; the licensing table covers them through the aggregate connect-scope entries.`))
+  findings.push(finding('info', 'connect-list', `${source} lists ${infoCsvPlugins.length} enterprise plugin(s); ${pinned.length} pinned by registry connect-plugin entries. Individual plugins are documented by the generated connector catalog; the licensing table covers them through the aggregate connect-scope entries.`))
   return findings
 }
 
@@ -213,6 +214,7 @@ function buildMappingPartial (features, enumValues) {
  * @param {string} [sources.coreHeader] - enterprise_features.h contents.
  * @param {string} [sources.configurationHeader] - configuration.h contents.
  * @param {string} [sources.infoCsv] - connect info.csv contents.
+ * @param {string} [sources.connectRef] - ref the info.csv was fetched at, for messages.
  * @param {string} [sources.disablePage] - disable-enterprise-features.adoc contents.
  * @param {string[]} [sources.allPropertyNames] - full property list for gating checks.
  * @returns {{findings: object[], features: object[], enumValues: string[]}}
@@ -235,7 +237,7 @@ function runChecks (sources) {
   }
   if (sources.infoCsv) {
     const plugins = parsers.parseConnectEnterprisePlugins(sources.infoCsv)
-    findings.push(...checkConnect(plugins, features))
+    findings.push(...checkConnect(plugins, features, sources.connectRef))
   } else {
     findings.push(finding('info', 'connect-list', 'Skipped: no connect info.csv provided.'))
   }

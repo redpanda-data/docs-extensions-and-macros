@@ -271,6 +271,60 @@ describe('enterprise-sources', () => {
       expect(sources.disablePage).toBe('local disable.adoc');
     });
 
+    it("resolves connectRef 'latest' to the newest release tag before fetching info.csv", async () => {
+      const fetchImpl = jest.fn(async (url) =>
+        url.includes('api.github.com')
+          ? okResponse(JSON.stringify({ tag_name: 'v4.65.0' }))
+          : okResponse(`content of ${url}`));
+      const sources = await loadEnterpriseSources({ ...baseOptions, connectRef: 'latest' }, { fetchImpl, token: null, sleep: noSleep });
+
+      const urls = fetchImpl.mock.calls.map(([url]) => url);
+      expect(urls).toContain('https://api.github.com/repos/redpanda-data/connect/releases/latest');
+      expect(urls).toContain(`${RAW}/redpanda-data/connect/v4.65.0/internal/plugins/info.csv`);
+      // The registry documents released state, so main must not be the baseline.
+      expect(urls.some((url) => url.includes('/redpanda-data/connect/main/'))).toBe(false);
+      expect(sources.connectRef).toBe('v4.65.0');
+      expect(sources.infoCsv).toContain('info.csv');
+    });
+
+    it('an explicit --connect-ref bypasses release resolution', async () => {
+      const fetchImpl = jest.fn(async (url) => okResponse(`content of ${url}`));
+      const sources = await loadEnterpriseSources({ ...baseOptions, connectRef: 'v4.60.0' }, { fetchImpl, token: null, sleep: noSleep });
+
+      const urls = fetchImpl.mock.calls.map(([url]) => url);
+      expect(urls.some((url) => url.includes('api.github.com'))).toBe(false);
+      expect(urls).toContain(`${RAW}/redpanda-data/connect/v4.60.0/internal/plugins/info.csv`);
+      expect(sources.connectRef).toBe('v4.60.0');
+    });
+
+    it('reports a failed release resolution as an error finding and skips info.csv', async () => {
+      const fetchImpl = jest.fn(async (url) =>
+        url.includes('api.github.com') ? errorResponse(503, 'Service Unavailable') : okResponse('content'));
+      const sources = await loadEnterpriseSources({ ...baseOptions, connectRef: 'latest' }, { fetchImpl, token: null, sleep: noSleep });
+
+      expect(sources.infoCsv).toBeUndefined();
+      expect(sources.failedSources.some((f) => f.message.includes('connect latest release'))).toBe(true);
+      const urls = fetchImpl.mock.calls.map(([url]) => url);
+      expect(urls.some((url) => url.includes('/internal/plugins/info.csv'))).toBe(false);
+    });
+
+    it('reports a release response without a tag_name as an error finding', async () => {
+      const fetchImpl = jest.fn(async (url) =>
+        url.includes('api.github.com') ? okResponse('{}') : okResponse('content'));
+      const sources = await loadEnterpriseSources({ ...baseOptions, connectRef: 'latest' }, { fetchImpl, token: null, sleep: noSleep });
+
+      expect(sources.infoCsv).toBeUndefined();
+      expect(sources.failedSources.some((f) => f.message.includes('no tag_name'))).toBe(true);
+    });
+
+    it('does not resolve or fetch anything connect-related with skipConnect', async () => {
+      const fetchImpl = jest.fn(async (url) => okResponse(`content of ${url}`));
+      await loadEnterpriseSources({ ...baseOptions, connectRef: 'latest', skipConnect: true }, { fetchImpl, token: null, sleep: noSleep });
+
+      const urls = fetchImpl.mock.calls.map(([url]) => url);
+      expect(urls.some((url) => url.includes('api.github.com') || url.includes('/redpanda-data/connect/'))).toBe(false);
+    });
+
     it('throws with the token hint when the registry fetch 404s without a token', async () => {
       const fetchImpl = jest.fn(async () => errorResponse(404));
       await expect(loadEnterpriseSources(baseOptions, { fetchImpl, token: null, sleep: noSleep }))

@@ -159,12 +159,19 @@ function createSourceFetcher (deps = {}) {
  * comparison against nothing. The connect check now validates the registry's
  * connect-plugin entries directly against info.csv.
  *
+ * The connect ref defaults to 'latest', which resolves to the latest
+ * published connect release tag. The registry documents released state, so
+ * comparing it against main would flag plugins renamed or newly marked
+ * enterprise ahead of any release. The core headers deliberately stay on
+ * 'dev' for the opposite reason: their check exists to give early warning
+ * of NEW license-gated features before they ship.
+ *
  * @param {object} options - Parsed CLI options: registry, tag, connectRef,
  *   docsRef, disablePage, skipConnect.
  * @param {object} [deps] - Injectable dependencies for tests: token,
  *   fetchImpl, warn, sleep (see createSourceFetcher), and readLocal.
  * @returns {Promise<object>} { registryYaml, coreHeader, configurationHeader,
- *   infoCsv, disablePage, failedSources }
+ *   infoCsv, connectRef, disablePage, failedSources }
  */
 async function loadEnterpriseSources (options, deps = {}) {
   const { fetchText, failedSources } = createSourceFetcher(deps)
@@ -175,14 +182,31 @@ async function loadEnterpriseSources (options, deps = {}) {
     : await fetchText(`${RAW}/redpanda-data/docs/${options.docsRef}/shared/modules/ROOT/partials/enterprise-features.yml`)
   const coreHeader = await fetchText(`${RAW}/redpanda-data/redpanda/${options.tag}/src/v/features/enterprise_features.h`, 'core enterprise_features.h')
   const configurationHeader = await fetchText(`${RAW}/redpanda-data/redpanda/${options.tag}/src/v/config/configuration.h`, 'core configuration.h')
-  const infoCsv = options.skipConnect
-    ? undefined
-    : await fetchText(`${RAW}/redpanda-data/connect/${options.connectRef}/internal/plugins/info.csv`, 'connect info.csv')
+
+  let connectRef = options.connectRef
+  let infoCsv
+  if (!options.skipConnect) {
+    if (!connectRef || connectRef === 'latest') {
+      const releaseJson = await fetchText('https://api.github.com/repos/redpanda-data/connect/releases/latest', 'connect latest release')
+      if (releaseJson === undefined) {
+        connectRef = undefined // resolution failed; already reported as an error finding
+      } else {
+        connectRef = JSON.parse(releaseJson).tag_name
+        if (!connectRef) {
+          failedSources.push({ level: 'error', check: 'fetch', message: 'Could not resolve the latest connect release: the GitHub API response has no tag_name. The connect check did not run.' })
+        }
+      }
+    }
+    if (connectRef) {
+      infoCsv = await fetchText(`${RAW}/redpanda-data/connect/${connectRef}/internal/plugins/info.csv`, `connect info.csv (${connectRef})`)
+    }
+  }
+
   const disablePage = options.disablePage
     ? readLocal(options.disablePage)
     : await fetchText(`${RAW}/redpanda-data/docs/${options.docsRef}/modules/get-started/pages/licensing/disable-enterprise-features.adoc`, 'disable-enterprise-features.adoc')
 
-  return { registryYaml, coreHeader, configurationHeader, infoCsv, disablePage, failedSources }
+  return { registryYaml, coreHeader, configurationHeader, infoCsv, connectRef, disablePage, failedSources }
 }
 
 module.exports = { createSourceFetcher, loadEnterpriseSources, RAW }

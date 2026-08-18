@@ -2244,7 +2244,7 @@ validation
   .description('Check the enterprise features registry against core, connect, and docs sources of truth')
   .option('--registry <path>', 'Local path to enterprise-features.yml (default: fetch from docs repo main)')
   .option('--tag <ref>', 'Redpanda git ref for the core headers', 'dev')
-  .option('--connect-ref <ref>', 'Connect git ref for info.csv', 'main')
+  .option('--connect-ref <ref>', "Connect git ref for info.csv ('latest' resolves the newest release tag; the registry documents released state)", 'latest')
   .option('--docs-ref <ref>', 'Docs repo git ref for remote fetches', 'main')
   .option('--disable-page <path>', 'Local path to disable-enterprise-features.adoc (default: fetch from docs repo)')
   .option('--properties <path>', 'Local path to a generated cluster-properties JSON; enables existence checks for gating properties')
@@ -2259,7 +2259,7 @@ validation
     const { loadEnterpriseSources } = require('../cli-utils/enterprise-sources')
 
     try {
-      const { registryYaml, coreHeader, configurationHeader, infoCsv, disablePage, failedSources } =
+      const { registryYaml, coreHeader, configurationHeader, infoCsv, connectRef, disablePage, failedSources } =
         await loadEnterpriseSources(options)
 
       let allPropertyNames
@@ -2273,6 +2273,7 @@ validation
         coreHeader,
         configurationHeader,
         infoCsv,
+        connectRef,
         disablePage,
         allPropertyNames,
       })
