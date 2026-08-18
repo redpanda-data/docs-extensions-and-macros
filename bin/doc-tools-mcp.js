@@ -488,6 +488,33 @@ const tools = [
     }
   },
   {
+    name: 'audit_overrides',
+    description: 'Audit docs-side override entries against extracted source strings. Classifies each override field as REDUNDANT (retire), UPSTREAMABLE (send prose upstream), KEEP_UNTIL_UPSTREAMED (markup-laden, stripped upstream candidate emitted), UPSTREAMABLE_SLOT, REDUNDANT_OR_UPSTREAMABLE, KEEP, or REVIEW. Writers use this to retire stale overrides and draft upstream source fixes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        overrides: {
+          type: 'string',
+          description: 'Path to the overrides JSON file (for example "docs-data/property-overrides.json")'
+        },
+        extracted: {
+          type: 'string',
+          description: 'Path to the extracted source JSON: the property extractor\'s RAW --output file, without overrides applied (required for the properties surface)'
+        },
+        surface: {
+          type: 'string',
+          description: 'Override surface to audit (optional, defaults to "properties")',
+          enum: ['properties', 'rpk', 'connect']
+        },
+        output: {
+          type: 'string',
+          description: 'Also write the JSON result to this file, relative to repo root (optional)'
+        }
+      },
+      required: ['overrides']
+    }
+  },
+  {
     name: 'run_doc_tools_command',
     description: 'Advanced: Run a raw doc-tools command. Only use this if none of the specific tools above fit your needs. Requires knowledge of doc-tools CLI syntax.',
     inputSchema: {

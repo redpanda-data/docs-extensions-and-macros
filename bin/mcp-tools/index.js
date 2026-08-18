@@ -25,6 +25,7 @@ const { generateBundleOpenApi } = require('./openapi');
 
 // Review tools
 const { reviewGeneratedDocs, generateReviewReport } = require('./generated-docs-review');
+const { auditOverrides } = require('./overrides-audit');
 
 // Doc-string tools (run in engineering repos)
 const { lintDocStrings } = require('./lint-doc-strings');
@@ -99,6 +100,10 @@ function executeTool(toolName, args = {}) {
 
       case 'preview_doc_string':
         result = previewDocString(args);
+        break;
+
+      case 'audit_overrides':
+        result = auditOverrides(args);
         break;
 
       case 'run_doc_tools_command': {
@@ -264,6 +269,7 @@ module.exports = {
   generateReviewReport,
   lintDocStrings,
   previewDocString,
+  auditOverrides,
 
   // Job queue
   initializeJobQueue,
