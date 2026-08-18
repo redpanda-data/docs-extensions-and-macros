@@ -2,7 +2,7 @@
 # Reusable workflow: block hand edits to generated files.
 #
 # Content repos call this from a thin wrapper to fail any PR that modifies
-# generated files without carrying the label their generation workflows apply
+# generated files without carrying a label their generation workflows apply
 # (auto-docs by convention). This keeps "generated" meaning generated: the only
 # path to changing those files is through the generator.
 #
@@ -26,11 +26,22 @@ on:
       generated-paths:
         description: >-
           Newline-separated path prefixes (relative to the repo root) of
-          generated files, for example "modules/reference/partials/generated/".
+          generated files. A prefix can be a directory
+          ("modules/reference/partials/generated/") or an exact file path.
         required: true
         type: string
-      allow-label:
-        description: PR label that marks generator-produced changes as allowed.
+      exclude-paths:
+        description: >-
+          Newline-separated path prefixes to exempt even though they fall
+          under generated-paths (for hand-written files inside generated
+          directories).
+        required: false
+        type: string
+        default: ''
+      allow-labels:
+        description: >-
+          Newline-separated PR labels, any one of which marks
+          generator-produced changes as allowed.
         required: false
         type: string
         default: auto-docs
@@ -39,25 +50,32 @@ jobs:
   block-manual-edits:
     runs-on: ubuntu-latest
     steps:
-      - name: Fail if generated files are edited without the allow label
+      - name: Fail if generated files are edited without an allow label
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GENERATED_PATHS: ${{ inputs.generated-paths }}
-          ALLOW_LABEL: ${{ inputs.allow-label }}
-          HAS_ALLOW_LABEL: ${{ contains(github.event.pull_request.labels.*.name, inputs.allow-label) }}
+          EXCLUDE_PATHS: ${{ inputs.exclude-paths }}
+          ALLOW_LABELS: ${{ inputs.allow-labels }}
+          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
           set -euo pipefail
 
-          mapfile -t prefixes < <(printf '%s\n' "$GENERATED_PATHS" | sed '/^[[:space:]]*$/d')
+          mapfile -t prefixes < <(printf '%s\n' "$GENERATED_PATHS" | sed 's/[[:space:]]*$//' | sed '/^[[:space:]]*$/d')
           if [ "${#prefixes[@]}" -eq 0 ]; then
             echo "::error::generated-paths input is empty."
             exit 1
           fi
+          mapfile -t excludes < <(printf '%s\n' "$EXCLUDE_PATHS" | sed 's/[[:space:]]*$//' | sed '/^[[:space:]]*$/d')
 
           violations=()
           while IFS= read -r file; do
+            excluded=false
+            for e in ${excludes[@]+"${excludes[@]}"}; do
+              if [[ "$file" == "$e"* ]]; then excluded=true; break; fi
+            done
+            if [ "$excluded" = true ]; then continue; fi
             for prefix in "${prefixes[@]}"; do
               if [[ "$file" == "$prefix"* ]]; then
                 violations+=("$file")
@@ -71,15 +89,21 @@ jobs:
             exit 0
           fi
 
-          if [ "$HAS_ALLOW_LABEL" = "true" ]; then
-            echo "PR has the '${ALLOW_LABEL}' label; generated-file changes are allowed:"
+          matched_label=$(jq -r --arg allow "$ALLOW_LABELS" \
+            '($allow | split("\n") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))) as $wanted
+             | map(select(. as $l | $wanted | index($l))) | first // empty' \
+            <<< "$PR_LABELS_JSON")
+
+          if [ -n "$matched_label" ]; then
+            echo "PR has the '${matched_label}' label; generated-file changes are allowed:"
             printf '  %s\n' "${violations[@]}"
             exit 0
           fi
 
-          echo "::error::This PR modifies auto-generated files without the '${ALLOW_LABEL}' label:"
+          allow_list=$(printf '%s\n' "$ALLOW_LABELS" | sed '/^[[:space:]]*$/d' | paste -sd ', ' -)
+          echo "::error::This PR modifies auto-generated files without an allow label (${allow_list}):"
           printf '%s\n' "${violations[@]}" | while IFS= read -r f; do
             echo "::error file=${f}::Auto-generated file edited by hand: ${f}"
           done
-          echo "::error::These files are produced by a generation workflow. Update the source data or the generator template instead, or add the '${ALLOW_LABEL}' label if this change genuinely comes from the generator."
+          echo "::error::These files are produced by a generation workflow. Update the source data or the generator template instead, or add one of the labels (${allow_list}) if this change genuinely comes from the generator."
           exit 1
