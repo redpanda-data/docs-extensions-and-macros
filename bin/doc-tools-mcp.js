@@ -431,6 +431,63 @@ const tools = [
     }
   },
   {
+    name: 'lint_doc_strings',
+    description: 'Lint user-facing doc strings embedded in engineering source code (property descriptions, rpk Short/Long/flag usage, metric help, Helm values comments, CRD field comments, connect field descriptions). These strings ship verbatim to docs.redpanda.com. Deterministic, suggest-only, with exact file:line spans. Run it inside an engineering checkout (redpanda, redpanda-operator, connect).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repo: {
+          type: 'string',
+          description: 'Absolute path to the engineering checkout to lint (required). Nothing is cloned.'
+        },
+        surface: {
+          type: 'string',
+          description: 'Comma-separated surfaces to lint: properties, metrics, rpk, helm, crd, connect (optional, defaults to all)'
+        },
+        diff: {
+          type: 'string',
+          description: 'Base git ref for declaration-anchored diff mode: lint only declarations whose span intersects lines changed in <ref>...HEAD (optional)'
+        },
+        skip_rules: {
+          type: 'string',
+          description: 'Comma-separated rule ids to skip (optional)'
+        },
+        only_rules: {
+          type: 'string',
+          description: 'Comma-separated rule ids to run exclusively (optional)'
+        }
+      },
+      required: ['repo']
+    }
+  },
+  {
+    name: 'preview_doc_string',
+    description: 'Render ONE embedded doc string from local engineering source to the final snippet published on docs.redpanda.com: properties through the real extractor and Handlebars template (with an optional override pane showing docs-repo masking), rpk through the real formatDescription() transformer, and metrics/helm/crd/connect in their published output shapes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repo: {
+          type: 'string',
+          description: 'Absolute path to the engineering checkout (required)'
+        },
+        surface: {
+          type: 'string',
+          description: 'Which surface the declaration belongs to',
+          enum: ['properties', 'rpk', 'metrics', 'helm', 'crd', 'connect']
+        },
+        name: {
+          type: 'string',
+          description: 'Declaration name: property name, rpk command token or --flag, metric name, Helm key path, CRD json field (or Struct.field), connect component/field name'
+        },
+        overrides: {
+          type: 'string',
+          description: 'Path to a docs-repo overrides JSON (properties only): adds an "as shipped" pane and a MASKED-BY-OVERRIDE notice when the override differs (optional)'
+        }
+      },
+      required: ['repo', 'surface', 'name']
+    }
+  },
+  {
     name: 'run_doc_tools_command',
     description: 'Advanced: Run a raw doc-tools command. Only use this if none of the specific tools above fit your needs. Requires knowledge of doc-tools CLI syntax.',
     inputSchema: {

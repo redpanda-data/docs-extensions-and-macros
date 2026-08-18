@@ -13,26 +13,34 @@ const { VERBATIM_ASCIIDOC_RULES } = require('./rules/verbatim-asciidoc')
  * embedded in engineering source code (the strings doc-tools publishes
  * verbatim to docs.redpanda.com).
  *
- * Registered surfaces. SEAM: rpk, helm, crd, and connect surface modules
- * plug in here - implement ./surfaces/<name>.js with the same contract as
- * properties.js/metrics.js ({ name, convention, extract({repo, files}),
- * rules }) and add it to this registry. Their diff-mode path routing already
- * exists in ./diff.js SURFACE_ROUTES.
+ * Registered surfaces. SEAM: new surface modules plug in here - implement
+ * ./surfaces/<name>.js with the same contract as the existing modules
+ * ({ name, convention, extract({repo, files}), rules, [skipRules] }) and
+ * add it to this registry plus ./diff.js SURFACE_ROUTES for diff-mode path
+ * routing.
  */
 const SURFACES = {
   properties: require('./surfaces/properties'),
-  metrics: require('./surfaces/metrics')
+  metrics: require('./surfaces/metrics'),
+  rpk: require('./surfaces/rpk'),
+  helm: require('./surfaces/helm'),
+  crd: require('./surfaces/crd'),
+  connect: require('./surfaces/connect')
 }
 
 /**
  * Build the rule set for a surface: common rules + verbatim-AsciiDoc rules
  * (for surfaces whose strings ship unescaped) + surface-specific rules.
+ * A surface may opt out of specific auto-applied rules via an optional
+ * skipRules array (for example, rpk skips too-short: one-line Shorts and
+ * flag usages are the convention, not a defect).
  */
 function rulesFor (surface) {
   const rules = [...COMMON_RULES]
   if (surface.convention.verbatim_asciidoc) rules.push(...VERBATIM_ASCIIDOC_RULES)
   rules.push(...surface.rules)
-  return rules
+  const skip = new Set(surface.skipRules || [])
+  return skip.size > 0 ? rules.filter((rule) => !skip.has(rule.name)) : rules
 }
 
 /**

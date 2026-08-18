@@ -14,16 +14,17 @@ const { spawnSync } = require('child_process')
  */
 
 /**
- * Path -> surface routing table. First match wins.
- * Surfaces without a registered extractor yet (rpk, helm, crd, connect) are
- * still routed so the orchestrator can report them as not-yet-supported
- * instead of silently dropping the files.
+ * Path -> surface routing table. First match wins. A surface routed here
+ * without an extractor in the index.js SURFACES registry is reported as
+ * not-yet-supported instead of silently dropping the files.
  */
 const SURFACE_ROUTES = [
   { surface: 'properties', pattern: /^src\/v\/config\// },
   { surface: 'metrics', pattern: /(^|\/)[^/]*probe\.cc$|^src\/v\/metrics\// },
   { surface: 'rpk', pattern: /^src\/go\/rpk\/pkg\/cli\// },
-  { surface: 'helm', pattern: /^charts\/[^/]+\/chart\/values\.yaml$/ },
+  // Both chart layouts ship: charts/<name>/chart/values.yaml (redpanda,
+  // console) and charts/<name>/values.yaml (connectors).
+  { surface: 'helm', pattern: /^charts\/[^/]+\/(chart\/)?values\.yaml$/ },
   { surface: 'crd', pattern: /^operator\/api\// },
   { surface: 'connect', pattern: /^internal\/impl\// }
 ]

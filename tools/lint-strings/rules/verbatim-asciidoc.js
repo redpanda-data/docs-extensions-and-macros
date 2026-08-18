@@ -73,6 +73,9 @@ const VERBATIM_ASCIIDOC_RULES = [
       const pattern = /\{([a-z][a-z0-9_-]*)\}/g
       let match
       while ((match = pattern.exec(text)) !== null) {
+        // A backslash-escaped \{...} is not substituted; authors escape
+        // deliberately (URL path templates, JSON pointers).
+        if (match.index > 0 && text[match.index - 1] === '\\') continue
         if (!KNOWN_ATTRIBUTES.has(match[1])) {
           issues.push({ message: `"{${match[1]}}" looks like an AsciiDoc attribute reference but is not a known product attribute. It will not be substituted on the rendered page.` })
         }

@@ -2365,7 +2365,7 @@ programCli
   .command('lint-strings')
   .description('Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)')
   .requiredOption('--repo <path>', 'Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned.')
-  .option('--surface <list>', 'Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics')
+  .option('--surface <list>', 'Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect')
   .option('--diff <base>', 'Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD')
   .option('--format <format>', 'Output format: human or json', 'human')
   .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
@@ -2373,6 +2373,44 @@ programCli
   .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
   .action((options) => {
     const { runCli } = require('../tools/lint-strings')
+    runCli(options)
+  })
+
+/**
+ * preview-string
+ *
+ * @description
+ * Render ONE doc-string declaration from local engineering source to the
+ * final published snippet: properties through the real extractor +
+ * Handlebars template (two panes when --overrides shows a docs-repo
+ * override masking the source string), rpk through the real
+ * formatDescription() transformer, and metrics/helm/crd/connect in their
+ * published output shapes.
+ *
+ * @why
+ * Engineers can see what their embedded string becomes on
+ * docs.redpanda.com BEFORE it ships - including whether an override in the
+ * docs repo would silently mask their fix.
+ *
+ * @example
+ * # What does this property's docs section look like?
+ * npx doc-tools preview-string --repo ~/redpanda --surface properties --name log_segment_size
+ *
+ * # Is my override masking the source string?
+ * npx doc-tools preview-string --repo ~/redpanda --surface properties --name log_segment_size --overrides ~/docs/docs-data/property-overrides.json
+ *
+ * # What does formatDescription do to my rpk Long text?
+ * npx doc-tools preview-string --repo ~/redpanda --surface rpk --name health
+ */
+programCli
+  .command('preview-string')
+  .description('Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish')
+  .requiredOption('--repo <path>', 'Path to an existing engineering checkout. Nothing is cloned.')
+  .requiredOption('--surface <surface>', 'One of: properties, rpk, metrics, helm, crd, connect')
+  .requiredOption('--name <name>', 'Declaration name: property name, rpk command token or --flag, metric name, helm key path, CRD json field (or Struct.field), connect component/field name')
+  .option('--overrides <path>', 'Docs-repo overrides JSON (properties only): adds an "as shipped" pane and a MASKED-BY-OVERRIDE notice when the override differs')
+  .action((options) => {
+    const { runCli } = require('../tools/preview-string')
     runCli(options)
   })
 

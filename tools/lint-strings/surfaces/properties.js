@@ -203,6 +203,7 @@ module.exports = {
   convention: CONVENTION,
   extract,
   mapExtractorJson,
+  runExtractor,
   rules: RULES,
   // Exposed for tests and future tooling
   TOOL_ROOT,

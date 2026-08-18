@@ -78,6 +78,10 @@ const COMMON_RULES = [
       if (text.startsWith('`')) return []
       const firstAlpha = text.match(/[A-Za-z]/)
       if (firstAlpha && firstAlpha.index === 0 && /[a-z]/.test(firstAlpha[0])) {
+        // Mixed-case product spellings (gRPC, iOS, jsonPath) are correct as
+        // written; only all-lowercase first words are capitalization drift.
+        const firstWord = text.split(/\s/, 1)[0]
+        if (/[A-Z]/.test(firstWord)) return []
         return [{ message: `Description starts with a lowercase letter: "${text.slice(0, 60)}"` }]
       }
       return []
