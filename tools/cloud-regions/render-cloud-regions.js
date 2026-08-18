@@ -12,10 +12,11 @@ const handlebars = require('handlebars');
  * @param {Array} opts.providers - List of cloud provider objects, each with a name and an array of regions.
  * @param {string} opts.format - Output format, either 'md' (Markdown) or 'adoc' (AsciiDoc).
  * @param {string} [opts.lastUpdated] - Optional ISO timestamp indicating when the data was last updated.
+ * @param {string} [opts.template] - Optional absolute path to a custom Handlebars template. Overrides the bundled template for the given format.
  * @returns {string} The rendered output string.
  * @throws {Error} If the providers array is missing or empty.
  */
-function renderCloudRegions({ providers, format, lastUpdated }) {
+function renderCloudRegions({ providers, format, lastUpdated, template }) {
   if (!Array.isArray(providers) || providers.length === 0) {
     throw new Error('No providers/regions found in YAML.');
   }
@@ -27,19 +28,19 @@ function renderCloudRegions({ providers, format, lastUpdated }) {
     ...provider,
     regions: [...provider.regions].sort((a, b) => a.name.localeCompare(b.name))
   }));
-  const templateFile = path.join(__dirname, `cloud-regions-table-${format}.hbs`);
+  const templateFile = template || path.join(__dirname, `cloud-regions-table-${format}.hbs`);
   if (!fs.existsSync(templateFile)) {
     throw new Error(`Template file not found: ${templateFile}`);
   }
-  let templateSrc, template;
+  let compiledTemplate;
   try {
-    templateSrc = fs.readFileSync(templateFile, 'utf8');
-    template = handlebars.compile(templateSrc);
+    const templateSrc = fs.readFileSync(templateFile, 'utf8');
+    compiledTemplate = handlebars.compile(templateSrc);
   } catch (err) {
     throw new Error(`Failed to compile Handlebars template at ${templateFile}: ${err.message}`);
   }
   try {
-    return template({ providers: sortedProviders, lastUpdated });
+    return compiledTemplate({ providers: sortedProviders, lastUpdated });
   } catch (err) {
     throw new Error(`Failed to render Handlebars template at ${templateFile}: ${err.message}`);
   }

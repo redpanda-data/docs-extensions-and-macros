@@ -1,3 +1,6 @@
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const renderCloudRegions = require('../../tools/cloud-regions/render-cloud-regions');
 
 const sampleProviders = [
@@ -47,5 +50,23 @@ describe('renderCloudRegions', () => {
 
   it('throws for empty providers', () => {
     expect(() => renderCloudRegions({ providers: [], format: 'md' })).toThrow();
+  });
+
+  it('renders a custom template when one is provided', () => {
+    const templateFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-regions-')), 'custom.hbs');
+    fs.writeFileSync(templateFile, '{{#each providers}}PROVIDER:{{name}} {{#each regions}}[{{name}}]{{/each}}\n{{/each}}', 'utf8');
+    try {
+      const out = renderCloudRegions({ providers: sampleProviders, format: 'adoc', template: templateFile });
+      expect(out).toContain('PROVIDER:GCP [europe-west1][us-central1]');
+      expect(out).toContain('PROVIDER:AWS [us-east-1]');
+      expect(out).not.toContain('=== GCP');
+    } finally {
+      fs.rmSync(path.dirname(templateFile), { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the bundled template when no custom template is provided', () => {
+    const out = renderCloudRegions({ providers: sampleProviders, format: 'adoc' });
+    expect(out).toContain('=== GCP');
   });
 });

@@ -1813,6 +1813,12 @@ automation
  * npx doc-tools generate cloud-regions \
  *   --output custom/path/regions.md
  *
+ * # Generate an AsciiDoc partial for one cluster type with a custom template
+ * export GITHUB_TOKEN=ghp_xxx
+ * npx doc-tools generate cloud-regions --format adoc --cluster-type BYOC \
+ *   --template docs-data/templates/cloud-regions.hbs \
+ *   --output modules/reference/partials/generated/regions-byoc.adoc
+ *
  * # Use different branch for testing
  * export GITHUB_TOKEN=ghp_xxx
  * npx doc-tools generate cloud-regions --ref staging
@@ -1832,6 +1838,7 @@ automation
   .option('--path <path>', 'Path to YAML file in repository', 'apps/master-data-reconciler/manifests/overlays/production/master-data.yaml')
   .option('--ref <ref>', 'Git reference (branch, tag, or commit SHA)', 'integration')
   .option('--template <path>', 'Path to custom Handlebars template (relative to repo root)')
+  .option('--cluster-type <type>', 'Only include regions/tiers available for this cluster type: BYOC or Dedicated')
   .option('--dry-run', 'Print output to stdout instead of writing file')
   .action(async (options) => {
     const { generateCloudRegions } = require('../tools/cloud-regions/generate-cloud-regions.js')
@@ -1858,7 +1865,8 @@ automation
         ref: options.ref,
         format: fmt,
         token,
-        template: templatePath
+        template: templatePath,
+        clusterType: options.clusterType
       })
       if (options.dryRun) {
         process.stdout.write(out)

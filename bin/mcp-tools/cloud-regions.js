@@ -16,6 +16,7 @@ const { getAntoraStructure } = require('./antora');
  * @param {string} [args.path] - Path to YAML file in repository
  * @param {string} [args.ref] - Git reference (branch, tag, or commit SHA)
  * @param {string} [args.template] - Path to custom Handlebars template
+ * @param {string} [args.cluster_type] - Only include regions/tiers available for this cluster type ('BYOC' or 'Dedicated')
  * @param {boolean} [args.dry_run] - Print output to stdout instead of writing file
  * @returns {Object} Generation results
  */
@@ -71,6 +72,11 @@ function generateCloudRegions(args = {}) {
     if (args.template) {
       baseArgs.push('--template');
       baseArgs.push(args.template);
+    }
+
+    if (args.cluster_type) {
+      baseArgs.push('--cluster-type');
+      baseArgs.push(args.cluster_type);
     }
 
     if (args.dry_run) {

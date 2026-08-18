@@ -1027,6 +1027,9 @@ Git reference (branch, tag, or commit SHA) (default: "integration")
 `--template <path>`::
 Path to custom Handlebars template (relative to repo root)
 
+`--cluster-type <type>`::
+Only include regions/tiers available for this cluster type: BYOC or Dedicated
+
 `--dry-run`::
 Print output to stdout instead of writing file
 
@@ -1053,6 +1056,12 @@ npx doc-tools generate cloud-regions --dry-run
 export GITHUB_TOKEN=ghp_xxx
 npx doc-tools generate cloud-regions \
   --output custom/path/regions.md
+
+# Generate an AsciiDoc partial for one cluster type with a custom template
+export GITHUB_TOKEN=ghp_xxx
+npx doc-tools generate cloud-regions --format adoc --cluster-type BYOC \
+  --template docs-data/templates/cloud-regions.hbs \
+  --output modules/reference/partials/generated/regions-byoc.adoc
 
 # Use different branch for testing
 export GITHUB_TOKEN=ghp_xxx

@@ -318,6 +318,11 @@ const tools = [
           type: 'string',
           description: 'Path to custom Handlebars template relative to repo root (optional)'
         },
+        cluster_type: {
+          type: 'string',
+          description: 'Only include regions/tiers available for this cluster type (optional)',
+          enum: ['BYOC', 'Dedicated']
+        },
         dry_run: {
           type: 'boolean',
           description: 'Print output to stdout instead of writing file (optional, defaults to false)'
