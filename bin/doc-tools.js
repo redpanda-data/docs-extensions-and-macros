@@ -501,6 +501,7 @@ programCli
       { name: 'generate_cloud_regions', description: 'Generate cloud regions documentation' },
       { name: 'generate_bundle_openapi', description: 'Bundle OpenAPI specifications' },
       { name: 'review_generated_docs', description: 'Review generated documentation' },
+      { name: 'audit_overrides', description: 'Audit docs-side overrides against extracted source strings' },
       { name: 'run_doc_tools_command', description: 'Run raw doc-tools command' },
       { name: 'get_job_status', description: 'Get background job status' },
       { name: 'list_jobs', description: 'List background jobs' }
@@ -2335,6 +2336,66 @@ validation
     }
   })
 
+// ====================================================================
+// OVERRIDES COMMANDS
+// ====================================================================
+const overridesGroup = new Command('overrides').description('Audit docs-side override files against extracted source strings')
+
+/**
+ * @description Field-level classification of override entries against the
+ * strings extracted from engineering source. Each override field classifies
+ * as REDUNDANT (source already matches; retire it), UPSTREAMABLE (send the
+ * prose upstream), KEEP_UNTIL_UPSTREAMED (markup-laden SPLIT case with a
+ * stripped upstream candidate), UPSTREAMABLE_SLOT (migrate to a source
+ * metadata slot), REDUNDANT_OR_UPSTREAMABLE (needs a human ruling), KEEP
+ * (docs enrichment by design), or REVIEW (possible source bug; never
+ * auto-delete). See tools/overrides-audit/README.adoc for the full rules
+ * and the upstream_ref policy.
+ *
+ * @why Description overrides are stopgaps awaiting an upstream source fix;
+ * once the fixed string ships in a release they silently mask all future
+ * source improvements. This audit powers the retirement loop (delete
+ * REDUNDANT fields on each release regeneration) and the upstreaming loop
+ * (draft source PRs from the UPSTREAMABLE/SPLIT candidates).
+ *
+ * @example
+ * # Audit the docs repo property overrides against a raw extraction
+ * npx doc-tools overrides audit \
+ *   --overrides docs-data/property-overrides.json \
+ *   --extracted tools/property-extractor/gen/properties-output.json \
+ *   --format human
+ *
+ * @requirements
+ * The --extracted file must be the property extractor's RAW output (its
+ * --output file, without overrides applied). The enhanced output and the
+ * versioned redpanda-properties-<tag>.json attachments already have
+ * overrides applied, so auditing against them classifies everything
+ * REDUNDANT.
+ */
+overridesGroup
+  .command('audit')
+  .description('Classify each override field as redundant, upstreamable, or keep against extracted source strings')
+  .requiredOption('--overrides <path>', 'Path to the overrides JSON file (for example docs-data/property-overrides.json)')
+  .option('--extracted <path>', 'Path to the extracted source JSON (property extractor raw output; required for the properties surface)')
+  .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk', 'connect']).default('properties'))
+  .addOption(new Option('--format <format>', 'Output format').choices(['json', 'human']).default('json'))
+  .option('--output <path>', 'Also write the JSON result to this file')
+  .action((options) => {
+    const { runAudit, formatHumanReport } = require('../tools/overrides-audit')
+    try {
+      const result = runAudit(options)
+      if (options.output) {
+        fs.mkdirSync(path.dirname(path.resolve(options.output)), { recursive: true })
+        fs.writeFileSync(path.resolve(options.output), JSON.stringify(result, null, 2) + '\n')
+        console.error(`JSON result written to ${options.output}`)
+      }
+      console.log(options.format === 'human' ? formatHumanReport(result) : JSON.stringify(result, null, 2))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
 programCli.addCommand(automation)
 programCli.addCommand(validation)
+programCli.addCommand(overridesGroup)
 programCli.parse(process.argv)

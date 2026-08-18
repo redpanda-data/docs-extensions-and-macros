@@ -25,6 +25,7 @@ const { generateBundleOpenApi } = require('./openapi');
 
 // Review tools
 const { reviewGeneratedDocs, generateReviewReport } = require('./generated-docs-review');
+const { auditOverrides } = require('./overrides-audit');
 
 // Job queue
 const { initializeJobQueue, createJob, getJob, listJobs, cleanupOldJobs } = require('./job-queue');
@@ -87,6 +88,10 @@ function executeTool(toolName, args = {}) {
 
       case 'review_generated_docs':
         result = reviewGeneratedDocs(args);
+        break;
+
+      case 'audit_overrides':
+        result = auditOverrides(args);
         break;
 
       case 'run_doc_tools_command': {
@@ -250,6 +255,7 @@ module.exports = {
   generateBundleOpenApi,
   reviewGeneratedDocs,
   generateReviewReport,
+  auditOverrides,
 
   // Job queue
   initializeJobQueue,
