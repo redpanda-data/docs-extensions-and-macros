@@ -297,24 +297,65 @@ describe('enterprise-sources', () => {
       expect(sources.connectRef).toBe('v4.60.0');
     });
 
-    it('reports a failed release resolution as an error finding and skips info.csv', async () => {
-      const fetchImpl = jest.fn(async (url) =>
-        url.includes('api.github.com') ? errorResponse(503, 'Service Unavailable') : okResponse('content'));
-      const sources = await loadEnterpriseSources({ ...baseOptions, connectRef: 'latest' }, { fetchImpl, token: null, sleep: noSleep });
+    it('falls back to the latest documented connect version when the GitHub API fails', async () => {
+      const antoraYaml = 'name: ROOT\nasciidoc:\n  attributes:\n    latest-connect-version: 4.105.0\n';
+      const fetchImpl = jest.fn(async (url) => {
+        if (url.includes('api.github.com')) return errorResponse(503, 'Service Unavailable');
+        if (url.includes('rp-connect-docs')) return okResponse(antoraYaml);
+        return okResponse(`content of ${url}`);
+      });
+      const warn = jest.fn();
+      const sources = await loadEnterpriseSources({ ...baseOptions, connectRef: 'latest' }, { fetchImpl, token: null, sleep: noSleep, warn });
+
+      expect(sources.connectRef).toBe('v4.105.0');
+      expect(sources.infoCsv).toContain('info.csv');
+      const urls = fetchImpl.mock.calls.map(([url]) => url);
+      expect(urls).toContain(`${RAW}/redpanda-data/rp-connect-docs/main/antora.yml`);
+      expect(urls).toContain(`${RAW}/redpanda-data/connect/v4.105.0/internal/plugins/info.csv`);
+      expect(warn.mock.calls.some(([msg]) => /falling back to the latest documented connect version/.test(msg))).toBe(true);
+      expect(sources.failedSources).toHaveLength(0);
+    });
+
+    it('falls back too when the release response has no tag_name, and tolerates a v-prefixed attribute', async () => {
+      const antoraYaml = 'asciidoc:\n  attributes:\n    latest-connect-version: v4.104.0\n';
+      const fetchImpl = jest.fn(async (url) => {
+        if (url.includes('api.github.com')) return okResponse('{}');
+        if (url.includes('rp-connect-docs')) return okResponse(antoraYaml);
+        return okResponse(`content of ${url}`);
+      });
+      const warn = jest.fn();
+      const sources = await loadEnterpriseSources({ ...baseOptions, connectRef: 'latest' }, { fetchImpl, token: null, sleep: noSleep, warn });
+
+      expect(sources.connectRef).toBe('v4.104.0');
+      expect(warn.mock.calls.some(([msg]) => /no tag_name/.test(msg))).toBe(true);
+    });
+
+    it('reports an error finding and skips info.csv when both resolution routes fail', async () => {
+      const fetchImpl = jest.fn(async (url) => {
+        if (url.includes('api.github.com')) return errorResponse(503, 'Service Unavailable');
+        if (url.includes('rp-connect-docs')) return errorResponse(404);
+        return okResponse('content');
+      });
+      const warn = jest.fn();
+      const sources = await loadEnterpriseSources({ ...baseOptions, connectRef: 'latest' }, { fetchImpl, token: null, sleep: noSleep, warn });
 
       expect(sources.infoCsv).toBeUndefined();
-      expect(sources.failedSources.some((f) => f.message.includes('connect latest release'))).toBe(true);
+      expect(sources.failedSources.some((f) => f.message.includes('latest documented connect version'))).toBe(true);
       const urls = fetchImpl.mock.calls.map(([url]) => url);
       expect(urls.some((url) => url.includes('/internal/plugins/info.csv'))).toBe(false);
     });
 
-    it('reports a release response without a tag_name as an error finding', async () => {
-      const fetchImpl = jest.fn(async (url) =>
-        url.includes('api.github.com') ? okResponse('{}') : okResponse('content'));
-      const sources = await loadEnterpriseSources({ ...baseOptions, connectRef: 'latest' }, { fetchImpl, token: null, sleep: noSleep });
+    it('reports an error finding when the fallback antora.yml lacks latest-connect-version', async () => {
+      const fetchImpl = jest.fn(async (url) => {
+        if (url.includes('api.github.com')) return errorResponse(503, 'Service Unavailable');
+        if (url.includes('rp-connect-docs')) return okResponse('name: ROOT\n');
+        return okResponse('content');
+      });
+      const warn = jest.fn();
+      const sources = await loadEnterpriseSources({ ...baseOptions, connectRef: 'latest' }, { fetchImpl, token: null, sleep: noSleep, warn });
 
       expect(sources.infoCsv).toBeUndefined();
-      expect(sources.failedSources.some((f) => f.message.includes('no tag_name'))).toBe(true);
+      expect(sources.failedSources.some((f) => f.message.includes('no latest-connect-version attribute'))).toBe(true);
     });
 
     it('does not resolve or fetch anything connect-related with skipConnect', async () => {

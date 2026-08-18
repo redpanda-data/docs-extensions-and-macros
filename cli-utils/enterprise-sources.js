@@ -151,6 +151,46 @@ function createSourceFetcher (deps = {}) {
 }
 
 /**
+ * Resolve the ref to compare connect plugins at.
+ *
+ * Primary: the newest published release tag from the GitHub API. Fallback
+ * when the API is unavailable: the `latest-connect-version` asciidoc
+ * attribute in rp-connect-docs antora.yml — the latest version the docs
+ * actually document, which is the state the registry describes. (This is a
+ * different use of that file than the retired enterprise-components list:
+ * the version attribute is actively maintained by the connect version-update
+ * automation.) If both routes fail, the connect check is skipped with an
+ * error finding rather than silently comparing against main.
+ */
+async function resolveLatestConnectRef ({ fetchText, failedSources, warn }) {
+  try {
+    const releaseJson = await fetchText('https://api.github.com/repos/redpanda-data/connect/releases/latest')
+    const tag = JSON.parse(releaseJson).tag_name
+    if (tag) return String(tag)
+    throw new Error('the GitHub API response has no tag_name')
+  } catch (err) {
+    warn(`Warning: could not resolve the latest connect release from the GitHub API (${err.message}); falling back to the latest documented connect version in rp-connect-docs antora.yml.`)
+  }
+  const antoraYaml = await fetchText(`${RAW}/redpanda-data/rp-connect-docs/main/antora.yml`, 'latest documented connect version (rp-connect-docs antora.yml fallback)')
+  if (antoraYaml === undefined) return undefined // fetch failure already reported
+  const yamlLib = require('js-yaml')
+  let documented
+  try {
+    const attributes = yamlLib.load(antoraYaml)?.asciidoc?.attributes
+    documented = attributes && attributes['latest-connect-version']
+  } catch (err) {
+    failedSources.push({ level: 'error', check: 'fetch', message: `Could not resolve the connect ref: rp-connect-docs antora.yml did not parse (${err.message}). The connect check did not run.` })
+    return undefined
+  }
+  if (!documented) {
+    failedSources.push({ level: 'error', check: 'fetch', message: 'Could not resolve the connect ref: rp-connect-docs antora.yml has no latest-connect-version attribute. The connect check did not run.' })
+    return undefined
+  }
+  const version = String(documented).trim()
+  return version.startsWith('v') ? version : `v${version}`
+}
+
+/**
  * Load every source the enterprise-features validation consumes.
  *
  * The rp-connect-docs antora.yml is deliberately NOT a source anymore:
@@ -187,15 +227,7 @@ async function loadEnterpriseSources (options, deps = {}) {
   let infoCsv
   if (!options.skipConnect) {
     if (!connectRef || connectRef === 'latest') {
-      const releaseJson = await fetchText('https://api.github.com/repos/redpanda-data/connect/releases/latest', 'connect latest release')
-      if (releaseJson === undefined) {
-        connectRef = undefined // resolution failed; already reported as an error finding
-      } else {
-        connectRef = JSON.parse(releaseJson).tag_name
-        if (!connectRef) {
-          failedSources.push({ level: 'error', check: 'fetch', message: 'Could not resolve the latest connect release: the GitHub API response has no tag_name. The connect check did not run.' })
-        }
-      }
+      connectRef = await resolveLatestConnectRef({ fetchText, failedSources, warn: deps.warn || ((msg) => console.warn(msg)) })
     }
     if (connectRef) {
       infoCsv = await fetchText(`${RAW}/redpanda-data/connect/${connectRef}/internal/plugins/info.csv`, `connect info.csv (${connectRef})`)
