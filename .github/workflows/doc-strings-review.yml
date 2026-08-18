@@ -1,0 +1,181 @@
+---
+# Reusable doc-strings review for Redpanda engineering repos.
+#
+# Callers provide a thin shim (their own pull_request paths trigger) and
+# invoke this via workflow_call, pinning a ref. This workflow owns the
+# shared logic so it cannot drift between repos:
+#   1. tamper-hardening pre-step (abort when a non-writer PR touches the
+#      review's own configuration),
+#   2. deterministic lint (doc-tools lint-strings --diff),
+#   3. a Claude pass ONLY when the lint finds something: one review with
+#      GitHub suggestion blocks rewriting the flagged strings, citing the
+#      docs-team writing standard, plus a published-content impact check
+#      against docs.redpanda.com (public MCP),
+#   4. doc-impact dispatch to the docs team's Jira router.
+#
+# Posture: suggest, never block. The job always succeeds; every external
+# dependency fails open (missing bot token -> lint-only review; missing
+# ANTHROPIC_API_KEY -> deterministic lint report only).
+#
+# This workflow reviews OTHER repos' PRs, so treat changes to it as review
+# infrastructure: callers should pin a release tag, not @main.
+name: doc-strings-review (reusable)
+on:
+  workflow_call:
+    inputs:
+      surfaces:
+        description: "Comma-separated lint surfaces (properties,rpk,metrics,helm,crd,connect). Empty = all."
+        type: string
+        default: ""
+      dispatch_repo:
+        description: "Repo receiving doc-impact repository_dispatch events"
+        type: string
+        default: "redpanda-data/docs-site"
+      doc_tools_package:
+        description: "npm package providing the doc-tools CLI"
+        type: string
+        default: "@redpanda-data/docs-extensions-and-macros"
+    secrets:
+      anthropic_api_key:
+        required: true
+      actions_bot_token:
+        description: "Org bot token: reads the private writing standard and fires the doc-impact dispatch. Optional; both uses fail open."
+        required: false
+jobs:
+  doc-strings-review:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Abort if PR modifies review configuration from a non-writer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          if gh pr view "$PR" --repo "${{ github.repository }}" --json files -q '.files[].path' \
+            | grep -qE '(^|/)\.claude/|(^|/)CLAUDE\.md$|^\.github/workflows/'; then
+            perm=$(gh api "repos/${{ github.repository }}/collaborators/$AUTHOR/permission" -q .permission || echo none)
+            if [ "$perm" != "admin" ] && [ "$perm" != "write" ]; then
+              echo "::error::PR touches review configuration from a non-writer; skipping automated review."
+              exit 1
+            fi
+          fi
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Lint doc strings in the diff
+        id: lint
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          SURFACES: ${{ inputs.surfaces }}
+        run: |
+          ARGS=(--repo . --diff "$BASE" --format json)
+          [ -n "$SURFACES" ] && ARGS+=(--surface "$SURFACES")
+          npx --yes ${{ inputs.doc_tools_package }} doc-tools lint-strings "${ARGS[@]}" > lint-findings.json || true
+          count=$(jq '.findings | length' lint-findings.json 2>/dev/null || echo 0)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+      - name: Fetch the writing standard
+        if: steps.lint.outputs.count != '0'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.actions_bot_token }}
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo "No bot token; lint-only review."; exit 0; }
+          gh api repos/redpanda-data/docs-team-standards/contents/resources/writing-style/embedded-reference-strings.md \
+            --jq .content | base64 -d > embedded-reference-strings.md
+      - name: Claude review with suggestions
+        if: steps.lint.outputs.count != '0'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.anthropic_api_key }}
+          allowed_bots: ""
+          allowed_non_write_users: ""
+          show_full_output: false
+          track_progress: false
+          use_commit_signing: false
+          claude_args: >
+            --model sonnet
+            --max-turns 20
+            --disallowed-tools "WebFetch,WebSearch,Edit,MultiEdit,NotebookEdit,Bash(git *)"
+            --mcp-config '{"mcpServers":{"redpanda-docs":{"type":"http","url":"https://docs.redpanda.com/mcp"}}}'
+            --allowed-tools "
+              mcp__github__add_issue_comment,
+              mcp__github_inline_comment__create_inline_comment,
+              mcp__redpanda-docs__search_api_reference,
+              mcp__redpanda-docs__ask_redpanda_question,
+              mcp__redpanda-docs__get_api_reference_content,
+              Write,
+              Bash(gh pr diff *),
+              Bash(gh pr view *),
+              Bash(cat lint-findings.json),
+              Bash(cat embedded-reference-strings.md)"
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR_NUMBER: ${{ github.event.pull_request.number }}
+
+            You are reviewing user-facing doc strings only: strings that doc
+            generators publish verbatim (config property descriptions, metric
+            help, rpk cobra help, Helm values comments, CRD field comments,
+            connector fields). lint-findings.json holds deterministic
+            findings: surface, name, file, line_start/line_end, the current
+            string, the exact declaration_text of the span, rule violations,
+            and in_pr_diff. If embedded-reference-strings.md exists in the
+            workspace it is the authoritative writing standard; cite its
+            per-surface contract in each comment; otherwise cite the lint
+            rule messages.
+
+            For each finding:
+            - in_pr_diff true: post an inline comment with a ```suggestion
+              block replacing the FULL declaration span. Per surface: C++
+              strings re-wrap as clang-format-style adjacent literals within
+              the file's column limit, all non-description arguments
+              byte-identical; metrics descriptions take NO terminal period;
+              cobra Short stays one capitalized line with no period; CRD
+              comments describe the json: tag key (never the Go field name)
+              and keep +kubebuilder marker lines byte-identical; Helm
+              comments keep the # -- marker conventions.
+            - in_pr_diff false: plain comment, no suggestion block.
+
+            Rewrites state effect, default, and units where the code shows
+            them and never restate the name. Do not invent findings beyond
+            the JSON, do not review code logic, do not flag subjective
+            polish.
+
+            PUBLISHED-CONTENT IMPACT: for each changed surface in the diff
+            (not just lint findings), use the redpanda-docs MCP tools to
+            search docs.redpanda.com. HIGH-IMPACT = a changed default/unit/
+            behavior or removed/renamed surface that a published page
+            currently states, or a new user-facing surface with no coverage.
+            If any exist, add an "Affected published content" section to
+            your summary comment and Write doc-impact.json:
+            {"findings":[{"surface","name","change_kind","affected_pages":
+            ["url"],"summary"}],"proposed_ticket":{"title","body"}}. Only
+            high-impact entries, maximum 10; write NO file when there are
+            none. The Write tool is for this single report file only.
+
+            Finish with one summary comment listing what was checked and a
+            reminder that these suggestions are optional.
+      - name: Dispatch doc-impact
+        if: steps.lint.outputs.count != '0'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.actions_bot_token }}
+        run: |
+          set -euo pipefail
+          [ -n "$GH_TOKEN" ] || { echo "No bot token; skipping dispatch."; exit 0; }
+          [ -s doc-impact.json ] || { echo "No high-impact findings."; exit 0; }
+          jq -e '.findings | length > 0' doc-impact.json >/dev/null || exit 0
+          jq -n --slurpfile impact doc-impact.json \
+            --arg repo "${{ github.repository }}" \
+            --arg pr "${{ github.event.pull_request.number }}" \
+            --arg url "${{ github.event.pull_request.html_url }}" \
+            '{event_type: "doc-impact", client_payload: {source_repo: $repo, pr_number: $pr, pr_url: $url, impact: $impact[0]}}' \
+          | gh api repos/${{ inputs.dispatch_repo }}/dispatches --input -
