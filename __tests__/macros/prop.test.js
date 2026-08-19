@@ -309,11 +309,12 @@ describe('prop macro', () => {
       const linked = convert('prop:fips_mode[link=true]', { catalog, component: 'cloud-data-platform' })
       expect(linked).toContain('cloud-cluster')
       // cloud_storage_enabled is outside the tag, so the cloud page doesn't
-      // render it: plain code, no marker, no link.
+      // render it. No streaming page exists in this fixture either, so it is
+      // published nowhere: the marker and its tooltip survive, the link
+      // doesn't.
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
       const excluded = convert('prop:cloud_storage_enabled[link=true]', { catalog, component: 'cloud-data-platform' })
-      expect(excluded).toContain('<code>cloud_storage_enabled</code>')
-      expect(excluded).not.toContain('data-property-name')
+      expect(excluded).toContain('data-property-name="cloud_storage_enabled"')
       expect(excluded).not.toContain('xref:')
       warn.mockRestore()
     })
@@ -362,38 +363,45 @@ describe('prop macro', () => {
       warn.mockRestore()
     })
 
-    test('renders plain code when no reference page documents the property', () => {
+    test('a property published nowhere keeps its tooltip and only warns on link=true', () => {
       const catalog = fakeCatalog({
         files: [
-          // Pages exist, but none of them includes a partial documenting admin.
+          // Pages exist, but none of them includes a partial documenting admin
+          // -- a deprecated property, or one held back by include tags. The
+          // published JSON still describes it, so the tooltip stays useful.
           partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n'),
           page('streaming', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/all.adoc[]'),
         ],
       })
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      // Warned with or without link=true: an undocumented property gets no
-      // tooltip either, so writers need to hear about it in both cases.
-      for (const source of ['prop:admin[link=true]', 'prop:admin[]']) {
-        warn.mockClear()
-        const html = convert(source, { catalog })
-        expect(html).toContain('<code>admin</code>')
-        expect(html).not.toContain('data-property-name')
-        expect(html).not.toContain('href')
-        expect(warn).toHaveBeenCalledWith(expect.stringContaining("documents 'admin'"))
-      }
+      const linked = convert('prop:admin[link=true]', { catalog })
+      expect(linked).toContain('data-property-name="admin"')
+      expect(linked).not.toContain('href')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('renders without a link'))
+      // A tooltip-only mention is silent: there is nothing for a writer to fix.
+      warn.mockClear()
+      const plain = convert('prop:admin[]', { catalog })
+      expect(plain).toContain('data-property-name="admin"')
+      expect(warn).not.toHaveBeenCalled()
       warn.mockRestore()
     })
 
-    test('property-validate=off silences the undocumented-property warning', () => {
+    test('property-validate=off silences the wrong-audience warning', () => {
       const catalog = fakeCatalog({
         files: [
-          partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n'),
-          page('streaming', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/all.adoc[]'),
+          partial('cloud-data-platform', 'properties/cluster.adoc', '=== cloud_storage_enabled\n'),
+          page('cloud-data-platform', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/cluster.adoc[]'),
+          partial('streaming', 'properties/topic.adoc', '=== redpanda.iceberg.mode\n'),
+          page('streaming', 'properties/topic-properties.adoc', 'include::reference:partial$properties/topic.adoc[]'),
         ],
       })
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const html = convert('prop:admin[]', { catalog, attributes: { 'property-validate': 'off' } })
-      expect(html).toContain('<code>admin</code>')
+      const html = convert('prop:redpanda.iceberg.mode[]', {
+        catalog,
+        component: 'cloud-data-platform',
+        attributes: { 'property-validate': 'off' },
+      })
+      expect(html).toContain('<code>redpanda.iceberg.mode</code>')
       expect(warn).not.toHaveBeenCalled()
       warn.mockRestore()
     })
@@ -401,14 +409,14 @@ describe('prop macro', () => {
     test('an unknown name warns once, not twice', () => {
       const catalog = fakeCatalog({
         files: [
-          partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n'),
-          page('streaming', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/all.adoc[]'),
+          partial('cloud-data-platform', 'properties/cluster.adoc', '=== cloud_storage_enabled\n'),
+          page('cloud-data-platform', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/cluster.adoc[]'),
+          partial('streaming', 'properties/topic.adoc', '=== redpanda.iceberg.mode\n'),
+          page('streaming', 'properties/topic-properties.adoc', 'include::reference:partial$properties/topic.adoc[]'),
         ],
       })
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const html = convert('prop:cloud_storage_enabbled[link=true]', { catalog })
-      // Plain code, because there is no page to link or describe.
-      expect(html).toContain('<code>cloud_storage_enabbled</code>')
+      convert('prop:cloud_storage_enabbled[link=true]', { catalog, component: 'cloud-data-platform' })
       expect(warn.mock.calls).toHaveLength(1)
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('does not match any property'))
       warn.mockRestore()
@@ -417,12 +425,15 @@ describe('prop macro', () => {
     test('a display text override survives the plain rendering', () => {
       const catalog = fakeCatalog({
         files: [
-          partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n'),
-          page('streaming', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/all.adoc[]'),
+          partial('cloud-data-platform', 'properties/cluster.adoc', '=== cloud_storage_enabled\n'),
+          page('cloud-data-platform', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/cluster.adoc[]'),
+          partial('streaming', 'properties/topic.adoc', '=== redpanda.iceberg.mode\n'),
+          page('streaming', 'properties/topic-properties.adoc', 'include::reference:partial$properties/topic.adoc[]'),
         ],
       })
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      expect(convert('prop:admin[text=admin API]', { catalog })).toContain('<code>admin API</code>')
+      const html = convert('prop:redpanda.iceberg.mode[text=Iceberg mode]', { catalog, component: 'cloud-data-platform' })
+      expect(html).toContain('<code>Iceberg mode</code>')
       warn.mockRestore()
     })
 

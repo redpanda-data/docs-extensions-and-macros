@@ -223,9 +223,15 @@ CSS class applied to the code element. The default is `property-ref`.
 [[prop-undocumented]]
 === Properties a component does not document
 
-A component that publishes its own property reference pages is authoritative for its audience. When no page in the current component documents the property -- a topic property on a Cloud page, for example, since the Cloud component publishes only the cluster and object storage references -- the macro renders the property as plain `<code>` with no link, no `data-property-name` marker, and therefore no tooltip, and logs a warning naming the property and the file. Linking into another component would send Cloud readers to self-managed documentation for a property they cannot set. Either publish the property on that component's reference pages (check the property's include tags) or reword the mention and drop the macro. Set `property-validate` to `off` to silence the warning.
+When no page in the current component documents the property, what the macro emits depends on whether another component's reference does.
 
-Only a component that publishes no property reference at all (`connect`, or a preview site) borrows the `streaming` (or `ROOT`) component's pages, through a component-qualified xref. When no component in the build publishes property pages, the link falls back deterministically to the property's `config_scope` (`cluster`, `broker`, or `topic`).
+*Published elsewhere but not here.* A topic property on a Cloud page, for example: the Cloud component publishes only the cluster and object storage references. The property does not apply to this audience, so the macro renders plain `<code>` with no link, no `data-property-name` marker, and therefore no tooltip, and logs a warning naming the property and the file. Linking into another component would send Cloud readers to self-managed documentation for a property they cannot set. Either publish the property on that component's reference pages (check the property's include tags) or reword the mention and drop the macro. Set `property-validate` to `off` to silence the warning.
+
+The exception is a component that publishes no property reference at all (`connect`, or a preview site). With no local reference to prefer, it borrows the `streaming` (or `ROOT`) component's pages through a component-qualified xref.
+
+*Published nowhere in the build.* A deprecated property, or one held back by include tags. The marker and its tooltip stay, because the published JSON still describes the property accurately, but there is no page to link: `link=true` renders unlinked and logs a warning. A tooltip-only mention is silent.
+
+When no component in the build publishes property pages at all, the link falls back deterministically to the property's `config_scope` (`cluster`, `broker`, or `topic`).
 
 === Registration
 

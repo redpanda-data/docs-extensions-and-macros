@@ -33,15 +33,22 @@
  * the target entirely. This supersedes the config_ref macro's linking for
  * most uses, without requiring writers to know the page.
  *
- * A component that publishes its own property reference (streaming
- * publishes all four scopes, cloud publishes the cluster and object storage
- * pages) is authoritative for its audience: a property missing from it is
- * one that audience cannot set. Rather than borrow another component's page
- * -- which would send cloud readers to self-managed documentation -- the
- * macro logs a warning and renders the property as plain inline code, with
- * no link and no tooltip. Only components that publish no property
- * reference at all (connect, this repo's preview site) borrow the streaming
- * (or ROOT) pages, through a component-qualified xref.
+ * When the current component's reference doesn't document the property, the
+ * outcome depends on whether another component's does:
+ *
+ *   - Published elsewhere but not here (a topic property on a cloud page:
+ *     cloud publishes the cluster and object storage references only). The
+ *     property doesn't apply to this audience, so the macro logs a warning
+ *     and renders plain inline code -- no link, no marker, no tooltip.
+ *     Linking would send cloud readers to self-managed documentation for a
+ *     setting they cannot change. The exception is a component that
+ *     publishes no property reference at all (connect, this repo's preview
+ *     site): with no local reference to prefer, it borrows the streaming
+ *     (or ROOT) pages through a component-qualified xref.
+ *   - Published nowhere in the build (a deprecated property, or one held
+ *     back by include tags). The marker and its tooltip stay, since the
+ *     published JSON still describes the property accurately, but there is
+ *     no page to link: link=true renders unlinked and warns.
  *
  * With helm-path=auto, pages rendered with the env-kubernetes attribute
  * display the property as its Helm values path (storage.tiered.config.*
@@ -340,13 +347,12 @@ function reportUnknownProperty ({ name, mode, registry, filePath }) {
 }
 
 /**
- * Report a property that no reference page in the current component
- * documents. The name is real (it validated against the published JSON), so
- * this is a scoping mismatch rather than a typo: the property exists in
- * Redpanda but this component's audience can't set it, or its include tags
- * keep it off this component's reference pages.
+ * Report a property that another component's reference documents but this
+ * one's does not. The name is real (it validated against the published
+ * JSON), so this is an audience mismatch rather than a typo: the mention
+ * belongs to a doc set that doesn't publish the property.
  */
-function reportUndocumentedProperty ({ name, component, mode, filePath }) {
+function reportWrongAudienceProperty ({ name, component, mode, filePath }) {
   if (mode === 'off') return
   const where = filePath ? ` in ${filePath}` : ''
   const which = component ? ` in the ${component} component` : ''
@@ -413,16 +419,16 @@ function propInlineMacro (config) {
         }
       }
       // Discover which page documents the property. The current component's
-      // own reference wins, and is authoritative for its audience: a cloud
-      // page whose property reference doesn't publish the property must not
-      // link into the self-managed (streaming) reference, because the
-      // property doesn't apply to cloud readers. Only components that
-      // publish no property reference at all (connect, this repo's preview
-      // site) borrow streaming's (or ROOT's) pages.
+      // own reference wins.
       let discoveredPage
       let discoveredUrl
       let componentPrefix = ''
-      let undocumented = false
+      // Documented in another component but not in this one: the audiences
+      // differ, so borrowing that page is worse than not linking.
+      let wrongAudience = false
+      // Documented nowhere in this build. Nothing to link, but the property
+      // is real and its tooltip still describes it accurately.
+      let unpublished = false
       const linkRequested = attributes.link === 'true' || attributes.link === true
       if (registry && config.contentCatalog && !attributes.page) {
         const component = (config.file && config.file.src && config.file.src.component) || ''
@@ -432,12 +438,9 @@ function propInlineMacro (config) {
         if (ownEntry) {
           discoveredPage = ownEntry.page
           discoveredUrl = ownEntry.url
-        } else if (ownIndex.size > 0) {
-          // This component documents properties, just not this one -- for
-          // example a topic property on a cloud page, where cloud publishes
-          // only the cluster and object storage references.
-          undocumented = true
         } else {
+          let elsewhere
+          let elsewhereComponent
           let fallbackWithPages = false
           for (const fallbackComponent of ['streaming', 'ROOT']) {
             if (fallbackComponent === component) continue
@@ -452,26 +455,46 @@ function propInlineMacro (config) {
             fallbackWithPages = true
             const fallbackEntry = fallbackIndex.get(name)
             if (fallbackEntry) {
-              discoveredPage = fallbackEntry.page
-              discoveredUrl = fallbackEntry.url
-              componentPrefix = `${fallbackComponent}:`
+              elsewhere = fallbackEntry
+              elsewhereComponent = fallbackComponent
               break
             }
           }
-          // Reference pages exist to borrow from, but none documents this
-          // property. Anything we linked would be a broken xref.
-          if (!discoveredPage && fallbackWithPages) undocumented = true
+          if (elsewhere && ownIndex.size === 0) {
+            // This component publishes no property reference at all (connect,
+            // this repo's preview site), so there is no local reference to
+            // prefer: borrow the other component's page.
+            discoveredPage = elsewhere.page
+            discoveredUrl = elsewhere.url
+            componentPrefix = `${elsewhereComponent}:`
+          } else if (elsewhere) {
+            // The property is published, just not for this component's
+            // audience -- a topic property on a cloud page, say, where cloud
+            // publishes only the cluster and object storage references.
+            // Linking would send cloud readers to self-managed docs for a
+            // setting they cannot change.
+            wrongAudience = true
+          } else if (ownIndex.size > 0 || fallbackWithPages) {
+            // Reference pages exist, but none documents this property (a
+            // deprecated property, or one excluded by include tags). Nothing
+            // to link, but the tooltip still describes it correctly.
+            unpublished = true
+          }
         }
-        // An unrecognized name is undocumented too, but reportUnknownProperty
-        // has already covered it; a second warning about the same call site
-        // would only add noise.
-        if (undocumented && entry) {
-          reportUndocumentedProperty({
-            name,
-            component,
-            mode: document.getAttribute('property-validate', 'warn'),
-            filePath: config.file && config.file.src && config.file.src.path,
-          })
+        // An unrecognized name lands here too, but reportUnknownProperty has
+        // already covered it; a second warning would only add noise.
+        if (entry) {
+          if (wrongAudience) {
+            reportWrongAudienceProperty({
+              name,
+              component,
+              mode: document.getAttribute('property-validate', 'warn'),
+              filePath: config.file && config.file.src && config.file.src.path,
+            })
+          } else if (unpublished && linkRequested) {
+            const where = (config.file && config.file.src && config.file.src.path) || 'unknown file'
+            console.warn(chalk.yellow(`prop:${name}[link=true] in ${where}: no property reference page documents '${name}' in this build, so it renders without a link. Check the property's include tags on the reference pages.`))
+          }
         }
       }
       // helm-path=auto displays the property as its Helm values path on
@@ -482,14 +505,14 @@ function propInlineMacro (config) {
       const content = buildPropContent({
         name,
         text: attributes.text,
-        link: linkRequested && !undocumented,
+        link: linkRequested && !wrongAudience && !unpublished,
         page: attributes.page || discoveredPage,
         scope: entry && entry.config_scope,
         role: document.getAttribute('property-ref-role', DEFAULT_ROLE),
         componentPrefix,
         helmPath,
         docUrl: discoveredUrl ? `${discoveredUrl}#${propertyAnchor(name)}` : undefined,
-        plain: undocumented,
+        plain: wrongAudience,
       })
       // The xref inside the code element is resolved by the 'macros'
       // substitution, the same mechanism the enterprise macro relies on.
