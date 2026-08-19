@@ -225,7 +225,7 @@ Each published Redpanda release series ships its own `redpanda-properties-v<majo
 The macro therefore selects by series (`major.minor`) rather than by newest tag:
 
 . For a component version with a numeric series (`streaming` at `25.3`), the newest patch whose tag matches that series -- preferring the copy attached to the page's own version, then the same series published anywhere in the component, since a series' JSON sometimes lives only on the main branch. Patch numbers compare numerically, so `v25.3.11` beats `v25.3.2`.
-. For a component with no numeric version and no property data of its own (`cloud-data-platform`, `connect`), the newest `streaming` dataset, then `ROOT`, then any. These doc sets track the current release.
+. For a component with no property data of its own (`cloud-data-platform`, `connect`), the `streaming` dataset -- that component's own series if its version names one, otherwise the newest -- then `ROOT`, then any. Unversioned doc sets, and those whose version numbers are unrelated to Redpanda releases, correctly track the current release; one versioned per Redpanda release gets that release's properties rather than the newest.
 
 Selecting by series rather than newest tag matters in practice: the docs repo's main branch carries the previous series' JSON alongside its own, and a prerelease tag could land there too. Newest-tag-wins would hand that file to pages of a different release.
 

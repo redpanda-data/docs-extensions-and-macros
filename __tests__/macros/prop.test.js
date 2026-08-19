@@ -307,6 +307,21 @@ describe('prop macro', () => {
         expect(warn.mock.calls.filter(([m]) => String(m).includes('24.9'))).toHaveLength(1)
       })
 
+      test('a versioned component with no data of its own borrows its own series', () => {
+        // Cloud is unversioned today, but if it were ever versioned per
+        // Redpanda release it must not be handed the newest release's
+        // properties just because it publishes no JSON itself.
+        const files = [A('streaming', '26.2', 'v26.2.1'), A('streaming', '25.1', 'v25.1.9')]
+        expect(load(files, 'cloud-data-platform', '25.1')).toBe('v25.1.9')
+      })
+
+      test('a version string unrelated to Redpanda releases falls back to the newest', () => {
+        // The agentic data plane and Connect version independently, so their
+        // version numbers name no property series.
+        const files = [A('streaming', '26.2', 'v26.2.1'), A('streaming', '25.1', 'v25.1.9')]
+        expect(load(files, 'agentic-data-plane', '1.0')).toBe('v26.2.1')
+      })
+
       test('unversioned components track the latest release', () => {
         // Cloud and connect publish no property JSON of their own and follow
         // the current release, so they take streaming's newest.

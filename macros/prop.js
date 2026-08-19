@@ -300,9 +300,10 @@ function releaseSeries (value) {
  * unvalidated with an explicit warning rather than borrowing the wrong
  * release's data.
  *
- * Components with no numeric version and no property data of their own
- * (cloud, connect) track the latest release, so they use the newest
- * streaming (or ROOT) dataset.
+ * Components with no property data of their own (cloud, connect) borrow the
+ * streaming (or ROOT) dataset -- their own series when their version names
+ * one, otherwise the newest, since an unversioned doc set or one versioned
+ * independently of Redpanda releases tracks the current release.
  */
 function loadProperties (config) {
   const contentCatalog = config && config.contentCatalog
@@ -360,10 +361,18 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
   } else if (ownComponent.length) {
     pick = newest(ownComponent.filter((c) => c.version === pageVersion)) || newest(ownComponent)
   } else {
-    pick =
-      newest(candidates.filter((c) => c.component === 'streaming')) ||
-      newest(candidates.filter((c) => c.component === 'ROOT')) ||
-      newest(candidates)
+    // No property data of this component's own. Borrow streaming's (or
+    // ROOT's), but still honor the page's series when it has one: a component
+    // versioned per Redpanda release must not be handed the newest release's
+    // properties. Components whose versions are unrelated to Redpanda releases
+    // (or unversioned, like cloud and connect today) have no series to match
+    // and correctly track the latest.
+    const borrow = (component) => {
+      const from = candidates.filter((c) => c.component === component)
+      if (!from.length) return null
+      return (series && newest(from.filter((c) => releaseSeries(c.tag) === series))) || newest(from)
+    }
+    pick = borrow('streaming') || borrow('ROOT') || newest(candidates)
   }
 
   let registry = null
