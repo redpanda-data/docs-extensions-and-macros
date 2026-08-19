@@ -308,13 +308,13 @@ describe('prop macro', () => {
       // fips_mode is inside the redpanda-cloud tag: discovered on the cloud page.
       const linked = convert('prop:fips_mode[link=true]', { catalog, component: 'cloud-data-platform' })
       expect(linked).toContain('cloud-cluster')
-      // cloud_storage_enabled is outside the tag: the cloud page doesn't
-      // render it, and no streaming page exists in this fixture, so it is
-      // documented nowhere -- the marker renders without a link.
+      // cloud_storage_enabled is outside the tag, so the cloud page doesn't
+      // render it: plain code, no marker, no link.
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const fallback = convert('prop:cloud_storage_enabled[link=true]', { catalog, component: 'cloud-data-platform' })
-      expect(fallback).toContain('data-property-name="cloud_storage_enabled"')
-      expect(fallback).not.toContain('xref:')
+      const excluded = convert('prop:cloud_storage_enabled[link=true]', { catalog, component: 'cloud-data-platform' })
+      expect(excluded).toContain('<code>cloud_storage_enabled</code>')
+      expect(excluded).not.toContain('data-property-name')
+      expect(excluded).not.toContain('xref:')
       warn.mockRestore()
     })
 
@@ -331,7 +331,7 @@ describe('prop macro', () => {
       expect(html).toContain('cluster-properties')
     })
 
-    test('a component with SOME property pages still borrows streaming for properties it does not publish', () => {
+    test('a component with its own property pages never borrows another component', () => {
       const catalog = fakeCatalog({
         files: [
           // Cloud publishes cluster properties but not topic properties.
@@ -344,13 +344,25 @@ describe('prop macro', () => {
       // Documented in cloud's own pages: component-relative link.
       const own = convert('prop:cloud_storage_enabled[link=true]', { catalog, component: 'cloud-data-platform' })
       expect(own).not.toContain('streaming')
-      // Not documented in cloud: component-qualified link into streaming.
-      const borrowed = convert('prop:redpanda.iceberg.mode[link=true]', { catalog, component: 'cloud-data-platform' })
-      expect(borrowed).toContain('streaming')
-      expect(borrowed).toContain('topic-properties')
+      // Not in cloud's reference: streaming documents it, but linking there
+      // would send cloud readers to self-managed docs for a property they
+      // can't set. Plain code plus a warning instead.
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('prop:redpanda.iceberg.mode[link=true]', {
+        catalog,
+        component: 'cloud-data-platform',
+        filePath: 'modules/develop/pages/topics/create-topic.adoc',
+      })
+      expect(html).toContain('<code>redpanda.iceberg.mode</code>')
+      expect(html).not.toContain('streaming')
+      expect(html).not.toContain('data-property-name')
+      expect(html).not.toContain('data-doc-url')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("no property reference page in the cloud-data-platform component documents 'redpanda.iceberg.mode'"))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('modules/develop/pages/topics/create-topic.adoc'))
+      warn.mockRestore()
     })
 
-    test('renders without a link when no reference page documents the property', () => {
+    test('renders plain code when no reference page documents the property', () => {
       const catalog = fakeCatalog({
         files: [
           // Pages exist, but none of them includes a partial documenting admin.
@@ -359,11 +371,58 @@ describe('prop macro', () => {
         ],
       })
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const html = convert('prop:admin[link=true]', { catalog })
-      expect(html).toContain('data-property-name="admin"')
-      expect(html).not.toContain('href')
-      expect(html).not.toContain('xref:')
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('renders without a link'))
+      // Warned with or without link=true: an undocumented property gets no
+      // tooltip either, so writers need to hear about it in both cases.
+      for (const source of ['prop:admin[link=true]', 'prop:admin[]']) {
+        warn.mockClear()
+        const html = convert(source, { catalog })
+        expect(html).toContain('<code>admin</code>')
+        expect(html).not.toContain('data-property-name')
+        expect(html).not.toContain('href')
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("documents 'admin'"))
+      }
+      warn.mockRestore()
+    })
+
+    test('property-validate=off silences the undocumented-property warning', () => {
+      const catalog = fakeCatalog({
+        files: [
+          partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n'),
+          page('streaming', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/all.adoc[]'),
+        ],
+      })
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('prop:admin[]', { catalog, attributes: { 'property-validate': 'off' } })
+      expect(html).toContain('<code>admin</code>')
+      expect(warn).not.toHaveBeenCalled()
+      warn.mockRestore()
+    })
+
+    test('an unknown name warns once, not twice', () => {
+      const catalog = fakeCatalog({
+        files: [
+          partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n'),
+          page('streaming', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/all.adoc[]'),
+        ],
+      })
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('prop:cloud_storage_enabbled[link=true]', { catalog })
+      // Plain code, because there is no page to link or describe.
+      expect(html).toContain('<code>cloud_storage_enabbled</code>')
+      expect(warn.mock.calls).toHaveLength(1)
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('does not match any property'))
+      warn.mockRestore()
+    })
+
+    test('a display text override survives the plain rendering', () => {
+      const catalog = fakeCatalog({
+        files: [
+          partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n'),
+          page('streaming', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/all.adoc[]'),
+        ],
+      })
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      expect(convert('prop:admin[text=admin API]', { catalog })).toContain('<code>admin API</code>')
       warn.mockRestore()
     })
 

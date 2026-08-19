@@ -37,7 +37,11 @@ That's it. Here's what happens for you:
 
 Rather than hardcoding "cluster properties live on the cluster-properties page," the macro reads the actual docs during the build. Every documented property appears as a heading in the generated property files, and each reference page pulls in one or more of those files. The macro follows that chain -- which pages exist, what they include, which property headings end up where -- and builds a lookup table per doc set.
 
-Because the lookup is done separately for each part of the site, a Cloud page links to Cloud's own property pages and a streaming page to streaming's. Cloud reuses streaming's property files with a filter ("only the cloud-relevant parts"), and the macro applies that same filter, so it never links to a property that a given page doesn't actually document. If a doc set doesn't cover a property at all -- Cloud publishes no topic-properties page, Connect publishes none -- the link borrows the streaming docs instead of pointing nowhere.
+Because the lookup is done separately for each part of the site, a Cloud page links to Cloud's own property pages and a streaming page to streaming's. Cloud reuses streaming's property files with a filter ("only the cloud-relevant parts"), and the macro applies that same filter, so it never links to a property that a given page doesn't actually document.
+
+A doc set that publishes its own property reference is treated as the last word for its readers. Cloud publishes cluster and object storage properties but no topic-properties page, so a Cloud page that marks a topic property gets *no* link and *no* tooltip -- just the name in code font -- plus a build warning naming the property and the file. Sending a Cloud reader to the self-managed reference for a setting they can't change is worse than sending them nowhere. Fix it by publishing the property in that doc set (check its include tags) or by rewording the sentence and dropping the macro.
+
+The one exception is a doc set with no property reference of its own at all, such as Connect: there the link borrows the streaming docs, because there's nothing local to prefer.
 
 Think phone book, not memory: if a property moves, the next build's phone book is already right.
 
