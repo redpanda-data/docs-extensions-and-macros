@@ -23,7 +23,9 @@ prop:cloud_storage_enabled[]
 
 That's it. Here's what happens for you:
 
-*It's checked.* The name is looked up in the published property data -- the same JSON, generated from Redpanda's source code, that powers the reference pages and tooltips. A typo gets a build warning with the file name and a "did you mean" suggestion. Nothing unverified ships. (A site can turn this up to a hard build failure with the `property-validate` attribute.)
+*It's checked, against the right release.* The name is looked up in the published property data -- the same JSON, generated from Redpanda's source code, that powers the reference pages and tooltips. A typo gets a build warning naming the file, the release data it was checked against, and a "did you mean" suggestion. Nothing unverified ships. (A site can turn this up to a hard build failure with the `property-validate` attribute.)
+
+Every release series has its own copy of that data, and the build picks the copy matching the page's own version: a 25.3 page is checked against 25.3 properties, never against the newest. Otherwise a property added in 26.2 would pass silently on a 25.3 page, and one removed since 25.3 would be flagged there as a typo. If a version branch has no property data of its own, the build says so and skips validation for that version rather than substituting a neighbouring release's -- and names the command that generates the missing file.
 
 *It gets a tooltip.* The docs UI decorates only elements the macro marked. A plain backticked word never gets a tooltip anymore, so `admin` in a Helm example stays plain text unless a writer deliberately writes `prop:admin[]`.
 

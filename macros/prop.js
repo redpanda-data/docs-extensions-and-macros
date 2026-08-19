@@ -15,12 +15,13 @@
  * `admin` or `rack` in unrelated contexts (Helm values, feature settings)
  * are never decorated by mistake.
  *
- * The macro validates its target against the published property reference
- * (the newest redpanda-properties-<tag>.json attachment in the reference
- * module, the same data the tooltips fetch at runtime). Unknown names are
- * reported according to the property-validate attribute. When no property
- * JSON is available in the build, the macro renders unvalidated with a
- * single warning.
+ * The macro validates its target against the published property reference: a
+ * redpanda-properties-<tag>.json attachment in the reference module, the same
+ * data the tooltips fetch at runtime. Each release series publishes its own
+ * copy, and a page is matched to the copy for its OWN series -- see
+ * loadPropertiesFor. Unknown names are reported according to the
+ * property-validate attribute; every warning names the dataset the page was
+ * checked against, so a typo can be told apart from a release mismatch.
  *
  * With link=true, the property also links to its reference page. The page
  * is discovered dynamically: the macro indexes which reference-module page
@@ -76,6 +77,9 @@
 const chalk = require('chalk')
 
 const $propertyRegistry = Symbol('$propertyRegistry')
+// Release series a component version has no property data for, recorded at
+// load time and reported by the macro on first actual use.
+const $propertySeriesGap = Symbol('$propertySeriesGap')
 
 const DEFAULT_ROLE = 'property-ref'
 const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
@@ -244,7 +248,20 @@ function helmValuesPath (name, scope) {
   return `config.cluster.${name}`
 }
 
-let warnedNoRegistry = false
+// Warnings are deduplicated per build. Antora's watch mode (gulp/npm start)
+// reuses one process across many builds, so a module-level guard would report
+// each problem only on a session's first build and stay silent afterwards --
+// exactly when a writer is iterating and most wants to see it. The content
+// catalog is rebuilt per build, so keying off it scopes the guard correctly.
+const $warned = Symbol('$warned')
+
+function warnOnce (contentCatalog, key, message) {
+  const seen = contentCatalog[$warned] || (contentCatalog[$warned] = new Set())
+  if (seen.has(key)) return false
+  seen.add(key)
+  console.warn(chalk.yellow(message))
+  return true
+}
 
 /**
  * Compare two vX.Y.Z(-pre) tags without a semver dependency. Good enough to
@@ -258,12 +275,34 @@ function compareTags (a, b) {
 }
 
 /**
- * Load and cache the property map from the newest published properties JSON
- * attachment in the content catalog. Properties are published per component
- * (streaming, cloud, sometimes agentic-data-plane and connect), so the JSON
- * from the page's own component wins, falling back to the streaming (or
- * ROOT) component, then to the newest JSON anywhere in the catalog. Returns
- * undefined when unavailable.
+ * The release series ('26.2') of a component version ('26.2', '25.3.1') or a
+ * properties tag ('v26.2.1', 'v26.3.1-rc1'). Undefined for non-numeric
+ * versions, which is how unversioned components (cloud, connect) and named
+ * branches are recognized.
+ */
+function releaseSeries (value) {
+  const match = String(value == null ? '' : value).replace(/^v/, '').match(/^(\d+)\.(\d+)/)
+  return match ? `${match[1]}.${match[2]}` : undefined
+}
+
+/**
+ * Load and cache the property map for one page's component and version.
+ * Returns undefined when no suitable dataset exists.
+ *
+ * Every published Redpanda release series has its own properties JSON, so a
+ * versioned page must validate against the data for its OWN series: a 25.3
+ * page checked against 26.2 data reports properties that release never had
+ * and flags removed ones as typos. The macro therefore matches by series
+ * (major.minor) rather than taking the newest tag it can find -- the docs
+ * repo's main branch carries an older series' JSON alongside its own, and
+ * older version branches may carry none at all. When a versioned component
+ * publishes property data but nothing for the page's series, the page goes
+ * unvalidated with an explicit warning rather than borrowing the wrong
+ * release's data.
+ *
+ * Components with no numeric version and no property data of their own
+ * (cloud, connect) track the latest release, so they use the newest
+ * streaming (or ROOT) dataset.
  */
 function loadProperties (config) {
   const contentCatalog = config && config.contentCatalog
@@ -282,11 +321,6 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
   const cache = contentCatalog[$propertyRegistry] || (contentCatalog[$propertyRegistry] = {})
   if (cache[cacheKey] !== undefined) return cache[cacheKey] || undefined
 
-  // Versioned components publish one properties JSON per version, so a page
-  // must validate against its OWN version's data (a 25.3 page checked
-  // against 26.x data would produce wrong results in both directions).
-  // Priority: own component and version, own component any version (newest
-  // tag), then the streaming/ROOT fallbacks, then anything.
   const attachments = contentCatalog.findBy({ family: 'attachment' }) || []
   const candidates = []
   for (const attachment of attachments) {
@@ -297,18 +331,46 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
     candidates.push({ tag: match[1], file: attachment, component: attachment.src.component, version: attachment.src.version })
   }
   const newest = (list) => list.reduce((best, entry) => (!best || compareTags(entry.tag, best.tag) > 0 ? entry : best), null)
-  const pick =
-    newest(candidates.filter((c) => c.component === pageComponent && c.version === pageVersion)) ||
-    newest(candidates.filter((c) => c.component === pageComponent)) ||
-    newest(candidates.filter((c) => c.component === 'streaming')) ||
-    newest(candidates.filter((c) => c.component === 'ROOT')) ||
-    newest(candidates)
+
+  const ownComponent = candidates.filter((c) => c.component === pageComponent)
+  const series = releaseSeries(pageVersion)
+  let pick
+  if (ownComponent.length && series) {
+    // Newest patch of this page's own series: prefer the copy published on
+    // the page's own version, then the same series published anywhere in the
+    // component (a series' JSON sometimes lives only on the main branch).
+    const inSeries = ownComponent.filter((c) => releaseSeries(c.tag) === series)
+    pick = newest(inSeries.filter((c) => c.version === pageVersion)) || newest(inSeries)
+    if (!pick) {
+      // Record the gap rather than reporting it here. This function also runs
+      // from the property-page-index extension, once per component version in
+      // the build, so warning at load time would report every version that
+      // lacks data even when none of its pages uses the macro. The macro
+      // reports it on first actual use instead.
+      const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
+      gaps[cacheKey] = {
+        component: pageComponent,
+        version: pageVersion,
+        series,
+        have: [...new Set(ownComponent.map((c) => c.tag))].sort(compareTags),
+      }
+      cache[cacheKey] = null
+      return undefined
+    }
+  } else if (ownComponent.length) {
+    pick = newest(ownComponent.filter((c) => c.version === pageVersion)) || newest(ownComponent)
+  } else {
+    pick =
+      newest(candidates.filter((c) => c.component === 'streaming')) ||
+      newest(candidates.filter((c) => c.component === 'ROOT')) ||
+      newest(candidates)
+  }
 
   let registry = null
   if (pick) {
     const data = JSON.parse(pick.file.contents.toString())
     if (data && data.properties) {
-      registry = { tag: pick.tag, properties: data.properties }
+      registry = { tag: pick.tag, properties: data.properties, component: pick.component, version: pick.version }
     }
   }
   // Cache null too, so a missing JSON is only searched for once per build.
@@ -316,10 +378,30 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
   return registry || undefined
 }
 
-function warnNoPropertyData () {
-  if (warnedNoRegistry) return
-  warnedNoRegistry = true
-  console.warn(chalk.yellow('Property reference data (redpanda-properties-<tag>.json attachment) not found; prop: targets are not validated.'))
+/**
+ * The component publishes property data for other release series but none for
+ * this page's. Silently validating against a neighbouring release is what this
+ * warning exists to prevent, so say exactly which file is missing and how to
+ * produce it. Returns whether a gap was found and reported.
+ */
+function warnSeriesMissing (contentCatalog, pageComponent, pageVersion) {
+  const gaps = contentCatalog[$propertySeriesGap]
+  const gap = gaps && gaps[`${pageComponent}@${pageVersion}`]
+  if (!gap) return false
+  const { series, have: tags } = gap
+  const have = tags.join(', ')
+  warnOnce(contentCatalog, `series:${gap.component}@${gap.version}`,
+    `prop macro: ${gap.component}@${gap.version} publishes no redpanda-properties-v${series}.*.json attachment in its reference module (found for other series: ${have}). ` +
+    `prop: targets on ${pageVersion} pages are therefore not validated and their tooltips carry no data, rather than being checked against another release's properties. ` +
+    `Generate it with 'npx doc-tools generate property-docs --tag v${series}.<patch>' on that branch, or leave prop: out of ${pageVersion} content.`)
+  // A gap was found and explained, whether or not this build already said so.
+  return true
+}
+
+function warnNoPropertyData (contentCatalog, component, version) {
+  warnOnce(contentCatalog, `nodata:${component}@${version}`,
+    `prop macro: no redpanda-properties-<tag>.json attachment found in any component's reference module for ${component || 'unknown component'}@${version || 'unversioned'}; ` +
+    'prop: targets are not validated and their tooltips carry no data. Publish the property JSON as a reference-module attachment in this component or in streaming.')
 }
 
 /**
@@ -341,9 +423,22 @@ function reportUnknownProperty ({ name, mode, registry, filePath }) {
     .map((scored) => scored.candidate)
   const hint = candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''
   const where = filePath ? ` in ${filePath}` : ''
-  const message = `prop:${name}[] does not match any property in the published property reference (${registry.tag})${where}.${hint}`
+  const message = `prop:${name}[]${where}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). ` +
+    `Either the name is misspelled or the property does not exist in that release.${hint}`
   if (mode === 'error') throw new Error(message)
   console.warn(chalk.yellow(message))
+}
+
+/**
+ * Which properties JSON a page was checked against. Named in every warning
+ * so a reader can tell a typo apart from a release or component mismatch --
+ * the same name can be valid in one series and absent from another.
+ */
+function describeDataset (registry) {
+  const from = registry.component
+    ? `${registry.component}@${registry.version || 'unversioned'}`
+    : 'unknown component'
+  return `redpanda-properties-${registry.tag}.json from ${from}`
 }
 
 /**
@@ -352,11 +447,32 @@ function reportUnknownProperty ({ name, mode, registry, filePath }) {
  * JSON), so this is an audience mismatch rather than a typo: the mention
  * belongs to a doc set that doesn't publish the property.
  */
-function reportWrongAudienceProperty ({ name, component, mode, filePath }) {
+function reportWrongAudienceProperty ({ name, component, elsewhereComponent, elsewherePage, mode, filePath }) {
   if (mode === 'off') return
   const where = filePath ? ` in ${filePath}` : ''
-  const which = component ? ` in the ${component} component` : ''
-  console.warn(chalk.yellow(`prop:${name}[]${where}: no property reference page${which} documents '${name}', so it renders as plain code with no link or tooltip. If this audience can set the property, publish it on that component's reference pages (check the property's include tags); otherwise reword the mention or drop the macro.`))
+  const which = component || 'this'
+  const found = elsewhereComponent
+    ? ` It is published in the ${elsewhereComponent} component (${elsewherePage}), but that reference is written for a different audience, so linking there would point readers at a property they cannot set.`
+    : ''
+  console.warn(chalk.yellow(
+    `prop:${name}[]${where}: no property reference page in the ${which} component documents '${name}', so it renders as plain code -- no link, and no tooltip.${found} ` +
+    `Fix it either way: if this audience CAN set '${name}', publish it on the ${which} component's reference pages (check the property's include tags in the generated partial); if not, reword the sentence and drop the macro.`
+  ))
+}
+
+/**
+ * Report a property that the published data describes but no reference page
+ * in the build renders. The tooltip still works, so this only matters when a
+ * writer explicitly asked for a link.
+ */
+function reportUnpublishedProperty ({ name, registry, mode, filePath }) {
+  if (mode === 'off') return
+  const where = filePath ? ` in ${filePath}` : ''
+  console.warn(chalk.yellow(
+    `prop:${name}[link=true]${where}: '${name}' is in ${describeDataset(registry)} but no reference page in this build renders a heading for it, so the tooltip renders without a documentation link. ` +
+    'Every property reference page filters out the deprecated and exclude-from-docs include tags, and some pages include only selected category tags -- check which tags enclose this property in the generated partial. ' +
+    'If it is meant to stay unpublished (a deprecated property, say), drop link=true and keep the tooltip-only form.'
+  ))
 }
 
 /**
@@ -405,7 +521,15 @@ function propInlineMacro (config) {
       let entry
       if (config && config.contentCatalog) {
         registry = loadProperties(config)
-        if (!registry) warnNoPropertyData()
+        if (!registry && document.getAttribute('property-validate', 'warn') !== 'off') {
+          const component = (config.file && config.file.src && config.file.src.component) || ''
+          const version = (config.file && config.file.src && config.file.src.version) || ''
+          // Prefer the specific diagnosis (this version's series has no data)
+          // over the general one (the build has no property data at all).
+          if (!warnSeriesMissing(config.contentCatalog, component, version)) {
+            warnNoPropertyData(config.contentCatalog, component, version)
+          }
+        }
       }
       if (registry) {
         entry = registry.properties[name]
@@ -473,7 +597,7 @@ function propInlineMacro (config) {
             // publishes only the cluster and object storage references.
             // Linking would send cloud readers to self-managed docs for a
             // setting they cannot change.
-            wrongAudience = true
+            wrongAudience = { component: elsewhereComponent, page: elsewhere.page }
           } else if (ownIndex.size > 0 || fallbackWithPages) {
             // Reference pages exist, but none documents this property (a
             // deprecated property, or one excluded by include tags). Nothing
@@ -484,16 +608,19 @@ function propInlineMacro (config) {
         // An unrecognized name lands here too, but reportUnknownProperty has
         // already covered it; a second warning would only add noise.
         if (entry) {
+          const mode = document.getAttribute('property-validate', 'warn')
+          const filePath = config.file && config.file.src && config.file.src.path
           if (wrongAudience) {
             reportWrongAudienceProperty({
               name,
               component,
-              mode: document.getAttribute('property-validate', 'warn'),
-              filePath: config.file && config.file.src && config.file.src.path,
+              elsewhereComponent: wrongAudience.component,
+              elsewherePage: wrongAudience.page,
+              mode,
+              filePath,
             })
           } else if (unpublished && linkRequested) {
-            const where = (config.file && config.file.src && config.file.src.path) || 'unknown file'
-            console.warn(chalk.yellow(`prop:${name}[link=true] in ${where}: no property reference page documents '${name}' in this build, so it renders without a link. Check the property's include tags on the reference pages.`))
+            reportUnpublishedProperty({ name, registry, mode, filePath })
           }
         }
       }
@@ -540,6 +667,7 @@ module.exports.propertyAnchor = propertyAnchor
 module.exports.helmValuesPath = helmValuesPath
 module.exports.loadPropertiesFor = loadPropertiesFor
 module.exports.compareTags = compareTags
+module.exports.releaseSeries = releaseSeries
 module.exports.extractHeadingsWithTags = extractHeadingsWithTags
 module.exports.evaluateTagExpression = evaluateTagExpression
 module.exports.buildPageIndex = buildPageIndex

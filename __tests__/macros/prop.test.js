@@ -7,6 +7,8 @@ const {
   extractHeadingsWithTags,
   evaluateTagExpression,
   helmValuesPath,
+  loadPropertiesFor,
+  releaseSeries,
 } = require('../../macros/prop')
 
 const PROPERTIES_JSON = JSON.stringify({
@@ -33,6 +35,13 @@ function fakeCatalog ({ json = PROPERTIES_JSON, tag = 'v26.2.1', version = 'curr
   }
 }
 
+function propertiesAttachment (component, version, tag, json = PROPERTIES_JSON) {
+  return {
+    src: { component, version, module: 'reference', family: 'attachment', relative: `redpanda-properties-${tag}.json` },
+    contents: Buffer.from(json),
+  }
+}
+
 function page (component, relative, contents, version = 'current') {
   return { src: { component, version, module: 'reference', family: 'page', relative }, contents: Buffer.from(contents) }
 }
@@ -52,6 +61,11 @@ function convert (input, { catalog, attributes = {}, filePath = 'modules/manage/
 }
 
 describe('prop macro', () => {
+  // jest.spyOn returns the existing spy when console.warn is already mocked,
+  // so a test that fails before its own mockRestore would otherwise leak its
+  // calls into the next test's assertions.
+  afterEach(() => jest.restoreAllMocks())
+
   describe('buildPropContent', () => {
     test('emits a marked code element the UI can decorate', () => {
       const html = buildPropContent({ name: 'cloud_storage_enabled', link: false, role: 'property-ref' })
@@ -96,6 +110,21 @@ describe('prop macro', () => {
     })
   })
 
+  describe('releaseSeries', () => {
+    test.each([
+      ['26.2', '26.2'],
+      ['25.3.1', '25.3'],
+      ['v26.2.1', '26.2'],
+      ['v26.3.1-rc1', '26.3'],
+      // Unversioned components and named branches have no series.
+      ['', undefined],
+      ['current', undefined],
+      [undefined, undefined],
+    ])('%s -> %s', (input, expected) => {
+      expect(releaseSeries(input)).toBe(expected)
+    })
+  })
+
   describe('registry-backed conversion', () => {
     test('marks a known property', () => {
       const html = convert('Set prop:cloud_storage_enabled[] to true.', { catalog: fakeCatalog() })
@@ -107,7 +136,7 @@ describe('prop macro', () => {
       const catalog = fakeCatalog({ extraTags: ['v25.3.1'] })
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
       convert('prop:stale_property[]', { catalog })
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('does not match any property'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('is not in the property data'))
       warn.mockRestore()
     })
 
@@ -124,7 +153,7 @@ describe('prop macro', () => {
       expect(() => convert('prop:not_a_property[]', {
         catalog: fakeCatalog(),
         attributes: { 'property-validate': 'error' },
-      })).toThrow(/does not match any property/)
+      })).toThrow(/is not in the property data/)
     })
 
     test('stays silent in off mode', () => {
@@ -133,7 +162,7 @@ describe('prop macro', () => {
         catalog: fakeCatalog(),
         attributes: { 'property-validate': 'off' },
       })
-      const validationWarnings = warn.mock.calls.filter(([msg]) => String(msg).includes('does not match'))
+      const validationWarnings = warn.mock.calls.filter(([msg]) => String(msg).includes('is not in the property data'))
       expect(validationWarnings).toHaveLength(0)
       warn.mockRestore()
     })
@@ -176,17 +205,123 @@ describe('prop macro', () => {
       // legacy_only_prop exists only in 25.3 data: valid on the 25.3 page...
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
       convert('prop:legacy_only_prop[]', { catalog, version: '25.3' })
-      const oldPageWarnings = warn.mock.calls.filter(([m]) => String(m).includes('does not match'))
+      const oldPageWarnings = warn.mock.calls.filter(([m]) => String(m).includes('is not in the property data'))
       expect(oldPageWarnings).toHaveLength(0)
       // ...but unknown on the current page.
       convert('prop:legacy_only_prop[]', { catalog, version: 'current' })
-      expect(warn.mock.calls.some(([m]) => String(m).includes('does not match'))).toBe(true)
+      expect(warn.mock.calls.some(([m]) => String(m).includes('is not in the property data'))).toBe(true)
       warn.mockRestore()
+    })
+
+    describe('release-series matching', () => {
+      // Every published Redpanda series ships its own properties JSON. Match
+      // by major.minor rather than "newest tag anywhere", so a 25.3 page is
+      // never checked against 26.x data.
+      const load = (files, component, version) => {
+        const catalog = { findBy: (q) => files.filter((f) => Object.entries(q).every(([k, v]) => f.src[k] === v)) }
+        const registry = loadPropertiesFor(catalog, component, version)
+        return registry && registry.tag
+      }
+      const A = propertiesAttachment
+
+      test('picks the JSON for the page version series, not the newest tag', () => {
+        const files = [A('streaming', '26.2', 'v26.2.1'), A('streaming', '26.1', 'v26.1.14'), A('streaming', '25.3', 'v25.3.11')]
+        expect(load(files, 'streaming', '26.2')).toBe('v26.2.1')
+        expect(load(files, 'streaming', '26.1')).toBe('v26.1.14')
+        expect(load(files, 'streaming', '25.3')).toBe('v25.3.11')
+      })
+
+      test('a branch carrying an out-of-series JSON does not derail its own series', () => {
+        // The docs main branch really does keep the previous series' JSON
+        // alongside its own, and a prerelease could land there too.
+        const files = [A('streaming', '26.2', 'v26.2.1'), A('streaming', '26.2', 'v26.1.14'), A('streaming', '26.2', 'v26.3.0')]
+        expect(load(files, 'streaming', '26.2')).toBe('v26.2.1')
+      })
+
+      test('newest patch within the series wins, compared numerically', () => {
+        const files = [A('streaming', '25.3', 'v25.3.2'), A('streaming', '25.3', 'v25.3.11')]
+        expect(load(files, 'streaming', '25.3')).toBe('v25.3.11')
+      })
+
+      test('a series JSON published only on another branch is still used', () => {
+        const files = [A('streaming', '26.2', 'v26.2.1'), A('streaming', '26.2', 'v25.3.11')]
+        expect(load(files, 'streaming', '25.3')).toBe('v25.3.11')
+      })
+
+      test('prerelease tags match their series', () => {
+        expect(load([A('streaming', '26.3', 'v26.3.1-rc1')], 'streaming', '26.3')).toBe('v26.3.1-rc1')
+      })
+
+      test('a version with no data of its own goes unvalidated, silently at load time', () => {
+        // Reporting here would fire for every version in the build, including
+        // the many that never use the macro: the index-warming extension calls
+        // this for each one. The gap is recorded and reported on first use.
+        const files = [A('streaming', '26.2', 'v26.2.1'), A('streaming', '25.3', 'v25.3.11')]
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        expect(load(files, 'streaming', '25.1')).toBeUndefined()
+        expect(warn).not.toHaveBeenCalled()
+      })
+
+      test('a page that actually uses prop: reports the gap, naming the missing file', () => {
+        const catalog = fakeCatalog({
+          version: '26.2',
+          files: [propertiesAttachment('streaming', '25.3', 'v25.3.11')],
+        })
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const html = convert('prop:cloud_storage_enabled[]', { catalog, version: '25.1' })
+        // Unvalidated, but still marked: the name may well be right.
+        expect(html).toContain('data-property-name="cloud_storage_enabled"')
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('redpanda-properties-v25.1.*.json'))
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('v25.3.11, v26.2.1'))
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('property-docs --tag v25.1.'))
+      })
+
+      test('a later build in the same process warns again', () => {
+        // Watch mode keeps one process across builds, so the guard is scoped to
+        // the content catalog rather than the module: a writer iterating on a
+        // page must keep seeing the warning, not just on the first build.
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        for (const build of [1, 2]) {
+          const catalog = fakeCatalog({ version: '26.2' })
+          convert('prop:cloud_storage_enabled[]', { catalog, version: '24.7' })
+          expect(warn.mock.calls.filter(([m]) => String(m).includes('24.7'))).toHaveLength(build)
+        }
+      })
+
+      test('property-validate=off silences the missing-series warning too', () => {
+        const catalog = fakeCatalog({ version: '26.2' })
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        convert('prop:cloud_storage_enabled[]', {
+          catalog,
+          version: '24.8',
+          attributes: { 'property-validate': 'off' },
+        })
+        expect(warn).not.toHaveBeenCalled()
+      })
+
+      test('the gap is reported once per component version, not once per mention', () => {
+        const catalog = fakeCatalog({ version: '26.2' })
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        convert('prop:cloud_storage_enabled[] prop:fips_mode[]', { catalog, version: '24.9' })
+        convert('prop:iceberg_enabled[]', { catalog, version: '24.9' })
+        expect(warn.mock.calls.filter(([m]) => String(m).includes('24.9'))).toHaveLength(1)
+      })
+
+      test('unversioned components track the latest release', () => {
+        // Cloud and connect publish no property JSON of their own and follow
+        // the current release, so they take streaming's newest.
+        const files = [A('streaming', '26.2', 'v26.2.1'), A('streaming', '25.3', 'v25.3.11')]
+        expect(load(files, 'cloud-data-platform', '')).toBe('v26.2.1')
+        expect(load(files, 'connect', '')).toBe('v26.2.1')
+      })
     })
 
     test('discovery never links a versioned page into another version', () => {
       const catalog = fakeCatalog({
         files: [
+          // 25.3 pages need 25.3 property data: without it the macro declines
+          // to validate or index them rather than borrow 26.x data.
+          propertiesAttachment('streaming', '25.3', 'v25.3.11'),
           partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n', '25.3'),
           page('streaming', 'properties/legacy-page.adoc', 'include::reference:partial$properties/all.adoc[]', '25.3'),
           partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n', 'current'),
@@ -377,7 +512,7 @@ describe('prop macro', () => {
       const linked = convert('prop:admin[link=true]', { catalog })
       expect(linked).toContain('data-property-name="admin"')
       expect(linked).not.toContain('href')
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('renders without a link'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('renders without a documentation link'))
       // A tooltip-only mention is silent: there is nothing for a writer to fix.
       warn.mockClear()
       const plain = convert('prop:admin[]', { catalog })
@@ -418,7 +553,7 @@ describe('prop macro', () => {
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
       convert('prop:cloud_storage_enabbled[link=true]', { catalog, component: 'cloud-data-platform' })
       expect(warn.mock.calls).toHaveLength(1)
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('does not match any property'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('is not in the property data'))
       warn.mockRestore()
     })
 
