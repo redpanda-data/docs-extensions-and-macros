@@ -15,41 +15,48 @@
  * `admin` or `rack` in unrelated contexts (Helm values, feature settings)
  * are never decorated by mistake.
  *
- * The macro validates its target against the published property reference: a
- * redpanda-properties-<tag>.json attachment in the reference module, the same
- * data the tooltips fetch at runtime. Each release series publishes its own
- * copy, and a page is matched to the copy for its OWN series -- see
- * loadPropertiesFor. Unknown names are reported according to the
- * property-validate attribute; every warning names the dataset the page was
- * checked against, so a typo can be told apart from a release mismatch.
+ * The macro's job is to check that a property is actually available to the
+ * audience reading the page, and to link it only where a page documents it.
  *
- * With link=true, the property also links to its reference page. The page
- * is discovered dynamically: the macro indexes which reference-module page
- * in the current component documents each property, by scanning property
- * headings in the partials each page includes (respecting include tag
- * filters such as tags=redpanda-cloud). Links therefore stay correct per
- * component (streaming, cloud, agentic-data-plane, connect) and keep
- * working if properties are split across different pages in the future.
- * The xref is component-relative (no component ID). Use page= to override
- * the target entirely. This supersedes the config_ref macro's linking for
- * most uses, without requiring writers to know the page.
+ * WHICH PROPERTIES A COMPONENT MAY REFERENCE
  *
- * When the current component's reference doesn't document the property, the
- * outcome depends on whether another component's does:
+ * Property data exists for two doc sets today:
  *
- *   - Published elsewhere but not here (a topic property on a cloud page:
- *     cloud publishes the cluster and object storage references only). The
- *     property doesn't apply to this audience, so the macro logs a warning
- *     and renders plain inline code -- no link, no marker, no tooltip.
- *     Linking would send cloud readers to self-managed documentation for a
- *     setting they cannot change. The exception is a component that
- *     publishes no property reference at all (connect, this repo's preview
- *     site): with no local reference to prefer, it borrows the streaming
- *     (or ROOT) pages through a component-qualified xref.
- *   - Published nowhere in the build (a deprecated property, or one held
- *     back by include tags). The marker and its tooltip stay, since the
- *     published JSON still describes the property accurately, but there is
- *     no page to link: link=true renders unlinked and warns.
+ *   Self-managed (streaming) publishes its own redpanda-properties-<tag>.json
+ *   per release, as a reference-module attachment. Every property in that
+ *   release's file is available, and a page validates against the file for
+ *   its OWN release series: a 25.3 page against 25.3 data, never against a
+ *   neighbouring release, which would accept properties that release never
+ *   had and flag removed ones as typos.
+ *
+ *   Cloud is managed streaming, so it has no property data of its own and
+ *   always tracks the newest streaming file. Only the properties whose
+ *   cloud_supported field is true are available; the rest exist in Redpanda
+ *   but cannot be set by a Cloud reader. A Cloud component is recognized by
+ *   its env-cloud attribute.
+ *
+ * Any other component (connect, the agentic data plane, a preview site) has
+ * no property data, and none is inferred for it: the macro warns once and
+ * renders the property as plain inline code. Supporting a further doc set is
+ * a deliberate addition here, not something guessed from a version number --
+ * those components carry their own product versions, which say nothing about
+ * which Redpanda properties exist.
+ *
+ * Unavailable and unknown names are reported according to property-validate.
+ * Every warning names the dataset the page was checked against, so a typo is
+ * distinguishable from an availability or release mismatch.
+ *
+ * LINKING
+ *
+ * With link=true the property also links to its reference page, but only when
+ * a page in this component actually documents it. The page is discovered by
+ * indexing which reference-module page documents each property, scanning
+ * property headings in the partials each page includes and respecting include
+ * tag filters such as tags=redpanda-cloud. Links are therefore
+ * component-relative and stay correct if properties are split across
+ * different pages later. Nothing is ever linked across components, and no
+ * page target is guessed from a property's scope: a link the build cannot
+ * verify would be a broken link. Use page= to set the target explicitly.
  *
  * With helm-path=auto, pages rendered with the env-kubernetes attribute
  * display the property as its Helm values path (storage.tiered.config.*
@@ -61,9 +68,9 @@
  *
  * Document or site attributes:
  *
- *   property-validate     'warn' (default) to log unknown property names,
- *                         'error' to fail the build, 'off' to disable
- *                         validation.
+ *   property-validate     'warn' (default) to log problems, 'error' to fail
+ *                         the build on an unknown name, 'off' to disable
+ *                         validation and silence these warnings.
  *   property-ref-role     CSS class applied to the code element
  *                         (default: property-ref).
  *
@@ -82,18 +89,10 @@ const $propertyRegistry = Symbol('$propertyRegistry')
 const $propertySeriesGap = Symbol('$propertySeriesGap')
 
 const DEFAULT_ROLE = 'property-ref'
+// Which slice of a dataset a component may reference.
+const SURFACE_ALL = 'all'
+const SURFACE_CLOUD = 'cloud'
 const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
-
-// Deterministic fallback only. The primary mechanism is dynamic discovery:
-// the macro indexes which reference-module page actually documents each
-// property (by scanning property headings in the partials each page
-// includes, respecting include tag filters), so links keep working if
-// properties are ever split across different pages.
-const SCOPE_PAGES = {
-  cluster: 'properties/cluster-properties',
-  broker: 'properties/broker-properties',
-  topic: 'properties/topic-properties',
-}
 
 const $propertyPageIndex = Symbol('$propertyPageIndex')
 const HEADING_RX = /^=+\s+(\S+)\s*$/
@@ -276,9 +275,8 @@ function compareTags (a, b) {
 
 /**
  * The release series ('26.2') of a component version ('26.2', '25.3.1') or a
- * properties tag ('v26.2.1', 'v26.3.1-rc1'). Undefined for non-numeric
- * versions, which is how unversioned components (cloud, connect) and named
- * branches are recognized.
+ * properties tag ('v26.2.1', 'v26.3.1-rc1'). Undefined when the value names no
+ * numeric series.
  */
 function releaseSeries (value) {
   const match = String(value == null ? '' : value).replace(/^v/, '').match(/^(\d+)\.(\d+)/)
@@ -286,24 +284,58 @@ function releaseSeries (value) {
 }
 
 /**
- * Load and cache the property map for one page's component and version.
- * Returns undefined when no suitable dataset exists.
+ * The asciidoc attributes declared for one component version, which is where
+ * env-cloud lives. Read from the catalog rather than the converting document
+ * so the property-page-index extension resolves surfaces identically.
+ */
+function componentAttributes (contentCatalog, component, version) {
+  if (typeof contentCatalog.getComponent !== 'function') return {}
+  const found = contentCatalog.getComponent(component)
+  if (!found) return {}
+  const versions = found.versions || []
+  const match = versions.find((entry) => entry.version === version) || found.latest || versions[0]
+  return (match && match.asciidoc && match.asciidoc.attributes) || {}
+}
+
+/**
+ * Every properties JSON in the build, as {tag, file, component, version}.
+ */
+function propertyDatasets (contentCatalog) {
+  const found = []
+  for (const attachment of contentCatalog.findBy({ family: 'attachment' }) || []) {
+    if (attachment.src.module !== 'reference') continue
+    const match = attachment.src.relative.split('/').pop().match(PROPERTIES_JSON_RX)
+    if (!match) continue
+    found.push({ tag: match[1], file: attachment, component: attachment.src.component, version: attachment.src.version })
+  }
+  return found
+}
+
+const newestDataset = (list) =>
+  list.reduce((best, entry) => (!best || compareTags(entry.tag, best.tag) > 0 ? entry : best), null)
+
+/**
+ * Load and cache the property data for one page's component and version, plus
+ * which slice of it that component may reference. Returns undefined when the
+ * component has no property data, which is the signal to render plain and warn.
  *
- * Every published Redpanda release series has its own properties JSON, so a
- * versioned page must validate against the data for its OWN series: a 25.3
- * page checked against 26.2 data reports properties that release never had
- * and flags removed ones as typos. The macro therefore matches by series
- * (major.minor) rather than taking the newest tag it can find -- the docs
- * repo's main branch carries an older series' JSON alongside its own, and
- * older version branches may carry none at all. When a versioned component
- * publishes property data but nothing for the page's series, the page goes
- * unvalidated with an explicit warning rather than borrowing the wrong
- * release's data.
+ * Two doc sets have property data:
  *
- * Components with no property data of their own (cloud, connect) borrow the
- * streaming (or ROOT) dataset -- their own series when their version names
- * one, otherwise the newest, since an unversioned doc set or one versioned
- * independently of Redpanda releases tracks the current release.
+ *   A component that publishes its own redpanda-properties-<tag>.json (the
+ *   self-managed docs) uses the file for its own release series, newest patch
+ *   within it, and may reference every property in it. Matching by series
+ *   rather than by newest tag matters because the main branch carries the
+ *   previous series' file alongside its own, and a prerelease could land there
+ *   too. A versioned page whose series has no file goes unvalidated with an
+ *   explicit warning rather than borrowing a neighbouring release's data.
+ *
+ *   A Cloud component (env-cloud) is managed streaming: no data of its own, so
+ *   it tracks the newest streaming (or ROOT) file, and may reference only the
+ *   properties marked cloud_supported.
+ *
+ * Anything else gets nothing. Component versions elsewhere in the site carry
+ * their own product versions, which say nothing about Redpanda releases, so no
+ * dataset is inferred for them.
  */
 function loadProperties (config) {
   const contentCatalog = config && config.contentCatalog
@@ -322,77 +354,65 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
   const cache = contentCatalog[$propertyRegistry] || (contentCatalog[$propertyRegistry] = {})
   if (cache[cacheKey] !== undefined) return cache[cacheKey] || undefined
 
-  const attachments = contentCatalog.findBy({ family: 'attachment' }) || []
-  const candidates = []
-  for (const attachment of attachments) {
-    if (attachment.src.module !== 'reference') continue
-    const basename = attachment.src.relative.split('/').pop()
-    const match = basename.match(PROPERTIES_JSON_RX)
-    if (!match) continue
-    candidates.push({ tag: match[1], file: attachment, component: attachment.src.component, version: attachment.src.version })
-  }
-  const newest = (list) => list.reduce((best, entry) => (!best || compareTags(entry.tag, best.tag) > 0 ? entry : best), null)
-
-  const ownComponent = candidates.filter((c) => c.component === pageComponent)
-  const series = releaseSeries(pageVersion)
+  const datasets = propertyDatasets(contentCatalog)
+  const own = datasets.filter((d) => d.component === pageComponent)
   let pick
-  if (ownComponent.length && series) {
-    // Newest patch of this page's own series: prefer the copy published on
-    // the page's own version, then the same series published anywhere in the
-    // component (a series' JSON sometimes lives only on the main branch).
-    const inSeries = ownComponent.filter((c) => releaseSeries(c.tag) === series)
-    pick = newest(inSeries.filter((c) => c.version === pageVersion)) || newest(inSeries)
-    if (!pick) {
-      // Record the gap rather than reporting it here. This function also runs
-      // from the property-page-index extension, once per component version in
-      // the build, so warning at load time would report every version that
-      // lacks data even when none of its pages uses the macro. The macro
-      // reports it on first actual use instead.
-      const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
-      gaps[cacheKey] = {
-        component: pageComponent,
-        version: pageVersion,
-        series,
-        have: [...new Set(ownComponent.map((c) => c.tag))].sort(compareTags),
+  let surface
+
+  if (own.length) {
+    surface = SURFACE_ALL
+    const series = releaseSeries(pageVersion)
+    if (series) {
+      const inSeries = own.filter((d) => releaseSeries(d.tag) === series)
+      pick = newestDataset(inSeries.filter((d) => d.version === pageVersion)) || newestDataset(inSeries)
+      if (!pick) {
+        // Record the gap rather than reporting it here: this also runs from the
+        // property-page-index extension, once per component version in the
+        // build, so warning now would report versions no page of which uses the
+        // macro. The macro reports it on first actual use.
+        const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
+        gaps[cacheKey] = {
+          component: pageComponent,
+          version: pageVersion,
+          series,
+          have: [...new Set(own.map((d) => d.tag))].sort(compareTags),
+        }
+        cache[cacheKey] = null
+        return undefined
       }
-      cache[cacheKey] = null
-      return undefined
+    } else {
+      pick = newestDataset(own.filter((d) => d.version === pageVersion)) || newestDataset(own)
     }
-  } else if (ownComponent.length) {
-    pick = newest(ownComponent.filter((c) => c.version === pageVersion)) || newest(ownComponent)
-  } else {
-    // No property data of this component's own. Borrow streaming's (or
-    // ROOT's), but still honor the page's series when it has one: a component
-    // versioned per Redpanda release must not be handed the newest release's
-    // properties. Components whose versions are unrelated to Redpanda releases
-    // (or unversioned, like cloud and connect today) have no series to match
-    // and correctly track the latest.
-    const borrow = (component) => {
-      const from = candidates.filter((c) => c.component === component)
-      if (!from.length) return null
-      return (series && newest(from.filter((c) => releaseSeries(c.tag) === series))) || newest(from)
-    }
-    pick = borrow('streaming') || borrow('ROOT') || newest(candidates)
+  } else if (componentAttributes(contentCatalog, pageComponent, pageVersion)['env-cloud'] !== undefined) {
+    // Cloud is managed streaming: newest self-managed data, cloud slice only.
+    surface = SURFACE_CLOUD
+    pick =
+      newestDataset(datasets.filter((d) => d.component === 'streaming')) ||
+      newestDataset(datasets.filter((d) => d.component === 'ROOT'))
   }
 
   let registry = null
   if (pick) {
     const data = JSON.parse(pick.file.contents.toString())
     if (data && data.properties) {
-      registry = { tag: pick.tag, properties: data.properties, component: pick.component, version: pick.version }
+      registry = { tag: pick.tag, properties: data.properties, component: pick.component, version: pick.version, surface }
     }
   }
-  // Cache null too, so a missing JSON is only searched for once per build.
+  // Cache null too, so a missing dataset is only searched for once per build.
   cache[cacheKey] = registry
   return registry || undefined
 }
 
 /**
- * The component publishes property data for other release series but none for
- * this page's. Silently validating against a neighbouring release is what this
- * warning exists to prevent, so say exactly which file is missing and how to
- * produce it. Returns whether a gap was found and reported.
+ * Whether a property is available to the audience this dataset was loaded for.
+ * On Cloud only cloud_supported properties are; a Cloud reader cannot set the
+ * rest, even though Redpanda has them.
  */
+function isAvailable (registry, entry) {
+  if (registry.surface !== SURFACE_CLOUD) return true
+  return entry.cloud_supported === true
+}
+
 function warnSeriesMissing (contentCatalog, pageComponent, pageVersion) {
   const gaps = contentCatalog[$propertySeriesGap]
   const gap = gaps && gaps[`${pageComponent}@${pageVersion}`]
@@ -451,36 +471,34 @@ function describeDataset (registry) {
 }
 
 /**
- * Report a property that another component's reference documents but this
- * one's does not. The name is real (it validated against the published
- * JSON), so this is an audience mismatch rather than a typo: the mention
- * belongs to a doc set that doesn't publish the property.
+ * Report a property that exists in Redpanda but is not available to this
+ * component's audience. On Cloud that means cloud_supported is false: a real
+ * property a Cloud reader cannot set, so it renders as plain code rather than
+ * as a tooltip implying otherwise.
  */
-function reportWrongAudienceProperty ({ name, component, elsewhereComponent, elsewherePage, mode, filePath }) {
+function reportUnavailableProperty ({ name, component, registry, mode, filePath }) {
   if (mode === 'off') return
   const where = filePath ? ` in ${filePath}` : ''
   const which = component || 'this'
-  const found = elsewhereComponent
-    ? ` It is published in the ${elsewhereComponent} component (${elsewherePage}), but that reference is written for a different audience, so linking there would point readers at a property they cannot set.`
-    : ''
   console.warn(chalk.yellow(
-    `prop:${name}[]${where}: no property reference page in the ${which} component documents '${name}', so it renders as plain code -- no link, and no tooltip.${found} ` +
-    `Fix it either way: if this audience CAN set '${name}', publish it on the ${which} component's reference pages (check the property's include tags in the generated partial); if not, reword the sentence and drop the macro.`
+    `prop:${name}[]${where}: '${name}' is not available in the ${which} component, so it renders as plain code -- no link, and no tooltip. ` +
+    `${describeDataset(registry)} marks it cloud_supported: false, meaning Redpanda has the property but this audience cannot set it. ` +
+    'If that is wrong, fix cloud_supported in the property extractor; if it is right, reword the sentence and drop the macro.'
   ))
 }
 
 /**
- * Report a property that the published data describes but no reference page
- * in the build renders. The tooltip still works, so this only matters when a
- * writer explicitly asked for a link.
+ * Report an available property that no page in this component documents. The
+ * tooltip still works, so this only matters when a link was explicitly asked
+ * for -- there is nothing to link to.
  */
 function reportUnpublishedProperty ({ name, registry, mode, filePath }) {
   if (mode === 'off') return
   const where = filePath ? ` in ${filePath}` : ''
   console.warn(chalk.yellow(
-    `prop:${name}[link=true]${where}: '${name}' is in ${describeDataset(registry)} but no reference page in this build renders a heading for it, so the tooltip renders without a documentation link. ` +
-    'Every property reference page filters out the deprecated and exclude-from-docs include tags, and some pages include only selected category tags -- check which tags enclose this property in the generated partial. ' +
-    'If it is meant to stay unpublished (a deprecated property, say), drop link=true and keep the tooltip-only form.'
+    `prop:${name}[link=true]${where}: '${name}' is in ${describeDataset(registry)} but no reference page in this component renders a heading for it, so it keeps its tooltip and renders without a link. ` +
+    'Every property reference page filters out the deprecated and exclude-from-docs include tags, and some include only selected category tags -- check which tags enclose this property in the generated partial. ' +
+    'If it is meant to stay unpublished, drop link=true.'
   ))
 }
 
@@ -491,30 +509,24 @@ function reportUnpublishedProperty ({ name, registry, mode, filePath }) {
  * @param {object} opts
  * @param {string} opts.name - Property name.
  * @param {string} [opts.text] - Display text override.
- * @param {boolean} opts.link - Whether to link to the reference page.
- * @param {string} [opts.page] - Reference page override (module-relative, no .adoc).
- * @param {string} [opts.scope] - config_scope from the published JSON.
+ * @param {boolean} [opts.link] - Whether to link to the reference page. Ignored
+ *   without a page: the macro never guesses a target.
+ * @param {string} [opts.page] - Reference page (module-relative, no .adoc).
+ * @param {string} [opts.scope] - config_scope, used only for the Helm path.
  * @param {string} opts.role - CSS class for the code element.
- * @param {string} [opts.componentPrefix] - 'component:' prefix when the link
- *   must leave the current component (which publishes no property pages).
  * @param {boolean} [opts.plain] - Render unmarked code (no tooltip, no link)
- *   because no reference page in this component documents the property.
+ *   because the build could not verify the property for this component.
  * @returns {string}
  */
-function buildPropContent ({ name, text, link, page, scope, role, componentPrefix = '', helmPath = false, docUrl, plain = false }) {
+function buildPropContent ({ name, text, link, page, scope, role, helmPath = false, docUrl, plain = false }) {
   const display = text || (helmPath ? helmValuesPath(name, scope) : name)
-  // Without a reference page to point at, the marker would give the docs UI
-  // nothing to link from its tooltip, so drop the marking entirely.
   if (plain) return `<code>${display}</code>`
-  let inner = display
-  if (link) {
-    const targetPage = page || SCOPE_PAGES[scope] || SCOPE_PAGES.cluster
-    inner = `xref:${componentPrefix}reference:${targetPage}.adoc#${propertyAnchor(name)}[${display}]`
-  }
+  const inner = link && page
+    ? `xref:reference:${page}.adoc#${propertyAnchor(name)}[${display}]`
+    : display
   // The published URL of the page that documents this property, discovered
   // at build time. The docs UI prefers it for the tooltip's documentation
-  // link -- the client can't know which scopes a component publishes or
-  // which page a shared property landed on.
+  // link -- the client cannot know which page a property landed on.
   const docAttr = docUrl ? ` data-doc-url="${docUrl}"` : ''
   return `<code class="${role}" data-property-name="${name}"${docAttr}>${inner}</code>`
 }
@@ -526,135 +538,87 @@ function propInlineMacro (config) {
     self.process(function (parent, target, attributes) {
       const document = parent.getDocument()
       const name = target.trim()
-      let registry
-      let entry
-      if (config && config.contentCatalog) {
-        registry = loadProperties(config)
-        if (!registry && document.getAttribute('property-validate', 'warn') !== 'off') {
-          const component = (config.file && config.file.src && config.file.src.component) || ''
-          const version = (config.file && config.file.src && config.file.src.version) || ''
-          // Prefer the specific diagnosis (this version's series has no data)
-          // over the general one (the build has no property data at all).
-          if (!warnSeriesMissing(config.contentCatalog, component, version)) {
-            warnNoPropertyData(config.contentCatalog, component, version)
-          }
-        }
-      }
-      if (registry) {
-        entry = registry.properties[name]
-        if (!entry) {
-          reportUnknownProperty({
-            name,
-            mode: document.getAttribute('property-validate', 'warn'),
-            registry,
-            filePath: config && config.file && config.file.src && config.file.src.path,
-          })
-        }
-      }
-      // Discover which page documents the property. The current component's
-      // own reference wins.
-      let discoveredPage
-      let discoveredUrl
-      let componentPrefix = ''
-      // Documented in another component but not in this one: the audiences
-      // differ, so borrowing that page is worse than not linking.
-      let wrongAudience = false
-      // Documented nowhere in this build. Nothing to link, but the property
-      // is real and its tooltip still describes it accurately.
-      let unpublished = false
+      const mode = document.getAttribute('property-validate', 'warn')
+      const filePath = config && config.file && config.file.src && config.file.src.path
+      const component = (config && config.file && config.file.src && config.file.src.component) || ''
+      const version = (config && config.file && config.file.src && config.file.src.version) || ''
       const linkRequested = attributes.link === 'true' || attributes.link === true
-      if (registry && config.contentCatalog && !attributes.page) {
-        const component = (config.file && config.file.src && config.file.src.component) || ''
-        const version = (config.file && config.file.src && config.file.src.version) || ''
-        const ownIndex = buildPageIndex(config.contentCatalog, component, registry.properties, version)
-        const ownEntry = ownIndex.get(name)
-        if (ownEntry) {
-          discoveredPage = ownEntry.page
-          discoveredUrl = ownEntry.url
-        } else {
-          let elsewhere
-          let elsewhereComponent
-          let fallbackWithPages = false
-          for (const fallbackComponent of ['streaming', 'ROOT']) {
-            if (fallbackComponent === component) continue
-            // A component-qualified xref without a version resolves to the
-            // fallback component's latest version, so consult exactly that
-            // version's index (which the property-page-index extension warms).
-            const latest = typeof config.contentCatalog.getComponent === 'function' &&
-              config.contentCatalog.getComponent(fallbackComponent)
-            const fallbackVersion = (latest && latest.latest && latest.latest.version) || undefined
-            const fallbackIndex = buildPageIndex(config.contentCatalog, fallbackComponent, registry.properties, fallbackVersion)
-            if (fallbackIndex.size === 0) continue
-            fallbackWithPages = true
-            const fallbackEntry = fallbackIndex.get(name)
-            if (fallbackEntry) {
-              elsewhere = fallbackEntry
-              elsewhereComponent = fallbackComponent
-              break
-            }
-          }
-          if (elsewhere && ownIndex.size === 0) {
-            // This component publishes no property reference at all (connect,
-            // this repo's preview site), so there is no local reference to
-            // prefer: borrow the other component's page.
-            discoveredPage = elsewhere.page
-            discoveredUrl = elsewhere.url
-            componentPrefix = `${elsewhereComponent}:`
-          } else if (elsewhere) {
-            // The property is published, just not for this component's
-            // audience -- a topic property on a cloud page, say, where cloud
-            // publishes only the cluster and object storage references.
-            // Linking would send cloud readers to self-managed docs for a
-            // setting they cannot change.
-            wrongAudience = { component: elsewhereComponent, page: elsewhere.page }
-          } else if (ownIndex.size > 0 || fallbackWithPages) {
-            // Reference pages exist, but none documents this property (a
-            // deprecated property, or one excluded by include tags). Nothing
-            // to link, but the tooltip still describes it correctly.
-            unpublished = true
+
+      // Anything that leaves the property unverified renders as plain inline
+      // code: no marker, so the docs UI adds no tooltip. A tooltip the build
+      // could not check is worse than none, and a marker with nothing behind it
+      // would leave the UI guessing at a documentation link.
+      const plain = () => self.createInline(parent, 'quoted', buildPropContent({
+        name,
+        text: attributes.text,
+        role: document.getAttribute('property-ref-role', DEFAULT_ROLE),
+        helmPath: helmPathRequested(attributes, document),
+        plain: true,
+      }), { attributes: { subs: 'macros' } })
+
+      const registry = config && config.contentCatalog ? loadProperties(config) : undefined
+      if (!registry) {
+        // No dataset covers this component. Say so once and render plain.
+        if (mode !== 'off' && config && config.contentCatalog) {
+          if (!warnSeriesMissing(config.contentCatalog, component, version)) {
+            warnNoPropertyData(config.contentCatalog, component, version, filePath)
           }
         }
-        // An unrecognized name lands here too, but reportUnknownProperty has
-        // already covered it; a second warning would only add noise.
-        if (entry) {
-          const mode = document.getAttribute('property-validate', 'warn')
-          const filePath = config.file && config.file.src && config.file.src.path
-          if (wrongAudience) {
-            reportWrongAudienceProperty({
-              name,
-              component,
-              elsewhereComponent: wrongAudience.component,
-              elsewherePage: wrongAudience.page,
-              mode,
-              filePath,
-            })
-          } else if (unpublished && linkRequested) {
-            reportUnpublishedProperty({ name, registry, mode, filePath })
-          }
+        return plain()
+      }
+
+      const entry = registry.properties[name]
+      if (!entry) {
+        reportUnknownProperty({ name, mode, registry, filePath })
+        return plain()
+      }
+      if (!isAvailable(registry, entry)) {
+        reportUnavailableProperty({ name, component, registry, mode, filePath })
+        return plain()
+      }
+
+      // Discover the page in THIS component that documents the property. A page
+      // is never borrowed from another component, and never guessed from the
+      // property's scope, because a link the build cannot verify is a broken
+      // link. page= overrides discovery for the rare case a writer knows better.
+      let discoveredPage = attributes.page
+      let discoveredUrl
+      if (!discoveredPage) {
+        const index = buildPageIndex(config.contentCatalog, component, registry.properties, version)
+        const found = index.get(name)
+        if (found) {
+          discoveredPage = found.page
+          discoveredUrl = found.url
+        } else if (linkRequested) {
+          reportUnpublishedProperty({ name, registry, mode, filePath })
         }
       }
-      // helm-path=auto displays the property as its Helm values path on
-      // pages rendered with env-kubernetes, so single-sourced content reads
-      // correctly for both Linux and Kubernetes audiences (the successor to
-      // the config_ref macro's hardcoded storage.tiered.config prefixing).
-      const helmPath = attributes['helm-path'] === 'auto' && document.getAttribute('env-kubernetes') !== undefined
+
       const content = buildPropContent({
         name,
         text: attributes.text,
-        link: linkRequested && !wrongAudience && !unpublished,
-        page: attributes.page || discoveredPage,
-        scope: entry && entry.config_scope,
+        link: linkRequested && Boolean(discoveredPage),
+        page: discoveredPage,
+        scope: entry.config_scope,
         role: document.getAttribute('property-ref-role', DEFAULT_ROLE),
-        componentPrefix,
-        helmPath,
+        helmPath: helmPathRequested(attributes, document),
         docUrl: discoveredUrl ? `${discoveredUrl}#${propertyAnchor(name)}` : undefined,
-        plain: wrongAudience,
       })
       // The xref inside the code element is resolved by the 'macros'
       // substitution, the same mechanism the enterprise macro relies on.
       return self.createInline(parent, 'quoted', content, { attributes: { subs: 'macros' } })
     })
   }
+}
+
+/**
+ * helm-path=auto displays the property as its Helm values path on pages
+ * rendered with env-kubernetes, so single-sourced content reads correctly for
+ * both Linux and Kubernetes audiences (the successor to the config_ref macro's
+ * hardcoded storage.tiered.config prefixing).
+ */
+function helmPathRequested (attributes, document) {
+  return attributes['helm-path'] === 'auto' && document.getAttribute('env-kubernetes') !== undefined
 }
 
 function register (registry, config = {}) {

@@ -186,7 +186,7 @@ Registered together with the `enterprise` inline macro (see <<enterprise>>).
 
 This inline macro references a Redpanda configuration property in prose. The property renders as a marked `<code>` element (`property-ref` class plus a `data-property-name` attribute) that the docs UI decorates with a hover-documentation tooltip. Marking is opt-in: only properties referenced through this macro get tooltips, so ambiguous words such as `admin` or `rack` in unrelated contexts (Helm values, feature settings) are never decorated by mistake.
 
-The macro validates its target against the published property reference: a `redpanda-properties-<tag>.json` attachment in the `reference` module of the build, the same data the tooltips fetch at runtime. See <<prop-version-selection>> for which one a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`.
+The macro checks that a property is actually available to the audience reading the page, and links it only where a page documents it. It validates against the published property data: a `redpanda-properties-<tag>.json` attachment in the `reference` module, the same data the tooltips fetch at runtime. See <<prop-availability>> for which properties each doc set may reference and <<prop-version-selection>> for which file a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`.
 
 === Usage
 
@@ -225,27 +225,33 @@ Each published Redpanda release series ships its own `redpanda-properties-v<majo
 The macro therefore selects by series (`major.minor`) rather than by newest tag:
 
 . For a component version with a numeric series (`streaming` at `25.3`), the newest patch whose tag matches that series -- preferring the copy attached to the page's own version, then the same series published anywhere in the component, since a series' JSON sometimes lives only on the main branch. Patch numbers compare numerically, so `v25.3.11` beats `v25.3.2`.
-. For a component with no property data of its own (`cloud-data-platform`, `connect`), the `streaming` dataset -- that component's own series if its version names one, otherwise the newest -- then `ROOT`, then any. Unversioned doc sets, and those whose version numbers are unrelated to Redpanda releases, correctly track the current release; one versioned per Redpanda release gets that release's properties rather than the newest.
+. For a Cloud component (`env-cloud`), the newest `streaming` dataset, then `ROOT`. Cloud is managed Redpanda and always tracks the current release, so its own version is never consulted.
 
-Selecting by series rather than newest tag matters in practice: the docs repo's main branch carries the previous series' JSON alongside its own, and a prerelease tag could land there too. Newest-tag-wins would hand that file to pages of a different release.
+Selecting by series rather than newest tag matters in practice: the docs repo's main branch carries the previous series' JSON alongside its own, and a prerelease tag could land there too. Newest-tag-wins would hand that file to pages of a different release. A component with no property data and no `env-cloud` attribute gets no dataset at all -- see <<prop-availability>>.
 
-When a versioned component publishes property data for other series but none for the page's own, the macro declines to validate rather than borrow a neighbouring release's data. It logs one warning per component version naming the missing file, the tags it did find, and the `doc-tools generate property-docs --tag` command that produces it. `prop:` targets on those pages render unvalidated and their tooltips carry no data, so either generate the series' JSON on that branch or leave `prop:` out of that version's content.
+When a component publishes property data for other series but none for the page's own, the macro declines to validate rather than use a neighbouring release's data. It logs one warning per component version naming the missing file, the tags it did find, and the `doc-tools generate property-docs --tag` command that produces it. `prop:` targets on those pages render unvalidated and their tooltips carry no data, so either generate the series' JSON on that branch or leave `prop:` out of that version's content.
 
 property-ref-role::
 CSS class applied to the code element. The default is `property-ref`.
 
-[[prop-undocumented]]
-=== Properties a component does not document
+[[prop-availability]]
+=== Which properties a doc set may reference
 
-When no page in the current component documents the property, what the macro emits depends on whether another component's reference does.
+Property data exists for two doc sets.
 
-*Published elsewhere but not here.* A topic property on a Cloud page, for example: the Cloud component publishes only the cluster and object storage references. The property does not apply to this audience, so the macro renders plain `<code>` with no link, no `data-property-name` marker, and therefore no tooltip, and logs a warning naming the property and the file. Linking into another component would send Cloud readers to self-managed documentation for a property they cannot set. Either publish the property on that component's reference pages (check the property's include tags) or reword the mention and drop the macro. Set `property-validate` to `off` to silence the warning.
+*Self-managed (`streaming`)* publishes its own properties JSON per release, as a reference-module attachment. Every property in that release's file is available.
 
-The exception is a component that publishes no property reference at all (`connect`, or a preview site). With no local reference to prefer, it borrows the `streaming` (or `ROOT`) component's pages through a component-qualified xref.
+*Cloud* is managed Redpanda, so it has no property data of its own and always tracks the newest self-managed file. Only the properties whose `cloud_supported` field is `true` are available; the rest exist in Redpanda but a Cloud reader cannot set them. A Cloud component is recognized by its `env-cloud` attribute. `cloud_supported` is the single gate because it is already the union of the Cloud states: no published property is `cloud_editable` or `cloud_readonly` without also being `cloud_supported`.
 
-*Published nowhere in the build.* A deprecated property, or one held back by include tags. The marker and its tooltip stay, because the published JSON still describes the property accurately, but there is no page to link: `link=true` renders unlinked and logs a warning. A tooltip-only mention is silent.
+Any other component (`connect`, the agentic data plane, a preview site) has no property data, and none is inferred for it. Those components carry their own product versions, which say nothing about which Redpanda properties exist, so a version number is never read as a Redpanda release. Supporting a further doc set is a deliberate addition to the macro.
 
-When no component in the build publishes property pages at all, the link falls back deterministically to the property's `config_scope` (`cluster`, `broker`, or `topic`).
+When a property is not available to the page's audience -- a non-`cloud_supported` property on a Cloud page -- the macro renders it as plain `<code>`: no link, no `data-property-name` marker, and therefore no tooltip. A tooltip would imply the reader can set something they cannot. The build logs a warning naming the property, the file, and the dataset consulted. Fix `cloud_supported` in the property extractor if the data is wrong; otherwise reword the sentence and drop the macro.
+
+When no dataset covers the component at all, the macro warns once per component version and renders every `prop:` target as plain code, rather than emitting tooltips it could not verify.
+
+=== Linking
+
+`link=true` links the property to its reference page, but only when a page *in the same component* documents it, as discovered above. Nothing is linked across components, and no target is guessed from the property's `config_scope`: a link the build cannot verify is a broken link. An available property that no page renders -- a deprecated property, or one held back by include tags -- keeps its tooltip and renders unlinked; `link=true` warns in that case, because there is nothing to link to. Use `page=` to set a target explicitly.
 
 === Registration
 

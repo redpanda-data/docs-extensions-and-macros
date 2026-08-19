@@ -11,29 +11,53 @@ const {
   releaseSeries,
 } = require('../../macros/prop')
 
+// cloud_supported mirrors the published data: it is the union of editable and
+// read-only in Cloud, so it is the single availability gate. Here iceberg_enabled
+// is the Cloud-available one; the rest exist in Redpanda but not in Cloud.
 const PROPERTIES_JSON = JSON.stringify({
   properties: {
-    cloud_storage_enabled: { name: 'cloud_storage_enabled', config_scope: 'cluster' },
-    fips_mode: { name: 'fips_mode', config_scope: 'broker' },
-    'redpanda.iceberg.mode': { name: 'redpanda.iceberg.mode', config_scope: 'topic' },
-    iceberg_enabled: { name: 'iceberg_enabled', config_scope: 'cluster' },
-    admin: { name: 'admin', config_scope: 'broker' },
+    cloud_storage_enabled: { name: 'cloud_storage_enabled', config_scope: 'cluster', cloud_supported: false },
+    fips_mode: { name: 'fips_mode', config_scope: 'broker', cloud_supported: false },
+    'redpanda.iceberg.mode': { name: 'redpanda.iceberg.mode', config_scope: 'topic', cloud_supported: false },
+    iceberg_enabled: { name: 'iceberg_enabled', config_scope: 'cluster', cloud_supported: true },
+    admin: { name: 'admin', config_scope: 'broker', cloud_supported: false },
   },
 })
 
-function fakeCatalog ({ json = PROPERTIES_JSON, tag = 'v26.2.1', version = 'current', extraTags = [], files = [] } = {}) {
+function fakeCatalog ({ json = PROPERTIES_JSON, tag = 'v26.2.1', version = 'current', extraTags = [], files = [], components = {} } = {}) {
   const attachment = (fileTag, contents, component = 'streaming', attachmentVersion = version) => ({
     src: { component, version: attachmentVersion, module: 'reference', family: 'attachment', relative: `redpanda-properties-${fileTag}.json` },
     contents: Buffer.from(contents),
   })
   const all = [attachment(tag, json), ...files]
   for (const extra of extraTags) all.push(attachment(extra, JSON.stringify({ properties: { stale_property: {} } })))
+  return catalogOf(all, components)
+}
+
+/**
+ * A content catalog over the given files. `components` maps a component name to
+ * the asciidoc attributes its versions declare, which is how the macro learns
+ * that a component is Cloud (env-cloud) and so tracks streaming's newest data.
+ */
+function catalogOf (files, components = {}) {
+  const names = new Set([...files.map((f) => f.src.component), ...Object.keys(components)])
   return {
-    findBy: jest.fn((query) => all.filter((file) =>
+    findBy: jest.fn((query) => files.filter((file) =>
       Object.entries(query).every(([key, value]) => file.src[key] === value)
     )),
+    getComponent: (name) => {
+      if (!names.has(name)) return undefined
+      const attributes = components[name] || {}
+      const versions = [...new Set(files.filter((f) => f.src.component === name).map((f) => f.src.version))]
+        .map((v) => ({ version: v, asciidoc: { attributes } }))
+      if (!versions.length) versions.push({ version: '', asciidoc: { attributes } })
+      return { name, versions, latest: versions[versions.length - 1] }
+    },
   }
 }
+
+// Shorthand: a Cloud component declares env-cloud, like cloud-docs' antora.yml.
+const CLOUD = { 'cloud-data-platform': { 'env-cloud': 'true' } }
 
 function propertiesAttachment (component, version, tag, json = PROPERTIES_JSON) {
   return {
@@ -72,9 +96,16 @@ describe('prop macro', () => {
       expect(html).toBe('<code class="property-ref" data-property-name="cloud_storage_enabled">cloud_storage_enabled</code>')
     })
 
-    test('links to the scope-derived reference page', () => {
-      const html = buildPropContent({ name: 'fips_mode', link: true, scope: 'broker', role: 'property-ref' })
+    test('links to the page it is given', () => {
+      const html = buildPropContent({ name: 'fips_mode', link: true, page: 'properties/broker-properties', role: 'property-ref' })
       expect(html).toContain('xref:reference:properties/broker-properties.adoc#fips_mode[fips_mode]')
+    })
+
+    test('link=true without a page renders unlinked rather than guessing one', () => {
+      // A target derived from config_scope was a guess, and guessed wrong for
+      // any component that does not publish that scope's page.
+      const html = buildPropContent({ name: 'fips_mode', link: true, scope: 'broker', role: 'property-ref' })
+      expect(html).toBe('<code class="property-ref" data-property-name="fips_mode">fips_mode</code>')
     })
 
     test('page overrides the derived target', () => {
@@ -88,9 +119,10 @@ describe('prop macro', () => {
       expect(html).toContain('xref:reference:properties/object-storage-properties.adoc#cloud_storage_enabled[')
     })
 
-    test('defaults to the cluster page when scope is unknown', () => {
-      const html = buildPropContent({ name: 'x_y', link: true, role: 'property-ref' })
-      expect(html).toContain('properties/cluster-properties.adoc#x_y')
+    test('plain rendering drops the marker entirely', () => {
+      // No marker means the docs UI adds no tooltip, which is what an
+      // unverified property should get.
+      expect(buildPropContent({ name: 'x_y', plain: true, role: 'property-ref' })).toBe('<code>x_y</code>')
     })
 
     test('honors display text overrides', () => {
@@ -167,10 +199,12 @@ describe('prop macro', () => {
       warn.mockRestore()
     })
 
-    test('link=true falls back to the scope-derived page when nothing is discovered', () => {
+    test('link=true renders unlinked when no page documents the property', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
       const html = convert('prop:fips_mode[link=true]', { catalog: fakeCatalog() })
-      expect(html).toContain('broker-properties')
       expect(html).toContain('data-property-name="fips_mode"')
+      expect(html).not.toContain('href')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('no reference page in this component'))
     })
 
     test('supports dotted topic property names', () => {
@@ -188,9 +222,10 @@ describe('prop macro', () => {
       expect(catalog.findBy.mock.calls.length).toBe(scansAfterFirst)
     })
 
-    test('renders unvalidated without a catalog (graceful degradation)', () => {
-      const html = convert('prop:anything_goes[]', {})
-      expect(html).toContain('data-property-name="anything_goes"')
+    test('renders plain with no catalog to check against', () => {
+      // Nothing to validate means nothing to assert, so no marker and no
+      // tooltip rather than an unchecked one.
+      expect(convert('prop:anything_goes[]', {})).toContain('<code>anything_goes</code>')
     })
   })
 
@@ -269,8 +304,8 @@ describe('prop macro', () => {
         })
         const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
         const html = convert('prop:cloud_storage_enabled[]', { catalog, version: '25.1' })
-        // Unvalidated, but still marked: the name may well be right.
-        expect(html).toContain('data-property-name="cloud_storage_enabled"')
+        // Unvalidated means unmarked: no tooltip the build could not check.
+        expect(html).toContain('<code>cloud_storage_enabled</code>')
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('redpanda-properties-v25.1.*.json'))
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('v25.3.11, v26.2.1'))
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('property-docs --tag v25.1.'))
@@ -307,27 +342,29 @@ describe('prop macro', () => {
         expect(warn.mock.calls.filter(([m]) => String(m).includes('24.9'))).toHaveLength(1)
       })
 
-      test('a versioned component with no data of its own borrows its own series', () => {
-        // Cloud is unversioned today, but if it were ever versioned per
-        // Redpanda release it must not be handed the newest release's
-        // properties just because it publishes no JSON itself.
+      test('a component with no data of its own and no env-cloud gets nothing', () => {
+        // Connect and the agentic data plane carry their own product versions,
+        // which say nothing about which Redpanda properties exist, so no
+        // dataset is inferred for them. Supporting a further doc set is a
+        // deliberate addition, not a guess from a version number.
         const files = [A('streaming', '26.2', 'v26.2.1'), A('streaming', '25.1', 'v25.1.9')]
-        expect(load(files, 'cloud-data-platform', '25.1')).toBe('v25.1.9')
+        expect(load(files, 'connect', '4.85')).toBeUndefined()
+        expect(load(files, 'agentic-data-plane', '1.2')).toBeUndefined()
+        expect(load(files, 'connect', '')).toBeUndefined()
       })
 
-      test('a version string unrelated to Redpanda releases falls back to the newest', () => {
-        // The agentic data plane and Connect version independently, so their
-        // version numbers name no property series.
-        const files = [A('streaming', '26.2', 'v26.2.1'), A('streaming', '25.1', 'v25.1.9')]
-        expect(load(files, 'agentic-data-plane', '1.0')).toBe('v26.2.1')
+      test('a Cloud component tracks the newest self-managed data', () => {
+        // Cloud is managed streaming: no data of its own, always the latest.
+        const files = [A('streaming', '25.1', 'v25.1.9'), A('streaming', '26.2', 'v26.2.1')]
+        const catalog = catalogOf(files, CLOUD)
+        const registry = loadPropertiesFor(catalog, 'cloud-data-platform', '')
+        expect(registry.tag).toBe('v26.2.1')
+        expect(registry.surface).toBe('cloud')
       })
 
-      test('unversioned components track the latest release', () => {
-        // Cloud and connect publish no property JSON of their own and follow
-        // the current release, so they take streaming's newest.
-        const files = [A('streaming', '26.2', 'v26.2.1'), A('streaming', '25.3', 'v25.3.11')]
-        expect(load(files, 'cloud-data-platform', '')).toBe('v26.2.1')
-        expect(load(files, 'connect', '')).toBe('v26.2.1')
+      test('a self-managed component may reference every property in its series', () => {
+        const files = [A('streaming', '26.2', 'v26.2.1')]
+        expect(loadPropertiesFor(catalogOf(files), 'streaming', '26.2').surface).toBe('all')
       })
     })
 
@@ -345,6 +382,48 @@ describe('prop macro', () => {
       })
       expect(convert('prop:cloud_storage_enabled[link=true]', { catalog, version: '25.3' })).toContain('legacy-page')
       expect(convert('prop:cloud_storage_enabled[link=true]', { catalog, version: 'current' })).toContain('current-page')
+    })
+  })
+
+  describe('cloud availability', () => {
+    // cloud_supported is the single gate: the published data has no property
+    // that is editable or read-only in Cloud without also being supported, so
+    // it is already the union of both.
+    const cloudCatalog = (files = []) => catalogOf([propertiesAttachment('streaming', 'current', 'v26.2.1'), ...files], CLOUD)
+
+    test('a cloud_supported property is marked on a Cloud page', () => {
+      const html = convert('prop:iceberg_enabled[]', { catalog: cloudCatalog(), component: 'cloud-data-platform', version: '' })
+      expect(html).toContain('data-property-name="iceberg_enabled"')
+    })
+
+    test('a property Cloud does not support renders plain and warns', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('prop:fips_mode[]', { catalog: cloudCatalog(), component: 'cloud-data-platform', version: '' })
+      expect(html).toContain('<code>fips_mode</code>')
+      expect(html).not.toContain('data-property-name')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('not available in the cloud-data-platform component'))
+    })
+
+    test('self-managed pages are not gated by cloud_supported', () => {
+      const html = convert('prop:fips_mode[]', { catalog: fakeCatalog(), component: 'streaming', version: '26.2' })
+      expect(html).toContain('data-property-name="fips_mode"')
+    })
+
+    test('property-validate=off silences the availability warning', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('prop:fips_mode[]', {
+        catalog: cloudCatalog(), component: 'cloud-data-platform', version: '',
+        attributes: { 'property-validate': 'off' },
+      })
+      expect(html).toContain('<code>fips_mode</code>')
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('an unavailable property keeps its display text override', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('prop:fips_mode[text=FIPS mode]', { catalog: cloudCatalog(), component: 'cloud-data-platform', version: '' })
+      expect(html).toContain('<code>FIPS mode</code>')
+      warn.mockRestore()
     })
   })
 
@@ -403,8 +482,8 @@ describe('prop macro', () => {
       '=== cloud_storage_enabled',
       'Enables tiered storage.',
       '// tag::redpanda-cloud[]',
-      '=== fips_mode',
-      'FIPS.',
+      '=== iceberg_enabled',
+      'Iceberg.',
       '// end::redpanda-cloud[]',
     ].join('\n')
 
@@ -448,69 +527,50 @@ describe('prop macro', () => {
     })
 
     test('cloud pages discover their own page through cross-component tag-filtered includes', () => {
-      const catalog = fakeCatalog({
-        files: [
-          partial('streaming', 'properties/all-properties.adoc', PARTIAL),
-          page('cloud-data-platform', 'properties/cloud-cluster.adoc',
-            'include::streaming:reference:partial$properties/all-properties.adoc[tags=redpanda-cloud]'),
-        ],
-      })
-      // fips_mode is inside the redpanda-cloud tag: discovered on the cloud page.
-      const linked = convert('prop:fips_mode[link=true]', { catalog, component: 'cloud-data-platform' })
+      const catalog = catalogOf([
+        propertiesAttachment('streaming', 'current', 'v26.2.1'),
+        partial('streaming', 'properties/all-properties.adoc', PARTIAL),
+        page('cloud-data-platform', 'properties/cloud-cluster.adoc',
+          'include::streaming:reference:partial$properties/all-properties.adoc[tags=redpanda-cloud]'),
+      ], CLOUD)
+      // iceberg_enabled is cloud_supported and sits inside the redpanda-cloud
+      // tag, so the cloud page documents it and the link stays component-local.
+      const linked = convert('prop:iceberg_enabled[link=true]', { catalog, component: 'cloud-data-platform', version: '' })
       expect(linked).toContain('cloud-cluster')
-      // cloud_storage_enabled is outside the tag, so the cloud page doesn't
-      // render it. No streaming page exists in this fixture either, so it is
-      // published nowhere: the marker and its tooltip survive, the link
-      // doesn't.
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const excluded = convert('prop:cloud_storage_enabled[link=true]', { catalog, component: 'cloud-data-platform' })
-      expect(excluded).toContain('data-property-name="cloud_storage_enabled"')
-      expect(excluded).not.toContain('xref:')
-      warn.mockRestore()
+      expect(linked).not.toContain('streaming:')
     })
 
-    test('components without property pages get component-qualified links into streaming', () => {
-      const catalog = fakeCatalog({
-        files: [
-          partial('streaming', 'properties/all-properties.adoc', PARTIAL),
-          page('streaming', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/all-properties.adoc[]'),
-        ],
+    test('a property Cloud does not support renders plain, whatever the pages say', () => {
+      // Availability is a property of the data, not of which pages happen to
+      // include it: cloud_supported false means a Cloud reader cannot set it.
+      const catalog = catalogOf([
+        propertiesAttachment('streaming', 'current', 'v26.2.1'),
+        partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n'),
+        // Even though a cloud page renders the heading, the data says no.
+        page('cloud-data-platform', 'properties/cloud-cluster.adoc',
+          'include::streaming:reference:partial$properties/all.adoc[]'),
+      ], CLOUD)
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('prop:cloud_storage_enabled[link=true]', {
+        catalog, component: 'cloud-data-platform', version: '',
+        filePath: 'modules/manage/pages/config-cluster.adoc',
       })
-      // The preview/connect components publish no property pages at all.
-      const html = convert('prop:cloud_storage_enabled[link=true]', { catalog, component: 'preview' })
-      expect(html).toContain('streaming')
+      expect(html).toBe('<div class="paragraph">\n<p><code>cloud_storage_enabled</code></p>\n</div>')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("'cloud_storage_enabled' is not available in the cloud-data-platform component"))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('cloud_supported: false'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('modules/manage/pages/config-cluster.adoc'))
+    })
+
+    test('the same property is fine on a self-managed page', () => {
+      const catalog = catalogOf([
+        propertiesAttachment('streaming', '26.2', 'v26.2.1'),
+        partial('streaming', 'properties/all.adoc', '=== cloud_storage_enabled\n', '26.2'),
+        page('streaming', 'properties/cluster-properties.adoc',
+          'include::reference:partial$properties/all.adoc[]', '26.2'),
+      ])
+      const html = convert('prop:cloud_storage_enabled[link=true]', { catalog, component: 'streaming', version: '26.2' })
+      expect(html).toContain('data-property-name="cloud_storage_enabled"')
       expect(html).toContain('cluster-properties')
-    })
-
-    test('a component with its own property pages never borrows another component', () => {
-      const catalog = fakeCatalog({
-        files: [
-          // Cloud publishes cluster properties but not topic properties.
-          partial('cloud-data-platform', 'properties/cluster.adoc', '=== cloud_storage_enabled\n'),
-          page('cloud-data-platform', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/cluster.adoc[]'),
-          partial('streaming', 'properties/topic.adoc', '=== redpanda.iceberg.mode\n'),
-          page('streaming', 'properties/topic-properties.adoc', 'include::reference:partial$properties/topic.adoc[]'),
-        ],
-      })
-      // Documented in cloud's own pages: component-relative link.
-      const own = convert('prop:cloud_storage_enabled[link=true]', { catalog, component: 'cloud-data-platform' })
-      expect(own).not.toContain('streaming')
-      // Not in cloud's reference: streaming documents it, but linking there
-      // would send cloud readers to self-managed docs for a property they
-      // can't set. Plain code plus a warning instead.
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const html = convert('prop:redpanda.iceberg.mode[link=true]', {
-        catalog,
-        component: 'cloud-data-platform',
-        filePath: 'modules/develop/pages/topics/create-topic.adoc',
-      })
-      expect(html).toContain('<code>redpanda.iceberg.mode</code>')
-      expect(html).not.toContain('streaming')
-      expect(html).not.toContain('data-property-name')
-      expect(html).not.toContain('data-doc-url')
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("no property reference page in the cloud-data-platform component documents 'redpanda.iceberg.mode'"))
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('modules/develop/pages/topics/create-topic.adoc'))
-      warn.mockRestore()
     })
 
     test('a property published nowhere keeps its tooltip and only warns on link=true', () => {
@@ -527,7 +587,7 @@ describe('prop macro', () => {
       const linked = convert('prop:admin[link=true]', { catalog })
       expect(linked).toContain('data-property-name="admin"')
       expect(linked).not.toContain('href')
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('renders without a documentation link'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('renders without a link'))
       // A tooltip-only mention is silent: there is nothing for a writer to fix.
       warn.mockClear()
       const plain = convert('prop:admin[]', { catalog })
@@ -558,11 +618,10 @@ describe('prop macro', () => {
 
     test('an unknown name warns once, not twice', () => {
       const catalog = fakeCatalog({
+        components: CLOUD,
         files: [
-          partial('cloud-data-platform', 'properties/cluster.adoc', '=== cloud_storage_enabled\n'),
+          partial('cloud-data-platform', 'properties/cluster.adoc', '=== iceberg_enabled\n'),
           page('cloud-data-platform', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/cluster.adoc[]'),
-          partial('streaming', 'properties/topic.adoc', '=== redpanda.iceberg.mode\n'),
-          page('streaming', 'properties/topic-properties.adoc', 'include::reference:partial$properties/topic.adoc[]'),
         ],
       })
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
