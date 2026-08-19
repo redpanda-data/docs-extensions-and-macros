@@ -19,7 +19,9 @@ const {
   updateNavFile,
   getOutputPath,
   findTopLevelWithSubcommands,
-  generateRpkDocs
+  generateRpkDocs,
+  derivePartialsDir,
+  writeEnvVarsPartial
 } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
 
 describe('rpk Docs Generation', () => {
@@ -1375,5 +1377,93 @@ describe('vanishing Flags tripwire', () => {
     expect(warned).toContain('rpk widget')
     expect(warned).toContain('Flags section and this render has none')
     fs.rmSync(tmp, { recursive: true, force: true })
+  })
+})
+
+describe('env vars partial output location', () => {
+  const treeWithXOptions = () => ({
+    name: 'rpk',
+    x_options: [
+      { name: 'brokers', env: 'RPK_BROKERS' },
+      { name: 'tls.enabled' }
+    ],
+    commands: [{
+      name: 'widget',
+      description: 'Widget things.',
+      usage: 'rpk widget [flags]',
+      commands: []
+    }]
+  })
+
+  describe('derivePartialsDir', () => {
+    it('resolves the sibling partials dir for the docs pages layout', () => {
+      expect(derivePartialsDir('/repo/modules/reference/pages/rpk'))
+        .toBe(path.join('/repo/modules/reference', 'partials'))
+    })
+
+    it('stays inside the output tree for an arbitrary output dir', () => {
+      // Regression: walking two levels up from the output dir escaped the tree
+      // and wrote to /tmp/project/../partials.
+      expect(derivePartialsDir('/tmp/project/custom-output'))
+        .toBe(path.join('/tmp/project', 'partials'))
+    })
+
+    it('uses the innermost pages segment when the path repeats it', () => {
+      expect(derivePartialsDir('/a/pages/b/modules/reference/pages/rpk'))
+        .toBe(path.join('/a/pages/b/modules/reference', 'partials'))
+    })
+  })
+
+  it('writes the partial inside a custom output tree, not above it', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-env-custom-'))
+    const outputDir = path.join(root, 'custom-output')
+    fs.mkdirSync(outputDir, { recursive: true })
+
+    await generateRpkDocs({
+      tree: treeWithXOptions(),
+      overrides: { commands: {} },
+      outputDir
+    })
+
+    // Correct: beside the output dir, still within the caller's tree.
+    const expected = path.join(root, 'partials', 'rpk-env-vars.adoc')
+    expect(fs.existsSync(expected)).toBe(true)
+    expect(fs.readFileSync(expected, 'utf8')).toContain('RPK_BROKERS')
+
+    // The old behavior walked two levels up and landed outside `root`.
+    const escaped = path.join(path.dirname(root), 'partials', 'rpk-env-vars.adoc')
+    expect(path.resolve(expected).startsWith(path.resolve(root))).toBe(true)
+    expect(expected).not.toBe(escaped)
+
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+
+  it('honors an explicit envPartialDir over deriving from outputDir', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-env-explicit-'))
+    const outputDir = path.join(root, 'modules', 'reference', 'pages', 'rpk')
+    const partialsDir = path.join(root, 'handler-chosen-partials')
+    fs.mkdirSync(outputDir, { recursive: true })
+
+    await generateRpkDocs({
+      tree: treeWithXOptions(),
+      overrides: { commands: {} },
+      outputDir,
+      envPartialDir: partialsDir
+    })
+
+    expect(fs.existsSync(path.join(partialsDir, 'rpk-env-vars.adoc'))).toBe(true)
+    // Nothing written to the derived location when the caller supplied one.
+    expect(fs.existsSync(path.join(root, 'modules', 'reference', 'partials', 'rpk-env-vars.adoc')))
+      .toBe(false)
+
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+
+  it('skips writing when the tree predates x_options', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-env-noopts-'))
+    const result = writeEnvVarsPartial({ name: 'rpk', commands: [] }, root)
+    expect(result).toEqual({ written: false })
+    expect(fs.existsSync(path.join(root, 'rpk-env-vars.adoc'))).toBe(false)
+    fs.rmSync(root, { recursive: true, force: true })
   })
 })

@@ -1,5 +1,7 @@
 'use strict'
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 const semver = require('semver')
 
 /**
@@ -34,6 +36,7 @@ const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.j
 const CONNECT_JSON_RX = /^connect-(\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
 
 module.exports.register = function () {
+  raiseListenerLimit(this)
   const logger = this.getLogger('set-available-attachment-versions-extension')
 
   this.once('contentClassified', ({ contentCatalog }) => {

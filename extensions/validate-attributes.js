@@ -6,7 +6,10 @@
 
 'use strict';
 
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
 module.exports.register = function ({ config }) {
+  raiseListenerLimit(this)
   const logger = this.getLogger('attribute-validation-extension');
 
   this.on('documentsConverted', async ({ contentCatalog, siteCatalog }) => {
@@ -65,7 +68,7 @@ function validateCategories(pageCategoryList, pageInfo, categoryMap, logger) {
   });
 
   if (!isValid) {
-      logger.warn(`Invalid categories detected. For a list of valid categories, see https://github.com/redpanda-data/docs/tree/shared/modules/ROOT/partials/valid-categories.yml`);
+      logger.warn(`Invalid categories detected. For a list of valid categories, see https://github.com/redpanda-data/docs/blob/main/shared/modules/ROOT/partials/valid-categories.yml`);
   }
   return Array.from(adjustedCategories).join(', ');
 }
