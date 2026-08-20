@@ -17,23 +17,26 @@
  */
 function buildBadgeHtml ({ label, size, tooltip } = {}) {
   const text = label || 'label';
-  const className = `badge--${text.toLowerCase().replace(/\s+/g, '-')}`;
   const isLarge = size === 'large';
   const sizeClass = isLarge ? 'badge--large' : '';
-  // Escape before interpolating: tooltips come from a registry field, and an
-  // unescaped quote terminates the attribute early, turning the rest of the
-  // text into stray attributes (including event handlers).
+  // Escape before interpolating: these values reach the macro from .adoc source
+  // and from registry fields, and an unescaped quote terminates the attribute
+  // early, turning the rest of the text into stray attributes (including event
+  // handlers). The label needs it as much as the tooltip -- it lands in the
+  // class attribute and in the text content, and escaping only the tooltip left
+  // `badge:x[label=x" onmouseover="...]` free to break out of the class.
   const escapeAttr = (value) => String(value)
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+  const className = `badge--${escapeAttr(text.toLowerCase().replace(/\s+/g, '-'))}`;
   const tooltipAttr = tooltip ? ` data-tooltip="${escapeAttr(tooltip)}"` : '';
 
   // Add brackets if not large. The brackets matter beyond styling: they are
   // real text content, so the label survives an HTML-to-Markdown conversion as
   // "(beta)" rather than vanishing with the CSS class.
-  const renderedLabel = isLarge ? text : `(${text})`;
+  const renderedLabel = isLarge ? escapeAttr(text) : `(${escapeAttr(text)})`;
 
   return `<span class="badge ${className} ${sizeClass}"${tooltipAttr}>${renderedLabel}</span>`;
 }

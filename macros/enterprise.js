@@ -58,6 +58,7 @@ const chalk = require('chalk')
 const { buildBadgeHtml } = require('./badge')
 
 const $enterpriseRegistry = Symbol('$enterpriseRegistry')
+const $enterpriseRegistryUnreadable = Symbol('$enterpriseRegistryUnreadable')
 const $warned = Symbol('$warned')
 
 /**
@@ -97,9 +98,12 @@ const VALID_STATUSES = [STATUS_GA, STATUS_BETA, STATUS_UNRELEASED]
  * The release status of a registry entry.
  *
  * `beta: true` predates the status field and still means beta, so old entries
- * keep working. An explicit status wins. An unrecognized status is reported
- * rather than quietly treated as shipped, which is the failure mode that lets a
- * typo publish an unreleased feature.
+ * keep working. An explicit status wins. An unrecognized status is reported AND
+ * treated as unreleased: a typo must not be the thing that publishes an
+ * unreleased feature. The two failure directions are not symmetric -- gating a
+ * shipped feature shows a writer a warning and an unstyled mention they will
+ * notice, while publishing an unreleased one promises readers a feature they
+ * cannot get, and nothing on the page looks wrong.
  *
  * @param {object} entry - Registry entry.
  * @param {object} [report] - {mode, filePath} to report an invalid status.
@@ -107,13 +111,13 @@ const VALID_STATUSES = [STATUS_GA, STATUS_BETA, STATUS_UNRELEASED]
  */
 function entryStatus (entry, report) {
   if (!entry) return STATUS_GA
-  if (entry.status !== undefined) {
+  if (entry.status !== undefined && entry.status !== null && String(entry.status).trim() !== '') {
     const status = String(entry.status).trim().toLowerCase()
     if (VALID_STATUSES.includes(status)) return status
     if (report && report.mode !== 'off') {
       const where = report.filePath ? ` in ${report.filePath}` : ''
       const message =
-        `enterprise:${entry.name}[]${where}: registry status '${entry.status}' is not one of ${VALID_STATUSES.join(', ')}, so the feature is treated as released. ` +
+        `enterprise:${entry.name}[]${where}: registry status '${entry.status}' is not one of ${VALID_STATUSES.join(', ')}, so the feature is treated as unreleased and is left unpublished on released pages. ` +
         'Fix the status in enterprise-features.yml.'
       // Honour error mode like every other registry diagnostic. A typo here is
       // exactly what publishes an unreleased feature, so the strictest setting
@@ -124,7 +128,7 @@ function entryStatus (entry, report) {
       if (report.contentCatalog) warnOnce(report.contentCatalog, `status:${entry.name}`, message)
       else console.warn(chalk.yellow(message))
     }
-    return STATUS_GA
+    return STATUS_UNRELEASED
   }
   return entry.beta === true ? STATUS_BETA : STATUS_GA
 }
@@ -287,8 +291,12 @@ function loadRegistry (config) {
       // Caching the failure also stops the error being re-raised per macro call
       // and attributed to whichever page happened to convert first.
       registry = null
+      // Remember that the file was found and unreadable, so the caller does not
+      // then also report it missing. Saying "not found" about a file we just
+      // read and failed to parse sends the writer looking for the wrong problem.
+      contentCatalog[$enterpriseRegistryUnreadable] = true
       warnOnce(contentCatalog, 'badregistry',
-        `Enterprise features registry ${registryFile.path} could not be read (${error.message}); enterprise: targets are not validated.`)
+        `Enterprise features registry ${registryFile.path} could not be read (${error.message}); enterprise: targets are not validated, so no feature is gated by release status and the licensing tables are empty.`)
     }
   }
   // Cache null too, so a missing registry is only searched for once per build.
@@ -297,6 +305,8 @@ function loadRegistry (config) {
 }
 
 function warnNoRegistry (contentCatalog) {
+  // Already reported as unreadable: one problem, one diagnostic.
+  if (contentCatalog && contentCatalog[$enterpriseRegistryUnreadable]) return
   const message = "Enterprise features registry (enterprise-features.yml in the 'shared' component) not found; enterprise: targets are not validated."
   // Deduplicate per build, not per process: Antora's watch mode reuses one
   // process across builds, and a module-level guard reported this only on a
