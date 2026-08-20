@@ -10,8 +10,9 @@
 # Point at local checkouts instead of the PR branches:
 #   DOCS_DIR=~/Documents/docs CLOUD_DOCS_DIR=~/Documents/cloud-docs ./scripts/macro-test.sh
 #
-# A private repo needs credentials for the remote sources. Either export
-# REDPANDA_GITHUB_TOKEN, or pass --git-credentials-path to antora yourself.
+# The docs repos are private. The script finds a token from
+# REDPANDA_GITHUB_TOKEN, GITHUB_TOKEN, GH_TOKEN, or `gh auth token`, writes a
+# throwaway credentials file for Antora, and removes it afterwards.
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -59,9 +60,29 @@ PY
 fi
 
 if [[ $BUILD -eq 1 ]]; then
+  # Antora needs credentials for the private content repos. Without them the
+  # build dies on the first private source and any report you then read is a
+  # stale one from an earlier run, which is worse than an obvious failure.
+  TOKEN="${REDPANDA_GITHUB_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
+  if [[ -z "$TOKEN" ]] && command -v gh >/dev/null 2>&1; then
+    TOKEN="$(gh auth token 2>/dev/null || true)"
+  fi
+  CREDS_ARGS=()
+  CREDS_DIR=""
+  if [[ -n "$TOKEN" ]]; then
+    CREDS_DIR="$(mktemp -d)"
+    printf 'https://x-access-token:%s@github.com\n' "$TOKEN" > "$CREDS_DIR/git-credentials"
+    chmod 600 "$CREDS_DIR/git-credentials"
+    CREDS_ARGS=(--git-credentials-path "$CREDS_DIR/git-credentials")
+    export REDPANDA_GITHUB_TOKEN="$TOKEN"
+  else
+    echo "warning: no GitHub token found; private content sources will fail" >&2
+  fi
+
   echo "building ($PLAYBOOK) ..."
-  npx antora --fetch "$PLAYBOOK" > "$LOG" 2>&1
+  npx antora --fetch "${CREDS_ARGS[@]}" "$PLAYBOOK" > "$LOG" 2>&1
   status=$?
+  [[ -n "$CREDS_DIR" ]] && rm -rf "$CREDS_DIR"
   if [[ $status -ne 0 ]]; then
     echo "BUILD FAILED (exit $status). Last lines of $LOG:" >&2
     tail -20 "$LOG" >&2
@@ -71,6 +92,12 @@ if [[ $BUILD -eq 1 ]]; then
 fi
 
 [[ -d $OUT ]] || { echo "no build output at $OUT; run without --report-only" >&2; exit 1; }
+
+if [[ -f $LOG ]] && grep -q '"level":"fatal"' "$LOG"; then
+  echo "WARNING: the last build logged a fatal error, so $OUT/ may be stale:" >&2
+  grep -oE '"level":"fatal"[^}]*"msg":"[^"]{0,140}' "$LOG" | tail -2 >&2
+  echo >&2
+fi
 
 hr() { printf '%s\n' "------------------------------------------------------------"; }
 count() { grep -Ec "$1" "$LOG" 2>/dev/null | head -1; }
