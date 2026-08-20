@@ -82,6 +82,7 @@
  */
 
 const chalk = require('chalk')
+const semver = require('semver')
 
 const $propertyRegistry = Symbol('$propertyRegistry')
 // Release series a component version has no property data for, recorded at
@@ -263,14 +264,38 @@ function warnOnce (contentCatalog, key, message) {
 }
 
 /**
- * Compare two vX.Y.Z(-pre) tags without a semver dependency. Good enough to
- * pick the newest properties attachment.
+ * Compare two property tags by release precedence, newest last.
+ *
+ * Prereleases matter here: a release cycle publishes v26.3.1-rc1, then rc2,
+ * then the GA v26.3.1, and the beta branch has to land on the newest of them
+ * deterministically. A numeric-only comparison rates all three equal, leaving
+ * the winner to catalog iteration order -- so rc1 could beat rc2, or an RC
+ * could beat its own GA.
+ *
+ * Redpanda tags spell prereleases as one identifier (-rc2, not -rc.2), which
+ * the semver spec compares as a string: 'rc10' would sort below 'rc2'. Split
+ * the trailing digits into their own identifier first so they compare
+ * numerically.
  */
 function compareTags (a, b) {
-  const parse = (tag) => tag.replace(/^v/, '').split('-')[0].split('.').map(Number)
+  const normalize = (tag) => String(tag).replace(/^v/, '').replace(/-([a-z]+)(\d+)/gi, '-$1.$2')
+  const left = semver.valid(normalize(a))
+  const right = semver.valid(normalize(b))
+  if (left && right) return semver.compare(left, right)
+  // Not semver (a hand-named file, say): fall back to numeric release order.
+  const parse = (tag) => String(tag).replace(/^v/, '').split('-')[0].split('.').map(Number)
   const [a1, a2, a3] = parse(a)
   const [b1, b2, b3] = parse(b)
-  return a1 - b1 || a2 - b2 || a3 - b3
+  return (a1 - b1) || (a2 - b2) || (a3 - b3) || 0
+}
+
+/**
+ * Whether a tag names a prerelease (an RC or beta build).
+ */
+function isPrerelease (tag) {
+  const normalized = String(tag).replace(/^v/, '')
+  const valid = semver.valid(normalized)
+  return valid ? Boolean(semver.prerelease(valid)) : /-/.test(normalized)
 }
 
 /**
@@ -372,6 +397,7 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
         // macro. The macro reports it on first actual use.
         const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
         gaps[cacheKey] = {
+          kind: 'series',
           component: pageComponent,
           version: pageVersion,
           series,
@@ -385,10 +411,28 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
     }
   } else if (componentAttributes(contentCatalog, pageComponent, pageVersion)['env-cloud'] !== undefined) {
     // Cloud is managed streaming: newest self-managed data, cloud slice only.
+    // GA only -- Cloud runs released Redpanda, so an RC published on the beta
+    // branch must not become the dataset Cloud pages validate against. Without
+    // this, a v26.3.1-rc1 attachment outranks the GA v26.2.1 and every Cloud
+    // page starts checking against an unreleased property list.
     surface = SURFACE_CLOUD
+    const released = datasets.filter((d) => !isPrerelease(d.tag))
     pick =
-      newestDataset(datasets.filter((d) => d.component === 'streaming')) ||
-      newestDataset(datasets.filter((d) => d.component === 'ROOT'))
+      newestDataset(released.filter((d) => d.component === 'streaming')) ||
+      newestDataset(released.filter((d) => d.component === 'ROOT'))
+    if (!pick && datasets.some((d) => isPrerelease(d.tag))) {
+      // Prerelease data exists but no GA. Say that specifically rather than
+      // claiming no property data was found at all.
+      const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
+      gaps[cacheKey] = {
+        kind: 'cloud-prerelease-only',
+        component: pageComponent,
+        version: pageVersion,
+        have: [...new Set(datasets.map((d) => d.tag))].sort(compareTags),
+      }
+      cache[cacheKey] = null
+      return undefined
+    }
   }
 
   let registry = null
@@ -413,17 +457,27 @@ function isAvailable (registry, entry) {
   return entry.cloud_supported === true
 }
 
+/**
+ * Report a recorded dataset gap. Either this component's release series has no
+ * property file, or Cloud found only prerelease files. Both leave the page
+ * unvalidated, and each has its own fix worth naming. Returns whether a gap was
+ * found and reported.
+ */
 function warnSeriesMissing (contentCatalog, pageComponent, pageVersion) {
   const gaps = contentCatalog[$propertySeriesGap]
   const gap = gaps && gaps[`${pageComponent}@${pageVersion}`]
   if (!gap) return false
-  const { series, have: tags } = gap
-  const have = tags.join(', ')
+  const have = gap.have.join(', ')
+  if (gap.kind === 'cloud-prerelease-only') {
+    warnOnce(contentCatalog, `cloudpre:${gap.component}@${gap.version}`,
+      `prop macro: ${gap.component} found only prerelease property data (${have}). Cloud runs released Redpanda, so it uses GA property data and will not validate against a release candidate. ` +
+      'prop: targets on Cloud pages are therefore not validated and their tooltips carry no data. Include a GA self-managed branch in the build, or leave prop: out of Cloud content until the release ships.')
+    return true
+  }
   warnOnce(contentCatalog, `series:${gap.component}@${gap.version}`,
-    `prop macro: ${gap.component}@${gap.version} publishes no redpanda-properties-v${series}.*.json attachment in its reference module (found for other series: ${have}). ` +
-    `prop: targets on ${pageVersion} pages are therefore not validated and their tooltips carry no data, rather than being checked against another release's properties. ` +
-    `Generate it with 'npx doc-tools generate property-docs --tag v${series}.<patch>' on that branch, or leave prop: out of ${pageVersion} content.`)
-  // A gap was found and explained, whether or not this build already said so.
+    `prop macro: ${gap.component}@${gap.version} publishes no redpanda-properties-v${gap.series}.*.json attachment in its reference module (found for other series: ${have}). ` +
+    `prop: targets on ${gap.version} pages are therefore not validated and their tooltips carry no data, rather than being checked against another release's properties. ` +
+    `Generate it with 'npx doc-tools generate property-docs --tag v${gap.series}.<patch>' on that branch, or leave prop: out of ${gap.version} content.`)
   return true
 }
 
@@ -640,6 +694,7 @@ module.exports.propertyAnchor = propertyAnchor
 module.exports.helmValuesPath = helmValuesPath
 module.exports.loadPropertiesFor = loadPropertiesFor
 module.exports.compareTags = compareTags
+module.exports.isPrerelease = isPrerelease
 module.exports.releaseSeries = releaseSeries
 module.exports.extractHeadingsWithTags = extractHeadingsWithTags
 module.exports.evaluateTagExpression = evaluateTagExpression

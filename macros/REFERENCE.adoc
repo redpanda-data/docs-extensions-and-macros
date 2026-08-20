@@ -229,6 +229,10 @@ The macro therefore selects by series (`major.minor`) rather than by newest tag:
 
 Selecting by series rather than newest tag matters in practice: the docs repo's main branch carries the previous series' JSON alongside its own, and a prerelease tag could land there too. Newest-tag-wins would hand that file to pages of a different release. A component with no property data and no `env-cloud` attribute gets no dataset at all -- see <<prop-availability>>.
 
+Tags compare by release precedence, so a GA release outranks its own release candidates and `rc2` outranks `rc1`. A cycle publishes `v26.3.1-rc1`, then `rc2`, then the GA `v26.3.1`, and a beta branch at `version: 26.3` lands on the newest of those deterministically rather than on whichever file the content catalog happened to yield first. Redpanda spells prereleases as one identifier (`-rc2`, not `-rc.2`), which the semver spec compares as a string, so the trailing digits are split out before comparing; otherwise `rc10` would sort below `rc2`.
+
+Cloud takes the newest *GA* dataset and ignores prereleases entirely, because Cloud runs released Redpanda. An RC published on a beta branch outranks the current GA by version number, so without this every Cloud page would start validating against an unreleased property list. When a build contains only prerelease data, Cloud goes unvalidated and the warning says so specifically rather than reporting no data at all.
+
 When a component publishes property data for other series but none for the page's own, the macro declines to validate rather than use a neighbouring release's data. It logs one warning per component version naming the missing file, the tags it did find, and the `doc-tools generate property-docs --tag` command that produces it. `prop:` targets on those pages render unvalidated and their tooltips carry no data, so either generate the series' JSON on that branch or leave `prop:` out of that version's content.
 
 property-ref-role::

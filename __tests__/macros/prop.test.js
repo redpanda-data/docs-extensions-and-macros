@@ -4,6 +4,7 @@ const {
   register,
   buildPropContent,
   compareTags,
+  isPrerelease,
   extractHeadingsWithTags,
   evaluateTagExpression,
   helmValuesPath,
@@ -382,6 +383,62 @@ describe('prop macro', () => {
       })
       expect(convert('prop:cloud_storage_enabled[link=true]', { catalog, version: '25.3' })).toContain('legacy-page')
       expect(convert('prop:cloud_storage_enabled[link=true]', { catalog, version: 'current' })).toContain('current-page')
+    })
+  })
+
+  describe('prerelease and beta releases', () => {
+    const A = propertiesAttachment
+    const cloudCat = (files) => catalogOf(files, CLOUD)
+
+    test('tag precedence puts GA above its release candidates', () => {
+      // A cycle publishes rc1, rc2, then GA. A numeric-only comparison rated
+      // all three equal and let catalog order pick the winner.
+      expect(Math.sign(compareTags('v26.3.1-rc1', 'v26.3.1'))).toBe(-1)
+      expect(Math.sign(compareTags('v26.3.1-rc1', 'v26.3.1-rc2'))).toBe(-1)
+      // Redpanda spells prereleases -rc2, not -rc.2, which the semver spec
+      // compares as a string: rc10 would otherwise sort below rc2.
+      expect(Math.sign(compareTags('v26.3.1-rc2', 'v26.3.1-rc10'))).toBe(-1)
+      expect(Math.sign(compareTags('v26.2.1', 'v26.3.1-rc1'))).toBe(-1)
+    })
+
+    test.each([
+      ['v26.3.1-rc1', true],
+      ['v26.3.0-beta1', true],
+      ['v26.3.1', false],
+    ])('isPrerelease(%s) -> %s', (tag, expected) => {
+      expect(isPrerelease(tag)).toBe(expected)
+    })
+
+    test('a beta branch validates against its own release candidate', () => {
+      const files = [A('streaming', '26.2', 'v26.2.1'), A('streaming', '26.3', 'v26.3.1-rc1')]
+      expect(loadPropertiesFor(catalogOf(files), 'streaming', '26.3').tag).toBe('v26.3.1-rc1')
+    })
+
+    test('GA wins over its release candidates whatever order they are found in', () => {
+      const rcFirst = [A('streaming', '26.3', 'v26.3.1-rc1'), A('streaming', '26.3', 'v26.3.1-rc2'), A('streaming', '26.3', 'v26.3.1')]
+      const gaFirst = [...rcFirst].reverse()
+      expect(loadPropertiesFor(catalogOf(rcFirst), 'streaming', '26.3').tag).toBe('v26.3.1')
+      expect(loadPropertiesFor(catalogOf(gaFirst), 'streaming', '26.3').tag).toBe('v26.3.1')
+    })
+
+    test('Cloud stays on GA data while a release candidate is in the build', () => {
+      // Cloud runs released Redpanda. An RC on the beta branch outranks the GA
+      // by version number, so without a GA filter every Cloud page would start
+      // validating against an unreleased property list.
+      const files = [A('streaming', '26.2', 'v26.2.1'), A('streaming', '26.3', 'v26.3.1-rc1')]
+      expect(loadPropertiesFor(cloudCat(files), 'cloud-data-platform', '').tag).toBe('v26.2.1')
+    })
+
+    test('Cloud with only prerelease data goes unvalidated, and says why', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const files = [A('streaming', '26.3', 'v26.3.1-rc1')]
+      const catalog = cloudCat(files)
+      expect(loadPropertiesFor(catalog, 'cloud-data-platform', '')).toBeUndefined()
+      // Recorded at load time; the macro reports it on first real use.
+      const html = convert('prop:iceberg_enabled[]', { catalog, component: 'cloud-data-platform', version: '' })
+      expect(html).toContain('<code>iceberg_enabled</code>')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('found only prerelease property data'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('v26.3.1-rc1'))
     })
   })
 
