@@ -14,6 +14,7 @@ module.exports = {
   renderPropertyExample: require('./renderPropertyExample.js'),
   formatUnits: require('./formatUnits.js'),
   anchorName: require('./anchorName.js'),
+  normalizePropertyAnchors: require('./normalizePropertyAnchors.js'),
   parseRelatedTopic: require('./parseRelatedTopic.js'),
   allTopicsConditional: require('./allTopicsConditional.js'),
   capitalize: require('./capitalize.js'),
