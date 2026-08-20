@@ -57,12 +57,14 @@ async function getLatestVersion(binaryType = 'cloud') {
       per_page: 20
     });
 
-    const prefix = binaryType === 'cloud' ? 'redpanda-connect-cloud' : 'redpanda-connect-cgo';
+    const prefix = resolveAssetPrefix(binaryType);
 
-    // Find the latest release with the specified binary type
+    // Find the latest release with the specified binary type. Match the
+    // separator too: every prefix starts with 'redpanda-connect', so a bare
+    // startsWith on the OSS prefix would also match the cloud and cgo assets.
     for (const release of releases) {
       const asset = release.assets.find(a =>
-        a.name.startsWith(prefix) &&
+        a.name.startsWith(`${prefix}_`) &&
         a.name.includes('linux') &&
         a.name.includes('amd64')
       );
@@ -131,12 +133,37 @@ function downloadFile(url, destPath) {
  * @param {string} destDir - Destination directory
  * @returns {Promise<string>} Path to downloaded binary
  */
+// Release asset prefixes per binary flavour. The plain OSS build is the one
+// `rpk connect install` puts on PATH, so fetching that asset directly yields
+// the same connector schema without passing a version through rpk's
+// --connect-version validation.
+const BINARY_ASSET_PREFIXES = {
+  oss: 'redpanda-connect',
+  cloud: 'redpanda-connect-cloud',
+  cgo: 'redpanda-connect-cgo'
+};
+
+/**
+ * Resolve a binary flavour to its release asset prefix.
+ * @param {string} binaryType - 'oss', 'cloud' or 'cgo'
+ * @returns {string} The asset name prefix
+ */
+function resolveAssetPrefix (binaryType) {
+  const prefix = BINARY_ASSET_PREFIXES[binaryType];
+  if (!prefix) {
+    throw new Error(
+      `Unknown binary type "${binaryType}" (expected one of ${Object.keys(BINARY_ASSET_PREFIXES).join(', ')})`
+    );
+  }
+  return prefix;
+}
+
 async function downloadBinary(binaryType, version, destDir) {
   // cgo binaries are only available for linux/amd64, so force that platform
   const platformInfo = binaryType === 'cgo'
     ? { platform: 'linux', arch: 'amd64' }
     : getPlatformInfo();
-  const prefix = binaryType === 'cloud' ? 'redpanda-connect-cloud' : 'redpanda-connect-cgo';
+  const prefix = resolveAssetPrefix(binaryType);
   const binaryName = `${prefix}-${version}-${platformInfo.platform}-${platformInfo.arch}`;
   const destPath = path.join(destDir, binaryName);
 
@@ -566,6 +593,8 @@ module.exports = {
   analyzeAllBinaries,
   findCgoOnlyConnectors,
   getLatestVersion,
+  resolveAssetPrefix,
+  downloadBinary,
   downloadCloudBinary,
   downloadCgoBinary,
   getConnectorList,

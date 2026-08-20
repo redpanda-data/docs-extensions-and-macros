@@ -712,41 +712,41 @@ async function loadConnectorDataForVersion(version, dataDir, options = {}) {
   const reason = options.forceFresh ? 'force refresh requested' : 'file not found';
   console.log(`📥 Fetching data for ${version} (${reason})...`);
 
+  // Fetch the OSS release asset for this exact version instead of asking rpk to
+  // install it. rpk validates --connect-version against a regex that caps every
+  // segment at two digits (validateVersion in rpk/pkg/cli/connect/install.go),
+  // so it refuses any version >= 4.100.0 — which is every version worth asking
+  // for. The plain OSS asset is the same build rpk would have installed, so the
+  // schema is identical, and this leaves the caller's own Connect installation
+  // untouched instead of forcing a managed plugin over the top of it.
+  const scratchDir = path.join(dataDir, `.connect-binary-${version}`);
   try {
-    // Try installing that specific version and fetching data
-    console.log(`   Installing Redpanda Connect version ${version}...`);
-    const installResult = spawnSync('rpk', ['connect', 'install', '--connect-version', version, '--force'], {
-      stdio: 'pipe'
-    });
+    const { downloadBinary, getConnectorList } = require('./connector-binary-analyzer.js');
 
-    if (installResult.status !== 0) {
-      throw new Error(`Failed to install Connect version ${version}`);
+    fs.mkdirSync(scratchDir, { recursive: true });
+    const binaryPath = await downloadBinary('oss', version, scratchDir);
+    const parsed = getConnectorList(binaryPath);
+
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('connector list was empty or not an object');
     }
 
-    // Fetch connector list
+    // Write via a temp file so an interrupted run cannot leave a half-written
+    // snapshot that the next run would happily reuse.
     const tmpFile = path.join(dataDir, `connect-${version}.tmp.json`);
-    const fd = fs.openSync(tmpFile, 'w');
-    const listResult = spawnSync('rpk', ['connect', 'list', '--format', 'json-full'], {
-      stdio: ['ignore', fd, 'pipe']
-    });
-    fs.closeSync(fd);
-
-    if (listResult.status !== 0) {
-      throw new Error(`Failed to fetch connector list for version ${version}`);
-    }
-
-    // Parse and validate
-    const rawJson = fs.readFileSync(tmpFile, 'utf8');
-    const parsed = JSON.parse(rawJson);
-
-    // Move to final location
+    fs.writeFileSync(tmpFile, JSON.stringify(parsed, null, 2));
     fs.renameSync(tmpFile, dataFile);
 
     console.log(`✓ Successfully fetched data for version ${version}`);
     return parsed;
   } catch (error) {
     console.error(`❌ Failed to fetch data for version ${version}: ${error.message}`);
-    throw new Error(`Cannot process version ${version} - data unavailable`);
+    // Carry the reason into the thrown error: this message is what reaches the
+    // failure summary and the PR body, where a bare "data unavailable" sends
+    // the reader back to the raw workflow log.
+    throw new Error(`Cannot process version ${version} - data unavailable (${error.message})`);
+  } finally {
+    fs.rmSync(scratchDir, { recursive: true, force: true });
   }
 }
 
@@ -776,34 +776,37 @@ async function handleRpcnConnectorDocs (options) {
           console.error('Expected format: X.Y.Z (e.g., 4.50.0)')
           process.exit(1)
         }
-        console.log(`Installing Redpanda Connect version ${options.connectVersion}...`)
-        const installResult = spawnSync('rpk', ['connect', 'install', '--connect-version', options.connectVersion, '--force'], {
-          stdio: 'inherit'
-        })
-        if (installResult.status !== 0) {
-          throw new Error(`Failed to install Connect version ${options.connectVersion}`)
-        }
-        console.log(`Done: Installed Redpanda Connect version ${options.connectVersion}`)
         newVersion = options.connectVersion
+        // An explicit version comes from the release asset rather than from
+        // rpk, which refuses to install anything >= 4.100.0 — see
+        // loadConnectorDataForVersion. Reuses an existing snapshot if there
+        // is one, and leaves the caller's own Connect install alone either way.
+        console.log(`Fetching connector data for Connect ${newVersion}...`)
+        await loadConnectorDataForVersion(newVersion, dataDir)
+        dataFile = path.join(dataDir, `connect-${newVersion}.json`)
+        needsAugmentation = true
+        console.log(`Done: Fetched connector data for version ${newVersion}`)
       } else {
+        // No version asked for, so read whatever rpk has: this is install's
+        // unvalidated "latest" path, which the version regex never sees.
         newVersion = getRpkConnectVersion()
+        console.log(`Fetching connector data from Connect ${newVersion}...`)
+
+        const tmpFile = path.join(dataDir, `connect-${newVersion}.tmp.json`)
+        const finalFile = path.join(dataDir, `connect-${newVersion}.json`)
+
+        const fd = fs.openSync(tmpFile, 'w')
+        spawnSync('rpk', ['connect', 'list', '--format', 'json-full'], { stdio: ['ignore', fd, 'inherit'] })
+        fs.closeSync(fd)
+
+        const rawJson = fs.readFileSync(tmpFile, 'utf8')
+        const parsed = JSON.parse(rawJson)
+        fs.writeFileSync(finalFile, JSON.stringify(parsed, null, 2))
+        fs.unlinkSync(tmpFile)
+        dataFile = finalFile
+        needsAugmentation = true
+        console.log(`Done: Fetched connector data for version ${newVersion}`)
       }
-      console.log(`Fetching connector data from Connect ${newVersion}...`)
-
-      const tmpFile = path.join(dataDir, `connect-${newVersion}.tmp.json`)
-      const finalFile = path.join(dataDir, `connect-${newVersion}.json`)
-
-      const fd = fs.openSync(tmpFile, 'w')
-      const r = spawnSync('rpk', ['connect', 'list', '--format', 'json-full'], { stdio: ['ignore', fd, 'inherit'] })
-      fs.closeSync(fd)
-
-      const rawJson = fs.readFileSync(tmpFile, 'utf8')
-      const parsed = JSON.parse(rawJson)
-      fs.writeFileSync(finalFile, JSON.stringify(parsed, null, 2))
-      fs.unlinkSync(tmpFile)
-      dataFile = finalFile
-      needsAugmentation = true
-      console.log(`Done: Fetched connector data for version ${newVersion}`)
 
       // Fetch info.csv
       try {
