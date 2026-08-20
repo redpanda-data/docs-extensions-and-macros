@@ -113,6 +113,31 @@ Set to `false` to render the term without a link.
 enterprise-beta-badge::
 Set to `false` to suppress the beta badge in prose. Generated tables always show it. See <<beta-features>>.
 
+[[release-status]]
+=== Release status
+
+A registry entry's `status` field declares where a feature may be referenced. It is the enterprise equivalent of `cloud_supported` for properties: one field in the data, checked at build time, rather than a rule reviewers have to remember.
+
+[cols="1,3a"]
+|===
+| `status` | Behavior
+
+| `ga` (default)
+| Shipped. Referenced anywhere, no badge. Applies when `status` is absent, so existing entries need no change.
+
+| `beta`
+| Publicly available as a beta. Referenced anywhere, with a `beta` badge in prose and in the generated tables.
+
+| `unreleased`
+| In a release candidate only, not public. Referenced *only* from a prerelease component version. On a released page the mention renders as plain text with no enterprise styling, tooltip, or link, and the build reports it according to `enterprise-validate`. Omitted from `enterprise_features` tables on released pages; listed with its badge on prerelease pages.
+|===
+
+A prerelease page is one whose component version sets `prerelease` in `antora.yml`. A playbook can declare it directly with the `page-component-version-is-prerelease` document attribute.
+
+`beta: true` predates this field and still means `status: beta`, so old entries keep working. Prefer `status` in new entries, because a boolean cannot express "not public at all". An unrecognized `status` value is reported rather than silently treated as shipped. Use `status-tooltip` to override the `unreleased` badge's hover text.
+
+For the writer-facing procedure, see link:DOCUMENTING_UNRELEASED_FEATURES.adoc[Documenting properties and enterprise features before they ship].
+
 [[beta-features]]
 === Beta features
 
@@ -186,7 +211,7 @@ Registered together with the `enterprise` inline macro (see <<enterprise>>).
 
 This inline macro references a Redpanda configuration property in prose. The property renders as a marked `<code>` element (`property-ref` class plus a `data-property-name` attribute) that the docs UI decorates with a hover-documentation tooltip. Marking is opt-in: only properties referenced through this macro get tooltips, so ambiguous words such as `admin` or `rack` in unrelated contexts (Helm values, feature settings) are never decorated by mistake.
 
-The macro validates its target against the published property reference: the newest `redpanda-properties-<tag>.json` attachment in the `reference` module of the build, the same data the tooltips fetch at runtime. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`.
+The macro checks that a property is actually available to the audience reading the page, and links it only where a page documents it. It validates against the published property data: a `redpanda-properties-<tag>.json` attachment in the `reference` module, the same data the tooltips fetch at runtime. See <<prop-availability>> for which properties each doc set may reference and <<prop-version-selection>> for which file a given page uses. To migrate existing plain-backtick property mentions, use `doc-tools generate migrate-property-refs`.
 
 === Usage
 
@@ -201,7 +226,7 @@ prop:write_caching_default[text=write caching]
 The macro target is the property name. Named attributes:
 
 link::
-Set to `true` to also link the property to its reference page. The page is discovered dynamically: the macro indexes which reference-module page in the current component documents each property, by scanning property headings in the partials each page includes (respecting include tag filters such as `tags=redpanda-cloud`). Links are component-relative, so a Cloud page links to the Cloud component's own property pages, and they keep working if properties are split across different pages in the future. When discovery finds nothing, the page falls back deterministically to the property's `config_scope` (`cluster`, `broker`, or `topic`). This supersedes the `config_ref` macro's linking for most uses.
+Set to `true` to also link the property to its reference page. The page is discovered dynamically: the macro indexes which reference-module page in the current component documents each property, by scanning property headings in the partials each page includes (respecting include tag filters such as `tags=redpanda-cloud`). Links are component-relative, so a Cloud page links to the Cloud component's own property pages, and they keep working if properties are split across different pages in the future. See <<prop-undocumented>> for properties the current component does not document. This supersedes the `config_ref` macro's linking for most uses.
 
 page::
 Optional reference-page override (module-relative, without `.adoc`), for example `properties/object-storage-properties`. Overrides discovery entirely.
@@ -215,10 +240,74 @@ Optional display text override. Wins over the Helm path display.
 === Configuration options
 
 property-validate::
-How to report a target that does not match any published property: `warn` (default) logs a build warning with the file path and close-match suggestions, `error` fails the build, and `off` disables validation. When no property JSON is available in the build, the macro renders without validation and logs a single warning.
+How to report a target that does not match any published property: `warn` (default) logs a build warning with the file path, the dataset the page was checked against, and close-match suggestions; `error` fails the build; and `off` disables validation and silences every warning described here. When no property JSON is available in the build, the macro renders without validation and logs one warning per component version.
+
+[[prop-version-selection]]
+=== Which property data a page validates against
+
+Each published Redpanda release series ships its own `redpanda-properties-v<major>.<minor>.<patch>.json`, so a page must be checked against the data for *its own* series. A 25.3 page validated against 26.2 data would accept properties that release never had and flag removed ones as typos.
+
+The macro therefore selects by series (`major.minor`) rather than by newest tag:
+
+. For a component version with a numeric series (`streaming` at `25.3`), the newest patch whose tag matches that series -- preferring the copy attached to the page's own version, then the same series published anywhere in the component, since a series' JSON sometimes lives only on the main branch. Patch numbers compare numerically, so `v25.3.11` beats `v25.3.2`.
+. For a Cloud component (`env-cloud`), the newest `streaming` dataset, then `ROOT`. Cloud is managed Redpanda and always tracks the current release, so its own version is never consulted.
+
+Selecting by series rather than newest tag matters in practice: the docs repo's main branch carries the previous series' JSON alongside its own, and a prerelease tag could land there too. Newest-tag-wins would hand that file to pages of a different release. A component with no property data and no `env-cloud` attribute gets no dataset at all -- see <<prop-availability>>.
+
+Tags compare by release precedence, so a GA release outranks its own release candidates and `rc2` outranks `rc1`. A cycle publishes `v26.3.1-rc1`, then `rc2`, then the GA `v26.3.1`, and a beta branch at `version: 26.3` lands on the newest of those deterministically rather than on whichever file the content catalog happened to yield first. Redpanda spells prereleases as one identifier (`-rc2`, not `-rc.2`), which the semver spec compares as a string, so the trailing digits are split out before comparing; otherwise `rc10` would sort below `rc2`.
+
+Cloud takes the newest *GA* dataset and ignores prereleases entirely, because Cloud runs released Redpanda. An RC published on a beta branch outranks the current GA by version number, so without this every Cloud page would start validating against an unreleased property list. When a build contains only prerelease data, Cloud goes unvalidated and the warning says so specifically rather than reporting no data at all.
+
+When a component publishes property data for other series but none for the page's own, the macro declines to validate rather than use a neighbouring release's data. It logs one warning per component version naming the missing file, the tags it did find, and the `doc-tools generate property-docs --tag` command that produces it. `prop:` targets on those pages render unvalidated and their tooltips carry no data, so either generate the series' JSON on that branch or leave `prop:` out of that version's content.
 
 property-ref-role::
 CSS class applied to the code element. The default is `property-ref`.
+
+[[prop-availability]]
+=== Which properties a doc set may reference
+
+Property data exists for two doc sets.
+
+*Self-managed (`streaming`)* publishes its own properties JSON per release, as a reference-module attachment. Every property in that release's file is available.
+
+*Cloud* is managed Redpanda, so it has no property data of its own and always tracks the newest self-managed file. A Cloud component is recognized by its `env-cloud` attribute.
+
+A *cluster* property is available to Cloud unless its `cloud_supported` field is explicitly `false`. That field is the union of the Cloud states -- no published property is `cloud_editable` or `cloud_readonly` without also being `cloud_supported` -- so it is the single gate for that scope.
+
+*Topic and broker* properties are not gated by it. `cloud_supported` is derived from the Cloud control plane's install pack, whose two sections (`customer_managed_configs` and `readonly_cluster_config`) describe cluster configuration and contain nothing else: every entry resolves to a cluster property, and no topic property appears anywhere in the file. A `false` value on another scope therefore asserted something that source cannot know, while Cloud users set topic properties routinely through the Kafka API and Console and Cloud publishes a topic properties reference of its own. The property extractor no longer writes the field for other scopes, and the macro treats an absent value as "no opinion", so already-published datasets stay correct too.
+
+Any other component (`connect`, the agentic data plane, a preview site) has no property data, and none is inferred for it. Those components carry their own product versions, which say nothing about which Redpanda properties exist, so a version number is never read as a Redpanda release. Supporting a further doc set is a deliberate addition to the macro.
+
+When a property is not available to the page's audience -- a non-`cloud_supported` property on a Cloud page -- the macro renders it as plain `<code>`: no link, no `data-property-name` marker, and therefore no tooltip. A tooltip would imply the reader can set something they cannot. The build logs a warning naming the property, the file, and the dataset consulted. Fix `cloud_supported` in the property extractor if the data is wrong; otherwise reword the sentence and drop the macro.
+
+When no dataset covers the component at all, the macro warns once per component version and renders every `prop:` target as plain code, rather than emitting tooltips it could not verify.
+
+=== Linking
+
+`link=true` links the property to its reference page, but only when a page *in the same component* documents it. Nothing is linked across components, and no target is guessed from the property's `config_scope`: a link the build cannot verify is a broken link. An available property that no page renders -- a deprecated property, or one held back by include tags -- keeps its tooltip and renders unlinked; `link=true` warns in that case. Use `page=` to set a target explicitly for one mention.
+
+[[prop-property-source]]
+==== Declaring which page is the reference
+
+A reference page can declare the property collection it publishes:
+
+[,asciidoc]
+----
+= Cluster Configuration Properties
+:page-property-source: cluster-properties
+----
+
+Claims on a property are then ranked, highest first:
+
+. A page that declares `page-property-source`.
+. A property heading pulled in from a generated partial.
+. A bare heading on a page that happens to match a property name.
+
+The ranking exists because inference alone is ambiguous. Several real property names are ordinary words -- `admin`, `brokers`, `rack`, `retries`, `superusers` -- so any reference page titled or sectioned with one of those would otherwise claim the property from the page that documents it, and a page title generates no anchor, so both the link and the tooltip URL would point at nothing. Ranking also makes resolution independent of the order Antora aggregates content, which is stable for one checkout but carries no meaning.
+
+Within a rank, the first page wins, ordered by path so the result is deterministic. When two *declared* pages claim the same property the build warns and names both: that is an authoring conflict rather than something to resolve quietly.
+
+Declaring the attribute is optional. Existing pages keep working through inference, and the declaration is worth adding when a property could plausibly be claimed by more than one page in the component, or to state the intent explicitly rather than relying on the generated partials happening to win.
 
 === Registration
 

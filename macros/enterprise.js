@@ -58,13 +58,110 @@ const chalk = require('chalk')
 const { buildBadgeHtml } = require('./badge')
 
 const $enterpriseRegistry = Symbol('$enterpriseRegistry')
+const $warned = Symbol('$warned')
+
+/**
+ * Report a message once per build. Keyed off the content catalog, which Antora
+ * rebuilds per build, so watch mode keeps reporting instead of going quiet.
+ */
+function warnOnce (contentCatalog, key, message) {
+  const seen = contentCatalog[$warned] || (contentCatalog[$warned] = new Set())
+  if (seen.has(key)) return false
+  seen.add(key)
+  console.warn(chalk.yellow(message))
+  return true
+}
 
 const DEFAULT_LICENSING_PAGE = 'get-started:licensing/overview.adoc'
 const DEFAULT_ROLE = 'enterprise-feature'
 const BETA_LABEL = 'beta'
+const UNRELEASED_LABEL = 'unreleased'
+const UNRELEASED_TOOLTIP =
+  'This feature is not in a released version of Redpanda yet. It is documented here for the upcoming release.'
+
+// Release status of a feature, which decides where it may be referenced.
+//
+//   ga          Shipped. Referenced anywhere. The default.
+//   beta        Publicly available as a beta. Referenced anywhere, badged, so
+//               readers know the feature is not yet stable.
+//   unreleased  In a release candidate only, not yet public. Referenced ONLY
+//               from prerelease docs (a beta branch). A mention on a released
+//               page describes something readers cannot get, so it is reported
+//               and rendered as plain text.
+const STATUS_GA = 'ga'
+const STATUS_BETA = 'beta'
+const STATUS_UNRELEASED = 'unreleased'
+const VALID_STATUSES = [STATUS_GA, STATUS_BETA, STATUS_UNRELEASED]
 
 /**
- * Render the beta badge for a registry entry marked `beta: true`.
+ * The release status of a registry entry.
+ *
+ * `beta: true` predates the status field and still means beta, so old entries
+ * keep working. An explicit status wins. An unrecognized status is reported
+ * rather than quietly treated as shipped, which is the failure mode that lets a
+ * typo publish an unreleased feature.
+ *
+ * @param {object} entry - Registry entry.
+ * @param {object} [report] - {mode, filePath} to report an invalid status.
+ * @returns {string} One of VALID_STATUSES.
+ */
+function entryStatus (entry, report) {
+  if (!entry) return STATUS_GA
+  if (entry.status !== undefined) {
+    const status = String(entry.status).trim().toLowerCase()
+    if (VALID_STATUSES.includes(status)) return status
+    if (report && report.mode !== 'off') {
+      const where = report.filePath ? ` in ${report.filePath}` : ''
+      const message =
+        `enterprise:${entry.name}[]${where}: registry status '${entry.status}' is not one of ${VALID_STATUSES.join(', ')}, so the feature is treated as released. ` +
+        'Fix the status in enterprise-features.yml.'
+      // Honour error mode like every other registry diagnostic. A typo here is
+      // exactly what publishes an unreleased feature, so the strictest setting
+      // has to stop it.
+      if (report.mode === 'error') throw new Error(message)
+      // One registry typo needs one fix, so report it once per build rather
+      // than once per mention of the feature.
+      if (report.contentCatalog) warnOnce(report.contentCatalog, `status:${entry.name}`, message)
+      else console.warn(chalk.yellow(message))
+    }
+    return STATUS_GA
+  }
+  return entry.beta === true ? STATUS_BETA : STATUS_GA
+}
+
+/**
+ * Whether the page being converted belongs to a prerelease component version,
+ * which is where an unreleased feature may be referenced.
+ *
+ * Read from the component version's own prerelease flag (antora.yml) rather
+ * than inferred, with a document attribute as an escape hatch for playbooks
+ * that surface it themselves.
+ */
+function isPrereleasePage (config, document) {
+  const attribute = document && document.getAttribute('page-component-version-is-prerelease')
+  if (attribute !== undefined) {
+    const value = String(attribute).trim().toLowerCase()
+    if (value === 'true' || value === '') return true
+    if (value === 'false') return false
+    // Anything else is a typo. Falling through to the catalog is safer than
+    // guessing, and silently treating it as "released" produced a warning that
+    // told the writer their prerelease page belonged to a released version.
+    console.warn(chalk.yellow(
+      `enterprise macro: page-component-version-is-prerelease is '${attribute}', which is neither true nor false, so it is ignored and the component version's own prerelease flag is used instead.`
+    ))
+  }
+  const contentCatalog = config && config.contentCatalog
+  const src = config && config.file && config.file.src
+  if (!contentCatalog || !src || typeof contentCatalog.getComponent !== 'function') return false
+  const component = contentCatalog.getComponent(src.component)
+  if (!component) return false
+  const versions = Array.isArray(component.versions) ? component.versions : []
+  const componentVersion = versions.find((entry) => entry.version === src.version)
+  return Boolean(componentVersion && componentVersion.prerelease)
+}
+
+/**
+ * Render the release-status badge for a registry entry.
  *
  * The badge HTML is built directly rather than emitted as `badge:[...]`
  * AsciiDoc, so it renders whether or not the consuming playbook registers the
@@ -73,14 +170,31 @@ const BETA_LABEL = 'beta'
  * `badge::[label=beta]` in any build without that macro registered.
  *
  * @param {object} entry - Registry entry.
- * @returns {string} Badge HTML, or an empty string when the entry is not beta.
+ * @returns {string} Badge HTML, or an empty string for a shipped feature.
  */
 function buildBetaBadge (entry) {
-  if (!entry || entry.beta !== true) return ''
-  return buildBadgeHtml({
-    label: BETA_LABEL,
-    tooltip: entry['beta-tooltip'] || undefined,
-  })
+  const status = entryStatus(entry)
+  if (status === STATUS_BETA) {
+    return buildBadgeHtml({ label: BETA_LABEL, tooltip: entry['beta-tooltip'] || undefined })
+  }
+  if (status === STATUS_UNRELEASED) {
+    return buildBadgeHtml({ label: UNRELEASED_LABEL, tooltip: entry['status-tooltip'] || UNRELEASED_TOOLTIP })
+  }
+  return ''
+}
+
+/**
+ * Report an unreleased feature referenced from released documentation.
+ */
+function reportUnreleasedFeature ({ feature, mode, filePath }) {
+  if (mode === 'off') return
+  const where = filePath ? ` in ${filePath}` : ''
+  const message =
+    `enterprise:${feature}[]${where}: '${feature}' is marked status: unreleased in the enterprise features registry, so it is only documented for an upcoming release. ` +
+    'This page belongs to a released version, so the mention renders as plain text with no enterprise styling, tooltip, or link. ' +
+    'Move the mention to the prerelease (beta) branch, or change the status once the feature ships.'
+  if (mode === 'error') throw new Error(message)
+  console.warn(chalk.yellow(message))
 }
 
 /**
@@ -164,17 +278,33 @@ function loadRegistry (config) {
   const partials = contentCatalog.findBy({ component: 'shared', module: 'ROOT', family: 'partial' }) || []
   const registryFile = partials.find((file) => file.path && file.path.endsWith(REGISTRY_FILENAME))
   if (registryFile) {
-    registry = parseRegistry(registryFile.contents.toString(), registryFile.path)
+    try {
+      registry = parseRegistry(registryFile.contents.toString(), registryFile.path)
+    } catch (error) {
+      // A malformed registry must not take the whole build down. Unvalidated
+      // enterprise mentions are the same graceful degradation as no registry at
+      // all, and this matches how prop.js treats a corrupt properties JSON.
+      // Caching the failure also stops the error being re-raised per macro call
+      // and attributed to whichever page happened to convert first.
+      registry = null
+      warnOnce(contentCatalog, 'badregistry',
+        `Enterprise features registry ${registryFile.path} could not be read (${error.message}); enterprise: targets are not validated.`)
+    }
   }
   // Cache null too, so a missing registry is only searched for once per build.
   contentCatalog[$enterpriseRegistry] = registry
   return registry || undefined
 }
 
-function warnNoRegistry () {
+function warnNoRegistry (contentCatalog) {
+  const message = "Enterprise features registry (enterprise-features.yml in the 'shared' component) not found; enterprise: targets are not validated."
+  // Deduplicate per build, not per process: Antora's watch mode reuses one
+  // process across builds, and a module-level guard reported this only on a
+  // session's first build -- exactly when a writer is iterating.
+  if (contentCatalog) return warnOnce(contentCatalog, 'noregistry', message)
   if (warnedNoRegistry) return
   warnedNoRegistry = true
-  console.warn(chalk.yellow(`Enterprise features registry (${REGISTRY_FILENAME} in the shared component) not found; enterprise: targets are not validated.`))
+  console.warn(chalk.yellow(message))
 }
 
 /**
@@ -268,8 +398,17 @@ function buildEnterpriseContent ({ feature, text, xref, url, tooltip, licensingP
  * @returns {string}
  */
 function buildFeatureTable (features, scope, opts = {}) {
+  // On released docs an unreleased feature is omitted entirely: the licensing
+  // table is a list of what a licence covers today, and listing something
+  // unavailable makes it wrong. Prerelease docs list it with its badge.
+  const includeUnreleased = opts.includeUnreleased === true
+  // Report a bad status from here too. Without a reporter a typo'd status was
+  // silently downgraded to released, so an unreleased feature that no page
+  // happens to reference inline was published in the table with no diagnostic.
+  const report = opts.report
   const rows = features
     .filter((feature) => feature.scope === scope)
+    .filter((feature) => includeUnreleased || entryStatus(feature, report) !== STATUS_UNRELEASED)
     .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }))
   const title = opts.title || TABLE_TITLES[scope]
   const heading = opts.heading || THIRD_COLUMN_HEADINGS[scope] || THIRD_COLUMN_HEADINGS.default
@@ -302,7 +441,7 @@ function enterpriseInlineMacro (config) {
       let registry
       if (config && config.contentCatalog) {
         registry = loadRegistry(config)
-        if (!registry) warnNoRegistry()
+        if (!registry) warnNoRegistry(config && config.contentCatalog)
       }
       let feature = target
       let entry
@@ -319,6 +458,16 @@ function enterpriseInlineMacro (config) {
           })
         }
       }
+      const mode = document.getAttribute('enterprise-validate', 'warn')
+      const filePath = config && config.file && config.file.src && config.file.src.path
+      const status = entryStatus(entry, { mode, filePath, contentCatalog: config && config.contentCatalog })
+      if (status === STATUS_UNRELEASED && !isPrereleasePage(config, document)) {
+        // Documented for an upcoming release, referenced from released docs.
+        // Styling it as an available enterprise feature would promise readers
+        // something they cannot get, so render the name and say so.
+        reportUnreleasedFeature({ feature, mode, filePath })
+        return self.createInline(parent, 'quoted', attributes.text || feature)
+      }
       let content = buildEnterpriseContent({
         feature,
         text: attributes.text,
@@ -330,12 +479,13 @@ function enterpriseInlineMacro (config) {
         tooltipAttr: resolveTooltipAttribute(document.getAttribute('enterprise-tooltip')),
         links: document.getAttribute('enterprise-links', 'true') === 'true',
       })
-      // A feature marked beta in the registry is beta wherever it is
-      // referenced, so prose gets the same badge as the generated tables.
-      // Set enterprise-beta-badge to false to suppress it in prose only.
-      if (document.getAttribute('enterprise-beta-badge', 'true') === 'true') {
-        const betaBadge = buildBetaBadge(entry)
-        if (betaBadge) content += ` ${betaBadge}`
+      // A feature's status holds wherever it is referenced, so prose gets the
+      // same badge as the generated tables. enterprise-beta-badge=false
+      // suppresses the beta badge in prose; the unreleased badge is not
+      // suppressible, because "not in a release yet" is not decoration.
+      if (status === STATUS_UNRELEASED || document.getAttribute('enterprise-beta-badge', 'true') === 'true') {
+        const badge = buildBetaBadge(entry)
+        if (badge) content += ` ${badge}`
       }
       // The xref inside the span is resolved by the 'macros' substitution,
       // the same mechanism the config_ref macro relies on.
@@ -355,10 +505,21 @@ function enterpriseFeaturesBlockMacro (config) {
       }
       const registry = config && config.contentCatalog ? loadRegistry(config) : undefined
       if (!registry) {
-        warnNoRegistry()
+        warnNoRegistry(config && config.contentCatalog)
         return self.parseContent(parent, `WARNING: The enterprise features registry is unavailable, so the ${scope} feature table cannot be rendered.`)
       }
-      const table = buildFeatureTable(registry.features, scope, { title: attributes.title, heading: attributes.heading })
+      const table = buildFeatureTable(registry.features, scope, {
+        title: attributes.title,
+        heading: attributes.heading,
+        report: {
+          mode: parent.getDocument().getAttribute('enterprise-validate', 'warn'),
+          filePath: config && config.file && config.file.src && config.file.src.path,
+          contentCatalog: config && config.contentCatalog,
+        },
+        // Prerelease docs describe the upcoming release, so they list features
+        // that are still only in a release candidate.
+        includeUnreleased: isPrereleasePage(config, parent.getDocument()),
+      })
       // A block anchor before the macro call ([[my-id]]) is consumed into the
       // macro's id attribute. Re-emit it so crossrefs to the table keep working.
       const source = attributes.id ? `[[${attributes.id}]]\n${table}` : table

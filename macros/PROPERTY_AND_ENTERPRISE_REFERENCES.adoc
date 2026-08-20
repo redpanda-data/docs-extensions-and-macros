@@ -23,7 +23,9 @@ prop:cloud_storage_enabled[]
 
 That's it. Here's what happens for you:
 
-*It's checked.* The name is looked up in the published property data -- the same JSON, generated from Redpanda's source code, that powers the reference pages and tooltips. A typo gets a build warning with the file name and a "did you mean" suggestion. Nothing unverified ships. (A site can turn this up to a hard build failure with the `property-validate` attribute.)
+*It's checked, against the right release.* The name is looked up in the published property data -- the same JSON, generated from Redpanda's source code, that powers the reference pages and tooltips. A typo gets a build warning naming the file, the release data it was checked against, and a "did you mean" suggestion. Nothing unverified ships. (A site can turn this up to a hard build failure with the `property-validate` attribute.)
+
+Every release series has its own copy of that data, and the build picks the copy matching the page's own version: a 25.3 page is checked against 25.3 properties, never against the newest. Otherwise a property added in 26.2 would pass silently on a 25.3 page, and one removed since 25.3 would be flagged there as a typo. If a version branch has no property data of its own, the build says so and skips validation for that version rather than substituting a neighbouring release's -- and names the command that generates the missing file.
 
 *It gets a tooltip.* The docs UI decorates only elements the macro marked. A plain backticked word never gets a tooltip anymore, so `admin` in a Helm example stays plain text unless a writer deliberately writes `prop:admin[]`.
 
@@ -37,9 +39,25 @@ That's it. Here's what happens for you:
 
 Rather than hardcoding "cluster properties live on the cluster-properties page," the macro reads the actual docs during the build. Every documented property appears as a heading in the generated property files, and each reference page pulls in one or more of those files. The macro follows that chain -- which pages exist, what they include, which property headings end up where -- and builds a lookup table per doc set.
 
-Because the lookup is done separately for each part of the site, a Cloud page links to Cloud's own property pages and a streaming page to streaming's. Cloud reuses streaming's property files with a filter ("only the cloud-relevant parts"), and the macro applies that same filter, so it never links to a property that a given page doesn't actually document. If a doc set doesn't cover a property at all -- Cloud publishes no topic-properties page, Connect publishes none -- the link borrows the streaming docs instead of pointing nowhere.
+Because the lookup is done separately for each part of the site, a Cloud page links to Cloud's own property pages and a streaming page to streaming's, and a link is only ever emitted when a page in that same doc set actually documents the property. Nothing is linked across doc sets, and no page is guessed from a property's scope -- a link the build can't verify is a broken link.
+
+Availability is a separate question from linking, and it comes from the data rather than from which pages happen to include what. The published JSON marks each property with `cloud_supported`. Cloud is managed Redpanda, so a Cloud page may reference only the properties that flag covers, and it always reads the newest self-managed file: there is no such thing as a Cloud release of the property list. A property Cloud doesn't support renders as plain code in code font -- no link and no tooltip -- plus a build warning naming the property and the file. A tooltip there would tell a Cloud reader they can change something they can't. (`cloud_supported` is the whole gate: no published property is editable or read-only in Cloud without also being supported.)
+
+Usefully, the current data has no Cloud-supported *topic* property at all -- all 62 are cluster properties. So a topic property mentioned on a Cloud page isn't a missing page; it genuinely doesn't apply.
+
+Doc sets with no property data -- Connect, the agentic data plane -- get nothing, and nothing is inferred for them. Their version numbers are their own product's, and say nothing about which Redpanda properties exist. Adding a third doc set is a deliberate change to the macro, not something it guesses.
+
+An available property that no page *renders* is a different situation, and keeps its tooltip. Deprecated properties are the usual case: the reference pages filter them out, but the published data still describes them accurately, so a tooltip on the deprecated-properties page is exactly what a reader wants. There's no page to link, so `link=true` renders unlinked and warns; a tooltip-only mention is silent.
 
 Think phone book, not memory: if a property moves, the next build's phone book is already right.
+
+=== Features and properties that have not shipped yet
+
+Redpanda cuts release candidates before every release, and the docs track them on a prerelease branch. Something in an RC is not the same as something in a public beta, and the difference decides where a mention is allowed: an unreleased thing referenced from released docs promises readers something they cannot have.
+
+Both macros enforce that from data rather than from reviewer memory. A property validates against its own release series, so an RC-only property works on the beta branch and fails on a released one. An enterprise feature carries `status: unreleased` or `status: beta` in the registry, and an unreleased feature referenced from released docs renders as plain text with a warning, and is omitted from licensing tables there. Cloud always uses GA property data and ignores release candidates entirely, because Cloud runs released Redpanda.
+
+The writer-facing procedure, including how to generate property data from an RC tag, is in link:DOCUMENTING_UNRELEASED_FEATURES.adoc[Documenting properties and enterprise features before they ship].
 
 === What happened to config_ref
 

@@ -1,0 +1,9 @@
+= Cluster properties
+:page-property-source: cluster-properties
+:description: Preview fixture for the prop macro.
+
+Fixture page. The `page-property-source` attribute above declares this page as
+the reference for the `cluster-properties` collection, so `prop:` links resolve here by
+declaration rather than by inferring ownership from headings.
+
+include::reference:partial$properties/preview-properties.adoc[tags=category-cluster;!deprecated;!exclude-from-docs]
