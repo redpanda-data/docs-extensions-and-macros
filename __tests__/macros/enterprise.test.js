@@ -204,14 +204,30 @@ features:
       expect(warn).not.toHaveBeenCalled()
     })
 
-    test('an unrecognized status is reported rather than treated as shipped silently', () => {
+    // A typo in the status is the one thing that must not publish an unreleased
+    // feature, so an unrecognized value fails closed. The two directions are not
+    // symmetric: gating a shipped feature shows the writer a warning and an
+    // unstyled mention they will notice, while publishing an unreleased one
+    // promises readers a feature they cannot get and looks entirely normal.
+    test('an unrecognized status is treated as unreleased, not as shipped', () => {
       const typo = STATUS_YAML.replace('status: unreleased', 'status: unreleaased')
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
       const html = convert('enterprise:Upcoming Feature[]', {
         catalog: catalogWithVersions(typo, VERSIONS), component: 'streaming', version: '26.2',
       })
-      expect(html).toContain('class="enterprise-feature"')
+      expect(html).not.toContain('class="enterprise-feature"')
+      expect(html).toContain('Upcoming Feature')
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("status 'unreleaased' is not one of"))
+    })
+
+    test('a blank status is an absent status, not an invalid one', () => {
+      const blank = STATUS_YAML.replace('status: unreleased', 'status:')
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Upcoming Feature[]', {
+        catalog: catalogWithVersions(blank, VERSIONS), component: 'streaming', version: '26.2',
+      })
+      expect(html).toContain('class="enterprise-feature"')
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('is not one of'))
     })
 
     test('the licensing table omits unreleased features on released docs', () => {
@@ -393,6 +409,22 @@ features:
       expect(table).toContain('pass:[<span class="badge badge--beta ">(beta)</span>]')
       expect(table).not.toContain('badge::[')
       expect(table).not.toContain('badge:[label')
+    })
+
+    // The label lands in the class attribute and in the text content, so it
+    // needs escaping as much as the tooltip does. Escaping only the tooltip left
+    // a label free to close the class attribute and add an event handler.
+    test('a hostile badge label cannot escape the class attribute', () => {
+      const { buildBadgeHtml } = require('../../macros/badge')
+      const html = buildBadgeHtml({ label: 'x" onmouseover="alert(1)', tooltip: 'safe' })
+      expect(html).not.toContain('onmouseover="alert(1)"')
+      expect(html).toContain('&quot;')
+      const withTag = buildBadgeHtml({ label: '<img src=x onerror=alert(1)>' })
+      expect(withTag).not.toContain('<img')
+      expect(withTag).toContain('&lt;img')
+      // Ordinary labels are untouched.
+      expect(buildBadgeHtml({ label: 'beta', tooltip: 'Beta feature' }))
+        .toBe('<span class="badge badge--beta " data-tooltip="Beta feature">(beta)</span>')
     })
 
     test('places the beta badge after the feature suffix', () => {
