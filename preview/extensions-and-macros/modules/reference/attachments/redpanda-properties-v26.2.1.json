@@ -46,6 +46,22 @@
       "nullable": false,
       "type": "boolean"
     },
+    "cloud_storage_max_partition_readers_per_shard": {
+      "cloud_byoc_only": false,
+      "cloud_editable": false,
+      "cloud_readonly": false,
+      "cloud_supported": false,
+      "config_scope": "cluster",
+      "default": null,
+      "defined_in": "src/v/config/configuration.cc",
+      "description": "Maximum partition readers per shard (deprecated).",
+      "is_deprecated": true,
+      "is_enterprise": false,
+      "name": "cloud_storage_max_partition_readers_per_shard",
+      "needs_restart": false,
+      "nullable": true,
+      "type": "integer"
+    },
     "empty_seed_starts_cluster": {
       "config_scope": "broker",
       "default": true,

@@ -20,10 +20,10 @@ Default log segment size in bytes.
 Default write caching mode for new topics.
 
 // tag::deprecated[]
-=== admin
+=== cloud_storage_max_partition_readers_per_shard
 
-Network address for the Admin API server. Kept here to prove the !deprecated
-filter excludes it from every page.
+Maximum partition readers per shard. Deprecated in the published data, and
+tagged deprecated here, which is why no page renders it.
 // end::deprecated[]
 // end::category-cluster[]
 
@@ -41,6 +41,10 @@ How a cluster forms when a broker has an empty seed server list.
 === fips_mode
 
 Whether Redpanda starts in FIPS mode.
+
+=== admin
+
+Network address for the Admin API server.
 // end::category-broker[]
 
 // tag::category-topic[]

@@ -102,15 +102,26 @@ wrong.
 
 [,asciidoc]
 ----
-prop:admin[link=true]
+prop:cloud_storage_max_partition_readers_per_shard[link=true]
 ----
 
-prop:admin[link=true]
+prop:cloud_storage_max_partition_readers_per_shard[link=true]
 
-`admin` is in the property data but sits inside a `deprecated` include tag, and
-every reference page filters that tag out. The property keeps its tooltip --
-the published data still describes it accurately -- but there is no page to
-link to, so `link=true` renders unlinked and warns.
+This property is deprecated. Every reference page filters out the `deprecated`
+include tag, so no page renders a heading for it, and there is nothing to link
+to: `link=true` renders unlinked and warns.
+
+It keeps its tooltip, though, because the published data still describes the
+property accurately -- including a *deprecated* badge, which the docs UI adds
+from the data's `is_deprecated` field. That is the point of the distinction: a
+reader who meets a deprecated property in older prose still gets told what it
+was, without being sent to a reference page that deliberately omits it.
+
+Note that the include tag and the data field are separate mechanisms. The tag
+decides whether a *page* renders the property; `is_deprecated` decides what the
+*tooltip* says. They agree here, and they should, but nothing enforces it --
+tagging a property `deprecated` in the partial without setting the field would
+hide it from every page while its tooltip claimed it was current.
 
 == Enterprise features
 
