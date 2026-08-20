@@ -280,7 +280,30 @@ When no dataset covers the component at all, the macro warns once per component 
 
 === Linking
 
-`link=true` links the property to its reference page, but only when a page *in the same component* documents it, as discovered above. Nothing is linked across components, and no target is guessed from the property's `config_scope`: a link the build cannot verify is a broken link. An available property that no page renders -- a deprecated property, or one held back by include tags -- keeps its tooltip and renders unlinked; `link=true` warns in that case, because there is nothing to link to. Use `page=` to set a target explicitly.
+`link=true` links the property to its reference page, but only when a page *in the same component* documents it. Nothing is linked across components, and no target is guessed from the property's `config_scope`: a link the build cannot verify is a broken link. An available property that no page renders -- a deprecated property, or one held back by include tags -- keeps its tooltip and renders unlinked; `link=true` warns in that case. Use `page=` to set a target explicitly for one mention.
+
+[[prop-property-source]]
+==== Declaring which page is the reference
+
+A reference page can declare the property collection it publishes:
+
+[,asciidoc]
+----
+= Cluster Configuration Properties
+:page-property-source: cluster-properties
+----
+
+Claims on a property are then ranked, highest first:
+
+. A page that declares `page-property-source`.
+. A property heading pulled in from a generated partial.
+. A bare heading on a page that happens to match a property name.
+
+The ranking exists because inference alone is ambiguous. Several real property names are ordinary words -- `admin`, `brokers`, `rack`, `retries`, `superusers` -- so any reference page titled or sectioned with one of those would otherwise claim the property from the page that documents it, and a page title generates no anchor, so both the link and the tooltip URL would point at nothing. Ranking also makes resolution independent of the order Antora aggregates content, which is stable for one checkout but carries no meaning.
+
+Within a rank, the first page wins, ordered by path so the result is deterministic. When two *declared* pages claim the same property the build warns and names both: that is an authoring conflict rather than something to resolve quietly.
+
+Declaring the attribute is optional. Existing pages keep working through inference, and the declaration is worth adding when a property could plausibly be claimed by more than one page in the component, or to state the intent explicitly rather than relying on the generated partials happening to win.
 
 === Registration
 

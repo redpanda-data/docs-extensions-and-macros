@@ -893,6 +893,46 @@ describe('prop macro', () => {
         expect([...index.keys()].sort()).toEqual([...expected].sort())
       })
 
+      test('a generated partial outranks an incidental heading', () => {
+        // Ranked, not first-come: alphabetical order puts api/admin first, and
+        // a page titled '= admin' must still not claim the broker property.
+        const index = buildPageIndex(catalogOf([
+          pg('streaming', 'api/admin.adoc', '= admin\n\nThe admin API.\n'),
+          pg('streaming', 'properties/broker-properties.adoc', '= Broker\n\ninclude::reference:partial$b.adoc[]\n'),
+          partial('streaming', 'b.adoc', '=== admin\n'),
+        ]), 'streaming', PROPS, 'current')
+        expect(index.get('admin').page).toBe('properties/broker-properties')
+      })
+
+      test('page-property-source declares the reference and outranks inference', () => {
+        const index = buildPageIndex(catalogOf([
+          pg('streaming', 'properties/broker-properties.adoc', '= Broker\n\ninclude::reference:partial$b.adoc[]\n'),
+          pg('streaming', 'zzz-custom.adoc', '= Custom\n:page-property-source: broker-properties\n\n=== admin\n'),
+          partial('streaming', 'b.adoc', '=== admin\n'),
+        ]), 'streaming', PROPS, 'current')
+        expect(index.get('admin').page).toBe('zzz-custom')
+      })
+
+      test('two declared sources for one property are reported, not resolved quietly', () => {
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const index = buildPageIndex(catalogOf([
+          pg('streaming', 'a-page.adoc', '= A\n:page-property-source: broker-properties\n\n=== admin\n'),
+          pg('streaming', 'b-page.adoc', '= B\n:page-property-source: broker-properties\n\n=== admin\n'),
+        ]), 'streaming', PROPS, 'current')
+        expect(index.get('admin').page).toBe('a-page')
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("'admin' is claimed by two declared property sources"))
+      })
+
+      test('claim resolution does not depend on catalog order', () => {
+        const files = [
+          pg('streaming', 'api/admin.adoc', '= admin\n'),
+          pg('streaming', 'properties/broker-properties.adoc', '= Broker\n\ninclude::reference:partial$b.adoc[]\n'),
+          partial('streaming', 'b.adoc', '=== admin\n'),
+        ]
+        const resolve = (list) => buildPageIndex(catalogOf(list), 'streaming', PROPS, 'current').get('admin').page
+        expect(resolve(files)).toBe(resolve([...files].reverse()))
+      })
+
       test('a cross-component include resolves deterministically, not by catalog order', () => {
         const older = partial('streaming', 'p.adoc', '=== fips_mode\n', '25.3')
         const newer = partial('streaming', 'p.adoc', '=== only_26\n', '26.2')

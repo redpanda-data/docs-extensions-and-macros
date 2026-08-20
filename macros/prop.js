@@ -99,6 +99,13 @@ const $propertyPageIndex = Symbol('$propertyPageIndex')
 const HEADING_RX = /^=+\s+(\S+)\s*$/
 const TAG_MARKER_RX = /^\/\/\s*(tag|end)::([\w-]+)\[\]\s*$/
 const INCLUDE_RX = /^include::([^[]+)\[([^\]]*)\]/
+// A reference page declaring the property collection it publishes.
+const PROPERTY_SOURCE_RX = /^:page-property-source:[ \t]*(\S.*)$/m
+// Claim strength: an explicit declaration beats a generated partial, which
+// beats a bare heading that happens to match a property name.
+const CLAIM_HEADING = 1
+const CLAIM_PARTIAL = 2
+const CLAIM_DECLARED = 3
 // Delimited block fences: listing, literal, example, sidebar, quote, comment.
 const DELIMITER_RX = /^(-{4,}|\.{4,}|={4,}|\*{4,}|_{4,}|\/{4,})$/
 
@@ -219,10 +226,61 @@ function buildPageIndex (contentCatalog, component, properties, version) {
   if (pages.some(looksConverted)) {
     console.warn(chalk.yellow(`prop macro: building the property page index for ${component}@${version || 'any'} after conversion started; some pages are already HTML and their properties may not be indexed. Register '@redpanda-data/docs-extensions-and-macros/extensions/property-page-index' under antora.extensions to build the index up front.`))
   }
-  for (const page of pages) {
+  // A page can declare that it is the reference for a named collection of
+  // properties:
+  //
+  //   = Cluster Configuration Properties
+  //   :page-property-source: cluster-properties
+  //
+  // Declared pages are authoritative and are visited first, so an ordinary page
+  // that merely happens to carry a heading matching a property name -- 'admin',
+  // 'rack' -- can never claim it from the reference page that documents it.
+  // Sorting also removes the last of the catalog-order dependence: two pages
+  // that both surface a property used to resolve by aggregation order, which is
+  // stable for one checkout but not meaningful.
+  const declarationOf = (page) => {
+    const match = sourceOf(page).match(PROPERTY_SOURCE_RX)
+    return match ? match[1].trim() : undefined
+  }
+  const ordered = pages
+    .map((page) => ({ page, declared: declarationOf(page) }))
+    .sort((a, b) =>
+      Number(Boolean(b.declared)) - Number(Boolean(a.declared)) ||
+      String(a.page.src.relative).localeCompare(String(b.page.src.relative)))
+  // Which page claimed each property, so a conflict between two *declared*
+  // sources can be reported rather than silently resolved.
+  const claims = new Map()
+  for (const { page, declared } of ordered) {
     const source = sourceOf(page)
     const pagePath = page.src.relative.replace(/\.adoc$/, '')
     const pageUrl = (page.pub && page.pub.url) || undefined
+    // First claim wins. Declared pages come first, so a declaration always
+    // beats inference; two declared pages claiming one property is an authoring
+    // conflict worth reporting rather than resolving quietly.
+    // Claims are ranked, not first-come. A declared page outranks everything; a
+    // property heading pulled in from a generated partial outranks a bare
+    // heading that merely happens to match a property name, which is how a page
+    // titled '= admin' used to claim the admin broker property from the
+    // reference page that documents it.
+    const claim = (name, entry, strength) => {
+      const rank = declared ? CLAIM_DECLARED : strength
+      const existing = claims.get(name)
+      if (existing) {
+        if (existing.rank > rank) return
+        if (existing.rank === rank) {
+          // Same standing. Keep the first, and say so when both pages
+          // explicitly declared themselves the source: that is an authoring
+          // conflict, not something to resolve quietly.
+          if (rank === CLAIM_DECLARED) {
+            warnOnce(contentCatalog, `claim:${component}:${name}`,
+              `prop macro: '${name}' is claimed by two declared property sources in ${component}: ${existing.page} (:page-property-source: ${existing.declared}) and ${pagePath} (:page-property-source: ${declared}). Links use ${existing.page}. Remove the declaration from whichever page is not the reference for it.`)
+          }
+          return
+        }
+      }
+      claims.set(name, { page: pagePath, declared, rank })
+      index.set(name, entry)
+    }
     let inDelimitedBlock = false
     for (const line of source.split('\n')) {
       // A property name inside a listing, literal, or comment block is sample
@@ -240,7 +298,7 @@ function buildPageIndex (contentCatalog, component, properties, version) {
         // property name -- 'admin', 'rack' -- steal it from the reference page
         // that documents it, and a doctitle produces no anchor at all, so both
         // the link and the tooltip URL pointed at nothing.
-        if (!index.has(heading[1])) index.set(heading[1], { page: pagePath, url: pageUrl })
+        claim(heading[1], { page: pagePath, url: pageUrl }, CLAIM_HEADING)
         continue
       }
       const include = line.match(INCLUDE_RX)
@@ -272,7 +330,7 @@ function buildPageIndex (contentCatalog, component, properties, version) {
       for (const entry of headingsFor(partial)) {
         if (!Object.prototype.hasOwnProperty.call(properties, entry.name)) continue
         if (!evaluateTagExpression(entry.tags, expression)) continue
-        if (!index.has(entry.name)) index.set(entry.name, { page: pagePath, url: pageUrl })
+        claim(entry.name, { page: pagePath, url: pageUrl }, CLAIM_PARTIAL)
       }
     }
   }
