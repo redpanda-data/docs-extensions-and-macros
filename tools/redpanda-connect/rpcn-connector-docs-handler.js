@@ -691,6 +691,64 @@ function logCollapsed (label, filesArray, maxToShow = 10) {
 
 
 /**
+ * Decide how to report intermediate releases that failed to process.
+ *
+ * A failed intermediate costs attribution, not coverage: the final diff
+ * compares the last snapshot in the repo against the new version, so a field
+ * added anywhere in the span still appears — it is just credited to the new
+ * version instead of the release that introduced it. That is worth a loud
+ * warning rather than a dead pipeline, so the run continues whenever the
+ * cumulative diff was written. Without that diff there is no complete record
+ * of the span and nothing to justify moving the version, so it stays fatal.
+ *
+ * @param {Array} results - Per-release results, each {success, fromVersion, toVersion, error}
+ * @param {Object} context - {hasCumulativeDiff: boolean, newVersion: string}
+ * @returns {Object|null} {fatal, failures, lines} or null when nothing failed
+ */
+function planIntermediateFailureReport (results, { hasCumulativeDiff, newVersion } = {}) {
+  const failures = (results || []).filter(r => !r.success)
+  if (failures.length === 0) return null
+
+  const fatal = !hasCumulativeDiff
+  const lines = [
+    fatal
+      ? `\n❌ Cannot update Antora version: ${failures.length} intermediate release(s) failed to process`
+      : `\n⚠️  ${failures.length} intermediate release(s) failed to process`
+  ]
+  failures.forEach(f => {
+    lines.push(`   • ${f.fromVersion} → ${f.toVersion}: ${f.error}`)
+  })
+  if (!fatal) {
+    lines.push(
+      `   The cumulative diff still covers every change up to ${newVersion}, so generation continues.`,
+      `   Changes from the releases above are attributed to ${newVersion} in the per-release breakdown.`
+    )
+  }
+  return { fatal, failures, lines }
+}
+
+/**
+ * Summarise a failed spawnSync result for use in an error message.
+ *
+ * These calls run with stdio 'pipe', which captures the child's output but
+ * leaves it unread, so a bare failure reports only that something failed. The
+ * child's own message is what separates "that version does not exist" from
+ * "rpk would not parse the version I asked for", so surface it.
+ *
+ * @param {Object} result - A spawnSync return value
+ * @returns {string} The child's message, or a description of how it died
+ */
+function describeSpawnFailure (result) {
+  if (result.error) return result.error.message
+  for (const stream of [result.stderr, result.stdout]) {
+    const text = stream ? stream.toString().trim() : ''
+    if (text) return text.split('\n').slice(0, 3).join('; ')
+  }
+  if (result.signal) return `killed by signal ${result.signal}`
+  return `exit code ${result.status}`
+}
+
+/**
  * Load or fetch connector data for a specific version
  * @param {string} version - Version to load (e.g., "4.50.0")
  * @param {string} dataDir - Directory where JSON files are stored
@@ -720,7 +778,12 @@ async function loadConnectorDataForVersion(version, dataDir, options = {}) {
     });
 
     if (installResult.status !== 0) {
-      throw new Error(`Failed to install Connect version ${version}`);
+      // rpk's own message is the only thing that distinguishes "this version
+      // does not exist" from "rpk refused to parse the version I asked for",
+      // so report it instead of discarding the captured output.
+      throw new Error(
+        `Failed to install Connect version ${version}: ${describeSpawnFailure(installResult)}`
+      );
     }
 
     // Fetch connector list
@@ -732,7 +795,9 @@ async function loadConnectorDataForVersion(version, dataDir, options = {}) {
     fs.closeSync(fd);
 
     if (listResult.status !== 0) {
-      throw new Error(`Failed to fetch connector list for version ${version}`);
+      throw new Error(
+        `Failed to fetch connector list for version ${version}: ${describeSpawnFailure(listResult)}`
+      );
     }
 
     // Parse and validate
@@ -746,7 +811,10 @@ async function loadConnectorDataForVersion(version, dataDir, options = {}) {
     return parsed;
   } catch (error) {
     console.error(`❌ Failed to fetch data for version ${version}: ${error.message}`);
-    throw new Error(`Cannot process version ${version} - data unavailable`);
+    // Carry the reason into the thrown error: this message is what lands in the
+    // failure summary and the PR body, where "data unavailable" alone sends the
+    // reader back to the raw workflow log.
+    throw new Error(`Cannot process version ${version} - data unavailable (${error.message})`);
   }
 }
 
@@ -2001,13 +2069,13 @@ async function handleRpcnConnectorDocs (options) {
   }
 
   // Check for failures in intermediate processing before updating Antora version
-  if (intermediateProcessingResults.length > 0) {
-    const failures = intermediateProcessingResults.filter(r => !r.success)
-    if (failures.length > 0) {
-      console.error(`\n❌ Cannot update Antora version: ${failures.length} intermediate release(s) failed to process`)
-      failures.forEach(f => {
-        console.error(`   • ${f.fromVersion} → ${f.toVersion}: ${f.error}`)
-      })
+  const intermediateFailureReport = planIntermediateFailureReport(
+    intermediateProcessingResults,
+    { hasCumulativeDiff: Boolean(masterDiff), newVersion }
+  )
+  if (intermediateFailureReport) {
+    intermediateFailureReport.lines.forEach(line => console.error(line))
+    if (intermediateFailureReport.fatal) {
       process.exit(1)
     }
   }
@@ -2064,6 +2132,8 @@ async function handleRpcnConnectorDocs (options) {
 
 module.exports = {
   handleRpcnConnectorDocs,
+  planIntermediateFailureReport,
+  describeSpawnFailure,
   updateWhatsNew,
   capToTwoSentences,
   augmentConnectorData,
