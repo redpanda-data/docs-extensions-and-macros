@@ -619,11 +619,25 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
   // and must not mask a good file: try candidates newest-first and use the
   // first one that actually carries properties, reporting each one skipped.
   let registry = null
-  for (const candidate of orderedCandidates(pick, pool)) {
+  const candidates = orderedCandidates(pick, pool)
+  for (const candidate of candidates) {
     const properties = readProperties(candidate, contentCatalog)
     if (!properties) continue
     registry = { tag: candidate.tag, properties, component: candidate.component, version: candidate.version, surface }
     break
+  }
+  if (!registry && candidates.length) {
+    // Every candidate was unusable. Record that, because the caller's fallback
+    // diagnostic says no attachment exists anywhere -- which contradicts the
+    // per-file warning readProperties just emitted and sends the writer looking
+    // for a file that is sitting right there.
+    const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
+    gaps[cacheKey] = {
+      kind: 'unusable',
+      component: pageComponent,
+      version: pageVersion,
+      have: [...new Set(candidates.map((d) => d.tag))].sort(compareTags),
+    }
   }
   // Cache null too, so a missing dataset is only searched for once per build.
   cache[cacheKey] = registry
@@ -706,6 +720,12 @@ function warnSeriesMissing (contentCatalog, pageComponent, pageVersion) {
   const gap = gaps && gaps[`${pageComponent}@${pageVersion}`]
   if (!gap) return false
   const have = gap.have.join(', ')
+  if (gap.kind === 'unusable') {
+    warnOnce(contentCatalog, `unusable:${gap.component}@${gap.version}`,
+      `prop macro: every property attachment for ${gap.component}@${gap.version} is unusable (${have}); see the per-file warning above for why. ` +
+      'prop: targets are therefore not validated and their tooltips carry no data. Regenerate the file with \'npx doc-tools generate property-docs\' rather than treating this as missing data.')
+    return true
+  }
   if (gap.kind === 'cloud-prerelease-only') {
     warnOnce(contentCatalog, `cloudpre:${gap.component}@${gap.version}`,
       `prop macro: ${gap.component} found only prerelease property data (${have}). Cloud runs released Redpanda, so it uses GA property data and will not validate against a release candidate. ` +

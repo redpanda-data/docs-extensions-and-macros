@@ -217,17 +217,37 @@ features:
       })
       expect(html).not.toContain('class="enterprise-feature"')
       expect(html).toContain('Upcoming Feature')
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("status 'unreleaased' is not one of"))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("status 'unreleaased', which is not one of"))
     })
 
-    test('a blank status is an absent status, not an invalid one', () => {
-      const blank = STATUS_YAML.replace('status: unreleased', 'status:')
+    // An absent key means no status was intended, so GA is the right default. A
+    // key with nothing after it means the writer meant to say something and did
+    // not, which is the same mistake as a typo and fails the same way -- an
+    // earlier version of this fix treated blank as absent and so republished
+    // unreleased features silently, which is the hole the fix exists to close.
+    test.each([
+      ['status:', 'an empty status'],
+      ['status: ~', 'an empty status'],
+      ['status: "   "', 'an empty status'],
+      ['status: unreleaased', "status 'unreleaased'"],
+    ])('%s is invalid and fails closed', (line, expected) => {
+      const yaml = STATUS_YAML.replace('status: unreleased', line)
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
       const html = convert('enterprise:Upcoming Feature[]', {
-        catalog: catalogWithVersions(blank, VERSIONS), component: 'streaming', version: '26.2',
+        catalog: catalogWithVersions(yaml, VERSIONS), component: 'streaming', version: '26.2',
+      })
+      expect(html).not.toContain('class="enterprise-feature"')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(expected))
+    })
+
+    test('an absent status defaults to released', () => {
+      const noStatus = STATUS_YAML.replace(/^\s*status: unreleased\n/m, '')
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Upcoming Feature[]', {
+        catalog: catalogWithVersions(noStatus, VERSIONS), component: 'streaming', version: '26.2',
       })
       expect(html).toContain('class="enterprise-feature"')
-      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('is not one of'))
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('not one of'))
     })
 
     test('the licensing table omits unreleased features on released docs', () => {

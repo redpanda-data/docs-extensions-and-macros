@@ -111,14 +111,22 @@ const VALID_STATUSES = [STATUS_GA, STATUS_BETA, STATUS_UNRELEASED]
  */
 function entryStatus (entry, report) {
   if (!entry) return STATUS_GA
-  if (entry.status !== undefined && entry.status !== null && String(entry.status).trim() !== '') {
-    const status = String(entry.status).trim().toLowerCase()
+  // Any present key goes through validation, including a blank value. An absent
+  // key means no status was intended, so GA is the right default; `status:` with
+  // nothing after it means the writer meant to say something and did not, which
+  // is the same mistake as a typo and must fail the same way. Treating blank as
+  // absent reopened the hole this function exists to close: a forgotten value
+  // published an unreleased feature with no warning at all.
+  if (entry.status !== undefined) {
+    const raw = entry.status === null ? '' : String(entry.status).trim()
+    const status = raw.toLowerCase()
     if (VALID_STATUSES.includes(status)) return status
     if (report && report.mode !== 'off') {
       const where = report.filePath ? ` in ${report.filePath}` : ''
+      const what = raw === '' ? 'an empty status' : `status '${entry.status}'`
       const message =
-        `enterprise:${entry.name}[]${where}: registry status '${entry.status}' is not one of ${VALID_STATUSES.join(', ')}, so the feature is treated as unreleased and is left unpublished on released pages. ` +
-        'Fix the status in enterprise-features.yml.'
+        `enterprise:${entry.name}[]${where}: registry has ${what}, which is not one of ${VALID_STATUSES.join(', ')}, so the feature is treated as unreleased and is left unpublished on released pages. ` +
+        'Fix the status in enterprise-features.yml, or remove the key entirely if the feature has shipped.'
       // Honour error mode like every other registry diagnostic. A typo here is
       // exactly what publishes an unreleased feature, so the strictest setting
       // has to stop it.
@@ -399,7 +407,16 @@ function resolveTooltipAttribute (raw) {
 function buildEnterpriseContent ({ feature, text, xref, url, tooltip, licensingPage, role, tooltipAttr, links }) {
   const display = text || feature
   const tooltipText = tooltip || `${feature} requires an Enterprise Edition license.`
-  const escapedTooltip = tooltipText.replace(/"/g, '&quot;')
+  // All four, matching badge.js. Escaping only the quote kept the attribute
+  // intact but let < and > through from a registry tooltip field, which any
+  // consumer that re-parses the page then reads as markup -- the docs UI
+  // promotes this attribute into a tooltip, the Markdown converter and the
+  // search indexer both re-read it.
+  const escapedTooltip = tooltipText
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
   const tooltipHtml = tooltipAttr ? ` ${tooltipAttr}="${escapedTooltip}"` : ''
   let inner = display
   if (links) {

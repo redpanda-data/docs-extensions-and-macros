@@ -1042,6 +1042,31 @@ describe('prop macro', () => {
       warn.mockRestore()
     })
 
+    // The per-file warning says the attachment was found and is invalid, so the
+    // fallback diagnostic must not then say no attachment exists anywhere --
+    // that contradicts it and sends the writer after a file that is right there.
+    test('an unusable dataset is not reported as a missing one', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const files = [propertiesAttachment('streaming', '25.3', 'v25.3.1', '{"properties": {')]
+      const html = convert('prop:log_segment_size[]', {
+        catalog: catalogOf(files), component: 'streaming', version: '25.3',
+      })
+      expect(html).not.toContain('property-ref')
+      const messages = warn.mock.calls.map((call) => String(call[0]))
+      expect(messages.some((m) => m.includes('is not valid JSON'))).toBe(true)
+      expect(messages.some((m) => m.includes('every property attachment'))).toBe(true)
+      expect(messages.some((m) => m.includes('no redpanda-properties-<tag>.json attachment found'))).toBe(false)
+      warn.mockRestore()
+    })
+
+    test('a genuinely absent dataset is still reported as missing', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      convert('prop:log_segment_size[]', { catalog: catalogOf([]), component: 'streaming', version: '25.3' })
+      const messages = warn.mock.calls.map((call) => String(call[0]))
+      expect(messages.some((m) => m.includes('no redpanda-properties-<tag>.json attachment found'))).toBe(true)
+      warn.mockRestore()
+    })
+
     test('a corrupt file still falls back within the same release series', () => {
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
       const files = [
