@@ -422,6 +422,26 @@ function buildComponentMap(indexObj) {
   return map;
 }
 
+/**
+ * Whether to refresh the Connect plugin before reading its version.
+ *
+ * Only ephemeral environments should: the refresh uses "install --force",
+ * which skips the safeguard that "upgrade" applies to a self-managed plugin
+ * (see the comment in getRpkConnectVersion), so on a real machine it can
+ * change which Connect binary the user runs afterwards.
+ *
+ * Defaults to on when CI is set. RPCN_FORCE_CONNECT_INSTALL overrides in
+ * either direction, for forcing a refresh locally or suppressing one in a
+ * CI-like environment that owns its own Connect installation.
+ */
+function shouldRefreshConnectPlugin() {
+  const override = process.env.RPCN_FORCE_CONNECT_INSTALL;
+  if (override !== undefined && override !== '') {
+    return !['0', 'false', 'no', 'off'].includes(override.toLowerCase());
+  }
+  return Boolean(process.env.CI);
+}
+
 function getRpkConnectVersion() {
   try {
     // Ensure the connect plugin is current (silent). Deliberately "install
@@ -434,7 +454,18 @@ function getRpkConnectVersion() {
     // releases up to at least v26.2.1; keep this workaround until a fixed
     // rpk release ships. install's "latest" path (the default) skips that
     // regex entirely, so it isn't exposed to the bug.
-    execSync('rpk connect install --force', { stdio: 'ignore' });
+    //
+    // The trade-off is that "install --force" drops a safeguard "upgrade"
+    // keeps: upgrade refuses to touch a plugin whose Managed flag is false
+    // (rpk/pkg/cli/connect/upgrade.go), which is how a Connect installed by
+    // Homebrew or by hand is protected. A forced install instead writes a
+    // managed binary into the plugin dir that rpk prioritises, shadowing
+    // that installation for every later rpk call. So refresh only where the
+    // Connect installation is disposable, and leave a developer's machine
+    // exactly as it is — reporting the version already installed there.
+    if (shouldRefreshConnectPlugin()) {
+      execSync('rpk connect install --force', { stdio: 'ignore' });
+    }
 
     // Now capture the --version output
     const raw = execSync('rpk connect --version', {
@@ -453,7 +484,13 @@ function getRpkConnectVersion() {
     }
     return match[1];
   } catch (err) {
-    throw new Error(`Unable to run "rpk connect --version": ${err.message}`);
+    // Outside CI the plugin is never installed on the caller's behalf, so say
+    // how to get one rather than only reporting that the call failed.
+    const hint = shouldRefreshConnectPlugin()
+      ? ''
+      : ' If Redpanda Connect is not installed, run "rpk connect install" first,' +
+        ' or set RPCN_FORCE_CONNECT_INSTALL=1 to let this command install it.';
+    throw new Error(`Unable to run "rpk connect --version": ${err.message}${hint}`);
   }
 }
 
