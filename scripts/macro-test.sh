@@ -113,7 +113,11 @@ printf '  %-42s %s\n' "unusable property JSON"           "$(count 'is not valid 
 printf '  %-42s %s\n' "two declared property sources"    "$(count 'claimed by two declared property sources')"
 printf '  %-42s %s\n' "index built after conversion"     "$(count 'after conversion started')"
 printf '  %-42s %s\n' "enterprise: unreleased on release" "$(count 'is marked status: unreleased')"
-printf '  %-42s %s\n' "enterprise: unknown feature"      "$(count 'does not match any enterprise feature')"
+# Must match macros/enterprise.js verbatim. The old pattern ('does not match any
+# enterprise feature') appears nowhere in the source, so this counter read 0 even
+# when the build had logged an unknown feature -- a false green in the report the
+# unreleased-features procedure tells writers to check.
+printf '  %-42s %s\n' "enterprise: unknown feature"      "$(count 'does not match any feature in the enterprise features registry')"
 printf '  %-42s %s\n' "enterprise: bad registry status"  "$(count 'is not one of ga, beta, unreleased')"
 
 hr; echo "RENDERED OUTPUT PER COMPONENT"; hr
