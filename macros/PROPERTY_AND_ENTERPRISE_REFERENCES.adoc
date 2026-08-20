@@ -51,6 +51,14 @@ An available property that no page *renders* is a different situation, and keeps
 
 Think phone book, not memory: if a property moves, the next build's phone book is already right.
 
+=== Features and properties that have not shipped yet
+
+Redpanda cuts release candidates before every release, and the docs track them on a prerelease branch. Something in an RC is not the same as something in a public beta, and the difference decides where a mention is allowed: an unreleased thing referenced from released docs promises readers something they cannot have.
+
+Both macros enforce that from data rather than from reviewer memory. A property validates against its own release series, so an RC-only property works on the beta branch and fails on a released one. An enterprise feature carries `status: unreleased` or `status: beta` in the registry, and an unreleased feature referenced from released docs renders as plain text with a warning, and is omitted from licensing tables there. Cloud always uses GA property data and ignores release candidates entirely, because Cloud runs released Redpanda.
+
+The writer-facing procedure, including how to generate property data from an RC tag, is in link:DOCUMENTING_UNRELEASED_FEATURES.adoc[Documenting properties and enterprise features before they ship].
+
 === What happened to config_ref
 
 The old `config_ref` macro did a smaller version of this job with three problems: you had to tell it which page to link to by hand, it never checked the property name, and on Kubernetes pages it prefixed *every* property with `storage.tiered.config.` -- which is only correct for tiered storage settings. The live docs really did render `storage.tiered.config.log_segment_size`, a path that mislabels where that setting belongs.

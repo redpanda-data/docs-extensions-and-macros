@@ -113,6 +113,31 @@ Set to `false` to render the term without a link.
 enterprise-beta-badge::
 Set to `false` to suppress the beta badge in prose. Generated tables always show it. See <<beta-features>>.
 
+[[release-status]]
+=== Release status
+
+A registry entry's `status` field declares where a feature may be referenced. It is the enterprise equivalent of `cloud_supported` for properties: one field in the data, checked at build time, rather than a rule reviewers have to remember.
+
+[cols="1,3a"]
+|===
+| `status` | Behavior
+
+| `ga` (default)
+| Shipped. Referenced anywhere, no badge. Applies when `status` is absent, so existing entries need no change.
+
+| `beta`
+| Publicly available as a beta. Referenced anywhere, with a `beta` badge in prose and in the generated tables.
+
+| `unreleased`
+| In a release candidate only, not public. Referenced *only* from a prerelease component version. On a released page the mention renders as plain text with no enterprise styling, tooltip, or link, and the build reports it according to `enterprise-validate`. Omitted from `enterprise_features` tables on released pages; listed with its badge on prerelease pages.
+|===
+
+A prerelease page is one whose component version sets `prerelease` in `antora.yml`. A playbook can declare it directly with the `page-component-version-is-prerelease` document attribute.
+
+`beta: true` predates this field and still means `status: beta`, so old entries keep working. Prefer `status` in new entries, because a boolean cannot express "not public at all". An unrecognized `status` value is reported rather than silently treated as shipped. Use `status-tooltip` to override the `unreleased` badge's hover text.
+
+For the writer-facing procedure, see link:DOCUMENTING_UNRELEASED_FEATURES.adoc[Documenting properties and enterprise features before they ship].
+
 [[beta-features]]
 === Beta features
 
