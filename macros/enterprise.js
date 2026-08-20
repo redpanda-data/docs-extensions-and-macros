@@ -243,7 +243,14 @@ let warnedNoRegistry = false
  * @returns {{features: object[], lookup: Map<string, object>}}
  */
 function parseRegistry (source, origin = REGISTRY_FILENAME) {
-  const data = yaml.load(source)
+  let data
+  try {
+    data = yaml.load(source)
+  } catch (error) {
+    // Every other throw below names the file, so this one does too: the caller
+    // then reports whatever it catches verbatim, and the path appears once.
+    throw new Error(`Enterprise features registry ${origin} is not valid YAML (${error.message}).`)
+  }
   if (!data || !Array.isArray(data.features)) {
     throw new Error(`Enterprise features registry ${origin} has no 'features' list.`)
   }
@@ -295,8 +302,13 @@ function loadRegistry (config) {
       // then also report it missing. Saying "not found" about a file we just
       // read and failed to parse sends the writer looking for the wrong problem.
       contentCatalog[$enterpriseRegistryUnreadable] = true
+      // Report the error as thrown. It already names the file and says exactly
+      // what is wrong -- invalid YAML, a missing features list, an entry with no
+      // name, an unknown scope, or a duplicate name or alias. Wrapping it in
+      // "could not be read" was inaccurate for all but the first (the file read
+      // fine; its contents are invalid) and printed the path twice.
       warnOnce(contentCatalog, 'badregistry',
-        `Enterprise features registry ${registryFile.path} could not be read (${error.message}); enterprise: targets are not validated, so no feature is gated by release status and the licensing tables are empty.`)
+        `${error.message} No enterprise: target is validated, no feature is gated by release status, and the licensing tables are empty until this is fixed.`)
     }
   }
   // Cache null too, so a missing registry is only searched for once per build.

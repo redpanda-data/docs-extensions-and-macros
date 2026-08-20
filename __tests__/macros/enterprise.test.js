@@ -363,6 +363,37 @@ features:
     test('throws when the features list is missing', () => {
       expect(() => parseRegistry('schema-version: 1\n')).toThrow(/no 'features' list/)
     })
+
+    // Invalid YAML used to escape as the raw js-yaml message, which names no
+    // file, so the caller had to prefix a path -- and then printed it twice for
+    // the four throws above, which name the file themselves.
+    test('names the file when the YAML itself is invalid', () => {
+      expect(() => parseRegistry('features: [oops\n', 'shared/enterprise-features.yml'))
+        .toThrow(/registry shared\/enterprise-features\.yml is not valid YAML/)
+    })
+
+    test('every failure names the file exactly once', () => {
+      const origin = 'shared/modules/ROOT/partials/enterprise-features.yml'
+      const broken = [
+        'features: [oops\n',
+        'schema-version: 1\n',
+        'features:\n  - description: x\n',
+        'features:\n  - name: A\n    scope: nonsense\n',
+        'features:\n  - name: A\n    aliases: [dup]\n  - name: B\n    aliases: [dup]\n',
+      ]
+      for (const source of broken) {
+        let message = ''
+        try {
+          parseRegistry(source, origin)
+        } catch (error) {
+          message = error.message
+        }
+        expect(message).toContain(origin)
+        expect(message.split(origin).length - 1).toBe(1)
+        // "could not be read" was inaccurate for everything but invalid YAML.
+        expect(message).not.toMatch(/could not be read/)
+      }
+    })
   })
 
   describe('buildFeatureTable', () => {
