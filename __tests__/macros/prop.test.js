@@ -9,6 +9,7 @@ const {
   evaluateTagExpression,
   helmValuesPath,
   loadPropertiesFor,
+  buildPageIndex,
   releaseSeries,
 } = require('../../macros/prop')
 
@@ -49,7 +50,11 @@ function catalogOf (files, components = {}) {
     getComponent: (name) => {
       if (!names.has(name)) return undefined
       const attributes = components[name] || {}
+      // Antora derives `latest` from version ordering, not from the order files
+      // were aggregated, so sort here: deriving it from file order would make
+      // the fixture itself nondeterministic and hide real order dependence.
       const versions = [...new Set(files.filter((f) => f.src.component === name).map((f) => f.src.version))]
+        .sort((a, b) => String(a).localeCompare(String(b), 'en', { numeric: true }))
         .map((v) => ({ version: v, asciidoc: { attributes } }))
       if (!versions.length) versions.push({ version: '', asciidoc: { attributes } })
       return { name, versions, latest: versions[versions.length - 1] }
@@ -712,6 +717,190 @@ describe('prop macro', () => {
       })
       const html = convert('prop:cloud_storage_enabled[link=true,page=properties/object-storage-properties]', { catalog })
       expect(html).toContain('object-storage-properties')
+    })
+  })
+
+  describe('hostile and malformed input', () => {
+    // Every case here was found by stress-testing and reproduced before fixing.
+    const A = propertiesAttachment
+    const raw = (component, version, tag, text) => {
+      const file = A(component, version, tag)
+      file.contents = Buffer.from(text)
+      return file
+    }
+
+    describe('attribute escaping', () => {
+      test('a hostile property-ref-role cannot inject attributes', () => {
+        // Site attribute, so one playbook line would poison every marked
+        // property in the build.
+        const html = buildPropContent({ name: 'x', role: 'a" onclick="y' })
+        expect(html).not.toMatch(/class="a" onclick=/)
+        expect(html).toContain('class="a&quot; onclick=&quot;y"')
+      })
+
+      test('a quote in a property name or doc URL is escaped', () => {
+        expect(buildPropContent({ name: 'q"n', role: 'r' })).toContain('data-property-name="q&quot;n"')
+        expect(buildPropContent({ name: 'x', role: 'r', docUrl: '/a" onx="1' }))
+          .toContain('data-doc-url="/a&quot; onx=&quot;1"')
+      })
+    })
+
+    describe('unusable property data', () => {
+      test('invalid JSON is reported, not thrown, and does not fail the build', () => {
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const catalog = catalogOf([raw('streaming', '26.2', 'v26.2.1', '{ oops')])
+        expect(() => loadPropertiesFor(catalog, 'streaming', '26.2')).not.toThrow()
+        expect(loadPropertiesFor(catalog, 'streaming', '26.2')).toBeUndefined()
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('redpanda-properties-v26.2.1.json in streaming@26.2 is not valid JSON'))
+      })
+
+      test('an unusable newest file falls through to the newest usable one', () => {
+        // A half-written file used to void the component's whole dataset and
+        // then advise publishing a JSON that was already there.
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const catalog = catalogOf([
+          A('streaming', '26.2', 'v26.2.1'),
+          raw('streaming', '26.2', 'v26.2.2', '{"version":"v26.2.2"}'),
+        ])
+        expect(loadPropertiesFor(catalog, 'streaming', '26.2').tag).toBe('v26.2.1')
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("has no usable 'properties' object"))
+      })
+
+      test.each([
+        ['{"properties":"oops"}'],
+        ['{"properties":7}'],
+        ['{"properties":[{"a":1}]}'],
+      ])('a non-object properties payload is rejected: %s', (text) => {
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        expect(loadPropertiesFor(catalogOf([raw('streaming', '26.2', 'v26.2.1', text)]), 'streaming', '26.2')).toBeUndefined()
+        expect(warn).toHaveBeenCalled()
+      })
+
+      test('two attachments with the same tag resolve identically either way round', () => {
+        const first = A('streaming', '25.3', 'v25.3.1', JSON.stringify({ properties: { first: {} } }))
+        const second = A('streaming', '25.3', 'v25.3.1', JSON.stringify({ properties: { second: {} } }))
+        second.src.relative = 'other/redpanda-properties-v25.3.1.json'
+        const forward = loadPropertiesFor(catalogOf([first, second]), 'streaming', '25.3')
+        const reverse = loadPropertiesFor(catalogOf([second, first]), 'streaming', '25.3')
+        expect(Object.keys(forward.properties)).toEqual(Object.keys(reverse.properties))
+      })
+    })
+
+    describe('cloud surface', () => {
+      test.each([
+        [false, false],
+        ['false', false],
+        [null, false],
+        [true, true],
+        ['true', true],
+      ])('env-cloud: %s -> cloud surface %s', (value, expected) => {
+        const registry = loadPropertiesFor(
+          catalogOf([A('streaming', '26.2', 'v26.2.1')], { x: { 'env-cloud': value } }), 'x', '')
+        expect(Boolean(registry && registry.surface === 'cloud')).toBe(expected)
+      })
+
+      test('a Cloud component keeps its cloud slice even if it ships its own data', () => {
+        // The property extractor writes that attachment path into whichever
+        // repo it runs in, so own-data must not switch the gate off.
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const catalog = catalogOf([
+          A('cloud-data-platform', '', 'v26.2.1'),
+          A('streaming', '26.2', 'v26.2.1'),
+        ], CLOUD)
+        expect(loadPropertiesFor(catalog, 'cloud-data-platform', '').surface).toBe('cloud')
+        const html = convert('prop:fips_mode[]', { catalog, component: 'cloud-data-platform', version: '' })
+        expect(html).toContain('<code>fips_mode</code>')
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('not available in the cloud-data-platform component'))
+      })
+
+      test('the prerelease-only diagnostic ignores other components tags', () => {
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const catalog = catalogOf([A('labs', '1.0', 'v9.9.9-rc1')], CLOUD)
+        convert('prop:iceberg_enabled[]', { catalog, component: 'cloud-data-platform', version: '' })
+        expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('v9.9.9-rc1'))
+      })
+    })
+
+    describe('lookup and rendering', () => {
+      test('inherited Object.prototype keys are not properties', () => {
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        for (const name of ['toString', 'constructor', 'valueOf']) {
+          const html = convert(`prop:${name}[]`, { catalog: fakeCatalog() })
+          expect(html).toContain(`<code>${name}</code>`)
+          expect(html).not.toContain('data-property-name')
+        }
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('is not in the property data'))
+      })
+
+      test('the plain path shows the name, never an invented Helm path', () => {
+        // helmValuesPath needs config_scope to pick config.node vs
+        // config.cluster, and an unverified property has none: it printed a
+        // confident values.yaml path, wrong for every broker property.
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const html = convert('prop:cloud_storage_bogus[helm-path=auto]', {
+          catalog: fakeCatalog(), attributes: { 'env-kubernetes': '' },
+        })
+        expect(html).toContain('<code>cloud_storage_bogus</code>')
+        expect(html).not.toContain('storage.tiered.config')
+        warn.mockRestore()
+      })
+    })
+
+    describe('page index', () => {
+      const pg = (component, relative, body, version = 'current') => {
+        const file = page(component, relative, body, version)
+        file.pub = { url: `/${component}/${version}/reference/${relative.replace(/\.adoc$/, '')}/` }
+        return file
+      }
+      const PROPS = { admin: {}, fips_mode: {}, iceberg_enabled: {}, only_26: {} }
+
+      test('a page titled with a property name does not steal it', () => {
+        const index = buildPageIndex(catalogOf([
+          pg('streaming', 'properties/broker-properties.adoc', '= Broker\n\ninclude::reference:partial$b.adoc[]\n'),
+          partial('streaming', 'b.adoc', '=== admin\n'),
+          pg('streaming', 'api/admin.adoc', '= admin\n\nThe admin API.\n'),
+        ]), 'streaming', PROPS, 'current')
+        expect(index.get('admin').page).toBe('properties/broker-properties')
+      })
+
+      test('a property name inside a listing block is sample text, not documentation', () => {
+        const index = buildPageIndex(catalogOf([
+          pg('streaming', 'rpk/x.adoc', '= X\n\n----\n=== iceberg_enabled\n----\n'),
+        ]), 'streaming', PROPS, 'current')
+        expect(index.get('iceberg_enabled')).toBeUndefined()
+      })
+
+      test('a same-component include never resolves across versions', () => {
+        const index = buildPageIndex(catalogOf([
+          partial('streaming', 'x.adoc', '=== only_26\n', '26.2'),
+          pg('streaming', 'p.adoc', '= P\n\ninclude::reference:partial$x.adoc[]\n', '25.3'),
+        ]), 'streaming', PROPS, '25.3')
+        expect(index.get('only_26')).toBeUndefined()
+      })
+
+      test.each([
+        ['tags=!deprecated', ['iceberg_enabled', 'admin']],
+        ['tags="!deprecated"', ['iceberg_enabled', 'admin']],
+        ['tags="keep"', ['iceberg_enabled']],
+        ['tags=**', ['iceberg_enabled', 'admin']],
+        ['tags=*', ['iceberg_enabled', 'admin']],
+      ])('include %s indexes %j', (expression, expected) => {
+        const body = '// tag::keep[]\n=== iceberg_enabled\n// end::keep[]\n=== admin\n'
+        const index = buildPageIndex(catalogOf([
+          partial('streaming', 't.adoc', body),
+          pg('streaming', 'pp.adoc', `= P\n\ninclude::reference:partial$t.adoc[${expression}]\n`),
+        ]), 'streaming', PROPS, 'current')
+        expect([...index.keys()].sort()).toEqual([...expected].sort())
+      })
+
+      test('a cross-component include resolves deterministically, not by catalog order', () => {
+        const older = partial('streaming', 'p.adoc', '=== fips_mode\n', '25.3')
+        const newer = partial('streaming', 'p.adoc', '=== only_26\n', '26.2')
+        const cloudPage = pg('cloud-data-platform', 'properties/cluster.adoc',
+          '= C\n\ninclude::streaming:reference:partial$p.adoc[]\n', '')
+        const build = (files) => [...buildPageIndex(catalogOf(files, CLOUD), 'cloud-data-platform', PROPS, '').keys()]
+        expect(build([older, newer, cloudPage])).toEqual(build([newer, older, cloudPage]))
+      })
     })
   })
 

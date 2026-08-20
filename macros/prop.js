@@ -99,6 +99,8 @@ const $propertyPageIndex = Symbol('$propertyPageIndex')
 const HEADING_RX = /^=+\s+(\S+)\s*$/
 const TAG_MARKER_RX = /^\/\/\s*(tag|end)::([\w-]+)\[\]\s*$/
 const INCLUDE_RX = /^include::([^[]+)\[([^\]]*)\]/
+// Delimited block fences: listing, literal, example, sidebar, quote, comment.
+const DELIMITER_RX = /^(-{4,}|\.{4,}|={4,}|\*{4,}|_{4,}|\/{4,})$/
 
 /**
  * Extract property-style headings from AsciiDoc source together with the
@@ -137,7 +139,19 @@ function extractHeadingsWithTags (source) {
  */
 function evaluateTagExpression (headingTags, expression) {
   if (!expression) return true
-  const items = expression.split(/[;,]/).map((item) => item.trim()).filter(Boolean)
+  // Asciidoctor accepts a quoted value, which is its documented way to write a
+  // comma-separated list. Keeping the quotes made the first item look like a
+  // positive tag named '"!deprecated', which matches nothing, so the page
+  // indexed zero properties and every link on it silently disappeared.
+  const unquoted = expression.trim().replace(/^(['"])([\s\S]*)\1$/, '$2')
+  const items = unquoted.split(/[;,]/).map((item) => item.trim()).filter(Boolean)
+  // '*' selects all tagged regions, '**' all content. Both mean "do not filter
+  // on positive tags"; negations still apply.
+  const wildcards = items.filter((item) => item === '*' || item === '**')
+  if (wildcards.length) {
+    const negated = items.filter((item) => item.startsWith('!')).map((item) => item.slice(1))
+    return !negated.some((tag) => headingTags.includes(tag))
+  }
   const positives = items.filter((item) => !item.startsWith('!'))
   const negatives = items.filter((item) => item.startsWith('!')).map((item) => item.slice(1))
   if (negatives.some((tag) => headingTags.includes(tag))) return false
@@ -177,8 +191,12 @@ function buildPageIndex (contentCatalog, component, properties, version) {
   if (cache[cacheKey]) return cache[cacheKey]
   const index = new Map()
   const partialHeadings = new Map()
+  // Antora replaces contents with converted HTML as it goes, but backs the
+  // AsciiDoc up at src.contents first, so prefer that: it makes an index built
+  // mid-conversion correct instead of merely reporting that it might be wrong.
+  const sourceOf = (file) => ((file.src && file.src.contents) || file.contents || '').toString()
   const headingsFor = (file) => {
-    if (!partialHeadings.has(file)) partialHeadings.set(file, extractHeadingsWithTags(file.contents.toString()))
+    if (!partialHeadings.has(file)) partialHeadings.set(file, extractHeadingsWithTags(sourceOf(file)))
     return partialHeadings.get(file)
   }
   // Restrict the index to the page's own component version, so a page on an
@@ -190,17 +208,39 @@ function buildPageIndex (contentCatalog, component, properties, version) {
   // an index built lazily mid-conversion can miss includes on pages that
   // already converted. The property-page-index extension warms this cache
   // before conversion starts; warn when that safety net is absent.
-  if (pages.some((candidate) => candidate.contents.toString('utf8', 0, 200).trimStart().startsWith('<'))) {
+  // Converted HTML starts with a tag. AsciiDoc that starts with '<<<' (a page
+  // break) or '<<anchor>>' also starts with '<', and tripping on those told the
+  // maintainer to register an extension that was often already running.
+  const looksConverted = (candidate) => {
+    if (candidate.src && candidate.src.contents) return false
+    const head = candidate.contents.toString('utf8', 0, 200).trimStart()
+    return head.startsWith('<') && !head.startsWith('<<') && /^<[a-zA-Z!/]/.test(head)
+  }
+  if (pages.some(looksConverted)) {
     console.warn(chalk.yellow(`prop macro: building the property page index for ${component}@${version || 'any'} after conversion started; some pages are already HTML and their properties may not be indexed. Register '@redpanda-data/docs-extensions-and-macros/extensions/property-page-index' under antora.extensions to build the index up front.`))
   }
   for (const page of pages) {
-    const source = page.contents.toString()
+    const source = sourceOf(page)
     const pagePath = page.src.relative.replace(/\.adoc$/, '')
     const pageUrl = (page.pub && page.pub.url) || undefined
+    let inDelimitedBlock = false
     for (const line of source.split('\n')) {
+      // A property name inside a listing, literal, or comment block is sample
+      // text, not documentation of that property. Indexing it handed the
+      // property to a page that renders no anchor for it.
+      if (DELIMITER_RX.test(line.trim())) {
+        inDelimitedBlock = !inDelimitedBlock
+        continue
+      }
+      if (inDelimitedBlock) continue
       const heading = line.match(HEADING_RX)
       if (heading && Object.prototype.hasOwnProperty.call(properties, heading[1])) {
-        index.set(heading[1], { page: pagePath, url: pageUrl })
+        // First writer wins, as for partial-derived entries. Setting
+        // unconditionally let any reference page whose title happens to be a
+        // property name -- 'admin', 'rack' -- steal it from the reference page
+        // that documents it, and a doctitle produces no anchor at all, so both
+        // the link and the tooltip URL pointed at nothing.
+        if (!index.has(heading[1])) index.set(heading[1], { page: pagePath, url: pageUrl })
         continue
       }
       const include = line.match(INCLUDE_RX)
@@ -213,7 +253,21 @@ function buildPageIndex (contentCatalog, component, properties, version) {
       const matching = partials.filter((candidate) => candidate.src.relative === partialRef.relative)
       // Same-component includes resolve within the page's version; for
       // cross-component includes take whichever version the catalog has.
-      const partial = matching.find((candidate) => candidate.src.version === page.src.version) || matching[0]
+      // Resolve the partial the way Antora does. A same-component include is
+      // pinned to the including page's version, so falling back to another
+      // version's copy indexed foreign-release content against this page. A
+      // version-less cross-component include resolves to that component's
+      // latest version, not to whichever copy the catalog yielded first.
+      let partial
+      if (partialRef.component === page.src.component) {
+        partial = matching.find((candidate) => candidate.src.version === page.src.version)
+      } else {
+        const lender = typeof contentCatalog.getComponent === 'function' &&
+          contentCatalog.getComponent(partialRef.component)
+        const latest = lender && lender.latest && lender.latest.version
+        partial = matching.find((candidate) => candidate.src.version === latest) ||
+          [...matching].sort((a, b) => String(b.src.version).localeCompare(String(a.src.version)))[0]
+      }
       if (!partial) continue
       for (const entry of headingsFor(partial)) {
         if (!Object.prototype.hasOwnProperty.call(properties, entry.name)) continue
@@ -309,6 +363,21 @@ function releaseSeries (value) {
 }
 
 /**
+ * Whether an Antora attribute counts as declared.
+ *
+ * Antora keeps a component version's antora.yml attributes verbatim, and
+ * setting one to false is how a maintainer turns it off: the key stays present.
+ * A bare `!== undefined` test therefore reads `env-cloud: false` as "this is
+ * Cloud", the opposite of what was written. Sibling readers of this attribute
+ * in this repo use truthiness, so match them, while still honouring AsciiDoc's
+ * set-but-empty convention.
+ */
+function isAttributeSet (value) {
+  if (value === undefined || value === null || value === false) return false
+  return String(value).toLowerCase() !== 'false'
+}
+
+/**
  * The asciidoc attributes declared for one component version, which is where
  * env-cloud lives. Read from the catalog rather than the converting document
  * so the property-page-index extension resolves surfaces identically.
@@ -336,8 +405,20 @@ function propertyDatasets (contentCatalog) {
   return found
 }
 
+/**
+ * The newest dataset in a list, with ties broken on a stable identity rather
+ * than on catalog iteration order: two attachments can carry the same tag, and
+ * picking whichever the catalog happened to yield first made the chosen
+ * property data differ between builds of identical content.
+ */
 const newestDataset = (list) =>
-  list.reduce((best, entry) => (!best || compareTags(entry.tag, best.tag) > 0 ? entry : best), null)
+  list.reduce((best, entry) => {
+    if (!best) return entry
+    const byTag = compareTags(entry.tag, best.tag)
+    if (byTag > 0) return entry
+    if (byTag < 0) return best
+    return stableKey(entry) < stableKey(best) ? entry : best
+  }, null)
 
 /**
  * Load and cache the property data for one page's component and version, plus
@@ -384,7 +465,37 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
   let pick
   let surface
 
-  if (own.length) {
+  // Cloud is decided first, and deliberately outranks the component's own
+  // attachments. The property extractor writes
+  // modules/reference/attachments/redpanda-properties-<tag>.json into whatever
+  // repo it runs in, so running it inside cloud-docs would otherwise flip that
+  // component to the unfiltered surface and switch off cloud_supported gating
+  // site-wide, with no warning anywhere.
+  if (isAttributeSet(componentAttributes(contentCatalog, pageComponent, pageVersion)['env-cloud'])) {
+    surface = SURFACE_CLOUD
+    // GA only: Cloud runs released Redpanda, so an RC published on the beta
+    // branch must not become the dataset Cloud pages validate against.
+    // Only streaming/ROOT count as lenders -- another component's product
+    // version is not a Redpanda release candidate.
+    const lenders = datasets.filter((d) => d.component === 'streaming' || d.component === 'ROOT')
+    const released = lenders.filter((d) => !isPrerelease(d.tag))
+    pick =
+      newestDataset(released.filter((d) => d.component === 'streaming')) ||
+      newestDataset(released.filter((d) => d.component === 'ROOT'))
+    if (!pick && lenders.length) {
+      // Self-managed data exists but all of it is a prerelease. Say that
+      // specifically rather than claiming no property data was found.
+      const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
+      gaps[cacheKey] = {
+        kind: 'cloud-prerelease-only',
+        component: pageComponent,
+        version: pageVersion,
+        have: [...new Set(lenders.map((d) => d.tag))].sort(compareTags),
+      }
+      cache[cacheKey] = null
+      return undefined
+    }
+  } else if (own.length) {
     surface = SURFACE_ALL
     const series = releaseSeries(pageVersion)
     if (series) {
@@ -409,42 +520,72 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
     } else {
       pick = newestDataset(own.filter((d) => d.version === pageVersion)) || newestDataset(own)
     }
-  } else if (componentAttributes(contentCatalog, pageComponent, pageVersion)['env-cloud'] !== undefined) {
-    // Cloud is managed streaming: newest self-managed data, cloud slice only.
-    // GA only -- Cloud runs released Redpanda, so an RC published on the beta
-    // branch must not become the dataset Cloud pages validate against. Without
-    // this, a v26.3.1-rc1 attachment outranks the GA v26.2.1 and every Cloud
-    // page starts checking against an unreleased property list.
-    surface = SURFACE_CLOUD
-    const released = datasets.filter((d) => !isPrerelease(d.tag))
-    pick =
-      newestDataset(released.filter((d) => d.component === 'streaming')) ||
-      newestDataset(released.filter((d) => d.component === 'ROOT'))
-    if (!pick && datasets.some((d) => isPrerelease(d.tag))) {
-      // Prerelease data exists but no GA. Say that specifically rather than
-      // claiming no property data was found at all.
-      const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
-      gaps[cacheKey] = {
-        kind: 'cloud-prerelease-only',
-        component: pageComponent,
-        version: pageVersion,
-        have: [...new Set(datasets.map((d) => d.tag))].sort(compareTags),
-      }
-      cache[cacheKey] = null
-      return undefined
-    }
   }
 
+  // A corrupt or half-written attachment must not take the whole build down,
+  // and must not mask a good file: try candidates newest-first and use the
+  // first one that actually carries properties, reporting each one skipped.
   let registry = null
-  if (pick) {
-    const data = JSON.parse(pick.file.contents.toString())
-    if (data && data.properties) {
-      registry = { tag: pick.tag, properties: data.properties, component: pick.component, version: pick.version, surface }
-    }
+  for (const candidate of orderedCandidates(pick, own, datasets, surface)) {
+    const properties = readProperties(candidate, contentCatalog)
+    if (!properties) continue
+    registry = { tag: candidate.tag, properties, component: candidate.component, version: candidate.version, surface }
+    break
   }
   // Cache null too, so a missing dataset is only searched for once per build.
   cache[cacheKey] = registry
   return registry || undefined
+}
+
+/**
+ * The chosen dataset first, then the remaining candidates from the same pool in
+ * descending release order, so an unusable file falls through to the next best
+ * rather than voiding the component's data entirely.
+ */
+function orderedCandidates (pick, own, datasets, surface) {
+  if (!pick) return []
+  const pool = surface === SURFACE_CLOUD
+    ? datasets.filter((d) => (d.component === 'streaming' || d.component === 'ROOT') && !isPrerelease(d.tag))
+    : own
+  const rest = pool
+    .filter((d) => d !== pick)
+    .sort((a, b) => compareTags(b.tag, a.tag) || stableKey(a).localeCompare(stableKey(b)))
+  return [pick, ...rest]
+}
+
+/**
+ * Parse one properties attachment, or report why it is unusable and return
+ * undefined. A JSON syntax error used to escape as an unhandled exception that
+ * named no file, so a single bad attachment failed the build with no way to tell
+ * which of them was at fault.
+ */
+function readProperties (candidate, contentCatalog) {
+  const where = `${candidate.component}@${candidate.version || 'unversioned'}`
+  let data
+  try {
+    data = JSON.parse(candidate.file.contents.toString())
+  } catch (error) {
+    warnOnce(contentCatalog, `badjson:${where}:${candidate.tag}`,
+      `prop macro: redpanda-properties-${candidate.tag}.json in ${where} is not valid JSON (${error.message}), so it is ignored. Regenerate it with 'npx doc-tools generate property-docs'.`)
+    return undefined
+  }
+  const properties = data && data.properties
+  // Must be a plain object of name -> entry. A string, number, or array parses
+  // fine and would then make every prop: target look like a typo.
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
+    warnOnce(contentCatalog, `noprops:${where}:${candidate.tag}`,
+      `prop macro: redpanda-properties-${candidate.tag}.json in ${where} has no usable 'properties' object, so it is ignored. Regenerate it with 'npx doc-tools generate property-docs'.`)
+    return undefined
+  }
+  return properties
+}
+
+/**
+ * A stable identity for an attachment, so two files carrying the same tag are
+ * resolved the same way on every build instead of by catalog iteration order.
+ */
+function stableKey (candidate) {
+  return `${candidate.component}\u0000${candidate.version}\u0000${candidate.file.src.relative}`
 }
 
 /**
@@ -578,11 +719,23 @@ function buildPropContent ({ name, text, link, page, scope, role, helmPath = fal
   const inner = link && page
     ? `xref:reference:${page}.adoc#${propertyAnchor(name)}[${display}]`
     : display
-  // The published URL of the page that documents this property, discovered
-  // at build time. The docs UI prefers it for the tooltip's documentation
-  // link -- the client cannot know which page a property landed on.
-  const docAttr = docUrl ? ` data-doc-url="${docUrl}"` : ''
-  return `<code class="${role}" data-property-name="${name}"${docAttr}>${inner}</code>`
+  // Escape every interpolated attribute value. role comes from a site
+  // attribute, docUrl from a page's published URL, and name from a dataset
+  // key: an unescaped quote in any of them ends the attribute early and the
+  // remainder becomes stray attributes on every marked property in the build.
+  const docAttr = docUrl ? ` data-doc-url="${escapeAttribute(docUrl)}"` : ''
+  return `<code class="${escapeAttribute(role)}" data-property-name="${escapeAttribute(name)}"${docAttr}>${inner}</code>`
+}
+
+/**
+ * Escape a value for use inside a double-quoted HTML attribute.
+ */
+function escapeAttribute (value) {
+  return String(value === undefined || value === null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
 }
 
 function propInlineMacro (config) {
@@ -602,26 +755,39 @@ function propInlineMacro (config) {
       // code: no marker, so the docs UI adds no tooltip. A tooltip the build
       // could not check is worse than none, and a marker with nothing behind it
       // would leave the UI guessing at a documentation link.
+      // No Helm path here, deliberately: helmValuesPath needs the property's
+      // config_scope to choose between config.node.* and config.cluster.*, and
+      // on this path there is no verified entry to take it from. Emitting one
+      // anyway printed a confident, copy-pasteable values.yaml path -- and the
+      // wrong one for every broker property -- for a property the build could
+      // not verify. Show the name instead.
+      //
+      // No macro substitution either: the content is a hand-built tag pair, so
+      // a text= value containing xref:/image:/pass:[] would otherwise be
+      // expanded inside it and could close or nest past the </code>.
       const plain = () => self.createInline(parent, 'quoted', buildPropContent({
         name,
         text: attributes.text,
         role: document.getAttribute('property-ref-role', DEFAULT_ROLE),
-        helmPath: helmPathRequested(attributes, document),
         plain: true,
-      }), { attributes: { subs: 'macros' } })
+      }))
 
       const registry = config && config.contentCatalog ? loadProperties(config) : undefined
       if (!registry) {
         // No dataset covers this component. Say so once and render plain.
         if (mode !== 'off' && config && config.contentCatalog) {
           if (!warnSeriesMissing(config.contentCatalog, component, version)) {
-            warnNoPropertyData(config.contentCatalog, component, version, filePath)
+            warnNoPropertyData(config.contentCatalog, component, version)
           }
         }
         return plain()
       }
 
-      const entry = registry.properties[name]
+      // Own properties only: a bare index lookup makes toString, constructor
+      // and valueOf validate as real properties and render marked.
+      const entry = Object.prototype.hasOwnProperty.call(registry.properties, name)
+        ? registry.properties[name]
+        : undefined
       if (!entry) {
         reportUnknownProperty({ name, mode, registry, filePath })
         return plain()
@@ -658,9 +824,12 @@ function propInlineMacro (config) {
         helmPath: helmPathRequested(attributes, document),
         docUrl: discoveredUrl ? `${discoveredUrl}#${propertyAnchor(name)}` : undefined,
       })
-      // The xref inside the code element is resolved by the 'macros'
-      // substitution, the same mechanism the enterprise macro relies on.
-      return self.createInline(parent, 'quoted', content, { attributes: { subs: 'macros' } })
+      // Only request macro substitution when an xref actually needs resolving.
+      // Applying it unconditionally let a text= value containing another macro
+      // expand inside the hand-built <code> element, producing mis-nested or
+      // unclosed markup.
+      const options = linkRequested && discoveredPage ? { attributes: { subs: 'macros' } } : {}
+      return self.createInline(parent, 'quoted', content, options)
     })
   }
 }

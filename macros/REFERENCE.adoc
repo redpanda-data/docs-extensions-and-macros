@@ -136,7 +136,7 @@ A prerelease page is one whose component version sets `prerelease` in `antora.ym
 
 `beta: true` predates this field and still means `status: beta`, so old entries keep working. Prefer `status` in new entries, because a boolean cannot express "not public at all". An unrecognized `status` value is reported rather than silently treated as shipped. Use `status-tooltip` to override the `unreleased` badge's hover text.
 
-For the writer-facing procedure, see link:DOCUMENTING_UNRELEASED_FEATURES.adoc[Documenting properties and enterprise features before they ship].
+For the writer-facing procedure, see https://github.com/redpanda-data/cupboard/blob/main/sales/customer-success/2026-08-20-documenting-unreleased-features.md[Documenting properties and enterprise features before they ship^].
 
 [[beta-features]]
 === Beta features

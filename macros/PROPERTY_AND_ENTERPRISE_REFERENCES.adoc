@@ -57,7 +57,7 @@ Redpanda cuts release candidates before every release, and the docs track them o
 
 Both macros enforce that from data rather than from reviewer memory. A property validates against its own release series, so an RC-only property works on the beta branch and fails on a released one. An enterprise feature carries `status: unreleased` or `status: beta` in the registry, and an unreleased feature referenced from released docs renders as plain text with a warning, and is omitted from licensing tables there. Cloud always uses GA property data and ignores release candidates entirely, because Cloud runs released Redpanda.
 
-The writer-facing procedure, including how to generate property data from an RC tag, is in link:DOCUMENTING_UNRELEASED_FEATURES.adoc[Documenting properties and enterprise features before they ship].
+The writer-facing procedure, including how to generate property data from an RC tag, is in https://github.com/redpanda-data/cupboard/blob/main/sales/customer-success/2026-08-20-documenting-unreleased-features.md[Documenting properties and enterprise features before they ship^].
 
 === What happened to config_ref
 

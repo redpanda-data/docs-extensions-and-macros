@@ -58,6 +58,19 @@ const chalk = require('chalk')
 const { buildBadgeHtml } = require('./badge')
 
 const $enterpriseRegistry = Symbol('$enterpriseRegistry')
+const $warned = Symbol('$warned')
+
+/**
+ * Report a message once per build. Keyed off the content catalog, which Antora
+ * rebuilds per build, so watch mode keeps reporting instead of going quiet.
+ */
+function warnOnce (contentCatalog, key, message) {
+  const seen = contentCatalog[$warned] || (contentCatalog[$warned] = new Set())
+  if (seen.has(key)) return false
+  seen.add(key)
+  console.warn(chalk.yellow(message))
+  return true
+}
 
 const DEFAULT_LICENSING_PAGE = 'get-started:licensing/overview.adoc'
 const DEFAULT_ROLE = 'enterprise-feature'
@@ -99,10 +112,17 @@ function entryStatus (entry, report) {
     if (VALID_STATUSES.includes(status)) return status
     if (report && report.mode !== 'off') {
       const where = report.filePath ? ` in ${report.filePath}` : ''
-      console.warn(chalk.yellow(
+      const message =
         `enterprise:${entry.name}[]${where}: registry status '${entry.status}' is not one of ${VALID_STATUSES.join(', ')}, so the feature is treated as released. ` +
         'Fix the status in enterprise-features.yml.'
-      ))
+      // Honour error mode like every other registry diagnostic. A typo here is
+      // exactly what publishes an unreleased feature, so the strictest setting
+      // has to stop it.
+      if (report.mode === 'error') throw new Error(message)
+      // One registry typo needs one fix, so report it once per build rather
+      // than once per mention of the feature.
+      if (report.contentCatalog) warnOnce(report.contentCatalog, `status:${entry.name}`, message)
+      else console.warn(chalk.yellow(message))
     }
     return STATUS_GA
   }
@@ -119,13 +139,24 @@ function entryStatus (entry, report) {
  */
 function isPrereleasePage (config, document) {
   const attribute = document && document.getAttribute('page-component-version-is-prerelease')
-  if (attribute !== undefined) return String(attribute) === 'true'
+  if (attribute !== undefined) {
+    const value = String(attribute).trim().toLowerCase()
+    if (value === 'true' || value === '') return true
+    if (value === 'false') return false
+    // Anything else is a typo. Falling through to the catalog is safer than
+    // guessing, and silently treating it as "released" produced a warning that
+    // told the writer their prerelease page belonged to a released version.
+    console.warn(chalk.yellow(
+      `enterprise macro: page-component-version-is-prerelease is '${attribute}', which is neither true nor false, so it is ignored and the component version's own prerelease flag is used instead.`
+    ))
+  }
   const contentCatalog = config && config.contentCatalog
   const src = config && config.file && config.file.src
   if (!contentCatalog || !src || typeof contentCatalog.getComponent !== 'function') return false
   const component = contentCatalog.getComponent(src.component)
   if (!component) return false
-  const componentVersion = (component.versions || []).find((entry) => entry.version === src.version)
+  const versions = Array.isArray(component.versions) ? component.versions : []
+  const componentVersion = versions.find((entry) => entry.version === src.version)
   return Boolean(componentVersion && componentVersion.prerelease)
 }
 
@@ -247,17 +278,33 @@ function loadRegistry (config) {
   const partials = contentCatalog.findBy({ component: 'shared', module: 'ROOT', family: 'partial' }) || []
   const registryFile = partials.find((file) => file.path && file.path.endsWith(REGISTRY_FILENAME))
   if (registryFile) {
-    registry = parseRegistry(registryFile.contents.toString(), registryFile.path)
+    try {
+      registry = parseRegistry(registryFile.contents.toString(), registryFile.path)
+    } catch (error) {
+      // A malformed registry must not take the whole build down. Unvalidated
+      // enterprise mentions are the same graceful degradation as no registry at
+      // all, and this matches how prop.js treats a corrupt properties JSON.
+      // Caching the failure also stops the error being re-raised per macro call
+      // and attributed to whichever page happened to convert first.
+      registry = null
+      warnOnce(contentCatalog, 'badregistry',
+        `Enterprise features registry ${registryFile.path} could not be read (${error.message}); enterprise: targets are not validated.`)
+    }
   }
   // Cache null too, so a missing registry is only searched for once per build.
   contentCatalog[$enterpriseRegistry] = registry
   return registry || undefined
 }
 
-function warnNoRegistry () {
+function warnNoRegistry (contentCatalog) {
+  const message = "Enterprise features registry (enterprise-features.yml in the 'shared' component) not found; enterprise: targets are not validated."
+  // Deduplicate per build, not per process: Antora's watch mode reuses one
+  // process across builds, and a module-level guard reported this only on a
+  // session's first build -- exactly when a writer is iterating.
+  if (contentCatalog) return warnOnce(contentCatalog, 'noregistry', message)
   if (warnedNoRegistry) return
   warnedNoRegistry = true
-  console.warn(chalk.yellow(`Enterprise features registry (${REGISTRY_FILENAME} in the shared component) not found; enterprise: targets are not validated.`))
+  console.warn(chalk.yellow(message))
 }
 
 /**
@@ -355,9 +402,13 @@ function buildFeatureTable (features, scope, opts = {}) {
   // table is a list of what a licence covers today, and listing something
   // unavailable makes it wrong. Prerelease docs list it with its badge.
   const includeUnreleased = opts.includeUnreleased === true
+  // Report a bad status from here too. Without a reporter a typo'd status was
+  // silently downgraded to released, so an unreleased feature that no page
+  // happens to reference inline was published in the table with no diagnostic.
+  const report = opts.report
   const rows = features
     .filter((feature) => feature.scope === scope)
-    .filter((feature) => includeUnreleased || entryStatus(feature) !== STATUS_UNRELEASED)
+    .filter((feature) => includeUnreleased || entryStatus(feature, report) !== STATUS_UNRELEASED)
     .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }))
   const title = opts.title || TABLE_TITLES[scope]
   const heading = opts.heading || THIRD_COLUMN_HEADINGS[scope] || THIRD_COLUMN_HEADINGS.default
@@ -390,7 +441,7 @@ function enterpriseInlineMacro (config) {
       let registry
       if (config && config.contentCatalog) {
         registry = loadRegistry(config)
-        if (!registry) warnNoRegistry()
+        if (!registry) warnNoRegistry(config && config.contentCatalog)
       }
       let feature = target
       let entry
@@ -409,7 +460,7 @@ function enterpriseInlineMacro (config) {
       }
       const mode = document.getAttribute('enterprise-validate', 'warn')
       const filePath = config && config.file && config.file.src && config.file.src.path
-      const status = entryStatus(entry, { mode, filePath })
+      const status = entryStatus(entry, { mode, filePath, contentCatalog: config && config.contentCatalog })
       if (status === STATUS_UNRELEASED && !isPrereleasePage(config, document)) {
         // Documented for an upcoming release, referenced from released docs.
         // Styling it as an available enterprise feature would promise readers
@@ -454,12 +505,17 @@ function enterpriseFeaturesBlockMacro (config) {
       }
       const registry = config && config.contentCatalog ? loadRegistry(config) : undefined
       if (!registry) {
-        warnNoRegistry()
+        warnNoRegistry(config && config.contentCatalog)
         return self.parseContent(parent, `WARNING: The enterprise features registry is unavailable, so the ${scope} feature table cannot be rendered.`)
       }
       const table = buildFeatureTable(registry.features, scope, {
         title: attributes.title,
         heading: attributes.heading,
+        report: {
+          mode: parent.getDocument().getAttribute('enterprise-validate', 'warn'),
+          filePath: config && config.file && config.file.src && config.file.src.path,
+          contentCatalog: config && config.contentCatalog,
+        },
         // Prerelease docs describe the upcoming release, so they list features
         // that are still only in a release candidate.
         includeUnreleased: isPrereleasePage(config, parent.getDocument()),
