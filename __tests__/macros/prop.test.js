@@ -553,6 +553,41 @@ describe('prop macro', () => {
       expect(html).toContain('>cloud_storage_enabled</code>')
     })
 
+    // Antora yields the string 'false' for `env-kubernetes: false` in
+    // antora.yml, and a bare presence check read that as a Kubernetes page. A
+    // Linux page in a component that explicitly turned the attribute off was
+    // telling readers to set a values.yaml key.
+    test('helm-path=auto renders the plain name when env-kubernetes is explicitly false', () => {
+      for (const value of ['false', 'FALSE']) {
+        const html = convert('prop:fips_mode[helm-path=auto]', {
+          catalog: fakeCatalog(),
+          attributes: { 'env-kubernetes': value },
+        })
+        expect(html).not.toContain('config.node')
+        expect(html).toContain('>fips_mode</code>')
+      }
+    })
+
+    test('helm-path=auto honours a set-but-empty env-kubernetes', () => {
+      const html = convert('prop:fips_mode[helm-path=auto]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-kubernetes': '' },
+      })
+      expect(html).toContain('>config.node.fips_mode</code>')
+    })
+
+    // Topic properties are set per topic through the Kafka API, rpk, or a Topic
+    // resource -- never in values.yaml -- so there is no Helm path to show, and
+    // inventing config.cluster.<name> hands the reader a key that does not exist.
+    test('helm-path=auto renders the plain name for a topic property', () => {
+      const html = convert('prop:redpanda.iceberg.mode[helm-path=auto]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-kubernetes': 'true' },
+      })
+      expect(html).not.toContain('config.cluster')
+      expect(html).toContain('>redpanda.iceberg.mode</code>')
+    })
+
     test('explicit text= wins over the helm path', () => {
       const html = convert('prop:cloud_storage_enabled[helm-path=auto,text=the tiered flag]', {
         catalog: fakeCatalog(),
@@ -946,6 +981,25 @@ describe('prop macro', () => {
         expect(warn).toHaveBeenCalledWith(expect.stringContaining("'admin' is claimed by two declared property sources"))
       })
 
+      // Assert the winner, not just that both orders agree: comparing one code
+      // path against itself passes for any wrong-but-consistent answer, so this
+      // stayed green when a bare page title was made to outrank a real
+      // reference page.
+      // The tags value was captured up to the first comma, which truncated the
+      // quoted form to '"!deprecated' -- matching nothing, so the page indexed
+      // no properties at all and every link on it silently disappeared.
+      test('a quoted comma-separated tag list is honoured, like Asciidoctor honours it', () => {
+        const files = [
+          pg('streaming', 'properties/cluster-properties.adoc',
+            '= Cluster\n\ninclude::reference:partial$c.adoc[tags="!deprecated,!exclude-from-docs"]\n'),
+          partial('streaming', 'c.adoc',
+            '=== iceberg_enabled\n\n// tag::deprecated[]\n=== admin\n\n// end::deprecated[]\n'),
+        ]
+        const index = buildPageIndex(catalogOf(files), 'streaming', PROPS, 'current')
+        expect(index.get('iceberg_enabled').page).toBe('properties/cluster-properties')
+        expect(index.has('admin')).toBe(false)
+      })
+
       test('claim resolution does not depend on catalog order', () => {
         const files = [
           pg('streaming', 'api/admin.adoc', '= admin\n'),
@@ -953,7 +1007,8 @@ describe('prop macro', () => {
           partial('streaming', 'b.adoc', '=== admin\n'),
         ]
         const resolve = (list) => buildPageIndex(catalogOf(list), 'streaming', PROPS, 'current').get('admin').page
-        expect(resolve(files)).toBe(resolve([...files].reverse()))
+        expect(resolve(files)).toBe('properties/broker-properties')
+        expect(resolve([...files].reverse())).toBe('properties/broker-properties')
       })
 
       test('a cross-component include resolves deterministically, not by catalog order', () => {
@@ -962,12 +1017,54 @@ describe('prop macro', () => {
         const cloudPage = pg('cloud-data-platform', 'properties/cluster.adoc',
           '= C\n\ninclude::streaming:reference:partial$p.adoc[]\n', '')
         const build = (files) => [...buildPageIndex(catalogOf(files, CLOUD), 'cloud-data-platform', PROPS, '').keys()]
-        expect(build([older, newer, cloudPage])).toEqual(build([newer, older, cloudPage]))
+        // Name the expected key rather than comparing the two orders to each
+        // other: both orders agreeing on [] passes trivially, which is what
+        // happened when the lender's latest-version lookup was removed.
+        expect(build([older, newer, cloudPage])).toEqual(['only_26'])
+        expect(build([newer, older, cloudPage])).toEqual(['only_26'])
       })
     })
   })
 
+  describe('release-series integrity', () => {
+    // The corrupt-file fallback used to fall back across release series, so a
+    // half-written 25.3 file made a 25.3 page validate silently against 25.2
+    // data -- accepting properties that release does not have, and flagging the
+    // ones it does as typos. Going unvalidated is the documented behaviour.
+    test('a corrupt in-series file does not fall back to another release series', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const files = [
+        propertiesAttachment('streaming', '25.3', 'v25.3.1', '{"properties": {"in_253": {'),
+        propertiesAttachment('streaming', '25.3', 'v25.2.9',
+          JSON.stringify({ properties: { removed_in_253: { config_scope: 'cluster' } } })),
+      ]
+      expect(loadPropertiesFor(catalogOf(files), 'streaming', '25.3')).toBeUndefined()
+      warn.mockRestore()
+    })
+
+    test('a corrupt file still falls back within the same release series', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const files = [
+        propertiesAttachment('streaming', '25.3', 'v25.3.9', '{"properties": {"broken": {'),
+        propertiesAttachment('streaming', '25.3', 'v25.3.1',
+          JSON.stringify({ properties: { in_253: { config_scope: 'cluster' } } })),
+      ]
+      const registry = loadPropertiesFor(catalogOf(files), 'streaming', '25.3')
+      expect(registry.tag).toBe('v25.3.1')
+      warn.mockRestore()
+    })
+  })
+
   describe('extractHeadingsWithTags', () => {
+    // A page title generates no anchor, so treating it as a property heading
+    // produced a link and a tooltip URL pointing at a fragment that is not on
+    // the page.
+    test('a level-0 heading is a page title, not a property heading', () => {
+      expect(extractHeadingsWithTags('= admin\n\ntext\n')).toEqual([])
+      expect(extractHeadingsWithTags('== admin\n')).toEqual([{ name: 'admin', tags: [] }])
+      expect(extractHeadingsWithTags('=== admin\n')).toEqual([{ name: 'admin', tags: [] }])
+    })
+
     test('records the open tags around each heading', () => {
       const headings = extractHeadingsWithTags([
         '=== plain_prop',
@@ -994,6 +1091,12 @@ describe('prop macro', () => {
       [['redpanda-cloud'], 'redpanda-cloud;!deprecated', true],
       [[], 'redpanda-cloud;!deprecated', false],
       [['redpanda-cloud', 'deprecated'], 'redpanda-cloud;!deprecated', false],
+      // A quoted value is AsciiDoc's documented way to write a comma-separated
+      // tag list, and Asciidoctor honours it, so the index has to as well.
+      [['deprecated'], '"!deprecated,!exclude-from-docs"', false],
+      [['exclude-from-docs'], '"!deprecated,!exclude-from-docs"', false],
+      [[], '"!deprecated,!exclude-from-docs"', true],
+      [['category-topic'], '"category-topic,!deprecated"', true],
     ])('tags %j with expression %j -> %s', (tags, expression, expected) => {
       expect(evaluateTagExpression(tags, expression)).toBe(expected)
     })
