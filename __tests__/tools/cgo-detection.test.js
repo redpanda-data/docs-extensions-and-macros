@@ -14,7 +14,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync, spawnSync } = require('child_process');
+const crypto = require('crypto');
+const { execSync, execFileSync, spawnSync } = require('child_process');
 const os = require('os');
 
 // Test configuration
@@ -74,6 +75,80 @@ function getPlatformInfo() {
   };
 }
 
+const SHA256_RE = /^[0-9a-f]{64}$/i;
+
+/**
+ * Fetch a URL, returning both the HTTP status and the body.
+ *
+ * Uses execFileSync with an argument array so no part of the URL is passed
+ * through a shell. Deliberately omits --fail so the status code is available
+ * to the caller: a 404 and a 500 need different handling here.
+ */
+function fetchWithStatus(url) {
+  fs.mkdirSync(TEST_DIR, { recursive: true });
+  const bodyPath = path.join(TEST_DIR, `.fetch-${crypto.randomBytes(6).toString('hex')}`);
+  try {
+    const status = execFileSync(
+      'curl',
+      ['-sSL', '--retry', '3', '--retry-delay', '2', '-w', '%{http_code}', '-o', bodyPath, url],
+      { stdio: ['pipe', 'pipe', 'pipe'] }
+    ).toString().trim();
+    const body = fs.existsSync(bodyPath) ? fs.readFileSync(bodyPath, 'utf8') : '';
+    return { status: Number(status), body };
+  } finally {
+    if (fs.existsSync(bodyPath)) fs.unlinkSync(bodyPath);
+  }
+}
+
+/**
+ * Verify a downloaded asset against the .sha256 published beside it.
+ *
+ * Catches a truncated or substituted download before tar reports it as a
+ * generic archive error. Hashing in node keeps this working on both Linux
+ * (sha256sum) and macOS (shasum), which have different CLIs.
+ *
+ * Only a 404 counts as "no checksum published" and skips verification. Any
+ * other outcome -- a 5xx, a transport error, an empty body, a body that isn't
+ * a SHA-256 -- fails loudly. Silently skipping on those would reintroduce the
+ * exact problem this hardening exists to prevent: a verification step that
+ * quietly does nothing and reports success.
+ */
+function verifyChecksum(filePath, sha256Url, assetName) {
+  let result;
+  try {
+    result = fetchWithStatus(sha256Url);
+  } catch (err) {
+    throw new Error(`could not retrieve checksum for ${assetName}: ${err.message}`);
+  }
+
+  if (result.status === 404) {
+    log(`  No checksum published for ${assetName} (HTTP 404), skipping verification`);
+    return;
+  }
+  if (result.status !== 200) {
+    throw new Error(`could not retrieve checksum for ${assetName}: HTTP ${result.status}`);
+  }
+
+  // Format is "<hash>  <filename>"; take the first token.
+  const expected = result.body.trim().split(/\s+/)[0];
+  if (!SHA256_RE.test(expected || '')) {
+    throw new Error(
+      `checksum for ${assetName} is not a SHA-256 value: ${JSON.stringify((expected || '').slice(0, 80))}`
+    );
+  }
+
+  const actual = crypto
+    .createHash('sha256')
+    .update(fs.readFileSync(filePath))
+    .digest('hex');
+
+  if (expected.toLowerCase() !== actual.toLowerCase()) {
+    throw new Error(
+      `checksum mismatch for ${assetName}\n  expected: ${expected}\n  actual:   ${actual}`
+    );
+  }
+}
+
 function downloadBinary(version, type) {
   const platform = getPlatformInfo();
   const binaryName = type === 'cgo' ? 'redpanda-connect-cgo' : 'redpanda-connect-cloud';
@@ -85,8 +160,21 @@ function downloadBinary(version, type) {
   const tarPath = path.join(TEST_DIR, `${type}.tar.gz`);
 
   try {
-    execSync(`curl -sL "${url}" -o "${tarPath}"`, { stdio: 'pipe' });
-    execSync(`tar -xzf "${tarPath}" -C "${TEST_DIR}"`, { stdio: 'pipe' });
+    // --fail matters: without it curl exits 0 on an HTTP error, writes the
+    // error body into the .tar.gz, and the failure surfaces from tar as
+    // "gzip: stdin: not in gzip format" -- which reads like a corrupt archive
+    // rather than a 404 or a rate limit. --retry covers the transient statuses
+    // (429, 5xx) that GitHub returns when throttling release downloads.
+    // execFileSync keeps the URL and paths out of a shell.
+    execFileSync(
+      'curl',
+      ['-sSL', '--fail', '--retry', '3', '--retry-delay', '2', url, '-o', tarPath],
+      { stdio: 'pipe' }
+    );
+
+    verifyChecksum(tarPath, `${url}.sha256`, assetName);
+
+    execFileSync('tar', ['-xzf', tarPath, '-C', TEST_DIR], { stdio: 'pipe' });
 
     // Find extracted binary
     const files = fs.readdirSync(TEST_DIR);

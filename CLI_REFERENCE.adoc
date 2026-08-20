@@ -1324,7 +1324,7 @@ Checks the enterprise features registry (the shared component's enterprise-featu
 
 *Why use it:*
 
-A feature must only be documented as enterprise under its approved external name. This check catches new license-gated features in core that have no registry entry yet, registry pointers that no longer match core, and stale connect enterprise lists.
+A feature must only be documented as enterprise under its approved external name. This check catches new license-gated features in core that have no registry entry yet, registry pointers that no longer match core, and registry connect-plugin entries that no longer match info.csv.
 
 *Usage:*
 
@@ -1342,7 +1342,7 @@ Local path to enterprise-features.yml (default: fetch from docs repo main)
 Redpanda git ref for the core headers (default: "dev")
 
 `--connect-ref <ref>`::
-Connect git ref for info.csv (default: "main")
+Connect git ref for info.csv ('latest' resolves the newest release tag; the registry documents released state) (default: "latest")
 
 `--docs-ref <ref>`::
 Docs repo git ref for remote fetches (default: "main")
@@ -1350,14 +1350,11 @@ Docs repo git ref for remote fetches (default: "main")
 `--disable-page <path>`::
 Local path to disable-enterprise-features.adoc (default: fetch from docs repo)
 
-`--antora <path>`::
-Local path to rp-connect-docs antora.yml (default: fetch from rp-connect-docs main)
-
 `--properties <path>`::
 Local path to a generated cluster-properties JSON; enables existence checks for gating properties
 
 `--skip-connect`::
-Skip the connect info.csv comparison
+Skip the connect check (info.csv is not fetched, so registry connect-plugin entries go unverified)
 
 `--format <format>`::
 Output format: text or json (default: "text")

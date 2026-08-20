@@ -5,7 +5,6 @@ const {
   parseEnterpriseProperties,
   parseConnectEnterprisePlugins,
   parseDisableTable,
-  extractAntoraEnterpriseComponents,
 } = require('../../../tools/enterprise-features/parsers')
 
 const {
@@ -130,11 +129,6 @@ describe('enterprise-features parsers', () => {
       { feature: 'Tiered Storage', properties: ['cloud_storage_enabled'] },
     ])
   })
-
-  test('extractAntoraEnterpriseComponents reads the attribute list', () => {
-    expect(extractAntoraEnterpriseComponents({ asciidoc: { attributes: { 'enterprise-components': ['a', 'b'] } } })).toEqual(['a', 'b'])
-    expect(extractAntoraEnterpriseComponents({})).toBeUndefined()
-  })
 })
 
 describe('enterprise-features checks', () => {
@@ -208,11 +202,35 @@ features:
     expect(findings).toEqual([])
   })
 
-  test('checkConnect reports contradictions in both directions', () => {
-    const findings = checkConnect(['iceberg', 'gateway'], ['iceberg', 'openai_chat_completion'])
-    const messages = findings.map((f) => f.message).join('\n')
-    expect(messages).toMatch(/'gateway' is enterprise in info.csv but missing/)
-    expect(messages).toMatch(/'openai_chat_completion' is in the enterprise-components list .* but not enterprise in info.csv/)
+  test('checkConnect flags registry connect-plugin pointers missing from info.csv', () => {
+    const features = [
+      { name: 'Iceberg output', source: { kind: 'connect-plugin', value: 'iceberg' } },
+      { name: 'Ghost plugin', source: { kind: 'connect-plugin', value: 'openai_chat_completion' } },
+      { name: 'Enterprise connectors', source: { kind: 'manual', value: 'Aggregate entry.' } },
+    ]
+    const findings = checkConnect(['iceberg', 'gateway'], features)
+    const errors = findings.filter((f) => f.level === 'error')
+    expect(errors).toHaveLength(1)
+    expect(errors[0].message).toMatch(/'Ghost plugin' points at connect plugin 'openai_chat_completion', which is not an enterprise plugin in info.csv/)
+  })
+
+  test('checkConnect reports what it verified instead of passing silently', () => {
+    const findings = checkConnect(['iceberg', 'gateway'], [
+      { name: 'Iceberg output', source: { kind: 'connect-plugin', value: 'iceberg' } },
+    ])
+    const info = findings.filter((f) => f.level === 'info')
+    expect(info).toHaveLength(1)
+    expect(info[0].message).toMatch(/info\.csv lists 2 enterprise plugin\(s\); 1 pinned by registry connect-plugin entries/)
+    expect(findings.filter((f) => f.level === 'error')).toHaveLength(0)
+  })
+
+  test('checkConnect with no connect-plugin entries is a visible shallow pass, not silence', () => {
+    const findings = checkConnect(['iceberg'], [
+      { name: 'Enterprise connectors', source: { kind: 'manual', value: 'Aggregate entry.' } },
+    ])
+    expect(findings).toHaveLength(1)
+    expect(findings[0].level).toBe('info')
+    expect(findings[0].message).toMatch(/0 pinned by registry connect-plugin entries/)
   })
 
   test('buildMappingPartial renders one row per enum value with all mapped features', () => {
