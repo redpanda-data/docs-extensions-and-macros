@@ -30,10 +30,12 @@
  *   had and flag removed ones as typos.
  *
  *   Cloud is managed streaming, so it has no property data of its own and
- *   always tracks the newest streaming file. Only the properties whose
- *   cloud_supported field is true are available; the rest exist in Redpanda
- *   but cannot be set by a Cloud reader. A Cloud component is recognized by
- *   its env-cloud attribute.
+ *   always tracks the newest streaming file. A cluster property is available
+ *   only when its cloud_supported field is not false; topic and broker
+ *   properties are always available, because the Cloud control plane config
+ *   that flag derives from describes cluster configuration only and has no
+ *   opinion on the other scopes. A Cloud component is recognized by its
+ *   env-cloud attribute.
  *
  * Any other component (connect, the agentic data plane, a preview site) has
  * no property data, and none is inferred for it: the macro warns once and
@@ -655,20 +657,27 @@ function stableKey (candidate) {
 
 /**
  * Whether a property is available to the audience this dataset was loaded for.
- * On Cloud only cloud_supported properties are; a Cloud reader cannot set the
- * rest, even though Redpanda has them.
+ *
+ * On Cloud the answer comes from cloud_supported, but only where that field
+ * means anything. It is derived from the Cloud control plane's install pack,
+ * whose two sections describe CLUSTER configuration and contain no topic or
+ * broker property at all -- so for those scopes a false value asserted
+ * something its source cannot know. Cloud users set topic properties routinely
+ * through the Kafka API and Console, a surface the control plane does not gate,
+ * and Cloud publishes a topic properties reference of its own.
+ *
+ * So: gate only when the flag is explicitly false AND the property is cluster
+ * scoped. Anything else counts as available, because nothing authoritative says
+ * otherwise. The extractor no longer writes the field for other scopes, and
+ * this also keeps already-published datasets correct, which assert false on
+ * every topic and broker property.
  */
 function isAvailable (registry, entry) {
   if (registry.surface !== SURFACE_CLOUD) return true
-  return entry.cloud_supported === true
+  if (entry.config_scope !== 'cluster') return true
+  return entry.cloud_supported !== false
 }
 
-/**
- * Report a recorded dataset gap. Either this component's release series has no
- * property file, or Cloud found only prerelease files. Both leave the page
- * unvalidated, and each has its own fix worth naming. Returns whether a gap was
- * found and reported.
- */
 function warnSeriesMissing (contentCatalog, pageComponent, pageVersion) {
   const gaps = contentCatalog[$propertySeriesGap]
   const gap = gaps && gaps[`${pageComponent}@${pageVersion}`]

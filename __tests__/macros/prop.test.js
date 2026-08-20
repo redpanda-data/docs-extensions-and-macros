@@ -458,12 +458,35 @@ describe('prop macro', () => {
       expect(html).toContain('data-property-name="iceberg_enabled"')
     })
 
-    test('a property Cloud does not support renders plain and warns', () => {
+    test('a cluster property Cloud does not support renders plain and warns', () => {
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const html = convert('prop:fips_mode[]', { catalog: cloudCatalog(), component: 'cloud-data-platform', version: '' })
-      expect(html).toContain('<code>fips_mode</code>')
+      const html = convert('prop:cloud_storage_enabled[]', { catalog: cloudCatalog(), component: 'cloud-data-platform', version: '' })
+      expect(html).toContain('<code>cloud_storage_enabled</code>')
       expect(html).not.toContain('data-property-name')
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('not available in the cloud-data-platform component'))
+    })
+
+    test.each([
+      ['fips_mode', 'broker'],
+      ['redpanda.iceberg.mode', 'topic'],
+    ])('a %s-scoped property is not gated by cloud_supported (%s)', (name) => {
+      // cloud_supported comes from the Cloud control plane's install pack,
+      // which describes cluster configuration only: every entry in both of its
+      // sections resolves to a cluster property, and no topic property appears
+      // in it at all. A false value on another scope asserted something that
+      // source cannot know, and Cloud publishes a topic properties reference.
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert(`prop:${name}[]`, { catalog: cloudCatalog(), component: 'cloud-data-platform', version: '' })
+      expect(html).toContain(`data-property-name="${name}"`)
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('not available'))
+    })
+
+    test('a cluster property with no cloud_supported field is not gated', () => {
+      // Absent means "no opinion", which the extractor now relies on.
+      const json = JSON.stringify({ properties: { unflagged: { name: 'unflagged', config_scope: 'cluster' } } })
+      const catalog = catalogOf([propertiesAttachment('streaming', 'current', 'v26.2.1', json)], CLOUD)
+      const html = convert('prop:unflagged[]', { catalog, component: 'cloud-data-platform', version: '' })
+      expect(html).toContain('data-property-name="unflagged"')
     })
 
     test('self-managed pages are not gated by cloud_supported', () => {
@@ -473,18 +496,18 @@ describe('prop macro', () => {
 
     test('property-validate=off silences the availability warning', () => {
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const html = convert('prop:fips_mode[]', {
+      const html = convert('prop:cloud_storage_enabled[]', {
         catalog: cloudCatalog(), component: 'cloud-data-platform', version: '',
         attributes: { 'property-validate': 'off' },
       })
-      expect(html).toContain('<code>fips_mode</code>')
+      expect(html).toContain('<code>cloud_storage_enabled</code>')
       expect(warn).not.toHaveBeenCalled()
     })
 
     test('an unavailable property keeps its display text override', () => {
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const html = convert('prop:fips_mode[text=FIPS mode]', { catalog: cloudCatalog(), component: 'cloud-data-platform', version: '' })
-      expect(html).toContain('<code>FIPS mode</code>')
+      const html = convert('prop:cloud_storage_enabled[text=tiered storage]', { catalog: cloudCatalog(), component: 'cloud-data-platform', version: '' })
+      expect(html).toContain('<code>tiered storage</code>')
       warn.mockRestore()
     })
   })
@@ -808,8 +831,8 @@ describe('prop macro', () => {
           A('streaming', '26.2', 'v26.2.1'),
         ], CLOUD)
         expect(loadPropertiesFor(catalog, 'cloud-data-platform', '').surface).toBe('cloud')
-        const html = convert('prop:fips_mode[]', { catalog, component: 'cloud-data-platform', version: '' })
-        expect(html).toContain('<code>fips_mode</code>')
+        const html = convert('prop:cloud_storage_enabled[]', { catalog, component: 'cloud-data-platform', version: '' })
+        expect(html).toContain('<code>cloud_storage_enabled</code>')
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('not available in the cloud-data-platform component'))
       })
 

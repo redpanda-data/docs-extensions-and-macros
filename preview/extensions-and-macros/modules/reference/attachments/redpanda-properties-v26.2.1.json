@@ -2,10 +2,6 @@
   "definitions": {},
   "properties": {
     "admin": {
-      "cloud_byoc_only": false,
-      "cloud_editable": false,
-      "cloud_readonly": false,
-      "cloud_supported": false,
       "config_scope": "broker",
       "default": "0.0.0.0:9644",
       "defined_in": "src/v/config/configuration.cc",
@@ -51,10 +47,6 @@
       "type": "boolean"
     },
     "empty_seed_starts_cluster": {
-      "cloud_byoc_only": false,
-      "cloud_editable": false,
-      "cloud_readonly": false,
-      "cloud_supported": false,
       "config_scope": "broker",
       "default": true,
       "defined_in": "src/v/config/configuration.cc",
@@ -67,10 +59,6 @@
       "type": "boolean"
     },
     "fips_mode": {
-      "cloud_byoc_only": false,
-      "cloud_editable": false,
-      "cloud_readonly": false,
-      "cloud_supported": false,
       "config_scope": "broker",
       "default": "disabled",
       "defined_in": "src/v/config/configuration.cc",
@@ -117,10 +105,6 @@
       "type": "integer"
     },
     "redpanda.iceberg.mode": {
-      "cloud_byoc_only": false,
-      "cloud_editable": false,
-      "cloud_readonly": false,
-      "cloud_supported": true,
       "config_scope": "topic",
       "default": "disabled",
       "defined_in": "src/v/config/configuration.cc",
@@ -133,10 +117,6 @@
       "type": "string"
     },
     "retention.ms": {
-      "cloud_byoc_only": false,
-      "cloud_editable": false,
-      "cloud_readonly": false,
-      "cloud_supported": false,
       "config_scope": "topic",
       "corresponding_cluster_property": "log_retention_ms",
       "default": 604800000,

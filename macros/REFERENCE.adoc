@@ -270,7 +270,11 @@ Property data exists for two doc sets.
 
 *Self-managed (`streaming`)* publishes its own properties JSON per release, as a reference-module attachment. Every property in that release's file is available.
 
-*Cloud* is managed Redpanda, so it has no property data of its own and always tracks the newest self-managed file. Only the properties whose `cloud_supported` field is `true` are available; the rest exist in Redpanda but a Cloud reader cannot set them. A Cloud component is recognized by its `env-cloud` attribute. `cloud_supported` is the single gate because it is already the union of the Cloud states: no published property is `cloud_editable` or `cloud_readonly` without also being `cloud_supported`.
+*Cloud* is managed Redpanda, so it has no property data of its own and always tracks the newest self-managed file. A Cloud component is recognized by its `env-cloud` attribute.
+
+A *cluster* property is available to Cloud unless its `cloud_supported` field is explicitly `false`. That field is the union of the Cloud states -- no published property is `cloud_editable` or `cloud_readonly` without also being `cloud_supported` -- so it is the single gate for that scope.
+
+*Topic and broker* properties are not gated by it. `cloud_supported` is derived from the Cloud control plane's install pack, whose two sections (`customer_managed_configs` and `readonly_cluster_config`) describe cluster configuration and contain nothing else: every entry resolves to a cluster property, and no topic property appears anywhere in the file. A `false` value on another scope therefore asserted something that source cannot know, while Cloud users set topic properties routinely through the Kafka API and Console and Cloud publishes a topic properties reference of its own. The property extractor no longer writes the field for other scopes, and the macro treats an absent value as "no opinion", so already-published datasets stay correct too.
 
 Any other component (`connect`, the agentic data plane, a preview site) has no property data, and none is inferred for it. Those components carry their own product versions, which say nothing about which Redpanda properties exist, so a version number is never read as a Redpanda release. Supporting a further doc set is a deliberate addition to the macro.
 
