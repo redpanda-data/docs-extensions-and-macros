@@ -29,6 +29,12 @@ const semver = require('semver')
  * overwritten.
  */
 
+// Components known to publish Redpanda property data. Any other component that
+// ships a redpanda-properties-<tag>.json attachment is picked up too: the docs
+// UI resolves the tooltip dataset against the page's own component when that
+// component declares available-properties-tag, so a component publishing its
+// own data must get the attribute or its tooltips fall back to streaming's and
+// describe different properties from the ones its pages document.
 const PROPERTIES_COMPONENTS = ['ROOT', 'streaming']
 const CONNECT_COMPONENTS = ['connect', 'redpanda-connect']
 
@@ -41,7 +47,9 @@ module.exports.register = function () {
 
   this.once('contentClassified', ({ contentCatalog }) => {
     contentCatalog.getComponents().forEach((component) => {
-      const isProperties = PROPERTIES_COMPONENTS.includes(component.name)
+      const publishesProperties = (contentCatalog.findBy({ component: component.name, family: 'attachment' }) || [])
+        .some((file) => file.src.module === 'reference' && PROPERTIES_JSON_RX.test(file.src.relative.split('/').pop()))
+      const isProperties = PROPERTIES_COMPONENTS.includes(component.name) || publishesProperties
       const isConnect = CONNECT_COMPONENTS.includes(component.name)
       if (!isProperties && !isConnect) return
 
