@@ -128,7 +128,7 @@ function parseJSDocComments(sourceFile) {
 
   // Regex to match JSDoc comments followed by command definitions
   // Matches both top-level commands and automation.command()
-  const pattern = /\/\*\*\s*([\s\S]*?)\s*\*\/\s*(?:programCli|automation)\s*\.command\(['"]([^'"]+)['"]\)/g;
+  const pattern = /\/\*\*\s*([\s\S]*?)\s*\*\/\s*(?:programCli|automation|validation)\s*\.command\(['"]([^'"]+)['"]\)/g;
 
   let match;
   while ((match = pattern.exec(content)) !== null) {
@@ -299,6 +299,7 @@ IMPORTANT: This documentation is auto-generated. Do not edit manually. Run \`npm
     'property-docs',
     'metrics-docs',
     'rpk-docs',
+    'rpk-env-partial',
     'rpcn-connector-docs',
     'helm-spec',
     'cloud-regions',
@@ -314,6 +315,24 @@ IMPORTANT: This documentation is auto-generated. Do not edit manually. Run \`npm
     const data = parseHelp(help);
     const jsdoc = jsdocs[subcmd];
     doc += generateCommandDoc(`generate ${subcmd}`, data, jsdoc, 3);
+  });
+
+  // Validate command and its subcommands
+  console.log('  Generating docs for: validate');
+  const validateHelp = getHelpOutput('validate');
+  const validateData = parseHelp(validateHelp);
+  doc += generateCommandDoc('validate', validateData, null, 2);
+
+  const validateSubcommands = [
+    'enterprise-features'
+  ];
+
+  validateSubcommands.forEach(subcmd => {
+    console.log(`    Generating docs for: validate ${subcmd}`);
+    const help = getHelpOutput(`validate ${subcmd}`);
+    const data = parseHelp(help);
+    const jsdoc = jsdocs[subcmd];
+    doc += generateCommandDoc(`validate ${subcmd}`, data, jsdoc, 3);
   });
 
   // Write to file

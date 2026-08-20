@@ -141,7 +141,8 @@ async function setupMCP(options = {}) {
 
         // Check if configuration matches desired mode
         const isCorrectNpxConfig = mode === 'npx' && existingCommand === 'npx' &&
-                                    existingArgs.includes('doc-tools-mcp');
+                                    existingArgs.includes('doc-tools-mcp') &&
+                                    existingArgs.some(a => a === `--package=${packageName}`);
         const isCorrectLocalConfig = mode === 'local' && existingCommand === 'node' &&
                                       existingArgs[0] === localPath;
 
@@ -149,7 +150,7 @@ async function setupMCP(options = {}) {
           needsUpdate = true;
           console.log(chalk.yellow('⚠ ') + ' MCP server configured but with different setup:');
           console.log(chalk.gray(`  Current: ${existingCommand} ${existingArgs.join(' ')}`));
-          const newSetup = mode === 'local' ? `node ${localPath}` : 'npx -y doc-tools-mcp';
+          const newSetup = mode === 'local' ? `node ${localPath}` : `npx -y --package=${packageName} doc-tools-mcp`;
           console.log(chalk.gray(`  New:     ${newSetup}\n`));
         } else {
           console.log(chalk.green('✓') + ` MCP server already configured correctly\n`);
@@ -197,7 +198,7 @@ async function setupMCP(options = {}) {
   if (mode === 'local') {
     command = `claude mcp add --transport stdio --scope user ${serverName} -- node ${localPath}`;
   } else {
-    command = `claude mcp add --transport stdio --scope user ${serverName} -- npx -y doc-tools-mcp`;
+    command = `claude mcp add --transport stdio --scope user ${serverName} -- npx -y --package=${packageName} doc-tools-mcp`;
   }
 
   // Execute the command

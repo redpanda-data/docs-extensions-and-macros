@@ -485,6 +485,97 @@ antora:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/set-available-attachment-versions'
 ----
 
+== URL to xref
+
+This extension converts absolute docs.redpanda.com URLs found in page and partial content into Antora xrefs, using the content catalog as the single source of truth. A URL is converted only when it maps to a page that is actually published in the current build, so the extension never guesses at URL structure. Converted links are validated by Antora's own xref resolution, and internal URLs that match no published page are logged as warnings — which makes this extension a broken-internal-link detector for the whole site.
+
+Behavior details:
+
+* Runs at `contentClassified`, before AsciiDoc conversion, so emitted xrefs flow through Antora's normal resolution and broken-xref logging.
+* URLs inside listing, literal, fenced, and passthrough blocks, inline code spans, attribute entry lines, and macro attribute values (such as `link=` on an image macro) are left untouched.
+* Legacy URL shapes (`/docs/...`, `/current/...`, `/vX.Y/...`, and pre-rename component slugs such as `/redpanda-connect/`) are rewritten to candidate paths, but a candidate is only used when it matches a published page.
+* Fragments (`#anchor`) and link labels are preserved, including a label that a generator wrapped across a line break, whose line breaks are collapsed to single spaces.
+* An unlabeled URL becomes `xref:...[]` so that Antora fills in the target page title. An unlabeled URL that carries a fragment is given link text explicitly, because Antora cannot resolve a section title and would render the raw resource ID as the link text: the extension uses the heading the fragment points at, falls back to the target page title, and leaves the URL as a raw link if it can read neither. Heading ids are also read from the partials a target page includes, because the reference pages that hold most anchor targets are thin wrappers around generated partials.
+* Targets in the latest version of a component emit an unversioned xref; targets pinned to an older version emit `version@component:module:page`.
+* A URL that points at a page's former path resolves through the `page-aliases` attribute that the page declares. Antora does not register those aliases as catalog files until it converts documents, which is after this extension runs, so the extension reads them from the page header. Only aliases in the same component and version as the page that declares them are mapped.
+* A URL that carries a query string is left as a raw link, because an xref cannot express one and dropping it would change the link (for example `?platform=kubernetes`, which the UI reads to preselect a tab). These are reported at info level, not as warnings.
+* Builds that publish the latest version under its real version number instead of a symbolic segment (such as this repository's preview build) still resolve `/current/...` URLs, so the same content works in both.
+
+=== Environment variables
+
+This extension does not require any environment variables.
+
+=== Configuration options
+
+hostnames (optional)::
+List of hostnames treated as internal documentation URLs. Default: `['docs.redpanda.com']`.
+
+ignore (optional)::
+List of regular expressions matched against URL paths. Matching URLs are left untouched with no warning. Use this for paths on the docs domain that live outside the Antora catalog. Default: `['^/api/', '^/mcp(/|$)']` (the API reference is hosted by Bump.sh, and `/mcp` is the docs MCP server endpoint).
+
+log_unconverted (optional)::
+Whether to log a warning for each internal URL that matches no published page. Default: `true`.
+
+=== Registration
+
+Register the `url-to-xref` extension in the Antora playbook under the `antora.extensions` key like so:
+
+[source,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/url-to-xref'
+----
+
+== External link checker
+
+This extension collects every external http(s) URL referenced in page and partial content and verifies that it responds, reporting dead links in the build log. Internal links are covered by the url-to-xref extension plus Antora's own xref validation; this extension covers everything that points off-site.
+
+Because it performs network requests, register it only in builds where that belongs (for example a scheduled nightly build), not necessarily on every preview build.
+
+Responses are classified as follows:
+
+* 2xx/3xx: ok
+* 404/410: broken — logged as a warning, or at error level with `fail_on_broken`
+* 401/403/429: unverifiable — logged at info level, because bot-walled or rate-limited sites are not broken
+* Other statuses, network errors, and timeouts (after one retry): unverifiable — logged as a warning
+
+=== Environment variables
+
+This extension does not require any environment variables.
+
+=== Configuration options
+
+internal_hostnames (optional)::
+Hostnames to skip because they are internal documentation URLs. Default: `['docs.redpanda.com']`.
+
+include (optional)::
+List of regular expressions. When set, only URLs matching at least one pattern are checked.
+
+exclude (optional)::
+List of regular expressions. URLs matching any pattern are skipped.
+
+concurrency (optional)::
+Number of simultaneous requests. Default: `10`.
+
+timeout (optional)::
+Per-request timeout in milliseconds. Default: `10000`.
+
+fail_on_broken (optional)::
+Log broken links at error level so a build run with `--log-failure-level=error` fails. Default: `false`.
+
+=== Registration
+
+Register the `external-link-checker` extension in the Antora playbook under the `antora.extensions` key like so:
+
+[source,yaml]
+----
+antora:
+  extensions:
+    - require: '@redpanda-data/docs-extensions-and-macros/extensions/external-link-checker'
+      fail_on_broken: false
+----
+
 == Validate attributes
 
 This extension ensures the consistency and validity of page attributes, focusing on validating page categories against a predefined list of valid categories and subcategories. It automatically adds missing parent categories for any specified subcategories and removes any specified categories that are invalid. Additionally, it processes specific environment attributes, setting corresponding page-level attributes when environment conditions are met.

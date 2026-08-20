@@ -38,6 +38,7 @@ display help for command
 * `validate-mcp` - Validate MCP server configuration (tools, resources)
 * `mcp-version` - Show MCP server version and configuration information
 * `generate` - Run docs automations
+* `validate` - Validate docs data against internal sources of truth
 * `help` - display help for command
 
 == install-test-dependencies
@@ -427,6 +428,7 @@ display help for command
 * `validate-mcp` - Validate MCP server configuration (tools, resources)
 * `mcp-version` - Show MCP server version and configuration information
 * `generate` - Run docs automations
+* `validate` - Validate docs data against internal sources of truth
 * `help` - display help for command
 
 == mcp-version
@@ -488,8 +490,10 @@ display help for command
 * `metrics-docs` - Generate JSON and AsciiDoc documentation for Redpanda metrics. Defaults to branch "dev" if neither --tag nor --branch is specified.
 * `rpcn-connector-docs` - Generate RPCN connector docs and diff changes since the last version
 * `migrate-rpcn-metadata` - One-time migration of inline connector == Metadata blocks into regenerated partials. Dry run unless --write is given.
+* `migrate-property-refs` - One-time migration of `property_name` prose mentions to prop:property_name[] macros. Dry run unless --write is given.
 * `property-docs` - Generate JSON and consolidated AsciiDoc partials for Redpanda configuration properties. Defaults to branch "dev" if neither --tag nor --branch is specified.
 * `rpk-docs` - Generate rpk CLI documentation from source. Builds rpk and parses source for platform detection.
+* `rpk-env-partial` - Generate the -X -> RPK_* env var mapping partial from rpk -X list output.
 * `rpk-plugin-stubs` - Reconcile single-source stub pages and nav against the docs repo's rpk plugin partials. Run from the consumer repo root.
 * `rpk-overrides` - Validate rpk-overrides.json against schema and check for common issues
 * `helm-spec` - Generate AsciiDoc documentation for Helm charts. Requires either --tag or --branch for GitHub URLs.
@@ -769,6 +773,51 @@ npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
 
 - Go must be installed (https://go.dev/)
 - Git must be installed (for cloning source)
+
+=== generate rpk-env-partial
+
+Generates the -X option -> RPK_* environment variable mapping table as an AsciiDoc partial from rpk's own -X option data, so the table cannot drift from the CLI. Prefers the structured x_options array in `rpk --print-tree` (which carries the env var names rpk itself derives) and falls back to parsing `-X list` text for rpk versions that predate it. Hidden -X options appear in neither source, so they are excluded automatically. The main rpk-docs pipeline also writes this partial from the tree it already holds; this standalone command is for targeted refreshes without a full generation run.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate rpk-env-partial [options]
+----
+
+*Options:*
+
+`-r, --ref <ref>`::
+Git branch or tag to build rpk from (e.g., dev, v26.2.1). Clones from GitHub.
+
+`--from-source <path>`::
+Path to local rpk source (src/go/rpk directory)
+
+`--rpk-bin <path>`::
+Path to an existing rpk binary (skips clone and build)
+
+`--from-json <path>`::
+Versioned tree snapshot from docs-data (skips clone and build; requires a snapshot with x_options)
+
+`--output <path>`::
+Path to write the partial to (default: "modules/reference/partials/rpk-env-vars.adoc")
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Generate for a release tag (sparse-clones redpanda, builds rpk with Go)
+npx doc-tools generate rpk-env-partial --ref v26.2.1 --output modules/reference/partials/rpk-env-vars.adoc
+
+# Use a local source checkout (as-is, no checkout changes), an existing
+# rpk binary, or a versioned tree snapshot (no clone or build at all)
+npx doc-tools generate rpk-env-partial --from-source ~/redpanda --output modules/reference/partials/rpk-env-vars.adoc
+npx doc-tools generate rpk-env-partial --rpk-bin "$(command -v rpk)" --output modules/reference/partials/rpk-env-vars.adoc
+npx doc-tools generate rpk-env-partial --from-json docs-data/rpk-v26.2.1.json --output modules/reference/partials/rpk-env-vars.adoc
+----
 
 === generate rpcn-connector-docs
 
@@ -1244,4 +1293,91 @@ npx doc-tools generate migrate-rpcn-metadata
 # Apply the migration
 npx doc-tools generate migrate-rpcn-metadata --write
 ----
+
+== validate
+
+Validate docs data against internal sources of truth
+
+*Usage:*
+
+[,bash]
+----
+doc-tools validate [options] [command]
+----
+
+*Options:*
+
+`-h, --help`::
+display help for command
+
+*Commands:*
+
+* `enterprise-features` - Check the enterprise features registry against core, connect, and docs sources of truth
+* `help` - display help for command
+
+=== validate enterprise-features
+
+Checks the enterprise features registry (the shared component's enterprise-features.yml in the docs repo) against the internal sources of truth: the license_required_feature enum and config::enterprise<> property wrappers in redpanda core, the enterprise plugins in connect info.csv, and the hand-maintained disable-enterprise-features.adoc table. Exit codes: 0 clean, 1 drift found (error or needs-human findings), 2 execution error.
+
+*Why use it:*
+
+A feature must only be documented as enterprise under its approved external name. This check catches new license-gated features in core that have no registry entry yet, registry pointers that no longer match core, and registry connect-plugin entries that no longer match info.csv.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools validate enterprise-features [options]
+----
+
+*Options:*
+
+`--registry <path>`::
+Local path to enterprise-features.yml (default: fetch from docs repo main)
+
+`--tag <ref>`::
+Redpanda git ref for the core headers (default: "dev")
+
+`--connect-ref <ref>`::
+Connect git ref for info.csv ('latest' resolves the newest release tag; the registry documents released state) (default: "latest")
+
+`--docs-ref <ref>`::
+Docs repo git ref for remote fetches (default: "main")
+
+`--disable-page <path>`::
+Local path to disable-enterprise-features.adoc (default: fetch from docs repo)
+
+`--properties <path>`::
+Local path to a generated cluster-properties JSON; enables existence checks for gating properties
+
+`--skip-connect`::
+Skip the connect check (info.csv is not fetched, so registry connect-plugin entries go unverified)
+
+`--format <format>`::
+Output format: text or json (default: "text")
+
+`--write-mapping <path>`::
+Write the internal-to-external name mapping partial to this path
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Check everything against the default remote sources
+npx doc-tools validate enterprise-features
+
+# Check a local registry file (for example, in docs repo CI)
+npx doc-tools validate enterprise-features --registry shared/modules/ROOT/partials/enterprise-features.yml
+
+# Regenerate the rpk name-mapping partial
+npx doc-tools validate enterprise-features --write-mapping modules/get-started/partials/licensing/feature-name-mapping.adoc
+----
+
+*Requirements:*
+
+Network access to raw.githubusercontent.com for any source not supplied
+with a local path option.
 

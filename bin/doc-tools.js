@@ -34,7 +34,6 @@ const {
 // Import other utilities
 const { determineDocsBranch } = require('../cli-utils/self-managed-docs-branch.js')
 const fetchFromGithub = require('../tools/fetch-from-github.js')
-const { urlToXref } = require('../cli-utils/convert-doc-links.js')
 const { getAntoraValue, setAntoraValue } = require('../cli-utils/antora-utils')
 
 // --------------------------------------------------------------------
@@ -828,6 +827,48 @@ automation
   })
 
 /**
+ * @description One-time migration of plain-backtick property mentions to the
+ * prop: inline macro, so property tooltips become opt-in. Only names that
+ * exist in the published property reference JSON AND contain a separator
+ * (_ or .) are converted. Separator-free names such as admin, brokers, rack,
+ * retries, and superusers are the ambiguous words that motivated opt-in
+ * marking, so they are always left for a human. Dry run unless --write is given.
+ *
+ * @example
+ * # Preview the conversion from a docs repo checkout
+ * npx doc-tools generate migrate-property-refs --properties modules/reference/attachments/redpanda-properties-v26.2.1.json
+ *
+ * # Apply it
+ * npx doc-tools generate migrate-property-refs --properties modules/reference/attachments/redpanda-properties-v26.2.1.json --write
+ */
+automation
+  .command('migrate-property-refs')
+  .description('One-time migration of `property_name` prose mentions to prop:property_name[] macros. Dry run unless --write is given.')
+  .requiredOption('--properties <path>', 'Path to the published redpanda-properties JSON to validate names against')
+  .option('--docs-dir <path>', 'Docs repo root containing modules/', '.')
+  .option('--config-refs', 'Also convert config_ref macro calls to prop macro calls')
+  .option('--write', 'Apply changes (default is a dry run that only reports)')
+  .action((options) => {
+    const { migrate } = require('../tools/migrate-property-refs.js')
+    const propertiesJson = JSON.parse(fs.readFileSync(path.resolve(options.properties), 'utf8'))
+    const result = migrate({
+      docsDir: path.resolve(options.docsDir),
+      propertiesJson,
+      write: Boolean(options.write),
+      configRefs: Boolean(options.configRefs),
+    })
+    result.changed
+      .sort((a, b) => b.count - a.count)
+      .forEach(({ file, count }) => console.log(`${String(count).padStart(4)}  ${file}`))
+    console.log(`\n${options.write ? 'Converted' : 'Would convert'} ${result.conversions} mention(s) across ${result.changed.length} of ${result.files} files.`)
+    console.log(`Left alone (ambiguous, no separator): ${result.ambiguous.join(', ')}`)
+    if (result.skippedConfigRefs && result.skippedConfigRefs.length) {
+      console.log(`config_ref calls left alone (names not in the published JSON): ${result.skippedConfigRefs.join(', ')}`)
+    }
+    if (!options.write && result.conversions) console.log('Re-run with --write to apply.')
+  })
+
+/**
  * generate property-docs
  *
  * @description
@@ -1239,6 +1280,56 @@ automation
   })
 
 /**
+ * generate rpk-env-partial
+ *
+ * @description
+ * Generates the -X option -> RPK_* environment variable mapping table as an
+ * AsciiDoc partial from rpk's own -X option data, so the table cannot drift
+ * from the CLI. Prefers the structured x_options array in `rpk --print-tree`
+ * (which carries the env var names rpk itself derives) and falls back to
+ * parsing `-X list` text for rpk versions that predate it. Hidden -X options
+ * appear in neither source, so they are excluded automatically.
+ *
+ * The main rpk-docs pipeline also writes this partial from the tree it
+ * already holds; this standalone command is for targeted refreshes without
+ * a full generation run.
+ *
+ * @example
+ * # Generate for a release tag (sparse-clones redpanda, builds rpk with Go)
+ * npx doc-tools generate rpk-env-partial --ref v26.2.1 --output modules/reference/partials/rpk-env-vars.adoc
+ *
+ * # Use a local source checkout (as-is, no checkout changes), an existing
+ * # rpk binary, or a versioned tree snapshot (no clone or build at all)
+ * npx doc-tools generate rpk-env-partial --from-source ~/redpanda --output modules/reference/partials/rpk-env-vars.adoc
+ * npx doc-tools generate rpk-env-partial --rpk-bin "$(command -v rpk)" --output modules/reference/partials/rpk-env-vars.adoc
+ * npx doc-tools generate rpk-env-partial --from-json docs-data/rpk-v26.2.1.json --output modules/reference/partials/rpk-env-vars.adoc
+ */
+automation
+  .command('rpk-env-partial')
+  .description('Generate the -X -> RPK_* env var mapping partial from rpk -X list output.')
+  .option('-r, --ref <ref>', 'Git branch or tag to build rpk from (e.g., dev, v26.2.1). Clones from GitHub.')
+  .option('--from-source <path>', 'Path to local rpk source (src/go/rpk directory)')
+  .option('--rpk-bin <path>', 'Path to an existing rpk binary (skips clone and build)')
+  .option('--from-json <path>', 'Versioned tree snapshot from docs-data (skips clone and build; requires a snapshot with x_options)')
+  .option('--output <path>', 'Path to write the partial to', 'modules/reference/partials/rpk-env-vars.adoc')
+  .action((options) => {
+    try {
+      const { handleXEnvPartialGeneration } = require('../tools/rpk-docs/generate-x-env-partial.js')
+      const result = handleXEnvPartialGeneration({
+        ref: options.ref,
+        fromSource: options.fromSource,
+        rpkBin: options.rpkBin,
+        fromJson: options.fromJson,
+        output: options.output
+      })
+      console.log(`Wrote ${result.keyCount} -X option mappings to ${result.output} (source: ${result.source})`)
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
  * generate rpk-plugin-stubs
  *
  * @description
@@ -1635,31 +1726,50 @@ automation
       r = spawnSync('pandoc', [md, '-t', 'asciidoc', '-o', outFile], { stdio: 'inherit' })
       if (r.status !== 0) process.exit(r.status)
 
-      let doc = fs.readFileSync(outFile, 'utf8')
-      const xrefRe = /https:\/\/docs\.redpanda\.com[^\s\]\[\)"]+(?:\[[^\]]*\])?/g
-      doc = doc
-        .replace(/(\[\d+\])\]\./g, '$1\\].')
-        .replace(/(\[\d+\])\]\]/g, '$1\\]\\]')
-        .replace(/^=== +(https?:\/\/[^\[]*)\[([^\]]*)\]/gm, '=== link:++$1++[$2]')
-        .replace(/^== # (.*)$/gm, '= $1')
-        .replace(/^== description: (.*)$/gm, ':description: $1')
-        .replace(xrefRe, (match) => {
-          let urlPart = match
-          let bracketPart = ''
-          const m = match.match(/^([^\[]+)(\[[^\]]*\])$/)
-          if (m) {
-            urlPart = m[1]
-            bracketPart = m[2]
+      const { formatHelmSpec } = require('../cli-utils/format-helm-spec')
+      let doc = formatHelmSpec(fs.readFileSync(outFile, 'utf8'))
+
+      // helm-docs only renders keys that exist in the YAML tree, so optional
+      // values that ship commented out never appear in the reference. Pull
+      // documented commented-out keys from values.yaml and inject them. This
+      // runs after formatHelmSpec so the injected body sections are not affected
+      // by the blank-line normalization that its header fix performs.
+      const valuesFile = path.join(chartPath, 'values.yaml')
+      if (fs.existsSync(valuesFile)) {
+        const { extractCommentedValueDocs, injectIntoAsciiDoc, filterEntriesBySchema } = require('../cli-utils/helm-commented-values')
+        try {
+          let entries = extractCommentedValueDocs(fs.readFileSync(valuesFile, 'utf8'))
+
+          // Deprecation notices and other prose can produce paths the chart
+          // no longer accepts (for example the removed
+          // storage.tiered.credentialsSecretRef.configurationKey). When the
+          // chart ships a values schema, drop any path it provably rejects.
+          const schemaFile = path.join(chartPath, 'values.schema.json')
+          if (entries.length > 0 && fs.existsSync(schemaFile)) {
+            const schema = JSON.parse(fs.readFileSync(schemaFile, 'utf8'))
+            const { accepted, rejected } = filterEntriesBySchema(entries, schema)
+            if (rejected.length > 0) {
+              console.warn(`Warning: Skipping ${rejected.length} commented-out value(s) rejected by values.schema.json: ${rejected.map((e) => e.path).join(', ')}`)
+            }
+            entries = accepted
           }
-          if (urlPart.endsWith('#')) return match
-          try {
-            const xref = urlToXref(urlPart)
-            return bracketPart ? `${xref}${bracketPart}` : `${xref}[]`
-          } catch (err) {
-            console.warn(`⚠️ urlToXref failed on ${urlPart}: ${err.message}`)
-            return match
+
+          if (entries.length > 0) {
+            const { doc: withInjected, injected, sectionsFound } = injectIntoAsciiDoc(doc, entries)
+            doc = withInjected
+            if (injected.length > 0) {
+              console.log(`Documented ${injected.length} commented-out value(s): ${injected.join(', ')}`)
+            } else if (sectionsFound === 0) {
+              // Without this, a heading-level change upstream would silently
+              // drop every documented commented-out value from the reference.
+              console.warn(`Warning: No value section headings found in ${name} to anchor commented-out value docs; dropped: ${entries.map((e) => e.path).join(', ')}`)
+            }
           }
-        })
+        } catch (err) {
+          console.warn(`Warning: Skipping commented-out value docs for ${name}: ${err.message}`)
+        }
+      }
+
       fs.writeFileSync(outFile, doc, 'utf8')
 
       console.log(`Done: Wrote ${outFile}`)
@@ -1932,26 +2042,8 @@ automation
       process.exit(1)
     }
 
-    let doc = fs.readFileSync(opts.output, 'utf8')
-    const xrefRe = /https:\/\/docs\.redpanda\.com[^\s\]\[\)"]+(?:\[[^\]]*\])?/g
-    doc = doc.replace(xrefRe, (match) => {
-      let urlPart = match
-      let bracketPart = ''
-      const m = match.match(/^([^\[]+)(\[[^\]]*\])$/)
-      if (m) {
-        urlPart = m[1]
-        bracketPart = m[2]
-      }
-      if (urlPart.endsWith('#')) return match
-      try {
-        const xref = urlToXref(urlPart)
-        return bracketPart ? `${xref}${bracketPart}` : `${xref}[]`
-      } catch (err) {
-        console.warn(`⚠️ urlToXref failed on ${urlPart}: ${err.message}`)
-        return match
-      }
-    })
-    fs.writeFileSync(opts.output, doc, 'utf8')
+    // docs.redpanda.com URLs are left as-is: the url-to-xref Antora
+    // extension converts them to validated xrefs at site build time.
 
     if (tmpSrc) fs.rmSync(tmpSrc, { recursive: true, force: true })
     fs.rmSync(configTmp, { recursive: true, force: true })
@@ -2118,5 +2210,100 @@ automation
     }
   })
 
+const validation = new Command('validate').description('Validate docs data against internal sources of truth')
+
+/**
+ * @description Checks the enterprise features registry (the shared component's
+ * enterprise-features.yml in the docs repo) against the internal sources of
+ * truth: the license_required_feature enum and config::enterprise<> property
+ * wrappers in redpanda core, the enterprise plugins in connect info.csv, and
+ * the hand-maintained disable-enterprise-features.adoc table.
+ * Exit codes: 0 clean, 1 drift found (error or needs-human findings), 2 execution error.
+ *
+ * @why A feature must only be documented as enterprise under its approved
+ * external name. This check catches new license-gated features in core that
+ * have no registry entry yet, registry pointers that no longer match core,
+ * and registry connect-plugin entries that no longer match info.csv.
+ *
+ * @example
+ * # Check everything against the default remote sources
+ * npx doc-tools validate enterprise-features
+ *
+ * # Check a local registry file (for example, in docs repo CI)
+ * npx doc-tools validate enterprise-features --registry shared/modules/ROOT/partials/enterprise-features.yml
+ *
+ * # Regenerate the rpk name-mapping partial
+ * npx doc-tools validate enterprise-features --write-mapping modules/get-started/partials/licensing/feature-name-mapping.adoc
+ *
+ * @requirements
+ * Network access to raw.githubusercontent.com for any source not supplied
+ * with a local path option.
+ */
+validation
+  .command('enterprise-features')
+  .description('Check the enterprise features registry against core, connect, and docs sources of truth')
+  .option('--registry <path>', 'Local path to enterprise-features.yml (default: fetch from docs repo main)')
+  .option('--tag <ref>', 'Redpanda git ref for the core headers', 'dev')
+  .option('--connect-ref <ref>', "Connect git ref for info.csv ('latest' resolves the newest release tag; the registry documents released state)", 'latest')
+  .option('--docs-ref <ref>', 'Docs repo git ref for remote fetches', 'main')
+  .option('--disable-page <path>', 'Local path to disable-enterprise-features.adoc (default: fetch from docs repo)')
+  .option('--properties <path>', 'Local path to a generated cluster-properties JSON; enables existence checks for gating properties')
+  .option('--skip-connect', 'Skip the connect check (info.csv is not fetched, so registry connect-plugin entries go unverified)')
+  .option('--format <format>', 'Output format: text or json', 'text')
+  .option('--write-mapping <path>', 'Write the internal-to-external name mapping partial to this path')
+  .action(async (options) => {
+    const { runChecks, buildMappingPartial } = require('../tools/enterprise-features/verify')
+    // Fetch wiring (GitHub auth, rejected-token retry, transient-failure
+    // retries, --skip-connect short-circuits) lives in
+    // cli-utils/enterprise-sources so it is testable without a network.
+    const { loadEnterpriseSources } = require('../cli-utils/enterprise-sources')
+
+    try {
+      const { registryYaml, coreHeader, configurationHeader, infoCsv, connectRef, disablePage, failedSources } =
+        await loadEnterpriseSources(options)
+
+      let allPropertyNames
+      if (options.properties) {
+        const propertyData = JSON.parse(fs.readFileSync(path.resolve(options.properties), 'utf8'))
+        allPropertyNames = Object.keys(propertyData.properties || propertyData)
+      }
+
+      const { findings, features, enumValues } = runChecks({
+        registryYaml,
+        coreHeader,
+        configurationHeader,
+        infoCsv,
+        connectRef,
+        disablePage,
+        allPropertyNames,
+      })
+      findings.push(...failedSources)
+
+      if (options.writeMapping) {
+        const partial = buildMappingPartial(features, enumValues)
+        fs.mkdirSync(path.dirname(path.resolve(options.writeMapping)), { recursive: true })
+        fs.writeFileSync(path.resolve(options.writeMapping), `${partial}\n`)
+        console.log(`Wrote name mapping partial to ${options.writeMapping}`)
+      }
+
+      const drift = findings.filter((f) => f.level === 'error' || f.level === 'needs-human')
+      if (options.format === 'json') {
+        console.log(JSON.stringify({ findings, drift: drift.length > 0 }, null, 2))
+      } else {
+        for (const level of ['error', 'needs-human', 'info']) {
+          for (const f of findings.filter((entry) => entry.level === level)) {
+            console.log(`${level.toUpperCase()} [${f.check}] ${f.message}`)
+          }
+        }
+        console.log(drift.length ? `\n${drift.length} finding(s) need attention.` : '\nRegistry is in sync with all checked sources.')
+      }
+      process.exit(drift.length ? 1 : 0)
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(2)
+    }
+  })
+
 programCli.addCommand(automation)
+programCli.addCommand(validation)
 programCli.parse(process.argv)
