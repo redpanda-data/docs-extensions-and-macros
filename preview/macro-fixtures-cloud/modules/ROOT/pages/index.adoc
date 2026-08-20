@@ -1,0 +1,17 @@
+= Cloud fixtures
+
+Exercises the Cloud rules. This component declares `env-cloud` and publishes no
+property data of its own.
+
+== Only cloud_supported properties are available
+
+* prop:iceberg_enabled[] is `cloud_supported: true`, so it renders marked.
+* prop:log_segment_size[] is not, so it renders as plain code and the build says why.
+* prop:fips_mode[] likewise: a real property this audience cannot set.
+
+== Release candidates are ignored
+
+The build also contains `redpanda-properties-v26.3.1-rc1.json` from the beta
+fixtures, which outranks the GA file by version number. Cloud must still use
+the GA data, so prop:iceberg_delete_orphans_enabled[] -- which exists only in
+the release candidate -- must NOT validate here.

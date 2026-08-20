@@ -263,15 +263,22 @@ function buildPageIndex (contentCatalog, component, properties, version) {
     // titled '= admin' used to claim the admin broker property from the
     // reference page that documents it.
     const claim = (name, entry, strength) => {
-      const rank = declared ? CLAIM_DECLARED : strength
+      // Declaring a page raises its claims above every undeclared page, but
+      // keeps the heading-versus-partial ordering within the page: a reference
+      // page can both hand-write a section for a property and include the
+      // generated partial that documents it.
+      const rank = (declared ? CLAIM_DECLARED : 0) + strength
       const existing = claims.get(name)
       if (existing) {
         if (existing.rank > rank) return
+        // A page claiming the same property twice is not a conflict between
+        // sources, it is one page documenting it in two places.
+        if (existing.page === pagePath) return
         if (existing.rank === rank) {
           // Same standing. Keep the first, and say so when both pages
           // explicitly declared themselves the source: that is an authoring
           // conflict, not something to resolve quietly.
-          if (rank === CLAIM_DECLARED) {
+          if (declared && existing.declared) {
             warnOnce(contentCatalog, `claim:${component}:${name}`,
               `prop macro: '${name}' is claimed by two declared property sources in ${component}: ${existing.page} (:page-property-source: ${existing.declared}) and ${pagePath} (:page-property-source: ${declared}). Links use ${existing.page}. Remove the declaration from whichever page is not the reference for it.`)
           }
