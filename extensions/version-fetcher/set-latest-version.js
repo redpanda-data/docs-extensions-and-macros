@@ -128,14 +128,24 @@ module.exports.register = function ({ config }) {
 
         if (!component.latest.asciidoc) component.latest.asciidoc = { attributes: {} };
 
-        // For Redpanda GA version, set both latest-redpanda-version and latest-redpanda-tag if available
-        if (semver.valid(latestVersions.redpanda?.latestRedpandaRelease?.version)) {
-          const currentVersion = component.latest.asciidoc.attributes['full-version'] || '0.0.0';
-          if (semver.gt(latestVersions.redpanda.latestRedpandaRelease.version, currentVersion)) {
-            // Required for backwards compatibility. Some docs still use full-version
-            component.latest.asciidoc.attributes['full-version'] = sanitizeVersion(latestVersions.redpanda.latestRedpandaRelease.version);
-            setVersionAndTagAttributes(component.latest.asciidoc, 'latest-redpanda', latestVersions.redpanda.latestRedpandaRelease.version, component.latest.name, component.latest.version);
-            component.latest.asciidoc.attributes['latest-release-commit'] = latestVersions.redpanda.latestRedpandaRelease.commitHash;
+        // For the Redpanda GA release, always publish latest-redpanda-version,
+        // latest-redpanda-tag, latest-redpanda-version-short and
+        // latest-release-commit. They describe the newest release, so they must
+        // not depend on how the component pins full-version: consuming repos seed
+        // full-version at the current GA (both docs and cloud-docs sit at 26.2.1
+        // today), which made the whole block unreachable and left those
+        // attributes unset until Redpanda shipped something strictly newer.
+        const gaRelease = latestVersions.redpanda?.latestRedpandaRelease;
+        if (semver.valid(gaRelease?.version)) {
+          setVersionAndTagAttributes(component.latest.asciidoc, 'latest-redpanda', gaRelease.version, component.latest.name, component.latest.version);
+          component.latest.asciidoc.attributes['latest-release-commit'] = gaRelease.commitHash;
+
+          // Required for backwards compatibility. Some docs still use full-version,
+          // and treat it as a floor, so only ever move it forwards. An unparseable
+          // pin counts as no pin, otherwise semver.gt throws and aborts the run.
+          const pinnedVersion = component.latest.asciidoc.attributes['full-version'];
+          if (!semver.valid(pinnedVersion) || semver.gt(gaRelease.version, pinnedVersion)) {
+            component.latest.asciidoc.attributes['full-version'] = sanitizeVersion(gaRelease.version);
           }
         }
       });

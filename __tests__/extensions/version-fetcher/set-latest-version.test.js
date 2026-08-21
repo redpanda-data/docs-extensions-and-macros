@@ -87,13 +87,40 @@ describe('set-latest-version extension', () => {
     expect(versionAttributes).not.toHaveProperty('latest-redpanda-helm-chart-version-short')
   })
 
-  it('does not overwrite a newer existing full-version on the latest component version', () => {
+  it('does not move full-version backwards, but still publishes the GA attributes', () => {
     const { latestAttributes } = runExtension({
       latestAttributes: { 'full-version': '99.0.0' },
     })
 
     expect(latestAttributes['full-version']).toBe('99.0.0')
-    expect(latestAttributes).not.toHaveProperty('latest-redpanda-version')
-    expect(latestAttributes).not.toHaveProperty('latest-redpanda-version-short')
+    expect(latestAttributes['latest-redpanda-version']).toBe('26.2.1')
+    expect(latestAttributes['latest-redpanda-version-short']).toBe('26.2')
+  })
+
+  it('publishes the GA attributes when full-version already equals the live GA release', () => {
+    // Both docs and cloud-docs seed full-version at the current GA release, so a
+    // gate on full-version < GA makes every latest-redpanda-* attribute, including
+    // the short one, unreachable in exactly the repos that consume them.
+    const { latestAttributes, errors } = runExtension({
+      latestAttributes: { 'full-version': '26.2.1' },
+    })
+
+    expect(errors).toEqual([])
+    expect(latestAttributes['full-version']).toBe('26.2.1')
+    expect(latestAttributes['latest-redpanda-version']).toBe('26.2.1')
+    expect(latestAttributes['latest-redpanda-tag']).toBe('v26.2.1')
+    expect(latestAttributes['latest-redpanda-version-short']).toBe('26.2')
+    expect(latestAttributes['latest-release-commit']).toBe('abc123')
+  })
+
+  it('treats an unparseable full-version pin as no pin instead of throwing', () => {
+    const { latestAttributes, errors } = runExtension({
+      latestAttributes: { 'full-version': '26.2' },
+    })
+
+    expect(errors).toEqual([])
+    expect(latestAttributes['full-version']).toBe('26.2.1')
+    expect(latestAttributes['latest-redpanda-version']).toBe('26.2.1')
+    expect(latestAttributes['latest-redpanda-version-short']).toBe('26.2')
   })
 })
