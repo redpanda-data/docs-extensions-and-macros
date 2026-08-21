@@ -523,82 +523,6 @@ module.exports.register = function (registry, context) {
   }
 
   /**
-   * Generates a short description for a connector based on its name and types.
-   */
-  function generateDescription(connector, types) {
-    const typeList = Array.from(types.keys());
-
-    // Special descriptions for common connectors
-    const descriptions = {
-      kafka: 'Stream messages to and from Apache Kafka topics',
-      redpanda: 'Native integration with Redpanda streaming platform',
-      http_server: 'Receive HTTP requests and serve responses',
-      http_client: 'Make HTTP requests to external services',
-      aws_s3: 'Read from and write to Amazon S3 buckets',
-      aws_kinesis: 'Stream data with AWS Kinesis',
-      gcp_pubsub: 'Publish and subscribe to Google Cloud Pub/Sub',
-      postgres: 'Query and insert data in PostgreSQL databases',
-      mongodb: 'Work with MongoDB collections',
-      redis: 'Cache and process data using Redis',
-      elasticsearch: 'Index and search documents in Elasticsearch',
-      file: 'Read from and write to local files',
-      mqtt: 'Publish and subscribe to MQTT topics',
-      nats: 'Stream messages with NATS messaging system',
-      pulsar: 'Integrate with Apache Pulsar',
-      amqp_0_9: 'Connect to AMQP 0.9 brokers like RabbitMQ',
-      amqp_1: 'Connect to AMQP 1.0 message brokers',
-      sftp: 'Transfer files via SFTP protocol',
-      websocket: 'Stream data over WebSocket connections',
-      stdin: 'Read input from standard input',
-      stdout: 'Write output to standard output',
-      generate: 'Generate sample data for testing',
-      csv: 'Parse and generate CSV formatted data',
-      json_schema: 'Validate JSON against schemas',
-      avro: 'Encode and decode Avro messages',
-      protobuf: 'Work with Protocol Buffer messages',
-      grok: 'Parse unstructured logs with Grok patterns',
-      jmespath: 'Transform JSON using JMESPath queries',
-      bloblang: 'Transform data with Bloblang mapping language',
-      branch: 'Route messages to different destinations',
-      switch: 'Conditionally process messages',
-      parallel: 'Process messages in parallel',
-      sql_raw: 'Execute raw SQL queries',
-      sql_insert: 'Insert data into SQL databases',
-      sql_select: 'Query data from SQL databases'
-    };
-
-    if (descriptions[connector]) {
-      return descriptions[connector];
-    }
-
-    // SQL connectors
-    if (connector.startsWith('sql_')) {
-      return 'Execute SQL queries across multiple database engines';
-    }
-
-    // Generate generic description based on types
-    if (typeList.length === 1) {
-      const type = typeList[0];
-      switch (type.toLowerCase()) {
-        case 'input': return 'Receive data from external sources';
-        case 'output': return 'Send data to external destinations';
-        case 'processor': return 'Transform and process message data';
-        case 'cache': return 'Store and retrieve cached data';
-        case 'buffer': return 'Buffer messages for throughput management';
-        case 'rate_limit': return 'Control message processing rate';
-        case 'metric': return 'Export pipeline metrics';
-        case 'tracer': return 'Trace message flow through pipeline';
-        case 'scanner': return 'Scan and process message patterns';
-        default: return `${capitalize(type)} component for data pipelines`;
-      }
-    } else if (typeList.length === 2) {
-      return `${typeList.map(t => capitalize(t)).join(' and ')} for data pipelines`;
-    } else {
-      return 'Multi-purpose component for data pipelines';
-    }
-  }
-
-  /**
    * Generates HTML cards for the list of connectors, including their types, support levels, and cloud support.
    *
    * This function iterates over the provided connectors and generates an HTML card for each connector.
@@ -776,7 +700,11 @@ module.exports.register = function (registry, context) {
                   <h3 class="card-title"><code>${escapeHtml(connector)}</code></h3>
                 </a>`
                   : `<h3 class="card-title"><code>${escapeHtml(connector)}</code></h3>`}
-                <p class="card-description">${escapeHtml(details.description || generateDescription(connector, types))}</p>
+                ${details.description
+                  // No invented copy: a description comes from the component's own
+                  // page, and a card without one simply has no description.
+                  ? `<p class="card-description">${escapeHtml(details.description)}</p>`
+                  : ''}
               </div>
               <div class="card-icon">
                 ${(() => {

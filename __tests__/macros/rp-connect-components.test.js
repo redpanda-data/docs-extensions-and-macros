@@ -242,6 +242,35 @@ describe('escaping of every CSV-derived value', () => {
   })
 })
 
+describe('card descriptions come only from the component pages', () => {
+  const CSV = [
+    'connector,commercial_name,type,support_level,is_cloud_supported,is_licensed,redpandaConnectUrl,redpandaCloudUrl,description',
+    'kafka,Apache Kafka,input,certified,n,No,/connect/components/inputs/kafka/,,Connects to Kafka brokers and consumes one or more topics.',
+    'gateway,N/A,input,certified,y,No,,,'
+  ].join('\n')
+
+  let html
+
+  beforeAll(() => {
+    html = renderComponentTable({ csv: CSV })
+  })
+
+  test('renders the description the extension extracted from the page', () => {
+    expect(cardFor(html, 'kafka')).toContain('<p class="card-description">Connects to Kafka brokers and consumes one or more topics.</p>')
+  })
+
+  test('invents nothing when a component page has no description', () => {
+    // The old hardcoded registry answered 'Stream messages to and from Apache
+    // Kafka topics' for kafka (already drifted from upstream) and
+    // 'Receive data from external sources' for anything it did not know.
+    const card = cardFor(html, 'gateway')
+    expect(card).not.toContain('card-description')
+    expect(html).not.toContain('Stream messages to and from Apache Kafka topics')
+    expect(html).not.toContain('Receive data from external sources')
+    expect(html).not.toContain('component for data pipelines')
+  })
+})
+
 describe('cards a reader can actually reach', () => {
   const CSV = [
     'connector,commercial_name,type,support_level,is_cloud_supported,is_licensed,redpandaConnectUrl,redpandaCloudUrl,description',
