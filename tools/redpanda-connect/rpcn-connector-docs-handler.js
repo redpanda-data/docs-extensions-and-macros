@@ -780,10 +780,15 @@ async function loadConnectorDataForVersion(version, dataDir, options = {}) {
   console.log(`📥 Fetching data for ${version} (${reason})...`);
 
   // Fetch the OSS release asset for this exact version instead of asking rpk to
-  // install it. rpk validates --connect-version against a regex that caps every
-  // segment at two digits (validateVersion in rpk/pkg/cli/connect/install.go),
-  // so it refuses any version >= 4.100.0 — which is every version worth asking
-  // for. The plain OSS asset is the same build rpk would have installed, so the
+  // install it. rpk's validateVersion (rpk/pkg/cli/connect/install.go) matches
+  // --connect-version against a regex that caps each segment at two digits, so
+  // it rejects every version >= 4.100.0, which is every version worth asking
+  // for. The cap is lifted in rpk v26.1.15 and on dev, but v26.1.14 and the
+  // whole v26.2.x line still carry it, so which versions can be installed
+  // depends on which rpk happens to be on PATH. Fetching the asset removes that
+  // dependency instead of working around one rpk release, so this is the
+  // permanent mechanism rather than something to revert once rpk ships a fix:
+  // the plain OSS asset is the same build rpk would have installed, so the
   // schema is identical, and this leaves the caller's own Connect installation
   // untouched instead of forcing a managed plugin over the top of it.
   try {
@@ -850,9 +855,10 @@ async function handleRpcnConnectorDocs (options) {
         }
         newVersion = options.connectVersion
         // An explicit version comes from the release asset rather than from
-        // rpk, which refuses to install anything >= 4.100.0 — see
-        // loadConnectorDataForVersion. Reuses an existing snapshot if there
-        // is one, and leaves the caller's own Connect install alone either way.
+        // rpk, which rejects anything >= 4.100.0 on the rpk releases this
+        // pipeline runs. See loadConnectorDataForVersion. Reuses an existing
+        // snapshot when it is raw, unaugmented output for this same version,
+        // and leaves the caller's own Connect install alone either way.
         console.log(`Fetching connector data for Connect ${newVersion}...`)
         await loadConnectorDataForVersion(newVersion, dataDir)
         dataFile = path.join(dataDir, `connect-${newVersion}.json`)

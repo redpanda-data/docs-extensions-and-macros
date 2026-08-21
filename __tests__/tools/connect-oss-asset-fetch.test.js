@@ -5,10 +5,12 @@
  * asset instead of through `rpk connect install --connect-version`.
  *
  * Why this path exists: rpk validates --connect-version with a regex that caps
- * each segment at two digits (validateVersion in rpk/pkg/cli/connect/install.go,
- * still capped as of v26.2.1), so it refuses every version >= 4.100.0. Fetching
- * the plain OSS asset — the same build rpk would have installed — skips that
- * validation and leaves the caller's own Connect installation untouched.
+ * each segment at two digits (validateVersion in rpk/pkg/cli/connect/install.go),
+ * so it refuses every version >= 4.100.0. The cap is lifted in rpk v26.1.15 and
+ * on dev, but v26.1.14 and the whole v26.2.x line still carry it, so what can be
+ * installed depends on which rpk is on PATH. Fetching the plain OSS asset, the
+ * same build rpk would have installed, skips that validation entirely and leaves
+ * the caller's own Connect installation untouched.
  */
 
 const mockListReleases = jest.fn();
