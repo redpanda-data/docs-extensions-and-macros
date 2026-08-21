@@ -497,8 +497,11 @@ function getRpkConnectVersion() {
  *  • which connectors/components are brand-new
  *  • which new fields appeared under existing connectors (including “config” entries)
  *  • for each new component/field, if the raw object contains “version” or “introducedInVersion” or “requiresVersion” metadata, print it
+ * @param {object} oldIndex - Previous version connector index
+ * @param {object} newIndex - Current version connector index
+ * @param {object} [opts] - { newVersion } used as the introducedIn fallback
  */
-function printDeltaReport(oldIndex, newIndex) {
+function printDeltaReport(oldIndex, newIndex, opts = {}) {
   const oldMap = buildComponentMap(oldIndex);
   const newMap = buildComponentMap(newIndex);
 
@@ -518,7 +521,9 @@ function printDeltaReport(oldIndex, newIndex) {
     added.forEach(fName => {
       const rawFieldObj = newMap[cKey].fieldMap.get(fName) || null;
       if (isDeprecatedField(rawFieldObj)) return;
-      const introducedIn = rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version);
+      // Same fallback as generateConnectorDiffJson, so the console report and
+      // the published table cannot disagree about the same input.
+      const introducedIn = (rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version)) || opts.newVersion || null;
       const requiresVer = rawFieldObj && rawFieldObj.requiresVersion;
 
       newFields.push({

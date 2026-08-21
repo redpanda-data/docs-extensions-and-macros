@@ -19,7 +19,7 @@
 jest.mock('../../cli-utils/octokit-client', () => ({}));
 
 const { capToTwoSentences, augmentConnectorData, buildCleanOssData, fieldAnchor, buildFieldsTable, buildChangedDefaultsTable } = require('../../tools/redpanda-connect/rpcn-connector-docs-handler');
-const { generateConnectorDiffJson } = require('../../tools/redpanda-connect/report-delta');
+const { generateConnectorDiffJson, printDeltaReport } = require('../../tools/redpanda-connect/report-delta');
 const renderConnectFields = require('../../tools/redpanda-connect/helpers/renderConnectFields');
 
 describe('capToTwoSentences - xref and filename protection', () => {
@@ -388,6 +388,55 @@ describe('generateConnectorDiffJson - config component status and cloud support'
     });
 
     expect(diff.details.newFields[0].introducedIn).toBe('4.99.0');
+  });
+});
+
+describe('printDeltaReport - console report agrees with the diff JSON', () => {
+  const oldIndex = { inputs: [{ name: 'aws_s3', config: { children: [{ name: 'bucket', kind: 'scalar' }] } }] };
+  const newIndex = {
+    inputs: [{
+      name: 'aws_s3',
+      config: { children: [{ name: 'bucket', kind: 'scalar' }, { name: 'region', kind: 'scalar' }] }
+    }]
+  };
+
+  const capture = (fn) => {
+    const out = [];
+    const log = jest.spyOn(console, 'log').mockImplementation(msg => out.push(String(msg === undefined ? '' : msg)));
+    const write = jest.spyOn(process.stdout, 'write').mockImplementation(msg => { out.push(String(msg)); return true; });
+    try {
+      fn();
+    } finally {
+      log.mockRestore();
+      write.mockRestore();
+    }
+    return out.join('');
+  };
+
+  test('stamps the diff target version onto a new field, like the diff JSON does', () => {
+    const report = capture(() => printDeltaReport(oldIndex, newIndex, { newVersion: '4.104.0' }));
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, { oldVersion: '4.103.1', newVersion: '4.104.0' });
+
+    expect(report).toContain('introducedIn: 4.104.0');
+    expect(diff.details.newFields[0].introducedIn).toBe('4.104.0');
+  });
+
+  test('reports an added group once, like the diff JSON does', () => {
+    const withGroup = {
+      inputs: [{
+        name: 'aws_s3',
+        config: {
+          children: [
+            { name: 'bucket', kind: 'scalar' },
+            { name: 'sqs', kind: 'scalar', children: [{ name: 'url', kind: 'scalar' }, { name: 'wait', kind: 'scalar' }] }
+          ]
+        }
+      }]
+    };
+    const report = capture(() => printDeltaReport(oldIndex, withGroup, { newVersion: '4.104.0' }));
+
+    expect(report).toContain('inputs:aws_s3 → sqs');
+    expect(report).not.toContain('sqs.url');
   });
 });
 

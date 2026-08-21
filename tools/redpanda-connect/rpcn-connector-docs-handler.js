@@ -1479,7 +1479,7 @@ async function handleRpcnConnectorDocs (options) {
       }
     }
 
-    printDeltaReport(oldIndexForDiff, newIndex)
+    printDeltaReport(oldIndexForDiff, newIndex, { newVersion })
 
     const { generateConnectorDiffJson } = require('./report-delta.js')
     diffJson = generateConnectorDiffJson(
