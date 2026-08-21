@@ -630,6 +630,13 @@ module.exports.register = function (registry, context) {
   function generateConnectorsHTMLCards(connectors, sqlDrivers, isCloud, showAllInfo, commercialNamesMap, uiRootPath) {
     return Object.entries(connectors)
       .filter(([_, details]) => {
+        // SQL drivers are not components. They are listed as driver badges on the
+        // sql_* cards, and the type filter deliberately offers no sql_driver
+        // option, so a card for one is in the DOM but unreachable by any filter
+        // or search. Do not emit it.
+        const isSqlDriverOnly = Array.from(details.types.keys())
+          .every(type => (type || '').toLowerCase() === 'sql_driver');
+        if (isSqlDriverOnly) return false;
         // If isCloud is true, filter out rows that do not support cloud
         return !isCloud || details.isCloudConnectorSupported;
       })
@@ -762,9 +769,13 @@ module.exports.register = function (registry, context) {
                data-cloud="${isCloudConnectorSupported ? 'yes' : 'no'}">
             <div class="card-header">
               <div class="card-header-content">
-                <a href="${firstUrl}" class="card-title-link">
+                ${firstUrl
+                  // Same degradation as the type badge below: with no page to link
+                  // to, the title is plain text rather than an anchor to nowhere.
+                  ? `<a href="${firstUrl}" class="card-title-link">
                   <h3 class="card-title"><code>${escapeHtml(connector)}</code></h3>
-                </a>
+                </a>`
+                  : `<h3 class="card-title"><code>${escapeHtml(connector)}</code></h3>`}
                 <p class="card-description">${escapeHtml(details.description || generateDescription(connector, types))}</p>
               </div>
               <div class="card-icon">

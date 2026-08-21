@@ -242,6 +242,53 @@ describe('escaping of every CSV-derived value', () => {
   })
 })
 
+describe('cards a reader can actually reach', () => {
+  const CSV = [
+    'connector,commercial_name,type,support_level,is_cloud_supported,is_licensed,redpandaConnectUrl,redpandaCloudUrl,description',
+    'sql_insert,SQL,output,certified,n,No,/connect/components/outputs/sql_insert/,,Inserts rows into SQL databases',
+    'sql_driver_postgres,PostgreSQL,sql_driver,certified,n,No,,,',
+    'sql_driver_trino,Trino,sql_driver,community,n,No,,,',
+    'a2a_message,N/A,processor,certified,y,No,,,Sends messages to an agent'
+  ].join('\n')
+
+  let html
+
+  beforeAll(() => {
+    html = renderComponentTable({ csv: CSV })
+  })
+
+  test('emits no card for a sql_driver row', () => {
+    // The type filter has no sql_driver option by design, so such a card could
+    // never be shown: 2 driver rows + sql_insert + a2a_message -> 2 cards.
+    expect(html.match(/id="component-\d+"/g)).toHaveLength(2)
+    expect(html).not.toContain('data-types="sql_driver"')
+    expect(cardFor(html, 'sql_driver_postgres')).toBe('')
+    expect(cardFor(html, 'sql_driver_trino')).toBe('')
+  })
+
+  test('still lists the drivers as badges on the sql_ component card', () => {
+    const card = cardFor(html, 'sql_insert')
+    expect(card).toContain('>Certified: PostgreSQL<')
+    expect(card).toContain('>Community: Trino<')
+  })
+
+  test('the type filter offers no sql_driver option', () => {
+    expect(html).not.toContain('value="sql_driver"')
+  })
+
+  test('a connector with no page renders its title as text, not a link to nowhere', () => {
+    const card = cardFor(html, 'a2a_message')
+    expect(card).not.toContain('href=""')
+    expect(card).not.toContain('card-title-link')
+    expect(card).toContain('<h3 class="card-title"><code>a2a_message</code></h3>')
+  })
+
+  test('a connector with a page still links its title', () => {
+    const card = cardFor(html, 'sql_insert')
+    expect(card).toContain('<a href="/connect/components/outputs/sql_insert/" class="card-title-link">')
+  })
+})
+
 describe('UI bundle path resolution', () => {
   // Logos live in the docs-ui bundle at <site root>/_/img/logos. Antora gives
   // AsciiDoc extensions the page's path back to the site root as
