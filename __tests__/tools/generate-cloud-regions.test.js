@@ -158,4 +158,14 @@ describe('processCloudRegions', () => {
     const usEast = providers.find((p) => p.name === 'AWS').regions[0];
     expect(usEast.zones).toBe('use1-az1, use1-az2');
   });
+
+  it('sorts zones so that reordering them upstream is not a docs change', () => {
+    const shuffled = sampleYaml.replace(
+      'zones: [use1-az1, use1-az2]',
+      'zones: [use1-az10, use1-az2, use1-az1]'
+    );
+    const providers = processCloudRegions(shuffled);
+    const usEast = providers.find((p) => p.name === 'AWS').regions[0];
+    expect(usEast.zones).toBe('use1-az1, use1-az2, use1-az10');
+  });
 });

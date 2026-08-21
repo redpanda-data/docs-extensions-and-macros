@@ -212,8 +212,14 @@ function buildCloudRegions(yamlText, { clusterType } = {}) {
     .map((prov) => {
       // Only include regions that have at least one public product/tier
       const filteredRegions = grouped[prov].map((region) => {
-        // Join with ', ' so long zone lists can wrap inside table cells
-        const zones = Array.isArray(region.zones) ? region.zones.join(', ') : (region.zones || '');
+        // Sort so a pure reordering upstream cannot produce a docs diff, and join
+        // with ', ' so long zone lists can wrap inside table cells.
+        const zones = Array.isArray(region.zones)
+          ? [...region.zones]
+            .map(String)
+            .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
+            .join(', ')
+          : (region.zones || '');
         let tiers = [];
         if (region.redpandaProductAvailability && typeof region.redpandaProductAvailability === 'object') {
           // Group by tier name, collect all cluster types for that tier
