@@ -81,23 +81,51 @@ function defineBlock (registry) {
     const self = this;
     self.named('iceberg-explorer');
     // Accept an empty open block (`--`) or a listing/literal/pass block whose
-    // body carries author-supplied JSON defaults.
-    self.onContext(['open', 'listing', 'literal', 'pass', 'paragraph']);
+    // body carries author-supplied JSON defaults. `paragraph` is deliberately
+    // absent: the processor discards the body, so registering the paragraph
+    // context made `[iceberg-explorer]` above ordinary prose delete that
+    // paragraph from the published page.
+    self.onContext(['open', 'listing', 'literal', 'pass']);
     self.process((parent, reader, attrs) => {
       const attributes = parent.getDocument().getAttributes();
+      // Name the page in every warning. Antora sets page-relative-src-path
+      // (the convention rp-connect-components.js follows); plain Asciidoctor
+      // runs only have docfile.
+      const page =
+        attributes['page-relative-src-path'] ||
+        attributes['docfile'] ||
+        'unknown page';
+      const warn = (message) => {
+        console.warn(`[iceberg-explorer] ${page}: ${message}`);
+      };
 
-      // Author-supplied defaults (optional). Validate that the body is JSON so
-      // a typo surfaces at build time rather than silently shipping bad data.
+      // Author-supplied defaults (optional). Validate that the body is a JSON
+      // object so a typo surfaces at build time rather than silently shipping
+      // bad data. docs-ui reads keys off the parsed value, so a scalar or an
+      // array is as unusable as a syntax error, and JSON.parse accepts both.
       let defaults = null;
       const body = reader.getLines().join('\n').trim();
       if (body) {
+        let parsed;
+        let valid = false;
         try {
-          defaults = JSON.parse(body);
+          parsed = JSON.parse(body);
+          valid = true;
         } catch (err) {
-          console.warn(
-            `[iceberg-explorer] block body is not valid JSON (${err.message}). ` +
+          warn(
+            `block body is not valid JSON (${err.message}). ` +
             'Rendering the explorer with built-in defaults instead.'
           );
+        }
+        if (valid) {
+          if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            warn(
+              `block body must be a JSON object with a "config" key, not ${describeJson(parsed)}. ` +
+              'Rendering the explorer with built-in defaults instead.'
+            );
+          } else {
+            defaults = parsed;
+          }
         }
       }
 
@@ -110,16 +138,19 @@ function defineBlock (registry) {
         '';
 
       // Optional named attributes let an author pin behavior without a body.
-      // `config` sets the initial DSL string; `height` overrides the min height.
+      // `config` sets the initial DSL string; `height` overrides the min
+      // height; `engine-base` overrides where docs-ui fetches the engine from.
       const initialConfig = attrs.config || (defaults && defaults.config) || '';
-      const height = attrs.height || '';
+      const height = cssLength(attrs.height, warn);
+      const engineBase = attrs['engine-base'] || '';
 
       const dataDefaults = defaults
         ? escapeAttr(JSON.stringify(defaults))
         : '';
       const dataConfig = initialConfig ? escapeAttr(initialConfig) : '';
-      const styleAttr = height ? ` style="min-height:${escapeAttr(height)}"` : '';
+      const styleAttr = height ? ` style="min-height:${height}"` : '';
       const versionAttr = version ? ` data-version="${escapeAttr(version)}"` : '';
+      const engineAttr = engineBase ? ` data-engine-base="${escapeAttr(engineBase)}"` : '';
 
       // The container is a mount point only; docs-ui replaces its contents on
       // hydration. Until then the fallback paragraph is visible, so the two
@@ -128,7 +159,7 @@ function defineBlock (registry) {
       // plain markup, not <noscript>, precisely because the common failure is
       // JS running fine with the module missing, which <noscript> hides.
       const html = `
-<div class="${MOUNT_CLASS}" ${MOUNT_ATTRIBUTE}="${MOUNT_CONTRACT_VERSION}"${versionAttr}${dataConfig ? ` data-config="${dataConfig}"` : ''}${dataDefaults ? ` data-defaults="${dataDefaults}"` : ''}${styleAttr}>
+<div class="${MOUNT_CLASS}" ${MOUNT_ATTRIBUTE}="${MOUNT_CONTRACT_VERSION}"${versionAttr}${engineAttr}${dataConfig ? ` data-config="${dataConfig}"` : ''}${dataDefaults ? ` data-defaults="${dataDefaults}"` : ''}${styleAttr}>
   <p class="iceberg-explorer-fallback">Interactive Iceberg Mode Explorer. If this text is still here, the explorer could not load: it needs JavaScript and a docs-ui build that includes the explorer module. See the Iceberg topic configuration reference for the equivalent settings.</p>
 </div>`;
 
@@ -136,6 +167,38 @@ function defineBlock (registry) {
     });
   });
 };
+
+/**
+ * Describe a parsed-but-unusable JSON body for the build warning.
+ * @param {*} value
+ * @returns {string}
+ */
+function describeJson (value) {
+  if (Array.isArray(value)) return 'an array';
+  if (value === null) return 'null';
+  return `a ${typeof value}`;
+}
+
+/**
+ * Validate the `height` attribute as a CSS length. A bare number is the natural
+ * thing to write and produces `min-height:400`, which browsers drop, so accept
+ * it and add `px`. Anything else is rejected rather than interpolated: the value
+ * lands inside a style attribute, where `1px;position:fixed;inset:0` would turn
+ * a doc page into a full-viewport overlay.
+ * @param {string} raw
+ * @param {function(string): void} warn
+ * @returns {string} A safe CSS length, or '' to omit the style attribute.
+ */
+function cssLength (raw, warn) {
+  if (!raw) return '';
+  const value = String(raw).trim();
+  if (/^\d+$/.test(value)) return `${value}px`;
+  if (/^\d+(\.\d+)?(px|rem|em|vh|vw|%)$/.test(value)) return value;
+  warn(
+    `height="${value}" is not a CSS length (for example, 400, 400px, 30rem, 60vh). Ignoring it.`
+  );
+  return '';
+}
 
 /**
  * Escape a value for safe inclusion inside a double-quoted HTML attribute.

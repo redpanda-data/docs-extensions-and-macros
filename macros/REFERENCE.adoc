@@ -385,7 +385,9 @@ Or pass a JSON object as the block body to supply author-defined defaults:
 ----
 ```
 
-The JSON is attribute-escaped and emitted as `data-defaults`. If the body is not valid JSON, the macro logs a warning, omits `data-defaults`, and still renders the mount point.
+The JSON is attribute-escaped and emitted as `data-defaults`. The body must be a JSON *object*: `JSON.parse()` also accepts scalars and arrays, and docs-ui reads keys off the parsed value, so a bare `123` is as unusable as a syntax error. If the body is not a JSON object, the macro logs a warning that names the page, omits `data-defaults`, and still renders the mount point.
+
+The block accepts an open (`--`), listing (`----`), literal, or pass body. It is not registered for the paragraph context, because the processor replaces the block with the mount point: registering paragraphs would delete the prose under a stray `[iceberg-explorer]` line from the published page.
 
 |===
 | Attribute | Description
@@ -394,7 +396,10 @@ The JSON is attribute-escaped and emitted as `data-defaults`. If the body is not
 | Initial configuration string. Emitted as `data-config`. Falls back to the `config` key of the JSON body.
 
 | `height`
-| Minimum height for the container, emitted as an inline `min-height` style.
+| Minimum height for the container, emitted as an inline `min-height` style. A bare number is treated as pixels (`height=400` becomes `min-height:400px`). Otherwise the value must be a CSS length in `px`, `rem`, `em`, `vh`, `vw`, or `%`; any other value is rejected with a warning rather than interpolated into the style attribute.
+
+| `engine-base`
+| Optional base location for the translation engine build, emitted as `data-engine-base`. docs-ui falls back to its own default when this is absent, so set it only to pin a specific engine build.
 |===
 
 === Registration
