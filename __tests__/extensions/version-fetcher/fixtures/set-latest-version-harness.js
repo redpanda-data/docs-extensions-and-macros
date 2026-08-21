@@ -43,11 +43,20 @@ const defaults = {
 const config = { ...defaults, ...scenario };
 
 mock(path.join(extDir, 'get-latest-redpanda-version.js'), async () => config.redpanda);
-mock(path.join(extDir, 'get-latest-console-version.js'), async () => null);
 mock(path.join(extDir, 'fetch-latest-docker-tag.js'), async (namespace, repo) => config.dockerTags[repo] || null);
 mock(path.join(extDir, 'get-latest-redpanda-helm-version-from-operator.js'), async () => config.helmChart);
 mock(path.join(extDir, 'get-latest-connect.js'), async () => config.connect);
 mock(path.join(repoRoot, 'cli-utils/github-token.js'), { getGitHubToken: () => 'fake-token' });
+
+// Record what the extension actually requires, so a dead dependency cannot be
+// reintroduced without a test noticing.
+const Module = require('module');
+const originalLoad = Module._load;
+const requires = [];
+Module._load = function (request, ...rest) {
+  requires.push(request);
+  return originalLoad.call(this, request, ...rest);
+};
 
 const errors = [];
 const logger = {
@@ -81,6 +90,7 @@ const contentCatalog = { getComponents: async () => [component] };
     versionAttributes: versionEntry.asciidoc.attributes,
     latestAttributes: component.latest.asciidoc.attributes,
     errors,
+    requires,
   }));
 })().catch((error) => {
   console.error(error);

@@ -93,6 +93,18 @@ describe('set-latest-version extension', () => {
     expect(versionAttributes['latest-redpanda-helm-chart-version-short']).toBe('5.10')
   })
 
+  it('does not load the unused console-version module', () => {
+    // Console versions come from the Docker tag lookup, so requiring
+    // get-latest-console-version advertises a dependency that is never used.
+    const { requires } = runExtension()
+
+    // Positive control: the hook does see the modules the extension really loads.
+    expect(requires).toContain('./get-latest-redpanda-version')
+    expect(requires).toContain('./fetch-latest-docker-tag')
+
+    expect(requires).not.toContain('./get-latest-console-version')
+  })
+
   it('names the failed lookup instead of throwing a TypeError from the logger', () => {
     // A failed Redpanda fetch resolves to null releases rather than rejecting.
     const { versionAttributes, latestAttributes, errors } = runExtension({
