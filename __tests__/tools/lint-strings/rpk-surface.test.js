@@ -26,7 +26,7 @@ describe('rpk scanner (scanFile)', () => {
       acc[d.meta.kind] = (acc[d.meta.kind] || 0) + 1
       return acc
     }, {})
-    expect(kinds).toEqual({ short: 2, long: 2, flag: 7 })
+    expect(kinds).toEqual({ short: 3, long: 2, flag: 7 })
     // cobra.Command in a comment never matches (comment masking)
     expect(declarations.some((d) => d.name === 'fake')).toBe(false)
   })
@@ -118,6 +118,17 @@ describe('rpk surface end-to-end (fixture file)', () => {
     // flag usage that merely echoes the flag name
     const echo = byKey.get(`${lineOf('"verbose-output"')}:verbose-output`)
     expect(echo.rules.map((r) => r.id).sort()).toEqual(['name-echo', 'starts-lowercase'])
+
+    // Multiline Short. This was the one rule in the linter with no coverage at
+    // all: it is live code that fires correctly, but no test referenced it and
+    // no fixture exercised it, so a regression in it would have shipped
+    // silently. Everything else about this Short conforms, so it isolates the
+    // rule, and the span must cover BOTH lines of the raw string literal.
+    const multiline = byKey.get(`${lineOf('Short: `Manage the widget cache')}:multiline`)
+    expect(multiline.rules.map((r) => r.id)).toEqual(['rpk-short-multiline'])
+    expect(multiline.rules[0].severity).toBe('warning')
+    expect(multiline.line_start).toBe(lineOf('Short: `Manage the widget cache'))
+    expect(multiline.line_end).toBe(lineOf('and everything attached to it'))
 
     // Conforming counterparts: zero findings (false-positive guard)
     const flagged = new Set(findings.map((f) => f.name))

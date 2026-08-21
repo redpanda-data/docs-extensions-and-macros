@@ -56,3 +56,14 @@ func newConformingCommand() *cobra.Command {
 	cmd.Flags().BoolP("help", "h", false, "Help for "+cmd.Name())
 	return cmd
 }
+
+// A multiline Short: the rpk convention is a one-line Short, so this is the
+// known-bad counterpart for the rpk-short-multiline rule. Everything else
+// about it conforms, so it isolates that one rule.
+func newMultilineShortCommand() *cobra.Command {
+	return &cobra.Command{
+		Use: "multiline",
+		Short: `Manage the widget cache
+and everything attached to it`,
+	}
+}
