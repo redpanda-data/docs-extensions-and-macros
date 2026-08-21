@@ -776,6 +776,7 @@ automation
   .option('--template-bloblang <path>', 'Custom Handlebars template for bloblang function/method partials')
   .option('--overrides <path>', 'Optional JSON file with overrides', 'docs-data/overrides.json')
   .option('--include-bloblang', 'Include Bloblang functions and methods in generation')
+  .option('--prune-orphaned-descriptions', 'Allow the description-partial orphan sweep to blank more than 10% of the tree. Only use this when the connector dataset is confirmed complete: an incomplete dataset looks identical to a mass upstream deletion and the sweep blanks published content')
   .option('--cloud-version <version>', 'Cloud binary version (default: auto-detect latest)')
   .option('--cgo-version <version>', 'cgo binary version (default: same as cloud-version)')
   .option('--skip-intermediate', 'Skip intermediate release processing (legacy mode - only compare latest vs last documented)')

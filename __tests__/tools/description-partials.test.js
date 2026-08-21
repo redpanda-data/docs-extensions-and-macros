@@ -664,3 +664,115 @@ describe('summaries are brace-escaped like description bodies', () => {
     });
   });
 });
+
+describe('orphan sweep blast-radius guard', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-sweep-guard');
+  let originalCwd, templateFile;
+  const descRoot = path.join(tmpDir, 'modules', 'components', 'partials', 'descriptions', 'inputs');
+
+  function writeData (count, offset = 0) {
+    const data = {
+      inputs: Array.from({ length: count }, (_, i) => ({
+        name: `conn_${i + offset}`,
+        type: 'input',
+        description: `Reads things for conn_${i + offset}.`,
+        config: { children: [{ name: 'foo', type: 'string', kind: 'scalar', description: 'A field.' }] },
+      })),
+    };
+    const dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    return dataFile;
+  }
+
+  function run (opts) {
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    return generateRpcnConnectorDocs({ template: templateFile, ...opts }).then((result) => {
+      const errors = errSpy.mock.calls.map((a) => a.join(' ')).join('\n');
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+      return { result, errors };
+    }, (err) => {
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+      throw err;
+    });
+  }
+
+  function bodies () {
+    return fs.readdirSync(descRoot)
+      .filter((f) => f.endsWith('.adoc'))
+      .filter((f) => fs.readFileSync(path.join(descRoot, f), 'utf8').includes('Reads things for'))
+      .length;
+  }
+
+  beforeEach(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('refuses to blank the tree when a truncated dataset orphans most of it', async () => {
+    // Run 1: the complete dataset.
+    await run({ data: writeData(20) });
+    expect(bodies()).toBe(20);
+
+    // Run 2: the same tool pointed at a dataset that only carries one
+    // component (a truncated fetch, a hand-made subset, a half-succeeded
+    // --force-fresh). Without a guard this blanks 19 published partials.
+    const { result, errors } = await run({ data: writeData(1) });
+
+    expect(bodies()).toBe(20);
+    expect(result.orphanSweepSkipped).toEqual({
+      orphans: 19,
+      partialsOnDisk: 20,
+      connectors: expect.arrayContaining(['inputs/conn_19']),
+    });
+    expect(errors).toContain('Orphan sweep refused');
+    expect(errors).toContain('19 of 20 description partial(s) (95%)');
+    // The refusal is reported to the PR summary, not just the workflow log.
+    expect(result.descriptionReports).toEqual(expect.arrayContaining([
+      expect.objectContaining({ message: expect.stringContaining('Orphan sweep refused') }),
+    ]));
+    // Nothing was reported as removed upstream, because nothing was.
+    expect(result.descriptionReports.some((r) => /removed upstream/.test(r.message))).toBe(false);
+  });
+
+  test('the explicit opt-in still sweeps the same truncated dataset', async () => {
+    await run({ data: writeData(20) });
+    const { result } = await run({ data: writeData(1), pruneOrphanedDescriptions: true });
+
+    expect(bodies()).toBe(1);
+    expect(result.orphanSweepSkipped).toBeNull();
+    expect(result.descriptionReports.filter((r) => /removed upstream/.test(r.message))).toHaveLength(19);
+  });
+
+  // Negative controls: the guard must not be a blanket "never sweep".
+  test('a plausible small upstream deletion is still swept', async () => {
+    await run({ data: writeData(20) });
+    const { result } = await run({ data: writeData(18) });
+
+    expect(bodies()).toBe(18);
+    expect(result.orphanSweepSkipped).toBeNull();
+    expect(result.descriptionReports.filter((r) => /removed upstream/.test(r.message))).toHaveLength(2);
+  });
+
+  test('a large but proportionally small deletion is still swept', async () => {
+    // 15 of 200 is over the always-allowed count but under the 10% fraction,
+    // so the fraction arm of the guard (not just the count arm) is exercised.
+    await run({ data: writeData(200) });
+    const { result } = await run({ data: writeData(185) });
+
+    expect(bodies()).toBe(185);
+    expect(result.orphanSweepSkipped).toBeNull();
+    expect(result.descriptionReports.filter((r) => /removed upstream/.test(r.message))).toHaveLength(15);
+  });
+});

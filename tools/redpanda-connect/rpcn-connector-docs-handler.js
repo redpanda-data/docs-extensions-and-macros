@@ -1145,6 +1145,7 @@ async function handleRpcnConnectorDocs (options) {
       templateDescription: options.templateDescription,
       templateBloblang: options.templateBloblang,
       writeFullDrafts: false,
+      pruneOrphanedDescriptions: !!options.pruneOrphanedDescriptions,
       includeBloblang: !!options.includeBloblang,
       csvMetadata
     })

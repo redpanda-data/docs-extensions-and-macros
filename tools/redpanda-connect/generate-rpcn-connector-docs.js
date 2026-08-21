@@ -56,6 +56,19 @@ const CONNECTOR_DESCRIPTION_TYPE_DIRS = new Set([
   'buffers', 'metrics', 'scanners', 'tracers',
 ]);
 
+// Blast-radius guard for the post-generation orphan sweep. The sweep blanks
+// every description partial the current dataset did not claim, so an
+// incomplete dataset (a truncated fetch, a half-succeeded --force-fresh, a
+// hand-made subset file) does not look different from "hundreds of connectors
+// were deleted upstream" -- and the partials are published content. Blanking
+// up to ORPHAN_SWEEP_ALWAYS_ALLOWED files is always fine (that is the size of
+// a plausible upstream deletion); above that the sweep also has to stay under
+// ORPHAN_SWEEP_MAX_FRACTION of the tree, or it refuses to run and reports
+// instead. `pruneOrphanedDescriptions` is the explicit opt-in that overrides
+// the refusal once a human has confirmed the dataset is complete.
+const ORPHAN_SWEEP_ALWAYS_ALLOWED = 10;
+const ORPHAN_SWEEP_MAX_FRACTION = 0.1;
+
 /**
  * Reads a file at `filePath` and registers it as a Handlebars partial called `name`.
  * Throws if the file cannot be read.
@@ -242,6 +255,7 @@ function resolveReferences(obj, root) {
  * @param {string} [options.templateFields] - Path to the fields partial template.
  * @param {string} [options.templateExamples] - Path to the examples partial template.
  * @param {boolean} options.writeFullDrafts - If true, generates full draft documentation; otherwise, generates partials.
+ * @param {boolean} [options.pruneOrphanedDescriptions=false] - Allow the post-generation sweep to blank description partials absent from the dataset even when they exceed the safety threshold. Only pass this for a dataset confirmed complete.
  * @returns {Promise<Object>} An object summarizing the number and paths of generated partials and drafts.
  *
  * @throws {Error} If reading or parsing input files fails, if template rendering fails for a component, or if $ref references cannot be resolved.
@@ -286,6 +300,9 @@ async function generateRpcnConnectorDocs(options) {
     templateDescription,
     templateBloblang,
     writeFullDrafts,
+    // Explicit opt-in for the destructive description-partial orphan sweep.
+    // Off by default: see ORPHAN_SWEEP_MAX_FRACTION.
+    pruneOrphanedDescriptions = false,
     cgoOnly = [],        // Array of cgo-only connectors from cgo binary inspection
     cloudOnly = [],      // Array of cloud-only connectors from cloud binary inspection
     csvMetadata = []     // Array of CSV metadata with support levels
@@ -791,18 +808,53 @@ async function generateRpcnConnectorDocs(options) {
   // run and blank them the same way. Skipped in draft mode: drafts run on a
   // filtered dataset (missing connectors only), so "not visited" there means
   // "already documented", not "deleted upstream".
+  // The sweep is destructive against published content, so collect the
+  // candidates first and check the blast radius before writing anything.
+  let orphanSweepSkipped = null;
   if (!writeFullDrafts && fs.existsSync(descriptionOutRoot)) {
+    const orphans = [];
+    let partialsOnDisk = 0;
     for (const typeDirName of fs.readdirSync(descriptionOutRoot)) {
       const typeDirPath = path.join(descriptionOutRoot, typeDirName);
       if (!fs.statSync(typeDirPath).isDirectory()) continue;
       for (const file of fs.readdirSync(typeDirPath)) {
         if (!file.endsWith('.adoc')) continue;
+        partialsOnDisk++;
         const key = `${typeDirName}/${file.slice(0, -'.adoc'.length)}`;
         if (visitedDescriptionPartials.has(key)) continue;
         const orphanPath = path.join(typeDirPath, file);
         // Already blanked on an earlier run: leave it alone so it is not
         // re-reported forever.
         if (fs.readFileSync(orphanPath, 'utf8') === STALE_DESCRIPTION_PARTIAL) continue;
+        orphans.push({ key, orphanPath });
+      }
+    }
+
+    // Over the threshold the far likelier explanation is an incomplete
+    // dataset, not a mass upstream deletion, so refuse and report.
+    const overBlastRadius =
+      orphans.length > ORPHAN_SWEEP_ALWAYS_ALLOWED &&
+      orphans.length > partialsOnDisk * ORPHAN_SWEEP_MAX_FRACTION;
+
+    if (orphans.length && overBlastRadius && !pruneOrphanedDescriptions) {
+      const percent = Math.round((orphans.length / partialsOnDisk) * 100);
+      const msg =
+        `Orphan sweep refused: ${orphans.length} of ${partialsOnDisk} description partial(s) (${percent}%) ` +
+        `are absent from this run's dataset, over the ${Math.round(ORPHAN_SWEEP_MAX_FRACTION * 100)}% safety ` +
+        'threshold. That normally means the dataset is truncated or filtered, not that this many connectors ' +
+        'were deleted upstream, and blanking them would wipe published content. Nothing was blanked. ' +
+        'Confirm the dataset is complete, then re-run with --prune-orphaned-descriptions to sweep. ' +
+        `Affected: ${orphans.slice(0, 10).map((o) => o.key).join(', ')}` +
+        (orphans.length > 10 ? `, and ${orphans.length - 10} more` : '');
+      orphanSweepSkipped = {
+        orphans: orphans.length,
+        partialsOnDisk,
+        connectors: orphans.map((o) => o.key),
+      };
+      descriptionReports.push({ connector: 'descriptions (sweep)', message: msg });
+      console.error(msg);
+    } else {
+      for (const { key, orphanPath } of orphans) {
         fs.writeFileSync(orphanPath, STALE_DESCRIPTION_PARTIAL);
         const msg =
           `Connector removed upstream: emptied orphaned description partial ` +
@@ -828,6 +880,7 @@ async function generateRpcnConnectorDocs(options) {
     draftFiles,
     descriptionReports,
     lostSectionWarnings,
+    orphanSweepSkipped,
     descriptionBackfill
   };
 }
