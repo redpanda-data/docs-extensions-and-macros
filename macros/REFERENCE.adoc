@@ -334,12 +334,29 @@ This macro registers an `[iceberg-explorer]` block that emits a version-aware mo
 
 [,html]
 ----
-<div class="iceberg-explorer" data-version="26.2"><noscript>...</noscript></div>
+<div class="iceberg-explorer-mount" data-iceberg-explorer="1" data-version="26.2">
+  <p class="iceberg-explorer-fallback">Interactive Iceberg Mode Explorer. If this text is still here...</p>
+</div>
 ----
 
-The block renders the container only. The explorer UI and its translation engine live in the docs-ui bundle, which hydrates any `.iceberg-explorer` element on the page, so the block is inert unless the site uses a docs-ui build that includes the explorer. This is the same "macro emits container, docs-ui hydrates it" handshake used by the Redpanda Connect component metadata block.
+The block renders the container only. The explorer UI and its translation engine live in the docs-ui bundle, which hydrates the mount point, so the block is inert unless the site uses a docs-ui build that includes the explorer. This is the same "macro emits container, docs-ui hydrates it" handshake used by the Redpanda Connect component metadata block.
+
+Until the explorer module replaces the container's contents, the fallback paragraph is visible. It is ordinary markup rather than `<noscript>` on purpose: the failure readers are most likely to hit is JavaScript running normally on a site whose UI bundle has no explorer module, and a browser hides `<noscript>` in that case, leaving a zero-height blank space with no explanation.
 
 The page's component version (`page-version`, falling back to `page-component-version`) is stamped onto the mount point as `data-version` so the UI can load the engine build that matches the doc version. If neither attribute is set, `data-version` is omitted.
+
+=== Mount contract
+
+docs-ui must hydrate on the `data-iceberg-explorer` attribute (`[data-iceberg-explorer]`), never on a class name that matches the block name.
+
+Asciidoctor turns an unrecognized block style into a CSS class. A site that uses `[iceberg-explorer]` but whose playbook does not register this macro still publishes `<div class="openblock iceberg-explorer">`, with the author's JSON body dumped onto the page as a code listing. If the explorer module hydrated on `.iceberg-explorer`, that accident would render as a working-looking explorer filled with built-in sample data, the author's defaults silently discarded, and no error anywhere to trace it back to the missing playbook entry.
+
+Only this macro can emit a data attribute, so:
+
+* `data-iceberg-explorer` is the mount contract, and its value is the contract version (`1` today). Bump it only if the emitted attributes change shape.
+* `iceberg-explorer-mount` is a styling hook, not a mount signal.
+
+The constants are exported (`MOUNT_ATTRIBUTE`, `MOUNT_CONTRACT_VERSION`, `MOUNT_CLASS`, `MOUNT_SELECTOR`) so docs-ui and the tests can assert against one definition.
 
 === Usage
 

@@ -6,11 +6,22 @@
  * Registers an `[iceberg-explorer]` AsciiDoc block that emits a lightweight,
  * version-aware mount point. The interactive tool itself (Ace editors,
  * controls, rendering) and its translation engine live in the docs-ui bundle;
- * a docs-ui JS module hydrates any `.iceberg-explorer` element on the page.
+ * a docs-ui JS module hydrates every element carrying the mount attribute
+ * (`MOUNT_SELECTOR` below).
  *
  * This mirrors the "macro emits container -> docs-ui JS hydrates" handshake
  * used by the component metadata block in `rp-connect-components.js` +
  * `docs-ui/src/js/24-move-connector-metadata.js`.
+ *
+ * MOUNT CONTRACT. docs-ui must hydrate on the `data-iceberg-explorer`
+ * attribute, never on a class name that matches the block name. Asciidoctor
+ * turns an unrecognized block style into a CSS class, so a page that uses
+ * `[iceberg-explorer]` in a site whose playbook forgot to register this macro
+ * still renders `<div class="openblock iceberg-explorer">`. Hydrating on
+ * `.iceberg-explorer` would dress that accident up as a working explorer
+ * showing built-in sample data while the author's JSON body was discarded, with
+ * no error anywhere. Only this macro can emit a data attribute, so the
+ * attribute is the contract and the class is for styling only.
  *
  * Authoring:
  *
@@ -36,6 +47,17 @@
  * @param {Object} context - The Antora context (unused today; kept for parity
  *   with the other macros and for future content-catalog resolution).
  */
+
+// Mount contract shared with docs-ui. Exported so both sides and the tests
+// reference one definition instead of a hard-coded string in three places.
+const MOUNT_ATTRIBUTE = 'data-iceberg-explorer';
+// Bumped only if the emitted attributes change shape, so a docs-ui build can
+// refuse a mount point it does not understand.
+const MOUNT_CONTRACT_VERSION = '1';
+// Styling hook only. Deliberately NOT the block name: see MOUNT CONTRACT above.
+const MOUNT_CLASS = 'iceberg-explorer-mount';
+const MOUNT_SELECTOR = `[${MOUNT_ATTRIBUTE}]`;
+
 module.exports.register = function (registry, context) {
   // Support both calling conventions:
   //  - Antora passes a registry as the first argument; it exposes `.block()`
@@ -99,13 +121,15 @@ function defineBlock (registry) {
       const styleAttr = height ? ` style="min-height:${escapeAttr(height)}"` : '';
       const versionAttr = version ? ` data-version="${escapeAttr(version)}"` : '';
 
-      // The container is a mount point only. docs-ui hydrates it; if JS is
-      // unavailable the noscript fallback points readers at the static docs.
+      // The container is a mount point only; docs-ui replaces its contents on
+      // hydration. Until then the fallback paragraph is visible, so the two
+      // ways this can fail (JS disabled, or a docs-ui build without the
+      // explorer module) both show a message instead of a 0px-tall void. It is
+      // plain markup, not <noscript>, precisely because the common failure is
+      // JS running fine with the module missing, which <noscript> hides.
       const html = `
-<div class="iceberg-explorer"${versionAttr}${dataConfig ? ` data-config="${dataConfig}"` : ''}${dataDefaults ? ` data-defaults="${dataDefaults}"` : ''}${styleAttr}>
-  <noscript>
-    <p>The interactive Iceberg Mode Explorer requires JavaScript. See the Iceberg topics documentation for configuration reference.</p>
-  </noscript>
+<div class="${MOUNT_CLASS}" ${MOUNT_ATTRIBUTE}="${MOUNT_CONTRACT_VERSION}"${versionAttr}${dataConfig ? ` data-config="${dataConfig}"` : ''}${dataDefaults ? ` data-defaults="${dataDefaults}"` : ''}${styleAttr}>
+  <p class="iceberg-explorer-fallback">Interactive Iceberg Mode Explorer. If this text is still here, the explorer could not load: it needs JavaScript and a docs-ui build that includes the explorer module. See the Iceberg topic configuration reference for the equivalent settings.</p>
 </div>`;
 
       return self.createBlock(parent, 'pass', html);
@@ -125,3 +149,8 @@ function escapeAttr(value) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 }
+
+module.exports.MOUNT_ATTRIBUTE = MOUNT_ATTRIBUTE;
+module.exports.MOUNT_CONTRACT_VERSION = MOUNT_CONTRACT_VERSION;
+module.exports.MOUNT_CLASS = MOUNT_CLASS;
+module.exports.MOUNT_SELECTOR = MOUNT_SELECTOR;

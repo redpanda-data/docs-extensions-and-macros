@@ -60,12 +60,48 @@ describe('iceberg-explorer macro', () => {
     })
   })
 
+  describe('mount contract', () => {
+    // Asciidoctor turns an unrecognized block style into a CSS class, so a site
+    // whose playbook forgot this macro still renders a div named after the
+    // block. If docs-ui hydrated on that class name, the accident would look
+    // like a working explorer full of built-in sample data while the author's
+    // JSON body was silently discarded. The mount contract therefore has to be
+    // something only this macro can emit.
+    test('an unregistered [iceberg-explorer] block cannot pass for a mount point', () => {
+      const source = '[iceberg-explorer]\n--\n--'
+      // No extension registry: this is what a consumer repo that added the
+      // block but forgot the playbook entry actually publishes.
+      const accidental = asciidoctor.convert(source)
+      expect(accidental).toContain('class="openblock iceberg-explorer"')
+      expect(accidental).not.toContain(macro.MOUNT_ATTRIBUTE)
+      expect(accidental).not.toContain(macro.MOUNT_CLASS)
+
+      const mounted = convert(source)
+      expect(mounted).toContain(`${macro.MOUNT_ATTRIBUTE}="${macro.MOUNT_CONTRACT_VERSION}"`)
+      expect(mounted).toContain(`class="${macro.MOUNT_CLASS}"`)
+    })
+
+    test('the mount selector keys on an attribute, not on a class name', () => {
+      expect(macro.MOUNT_SELECTOR).toBe(`[${macro.MOUNT_ATTRIBUTE}]`)
+      expect(macro.MOUNT_ATTRIBUTE.startsWith('data-')).toBe(true)
+    })
+  })
+
   describe('rendering', () => {
     test('emits a hydration mount point for an empty open block', () => {
       const html = convert('[iceberg-explorer]\n--\n--')
-      expect(html).toContain('class="iceberg-explorer"')
-      // Container is a mount point only: no controls are rendered server-side.
-      expect(html).toContain('<noscript>')
+      expect(html).toContain(`class="${macro.MOUNT_CLASS}"`)
+      expect(html).toContain(`${macro.MOUNT_ATTRIBUTE}="1"`)
+    })
+
+    // The failure readers actually hit is JS running fine with the docs-ui
+    // explorer module missing, which suppresses <noscript> and leaves a
+    // zero-height void. The fallback has to be plain, visible markup.
+    test('renders a visible fallback that does not depend on JavaScript', () => {
+      const html = convert('[iceberg-explorer]\n--\n--')
+      expect(html).not.toContain('<noscript>')
+      expect(html).toContain('class="iceberg-explorer-fallback"')
+      expect(html).toMatch(/docs-ui build that includes the explorer module/)
     })
 
     test('stamps the doc version onto the mount point', () => {
@@ -110,7 +146,7 @@ describe('iceberg-explorer macro', () => {
     test('ignores an invalid JSON body but still renders the mount point', () => {
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
       const html = convert('[iceberg-explorer]\n----\nnot json\n----')
-      expect(html).toContain('class="iceberg-explorer"')
+      expect(html).toContain(`class="${macro.MOUNT_CLASS}"`)
       expect(html).not.toContain('data-defaults=')
       expect(warn).toHaveBeenCalled()
       warn.mockRestore()
