@@ -1793,7 +1793,8 @@ automation
  * `regions`, each region with `name`, `zones` (comma separated) and `tiers`; `clusterType`,
  * the cluster type the data was filtered to, set only with --cluster-type, in which case the
  * tier entries carry no per-tier cluster type; and `lastUpdated`, an ISO timestamp. The
- * bundled templates in tools/cloud-regions show all of it in use.
+ * bundled templates in tools/cloud-regions show all of it in use. The template decides the
+ * markup, so with --template the --format value is only checked for validity.
  *
  * @why
  * Cloud region data changes frequently as new regions are added and tier availability evolves.
