@@ -49,10 +49,12 @@ function catalogWith (json, { pages = true, partialSource } = {}) {
     // unresolved placeholder (`href="#reference:...adoc#anchor" class="xref
     // unresolved"`), which a loose regex matches happily -- so the test passed
     // while xref resolution was doing nothing.
+    // Resolves any <module>:<path>.adoc, as Antora does, so a target outside the
+    // reference module is exercised too.
     resolveResource: (spec) => {
-      const match = /^reference:(.+)\.adoc$/.exec(String(spec).split('#')[0])
+      const match = /^([\w-]+):(.+)\.adoc$/.exec(String(spec).split('#')[0])
       if (!match) return undefined
-      return { pub: { url: `/streaming/26.2/reference/${match[1]}/` } }
+      return { pub: { url: `/streaming/26.2/${match[1]}/${match[2]}/` } }
     },
     getById: () => undefined,
   }
@@ -194,6 +196,42 @@ describe('render-property-descriptions extension', () => {
     const catalog = catalogWith(dataset({ lonely: 'See <<iceberg_enabled,the flag>>.' }), { pages: true })
     const { warnings } = run(catalog)
     expect(warnings.some((w) => String(w).includes('render as plain text'))).toBe(true)
+  })
+
+  // The attachment is a published download. `xref:...[]` means nothing to
+  // someone reading the JSON on its own, which is why the xref extension used to
+  // rewrite these files; this extension owns that job for property datasets now.
+  it('resolves xref macros in the description itself, for downloaders', () => {
+    const catalog = catalogWith(dataset({
+      linked: 'See xref:reference:internal-metrics-reference.adoc[the metrics reference].',
+      fragmented: 'See xref:reference:properties/cluster-properties.adoc#log_cleanup_policy[the policy].',
+      noext: 'See xref:develop:transactions#transaction-usage-tips[the tips].',
+    }))
+    const { data } = run(catalog)
+    // Antora's own output shape, classes included, so a downloaded attachment's
+    // links match the site's rather than a hand-built approximation.
+    expect(data.properties.linked.description)
+      .toContain('<a href="/streaming/26.2/reference/internal-metrics-reference/" class="xref page">the metrics reference</a>')
+    // The anchor is passed through exactly as authored. The previous
+    // implementation converted underscores to hyphens, and property page anchors
+    // keep their underscores, so all 25 of its fragment links were dead.
+    expect(data.properties.fragmented.description).toContain('cluster-properties/#log_cleanup_policy"')
+    expect(data.properties.fragmented.description).toContain('>the policy</a>')
+    expect(data.properties.fragmented.description).not.toContain('#log-cleanup-policy')
+    expect(data.properties.noext.description).toContain('#transaction-usage-tips"')
+    expect(data.properties.noext.description).toContain('>the tips</a>')
+    for (const name of ['linked', 'fragmented', 'noext']) {
+      expect(data.properties[name].description).not.toContain('xref:')
+    }
+  })
+
+  it('leaves an unresolvable xref as a macro and reports it', () => {
+    const catalog = catalogWith(dataset({ dangling: 'See xref:nowhere:missing.adoc[nothing].' }))
+    catalog.resolveResource = () => undefined
+    const { data, warnings } = run(catalog)
+    // A raw macro a reader can interpret beats a link to nowhere.
+    expect(data.properties.dangling.description).toContain('xref:nowhere:missing.adoc[nothing]')
+    expect(warnings.some((w) => String(w).includes('could not be resolved'))).toBe(true)
   })
 
   it('does not treat a shift expression as a property reference', () => {

@@ -36,6 +36,9 @@ const { buildPageIndex, propertyAnchor } = require('../macros/prop')
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
+// xref:target[label] as authored in a description. The .adoc extension is
+// optional: one real description writes xref:develop:transactions#tips[...].
+const XREF_RX = /xref:([^[\]\s#]+?)(?:#([^[\]\s]*))?\[([^\]]*)\]/g
 // <<anchor>> and <<anchor,display text>>, as authored in the description. The
 // anchor must start with a letter or underscore: property anchors always do,
 // and without that a C++ shift expression in a code span (`1<<20>>`) was read as
@@ -100,6 +103,8 @@ module.exports.register = function () {
       let rendered = 0
       let failed = 0
       const brokenAnchors = new Set()
+      const unresolved = new Set()
+      const xrefCache = new Map()
       for (const [name, entry] of Object.entries(properties)) {
         const description = entry && entry.description
         if (typeof description !== 'string' || !description.trim()) continue
@@ -108,6 +113,16 @@ module.exports.register = function () {
           const html = render(source, hostPage, contentCatalog, asciidocConfig)
           if (html == null) continue
           entry.description_html = html
+          // The attachment is a published download, and `xref:...[]` means
+          // nothing to someone reading the JSON on its own -- resolving it is
+          // why resolve-xrefs-in-attachments existed for these files. This
+          // extension owns that job for property datasets now, so it has to keep
+          // doing it, using Antora's resolver rather than rewriting paths by
+          // hand. Descriptions stay AsciiDoc apart from the resolved anchors,
+          // which is the shape consumers already read.
+          entry.description = resolveXrefs(
+            description, hostPage, contentCatalog, asciidocConfig, xrefCache, (macro) => unresolved.add(macro)
+          )
           rendered++
         } catch (error) {
           // One description that will not convert must not cost the other 680.
@@ -118,6 +133,12 @@ module.exports.register = function () {
 
       if (rendered) attachment.contents = Buffer.from(bigIntJson.stringify(data))
       logger.info(`${where}: rendered ${rendered} property descriptions to HTML${failed ? `, ${failed} failed` : ''}`)
+      if (unresolved.size) {
+        logger.warn(
+          `${where}: ${unresolved.size} xref target(s) in property descriptions could not be resolved, so they stay as raw macros in the published attachment: ` +
+          `${[...unresolved].sort().join(', ')}.`
+        )
+      }
       if (brokenAnchors.size) {
         logger.warn(
           `${where}: ${brokenAnchors.size} <<anchor>> reference(s) in property descriptions name no documented property, so they render as plain text: ` +
@@ -248,6 +269,52 @@ function resolveInternalRefs (description, anchors, report) {
 function attrlistValue (text) {
   const escaped = text.replace(/]/g, '\\]')
   return /=/.test(escaped) ? `"${escaped.replace(/"/g, '\\"')}"` : escaped
+}
+
+/**
+ * Rewrite xref macros in a description to resolved links, so the published
+ * attachment is useful on its own.
+ *
+ * The conversion is done by Antora, one macro at a time, rather than by building
+ * a URL here: that way the page resolution, the fragment, and any id rules from
+ * the site's AsciiDoc config are whatever the site itself would produce, and
+ * cannot drift from the pages the links point at. The previous implementation
+ * rewrote paths with regexes and converted underscores in the fragment to
+ * hyphens -- but property page anchors keep their underscores
+ * (`id="log_cleanup_policy"`), so all 25 of its fragment links in the published
+ * v26.2.1 data were dead.
+ *
+ * Conversions are cached per macro, because the same xref appears in many
+ * descriptions.
+ */
+function resolveXrefs (description, hostPage, contentCatalog, asciidocConfig, cache, report) {
+  return description.replace(XREF_RX, (match) => {
+    if (!cache.has(match)) cache.set(match, convertXref(match, hostPage, contentCatalog, asciidocConfig))
+    const anchor = cache.get(match)
+    if (!anchor) {
+      report(match)
+      // Leave the macro alone rather than emitting a link to nowhere: a reader
+      // of the raw JSON can still see what was meant.
+      return match
+    }
+    return anchor
+  })
+}
+
+/** One xref macro, converted by Antora. Returns undefined if it does not resolve. */
+function convertXref (macro, hostPage, contentCatalog, asciidocConfig) {
+  let html
+  try {
+    html = render(macro, hostPage, contentCatalog, asciidocConfig)
+  } catch (error) {
+    return undefined
+  }
+  if (!html) return undefined
+  const anchor = /<a\b[^>]*>[\s\S]*?<\/a>/.exec(html)
+  // Antora marks a target it could not resolve, and that is not a link worth
+  // publishing into a file people read on its own.
+  if (!anchor || /class="[^"]*\bunresolved\b/.test(anchor[0])) return undefined
+  return anchor[0]
 }
 
 /** Convert one description with the site's converter, as the host page. */
