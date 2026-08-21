@@ -386,7 +386,11 @@ function buildComponentMap(indexObj) {
         }
       }
 
-      const flattened = flattenConnectFields(childArray);
+      // arrayMarker keeps the paths identical to the headings
+      // renderConnectFields emits, so a field name in the what's-new table is
+      // a config path a reader can paste into YAML (`sasl[].aws.tcp`, not the
+      // invalid `sasl.aws.tcp`).
+      const flattened = flattenConnectFields(childArray, { arrayMarker: true });
       const fieldNames = flattened.map(f => f.path);
       const fieldMap = new Map(flattened.map(f => [f.path, f.field]));
 

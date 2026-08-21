@@ -20,6 +20,7 @@ jest.mock('../../cli-utils/octokit-client', () => ({}));
 
 const { capToTwoSentences, augmentConnectorData, buildCleanOssData, fieldAnchor, buildFieldsTable, buildChangedDefaultsTable } = require('../../tools/redpanda-connect/rpcn-connector-docs-handler');
 const { generateConnectorDiffJson } = require('../../tools/redpanda-connect/report-delta');
+const renderConnectFields = require('../../tools/redpanda-connect/helpers/renderConnectFields');
 
 describe('capToTwoSentences - xref and filename protection', () => {
   test('does not truncate descriptions containing xref macros', () => {
@@ -209,6 +210,49 @@ describe('generateConnectorDiffJson - config component status and cloud support'
     const added = diff.details.newFields.find(f => f.field === 'sqs.zero_key_warn_interval');
     expect(added).toBeDefined();
     expect(added.component).toBe('inputs:aws_s3');
+  });
+
+  test('keeps the [] marker on a field nested under an array-of-object group', () => {
+    // `sasl` is kind: array in the real connect data, so the reference page
+    // heads the field `sasl[].aws.tcp`. A what's-new row saying
+    // `sasl.aws.tcp` publishes a config path that does not exist.
+    const saslChildren = (extra = []) => ([
+      {
+        name: 'sasl',
+        kind: 'array',
+        type: 'object',
+        children: [
+          { name: 'mechanism', kind: 'scalar', type: 'string' },
+          ...extra
+        ]
+      }
+    ]);
+    const oldIndex = { inputs: [{ name: 'redpanda', config: { children: saslChildren() } }] };
+    const newChildren = saslChildren([
+      { name: 'aws', kind: 'scalar', type: 'object', children: [{ name: 'tcp', kind: 'scalar', type: 'string', description: 'TCP settings.' }] }
+    ]);
+    const newIndex = { inputs: [{ name: 'redpanda', config: { children: newChildren } }] };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.103.1',
+      newVersion: '4.104.0'
+    });
+    const paths = diff.details.newFields.map(f => f.field);
+
+    expect(paths).toContain('sasl[].aws.tcp');
+    expect(paths).not.toContain('sasl.aws.tcp');
+
+    // Every reported path must match a heading the reference page renders,
+    // because the what's-new table links to those headings.
+    const headings = String(renderConnectFields(newChildren, ''))
+      .split('\n')
+      .filter(line => line.startsWith('=== '))
+      .map(line => line.replace(/^=== `?|`?$/g, ''));
+    paths.forEach(fieldPath => expect(headings).toContain(fieldPath));
+
+    // The link target is unchanged: the anchor normalizes the marker away.
+    expect(fieldAnchor('sasl[].aws.tcp')).toBe('sasl-aws-tcp');
+    expect(fieldAnchor('sasl[].aws.tcp')).toBe(fieldAnchor('sasl.aws.tcp'));
   });
 
   test('stamps the diff target version onto a new field when the source data carries none', () => {
