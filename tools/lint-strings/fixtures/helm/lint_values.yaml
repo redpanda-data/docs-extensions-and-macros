@@ -39,3 +39,9 @@ undocumentedTopLevel:
 config: |
   # -- inside a block scalar this marker is content, not documentation
   some: content
+
+# -- External access settings.
+external:
+  # -- Optional domain advertised to external clients. Hyphenated key names
+  # must survive both the generator and the linter.
+  # my-domain: local

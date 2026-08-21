@@ -4,6 +4,7 @@ const fs = require('fs')
 const path = require('path')
 
 const { SourceCache } = require('../source-text')
+const { parseValuesFile: parseSharedValuesFile } = require('../../../cli-utils/helm-commented-values')
 
 /**
  * Helm surface: helm-docs description comments in chart values.yaml files
@@ -16,10 +17,15 @@ const { SourceCache } = require('../source-text')
  *   -- text`, `# @raw`, and `# @ignored` annotate it.
  * - doc-tools helm-spec (cli-utils/helm-commented-values.js): a `# --`
  *   block directly above a COMMENTED-OUT key documents that key, and
- *   `# @doc full.path -- description` documents any path explicitly. This
- *   parser mirrors that module's state machine (candidate selection,
- *   effective indent folding, subtree suppression) so the linter never
- *   calls a marker dead that the generator in this repo renders.
+ *   `# @doc full.path -- description` documents any path explicitly.
+ *
+ * Both conventions are decided by ONE walk, cli-utils/helm-commented-values
+ * `parseValuesFile`, which this surface calls with attachRealKeys so it also
+ * models helm-docs' own real-key attachment. This file used to hold a
+ * byte-identical copy of that module's nine regexes and a near-copy of its
+ * state machine, on the stated grounds that "the linter never calls a marker
+ * dead that the generator in this repo renders" - which nothing enforced.
+ * Sharing the walk is what actually enforces it.
  *
  * A DEAD marker is a `# --` block neither pipeline can attach: one buried
  * inside another commented-out key's subtree (the classic commented-out
@@ -39,214 +45,44 @@ const CONVENTION = {
   verbatim_asciidoc: false
 }
 
-// Regexes mirrored from cli-utils/helm-commented-values.js.
-const COMMENTED_KEY_RE = /^(\s*)#(\s{0,4})([a-z][A-Za-z0-9_-]*):\s*(.*)$/
-const REAL_KEY_RE = /^(\s*)([A-Za-z0-9_."/-]+):(.*)$/
-const DESC_MARKER_RE = /^\s*#\s*--\s*(?!-)(.*)$/
-const AT_DOC_RE = /^\s*#\s*@doc\s+([A-Za-z0-9_./-]+)\s+--\s*(.*)$/
-const AT_DEFAULT_RE = /^\s*#\s*@default\s+--\s*(.*)$/
-const AT_WORD_RE = /^\s*#\s*@(\w+)\s*$/
-const COMMENT_RE = /^\s*#\s?(.*)$/
-const BLOCK_SCALAR_RE = /[|>][0-9]?[+-]?[0-9]?\s*(#.*)?$/
-const LIST_ITEM_RE = /^\s*-\s/
-
 /**
- * Parse one values.yaml. Exported for tests.
+ * Parse one values.yaml into lint declarations. Exported for tests.
+ *
+ * The attachment decisions and the line spans both come from the shared walk;
+ * this function only reshapes its records into the linter's declaration form.
  *
  * @param {string} content - File content
  * @param {string} file - Repo-relative path
  * @returns {Array} declarations (without declaration_text)
  */
 function parseValuesFile (content, file) {
-  const declarations = []
-  const lines = content.split('\n')
-  const stack = [] // enclosing real keys: { name, indent }
-
-  let block = null // { markerLine, lastLine, descLines, annotations, candidate }
-  let atDoc = null // { line, lastLine, path, descLines, annotations }
-  let skipScalarIndent = -1
-  let suppressInnerIndent = -1
-  let looseIgnored = false // bare `# @ignored` with no `# --` block above a key
-
-  const decl = (name, string, lineStart, lineEnd, meta) => ({
-    surface: 'helm',
-    name,
-    file,
-    line_start: lineStart + 1, // 0-indexed -> 1-indexed
-    line_end: lineEnd + 1,
-    string,
-    declaration_text: null,
-    convention: CONVENTION,
-    meta
-  })
-
-  const emitDead = (b) => {
-    declarations.push(decl(null, b.descLines.join(' ').trim() || null, b.markerLine, b.lastLine, {
-      kind: 'dead-marker',
-      unverifiable: true
-    }))
-  }
-
-  const flushAtDoc = () => {
-    if (!atDoc) return
-    declarations.push(decl(atDoc.path, atDoc.descLines.join(' ').trim() || null, atDoc.line, atDoc.lastLine, {
-      kind: 'key',
-      commented_out: true,
-      top_level: !atDoc.path.includes('.'),
-      default_annotation: atDoc.annotations.default || null
-    }))
-    atDoc = null
-  }
-
-  // Emit the active block's candidate (a documented commented-out key), or
-  // record the block as dead when it has none. Mirrors flushBlock in
-  // helm-commented-values.js, with dead blocks surfaced instead of dropped.
-  const flushBlock = () => {
-    if (!block) return
-    if (block.candidate) {
-      const { name, effIndent } = block.candidate
-      const parents = stack.filter((k) => k.indent < effIndent).map((k) => k.name)
-      declarations.push(decl([...parents, name].join('.'), block.descLines.join(' ').trim() || null,
-        block.markerLine, block.lastLine, {
-          kind: 'key',
-          commented_out: true,
-          top_level: parents.length === 0,
-          default_annotation: block.annotations.default || null
-        }))
-      suppressInnerIndent = effIndent
+  return parseSharedValuesFile(content, { attachRealKeys: true }).map((r) => {
+    // The generator keeps newlines in a description; helm-docs renders one
+    // paragraph, and the rules read one string, so flatten here.
+    const string = r.descLines.map((l) => l.trim()).filter(Boolean).join(' ') || null
+    let meta
+    if (r.kind === 'dead-marker') {
+      meta = { kind: 'dead-marker', unverifiable: true }
+    } else if (r.undocumented) {
+      // Nothing to lint for content: the rule fires on the absence itself.
+      meta = { kind: 'key', top_level: true, undocumented: true, unverifiable: true }
+    } else if (r.commentedOut) {
+      meta = { kind: 'key', commented_out: true, top_level: r.topLevel, default_annotation: r.default || null }
     } else {
-      emitDead(block)
+      meta = { kind: 'key', top_level: r.topLevel, raw: Boolean(r.annotations.raw), default_annotation: r.default || null }
     }
-    block = null
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-
-    if (skipScalarIndent >= 0) {
-      const indent = line.match(/^\s*/)[0].length
-      if (line.trim() === '' || indent > skipScalarIndent) continue
-      skipScalarIndent = -1
+    return {
+      surface: 'helm',
+      name: r.kind === 'dead-marker' ? null : r.path,
+      file,
+      line_start: r.lineStart + 1, // 0-indexed -> 1-indexed
+      line_end: r.lineEnd + 1,
+      string: r.undocumented ? null : string,
+      declaration_text: null,
+      convention: CONVENTION,
+      meta
     }
-
-    const atDocMatch = line.match(AT_DOC_RE)
-    if (atDocMatch) {
-      flushAtDoc()
-      flushBlock()
-      atDoc = { line: i, lastLine: i, path: atDocMatch[1], descLines: [atDocMatch[2]], annotations: {} }
-      continue
-    }
-
-    const atDefault = line.match(AT_DEFAULT_RE)
-    if (atDefault) {
-      if (atDoc) { atDoc.annotations.default = atDefault[1].trim(); atDoc.lastLine = i }
-      else if (block) { block.annotations.default = atDefault[1].trim(); block.lastLine = i }
-      continue
-    }
-
-    const atWord = line.match(AT_WORD_RE)
-    if (atWord) {
-      if (block) { block.annotations[atWord[1]] = true; block.lastLine = i }
-      else if (atWord[1] === 'ignored') looseIgnored = true
-      continue
-    }
-
-    const commentedKey = line.match(COMMENTED_KEY_RE)
-    if (commentedKey) {
-      flushAtDoc()
-      // Fold indentation on both sides of the "#" into one depth (the space
-      // separating "#" from its text is punctuation, not indentation).
-      const effIndent = commentedKey[1].length + Math.max(0, commentedKey[2].length - 1)
-      // A previously emitted commented key suppresses its own subtree: a
-      // marker in there is documentation neither pipeline ever renders.
-      if (suppressInnerIndent >= 0 && effIndent > suppressInnerIndent) {
-        if (block) emitDead(block)
-        block = null
-        continue
-      }
-      suppressInnerIndent = -1
-      const value = commentedKey[4].trim()
-      const simpleValue = (value === '' || !/\s/.test(value)) && !value.startsWith('/')
-      if (block && simpleValue) {
-        if (!block.candidate || effIndent <= block.candidate.effIndent) {
-          block.candidate = { name: commentedKey[3], effIndent }
-        }
-        block.lastLine = i
-        continue
-      }
-    }
-
-    const descMarker = line.match(DESC_MARKER_RE)
-    if (descMarker) {
-      flushAtDoc()
-      flushBlock()
-      block = { markerLine: i, lastLine: i, descLines: [descMarker[1]], annotations: {}, candidate: null }
-      continue
-    }
-
-    const comment = line.match(COMMENT_RE)
-    if (comment && line.trim().startsWith('#')) {
-      if (atDoc) { atDoc.descLines.push(comment[1]); atDoc.lastLine = i }
-      else if (block && !block.candidate) {
-        if (comment[1].trim() !== '') block.descLines.push(comment[1].trim())
-        block.lastLine = i
-      } else if (block) {
-        block.lastLine = i
-      }
-      continue
-    }
-
-    // Non-comment line.
-    flushAtDoc()
-
-    const realKey = line.match(REAL_KEY_RE)
-    if (realKey && block && !block.candidate && block.lastLine === i - 1) {
-      // helm-docs attachment: the block sits DIRECTLY above a real key.
-      const indent = realKey[1].length
-      while (stack.length > 0 && stack[stack.length - 1].indent >= indent) stack.pop()
-      const name = realKey[2].replace(/^"|"$/g, '')
-      const keyPath = [...stack.map((k) => k.name), name].join('.')
-      stack.push({ name, indent })
-      if (!block.annotations.ignored) {
-        declarations.push(decl(keyPath, block.descLines.join(' ').trim() || null, block.markerLine, i, {
-          kind: 'key',
-          top_level: indent === 0,
-          raw: Boolean(block.annotations.raw),
-          default_annotation: block.annotations.default || null
-        }))
-      }
-      block = null
-      if (BLOCK_SCALAR_RE.test(realKey[3])) skipScalarIndent = indent
-      continue
-    }
-
-    flushBlock()
-    if (line.trim() === '') continue
-    suppressInnerIndent = -1
-    if (LIST_ITEM_RE.test(line)) continue
-
-    if (realKey) {
-      const indent = realKey[1].length
-      while (stack.length > 0 && stack[stack.length - 1].indent >= indent) stack.pop()
-      const name = realKey[2].replace(/^"|"$/g, '')
-      stack.push({ name, indent })
-      if (BLOCK_SCALAR_RE.test(realKey[3])) skipScalarIndent = indent
-      if (indent === 0 && !looseIgnored) {
-        // Undocumented top-level user-visible key (no attached # -- marker).
-        declarations.push(decl(name, null, i, i, {
-          kind: 'key',
-          top_level: true,
-          undocumented: true,
-          unverifiable: true
-        }))
-      }
-    }
-    looseIgnored = false
-  }
-
-  flushAtDoc()
-  flushBlock()
-  return declarations
+  })
 }
 
 /**

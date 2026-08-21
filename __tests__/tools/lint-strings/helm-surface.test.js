@@ -101,3 +101,62 @@ describe('helm surface end-to-end (fixture file)', () => {
     expect(summary.errors).toBe(3)
   })
 })
+
+/**
+ * The linter and the helm-spec generator must agree about which comment
+ * blocks attach to a key. This surface's whole purpose is calling a `# --`
+ * marker DEAD, so a disagreement means it reports "this description never
+ * ships" about a description that the generator in this same repo does ship.
+ *
+ * They used to be two independent copies of one state machine, right down to
+ * nine byte-identical regexes, with nothing pinning them together: dropping
+ * `-` from the linter's commented-key pattern made it call
+ * external.my-domain a dead marker while the generator still rendered it, and
+ * the whole suite stayed green. They now share one walk, and this is the test
+ * that says so out loud.
+ */
+describe('the linter and the helm-spec generator agree on attachment', () => {
+  const generator = require('../../../cli-utils/helm-commented-values')
+
+  test('the linter holds no private copy of the shared patterns', () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, '../../../tools/lint-strings/surfaces/helm.js'), 'utf8')
+    for (const name of Object.keys(generator.PATTERNS)) {
+      expect(source).not.toContain(`const ${name} =`)
+    }
+    expect(source).toContain("require('../../../cli-utils/helm-commented-values')")
+  })
+
+  test('every path the generator attaches is a live key to the linter, never dead', () => {
+    const attached = generator.extractCommentedValueDocs(fixture).map((e) => e.path)
+    // Guard the guard: an empty list would make this vacuous.
+    expect(attached.length).toBeGreaterThan(3)
+    expect(attached).toContain('external.my-domain')
+
+    const declarations = helm.parseValuesFile(fixture, 'charts/fixture/chart/values.yaml')
+    const liveKeys = new Set(
+      declarations.filter((d) => d.meta.kind === 'key' && d.name).map((d) => d.name))
+    for (const path of attached) {
+      expect(liveKeys).toContain(path)
+    }
+  })
+
+  test('the two agree on the description text of every attached path', () => {
+    const declarations = helm.parseValuesFile(fixture, 'charts/fixture/chart/values.yaml')
+    const byName = new Map(declarations.filter((d) => d.name).map((d) => [d.name, d]))
+    for (const entry of generator.extractCommentedValueDocs(fixture)) {
+      // The generator keeps the author's line breaks; the linter flattens.
+      const flattened = entry.description.split('\n').map((l) => l.trim()).filter(Boolean).join(' ')
+      expect(byName.get(entry.path).string).toBe(flattened)
+    }
+  })
+
+  test('the shared walk without attachRealKeys reproduces the generator exactly', () => {
+    // The generator is now a filter over the shared walk, so this pins the
+    // filter rather than trusting it.
+    const viaWalk = generator.parseValuesFile(fixture)
+      .filter((r) => r.kind === 'key' && r.commentedOut)
+      .map((r) => r.path)
+    expect(viaWalk).toEqual(generator.extractCommentedValueDocs(fixture).map((e) => e.path))
+  })
+})
