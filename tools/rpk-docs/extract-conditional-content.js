@@ -11,7 +11,9 @@ const { spawnSync } = require('child_process')
 
 const docsDir = process.argv[2] || '../docs'
 const rpkDir = path.join(docsDir, 'modules/reference/pages/rpk')
-const overridesPath = path.join(__dirname, '../../docs-data/rpk-overrides.json')
+// The canonical overrides live in the docs repo (the docsDir this script
+// already takes); this repo ships only the schema.
+const overridesPath = process.argv[3] || path.join(docsDir, 'docs-data/rpk-overrides.json')
 
 // Validate docsDir exists and is a directory
 if (!fs.existsSync(docsDir) || !fs.statSync(docsDir).isDirectory()) {
