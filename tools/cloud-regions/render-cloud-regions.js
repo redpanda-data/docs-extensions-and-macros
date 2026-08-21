@@ -36,6 +36,10 @@ function renderCloudRegions({ providers, format, lastUpdated, template, clusterT
   let compiledTemplate;
   try {
     const templateSrc = fs.readFileSync(templateFile, 'utf8');
+    // compile() only parses on first render, so a syntax error in a custom
+    // template would otherwise be reported as a render failure and send the
+    // author looking at their data instead of their braces. precompile parses now.
+    handlebars.precompile(templateSrc);
     compiledTemplate = handlebars.compile(templateSrc);
   } catch (err) {
     throw new Error(`Failed to compile Handlebars template at ${templateFile}: ${err.message}`);

@@ -73,6 +73,17 @@ describe('renderCloudRegions', () => {
     expect(out).toContain('=== GCP');
   });
 
+  it('reports a syntax error in a custom template as a compile failure', () => {
+    const templateFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-regions-')), 'broken.hbs');
+    fs.writeFileSync(templateFile, '{{#each providers}}{{name}}', 'utf8');
+    try {
+      expect(() => renderCloudRegions({ providers: sampleProviders, format: 'adoc', template: templateFile }))
+        .toThrow(/Failed to compile Handlebars template/);
+    } finally {
+      fs.rmSync(path.dirname(templateFile), { recursive: true, force: true });
+    }
+  });
+
   it('exposes the cluster type filter to a custom template', () => {
     const templateFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-regions-')), 'custom.hbs');
     fs.writeFileSync(templateFile, '== {{clusterType}} regions\n{{#each providers}}{{displayName}}\n{{/each}}', 'utf8');
