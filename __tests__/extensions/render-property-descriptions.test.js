@@ -45,7 +45,15 @@ function catalogWith (json, { pages = true, partialSource } = {}) {
       const versions = [{ version: '26.2', displayVersion: '26.2', asciidoc: { attributes: {} } }]
       return { name: 'streaming', title: 'Redpanda', versions, latest: versions[0] }
     },
-    resolveResource: () => undefined,
+    // A resolver that actually resolves. With `() => undefined` Antora emits its
+    // unresolved placeholder (`href="#reference:...adoc#anchor" class="xref
+    // unresolved"`), which a loose regex matches happily -- so the test passed
+    // while xref resolution was doing nothing.
+    resolveResource: (spec) => {
+      const match = /^reference:(.+)\.adoc$/.exec(String(spec).split('#')[0])
+      if (!match) return undefined
+      return { pub: { url: `/streaming/26.2/reference/${match[1]}/` } }
+    },
     getById: () => undefined,
   }
 }
@@ -123,7 +131,42 @@ describe('render-property-descriptions extension', () => {
     const { data } = run(catalog)
     const html = data.properties.other_property.description_html
     expect(html).not.toContain('<<')
-    expect(html).toMatch(/href="[^"]*properties\/cluster-properties[^"]*#iceberg_enabled"/)
+    // A resolved, site-root-relative link -- not Antora's unresolved placeholder.
+    expect(html).toContain('href="/streaming/26.2/reference/properties/cluster-properties/#iceberg_enabled"')
+    expect(html).toContain('class="xref page"')
+    expect(html).not.toContain('unresolved')
+  })
+
+  // Display text is pasted into an attribute list, where an unescaped ] ends the
+  // list and a bare = is read as a named attribute. Untreated, the first was
+  // published as a truncated link with the tail outside it, and the second lost
+  // the label entirely and applied part of it as a CSS role.
+  it.each([
+    ['brackets', 'the flag [beta] option'],
+    ['closing bracket', 'element a] b'],
+    ['equals sign', 'x=y mapping'],
+    ['equals and bracket', 'x=y and a] b'],
+    ['quotes', 'say "hi" now'],
+    ['comma', 'comma, separated'],
+  ])('keeps display text intact through the attribute list: %s', (_label, text) => {
+    const partial = '=== iceberg_enabled\n\nEnables Iceberg.\n\n=== other_property\n\nElse.\n'
+    const catalog = catalogWith(
+      dataset({ other_property: `See <<iceberg_enabled,${text}>>.`, iceberg_enabled: 'Enables Iceberg.' }),
+      { partialSource: partial }
+    )
+    const { data } = run(catalog)
+    const html = data.properties.other_property.description_html
+    expect(html).toContain('#iceberg_enabled"')
+    // The label survives whole, inside the anchor, with nothing trailing it.
+    expect(html).toMatch(new RegExp('>' + text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '</a>'))
+  })
+
+  it('does not treat a shift expression as a property reference', () => {
+    // <<20>> is not an anchor. Reporting it as a broken one told writers to fix
+    // an anchor that never existed.
+    const catalog = catalogWith(dataset({ shifty: 'Compute 1<<20>> bytes.' }))
+    const { warnings } = run(catalog)
+    expect(warnings.some((w) => String(w).includes('20'))).toBe(false)
   })
 
   it('renders an anchor it cannot attribute to a property as plain text, and reports it', () => {

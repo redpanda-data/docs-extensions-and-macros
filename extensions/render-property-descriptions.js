@@ -35,8 +35,20 @@ const { buildPageIndex, propertyAnchor } = require('../macros/prop')
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
-// <<anchor>> and <<anchor,display text>>, as authored in the description.
-const INTERNAL_REF_RX = /<<([^,<>\s]+)(?:,\s*([^<>]*?))?>>/g
+// An integer literal too large for a JS double, in JSON value position: after a
+// colon, an opening bracket or a comma, and followed by a delimiter. A digit run
+// inside a string cannot match, because a string value starts with a quote.
+const UNSAFE_INT_RX = /([:[,]\s*)(-?\d{16,})(?=\s*[,}\]])/g
+// Printable ASCII only. A control character such as NUL is not legal inside a
+// JSON string, so shielding with one produced JSON that would not parse at all.
+// The '@@' pair does not occur in any dataset value, and the marker only has to
+// survive one parse/stringify cycle in this function.
+const INT_SENTINEL = '@@bigint:'
+// <<anchor>> and <<anchor,display text>>, as authored in the description. The
+// anchor must start with a letter or underscore: property anchors always do,
+// and without that a C++ shift expression in a code span (`1<<20>>`) was read as
+// a reference, rewritten, and then reported as a broken anchor.
+const INTERNAL_REF_RX = /<<([A-Za-z_][\w.-]*)(?:,\s*([^<>]*?))?>>/g
 
 module.exports.register = function () {
   raiseListenerLimit(this)
@@ -57,7 +69,7 @@ module.exports.register = function () {
       const where = `${attachment.src.component}@${attachment.src.version || 'unversioned'}`
       let data
       try {
-        data = JSON.parse(attachment.contents.toString())
+        data = JSON.parse(shieldBigInts(attachment.contents.toString()))
       } catch (error) {
         // Left as-is: the prop macro reports an unusable dataset with the detail,
         // and failing the build over one bad attachment helps nobody.
@@ -96,7 +108,7 @@ module.exports.register = function () {
         }
       }
 
-      if (rendered) attachment.contents = Buffer.from(JSON.stringify(data))
+      if (rendered) attachment.contents = Buffer.from(restoreBigInts(JSON.stringify(data)))
       logger.info(`${where}: rendered ${rendered} property descriptions to HTML${failed ? `, ${failed} failed` : ''}`)
       if (brokenAnchors.size) {
         logger.warn(
@@ -107,6 +119,23 @@ module.exports.register = function () {
       }
     }
   })
+}
+
+/**
+ * Round-tripping this JSON through JS numbers corrupts every integer above
+ * 2^53: the dataset carries 28 of them, and cloud_storage_cache_size.maximum
+ * would be published as 18446744073709552000 instead of 18446744073709551615 --
+ * a limit the server does not accept. Node 22 could preserve them with
+ * JSON.rawJSON, but the docs build does not pin a Node that new, so shield them
+ * as strings across the parse and unwrap them after stringify. Nothing in this
+ * extension reads or writes a numeric field, so they only need to survive.
+ */
+function shieldBigInts (text) {
+  return text.replace(UNSAFE_INT_RX, (match, lead, digits) => `${lead}"${INT_SENTINEL}${digits}"`)
+}
+
+function restoreBigInts (text) {
+  return text.replace(new RegExp(`"${INT_SENTINEL}(-?\\d+)"`, 'g'), '$1')
 }
 
 function basename (file) {
@@ -164,7 +193,7 @@ function resolveInternalRefs (description, anchors, report) {
   return description.replace(INTERNAL_REF_RX, (match, anchor, display) => {
     const text = (display || '').trim()
     const target = anchors.get(anchor)
-    if (target) return `xref:reference:${target.page}.adoc#${anchor}[${text || `\`${target.name}\``}]`
+    if (target) return `xref:reference:${target.page}.adoc#${anchor}[${attrlistValue(text || `\`${target.name}\``)}]`
     // The anchor names no documented property, so there is nothing to link to.
     // Asciidoctor would render a same-page fragment, and a tooltip is shown on
     // arbitrary pages, so that link would go nowhere and still invite a click --
@@ -173,6 +202,19 @@ function resolveInternalRefs (description, anchors, report) {
     report(anchor)
     return text || `\`${anchor}\``
   })
+}
+
+/**
+ * Display text as a single positional attribute. An unescaped `]` ends the
+ * attribute list, so `<<prop,the flag [beta] option>>` published a truncated
+ * link with ` option]` outside it; and a bare `=` makes Asciidoctor read the
+ * value as a named attribute, which dropped the label entirely and applied part
+ * of it as a CSS role. Escaping the bracket and quoting when there is an equals
+ * sign round-trips every combination of brackets, equals, quotes and commas.
+ */
+function attrlistValue (text) {
+  const escaped = text.replace(/]/g, '\\]')
+  return /=/.test(escaped) ? `"${escaped.replace(/"/g, '\\"')}"` : escaped
 }
 
 /** Convert one description with the site's converter, as the host page. */

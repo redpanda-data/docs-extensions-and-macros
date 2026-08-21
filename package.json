@@ -77,6 +77,7 @@
     "./extensions/convert-llms-to-txt": "./extensions/convert-llms-to-txt.js",
     "./extensions/convert-sitemap-to-markdown": "./extensions/convert-sitemap-to-markdown.js",
     "./extensions/modify-redirects": "./extensions/produce-redirects.js",
+    "./extensions/produce-redirects": "./extensions/produce-redirects.js",
     "./extensions/algolia-indexer/index": "./extensions/algolia-indexer/index.js",
     "./extensions/aggregate-terms": "./extensions/aggregate-terms.js",
     "./extensions/resolve-xrefs-in-attachments": "./extensions/resolve-xrefs-in-attachments.js",
@@ -92,7 +93,7 @@
     "./macros/enterprise": "./macros/enterprise.js",
     "./macros/prop": "./macros/prop.js",
     "./extensions/property-page-index": "./extensions/property-page-index.js",
-    "./extensions/render-property-descriptions.js": "./extensions/render-property-descriptions.js"
+    "./extensions/render-property-descriptions": "./extensions/render-property-descriptions.js"
   },
   "files": [
     "extensions",
@@ -157,5 +158,8 @@
     "@web/dev-server": "^0.2.5",
     "jest": "^29.7.0",
     "jest-junit": "^16.0.0"
+  },
+  "peerDependencies": {
+    "@antora/asciidoc-loader": "^3.1.0"
   }
 }
