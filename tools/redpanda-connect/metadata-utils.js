@@ -139,11 +139,16 @@ function descriptionWithMetadataInclude (item) {
  * Mirrors {@link metadataIncludeLine} so a drafted page can pull its
  * auto-generated summary and description from a regenerated partial instead of
  * freezing them into the page body at first draft.
+ *
+ * The partial defines two tag regions, so pages address it twice: `attrs` in
+ * the page header (sets `:description:`) and `body` where the prose renders.
  * @param {object} item connector data with `type`/`typeDir` and `name`
+ * @param {string} [tag] tag region to include (`attrs` or `body`); omit for the whole file
  * @returns {string}
  */
-function descriptionIncludeLine (item) {
-  return `include::connect:components:partial$descriptions/${typeDirFor(item)}/${item.name}.adoc[]`;
+function descriptionIncludeLine (item, tag) {
+  const attrs = tag ? `tag=${tag}` : '';
+  return `include::connect:components:partial$descriptions/${typeDirFor(item)}/${item.name}.adoc[${attrs}]`;
 }
 
 // Markdown-style fence delimiter (``` or ~~~, possibly with a language tag).

@@ -573,6 +573,20 @@ async function generateRpcnConnectorDocs(options) {
         if (descriptionOut.trim()) {
           fs.mkdirSync(path.dirname(dPath), { recursive: true });
           fs.writeFileSync(dPath, descriptionOut);
+          // The partial now exists for this connector, so a drafted page can
+          // include its body instead of freezing the summary and description
+          // into the page. Gated on the file actually being written:
+          // component families outside CONNECTOR_DESCRIPTION_TYPE_DIRS, and
+          // connectors with neither summary nor description, keep the inline
+          // text rather than getting an include that cannot resolve.
+          item.hasDescriptionPartial = true;
+          // The attrs region only sets :description: when the connector has a
+          // summary, so a page may only replace its header attribute with the
+          // include when there is one. Otherwise the page would lose its meta
+          // description entirely and keep the inline attribute instead.
+          if (typeof item.summary === 'string' && item.summary.trim()) {
+            item.hasDescriptionAttrs = true;
+          }
           if (!writeFullDrafts) {
             partialsWritten++;
             partialFiles.push(path.relative(process.cwd(), dPath));
@@ -953,7 +967,12 @@ function backfillPageDescriptions (connectorData, { pagesRoot, dryRun = false } 
       const lines = content.split('\n');
       const headerEnd = lines.findIndex((l) => l.trim() === '');
       const header = lines.slice(0, headerEnd === -1 ? lines.length : headerEnd);
-      if (header.some((l) => l.startsWith(':description:'))) continue;
+      // A page migrated to the description partial carries the attrs include
+      // instead of a literal :description:. Without this arm the backfill
+      // splices a competing meta block into every migrated page, so the page
+      // ends up with a dead include plus a hand-inserted attribute that
+      // silently wins.
+      if (header.some((l) => l.startsWith(':description:') || /partial\$descriptions\//.test(l))) continue;
 
       // Meta descriptions are read as plain text by search results, link
       // previews, and assistants, so the markup comes out mechanically. Same

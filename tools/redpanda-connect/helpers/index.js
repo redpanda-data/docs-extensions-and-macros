@@ -15,6 +15,7 @@ module.exports = {
   renderConnectDescription: require('./renderConnectDescription.js'),
   summaryAttribute: require('./summaryAttribute.js'),
   descriptionWithMetadataInclude: require('./descriptionWithMetadataInclude.js'),
+  descriptionInclude: require('./descriptionInclude.js'),
   renderLeafField:        require('./renderLeafField.js'),
   renderObjectField:      require('./renderObjectField.js'),
   buildConfigYaml:        require('./buildConfigYaml.js'),

@@ -819,6 +819,43 @@ automation
  * # Apply the migration
  * npx doc-tools generate migrate-rpcn-metadata --write
  */
+/**
+ * generate migrate-rpcn-descriptions
+ *
+ * @description
+ * One-time migration that rewires published connector reference pages onto the
+ * regenerated description partial: the header `:description:` becomes
+ * `include::...[tag=attrs]` and the frozen intro prose becomes
+ * `include::...[tag=body]`. Afterwards `generate rpcn-connector-docs` keeps
+ * both fresh on every run.
+ *
+ * @why
+ * Connector pages are one-time first drafts, so their summary, "Introduced in
+ * version" line and description prose never change again even when the
+ * connector does. The body rewire is guarded: a page whose intro carries
+ * anything the partial does not reproduce is reported and left for a human,
+ * because rewriting it would delete published content.
+ *
+ * @example
+ * # Dry run (default): report the pages that would change
+ * npx doc-tools generate migrate-rpcn-descriptions
+ *
+ * # Apply the migration
+ * npx doc-tools generate migrate-rpcn-descriptions --write
+ *
+ * # Rewire page headers only, leaving the body prose alone
+ * npx doc-tools generate migrate-rpcn-descriptions --write --skip-body
+ */
+automation
+  .command('migrate-rpcn-descriptions')
+  .description('One-time migration of frozen connector summaries and description prose onto the regenerated description partial. Dry run unless --write is given.')
+  .option('--write', 'Apply changes (default is a dry run that only reports)')
+  .option('--skip-body', 'Rewire page headers only, leaving the frozen intro prose in the page')
+  .action((options) => {
+    const { migrateDescriptionsToPartials } = require('../tools/redpanda-connect/migrate-descriptions-to-partials.js')
+    migrateDescriptionsToPartials({ write: Boolean(options.write), skipBody: Boolean(options.skipBody) })
+  })
+
 automation
   .command('migrate-rpcn-metadata')
   .description('One-time migration of inline connector == Metadata blocks into regenerated partials. Dry run unless --write is given.')

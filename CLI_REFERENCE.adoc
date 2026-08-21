@@ -490,6 +490,7 @@ display help for command
 * `metrics-docs` - Generate JSON and AsciiDoc documentation for Redpanda metrics. Defaults to branch "dev" if neither --tag nor --branch is specified.
 * `rpcn-connector-docs` - Generate RPCN connector docs and diff changes since the last version
 * `migrate-rpcn-metadata` - One-time migration of inline connector == Metadata blocks into regenerated partials. Dry run unless --write is given.
+* `migrate-rpcn-descriptions` - One-time migration of frozen connector summaries and description prose onto the regenerated description partial. Dry run unless --write is given.
 * `migrate-property-refs` - One-time migration of `property_name` prose mentions to prop:property_name[] macros. Dry run unless --write is given.
 * `property-docs` - Generate JSON and consolidated AsciiDoc partials for Redpanda configuration properties. Defaults to branch "dev" if neither --tag nor --branch is specified.
 * `rpk-docs` - Generate rpk CLI documentation from source. Builds rpk and parses source for platform detection.
@@ -1265,6 +1266,50 @@ npx doc-tools generate update-connect-version --connect-version 4.50.0
 *Requirements:*
 
 None (uses GitHub API).
+
+=== generate migrate-rpcn-descriptions
+
+One-time migration that rewires published connector reference pages onto the regenerated description partial: the header `:description:` becomes `include::...[tag=attrs]` and the frozen intro prose becomes `include::...[tag=body]`. Afterwards `generate rpcn-connector-docs` keeps both fresh on every run.
+
+*Why use it:*
+
+Connector pages are one-time first drafts, so their summary, "Introduced in version" line and description prose never change again even when the connector does. The body rewire is guarded: a page whose intro carries anything the partial does not reproduce is reported and left for a human, because rewriting it would delete published content.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate migrate-rpcn-descriptions [options]
+----
+
+*Options:*
+
+`--write`::
+Apply changes (default is a dry run that only reports)
+
+`--skip-body`::
+Rewire page headers only, leaving the frozen intro prose in the page
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Dry run (default): report the pages that would change
+npx doc-tools generate migrate-rpcn-descriptions
+
+# Apply the migration
+npx doc-tools generate migrate-rpcn-descriptions --write
+
+# Rewire page headers only, leaving the body prose alone
+npx doc-tools generate migrate-rpcn-descriptions --write --skip-body
+----
+
+*Requirements:*
+
+Run from the consumer repo root, after a `generate rpcn-connector-docs` run so the partials exist.
 
 === generate migrate-rpcn-metadata
 
