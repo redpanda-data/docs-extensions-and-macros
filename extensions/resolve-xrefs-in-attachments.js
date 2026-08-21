@@ -1,6 +1,7 @@
 'use strict'
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
+const bigIntJson = require('../cli-utils/big-int-json')
 
 /**
  * Resolves AsciiDoc xrefs in JSON attachment files to HTML links.
@@ -82,7 +83,10 @@ function processJsonAttachment (attachment, contentCatalog, logger) {
 
   let data
   try {
-    data = JSON.parse(contentStr)
+    // bigIntJson: this function rewrites the attachment, so a plain round trip
+    // rounded every integer beyond 2^53 in whatever it touched. The Connect
+    // component catalog ships two int64 values that were corrupted this way.
+    data = bigIntJson.parse(contentStr)
   } catch (err) {
     logger.debug(`Skipping invalid JSON: ${attachment.src?.path}`)
     return { modified: false, xrefCount: 0 }
@@ -100,7 +104,7 @@ function processJsonAttachment (attachment, contentCatalog, logger) {
   const processed = processValue(data, contentCatalog, context, logger)
 
   // Write back the modified JSON
-  attachment.contents = Buffer.from(JSON.stringify(processed, null, 2), 'utf8')
+  attachment.contents = Buffer.from(bigIntJson.stringify(processed, 2), 'utf8')
 
   return { modified: true, xrefCount: context.xrefCount }
 }

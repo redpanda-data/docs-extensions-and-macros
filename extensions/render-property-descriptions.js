@@ -31,19 +31,11 @@
  */
 
 const loadAsciiDoc = require('@antora/asciidoc-loader')
+const bigIntJson = require('../cli-utils/big-int-json')
 const { buildPageIndex, propertyAnchor } = require('../macros/prop')
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
-// An integer literal too large for a JS double, in JSON value position: after a
-// colon, an opening bracket or a comma, and followed by a delimiter. A digit run
-// inside a string cannot match, because a string value starts with a quote.
-const UNSAFE_INT_RX = /([:[,]\s*)(-?\d{16,})(?=\s*[,}\]])/g
-// Printable ASCII only. A control character such as NUL is not legal inside a
-// JSON string, so shielding with one produced JSON that would not parse at all.
-// The '@@' pair does not occur in any dataset value, and the marker only has to
-// survive one parse/stringify cycle in this function.
-const INT_SENTINEL = '@@bigint:'
 // <<anchor>> and <<anchor,display text>>, as authored in the description. The
 // anchor must start with a letter or underscore: property anchors always do,
 // and without that a C++ shift expression in a code span (`1<<20>>`) was read as
@@ -124,7 +116,7 @@ module.exports.register = function () {
         }
       }
 
-      if (rendered) attachment.contents = Buffer.from(restoreBigInts(JSON.stringify(data)))
+      if (rendered) attachment.contents = Buffer.from(bigIntJson.stringify(data))
       logger.info(`${where}: rendered ${rendered} property descriptions to HTML${failed ? `, ${failed} failed` : ''}`)
       if (brokenAnchors.size) {
         logger.warn(
@@ -135,23 +127,6 @@ module.exports.register = function () {
       }
     }
   })
-}
-
-/**
- * Round-tripping this JSON through JS numbers corrupts every integer above
- * 2^53: the dataset carries 28 of them, and cloud_storage_cache_size.maximum
- * would be published as 18446744073709552000 instead of 18446744073709551615 --
- * a limit the server does not accept. Node 22 could preserve them with
- * JSON.rawJSON, but the docs build does not pin a Node that new, so shield them
- * as strings across the parse and unwrap them after stringify. Nothing in this
- * extension reads or writes a numeric field, so they only need to survive.
- */
-function shieldBigInts (text) {
-  return text.replace(UNSAFE_INT_RX, (match, lead, digits) => `${lead}"${INT_SENTINEL}${digits}"`)
-}
-
-function restoreBigInts (text) {
-  return text.replace(new RegExp(`"${INT_SENTINEL}(-?\\d+)"`, 'g'), '$1')
 }
 
 function basename (file) {
@@ -173,7 +148,7 @@ function readDataset (attachment, logger) {
   const where = `${attachment.src.component}@${attachment.src.version || 'unversioned'}`
   let data
   try {
-    data = JSON.parse(shieldBigInts(attachment.contents.toString()))
+    data = bigIntJson.parse(attachment.contents.toString())
   } catch (error) {
     logger.warn(`${where}: ${basename(attachment)} is not valid JSON, descriptions not rendered (${error.message})`)
     return undefined
