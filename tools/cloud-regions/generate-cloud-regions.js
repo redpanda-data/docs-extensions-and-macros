@@ -50,13 +50,28 @@ const clusterTypeMap = {
   CLUSTER_TYPE_DEDICATED: 'Dedicated',
   CLUSTER_TYPE_FMC: 'Dedicated',
 };
+// Warn once per unmapped cluster type per process, so a rename upstream is loud
+// instead of being spread over every region row.
+const warnedClusterTypes = new Set();
+
 /**
  * Returns the display name for a given cluster type, or the original value if unmapped.
+ *
+ * An unmapped value is a signal, not a detail: it reaches the published table
+ * verbatim, and if a mapped enum is ever renamed upstream the table it feeds
+ * (every Dedicated region comes from CLUSTER_TYPE_FMC) empties out quietly. Warn
+ * so that shows up in the generation logs.
+ *
  * @param {string} ct - The internal cluster type identifier.
  * @return {string} The display name for the cluster type.
  */
 function displayClusterType(ct) {
-  return clusterTypeMap[ct] || ct;
+  if (clusterTypeMap[ct]) return clusterTypeMap[ct];
+  if (!warnedClusterTypes.has(ct)) {
+    warnedClusterTypes.add(ct);
+    console.warn(`[cloud-regions] WARN: Unmapped cluster type '${ct}'. It appears in the table exactly as written here, and --cluster-type has to be given that same value. Add it to clusterTypeMap to give it a display name.`);
+  }
+  return ct;
 }
 
 /**
@@ -232,7 +247,8 @@ function buildCloudRegions(yamlText, { clusterType } = {}) {
         };
       }).filter(region => region.tiers && region.tiers.length > 0);
       if (filteredRegions.length === 0) {
-        console.info(`[cloud-regions] INFO: No public tiers found for provider '${prov}'.`);
+        const because = clusterTypeFilter ? ` available for ${clusterTypeFilter} clusters` : '';
+        console.info(`[cloud-regions] INFO: No public tiers${because} found for provider '${prov}'.`);
       }
       return {
         name: prov,

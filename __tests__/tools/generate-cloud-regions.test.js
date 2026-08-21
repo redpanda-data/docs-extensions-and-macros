@@ -128,6 +128,31 @@ describe('processCloudRegions', () => {
     expect(() => processCloudRegions(sampleYaml, { clusterType: 'Serverless' })).toThrow(/Unsupported cluster type/);
   });
 
+  it('warns once about a cluster type it does not map', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const yaml = serverlessYaml.replace(/CLUSTER_TYPE_SERVERLESS/g, 'CLUSTER_TYPE_ONLY_HERE');
+      processCloudRegions(yaml);
+      processCloudRegions(yaml);
+      const unmapped = warn.mock.calls.filter((call) => /CLUSTER_TYPE_ONLY_HERE/.test(call[0]));
+      expect(unmapped).toHaveLength(1);
+      expect(unmapped[0][0]).toMatch(/Unmapped cluster type/);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('says the cluster type filter is why a provider has no tiers', () => {
+    const info = jest.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      processCloudRegions(sampleYaml, { clusterType: 'BYOC' });
+      expect(info.mock.calls.map((call) => call[0]).join('\n'))
+        .toContain("No public tiers available for BYOC clusters found for provider 'GCP'.");
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   it('joins zones with a comma and a space so long lists can wrap in a table cell', () => {
     const providers = processCloudRegions(sampleYaml);
     const usEast = providers.find((p) => p.name === 'AWS').regions[0];
