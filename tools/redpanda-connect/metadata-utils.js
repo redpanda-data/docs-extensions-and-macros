@@ -75,16 +75,39 @@ function extractMetadata (description) {
   return found ? found.block : '';
 }
 
+// Rate limits are the one component family the upstream data and the docs
+// repo spell differently: the dataset key is `rate-limits`, `item.type` is
+// `rate_limit`, and the pages directory is `rate_limits`. Every spelling has
+// to collapse to one partial directory or the write path and the include path
+// disagree and the include does not resolve.
+const TYPE_DIR_ALIASES = new Map([
+  ['rate-limit', 'rate_limits'],
+  ['rate-limits', 'rate_limits'],
+  ['rate_limit', 'rate_limits'],
+]);
+
 /**
- * Derive the plural type directory (for example `input` -> `inputs`).
+ * Canonical partial directory for a plural type directory. Applied to every
+ * derivation of a type directory so `typeDirFor` is the single source of truth
+ * for both the file the generator writes and the include line a page carries.
+ * @param {string} typeDir
+ * @returns {string}
+ */
+function normalizeTypeDir (typeDir) {
+  return TYPE_DIR_ALIASES.get(typeDir) || typeDir;
+}
+
+/**
+ * Derive the plural, canonical type directory (for example `input` ->
+ * `inputs`, `rate-limits` -> `rate_limits`).
  * @param {object} item connector data with `type` and/or `typeDir`
  * @returns {string}
  */
 function typeDirFor (item) {
-  if (item && item.typeDir) return item.typeDir;
+  if (item && item.typeDir) return normalizeTypeDir(item.typeDir);
   const type = item && item.type;
   if (!type) return '';
-  return type.endsWith('s') ? type : `${type}s`;
+  return normalizeTypeDir(type.endsWith('s') ? type : `${type}s`);
 }
 
 /**
@@ -182,6 +205,7 @@ function lostMetadataSections (oldContent, newContent) {
 
 module.exports = {
   locateMetadata,
+  normalizeTypeDir,
   extractMetadata,
   typeDirFor,
   metadataIncludeLine,

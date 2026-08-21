@@ -5,7 +5,7 @@ const path = require('path');
 const handlebars = require('handlebars');
 const yaml = require('yaml');
 const helpers = require('./helpers');
-const { lostMetadataSections } = require('./metadata-utils.js');
+const { lostMetadataSections, typeDirFor } = require('./metadata-utils.js');
 
 // Register each helper under handlebars, verifying that it’s a function
 Object.entries(helpers).forEach(([name, fn]) => {
@@ -49,10 +49,10 @@ const STALE_DESCRIPTION_PARTIAL =
 // pages (mirrors the connectorTypes list in rpcn-connector-docs-handler.js).
 // Other data keys, such as `config` and the bloblang functions/methods, have
 // no per-connector page that could include a description partial, so none is
-// emitted for them. Keyed by typeDir; includes both spellings of rate limits
-// because upstream datasets have carried both.
+// emitted for them. Keyed by the canonical type directory from typeDirFor(),
+// so rate limits appear once, under the spelling their include line uses.
 const CONNECTOR_DESCRIPTION_TYPE_DIRS = new Set([
-  'inputs', 'outputs', 'processors', 'caches', 'rate_limits', 'rate-limits',
+  'inputs', 'outputs', 'processors', 'caches', 'rate_limits',
   'buffers', 'metrics', 'scanners', 'tracers',
 ]);
 
@@ -451,6 +451,14 @@ async function generateRpcnConnectorDocs(options) {
       // Compute typeDir once for this item (used in templates and file paths)
       const typeDir = type.endsWith('s') ? type : `${type}s`;
       item.typeDir = typeDir;
+      // Canonical directory for the partials that pages address by include
+      // line. `typeDir` keeps the raw data-key spelling because the fields
+      // and examples partials are written under it and published pages
+      // already include them by that path; the metadata and description
+      // partials are addressed through typeDirFor(), so writing them under
+      // anything else leaves the include unresolved. Rate limits are the
+      // live case: data key `rate-limits`, include path `rate_limits`.
+      const partialTypeDir = typeDirFor(item);
 
       // Always generate field and example partials (needed for both standalone and draft modes)
       // Render fields using the registered "fields" partial
@@ -492,7 +500,7 @@ async function generateRpcnConnectorDocs(options) {
       if (type !== 'bloblang-functions' && type !== 'bloblang-methods') {
         // Write under typeDir (not the raw data key) so the file path always
         // matches the include directive built by metadataIncludeLine().
-        const mPath = path.join(metadataOutRoot, typeDir, `${name}.adoc`);
+        const mPath = path.join(metadataOutRoot, partialTypeDir, `${name}.adoc`);
         if (metadataOut.trim()) {
           fs.mkdirSync(path.dirname(mPath), { recursive: true });
           if (fs.existsSync(mPath)) {
@@ -549,9 +557,9 @@ async function generateRpcnConnectorDocs(options) {
       const descriptionOut = handlebars
         .compile('{{> description summary=summary version=version description=description type=type typeDir=typeDir name=name}}')(descriptionItem);
 
-      if (CONNECTOR_DESCRIPTION_TYPE_DIRS.has(typeDir)) {
-        visitedDescriptionPartials.add(`${typeDir}/${name}`);
-        const dPath = path.join(descriptionOutRoot, typeDir, `${name}.adoc`);
+      if (CONNECTOR_DESCRIPTION_TYPE_DIRS.has(partialTypeDir)) {
+        visitedDescriptionPartials.add(`${partialTypeDir}/${name}`);
+        const dPath = path.join(descriptionOutRoot, partialTypeDir, `${name}.adoc`);
         if (descriptionOut.trim()) {
           fs.mkdirSync(path.dirname(dPath), { recursive: true });
           fs.writeFileSync(dPath, descriptionOut);
@@ -569,11 +577,11 @@ async function generateRpcnConnectorDocs(options) {
           ) {
             const md = hasMarkdownHeadings(item.description);
             const msg = md
-              ? `Markdown-style headings: ${typeDir}/${name} structures its description with ## headings, ` +
+              ? `Markdown-style headings: ${partialTypeDir}/${name} structures its description with ## headings, ` +
                 'which render unreliably. Convert them to == sections upstream in the Connect source.'
-              : `Long heading-less description: ${typeDir}/${name} ` +
+              : `Long heading-less description: ${partialTypeDir}/${name} ` +
                 `(${item.description.length} chars). Consider adding == sections upstream in the Connect source.`;
-            descriptionReports.push({ connector: `${typeDir}/${name}`, message: msg });
+            descriptionReports.push({ connector: `${partialTypeDir}/${name}`, message: msg });
             console.warn(msg);
           }
           // Headings that start deeper than level one render out of
@@ -581,9 +589,9 @@ async function generateRpcnConnectorDocs(options) {
           const headingDepth = typeof item.description === 'string' ? firstHeadingDepth(item.description) : null;
           if (headingDepth !== null && headingDepth > 2) {
             const seqMsg =
-              `Out-of-sequence headings: ${typeDir}/${name} starts at level ${headingDepth - 1} ` +
+              `Out-of-sequence headings: ${partialTypeDir}/${name} starts at level ${headingDepth - 1} ` +
               '(=== or ### with no parent section). Promote the top headings upstream in the Connect source.';
-            descriptionReports.push({ connector: `${typeDir}/${name}`, message: seqMsg });
+            descriptionReports.push({ connector: `${partialTypeDir}/${name}`, message: seqMsg });
             console.warn(seqMsg);
           }
         } else if (fs.existsSync(dPath)) {

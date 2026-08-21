@@ -9,6 +9,7 @@ Object.entries(helpers).forEach(([name, fn]) => handlebars.registerHelper(name, 
 
 const {
   descriptionIncludeLine,
+  metadataIncludeLine,
 } = require('../../tools/redpanda-connect/metadata-utils.js');
 
 const renderConnectDescription = require('../../tools/redpanda-connect/helpers/renderConnectDescription.js');
@@ -774,5 +775,68 @@ describe('orphan sweep blast-radius guard', () => {
     expect(bodies()).toBe(185);
     expect(result.orphanSweepSkipped).toBeNull();
     expect(result.descriptionReports.filter((r) => /removed upstream/.test(r.message))).toHaveLength(15);
+  });
+});
+
+describe('rate limits: the partial is written where its include line points', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-rate-limits');
+  let originalCwd, templateFile, dataFile;
+  const partialsRoot = path.join(tmpDir, 'modules', 'components', 'partials');
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    // The upstream dataset key is 'rate-limits' while item.type is
+    // 'rate_limit' and the pages directory is 'rate_limits'.
+    const data = {
+      'rate-limits': [
+        {
+          name: 'local',
+          type: 'rate_limit',
+          summary: 'A simple X every Y rate limit.',
+          description: 'Shared across components.\n\n== Metadata\n\n- a: one',
+          config: { children: [{ name: 'count', type: 'int', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('the description and metadata partials land on the path the include lines use', async () => {
+    await generateRpcnConnectorDocs({ data: dataFile, template: templateFile });
+
+    const item = { type: 'rate_limit', name: 'local' };
+    // The include line a page (or the migration) writes...
+    const descInclude = descriptionIncludeLine(item);
+    const metaInclude = metadataIncludeLine(item);
+    expect(descInclude).toContain('partial$descriptions/rate_limits/local.adoc');
+    expect(metaInclude).toContain('partial$metadata/rate_limits/local.adoc');
+
+    // ...must name a file that exists. Resolve the partial$ target the way
+    // Antora does: <partials root>/<the path after partial$>.
+    const resolve = (line) => path.join(
+      partialsRoot, line.match(/partial\$([^[]+)/)[1]
+    );
+    expect(fs.existsSync(resolve(descInclude))).toBe(true);
+    expect(fs.existsSync(resolve(metaInclude))).toBe(true);
+
+    // The hyphenated spelling must not also exist: two directories for one
+    // component family is how the mismatch came back last time.
+    expect(fs.existsSync(path.join(partialsRoot, 'descriptions', 'rate-limits'))).toBe(false);
+    expect(fs.existsSync(path.join(partialsRoot, 'metadata', 'rate-limits'))).toBe(false);
+
+    // Fields and examples are unchanged: published pages already include
+    // them under the raw data-key spelling, so that path must not move.
+    expect(fs.existsSync(path.join(partialsRoot, 'fields', 'rate-limits', 'local.adoc'))).toBe(true);
   });
 });
