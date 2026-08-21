@@ -1,5 +1,6 @@
 'use strict';
 const { posix: path } = require('path')
+const { escapeHtml } = require('../extension-utils/html-utils')
 
 /**
  * Logos shipped in the docs-ui bundle under `img/logos/`, keyed by connector
@@ -278,16 +279,6 @@ module.exports.register = function (registry, context) {
     // site-root-relative path, which holds for a site published at the domain root.
     return `/${uiOutputDir}`;
   }
-
-  /**
-   * Escapes HTML special characters so CSV-sourced values can be safely
-   * interpolated into element content and double-quoted attribute values.
-   */
-  const escapeHtml = s => String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 
   /**
    * Processes the parsed CSV data and returns a data structure organized by connector.
