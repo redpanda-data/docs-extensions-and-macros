@@ -2,6 +2,103 @@
 const { posix: path } = require('path')
 
 /**
+ * Logos shipped in the docs-ui bundle under `img/logos/`, keyed by connector
+ * name or by vendor/family token. This is the single source for connector
+ * logos: `getConnectorIcon` falls back from the exact connector name to the
+ * version-stripped name, then to the leading and trailing token runs, so a
+ * vendor only needs one entry to cover its whole family (`gcp` covers
+ * `gcp_pubsub`, `snowflake` covers `snowflake_put` and `sql_driver_snowflake`).
+ */
+const LOGO_FILES = {
+  amqp: 'rabbit-mq.svg',
+  avro: 'apacheavro.svg',
+  aws: 'amazon-web-services.svg',
+  aws_bedrock: 'awslambda.svg',
+  aws_cloudwatch: 'awscloud-watch.svg',
+  aws_dynamodb: 'awsdynamo-db.svg',
+  aws_kinesis: 'awskinesis.svg',
+  aws_lambda: 'awslambda.svg',
+  aws_s3: 'awss3.svg',
+  aws_sns: 'awssns.svg',
+  aws_sqs: 'awssqs.svg',
+  azure: 'microsoftazure.svg',
+  beanstalkd: 'beanstalkd.svg',
+  cassandra: 'cassandra.svg',
+  clickhouse: 'clickhouse.svg',
+  cohere: 'cohere.svg',
+  couchbase: 'couchbase.svg',
+  discord: 'discord.svg',
+  elasticsearch: 'elasticsearch.svg',
+  gcp: 'google-cloud.svg',
+  gocosmos: 'microsoftazure.svg',
+  google_drive: 'google-drive.svg',
+  grok: 'elasticsearch.svg',
+  hdfs: 'hadoop.svg',
+  influxdb: 'influx-db.svg',
+  javascript: 'java-script.svg',
+  jq: 'jq.svg',
+  json: 'json.svg',
+  kafka: 'apache-kafka.svg',
+  memcached: 'memcached.svg',
+  microsoft_sql_server: 'microsoftsqlserver.svg',
+  mongodb: 'mongo-db.svg',
+  mqtt: 'mqtt.svg',
+  mssql: 'microsoftsqlserver.svg',
+  mysql: 'my-sql.svg',
+  nanomsg: 'nanomsg.svg',
+  nats: 'nats.svg',
+  nsq: 'nsq.svg',
+  openai: 'open-ai.svg',
+  opensearch: 'open-search.svg',
+  open_telemetry: 'open-telemetry.svg',
+  oracle: 'oracle.svg',
+  oracledb: 'oracle.svg',
+  otlp: 'open-telemetry.svg',
+  pg_stream: 'postgre-sql.svg',
+  pinecone: 'pinecone.svg',
+  postgres: 'postgre-sql.svg',
+  postgresql: 'postgre-sql.svg',
+  prometheus: 'prometheus.svg',
+  protobuf: 'google-protocol-buffers.svg',
+  pulsar: 'apache-pulsar.svg',
+  pusher: 'pusher.svg',
+  qdrant: 'qdrant.svg',
+  // The Redpanda mark is not in the docs-ui bundle yet, so it is hot-linked.
+  // Tracked as a docs-ui task: the asset belongs in the bundle like every other logo.
+  redpanda: 'https://cdn.prod.website-files.com/68ed36e99e31581dedf5dc7c/68ed91d74b9cd10c98cb8e6e_footer-logo.svg',
+  redis: 'redis.svg',
+  sentry: 'sentry.svg',
+  slack: 'slack.svg',
+  snowflake: 'snowflake.svg',
+  splunk: 'splunk.svg',
+  websocket: 'web-socket.svg',
+  xml: 'xml.svg',
+}
+
+/**
+ * Connectors with no vendor logo that read better as a symbol than as the
+ * generic plug. Checked after an exact logo match and before the family passes.
+ */
+const EMOJI_ICONS = {
+  http_server: '🌐',
+  http_client: '🌐',
+  tcp: '🔌',
+  udp: '🔌',
+  sftp: '📁',
+  ftp: '📁',
+  file: '📄',
+  stdin: '⌨️',
+  stdout: '📺',
+  sql_raw: '🗄️',
+  sql_insert: '🗄️',
+  sql_select: '🗄️',
+  cache: '💾',
+  rate_limit: '⏱️',
+  batched: '📦',
+  drop: '🗑️',
+}
+
+/**
  * Registers macros for use in Redpanda Connect contexts in the Redpanda documentation.
   * @param {Registry} registry - The Antora registry where this block macro is registered.
   * @param {Object} context - The Antora context that provides access to configuration data, such as parsed CSV content.
@@ -333,201 +430,75 @@ module.exports.register = function (registry, context) {
   }
 
   /**
-   * Gets the icon/logo for a connector.
-   * Uses extracted logos from Console repo, Simple Icons CDN, or Unicode symbols as fallbacks.
+   * Resolves the icon for a connector card.
+   *
+   * Returns a tagged value so callers never have to sniff the string to tell a
+   * logo URL from an emoji: `{ type: 'logo', url }` or `{ type: 'emoji', symbol }`.
+   *
+   * Lookup order, all against the single LOGO_FILES table:
+   * 1. the exact connector name
+   * 2. an emoji override (for example, `stdin`)
+   * 3. the name without a version suffix (`elasticsearch_v8` -> `elasticsearch`)
+   * 4. the longest leading token run (`aws_cloudwatch_logs` -> `aws_cloudwatch`)
+   * 5. the trailing token run, for vendor-suffixed names (`sql_driver_snowflake` -> `snowflake`)
+   * 6. name patterns, then the component type, then a generic plug
+   *
    * @param {string} connector - The connector name
    * @param {Map} types - Map of component types (optional, used for generic type-based fallback icons)
+   * @param {string} uiRootPath - Path from the current page to the UI bundle root
+   * @returns {{type: 'logo', url: string}|{type: 'emoji', symbol: string}}
    */
   function getConnectorIcon(connector, types, uiRootPath) {
-    /**
-     * Smart logo lookup with fallbacks:
-     * 1. Try exact match (e.g., elasticsearch_v9)
-     * 2. Try without version suffix (e.g., elasticsearch)
-     */
-    function findLogo(componentName, logoMap) {
-      // Try exact match first
-      if (logoMap[componentName]) {
-        return logoMap[componentName];
-      }
+    const logo = file => ({
+      type: 'logo',
+      url: /^(https?:|data:)/.test(file) ? file : `${uiRootPath}/img/logos/${file}`
+    });
+    const emoji = symbol => ({ type: 'emoji', symbol });
 
-      // Try without version suffix (e.g., elasticsearch_v9 -> elasticsearch)
-      const withoutVersion = componentName.replace(/_v\d+$/i, '');
-      if (withoutVersion !== componentName && logoMap[withoutVersion]) {
-        return logoMap[withoutVersion];
-      }
+    if (LOGO_FILES[connector]) return logo(LOGO_FILES[connector]);
+    if (EMOJI_ICONS[connector]) return emoji(EMOJI_ICONS[connector]);
 
-      return null;
+    // Version suffix (elasticsearch_v8 -> elasticsearch)
+    const withoutVersion = connector.replace(/_v\d+$/i, '');
+    if (withoutVersion !== connector && LOGO_FILES[withoutVersion]) {
+      return logo(LOGO_FILES[withoutVersion]);
     }
 
-    // Helper function to build logo map with correct UI root path
-    function buildLogoMap(uiRootPath) {
-      return {
-      amqp_0_9: `${uiRootPath}/img/logos/rabbit-mq.svg`,
-      amqp_1: `${uiRootPath}/img/logos/rabbit-mq.svg`,
-      aws_bedrock_chat: `${uiRootPath}/img/logos/awslambda.svg`,
-      aws_bedrock_embeddings: `${uiRootPath}/img/logos/awslambda.svg`,
-      aws_cloudwatch: `${uiRootPath}/img/logos/awscloud-watch.svg`,
-      aws_dynamodb: `${uiRootPath}/img/logos/awsdynamo-db.svg`,
-      aws_dynamodb_partiql: `${uiRootPath}/img/logos/awsdynamo-db.svg`,
-      aws_kinesis: `${uiRootPath}/img/logos/awskinesis.svg`,
-      aws_kinesis_firehose: `${uiRootPath}/img/logos/awskinesis.svg`,
-      aws_lambda: `${uiRootPath}/img/logos/awslambda.svg`,
-      aws_s3: `${uiRootPath}/img/logos/awss3.svg`,
-      aws_sns: `${uiRootPath}/img/logos/awssns.svg`,
-      aws_sqs: `${uiRootPath}/img/logos/awssqs.svg`,
-      azure_blob_storage: `${uiRootPath}/img/logos/microsoftazure.svg`,
-      azure_cosmosdb: `${uiRootPath}/img/logos/microsoftazure.svg`,
-      azure_data_lake_gen2: `${uiRootPath}/img/logos/microsoftazure.svg`,
-      azure_queue_storage: `${uiRootPath}/img/logos/microsoftazure.svg`,
-      azure_table_storage: `${uiRootPath}/img/logos/microsoftazure.svg`,
-      beanstalkd: `${uiRootPath}/img/logos/beanstalkd.svg`,
-      cassandra: `${uiRootPath}/img/logos/cassandra.svg`,
-      cohere_chat: `${uiRootPath}/img/logos/cohere.svg`,
-      cohere_embeddings: `${uiRootPath}/img/logos/cohere.svg`,
-      cohere_rerank: `${uiRootPath}/img/logos/cohere.svg`,
-      couchbase: `${uiRootPath}/img/logos/couchbase.svg`,
-      discord: `${uiRootPath}/img/logos/discord.svg`,
-      elasticsearch_v8: `${uiRootPath}/img/logos/elasticsearch.svg`,
-      elasticsearch: `${uiRootPath}/img/logos/elasticsearch.svg`,
-      gcp_bigquery: `${uiRootPath}/img/logos/google-cloud.svg`,
-      gcp_bigquery_select: `${uiRootPath}/img/logos/google-cloud.svg`,
-      gcp_cloud_storage: `${uiRootPath}/img/logos/google-cloud.svg`,
-      gcp_cloudtrace: `${uiRootPath}/img/logos/google-cloud.svg`,
-      gcp_pubsub: `${uiRootPath}/img/logos/google-cloud.svg`,
-      gcp_spanner_cdc: `${uiRootPath}/img/logos/google-cloud.svg`,
-      gcp_vertex_ai_chat: `${uiRootPath}/img/logos/google-cloud.svg`,
-      gcp_vertex_ai_embeddings: `${uiRootPath}/img/logos/google-cloud.svg`,
-      google_drive_download: `${uiRootPath}/img/logos/google-drive.svg`,
-      google_drive_list_labels: `${uiRootPath}/img/logos/google-drive.svg`,
-      google_drive_search: `${uiRootPath}/img/logos/google-drive.svg`,
-      grok: `${uiRootPath}/img/logos/elasticsearch.svg`,
-      hdfs: `${uiRootPath}/img/logos/hadoop.svg`,
-      influxdb: `${uiRootPath}/img/logos/influx-db.svg`,
-      javascript: `${uiRootPath}/img/logos/java-script.svg`,
-      jq: `${uiRootPath}/img/logos/jq.svg`,
-      json_api: `${uiRootPath}/img/logos/json.svg`,
-      json_array: `${uiRootPath}/img/logos/json.svg`,
-      json_documents: `${uiRootPath}/img/logos/json.svg`,
-      json_schema: `${uiRootPath}/img/logos/json.svg`,
-      kafka: `${uiRootPath}/img/logos/apache-kafka.svg`,
-      memcached: `${uiRootPath}/img/logos/memcached.svg`,
-      microsoft_sql_server_cdc: `${uiRootPath}/img/logos/microsoftsqlserver.svg`,
-      mongodb: `${uiRootPath}/img/logos/mongo-db.svg`,
-      mongodb_cdc: `${uiRootPath}/img/logos/mongo-db.svg`,
-      mysql_cdc: `${uiRootPath}/img/logos/my-sql.svg`,
-      mysql: `${uiRootPath}/img/logos/my-sql.svg`,
-      nanomsg: `${uiRootPath}/img/logos/nanomsg.svg`,
-      nats: `${uiRootPath}/img/logos/nats.svg`,
-      nats_jetstream: `${uiRootPath}/img/logos/nats.svg`,
-      nats_kv: `${uiRootPath}/img/logos/nats.svg`,
-      nats_request_reply: `${uiRootPath}/img/logos/nats.svg`,
-      nats_stream: `${uiRootPath}/img/logos/nats.svg`,
-      nsq: `${uiRootPath}/img/logos/nsq.svg`,
-      openai_chat_completion: `${uiRootPath}/img/logos/open-ai.svg`,
-      openai_embeddings: `${uiRootPath}/img/logos/open-ai.svg`,
-      openai_image_generation: `${uiRootPath}/img/logos/open-ai.svg`,
-      openai_speech: `${uiRootPath}/img/logos/open-ai.svg`,
-      openai_transcription: `${uiRootPath}/img/logos/open-ai.svg`,
-      openai_translation: `${uiRootPath}/img/logos/open-ai.svg`,
-      opensearch: `${uiRootPath}/img/logos/open-search.svg`,
-      open_telemetry_collector: `${uiRootPath}/img/logos/open-telemetry.svg`,
-      pg_stream: `${uiRootPath}/img/logos/postgre-sql.svg`,
-      postgres_cdc: `${uiRootPath}/img/logos/postgre-sql.svg`,
-      postgres: `${uiRootPath}/img/logos/postgre-sql.svg`,
-      pinecone: `${uiRootPath}/img/logos/pinecone.svg`,
-      prometheus: `${uiRootPath}/img/logos/prometheus.svg`,
-      protobuf: `${uiRootPath}/img/logos/google-protocol-buffers.svg`,
-      pusher: `${uiRootPath}/img/logos/pusher.svg`,
-      qdrant: `${uiRootPath}/img/logos/qdrant.svg`,
-      redis: `${uiRootPath}/img/logos/redis.svg`,
-      redis_hash: `${uiRootPath}/img/logos/redis.svg`,
-      redis_list: `${uiRootPath}/img/logos/redis.svg`,
-      redis_pubsub: `${uiRootPath}/img/logos/redis.svg`,
-      redis_scan: `${uiRootPath}/img/logos/redis.svg`,
-      redis_sorted_set: `${uiRootPath}/img/logos/redis.svg`,
-      redis_streams: `${uiRootPath}/img/logos/redis.svg`,
-      sentry: `${uiRootPath}/img/logos/sentry.svg`,
-      slack: `${uiRootPath}/img/logos/slack.svg`,
-      snowflake: `${uiRootPath}/img/logos/snowflake.svg`,
-      snowflake_put: `${uiRootPath}/img/logos/snowflake.svg`,
-      snowflake_streaming: `${uiRootPath}/img/logos/snowflake.svg`,
-      websocket: `${uiRootPath}/img/logos/web-socket.svg`,
-      };
+    // Vendor family: longest leading token run first (aws_cloudwatch_logs ->
+    // aws_cloudwatch), then the trailing tokens, which is where vendor-suffixed
+    // names live (sql_driver_snowflake -> snowflake, ockam_kafka -> kafka).
+    const tokens = withoutVersion.split('_');
+    for (let end = tokens.length - 1; end > 0; end--) {
+      const candidate = tokens.slice(0, end).join('_');
+      if (LOGO_FILES[candidate]) return logo(LOGO_FILES[candidate]);
     }
-
-    // Use smart lookup with version fallback
-    const consoleLogo = findLogo(connector, buildLogoMap(uiRootPath));
-    if (consoleLogo) {
-      return consoleLogo;
-    }
-
-    // Local logo files from docs-ui
-    const localLogos = {
-      kafka_franz: `${uiRootPath}/img/logos/apache-kafka.svg`,
-      pulsar: `${uiRootPath}/img/logos/apache-pulsar.svg`,
-      mqtt: `${uiRootPath}/img/logos/mqtt.svg`,
-      splunk: `${uiRootPath}/img/logos/splunk.svg`,
-      splunk_hec: `${uiRootPath}/img/logos/splunk.svg`,
-      sql_driver_clickhouse: `${uiRootPath}/img/logos/clickhouse.svg`,
-    };
-
-    if (localLogos[connector]) {
-      return localLogos[connector];
-    }
-
-    // Emoji fallbacks for generic types
-    const redpandaLogo = 'https://cdn.prod.website-files.com/68ed36e99e31581dedf5dc7c/68ed91d74b9cd10c98cb8e6e_footer-logo.svg';
-    const emojiFallback = {
-      redpanda: redpandaLogo,
-      redpanda_common: redpandaLogo,
-      redpanda_data_transform: redpandaLogo,
-      redpanda_migrator: redpandaLogo,
-      redpanda_migrator_bundle: redpandaLogo,
-      redpanda_migrator_offsets: redpandaLogo,
-      http_server: '🌐',
-      http_client: '🌐',
-      tcp: '🔌',
-      udp: '🔌',
-      sftp: '📁',
-      ftp: '📁',
-      file: '📄',
-      stdin: '⌨️',
-      stdout: '📺',
-      sql_raw: '🗄️',
-      sql_insert: '🗄️',
-      sql_select: '🗄️',
-      cache: '💾',
-      rate_limit: '⏱️',
-      batched: '📦',
-      drop: '🗑️',
-    };
-
-    if (emojiFallback[connector]) {
-      return emojiFallback[connector];
+    for (let start = 1; start < tokens.length; start++) {
+      const candidate = tokens.slice(start).join('_');
+      if (LOGO_FILES[candidate]) return logo(LOGO_FILES[candidate]);
     }
 
     // Pattern-based fallbacks
-    if (connector.startsWith('sql_')) return '🗄️';
-    if (connector.endsWith('_cdc')) return '🔄';
-    if (connector.includes('http')) return '🌐';
+    if (connector.startsWith('sql_')) return emoji('🗄️');
+    if (connector.endsWith('_cdc')) return emoji('🔄');
+    if (connector.includes('http')) return emoji('🌐');
 
     // Type-based fallback icons (if types are provided)
     if (types && types.size > 0) {
       // Determine primary type for icon selection
       // Priority order: input > output > processor > scanner > others
-      if (types.has('input')) return '📥'; // Inbox tray - receiving data
-      if (types.has('output')) return '📤'; // Outbox tray - sending data
-      if (types.has('processor')) return '⚙️'; // Gear - processing/transforming
-      if (types.has('scanner')) return '🔍'; // Magnifying glass - scanning
-      if (types.has('buffer')) return '📦'; // Package - buffering
-      if (types.has('cache')) return '💾'; // Floppy disk - caching (already in emojiFallback but as safety)
-      if (types.has('rate_limit')) return '⏱️'; // Stopwatch - rate limiting (already in emojiFallback but as safety)
-      if (types.has('metric')) return '📊'; // Bar chart - metrics
-      if (types.has('tracer')) return '🔎'; // Magnifying glass tilted - tracing
+      if (types.has('input')) return emoji('📥'); // Inbox tray - receiving data
+      if (types.has('output')) return emoji('📤'); // Outbox tray - sending data
+      if (types.has('processor')) return emoji('⚙️'); // Gear - processing/transforming
+      if (types.has('scanner')) return emoji('🔍'); // Magnifying glass - scanning
+      if (types.has('buffer')) return emoji('📦'); // Package - buffering
+      if (types.has('cache')) return emoji('💾'); // Floppy disk - caching
+      if (types.has('rate_limit')) return emoji('⏱️'); // Stopwatch - rate limiting
+      if (types.has('metric')) return emoji('📊'); // Bar chart - metrics
+      if (types.has('tracer')) return emoji('🔎'); // Magnifying glass tilted - tracing
     }
 
     // Default generic icon (plug for unknown connectors)
-    return '🔌';
+    return emoji('🔌');
   }
 
   /**
@@ -778,9 +749,9 @@ module.exports.register = function (registry, context) {
               <div class="card-icon">
                 ${(() => {
                   const icon = getConnectorIcon(connector, types, uiRootPath);
-                  return (icon.startsWith('http') || icon.startsWith('data:image') || icon.startsWith('/') || icon.startsWith('..'))
-                    ? `<img src="${icon}" alt="${escapeHtml(connector)} logo" />`
-                    : `<span class="card-icon-emoji">${icon}</span>`;
+                  return icon.type === 'logo'
+                    ? `<img src="${escapeHtml(icon.url)}" alt="${escapeHtml(connector)} logo" />`
+                    : `<span class="card-icon-emoji">${icon.symbol}</span>`;
                 })()}
               </div>
             </div>

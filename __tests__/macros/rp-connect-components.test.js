@@ -34,11 +34,11 @@ const CSV_FIXTURE = [
   'evil<script>,"Bad<Name> & ""Co""",input,community,n,Yes,/connect/components/inputs/evil/,,"Injects <b>markup</b> & ""quotes"" into cards"'
 ].join('\n')
 
-function renderComponentTable ({ attributes = { all: 'all' }, docAttributes } = {}) {
+function renderComponentTable ({ attributes = { all: 'all' }, docAttributes, csv = CSV_FIXTURE } = {}) {
   jest.resetModules()
   const macro = require('../../macros/rp-connect-components.js')
   const { registry, processors } = createCapturingRegistry()
-  const csvData = Papa.parse(CSV_FIXTURE, { header: true, skipEmptyLines: true })
+  const csvData = Papa.parse(csv, { header: true, skipEmptyLines: true })
   const context = { config: { attributes: { csvData, commercialNamesMap: {} } } }
   macro.register(registry, context)
   const parent = {
@@ -48,6 +48,17 @@ function renderComponentTable ({ attributes = { all: 'all' }, docAttributes } = 
   }
   const block = processors.component_table(parent, '', attributes)
   return block.source
+}
+
+/** Returns just the card whose data-name starts with the given connector name. */
+function cardFor (html, connector) {
+  const start = html.indexOf(`data-name="${connector} `) === -1
+    ? html.indexOf(`data-name="${connector}"`)
+    : html.indexOf(`data-name="${connector} `)
+  if (start === -1) return ''
+  const cardStart = html.lastIndexOf('<div class="component-card"', start)
+  const next = html.indexOf('<div class="component-card"', start)
+  return html.slice(cardStart, next === -1 ? html.length : next)
 }
 
 describe('component_table macro rendering', () => {
@@ -137,6 +148,40 @@ describe('component_table macro rendering', () => {
     // Dropdown click-outside close is live
     expect(html).toContain('window.dropdownClickOutsideHandler = function(event)')
     expect(html).not.toContain('TEMPORARILY DISABLED')
+  })
+})
+
+describe('connector logo lookup', () => {
+  // Connectors whose logo can only be found by falling back to a vendor/family
+  // token: a trailing token (ockam_kafka -> kafka), a leading token run
+  // (aws_cloudwatch_logs -> aws_cloudwatch), a vendor alias (oracledb_cdc ->
+  // oracle) and a single-token vendor (xml). All four shipped a generic emoji
+  // before the three logo maps were merged into one table.
+  const FAMILY_CSV = [
+    'connector,commercial_name,type,support_level,is_cloud_supported,is_licensed,redpandaConnectUrl,redpandaCloudUrl,description',
+    'ockam_kafka,Ockam,input,community,n,No,/connect/components/inputs/ockam_kafka/,,Reads through an Ockam portal',
+    'aws_cloudwatch_logs,CloudWatch Logs,output,certified,n,No,/connect/components/outputs/aws_cloudwatch_logs/,,Writes log events',
+    'oracledb_cdc,Oracle,input,certified,n,No,/connect/components/inputs/oracledb_cdc/,,Streams change events',
+    'xml,XML,processor,community,n,No,/connect/components/processors/xml/,,Parses XML documents',
+    'redis_script,Redis,processor,community,n,No,/connect/components/processors/redis_script/,,Runs a Lua script'
+  ].join('\n')
+
+  let html
+
+  beforeAll(() => {
+    html = renderComponentTable({ csv: FAMILY_CSV })
+  })
+
+  test.each([
+    ['ockam_kafka', 'apache-kafka.svg'],
+    ['aws_cloudwatch_logs', 'awscloud-watch.svg'],
+    ['oracledb_cdc', 'oracle.svg'],
+    ['xml', 'xml.svg'],
+    ['redis_script', 'redis.svg']
+  ])('%s inherits the %s vendor logo instead of a generic emoji', (connector, file) => {
+    const card = cardFor(html, connector)
+    expect(card).toContain(`<img src="/_/img/logos/${file}" alt="${connector} logo" />`)
+    expect(card).not.toContain('card-icon-emoji')
   })
 })
 
