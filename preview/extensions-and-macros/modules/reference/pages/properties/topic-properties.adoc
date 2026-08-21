@@ -1,0 +1,9 @@
+= Topic properties
+:page-property-source: topic-properties
+:description: Preview fixture for the prop macro.
+
+Fixture page. The `page-property-source` attribute above declares this page as
+the reference for the `topic-properties` collection, so `prop:` links resolve here by
+declaration rather than by inferring ownership from headings.
+
+include::reference:partial$properties/preview-properties.adoc[tags=category-topic;!deprecated;!exclude-from-docs]

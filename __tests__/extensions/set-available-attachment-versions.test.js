@@ -30,8 +30,12 @@ describe('set-available-attachment-versions extension', () => {
   function run (components, attachments) {
     const contentCatalog = {
       getComponents: jest.fn(() => components),
-      findBy: jest.fn(({ component, version }) =>
-        attachments.filter((a) => a.src.component === component && a.src.version === version)
+      // Mirrors Antora's ContentCatalog.findBy, which filters on the criteria
+      // keys you supply and ignores the rest. The old mock required a version
+      // match even when the caller omitted version, so a catalog-wide query
+      // came back empty here while returning files in a real build.
+      findBy: jest.fn((criteria) =>
+        attachments.filter((a) => Object.entries(criteria).every(([key, val]) => a.src[key] === val))
       ),
     }
     extension.register.call(extensionContext)
@@ -129,10 +133,23 @@ describe('set-available-attachment-versions extension', () => {
     expect(compVer.asciidoc.attributes['available-properties-tag']).toBe('v26.1.13')
   })
 
-  it('ignores components that are neither streaming nor connect', () => {
+  it('sets no attributes on a component with no property or connect data', () => {
     const compVer = { version: 'main', asciidoc: { attributes: {} } }
-    const catalog = run([{ name: 'labs', versions: [compVer] }], [])
-    expect(catalog.findBy).not.toHaveBeenCalled()
+    run([{ name: 'labs', versions: [compVer] }], [])
     expect(compVer.asciidoc.attributes).toEqual({})
+  })
+
+  it('covers any component that publishes its own property JSON', () => {
+    // The docs UI resolves the tooltip dataset against the page's own
+    // component when that component declares available-properties-tag, so a
+    // component shipping its own data has to get the attribute. Without it the
+    // tooltips silently fall back to streaming's dataset and describe
+    // different properties from the ones the component's pages document.
+    const compVer = { version: '', asciidoc: { attributes: {} } }
+    run(
+      [{ name: 'preview', versions: [compVer] }],
+      [makeAttachment('preview', '', 'reference', 'redpanda-properties-v26.2.1.json')]
+    )
+    expect(compVer.asciidoc.attributes['available-properties-tag']).toBe('v26.2.1')
   })
 })

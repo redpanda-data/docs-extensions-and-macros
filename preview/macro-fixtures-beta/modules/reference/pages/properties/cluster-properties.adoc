@@ -1,0 +1,4 @@
+= Cluster properties (beta)
+:page-property-source: cluster-properties
+
+include::reference:partial$properties/beta-properties.adoc[tags=!deprecated]
