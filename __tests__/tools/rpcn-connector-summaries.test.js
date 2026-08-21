@@ -212,24 +212,108 @@ describe('generateConnectorDiffJson - config component status and cloud support'
     expect(added.component).toBe('inputs:aws_s3');
   });
 
+  test('reports a newly added group once, not once per field inside it', () => {
+    const oldIndex = {
+      inputs: [{ name: 'kafka', config: { children: [{ name: 'topics', kind: 'scalar' }] } }]
+    };
+    const newIndex = {
+      inputs: [{
+        name: 'kafka',
+        config: {
+          children: [
+            { name: 'topics', kind: 'scalar' },
+            {
+              name: 'sasl',
+              kind: 'scalar',
+              description: 'SASL settings.',
+              children: [
+                { name: 'mechanism', kind: 'scalar' },
+                { name: 'user', kind: 'scalar' },
+                { name: 'password', kind: 'scalar' }
+              ]
+            }
+          ]
+        }
+      }]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, { oldVersion: '1.0.0', newVersion: '1.1.0' });
+
+    // The group row already covers everything inside it.
+    expect(diff.details.newFields.map(f => f.field)).toEqual(['sasl']);
+    expect(diff.summary.newFields).toBe(1);
+  });
+
+  test('reports a removed group once, not once per field inside it', () => {
+    const withSasl = () => ({
+      inputs: [{
+        name: 'kafka',
+        config: {
+          children: [
+            { name: 'topics', kind: 'scalar' },
+            {
+              name: 'sasl',
+              kind: 'scalar',
+              children: [
+                { name: 'mechanism', kind: 'scalar' },
+                { name: 'user', kind: 'scalar' },
+                { name: 'password', kind: 'scalar' }
+              ]
+            }
+          ]
+        }
+      }]
+    });
+    const newIndex = {
+      inputs: [{ name: 'kafka', config: { children: [{ name: 'topics', kind: 'scalar' }] } }]
+    };
+
+    const diff = generateConnectorDiffJson(withSasl(), newIndex, { oldVersion: '1.0.0', newVersion: '1.1.0' });
+
+    expect(diff.details.removedFields.map(f => f.field)).toEqual(['sasl']);
+    expect(diff.summary.removedFields).toBe(1);
+  });
+
+  test('still reports a field removed from a group that survives', () => {
+    const children = (saslChildren) => ([
+      { name: 'topics', kind: 'scalar' },
+      { name: 'sasl', kind: 'scalar', children: saslChildren }
+    ]);
+    const oldIndex = {
+      inputs: [{ name: 'kafka', config: { children: children([{ name: 'mechanism', kind: 'scalar' }, { name: 'user', kind: 'scalar' }]) } }]
+    };
+    const newIndex = {
+      inputs: [{ name: 'kafka', config: { children: children([{ name: 'mechanism', kind: 'scalar' }]) } }]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, { oldVersion: '1.0.0', newVersion: '1.1.0' });
+
+    expect(diff.details.removedFields.map(f => f.field)).toEqual(['sasl.user']);
+  });
+
   test('keeps the [] marker on a field nested under an array-of-object group', () => {
     // `sasl` is kind: array in the real connect data, so the reference page
     // heads the field `sasl[].aws.tcp`. A what's-new row saying
     // `sasl.aws.tcp` publishes a config path that does not exist.
-    const saslChildren = (extra = []) => ([
+    const saslChildren = (awsExtra = []) => ([
       {
         name: 'sasl',
         kind: 'array',
         type: 'object',
         children: [
           { name: 'mechanism', kind: 'scalar', type: 'string' },
-          ...extra
+          {
+            name: 'aws',
+            kind: 'scalar',
+            type: 'object',
+            children: [{ name: 'region', kind: 'scalar', type: 'string' }, ...awsExtra]
+          }
         ]
       }
     ]);
     const oldIndex = { inputs: [{ name: 'redpanda', config: { children: saslChildren() } }] };
     const newChildren = saslChildren([
-      { name: 'aws', kind: 'scalar', type: 'object', children: [{ name: 'tcp', kind: 'scalar', type: 'string', description: 'TCP settings.' }] }
+      { name: 'tcp', kind: 'scalar', type: 'string', description: 'TCP settings.' }
     ]);
     const newIndex = { inputs: [{ name: 'redpanda', config: { children: newChildren } }] };
 

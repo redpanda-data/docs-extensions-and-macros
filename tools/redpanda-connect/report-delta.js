@@ -55,20 +55,22 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     if (!(cKey in oldMap)) return;
     const oldFields = new Set(oldMap[cKey].fields || []);
     const newFieldsArr = newMap[cKey].fields || [];
-    newFieldsArr.forEach(fName => {
-      if (!oldFields.has(fName)) {
-        const rawFieldObj = newMap[cKey].fieldMap.get(fName) || null;
-        newFields.push({
-          component: cKey,
-          field: fName,
-          // The source data carries no per-field version metadata today, so
-          // fall back to the version this diff is comparing against — it's
-          // still an accurate "introduced in" answer, since this field is
-          // new as of exactly that release.
-          introducedIn: (rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version)) || opts.newVersion || null,
-          description: rawFieldObj && rawFieldObj.description
-        });
-      }
+    const added = collapseToTopmost(
+      newFieldsArr.filter(fName => !oldFields.has(fName)),
+      newMap[cKey].parents
+    );
+    added.forEach(fName => {
+      const rawFieldObj = newMap[cKey].fieldMap.get(fName) || null;
+      newFields.push({
+        component: cKey,
+        field: fName,
+        // The source data carries no per-field version metadata today, so
+        // fall back to the version this diff is comparing against — it's
+        // still an accurate "introduced in" answer, since this field is
+        // new as of exactly that release.
+        introducedIn: (rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version)) || opts.newVersion || null,
+        description: rawFieldObj && rawFieldObj.description
+      });
     });
   });
 
@@ -78,13 +80,15 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     if (!(cKey in newMap)) return;
     const newFieldsSet = new Set(newMap[cKey].fields || []);
     const oldFieldsArr = oldMap[cKey].fields || [];
-    oldFieldsArr.forEach(fName => {
-      if (!newFieldsSet.has(fName)) {
-        removedFields.push({
-          component: cKey,
-          field: fName
-        });
-      }
+    const removed = collapseToTopmost(
+      oldFieldsArr.filter(fName => !newFieldsSet.has(fName)),
+      oldMap[cKey].parents
+    );
+    removed.forEach(fName => {
+      removedFields.push({
+        component: cKey,
+        field: fName
+      });
     });
   });
 
@@ -364,6 +368,30 @@ function discoverComponentKeys(obj) {
   return Object.keys(obj).filter(key => Array.isArray(obj[key]));
 }
 
+/**
+ * Drop paths whose parent changed in the same way, keeping only the topmost
+ * field of each changed subtree.
+ *
+ * Adding or removing one group adds or removes every field under it, and the
+ * flattened field list contains all of them. Reporting each descendant turns
+ * a single change into one row per node: removing `batching` from
+ * outputs:redpanda_migrator would list `batching` plus batching.count,
+ * .byte_size, .period, .check and .processors, and the group row already says
+ * all of that. Only the fields added to or removed from a group that still
+ * exists are news.
+ *
+ * @param {Array<string>} changedPaths - Paths that are new (or removed)
+ * @param {Map<string, (string|null)>} parents - Path to parent path
+ * @returns {Array<string>} The topmost changed path of each subtree, in order
+ */
+function collapseToTopmost(changedPaths, parents) {
+  const changed = new Set(changedPaths);
+  return changedPaths.filter(path => {
+    const parent = parents && parents.get(path);
+    return !(parent && changed.has(parent));
+  });
+}
+
 function buildComponentMap(indexObj) {
   const map = {};
   const types = discoverComponentKeys(indexObj);
@@ -393,6 +421,7 @@ function buildComponentMap(indexObj) {
       const flattened = flattenConnectFields(childArray, { arrayMarker: true });
       const fieldNames = flattened.map(f => f.path);
       const fieldMap = new Map(flattened.map(f => [f.path, f.field]));
+      const parents = new Map(flattened.map(f => [f.path, f.parentPath]));
 
       // Preserve platform metadata for accurate diff comparison
       const metadata = {
@@ -405,6 +434,7 @@ function buildComponentMap(indexObj) {
         raw: component,
         fields: fieldNames,
         fieldMap: fieldMap,
+        parents: parents,
         metadata: metadata
       };
     });
@@ -458,19 +488,21 @@ function printDeltaReport(oldIndex, newIndex) {
     if (!(cKey in oldMap)) return; // skip brand-new components here
     const oldFields = new Set(oldMap[cKey].fields || []);
     const newFieldsArr = newMap[cKey].fields || [];
-    newFieldsArr.forEach(fName => {
-      if (!oldFields.has(fName)) {
-        const rawFieldObj = newMap[cKey].fieldMap.get(fName) || null;
-        const introducedIn = rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version);
-        const requiresVer = rawFieldObj && rawFieldObj.requiresVersion;
+    const added = collapseToTopmost(
+      newFieldsArr.filter(fName => !oldFields.has(fName)),
+      newMap[cKey].parents
+    );
+    added.forEach(fName => {
+      const rawFieldObj = newMap[cKey].fieldMap.get(fName) || null;
+      const introducedIn = rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version);
+      const requiresVer = rawFieldObj && rawFieldObj.requiresVersion;
 
-        newFields.push({
-          component: cKey,
-          field: fName,
-          introducedIn,
-          requiresVersion: requiresVer,
-        });
-      }
+      newFields.push({
+        component: cKey,
+        field: fName,
+        introducedIn,
+        requiresVersion: requiresVer,
+      });
     });
   });
 
