@@ -40,6 +40,28 @@ function runCloudRegions(args) {
   return { status: result.status, stdout: result.stdout || '', stderr: result.stderr || '' };
 }
 
+describe('generate cloud-regions flags', () => {
+  // The MCP wrapper builds its argv from this exact set, and __tests__/mcp/
+  // cli-contract.test.js keeps a list of it, so a flag added or renamed here has
+  // to be a deliberate change in both places.
+  it('offers exactly the flags the MCP wrapper forwards', () => {
+    const help = runCloudRegions(['--help']);
+    // Option lines are indented two spaces; wrapped description lines are not.
+    const flags = [...help.stdout.matchAll(/^ {2}(--[a-z][a-z-]*)/gm)].map((m) => m[1]);
+    expect(flags.sort()).toEqual([
+      '--cluster-type',
+      '--dry-run',
+      '--format',
+      '--output',
+      '--owner',
+      '--path',
+      '--ref',
+      '--repo',
+      '--template'
+    ]);
+  });
+});
+
 describe('generate cloud-regions path containment', () => {
   let outsideDir;
   let outsideFile;

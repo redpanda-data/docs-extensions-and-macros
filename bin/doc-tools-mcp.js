@@ -320,8 +320,7 @@ const tools = [
         },
         cluster_type: {
           type: 'string',
-          description: 'Only include regions/tiers available for this cluster type (optional)',
-          enum: ['BYOC', 'Dedicated']
+          description: 'Only include regions/tiers available for this cluster type, usually "BYOC" or "Dedicated"; the CLI validates the value against the cluster types the source data offers and lists them if it does not match (optional, requires output or dry_run)'
         },
         dry_run: {
           type: 'boolean',
