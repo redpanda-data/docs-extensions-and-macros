@@ -438,6 +438,13 @@ async function generateRpcnConnectorDocs(options) {
     fs.mkdirSync(descriptionOutRoot, { recursive: true });
   }
 
+  // Compile the one-line partial wrappers once, not once per component: they
+  // are constants, and the loop runs for every entry in every data key.
+  const renderFieldsPartial = handlebars.compile('{{> fields children=config.children}}');
+  const renderExamplesPartial = handlebars.compile('{{> examples examples=examples}}');
+  const renderMetadataPartial = handlebars.compile('{{> metadata description=description type=type typeDir=typeDir name=name}}');
+  const renderDescriptionPartial = handlebars.compile('{{> description summary=summary version=version description=description type=type typeDir=typeDir name=name}}');
+
   let partialsWritten = 0;
   const descriptionReports = [];
   const lostSectionWarnings = [];
@@ -469,14 +476,12 @@ async function generateRpcnConnectorDocs(options) {
 
       // Always generate field and example partials (needed for both standalone and draft modes)
       // Render fields using the registered "fields" partial
-      const fieldsOut = handlebars
-        .compile('{{> fields children=config.children}}')(item);
+      const fieldsOut = renderFieldsPartial(item);
 
       // Render examples only if an examples template was provided
       let examplesOut = '';
       if (examplesTemplatePath) {
-        examplesOut = handlebars
-          .compile('{{> examples examples=examples}}')(item);
+        examplesOut = renderExamplesPartial(item);
       }
 
       if (fieldsOut.trim()) {
@@ -503,12 +508,13 @@ async function generateRpcnConnectorDocs(options) {
         }
       }
 
-      // Render the metadata partial from the connector's description. Only
-      // written when the description contains a `== Metadata` section.
-      const metadataOut = handlebars
-        .compile('{{> metadata description=description type=type typeDir=typeDir name=name}}')(item);
-
       if (CONNECTOR_PAGE_TYPE_DIRS.has(partialTypeDir)) {
+        // Render the metadata partial from the connector's description. Only
+        // written when the description contains a `== Metadata` section.
+        // Rendered inside the guard, not before it: the loop covers every
+        // data key, so rendering first meant computing and discarding a
+        // partial for every bloblang function, method and config entry.
+        const metadataOut = renderMetadataPartial(item);
         // Write under the canonical type directory (not the raw data key) so
         // the file path always matches the include directive built by
         // metadataIncludeLine().
@@ -563,13 +569,11 @@ async function generateRpcnConnectorDocs(options) {
       // emits it raw in both the body and the :description: attribute, where
       // an unescaped {placeholder} is silently consumed as a missing
       // attribute reference.
-      const descriptionItem = typeof item.summary === 'string'
-        ? { ...item, summary: escapePlaceholderBraces(item.summary) }
-        : item;
-      const descriptionOut = handlebars
-        .compile('{{> description summary=summary version=version description=description type=type typeDir=typeDir name=name}}')(descriptionItem);
-
       if (CONNECTOR_PAGE_TYPE_DIRS.has(partialTypeDir)) {
+        const descriptionItem = typeof item.summary === 'string'
+          ? { ...item, summary: escapePlaceholderBraces(item.summary) }
+          : item;
+        const descriptionOut = renderDescriptionPartial(descriptionItem);
         visitedDescriptionPartials.add(`${partialTypeDir}/${name}`);
         const dPath = path.join(descriptionOutRoot, partialTypeDir, `${name}.adoc`);
         if (descriptionOut.trim()) {
@@ -598,7 +602,7 @@ async function generateRpcnConnectorDocs(options) {
           // The partial now exists for this connector, so a drafted page can
           // include its body instead of freezing the summary and description
           // into the page. Gated on the file actually being written:
-          // component families outside CONNECTOR_DESCRIPTION_TYPE_DIRS, and
+          // component families outside CONNECTOR_PAGE_TYPE_DIRS, and
           // connectors with neither summary nor description, keep the inline
           // text rather than getting an include that cannot resolve.
           item.hasDescriptionPartial = true;

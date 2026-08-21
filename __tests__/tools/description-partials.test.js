@@ -1234,3 +1234,110 @@ describe('one connector-type list', () => {
     }
   });
 });
+
+describe('the description template is overridable and the guard covers version-only connectors', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-template-flag');
+  let originalCwd, dataFile;
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    fs.writeFileSync(path.join(tmpDir, 'main.hbs'), '= {{name}}\n', 'utf8');
+    dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify({
+      outputs: [
+        {
+          name: 'sql_raw',
+          type: 'output',
+          summary: 'Executes a query.',
+          description: 'Runs a query.\n\n== Metadata\n\n- a: one',
+          config: { children: [{ name: 'dsn', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+        {
+          // Version only: no summary, no description. The outer guard used to
+          // test (or summary description), so this connector got no partial
+          // at all and its "Introduced in version" line was lost.
+          name: 'vonly',
+          type: 'output',
+          version: '4.1.0',
+          config: { children: [{ name: 'dsn', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    }), 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function partialFor (name) {
+    const p = path.join(tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', `${name}.adoc`);
+    return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
+  }
+
+  test('a version-only connector still gets a partial carrying its version line', async () => {
+    await generateRpcnConnectorDocs({ data: dataFile, template: path.join(tmpDir, 'main.hbs') });
+    const partial = partialFor('vonly');
+    expect(partial).not.toBeNull();
+    expect(partial).toContain('Introduced in version 4.1.0.');
+    // With no summary the attrs region sets nothing, so a page keeps its own
+    // :description: rather than losing it.
+    const attrs = partial.split('// tag::attrs[]')[1].split('// end::attrs[]')[0];
+    expect(attrs.trim()).toBe('');
+  });
+
+  test('--template-description swaps the template that produces the partial', async () => {
+    const stub = path.join(tmpDir, 'stub-description.hbs');
+    fs.writeFileSync(stub, 'STUB-DESCRIPTION-MARKER {{name}}\n', 'utf8');
+    const stubMetadata = path.join(tmpDir, 'stub-metadata.hbs');
+    fs.writeFileSync(stubMetadata, 'STUB-METADATA-MARKER {{name}}\n', 'utf8');
+
+    await generateRpcnConnectorDocs({
+      data: dataFile,
+      template: path.join(tmpDir, 'main.hbs'),
+      templateDescription: stub,
+      templateMetadata: stubMetadata,
+    });
+
+    expect(partialFor('sql_raw')).toContain('STUB-DESCRIPTION-MARKER sql_raw');
+    expect(fs.readFileSync(path.join(
+      tmpDir, 'modules', 'components', 'partials', 'metadata', 'outputs', 'sql_raw.adoc'
+    ), 'utf8')).toContain('STUB-METADATA-MARKER sql_raw');
+  });
+
+  test('the CLI exposes --template-description and --prune-orphaned-descriptions', () => {
+    const help = require('child_process').execFileSync(
+      process.execPath,
+      [path.resolve(originalCwd, 'bin/doc-tools.js'), 'generate', 'rpcn-connector-docs', '--help'],
+      { encoding: 'utf8' }
+    );
+    // CLI_REFERENCE.adoc documents both, and the CLI contract check does not
+    // notice a documented flag going missing.
+    expect(help).toContain('--template-description');
+    expect(help).toContain('--prune-orphaned-descriptions');
+  });
+});
+
+describe('intro.hbs shares the renderer with the description partial', () => {
+  const REPO_ROOT = path.resolve(__dirname, '../..');
+
+  test('the intro template applies brace escaping and heading separation too', () => {
+    // intro.hbs is the fallback body for component families with no
+    // description partial. It called descriptionWithMetadataInclude directly,
+    // so it shipped unescaped {placeholder} braces and headings glued to the
+    // paragraph above -- the two defects the PR advertises as fixed.
+    const intro = fs.readFileSync(path.join(REPO_ROOT, 'tools/redpanda-connect/templates/intro.hbs'), 'utf8');
+    const item = {
+      type: 'output',
+      name: 'otlp_http',
+      summary: 'Sends telemetry.',
+      description: 'Post to {endpoint}/v1/logs.\nParagraph.\n== Operators\n\nDetails.',
+    };
+    const out = handlebars.compile(intro)(item);
+    expect(out).toContain('Post to \\{endpoint}/v1/logs.');
+    expect(out).toContain('Paragraph.\n\n== Operators');
+  });
+});
