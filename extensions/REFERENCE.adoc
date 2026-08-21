@@ -687,7 +687,6 @@ There are no configurable options for this extension.
 ```yaml
 antora:
   extensions:
-  - '@redpanda-data/docs-extensions-and-macros/extensions/modify-redirects'
 ```
 
 == Replace attributes in attachments
