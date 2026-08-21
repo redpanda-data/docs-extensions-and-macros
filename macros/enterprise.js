@@ -449,7 +449,15 @@ function buildFeatureTable (features, scope, opts = {}) {
   const report = opts.report
   const rows = features
     .filter((feature) => feature.scope === scope)
-    .filter((feature) => includeUnreleased || entryStatus(feature, report) !== STATUS_UNRELEASED)
+    // Evaluate the status first: `includeUnreleased || entryStatus(...)` skipped
+    // the call entirely on a prerelease page, so a typo'd status went unreported
+    // on the beta branch -- the one branch where unreleased features are
+    // actually authored and the table renders them -- and enterprise-validate=error
+    // did not fail there either.
+    .filter((feature) => {
+      const status = entryStatus(feature, report)
+      return includeUnreleased || status !== STATUS_UNRELEASED
+    })
     .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }))
   const title = opts.title || TABLE_TITLES[scope]
   const heading = opts.heading || THIRD_COLUMN_HEADINGS[scope] || THIRD_COLUMN_HEADINGS.default

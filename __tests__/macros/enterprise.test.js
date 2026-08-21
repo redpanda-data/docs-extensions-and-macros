@@ -495,6 +495,29 @@ features:
       }
     })
 
+    // A plain-object lookup keyed on the label returned Object.prototype members,
+    // so label=constructor shipped 'function Object() { [native code] }' as hover
+    // text. Escaping made it harmless but not sane.
+    test.each(['constructor', '__proto__', 'toString', 'valueOf', 'ga'])(
+      'the label %s gets no default tooltip', (label) => {
+        const { buildBadgeHtml } = require('../../macros/badge')
+        const html = buildBadgeHtml({ label })
+        expect(html).not.toContain('data-tooltip')
+        expect(html).not.toContain('native code')
+      })
+
+    // The table filter short-circuited on a prerelease page, so entryStatus was
+    // never called with the reporter -- and the beta branch is the one place
+    // unreleased features are authored and the table renders them.
+    test('a bad status in the table is reported on a prerelease page too', () => {
+      const yaml = 'features:\n  - name: F\n    scope: redpanda\n    description: d\n    status: unrelesed\n'
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      convert('enterprise_features::redpanda[]', {
+        catalog: catalogWithVersions(yaml, VERSIONS), component: 'streaming', version: '26.3',
+      })
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("status 'unrelesed'"))
+    })
+
     test('a registry-supplied beta-tooltip wins over the default', () => {
       const yaml = 'features:\n  - name: F\n    scope: redpanda\n    description: d\n    status: beta\n    beta-tooltip: A specific note.\n'
       const html = convert('enterprise:F[]', {

@@ -40,7 +40,15 @@ function buildBadgeHtml ({ label, size, tooltip } = {}) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
   const className = `badge--${escapeAttr(text.toLowerCase().replace(/\s+/g, '-'))}`;
-  const hoverText = tooltip || DEFAULT_TOOLTIPS[text.trim().toLowerCase()];
+  // hasOwnProperty, not a bare index: `label=constructor` and `label=__proto__`
+  // are already lowercase, so a bare lookup shipped
+  // `function Object() { [native code] }` to readers as hover text. prop.js
+  // guards its property lookups the same way.
+  const labelKey = text.trim().toLowerCase();
+  const defaultTooltip = Object.prototype.hasOwnProperty.call(DEFAULT_TOOLTIPS, labelKey)
+    ? DEFAULT_TOOLTIPS[labelKey]
+    : undefined;
+  const hoverText = tooltip || defaultTooltip;
   const tooltipAttr = hoverText ? ` data-tooltip="${escapeAttr(hoverText)}"` : '';
 
   // Add brackets if not large. The brackets matter beyond styling: they are
