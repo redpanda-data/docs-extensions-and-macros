@@ -15,6 +15,7 @@
  */
 
 const fs = require('fs');
+const bigIntJson = require('../../cli-utils/big-int-json');
 const path = require('path');
 const semver = require('semver');
 
@@ -424,8 +425,8 @@ function comparePropertyFiles(oldFilePath, newFilePath, oldVersion, newVersion, 
     console.log(`   Old: ${oldFilePath}`);
     console.log(`   New: ${newFilePath}`);
     
-    const oldData = JSON.parse(fs.readFileSync(oldFilePath, 'utf8'));
-    const newData = JSON.parse(fs.readFileSync(newFilePath, 'utf8'));
+    const oldData = bigIntJson.parse(fs.readFileSync(oldFilePath, 'utf8'));
+    const newData = bigIntJson.parse(fs.readFileSync(newFilePath, 'utf8'));
     
     const report = compareProperties(oldData, newData, oldVersion, newVersion);
 
@@ -447,7 +448,10 @@ function comparePropertyFiles(oldFilePath, newFilePath, oldVersion, newVersion, 
       });
 
       newData.properties = newProps;
-      fs.writeFileSync(newFilePath, JSON.stringify(newData, null, 2), 'utf8');
+      // bigIntJson: this rewrites the dataset in place, so a plain stringify
+      // corrupts the uint64/int64 limits on disk -- ahead of, and defeating, the
+      // lossless read in generate-handlebars-docs.js.
+      fs.writeFileSync(newFilePath, bigIntJson.stringify(newData, 2), 'utf8');
       console.log(`\nMerged ${report.removedDeprecatedProperties.length} removed deprecated properties back into ${newVersion} JSON`);
     }
 

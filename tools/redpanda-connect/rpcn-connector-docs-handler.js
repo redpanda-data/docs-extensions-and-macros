@@ -1,6 +1,7 @@
 'use strict'
 
 const { spawnSync } = require('child_process')
+const bigIntJson = require('../../cli-utils/big-int-json')
 const path = require('path')
 const fs = require('fs')
 const { findRepoRoot } = require('../../cli-utils/doc-tools-utils')
@@ -798,8 +799,11 @@ async function handleRpcnConnectorDocs (options) {
       fs.closeSync(fd)
 
       const rawJson = fs.readFileSync(tmpFile, 'utf8')
-      const parsed = JSON.parse(rawJson)
-      fs.writeFileSync(finalFile, JSON.stringify(parsed, null, 2))
+      // bigIntJson: the connect dataset carries int64 defaults (the bloblang
+      // random_int bounds), and a plain round trip rounded them past MaxInt64 --
+      // the rendered page ends up contradicting its own description.
+      const parsed = bigIntJson.parse(rawJson)
+      fs.writeFileSync(finalFile, bigIntJson.stringify(parsed, 2))
       fs.unlinkSync(tmpFile)
       dataFile = finalFile
       needsAugmentation = true
