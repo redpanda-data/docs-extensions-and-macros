@@ -4,6 +4,7 @@ const fs = require('fs')
 const path = require('path')
 
 const properties = require('../../../tools/lint-strings/surfaces/properties')
+const { describeWithExtractor } = require('../../helpers/extractor-env')
 const { runRules } = require('../../../tools/lint-strings/engine')
 const { rulesFor } = require('../../../tools/lint-strings')
 
@@ -121,15 +122,50 @@ describe('properties convention rules', () => {
   })
 })
 
+/**
+ * The properties surface bootstraps the extractor environment itself, mirroring
+ * the Makefile's `venv` and `treesitter` targets. That makes the Makefile and
+ * this module two statements of the same pins, and a bump on one side would
+ * silently disagree with the other: the linter would check out a different
+ * grammar than the generator, or look for a venv the Makefile never built.
+ *
+ * Nothing here manufactures a registry to maintain by hand - the test reads
+ * both files and fails at the moment they diverge.
+ */
+describe('the extractor bootstrap agrees with the Makefile', () => {
+  const MAKEFILE_PATH = path.join(__dirname, '../../../tools/property-extractor/Makefile')
+  const makefile = fs.readFileSync(MAKEFILE_PATH, 'utf8')
+  const treesitterTarget = makefile.slice(makefile.indexOf('\ntreesitter:') + 1)
+    .split(/\n(?=[a-zA-Z][\w-]*:)/)[0]
+
+  test('the grammar tag lives in exactly one place', () => {
+    // The Makefile reads TREESITTER_TAG from this module rather than repeating
+    // it, so the two bootstraps cannot check out different grammars.
+    expect(makefile).toContain("require('$(MODULE_ROOT)/tools/lint-strings/surfaces/properties.js').TREESITTER_TAG")
+    expect(properties.TREESITTER_TAG).toMatch(/^v\d+\.\d+\.\d+$/)
+    // Guard the guard: an empty target slice would make the next assertion
+    // vacuous.
+    expect(treesitterTarget).toContain('tree-sitter-cpp.git')
+    expect(treesitterTarget).not.toMatch(/\bv\d+\.\d+\.\d+\b/)
+    expect(treesitterTarget).toContain('$(TREESITTER_TAG)')
+  })
+
+  test('the venv and grammar paths match the Makefile', () => {
+    const toolRoot = path.join(__dirname, '../../../tools/property-extractor')
+    const venvName = makefile.match(/^VENV\s*:?=\s*\$\(TOOL_ROOT\)\/(.+)$/m)[1].trim()
+    expect(properties.VENV_PYTHON).toBe(path.join(toolRoot, venvName, 'bin', 'python'))
+    const tsName = makefile.match(/^TREESITTER_DIR\s*:?=\s*\$\(TOOL_ROOT\)\/(.+)$/m)[1].trim()
+    expect(properties.TREESITTER_DIR).toBe(path.join(toolRoot, tsName))
+  })
+})
+
 // Integration: run the REAL Python extractor over the fixture .h/.cc pair and
 // assert rule ids AND line spans. Requires the property-extractor venv and
 // tree-sitter grammar (built by the Makefile / doc-tools property-docs, or by
-// a previous lint-strings run). Skipped when they are absent so unit runs
-// stay hermetic.
-const canRunExtractor = fs.existsSync(properties.VENV_PYTHON) &&
-  fs.existsSync(path.join(properties.TREESITTER_DIR, 'src', 'parser.c'))
-
-const describeIntegration = canRunExtractor ? describe : describe.skip
+// a previous lint-strings run). Skipped LOUDLY when they are absent so a
+// local run stays hermetic, and failed outright in CI, where a silent skip is
+// indistinguishable from a pass. See __tests__/helpers/extractor-env.js.
+const describeIntegration = describeWithExtractor(properties)
 
 describeIntegration('properties surface integration (real extractor over fixtures)', () => {
   jest.setTimeout(240000)

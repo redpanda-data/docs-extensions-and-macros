@@ -208,8 +208,36 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The lint-strings properties surface and preview-string shell out to the
+      # real Python property extractor, so their integration assertions - the
+      # only ones covering parser.py's line_start/line_end spans - need a venv
+      # and the tree-sitter-cpp grammar. Without them the suites self-skip, and
+      # no job used to satisfy the guard: this one ran jest on a bare npm ci,
+      # and test-property-extractor built the environment but ran only pytest.
+      # Six assertions were dark behind a green check. `make venv treesitter`
+      # only builds those two targets; it does not clone redpanda the way
+      # `make build` does.
+      - name: Set up Python for the property extractor
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'tools/property-extractor/requirements.txt'
+
+      - name: Cache the tree-sitter-cpp grammar
+        uses: actions/cache@v4
+        with:
+          path: tools/property-extractor/tree-sitter/tree-sitter-cpp
+          # Keyed on the files that hold the pinned grammar tag, so bumping the
+          # pin in either place invalidates the cache instead of resurrecting a
+          # checkout at the old tag.
+          key: tree-sitter-cpp-${{ runner.os }}-${{ hashFiles('tools/property-extractor/Makefile', 'tools/lint-strings/surfaces/properties.js') }}
+
+      - name: Bootstrap the property extractor (venv + tree-sitter grammar)
+        run: make -C tools/property-extractor venv treesitter
+
       - name: Run tools tests
-        run: npm test -- __tests__/tools/ __tests__/cli-utils/ __tests__/mcp/ --passWithNoTests
+        run: npm test -- __tests__/tools/ __tests__/cli-utils/ __tests__/mcp/ __tests__/workflows/ --passWithNoTests
 
   test-property-extractor:
     needs: detect-changes
@@ -288,6 +316,34 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # The lint-strings properties surface and preview-string shell out to the
+      # real Python property extractor, so their integration assertions - the
+      # only ones covering parser.py's line_start/line_end spans - need a venv
+      # and the tree-sitter-cpp grammar. Without them the suites self-skip, and
+      # no job used to satisfy the guard: this one ran jest on a bare npm ci,
+      # and test-property-extractor built the environment but ran only pytest.
+      # Six assertions were dark behind a green check. `make venv treesitter`
+      # only builds those two targets; it does not clone redpanda the way
+      # `make build` does.
+      - name: Set up Python for the property extractor
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'tools/property-extractor/requirements.txt'
+
+      - name: Cache the tree-sitter-cpp grammar
+        uses: actions/cache@v4
+        with:
+          path: tools/property-extractor/tree-sitter/tree-sitter-cpp
+          # Keyed on the files that hold the pinned grammar tag, so bumping the
+          # pin in either place invalidates the cache instead of resurrecting a
+          # checkout at the old tag.
+          key: tree-sitter-cpp-${{ runner.os }}-${{ hashFiles('tools/property-extractor/Makefile', 'tools/lint-strings/surfaces/properties.js') }}
+
+      - name: Bootstrap the property extractor (venv + tree-sitter grammar)
+        run: make -C tools/property-extractor venv treesitter
 
       # jest.unit.config.js extends jest.config.js's testPathIgnorePatterns
       # instead of repeating them here, because a CLI --testPathIgnorePatterns

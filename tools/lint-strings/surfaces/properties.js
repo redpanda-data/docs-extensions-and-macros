@@ -205,8 +205,12 @@ module.exports = {
   mapExtractorJson,
   runExtractor,
   rules: RULES,
-  // Exposed for tests and future tooling
+  // Exposed for tests and future tooling. TREESITTER_TAG is also the single
+  // pin for the grammar: tools/property-extractor/Makefile reads it from here
+  // rather than repeating the version, so the Makefile's `treesitter` target
+  // and this module's ensureTreesitter can never check out different grammars.
   TOOL_ROOT,
   VENV_PYTHON,
-  TREESITTER_DIR
+  TREESITTER_DIR,
+  TREESITTER_TAG
 }

@@ -6,6 +6,7 @@ const path = require('path')
 
 const { previewString, publishRpkString } = require('../../../tools/preview-string')
 const properties = require('../../../tools/lint-strings/surfaces/properties')
+const { describeWithExtractor } = require('../../helpers/extractor-env')
 
 const FIXTURES = path.join(__dirname, '../../../tools/lint-strings/fixtures')
 
@@ -114,11 +115,10 @@ describe('preview-string helm/crd/connect output shapes (fixture repos)', () => 
 // Properties preview runs the REAL Python extractor and the real Handlebars
 // template. Requires the property-extractor venv and tree-sitter grammar
 // (built by the Makefile / doc-tools property-docs, or by a previous
-// lint-strings run). Skipped when they are absent so unit runs stay hermetic.
-const canRunExtractor = fs.existsSync(properties.VENV_PYTHON) &&
-  fs.existsSync(path.join(properties.TREESITTER_DIR, 'src', 'parser.c'))
-
-const describeIntegration = canRunExtractor ? describe : describe.skip
+// lint-strings run). Skipped LOUDLY when they are absent so a local run stays
+// hermetic, and failed outright in CI, where a silent skip is
+// indistinguishable from a pass. See __tests__/helpers/extractor-env.js.
+const describeIntegration = describeWithExtractor(properties)
 
 describeIntegration('preview-string properties (real extractor over fixtures)', () => {
   jest.setTimeout(240000)
