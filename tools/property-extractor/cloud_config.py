@@ -500,10 +500,23 @@ def add_cloud_support_metadata(properties: Dict, cloud_config: CloudConfig) -> D
                 skipped_count += 1
                 continue
             
-            # Only process cluster, broker, and topic properties for cloud support
+            # Only cluster properties get cloud metadata.
+            #
+            # The two sections this data comes from -- customer_managed_configs
+            # and readonly_cluster_config -- describe the Cloud control plane's
+            # view of CLUSTER configuration, and contain nothing else: every one
+            # of their entries resolves to a cluster property, and no topic
+            # property appears anywhere in the install pack.
+            #
+            # Emitting cloud_supported: false for a topic or broker property
+            # therefore asserted something this source cannot know. Downstream
+            # that read as "a Cloud reader cannot set this", which is wrong for
+            # topic properties -- Cloud users set them routinely through the
+            # Kafka API and Console, a surface the control plane does not gate.
+            # Leave the fields absent instead, so absent means "no opinion" and
+            # false keeps its meaning of "the control plane forbids it".
             config_scope = prop_data.get('config_scope', '')
-            if config_scope not in ['cluster', 'broker', 'topic']:
-                # Skip node config properties and others without cloud relevance
+            if config_scope != 'cluster':
                 skipped_count += 1
                 continue
             

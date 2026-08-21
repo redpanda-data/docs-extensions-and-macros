@@ -68,17 +68,176 @@ function fakeCatalog (yamlSource = REGISTRY_YAML) {
   }
 }
 
-function convert (input, { catalog, attributes = {}, filePath = 'modules/manage/pages/example.adoc' } = {}) {
+function convert (input, { catalog, attributes = {}, filePath = 'modules/manage/pages/example.adoc', component = 'streaming', version = '26.2' } = {}) {
   const Asciidoctor = require('@asciidoctor/core')()
   const extensionRegistry = Asciidoctor.Extensions.create()
   register(extensionRegistry, catalog && {
     contentCatalog: catalog,
-    file: { src: { path: filePath } },
+    file: { src: { path: filePath, component, version } },
   })
   return Asciidoctor.convert(input, { extension_registry: extensionRegistry, attributes })
 }
 
+/**
+ * A catalog whose component versions carry Antora's prerelease flag, which is
+ * how the macro tells a beta branch from released docs.
+ */
+function catalogWithVersions (yamlSource, versions) {
+  return {
+    findBy: jest.fn(() => [
+      { path: 'modules/ROOT/partials/enterprise-features.yml', contents: Buffer.from(yamlSource) },
+    ]),
+    getComponent: (name) => name === 'streaming'
+      ? { name, versions, latest: versions[0] }
+      : undefined,
+  }
+}
+
+const VERSIONS = [{ version: '26.2' }, { version: '26.3', prerelease: true }]
+
 describe('enterprise macro', () => {
+  // jest.spyOn returns the existing spy when console.warn is already mocked, so
+  // a test that does not restore its own leaks its calls into the next test.
+  afterEach(() => jest.restoreAllMocks())
+
+  describe('release status', () => {
+    // A release cycle: a feature lands in an RC (unreleased), later becomes a
+    // public beta, later ships. Each state decides where it may be referenced.
+    const STATUS_YAML = `
+schema-version: 1
+features:
+  - name: Shipped Feature
+    scope: redpanda
+    description: Already released.
+    expiration: Restricted.
+    kind: license
+    source: x
+    value: y
+  - name: Public Beta Feature
+    scope: redpanda
+    status: beta
+    description: Available as a beta.
+    expiration: Restricted.
+    kind: license
+    source: x
+    value: y
+  - name: Upcoming Feature
+    scope: redpanda
+    status: unreleased
+    description: Only in a release candidate.
+    expiration: Restricted.
+    kind: license
+    source: x
+    value: y
+  - name: Legacy Beta Feature
+    scope: redpanda
+    beta: true
+    description: Marked with the older boolean.
+    expiration: Restricted.
+    kind: license
+    source: x
+    value: y
+`
+    const catalog = () => catalogWithVersions(STATUS_YAML, VERSIONS)
+    const onReleased = (input) => convert(input, { catalog: catalog(), component: 'streaming', version: '26.2' })
+    const onBeta = (input) => convert(input, { catalog: catalog(), component: 'streaming', version: '26.3' })
+
+    test('a shipped feature renders normally on released docs', () => {
+      const html = onReleased('enterprise:Shipped Feature[]')
+      expect(html).toContain('class="enterprise-feature"')
+      expect(html).not.toContain('unreleased')
+      expect(html).not.toContain('>beta<')
+    })
+
+    test('a public beta feature renders with a beta badge anywhere', () => {
+      for (const html of [onReleased('enterprise:Public Beta Feature[]'), onBeta('enterprise:Public Beta Feature[]')]) {
+        expect(html).toContain('class="enterprise-feature"')
+        expect(html).toContain('beta')
+      }
+    })
+
+    test('beta: true still means beta, so existing entries keep working', () => {
+      const html = onReleased('enterprise:Legacy Beta Feature[]')
+      expect(html).toContain('class="enterprise-feature"')
+      expect(html).toContain('beta')
+    })
+
+    test('an unreleased feature on released docs renders as plain text and warns', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = onReleased('enterprise:Upcoming Feature[]')
+      // No enterprise styling, no tooltip, no link: the reader cannot get it.
+      expect(html).not.toContain('enterprise-feature')
+      expect(html).not.toContain('unreleased')
+      expect(html).toContain('Upcoming Feature')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('status: unreleased'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('prerelease (beta) branch'))
+    })
+
+    test('an unreleased feature on a prerelease page renders with an unreleased badge', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = onBeta('enterprise:Upcoming Feature[]')
+      expect(html).toContain('class="enterprise-feature"')
+      expect(html).toContain('unreleased')
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('the display text override survives the plain rendering', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      expect(onReleased('enterprise:Upcoming Feature[text=the upcoming thing]')).toContain('the upcoming thing')
+      warn.mockRestore()
+    })
+
+    test('enterprise-validate=error fails the build on a released page', () => {
+      expect(() => convert('enterprise:Upcoming Feature[]', {
+        catalog: catalog(), component: 'streaming', version: '26.2',
+        attributes: { 'enterprise-validate': 'error' },
+      })).toThrow(/status: unreleased/)
+    })
+
+    test('enterprise-validate=off silences the report', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Upcoming Feature[]', {
+        catalog: catalog(), component: 'streaming', version: '26.2',
+        attributes: { 'enterprise-validate': 'off' },
+      })
+      expect(html).toContain('Upcoming Feature')
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('an unrecognized status is reported rather than treated as shipped silently', () => {
+      const typo = STATUS_YAML.replace('status: unreleased', 'status: unreleaased')
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Upcoming Feature[]', {
+        catalog: catalogWithVersions(typo, VERSIONS), component: 'streaming', version: '26.2',
+      })
+      expect(html).toContain('class="enterprise-feature"')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("status 'unreleaased' is not one of"))
+    })
+
+    test('the licensing table omits unreleased features on released docs', () => {
+      const html = onReleased('enterprise_features::redpanda[]')
+      expect(html).toContain('Shipped Feature')
+      expect(html).toContain('Public Beta Feature')
+      expect(html).not.toContain('Upcoming Feature')
+    })
+
+    test('the licensing table lists them on prerelease docs, badged', () => {
+      const html = onBeta('enterprise_features::redpanda[]')
+      expect(html).toContain('Upcoming Feature')
+      expect(html).toContain('unreleased')
+    })
+
+    test('a playbook attribute can declare prerelease-ness directly', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Upcoming Feature[]', {
+        catalog: catalog(), component: 'streaming', version: '26.2',
+        attributes: { 'page-component-version-is-prerelease': 'true' },
+      })
+      expect(html).toContain('class="enterprise-feature"')
+      expect(warn).not.toHaveBeenCalled()
+    })
+  })
+
   describe('buildEnterpriseContent', () => {
     const defaults = {
       licensingPage: 'get-started:licensing/overview.adoc',

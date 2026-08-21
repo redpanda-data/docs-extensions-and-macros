@@ -6,3 +6,8 @@
 * xref:preview:ROOT:faq-blocks-test.adoc[]
 * xref:preview:ROOT:iceberg-explorer-test.adoc[]
 * xref:preview:reference:glossary.adoc[]
+* Macro showcase
+** xref:ROOT:macros-showcase.adoc[Property and enterprise macros]
+** xref:ROOT:macros-showcase-kubernetes.adoc[On Kubernetes pages]
+** xref:ROOT:release-status-test.adoc[Release status gating]
+** xref:reference:properties/cluster-properties.adoc[Declared reference page]

@@ -1,3 +1,16 @@
+# Macro test harness: the FULL local playbook, pointed at work-in-progress
+# branches and using the macros and extensions from this working tree.
+#
+# Identical to local-antora-playbook.yml except for:
+#   - the docs and cloud-docs content sources, which track the WIP branches
+#   - a separate output directory and log, so it never clobbers your normal build
+#
+#   ./scripts/macro-test.sh              build, then a focused report
+#   ./scripts/macro-test.sh --serve      build, report, serve on :5002
+#   DOCS_DIR=~/Documents/docs ./scripts/macro-test.sh    use a local checkout
+#
+# The docs repo is private, so export REDPANDA_GITHUB_TOKEN first.
+
 site:
   title: Redpanda Docs Extensions and Macros
   start_page: preview:ROOT:test.adoc
@@ -6,6 +19,8 @@ urls:
   html_extension_style: indexify
 output:
   clean: true
+  # Separate from the normal build so the two never clobber each other.
+  dir: ./macro-test-out
 runtime:
   log:
     level: warn
@@ -13,22 +28,33 @@ content:
   sources:
   - url: .
     branches: HEAD
-    start_paths: [preview/extensions-and-macros, preview/shared, preview/home]
+    start_paths: [preview/extensions-and-macros, preview/shared, preview/home,
+                 preview/macro-fixtures-beta, preview/macro-fixtures-cloud]
+  # WIP: jake/property-source-attributes stands in for main (it is branched
+  # from it) and carries the page-property-source declarations. v/26.1 and
+  # v/25.3 are where the 586 and 607 prop: calls live, so they are what
+  # exercises the macro at scale. Narrow this list for a faster build.
   - url: https://github.com/redpanda-data/docs
-    branches: [main, v/*, api, 'site-search', '!v-end-of-life/*']
+    branches: [jake/property-source-attributes, v/26.1, v/25.3, api, 'site-search']
   - url: https://github.com/redpanda-data/redpanda-labs
     branches: main
     start_paths: [docs,'*/docs']
   - url: https://github.com/redpanda-data/rp-connect-docs
     branches: main
+  # WIP: this branch has the prop: calls in Cloud prose, so it exercises the
+  # cloud_supported gate. Swap for jake/property-source-attributes to test the
+  # declarations on Cloud's own pages instead.
   - url: https://github.com/redpanda-data/cloud-docs
-    branches: main
+    branches: [DOC-887-prop-macro-adoption]
 ui:
   bundle:
     url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip
     snapshot: true
 asciidoc:
   attributes:
+    # 'error' fails the build instead; 'off' silences these.
+    property-validate: warn
+    enterprise-validate: warn
   extensions:
   - '@asciidoctor/tabs'
   - './macros/glossary'
@@ -101,5 +127,4 @@ antora:
     enabled: true
   - require: './extensions/aggregate-terms'
   - require: './extensions/property-page-index'
-  - require: './extensions/set-available-attachment-versions'
 
