@@ -52,6 +52,9 @@ describe('renderCloudRegions', () => {
     expect(() => renderCloudRegions({ providers: [], format: 'md' })).toThrow();
   });
 
+  // The renderer takes the template path as already contained: the CLI resolves
+  // and checks it (see __tests__/tools/cloud-regions-cli.test.js), so an absolute
+  // path is legitimate input here.
   it('renders a custom template when one is provided', () => {
     const templateFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-regions-')), 'custom.hbs');
     fs.writeFileSync(templateFile, '{{#each providers}}PROVIDER:{{name}} {{#each regions}}[{{name}}]{{/each}}\n{{/each}}', 'utf8');

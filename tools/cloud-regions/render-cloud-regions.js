@@ -12,7 +12,7 @@ const handlebars = require('handlebars');
  * @param {Array} opts.providers - List of cloud provider objects, each with a name and an array of regions.
  * @param {string} opts.format - Output format, either 'md' (Markdown) or 'adoc' (AsciiDoc).
  * @param {string} [opts.lastUpdated] - Optional ISO timestamp indicating when the data was last updated.
- * @param {string} [opts.template] - Optional absolute path to a custom Handlebars template. Overrides the bundled template for the given format.
+ * @param {string} [opts.template] - Optional absolute path to a custom Handlebars template. Overrides the bundled template for the given format. The caller is responsible for containing this path: bin/doc-tools.js resolves it with resolveInsideRepo before calling, and that is the single enforcement point for the CLI and the MCP server alike.
  * @param {string} [opts.clusterType] - Optional cluster type the data was filtered to. Exposed to the template so a filtered table can name it.
  * @returns {string} The rendered output string.
  * @throws {Error} If the providers array is missing or empty.
