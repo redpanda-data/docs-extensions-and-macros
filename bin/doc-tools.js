@@ -1845,13 +1845,19 @@ automation
   .option('--path <path>', 'Path to YAML file in repository', 'apps/master-data-reconciler/manifests/overlays/production/master-data.yaml')
   .option('--ref <ref>', 'Git reference (branch, tag, or commit SHA)', 'integration')
   .option('--template <path>', 'Path to custom Handlebars template (relative to repo root, must stay inside the repository)')
-  .option('--cluster-type <type>', 'Only include regions/tiers available for this cluster type: BYOC or Dedicated')
+  .option('--cluster-type <type>', 'Only include regions/tiers available for this cluster type, such as BYOC or Dedicated (requires --output or --dry-run)')
   .option('--dry-run', 'Print output to stdout instead of writing file')
-  .action(async (options) => {
+  .action(async (options, command) => {
     const { generateCloudRegions } = require('../tools/cloud-regions/generate-cloud-regions.js')
     const { getGitHubToken } = require('../cli-utils/github-token')
 
     try {
+      // The default output path holds the unfiltered table, so a filtered run
+      // that forgets --output silently replaces it, and the documented
+      // BYOC-then-Dedicated pair would leave only whichever ran last.
+      if (options.clusterType && !options.dryRun && command.getOptionValueSource('output') === 'default') {
+        throw new Error('--cluster-type needs its own destination: pass --output <file> for the filtered table, or --dry-run to preview it.')
+      }
       // Contain every caller-supplied path before doing any work: both options
       // are also reachable through the MCP server, so --template must not read
       // and --output must not write outside the repository.

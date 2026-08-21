@@ -86,6 +86,19 @@ describe('generate cloud-regions path containment', () => {
     expect(fs.existsSync(target)).toBe(false);
   });
 
+  it('refuses --cluster-type without a destination of its own', () => {
+    const result = runCloudRegions(['--cluster-type', 'BYOC']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/--cluster-type needs its own destination/);
+  });
+
+  it('accepts --cluster-type with --dry-run', () => {
+    const result = runCloudRegions(['--cluster-type', 'BYOC', '--dry-run']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).not.toMatch(/needs its own destination/);
+    expect(result.stderr).toMatch(/GitHub token is required/);
+  });
+
   it('accepts an in-repo --template and --output and only then asks for a token', () => {
     const result = runCloudRegions([
       '--template', path.join('tools', 'cloud-regions', 'cloud-regions-table-md.hbs'),
