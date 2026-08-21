@@ -69,4 +69,35 @@ describe('renderCloudRegions', () => {
     const out = renderCloudRegions({ providers: sampleProviders, format: 'adoc' });
     expect(out).toContain('=== GCP');
   });
+
+  it('exposes the cluster type filter to a custom template', () => {
+    const templateFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-regions-')), 'custom.hbs');
+    fs.writeFileSync(templateFile, '== {{clusterType}} regions\n{{#each providers}}{{displayName}}\n{{/each}}', 'utf8');
+    try {
+      const out = renderCloudRegions({
+        providers: [{ name: 'GCP', displayName: 'Google Cloud Platform (GCP)', regions: sampleProviders[0].regions }],
+        format: 'adoc',
+        template: templateFile,
+        clusterType: 'BYOC'
+      });
+      expect(out).toContain('== BYOC regions');
+      expect(out).toContain('Google Cloud Platform (GCP)');
+    } finally {
+      fs.rmSync(path.dirname(templateFile), { recursive: true, force: true });
+    }
+  });
+
+  describe.each(['adoc', 'md'])('bundled %s intro', (format) => {
+    it('names the cluster type when the data was filtered', () => {
+      const out = renderCloudRegions({ providers: sampleProviders, format, clusterType: 'BYOC' });
+      expect(out).toContain('This table lists only the tiers available for BYOC clusters.');
+      expect(out).not.toContain('and the cluster type (BYOC, Dedicated)');
+    });
+
+    it('keeps the unfiltered wording when the data was not filtered', () => {
+      const out = renderCloudRegions({ providers: sampleProviders, format });
+      expect(out).toContain('Availability depends on the region and the cluster type (BYOC, Dedicated).');
+      expect(out).not.toContain('This table lists only');
+    });
+  });
 });

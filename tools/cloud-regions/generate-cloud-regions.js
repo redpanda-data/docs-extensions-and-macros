@@ -110,17 +110,20 @@ async function fetchYaml({ owner, repo, path, ref = 'main', token }) {
 }
 
 /**
- * Parses YAML text describing cloud regions and products, filters for public products, and organizes regions by provider.
+ * Parses YAML text describing cloud regions and products and returns both the
+ * providers and the cluster type the result was filtered to.
  *
- * The function expects YAML content with a top-level `regions` array and an optional `products` array. It groups regions by cloud provider, includes only those with at least one public product tier, and formats tier and cluster type information for each region. Providers and regions without public tiers are excluded from the result.
+ * Templates need the resolved cluster type, not the string the caller typed, so
+ * that a filtered table can name it in a heading or an intro. Keeping the
+ * resolution here means the YAML is parsed once.
  *
  * @param {string} yamlText - The YAML content to parse and process.
  * @param {Object} [options] - Processing options.
- * @param {string} [options.clusterType] - Optional cluster type display name ('BYOC' or 'Dedicated', case-insensitive). When set, only tiers available for that cluster type are included, and regions with no matching tiers are dropped.
- * @return {Array<Object>} An array of provider objects, each containing a name and a list of regions with their available public product tiers.
- * @throws {Error} If the YAML is malformed or missing the required `regions` array.
+ * @param {string} [options.clusterType] - Optional cluster type display name (case-insensitive).
+ * @return {{providers: Array<Object>, clusterType: string|undefined}} The providers and the resolved cluster type filter.
+ * @throws {Error} If the YAML is malformed, missing the required `regions` array, or the cluster type is unsupported.
  */
-function processCloudRegions(yamlText, { clusterType } = {}) {
+function buildCloudRegions(yamlText, { clusterType } = {}) {
   let clusterTypeFilter;
   if (clusterType) {
     const validClusterTypes = [...new Set(Object.values(clusterTypeMap))];
@@ -187,7 +190,12 @@ function processCloudRegions(yamlText, { clusterType } = {}) {
             for (const ct of displayTypes) tierMap[productName].add(ct);
           }
           tiers = Object.entries(tierMap)
-            .map(([productName, cts]) => `${productName}: ${Array.from(cts).sort().join(', ')}`)
+            // With a filter every tier carries exactly the filtered type, so
+            // repeating it on all 50-odd rows is noise: the template says it
+            // once from clusterType instead.
+            .map(([productName, cts]) => (clusterTypeFilter
+              ? productName
+              : `${productName}: ${Array.from(cts).sort().join(', ')}`))
             .sort((a, b) => a.localeCompare(b));
         }
         return {
@@ -209,7 +217,22 @@ function processCloudRegions(yamlText, { clusterType } = {}) {
   if (providers.length === 0) {
     console.warn('[cloud-regions] WARN: No providers/regions found after filtering.');
   }
-  return providers;
+  return { providers, clusterType: clusterTypeFilter };
+}
+
+/**
+ * Parses YAML text describing cloud regions and products, filters for public products, and organizes regions by provider.
+ *
+ * The function expects YAML content with a top-level `regions` array and an optional `products` array. It groups regions by cloud provider, includes only those with at least one public product tier, and formats tier and cluster type information for each region. Providers and regions without public tiers are excluded from the result.
+ *
+ * @param {string} yamlText - The YAML content to parse and process.
+ * @param {Object} [options] - Processing options.
+ * @param {string} [options.clusterType] - Optional cluster type display name ('BYOC' or 'Dedicated', case-insensitive). When set, only tiers available for that cluster type are included, and regions with no matching tiers are dropped.
+ * @return {Array<Object>} An array of provider objects, each containing a name and a list of regions with their available public product tiers.
+ * @throws {Error} If the YAML is malformed or missing the required `regions` array.
+ */
+function processCloudRegions(yamlText, options = {}) {
+  return buildCloudRegions(yamlText, options).providers;
 }
 
 /**
@@ -239,8 +262,9 @@ async function generateCloudRegions({ owner, repo, path, ref = 'main', format = 
     throw err;
   }
   let providers;
+  let resolvedClusterType;
   try {
-    providers = processCloudRegions(yamlText, { clusterType });
+    ({ providers, clusterType: resolvedClusterType } = buildCloudRegions(yamlText, { clusterType }));
   } catch (err) {
     console.error(`[cloud-regions] ERROR: Failed to process cloud regions: ${err.message}`);
     throw err;
@@ -251,7 +275,7 @@ async function generateCloudRegions({ owner, repo, path, ref = 'main', format = 
   }
   const lastUpdated = new Date().toISOString();
   try {
-    return renderCloudRegions({ providers, format, lastUpdated, template });
+    return renderCloudRegions({ providers, format, lastUpdated, template, clusterType: resolvedClusterType });
   } catch (err) {
     console.error(`[cloud-regions] ERROR: Failed to render cloud regions: ${err.message}`);
     throw err;

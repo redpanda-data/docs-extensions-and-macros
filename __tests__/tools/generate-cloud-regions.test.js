@@ -63,7 +63,8 @@ describe('processCloudRegions', () => {
     // us-west1 is FMC-only, which maps to Dedicated
     expect(regionNames(providers, 'GCP')).toEqual([]);
     const usEast = providers.find((p) => p.name === 'AWS').regions[0];
-    expect(usEast.tiers).toEqual(['tier-1-aws: BYOC', 'tier-2-aws: BYOC']);
+    // The whole table is BYOC, so tiers carry no per-row cluster type suffix
+    expect(usEast.tiers).toEqual(['tier-1-aws', 'tier-2-aws']);
   });
 
   it('filters by cluster type Dedicated and maps FMC to Dedicated', () => {
@@ -71,7 +72,7 @@ describe('processCloudRegions', () => {
     expect(regionNames(providers, 'AWS')).toEqual(['us-east-1', 'eu-west-3']);
     expect(regionNames(providers, 'GCP')).toEqual(['us-west1']);
     const usEast = providers.find((p) => p.name === 'AWS').regions[0];
-    expect(usEast.tiers).toEqual(['tier-1-aws: Dedicated']);
+    expect(usEast.tiers).toEqual(['tier-1-aws']);
   });
 
   it('accepts the cluster type case-insensitively', () => {
@@ -81,5 +82,17 @@ describe('processCloudRegions', () => {
 
   it('throws on an unsupported cluster type', () => {
     expect(() => processCloudRegions(sampleYaml, { clusterType: 'Serverless' })).toThrow(/Unsupported cluster type/);
+  });
+
+  it('keeps the per-tier cluster types when no filter is given', () => {
+    const providers = processCloudRegions(sampleYaml);
+    const usEast = providers.find((p) => p.name === 'AWS').regions[0];
+    expect(usEast.tiers).toEqual(['tier-1-aws: BYOC, Dedicated', 'tier-2-aws: BYOC']);
+  });
+
+  it('joins zones with a comma and a space so long lists can wrap in a table cell', () => {
+    const providers = processCloudRegions(sampleYaml);
+    const usEast = providers.find((p) => p.name === 'AWS').regions[0];
+    expect(usEast.zones).toBe('use1-az1, use1-az2');
   });
 });

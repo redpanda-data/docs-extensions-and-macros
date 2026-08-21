@@ -13,10 +13,11 @@ const handlebars = require('handlebars');
  * @param {string} opts.format - Output format, either 'md' (Markdown) or 'adoc' (AsciiDoc).
  * @param {string} [opts.lastUpdated] - Optional ISO timestamp indicating when the data was last updated.
  * @param {string} [opts.template] - Optional absolute path to a custom Handlebars template. Overrides the bundled template for the given format.
+ * @param {string} [opts.clusterType] - Optional cluster type the data was filtered to. Exposed to the template so a filtered table can name it.
  * @returns {string} The rendered output string.
  * @throws {Error} If the providers array is missing or empty.
  */
-function renderCloudRegions({ providers, format, lastUpdated, template }) {
+function renderCloudRegions({ providers, format, lastUpdated, template, clusterType }) {
   if (!Array.isArray(providers) || providers.length === 0) {
     throw new Error('No providers/regions found in YAML.');
   }
@@ -40,7 +41,7 @@ function renderCloudRegions({ providers, format, lastUpdated, template }) {
     throw new Error(`Failed to compile Handlebars template at ${templateFile}: ${err.message}`);
   }
   try {
-    return compiledTemplate({ providers: sortedProviders, lastUpdated });
+    return compiledTemplate({ providers: sortedProviders, lastUpdated, clusterType });
   } catch (err) {
     throw new Error(`Failed to render Handlebars template at ${templateFile}: ${err.message}`);
   }
