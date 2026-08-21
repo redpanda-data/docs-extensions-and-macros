@@ -78,13 +78,19 @@ describe('set-latest-version extension', () => {
     expect(latestAttributes['latest-release-commit']).toBe('abc123')
 
     // Operator and Helm chart attributes keep their original names and values.
+    // The "v" prefix on latest-operator-version is load bearing: docs pages pass
+    // it straight to `helm --version`, and both consuming antora.yml files seed
+    // it in v-prefixed form.
     expect(versionAttributes['latest-operator-version']).toBe('v25.1.3')
     expect(versionAttributes['latest-redpanda-helm-chart-version']).toBe('5.10.1')
     expect(versionAttributes['redpanda-beta-commit']).toBe('rc456')
+  })
 
-    // No stray -version-short attributes for keys that never had version/tag pairs.
-    expect(versionAttributes).not.toHaveProperty('latest-operator-version-short')
-    expect(versionAttributes).not.toHaveProperty('latest-redpanda-helm-chart-version-short')
+  it('emits -version-short for the operator and Helm chart attributes too', () => {
+    const { versionAttributes } = runExtension()
+
+    expect(versionAttributes['latest-operator-version-short']).toBe('25.1')
+    expect(versionAttributes['latest-redpanda-helm-chart-version-short']).toBe('5.10')
   })
 
   it('does not move full-version backwards, but still publishes the GA attributes', () => {

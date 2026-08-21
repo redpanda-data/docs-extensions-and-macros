@@ -94,7 +94,10 @@ module.exports.register = function ({ config }) {
             asciidoc.attributes['page-component-version-is-prerelease'] = 'true';
           }
 
-          // Set operator and helm chart attributes via helper function
+          // Set operator and helm chart attributes via helper function. These keep
+          // their raw fetched form, including the "v" prefix on
+          // latest-operator-version, because docs pages pass that value straight
+          // to `helm --version`. Only the short sibling is derived.
           updateAttributes(asciidoc, [
             { condition: latestVersions.operator, key: 'latest-operator-version', value: latestVersions.operator?.latestStableRelease },
             { condition: latestVersions.helmChart, key: 'latest-redpanda-helm-chart-version', value: latestVersions.helmChart?.latestStableRelease }
@@ -168,16 +171,26 @@ module.exports.register = function ({ config }) {
       asciidoc.attributes[`${baseName}-version`] = versionWithoutPrefix; // Without "v" prefix
       asciidoc.attributes[`${baseName}-tag`] = `${versionData}`;
 
-      const shortVersion = toShortVersion(versionWithoutPrefix);
-      if (shortVersion) {
-        asciidoc.attributes[`${baseName}-version-short`] = shortVersion; // major.minor only
-      }
+      setShortVersionAttribute(asciidoc, `${baseName}-version`, versionWithoutPrefix);
 
       if (name && version) {
         logger.debug(`Set ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to ${versionData} in ${name} ${version}`);
       } else {
         logger.debug(`Updated ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to ${versionData}`);
       }
+    }
+  }
+
+  // Helper function to set the major.minor sibling of a *-version attribute (for
+  // example, latest-operator-version v25.1.3 -> latest-operator-version-short
+  // 25.1). Release channels that are not versions (for example, nightly) get no
+  // short attribute rather than a misleading one.
+  function setShortVersionAttribute(asciidoc, versionKey, versionData) {
+    if (!versionData || typeof versionData !== 'string') return;
+    if (!versionKey.endsWith('-version')) return;
+    const shortVersion = toShortVersion(sanitizeVersion(versionData));
+    if (shortVersion) {
+      asciidoc.attributes[`${versionKey}-short`] = shortVersion;
     }
   }
 
@@ -191,6 +204,7 @@ module.exports.register = function ({ config }) {
     mappings.forEach(({ condition, key, value }) => {
       if (condition) {
         asciidoc.attributes[key] = value;
+        setShortVersionAttribute(asciidoc, key, value);
       }
     });
   }
