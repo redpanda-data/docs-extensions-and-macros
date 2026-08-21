@@ -13,7 +13,7 @@ const {
 } = require('../../tools/redpanda-connect/metadata-utils.js');
 
 const renderConnectDescription = require('../../tools/redpanda-connect/helpers/renderConnectDescription.js');
-const { generateRpcnConnectorDocs } = require('../../tools/redpanda-connect/generate-rpcn-connector-docs.js');
+const { generateRpcnConnectorDocs, backfillPageDescriptions } = require('../../tools/redpanda-connect/generate-rpcn-connector-docs.js');
 
 // @asciidoctor/core is a transitive dependency (via @antora/asciidoc-loader),
 // so it may not be hoisted to the top-level node_modules. Resolve it the same
@@ -154,6 +154,33 @@ describe('summaryAttribute helper', () => {
     expect(summaryAttribute('Already one line.')).toBe('Already one line.');
     expect(summaryAttribute('')).toBe('');
     expect(summaryAttribute(undefined)).toBe('');
+  });
+
+  test('flattens AsciiDoc markup, matching backfillPageDescriptions exactly', () => {
+    // The attrs region becomes the page's <meta name="description">, so raw
+    // markup here ships into search snippets, link previews and cloud-docs
+    // stubs. Verified in a real Antora build before this was flattened.
+    const summary = 'The `branch` processor creates a request via a '
+      + 'xref:guides:bloblang/about.adoc[Bloblang mapping], see '
+      + 'https://example.com/x[Docs^] and <<patterns>>.';
+    expect(summaryAttribute(summary)).toBe(
+      'The branch processor creates a request via a Bloblang mapping, see Docs and patterns.'
+    );
+
+    // Same input, same output as the page-header backfill: one flattener,
+    // two call sites, so a page cannot publish one meta description before
+    // migrating to the partial and a different one after.
+    const root = fs.mkdtempSync(path.join(require('os').tmpdir(), 'flatten-parity-'));
+    try {
+      fs.mkdirSync(path.join(root, 'processors'), { recursive: true });
+      fs.writeFileSync(path.join(root, 'processors', 'branch.adoc'),
+        '= branch\n// tag::single-source[]\n:type: processor\n\nBody.\n', 'utf8');
+      backfillPageDescriptions({ processors: [{ name: 'branch', summary }] }, { pagesRoot: root });
+      const page = fs.readFileSync(path.join(root, 'processors', 'branch.adoc'), 'utf8');
+      expect(page).toContain(`:description: ${summaryAttribute(summary)}`);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

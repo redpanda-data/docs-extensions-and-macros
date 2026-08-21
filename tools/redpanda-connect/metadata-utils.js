@@ -203,8 +203,49 @@ function lostMetadataSections (oldContent, newContent) {
   return sectionHeadings(oldContent).filter((h) => !newHeadings.has(h));
 }
 
+/**
+ * Flatten AsciiDoc prose into a value usable as a `:description:` attribute
+ * and, downstream, as the page's `<meta name="description">`.
+ *
+ * Meta descriptions are read as plain text by search results, link previews
+ * and assistants, so markup has to come out mechanically: xref and link
+ * macros become their labels, bare URL macros become their labels, `<<>>`
+ * shorthand becomes its text, the "open in new tab" caret goes, inline code
+ * loses its backticks, and whitespace (including hard line breaks, which an
+ * attribute value cannot carry) collapses to single spaces. No prose is
+ * edited.
+ *
+ * This is the one implementation: `summaryAttribute` (the description
+ * partial's attrs region) and `backfillPageDescriptions` (the page-header
+ * self-heal) both call it, so the two paths cannot drift into publishing
+ * different meta descriptions for the same summary.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function flattenToAttributeValue (text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/(?:xref|link):[^\[\]]+\[([^\]]*)\]/g, '$1')
+    // Bare URL macros (no xref:/link: prefix) and internal xref shorthand
+    // also appear in source summaries and render literally if left in place.
+    .replace(/https?:\/\/[^\s\[\]]+\[([^\]]*)\]/g, '$1')
+    // image:: and inline image: macros have no textual value in a meta
+    // description; drop them rather than leaking the target path.
+    .replace(/image:{1,2}[^\[\]\s]*\[[^\]]*\]/g, '')
+    .replace(/<<[^,>]+,([^>]+)>>/g, '$1')
+    .replace(/<<([^>]+)>>/g, '$1')
+    // Strip the "open in new tab" caret that AsciiDoc URL macros carry
+    // inside the link text, e.g. [Open Telemetry collector^].
+    .replace(/\^/g, '')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 module.exports = {
   locateMetadata,
+  flattenToAttributeValue,
   normalizeTypeDir,
   extractMetadata,
   typeDirFor,

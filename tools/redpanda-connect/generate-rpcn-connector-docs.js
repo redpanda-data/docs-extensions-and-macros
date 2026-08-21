@@ -5,7 +5,7 @@ const path = require('path');
 const handlebars = require('handlebars');
 const yaml = require('yaml');
 const helpers = require('./helpers');
-const { lostMetadataSections, typeDirFor } = require('./metadata-utils.js');
+const { lostMetadataSections, typeDirFor, flattenToAttributeValue } = require('./metadata-utils.js');
 
 // Register each helper under handlebars, verifying that it’s a function
 Object.entries(helpers).forEach(([name, fn]) => {
@@ -956,22 +956,11 @@ function backfillPageDescriptions (connectorData, { pagesRoot, dryRun = false } 
       if (header.some((l) => l.startsWith(':description:'))) continue;
 
       // Meta descriptions are read as plain text by search results, link
-      // previews, and assistants, so flatten AsciiDoc markup mechanically:
-      // xrefs and links become their labels, inline code loses its
-      // backticks. No prose is edited.
-      const summary = (item.summary || '')
-        .replace(/(?:xref|link):[^\[\]]+\[([^\]]*)\]/g, '$1')
-        // Bare URL macros (no xref:/link: prefix) and internal xref shorthand
-        // also appear in source summaries and render literally if left in place.
-        .replace(/https?:\/\/[^\s\[\]]+\[([^\]]*)\]/g, '$1')
-        .replace(/<<[^,>]+,([^>]+)>>/g, '$1')
-        .replace(/<<([^>]+)>>/g, '$1')
-        // Strip the "open in new tab" caret that AsciiDoc URL macros carry
-        // inside the link text, e.g. [Open Telemetry collector^].
-        .replace(/\^/g, '')
-        .replace(/`([^`]*)`/g, '$1')
-        .replace(/\s+/g, ' ')
-        .trim();
+      // previews, and assistants, so the markup comes out mechanically. Same
+      // flattener the description partial's attrs region uses, so a page
+      // cannot publish one meta description before migrating to the partial
+      // and a different one after.
+      const summary = flattenToAttributeValue(item.summary);
       if (!summary) {
         results.skippedNoSummary.push(`${typeDir}/${item.name}`);
         continue;
