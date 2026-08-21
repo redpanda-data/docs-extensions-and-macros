@@ -355,6 +355,74 @@ describe('UI bundle path resolution', () => {
   })
 })
 
+describe('the cloud view', () => {
+  // The cloud variant (env-cloud, without the `all` attribute) is what
+  // cloud-docs renders, and nothing covered it.
+  const CSV = [
+    'connector,commercial_name,type,support_level,is_cloud_supported,is_licensed,redpandaConnectUrl,redpandaCloudUrl,description',
+    'kafka,Apache Kafka,input,certified,y,No,/connect/components/inputs/kafka/,/cloud/connect/components/inputs/kafka/,Consumes messages from Kafka topics',
+    'selfmanaged_only,Self Managed,output,community,n,Yes,/connect/components/outputs/selfmanaged_only/,,Writes somewhere on-prem'
+  ].join('\n')
+
+  let html
+
+  beforeAll(() => {
+    html = renderComponentTable({ csv: CSV, attributes: {}, docAttributes: { 'env-cloud': '' } })
+  })
+
+  test('drops connectors that do not support cloud', () => {
+    expect(html.match(/id="component-\d+"/g)).toHaveLength(1)
+    expect(cardFor(html, 'kafka')).not.toBe('')
+    expect(cardFor(html, 'selfmanaged_only')).toBe('')
+  })
+
+  test('links type badges to the cloud page, not the self-managed one', () => {
+    const card = cardFor(html, 'kafka')
+    expect(card).toContain('href="/cloud/connect/components/inputs/kafka/"')
+    expect(card).not.toContain('href="/connect/components/inputs/kafka/"')
+  })
+
+  test('leaves the cloud and enterprise badges off the cards, where they mean nothing', () => {
+    // The legend modal and the stylesheet still mention both classes; the cards
+    // are what must not carry them in the cloud view.
+    const card = cardFor(html, 'kafka')
+    expect(card).not.toContain('badge-cloud')
+    expect(card).not.toContain('badge-enterprise')
+    expect(card).toContain('badge-support')
+  })
+
+  test('still resolves logos at the page depth', () => {
+    expect(html).toContain('<img src="../../_/img/logos/apache-kafka.svg" alt="kafka logo" />')
+  })
+})
+
+describe('emitted inline scripts', () => {
+  // ~50KB of behaviour is serialized into the page as inline script. A syntax
+  // error there is silent in a unit test but breaks every filter on the page,
+  // so parse every block the macro emits.
+  const vm = require('vm')
+
+  test('every inline script block parses', () => {
+    const html = renderComponentTable()
+    const blocks = [...html.matchAll(/<script(?<attrs>[^>]*)>(?<body>[\s\S]*?)<\/script>/g)]
+      .filter(match => !/type\s*=\s*"application\/ld\+json"/.test(match.groups.attrs))
+      .map(match => match.groups.body)
+
+    expect(blocks.length).toBeGreaterThan(0)
+    for (const block of blocks) {
+      expect(() => new vm.Script(block)).not.toThrow()
+    }
+  })
+
+  test('the handlers the inline markup calls are defined on window', () => {
+    const html = renderComponentTable()
+    for (const fn of ['filterComponentTable', 'getQueryParams', 'updateURLParameters', 'toggleDropdownCheckbox', 'updateDropdownText']) {
+      expect(html).toContain(`window.${fn} =`)
+      expect(html).toContain(`${fn}(`)
+    }
+  })
+})
+
 describe('rp-connect-components macro', () => {
   describe('content catalog URL resolution', () => {
     // Test the URL resolution logic used for removed connectors
