@@ -34,16 +34,24 @@ const CSV_FIXTURE = [
   'evil<script>,"Bad<Name> & ""Co""",input,community,n,Yes,/connect/components/inputs/evil/,,"Injects <b>markup</b> & ""quotes"" into cards"'
 ].join('\n')
 
-function renderComponentTable ({ attributes = { all: 'all' }, docAttributes, csv = CSV_FIXTURE } = {}) {
+// Antora hands AsciiDoc extensions the page as context.file and puts the page's
+// path back to the site root on it as file.pub.rootPath. '../..' is what a page
+// two levels down gets (for example /preview/component-catalog/); the real
+// /connect/components/about/ page is one level deeper. Passing an absolute path
+// here would hide any depth bug, so the default is a genuine Antora value.
+function renderComponentTable ({ attributes = { all: 'all' }, docAttributes, csv = CSV_FIXTURE, rootPath = '../..', file } = {}) {
   jest.resetModules()
   const macro = require('../../macros/rp-connect-components.js')
   const { registry, processors } = createCapturingRegistry()
   const csvData = Papa.parse(csv, { header: true, skipEmptyLines: true })
-  const context = { config: { attributes: { csvData, commercialNamesMap: {} } } }
+  const context = {
+    config: { attributes: { csvData, commercialNamesMap: {} } },
+    file: file === undefined ? { pub: { rootPath } } : file
+  }
   macro.register(registry, context)
   const parent = {
     getDocument: () => ({
-      getAttributes: () => (docAttributes || { 'page-ui-root-path': '/_' })
+      getAttributes: () => (docAttributes || {})
     })
   }
   const block = processors.component_table(parent, '', attributes)
@@ -102,9 +110,9 @@ describe('component_table macro rendering', () => {
 
   test('resolves logos, including fallbacks, instead of generic emoji', () => {
     // kafka must resolve to the Apache Kafka SVG (not an emoji fallback)
-    expect(html).toContain('<img src="/_/img/logos/apache-kafka.svg" alt="kafka logo" />')
+    expect(html).toContain('<img src="../../_/img/logos/apache-kafka.svg" alt="kafka logo" />')
     // elasticsearch_v8 resolves to the shared elasticsearch.svg
-    expect(html).toContain('<img src="/_/img/logos/elasticsearch.svg" alt="elasticsearch_v8 logo" />')
+    expect(html).toContain('<img src="../../_/img/logos/elasticsearch.svg" alt="elasticsearch_v8 logo" />')
   })
 
   test('HTML-escapes connector names, commercial names, and descriptions', () => {
@@ -180,8 +188,45 @@ describe('connector logo lookup', () => {
     ['redis_script', 'redis.svg']
   ])('%s inherits the %s vendor logo instead of a generic emoji', (connector, file) => {
     const card = cardFor(html, connector)
-    expect(card).toContain(`<img src="/_/img/logos/${file}" alt="${connector} logo" />`)
+    expect(card).toContain(`<img src="../../_/img/logos/${file}" alt="${connector} logo" />`)
     expect(card).not.toContain('card-icon-emoji')
+  })
+})
+
+describe('UI bundle path resolution', () => {
+  // Logos live in the docs-ui bundle at <site root>/_/img/logos. Antora gives
+  // AsciiDoc extensions the page's path back to the site root as
+  // context.file.pub.rootPath, so the src has to track the page's own depth.
+  // A hardcoded '../../_' works only for pages exactly two levels deep and 404s
+  // on /connect/components/about/, which is where this macro actually ships.
+  test.each([
+    ['.', '_/img/logos/apache-kafka.svg'],
+    ['..', '../_/img/logos/apache-kafka.svg'],
+    ['../..', '../../_/img/logos/apache-kafka.svg'],
+    ['../../..', '../../../_/img/logos/apache-kafka.svg'],
+    ['../../../..', '../../../../_/img/logos/apache-kafka.svg']
+  ])('a page whose rootPath is %s links its logos as %s', (rootPath, expected) => {
+    const html = renderComponentTable({ rootPath })
+    expect(html).toContain(`<img src="${expected}" alt="kafka logo" />`)
+  })
+
+  test('a top-level page renders a logo, not an emoji, for its relative path', () => {
+    // Guards the <img> vs emoji decision: '_/img/...' starts with neither '/'
+    // nor '..', which an earlier startsWith() sniff treated as an emoji.
+    const card = cardFor(renderComponentTable({ rootPath: '.' }), 'kafka')
+    expect(card).toContain('<img src="_/img/logos/apache-kafka.svg"')
+    expect(card).not.toContain('card-icon-emoji')
+  })
+
+  test('falls back to a site-root-relative path when there is no Antora file', () => {
+    const html = renderComponentTable({ file: null })
+    expect(html).toContain('<img src="/_/img/logos/apache-kafka.svg" alt="kafka logo" />')
+  })
+
+  test('does not read the UI path from a page attribute Antora never sets', () => {
+    const html = renderComponentTable({ rootPath: '../../..', docAttributes: { 'page-ui-root-path': '/somewhere-else' } })
+    expect(html).toContain('<img src="../../../_/img/logos/apache-kafka.svg" alt="kafka logo" />')
+    expect(html).not.toContain('/somewhere-else')
   })
 })
 

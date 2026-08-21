@@ -259,6 +259,27 @@ module.exports.register = function (registry, context) {
   const capitalize = s => s && s[0].toUpperCase() + s.slice(1);
 
   /**
+   * Resolves the path from the page being converted to the root of the published
+   * UI bundle, which is where docs-ui ships the connector logos
+   * (`<ui root>/img/logos/*.svg`).
+   *
+   * Antora does not expose this as an AsciiDoc page attribute. It does put the
+   * page's path back to the site root on the file it hands to AsciiDoc extensions
+   * as `file.pub.rootPath`, and @antora/page-composer builds the UI templates'
+   * own `uiRootPath` from that same value, so this returns exactly what the UI
+   * uses for bundle assets, at any page depth.
+   */
+  function resolveUiRootPath () {
+    // Antora's default ui.output_dir, which every Redpanda playbook uses.
+    const uiOutputDir = '_';
+    const rootPath = context?.file?.pub?.rootPath;
+    if (typeof rootPath === 'string' && rootPath) return path.join(rootPath, uiOutputDir);
+    // No Antora file in context (for example, a unit-test harness): fall back to a
+    // site-root-relative path, which holds for a site published at the domain root.
+    return `/${uiOutputDir}`;
+  }
+
+  /**
    * Escapes HTML special characters so CSV-sourced values can be safely
    * interpolated into element content and double-quoted attribute values.
    */
@@ -842,8 +863,8 @@ module.exports.register = function (registry, context) {
       const csvData = context.config?.attributes?.csvData || null;
       if (!csvData) return console.error(`CSV data is not available for ${docAttributes['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`)
 
-      // Get the UI root path for this page (works at any depth)
-      const uiRootPath = docAttributes['page-ui-root-path'] || '../../_';
+      // Path from this page to the UI bundle root, so logos resolve at any page depth
+      const uiRootPath = resolveUiRootPath();
 
       // Get the enriched commercial names map (includes CSV + AsciiDoc names)
       const commercialNamesMap = context.config?.attributes?.commercialNamesMap || {};
