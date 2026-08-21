@@ -602,6 +602,39 @@ describe('buildFieldsTable - whats-new field links', () => {
     expect(table).toContain('* xref:components:inputs/kafka_franz.adoc#regexp_topics_exclude[kafka_franz]');
   });
 
+  test('keeps distinct "Introduced in" versions apart when two components gain the same field', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:a', field: 'urls', description: 'Urls A.', introducedIn: '3.58.0' },
+      { component: 'inputs:b', field: 'urls', description: 'Urls B.', introducedIn: '4.23.0' }
+    ], cap, { showIntroducedIn: true });
+
+    expect(table).toContain('|3.58.0');
+    expect(table).toContain('|4.23.0');
+    expect(table.match(/\|urls\n/g)).toHaveLength(2);
+    expect(table).toContain('xref:components:inputs/a.adoc#urls[a]');
+    expect(table).toContain('xref:components:inputs/b.adoc#urls[b]');
+  });
+
+  test('still merges components that gained the same field in the same release', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:a', field: 'urls', description: 'Urls.', introducedIn: '4.23.0' },
+      { component: 'inputs:b', field: 'urls', description: 'Urls.', introducedIn: '4.23.0' }
+    ], cap, { showIntroducedIn: true });
+
+    expect(table.match(/\|urls\n/g)).toHaveLength(1);
+    expect(table).toContain('xref:components:inputs/a.adoc#urls[a]');
+    expect(table).toContain('xref:components:inputs/b.adoc#urls[b]');
+  });
+
+  test('merges components into one row when the version column is off', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:a', field: 'urls', description: 'Urls A.', introducedIn: '3.58.0' },
+      { component: 'inputs:b', field: 'urls', description: 'Urls B.', introducedIn: '4.23.0' }
+    ], cap);
+
+    expect(table.match(/\|urls\n/g)).toHaveLength(1);
+  });
+
   test('omits the "Introduced in" column by default', () => {
     const table = buildFieldsTable([
       { component: 'inputs:aws_s3', field: 'sqs.zero_key_warn_interval', description: 'Warn interval.', introducedIn: '4.104.0' }
