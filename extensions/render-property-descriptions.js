@@ -54,30 +54,37 @@ module.exports.register = function () {
   raiseListenerLimit(this)
   const logger = this.getLogger('render-property-descriptions')
 
-  // documentsConverted, not contentClassified: page aliases and the rest of
+  // The anchor index has to be built here, while page sources still exist:
+  // convert-documents.js deletes page.src.contents once conversion finishes
+  // (unless keepSource), and buildPageIndex reads that source to find which page
+  // documents which property. Building it at documentsConverted worked only
+  // because property-page-index happened to warm the same cache earlier, and
+  // without that every <<anchor>> silently degraded to plain text.
+  const anchorIndexes = new Map()
+  this.once('contentClassified', ({ contentCatalog }) => {
+    for (const attachment of propertyAttachments(contentCatalog)) {
+      const properties = readProperties(attachment, logger)
+      if (!properties) continue
+      const key = `${attachment.src.component}@${attachment.src.version || ''}`
+      if (anchorIndexes.has(key)) continue
+      anchorIndexes.set(key, anchorIndex(contentCatalog, attachment, properties, logger))
+    }
+  })
+
+  // Conversion itself waits for documentsConverted: page aliases and the rest of
   // what page conversion relies on are only fully registered by then. Hooking
   // earlier left an xref to an aliased page rendering as
   // class="xref unresolved" while the same xref resolved fine on a real page.
   // Attachments are still published after this event.
   this.once('documentsConverted', ({ contentCatalog, siteAsciiDocConfig }) => {
-    const attachments = (contentCatalog.findBy({ family: 'attachment' }) || []).filter(
-      (file) => file.src.module === 'reference' && PROPERTIES_JSON_RX.test(basename(file))
-    )
+    const attachments = propertyAttachments(contentCatalog)
     if (!attachments.length) return
 
     for (const attachment of attachments) {
       const where = `${attachment.src.component}@${attachment.src.version || 'unversioned'}`
-      let data
-      try {
-        data = JSON.parse(shieldBigInts(attachment.contents.toString()))
-      } catch (error) {
-        // Left as-is: the prop macro reports an unusable dataset with the detail,
-        // and failing the build over one bad attachment helps nobody.
-        logger.warn(`${where}: ${basename(attachment)} is not valid JSON, descriptions not rendered (${error.message})`)
-        continue
-      }
-      const properties = data && data.properties
-      if (!properties || typeof properties !== 'object' || Array.isArray(properties)) continue
+      const data = readDataset(attachment, logger)
+      if (!data) continue
+      const properties = data.properties
 
       // Convert "as" a real page rather than a fabricated one. A hand-built
       // file.pub is missing fields Antora's resolver needs, and resolving an
@@ -87,7 +94,16 @@ module.exports.register = function () {
         logger.debug(`${where}: no reference page to convert descriptions as, skipped`)
         continue
       }
-      const anchors = anchorIndex(contentCatalog, attachment, properties)
+      const anchors = anchorIndexes.get(`${attachment.src.component}@${attachment.src.version || ''}`) || new Map()
+
+      // Antora converts each page with its component version's own config
+      // (convert-documents.js builds one per component version and prefers it
+      // over the site config), so attributes declared in antora.yml -- env-cloud
+      // among them, which five descriptions branch on -- only exist there.
+      const componentVersion = contentCatalog.getComponentVersion
+        ? contentCatalog.getComponentVersion(attachment.src.component, attachment.src.version)
+        : undefined
+      const asciidocConfig = (componentVersion && componentVersion.asciidoc) || siteAsciiDocConfig
 
       let rendered = 0
       let failed = 0
@@ -97,7 +113,7 @@ module.exports.register = function () {
         if (typeof description !== 'string' || !description.trim()) continue
         try {
           const source = resolveInternalRefs(description, anchors, (anchor) => brokenAnchors.add(anchor))
-          const html = render(source, hostPage, contentCatalog, siteAsciiDocConfig)
+          const html = render(source, hostPage, contentCatalog, asciidocConfig)
           if (html == null) continue
           entry.description_html = html
           rendered++
@@ -142,6 +158,39 @@ function basename (file) {
   return file.src.relative.split('/').pop()
 }
 
+function propertyAttachments (contentCatalog) {
+  return (contentCatalog.findBy({ family: 'attachment' }) || []).filter(
+    (file) => file.src.module === 'reference' && PROPERTIES_JSON_RX.test(basename(file))
+  )
+}
+
+/**
+ * Parse one dataset, or report why it is unusable and return undefined. Left
+ * as-is on failure: the prop macro reports an unusable dataset with the detail,
+ * and failing the whole build over one bad attachment helps nobody.
+ */
+function readDataset (attachment, logger) {
+  const where = `${attachment.src.component}@${attachment.src.version || 'unversioned'}`
+  let data
+  try {
+    data = JSON.parse(shieldBigInts(attachment.contents.toString()))
+  } catch (error) {
+    logger.warn(`${where}: ${basename(attachment)} is not valid JSON, descriptions not rendered (${error.message})`)
+    return undefined
+  }
+  const properties = data && data.properties
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
+    logger.warn(`${where}: ${basename(attachment)} has no usable 'properties' object, descriptions not rendered`)
+    return undefined
+  }
+  return data
+}
+
+function readProperties (attachment, logger) {
+  const data = readDataset(attachment, logger)
+  return data ? data.properties : undefined
+}
+
 /**
  * A real page in the attachment's own component and reference module, preferring
  * one under properties/ so includes and relative xrefs resolve from where the
@@ -165,12 +214,21 @@ function findHostPage (contentCatalog, attachment) {
  * documented property. Built from the same page index the prop macro links
  * with, so a description and a prop: call agree about which page documents what.
  */
-function anchorIndex (contentCatalog, attachment, properties) {
+function anchorIndex (contentCatalog, attachment, properties, logger) {
+  const where = `${attachment.src.component}@${attachment.src.version || 'unversioned'}`
   const index = new Map()
   let pages
   try {
     pages = buildPageIndex(contentCatalog, attachment.src.component, properties, attachment.src.version)
   } catch (error) {
+    // Returning an empty index silently made a thrown index and an empty one
+    // indistinguishable, and every <<anchor>> then degraded to plain text with
+    // no explanation.
+    logger.warn(`${where}: could not index which page documents each property, so <<anchor>> references in descriptions render as plain text (${error.message})`)
+    return index
+  }
+  if (!pages.size) {
+    logger.warn(`${where}: no reference page was found to document any property, so <<anchor>> references in descriptions render as plain text.`)
     return index
   }
   for (const [name, entry] of pages) {

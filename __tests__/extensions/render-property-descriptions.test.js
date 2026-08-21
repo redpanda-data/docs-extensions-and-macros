@@ -69,6 +69,11 @@ function run (contentCatalog, { extensions = [] } = {}) {
     setMaxListeners: () => {},
   }
   extension.register.call(context)
+  // Both events, in build order. The anchor index is built at contentClassified
+  // because Antora deletes page.src.contents once conversion finishes; firing
+  // only documentsConverted would leave the index empty, which is precisely the
+  // silent degradation this ordering exists to prevent.
+  context.handlers.contentClassified({ contentCatalog })
   context.handlers.documentsConverted({
     contentCatalog,
     siteAsciiDocConfig: { attributes: { 'attribute-missing': 'drop' }, extensions },
@@ -159,6 +164,36 @@ describe('render-property-descriptions extension', () => {
     expect(html).toContain('#iceberg_enabled"')
     // The label survives whole, inside the anchor, with nothing trailing it.
     expect(html).toMatch(new RegExp('>' + text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '</a>'))
+  })
+
+  // Antora converts each page with its component version's own AsciiDoc config,
+  // not the site config, so attributes declared in antora.yml exist only there.
+  // Five real descriptions branch on env-cloud.
+  it('converts with the component version\'s own attributes', () => {
+    const catalog = catalogWith(dataset({ conditional: 'Base.\n\nifdef::env-cloud[]\nCloud only.\nendif::[]' }))
+    catalog.getComponentVersion = () => ({
+      version: '26.2',
+      asciidoc: { attributes: { 'env-cloud': '', 'attribute-missing': 'drop' }, extensions: [] },
+    })
+    const { data } = run(catalog)
+    expect(data.properties.conditional.description_html).toContain('Cloud only.')
+  })
+
+  it('falls back to the site config when the component version has none', () => {
+    const catalog = catalogWith(dataset({ plain: 'A description.' }))
+    catalog.getComponentVersion = () => undefined
+    const { data } = run(catalog)
+    expect(data.properties.plain.description_html).toBe('A description.')
+  })
+
+  // Antora deletes page.src.contents after conversion, so an index built at
+  // documentsConverted comes back empty and every reference degrades to plain
+  // text. Warming it at contentClassified is what prevents that, and the
+  // degradation must be reported rather than silent.
+  it('reports rather than silently degrading when no page documents a property', () => {
+    const catalog = catalogWith(dataset({ lonely: 'See <<iceberg_enabled,the flag>>.' }), { pages: true })
+    const { warnings } = run(catalog)
+    expect(warnings.some((w) => String(w).includes('render as plain text'))).toBe(true)
   })
 
   it('does not treat a shift expression as a property reference', () => {
