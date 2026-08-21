@@ -1172,3 +1172,65 @@ describe('one annotator: every scanner agrees about verbatim regions', () => {
       .toEqual([true, true, true, false]);
   });
 });
+
+describe('one connector-type list', () => {
+  const { CONNECTOR_TYPE_DIRS, CONNECTOR_DATA_KEYS } = require('../../tools/redpanda-connect/metadata-utils.js');
+
+  test('covers every page-backed family exactly once, in canonical spelling', () => {
+    expect(CONNECTOR_TYPE_DIRS).toEqual([
+      'inputs', 'outputs', 'processors', 'caches', 'rate_limits',
+      'buffers', 'metrics', 'scanners', 'tracers',
+    ]);
+    // The copies this replaces disagreed three ways: rate_limits missing from
+    // one, both rate-limit spellings in two, config in two.
+    expect(new Set(CONNECTOR_TYPE_DIRS).size).toBe(CONNECTOR_TYPE_DIRS.length);
+    expect(CONNECTOR_TYPE_DIRS).toContain('rate_limits');
+    expect(CONNECTOR_TYPE_DIRS).not.toContain('rate-limits');
+    expect(CONNECTOR_TYPE_DIRS).not.toContain('config');
+    // Dataset walkers need config as well; page writers must not have it.
+    expect(CONNECTOR_DATA_KEYS).toEqual([...CONNECTOR_TYPE_DIRS, 'config']);
+  });
+
+  test('the generator gates every per-page partial on that one list', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'type-dirs-'));
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(tmpDir);
+      const templateFile = path.join(tmpDir, 'main.hbs');
+      fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+      const dataFile = path.join(tmpDir, 'data.json');
+      const withMetadata = (name) => ({
+        name,
+        description: 'Prose.\n\n== Metadata\n\n- a: one',
+        examples: [{ title: 'One', summary: 'S', config: 'x: 1' }],
+        config: { children: [{ name: 'f', type: 'string', kind: 'scalar', description: 'A field.' }] },
+      });
+      fs.writeFileSync(dataFile, JSON.stringify({
+        outputs: [{ ...withMetadata('sql_raw'), type: 'output' }],
+        // Not a page-backed family: no page can include a partial for it, so
+        // the metadata and examples partials must not be written either. The
+        // old denylist named only the two bloblang keys and let this through.
+        config: [{ ...withMetadata('logger'), type: 'object' }],
+      }), 'utf8');
+
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        await generateRpcnConnectorDocs({
+          data: dataFile,
+          template: templateFile,
+          templateExamples: path.resolve(originalCwd, 'tools/redpanda-connect/templates/examples-partials.hbs'),
+        });
+      } finally {
+        warnSpy.mockRestore();
+      }
+
+      const partials = path.join(tmpDir, 'modules', 'components', 'partials');
+      for (const kind of ['descriptions', 'metadata', 'examples']) {
+        expect(fs.readdirSync(path.join(partials, kind)).sort()).toEqual(['outputs']);
+      }
+    } finally {
+      process.chdir(originalCwd);
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});

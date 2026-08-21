@@ -132,6 +132,31 @@ const TYPE_DIR_ALIASES = new Map([
 ]);
 
 /**
+ * The component families that have their own reference pages under
+ * `modules/components/pages/<typeDir>/`, in canonical typeDir spelling.
+ *
+ * This list existed in eight places and the copies disagreed three ways:
+ * `config` was in two of them, `rate_limits` was missing from one, and two
+ * carried both rate-limit spellings. A component family added upstream that
+ * is missed by one copy silently gets no partial, no page backfill or no
+ * cloud-docs check, depending on which copy forgot it.
+ * @type {string[]}
+ */
+const CONNECTOR_TYPE_DIRS = [
+  'inputs', 'outputs', 'processors', 'caches', 'rate_limits',
+  'buffers', 'metrics', 'scanners', 'tracers',
+];
+
+/**
+ * Every top-level key of the connector dataset that holds component objects:
+ * the page-backed families plus `config`, which has entries but no per-entry
+ * page. Callers that walk the dataset (augmenting, diffing, stripping) want
+ * this; callers that write per-page artifacts want CONNECTOR_TYPE_DIRS.
+ * @type {string[]}
+ */
+const CONNECTOR_DATA_KEYS = [...CONNECTOR_TYPE_DIRS, 'config'];
+
+/**
  * Canonical partial directory for a plural type directory. Applied to every
  * derivation of a type directory so `typeDirFor` is the single source of truth
  * for both the file the generator writes and the include line a page carries.
@@ -275,6 +300,8 @@ function flattenToAttributeValue (text) {
 module.exports = {
   locateMetadata,
   flattenToAttributeValue,
+  CONNECTOR_TYPE_DIRS,
+  CONNECTOR_DATA_KEYS,
   normalizeTypeDir,
   extractMetadata,
   typeDirFor,

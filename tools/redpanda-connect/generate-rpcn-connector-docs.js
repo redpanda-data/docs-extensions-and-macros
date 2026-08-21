@@ -5,7 +5,9 @@ const path = require('path');
 const handlebars = require('handlebars');
 const yaml = require('yaml');
 const helpers = require('./helpers');
-const { lostMetadataSections, typeDirFor, flattenToAttributeValue } = require('./metadata-utils.js');
+const {
+  lostMetadataSections, typeDirFor, normalizeTypeDir, flattenToAttributeValue, CONNECTOR_TYPE_DIRS,
+} = require('./metadata-utils.js');
 
 // Register each helper under handlebars, verifying that it’s a function
 Object.entries(helpers).forEach(([name, fn]) => {
@@ -55,16 +57,11 @@ const STALE_DESCRIPTION_PARTIAL =
   '\n// tag::attrs[]\n// end::attrs[]\n' +
   '\n// tag::body[]\n// end::body[]\n';
 
-// Type directories that hold connector components with their own reference
-// pages (mirrors the connectorTypes list in rpcn-connector-docs-handler.js).
-// Other data keys, such as `config` and the bloblang functions/methods, have
-// no per-connector page that could include a description partial, so none is
-// emitted for them. Keyed by the canonical type directory from typeDirFor(),
-// so rate limits appear once, under the spelling their include line uses.
-const CONNECTOR_DESCRIPTION_TYPE_DIRS = new Set([
-  'inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-  'buffers', 'metrics', 'scanners', 'tracers',
-]);
+// Component families with their own reference pages, keyed by the canonical
+// type directory from typeDirFor(). Other data keys -- `config`, the bloblang
+// functions and methods -- have no per-component page that could include a
+// partial, so none is emitted for them.
+const CONNECTOR_PAGE_TYPE_DIRS = new Set(CONNECTOR_TYPE_DIRS);
 
 // Blast-radius guard for the post-generation orphan sweep. The sweep blanks
 // every description partial the current dataset did not claim, so an
@@ -492,7 +489,11 @@ async function generateRpcnConnectorDocs(options) {
         }
       }
 
-      if (examplesOut.trim() && type !== 'bloblang-functions' && type !== 'bloblang-methods') {
+      // Same allowlist as the metadata and description partials below: one
+      // gate, one list. The old denylist named only the two bloblang keys, so
+      // any other non-page data key (config today, anything added upstream
+      // tomorrow) leaked partials no page can include.
+      if (examplesOut.trim() && CONNECTOR_PAGE_TYPE_DIRS.has(partialTypeDir)) {
         const ePath = path.join(examplesOutRoot, type, `${name}.adoc`);
         fs.mkdirSync(path.dirname(ePath), { recursive: true });
         fs.writeFileSync(ePath, examplesOut);
@@ -507,9 +508,10 @@ async function generateRpcnConnectorDocs(options) {
       const metadataOut = handlebars
         .compile('{{> metadata description=description type=type typeDir=typeDir name=name}}')(item);
 
-      if (type !== 'bloblang-functions' && type !== 'bloblang-methods') {
-        // Write under typeDir (not the raw data key) so the file path always
-        // matches the include directive built by metadataIncludeLine().
+      if (CONNECTOR_PAGE_TYPE_DIRS.has(partialTypeDir)) {
+        // Write under the canonical type directory (not the raw data key) so
+        // the file path always matches the include directive built by
+        // metadataIncludeLine().
         const mPath = path.join(metadataOutRoot, partialTypeDir, `${name}.adoc`);
         if (metadataOut.trim()) {
           fs.mkdirSync(path.dirname(mPath), { recursive: true });
@@ -567,7 +569,7 @@ async function generateRpcnConnectorDocs(options) {
       const descriptionOut = handlebars
         .compile('{{> description summary=summary version=version description=description type=type typeDir=typeDir name=name}}')(descriptionItem);
 
-      if (CONNECTOR_DESCRIPTION_TYPE_DIRS.has(partialTypeDir)) {
+      if (CONNECTOR_PAGE_TYPE_DIRS.has(partialTypeDir)) {
         visitedDescriptionPartials.add(`${partialTypeDir}/${name}`);
         const dPath = path.join(descriptionOutRoot, partialTypeDir, `${name}.adoc`);
         if (descriptionOut.trim()) {
@@ -938,14 +940,6 @@ async function generateRpcnConnectorDocs(options) {
 }
 
 
-// Connector page families that have per-component pages under
-// modules/components/pages/. Other data keys (config, bloblang-functions,
-// bloblang-methods) have no per-component page to backfill.
-const PAGE_TYPE_DIRS = new Set([
-  'inputs', 'outputs', 'processors', 'caches', 'buffers', 'metrics',
-  'tracers', 'scanners', 'rate-limits', 'rate_limits'
-]);
-
 /**
  * Insert a tagged :description: into existing connector page headers that
  * lack one, sourced from the component's summary in the connector data.
@@ -972,12 +966,14 @@ function backfillPageDescriptions (connectorData, { pagesRoot, dryRun = false } 
   if (!fs.existsSync(root)) return results;
 
   for (const [dataKey, items] of Object.entries(connectorData)) {
-    if (!PAGE_TYPE_DIRS.has(dataKey) || !Array.isArray(items)) continue;
+    // Membership is tested on the canonical spelling, so the list does not
+    // have to carry both spellings of rate limits (which is how one copy of
+    // it ended up missing rate limits entirely).
+    const canonical = normalizeTypeDir(dataKey);
+    if (!CONNECTOR_PAGE_TYPE_DIRS.has(canonical) || !Array.isArray(items)) continue;
     // The data uses 'rate-limits' while the pages directory is
     // 'rate_limits'. Resolve whichever spelling exists on disk.
-    const typeDir = fs.existsSync(path.join(root, dataKey))
-      ? dataKey
-      : dataKey.replace(/-/g, '_');
+    const typeDir = fs.existsSync(path.join(root, dataKey)) ? dataKey : canonical;
     for (const item of items) {
       if (!item || !item.name) continue;
       const pagePath = path.join(root, typeDir, `${item.name}.adoc`);
