@@ -110,6 +110,28 @@ async function fetchYaml({ owner, repo, path, ref = 'main', token }) {
 }
 
 /**
+ * Collects every cluster type display name that the source data offers on a
+ * public tier, together with the ones this tool maps by default.
+ *
+ * @param {Array<Object>} regions - The `regions` array from the source YAML.
+ * @param {Set<string>} publicProductNames - Names of products marked public.
+ * @return {Set<string>} Cluster type display names available for filtering.
+ */
+function collectClusterTypes(regions, publicProductNames) {
+  const available = new Set(Object.values(clusterTypeMap));
+  for (const region of regions) {
+    const availability = region.redpandaProductAvailability;
+    if (!availability || typeof availability !== 'object') continue;
+    for (const tier of Object.values(availability)) {
+      if (!tier.redpandaProductName || !publicProductNames.has(tier.redpandaProductName)) continue;
+      if (!Array.isArray(tier.clusterTypes)) continue;
+      for (const ct of tier.clusterTypes) available.add(displayClusterType(ct));
+    }
+  }
+  return available;
+}
+
+/**
  * Parses YAML text describing cloud regions and products and returns both the
  * providers and the cluster type the result was filtered to.
  *
@@ -124,14 +146,6 @@ async function fetchYaml({ owner, repo, path, ref = 'main', token }) {
  * @throws {Error} If the YAML is malformed, missing the required `regions` array, or the cluster type is unsupported.
  */
 function buildCloudRegions(yamlText, { clusterType } = {}) {
-  let clusterTypeFilter;
-  if (clusterType) {
-    const validClusterTypes = [...new Set(Object.values(clusterTypeMap))];
-    clusterTypeFilter = validClusterTypes.find((ct) => ct.toLowerCase() === String(clusterType).toLowerCase());
-    if (!clusterTypeFilter) {
-      throw new Error(`Unsupported cluster type: ${clusterType}. Use one of: ${validClusterTypes.join(', ')}.`);
-    }
-  }
   let data;
   try {
     data = jsYaml.load(yamlText);
@@ -163,6 +177,19 @@ function buildCloudRegions(yamlText, { clusterType } = {}) {
     }
   } else {
     console.warn('[cloud-regions] WARN: No products array found in YAML.');
+  }
+  // Accept any cluster type the source data actually offers, not only the ones
+  // clusterTypeMap knows about: an unmapped type such as CLUSTER_TYPE_SERVERLESS
+  // already shows up verbatim in the unfiltered table, so refusing to filter on
+  // it would be inconsistent with the output.
+  let clusterTypeFilter;
+  if (clusterType) {
+    const validClusterTypes = [...collectClusterTypes(data.regions, publicProductNames)].sort();
+    const wanted = String(clusterType).trim().toLowerCase();
+    clusterTypeFilter = validClusterTypes.find((ct) => ct.toLowerCase() === wanted);
+    if (!clusterTypeFilter) {
+      throw new Error(`Unsupported cluster type: ${clusterType}. Use one of: ${validClusterTypes.join(', ')}.`);
+    }
   }
   // Prepare providers array for template, only including public products and using name
   const providers = providerOrder

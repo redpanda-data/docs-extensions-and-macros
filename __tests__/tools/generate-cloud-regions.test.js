@@ -40,6 +40,28 @@ products:
     isPublic: false
 `;
 
+// The upstream YAML gains cluster types over time. This one carries a type that
+// clusterTypeMap does not map, alongside a private tier that offers a second
+// unmapped type.
+const serverlessYaml = `
+regions:
+  - name: us-east-1
+    cloudProvider: CLOUD_PROVIDER_AWS
+    zones: [use1-az1]
+    redpandaProductAvailability:
+      tier-serverless-aws:
+        redpandaProductName: tier-serverless-aws
+        clusterTypes: [CLUSTER_TYPE_SERVERLESS, CLUSTER_TYPE_BYOC]
+      tier-secret-aws:
+        redpandaProductName: tier-secret-aws
+        clusterTypes: [CLUSTER_TYPE_SECRET]
+products:
+  - name: tier-serverless-aws
+    isPublic: true
+  - name: tier-secret-aws
+    isPublic: false
+`;
+
 function regionNames(providers, providerName) {
   const provider = providers.find((p) => p.name === providerName);
   return provider ? provider.regions.map((r) => r.name) : [];
@@ -88,6 +110,22 @@ describe('processCloudRegions', () => {
     const providers = processCloudRegions(sampleYaml);
     const usEast = providers.find((p) => p.name === 'AWS').regions[0];
     expect(usEast.tiers).toEqual(['tier-1-aws: BYOC, Dedicated', 'tier-2-aws: BYOC']);
+  });
+
+  it('filters on a cluster type the source data adds but this tool does not map', () => {
+    const providers = processCloudRegions(serverlessYaml, { clusterType: 'CLUSTER_TYPE_SERVERLESS' });
+    expect(regionNames(providers, 'AWS')).toEqual(['us-east-1']);
+    const usEast = providers.find((p) => p.name === 'AWS').regions[0];
+    expect(usEast.tiers).toEqual(['tier-serverless-aws']);
+  });
+
+  it('lists the cluster types the source data offers when one is unsupported', () => {
+    expect(() => processCloudRegions(serverlessYaml, { clusterType: 'Nope' }))
+      .toThrow('Unsupported cluster type: Nope. Use one of: BYOC, CLUSTER_TYPE_SERVERLESS, Dedicated.');
+  });
+
+  it('ignores cluster types that only private tiers offer', () => {
+    expect(() => processCloudRegions(sampleYaml, { clusterType: 'Serverless' })).toThrow(/Unsupported cluster type/);
   });
 
   it('joins zones with a comma and a space so long lists can wrap in a table cell', () => {
