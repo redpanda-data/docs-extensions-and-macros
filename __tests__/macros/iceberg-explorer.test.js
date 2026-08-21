@@ -33,6 +33,31 @@ describe('iceberg-explorer macro', () => {
       expect(() => macro.register.call(mockRegistry)).not.toThrow()
       expect(mockRegistry.block).toHaveBeenCalled()
     })
+
+    // The two branches in register() exist because the Extensions module and a
+    // registry expose different APIs. Pin that shape against the real library
+    // so the assumption cannot drift with an @asciidoctor/core upgrade.
+    test('the real Extensions module exposes register() but not block()', () => {
+      expect(typeof asciidoctor.Extensions.block).toBe('undefined')
+      expect(typeof asciidoctor.Extensions.register).toBe('function')
+    })
+
+    test('registers through an Extensions-like module that has only register()', () => {
+      // Shape of Asciidoctor.Extensions: no .block(), and the callback passed
+      // to .register() runs with a real registry as `this`. Without the
+      // register() branch this target is unusable and the call throws.
+      const innerRegistry = { block: jest.fn(() => {}) }
+      const extensionsModule = {
+        register: jest.fn(function (callback) { callback.call(innerRegistry) }),
+      }
+      expect(() => macro.register.call(extensionsModule)).not.toThrow()
+      expect(extensionsModule.register).toHaveBeenCalled()
+      expect(innerRegistry.block).toHaveBeenCalled()
+    })
+
+    test('throws a named error when the target is neither a registry nor Extensions', () => {
+      expect(() => macro.register({}, {})).toThrow(/iceberg-explorer/)
+    })
   })
 
   describe('rendering', () => {
@@ -65,6 +90,21 @@ describe('iceberg-explorer macro', () => {
       // JSON quotes must be attribute-escaped, never raw, to keep valid HTML.
       expect(html).toContain('&quot;')
       expect(html).not.toContain('data-defaults="{"')
+    })
+
+    // Every string below is author-controlled and lands inside a double-quoted
+    // HTML attribute, so each interpolation point needs its own assertion. The
+    // JSON-body path was the only one covered.
+    test('escapes a config attribute that tries to break out of the attribute', () => {
+      const html = convert('[iceberg-explorer,config="a\\" onmouseover=\\"x"]\n--\n--')
+      expect(html).toContain('data-config="a&quot; onmouseover=&quot;x"')
+      expect(html).not.toContain('onmouseover="')
+    })
+
+    test('escapes a page version that tries to break out of the attribute', () => {
+      const html = convert('[iceberg-explorer]\n--\n--', { 'page-version': '1" onload="x' })
+      expect(html).toContain('data-version="1&quot; onload=&quot;x"')
+      expect(html).not.toContain('onload="')
     })
 
     test('ignores an invalid JSON body but still renders the mount point', () => {
