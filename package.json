@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "5.12.0",
+  "version": "5.13.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -91,7 +91,8 @@
     "./macros/badge": "./macros/badge.js",
     "./macros/enterprise": "./macros/enterprise.js",
     "./macros/prop": "./macros/prop.js",
-    "./extensions/property-page-index": "./extensions/property-page-index.js"
+    "./extensions/property-page-index": "./extensions/property-page-index.js",
+    "./extensions/render-property-descriptions.js": "./extensions/render-property-descriptions.js"
   },
   "files": [
     "extensions",
