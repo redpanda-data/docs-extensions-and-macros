@@ -93,6 +93,22 @@ describe('set-latest-version extension', () => {
     expect(versionAttributes['latest-redpanda-helm-chart-version-short']).toBe('5.10')
   })
 
+  it('keeps a seeded commit attribute when the release tag has no commit hash', () => {
+    const { versionAttributes, latestAttributes } = runExtension({
+      redpanda: {
+        latestRedpandaRelease: { version: 'v26.2.1', commitHash: null },
+        latestRcRelease: { version: 'v26.3.1-rc1', commitHash: null },
+      },
+      latestAttributes: { 'latest-release-commit': 'seeded-in-antora-yml' },
+    })
+
+    // The version is still published even though its commit could not be resolved.
+    expect(latestAttributes['latest-redpanda-version']).toBe('26.2.1')
+    expect(latestAttributes['latest-redpanda-version-short']).toBe('26.2')
+    expect(latestAttributes['latest-release-commit']).toBe('seeded-in-antora-yml')
+    expect(versionAttributes).not.toHaveProperty('redpanda-beta-commit')
+  })
+
   it('does not load the unused console-version module', () => {
     // Console versions come from the Docker tag lookup, so requiring
     // get-latest-console-version advertises a dependency that is never used.

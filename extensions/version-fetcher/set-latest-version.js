@@ -115,7 +115,9 @@ module.exports.register = function ({ config }) {
           // Special handling for Redpanda RC versions if in beta
           if (latestVersions.redpanda?.latestRcRelease?.version) {
             setVersionAndTagAttributes(asciidoc, 'redpanda-beta', latestVersions.redpanda.latestRcRelease.version, name, version);
-            asciidoc.attributes['redpanda-beta-commit'] = latestVersions.redpanda.latestRcRelease.commitHash;
+            if (latestVersions.redpanda.latestRcRelease.commitHash) {
+              asciidoc.attributes['redpanda-beta-commit'] = latestVersions.redpanda.latestRcRelease.commitHash;
+            }
           }
           if (latestVersions.console?.latestBetaRelease) {
             setVersionAndTagAttributes(asciidoc, 'console-beta', latestVersions.console.latestBetaRelease, name, version);
@@ -140,7 +142,11 @@ module.exports.register = function ({ config }) {
         const gaRelease = latestVersions.redpanda?.latestRedpandaRelease;
         if (semver.valid(gaRelease?.version)) {
           setVersionAndTagAttributes(component.latest.asciidoc, 'latest-redpanda', gaRelease.version, component.latest.name, component.latest.version);
-          component.latest.asciidoc.attributes['latest-release-commit'] = gaRelease.commitHash;
+          // An unresolvable tag leaves the commit hash null. Leave any antora.yml
+          // fallback in place rather than overwriting it with nothing.
+          if (gaRelease.commitHash) {
+            component.latest.asciidoc.attributes['latest-release-commit'] = gaRelease.commitHash;
+          }
 
           // Required for backwards compatibility. Some docs still use full-version,
           // and treat it as a floor, so only ever move it forwards. An unparseable
