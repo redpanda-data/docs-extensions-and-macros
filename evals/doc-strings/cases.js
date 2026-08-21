@@ -8,7 +8,8 @@
  *   lint finding goes in; the suggestion comes out, is APPLIED to the
  *   fixture, and the verdict is computed by re-running lint-strings plus the
  *   surface extractor over the result.
- * - upstream: behavior B (upstream-doc-strings.yml). A real overrides-audit
+ * - upstream: behavior B (upstream-doc-strings.yml, not built yet - these
+ *   cases define the contract for it). A real overrides-audit
  *   candidate goes in; the edit is applied and verified by re-running the
  *   audit (class must flip) and the extractor (text must match, nothing else
  *   may change).

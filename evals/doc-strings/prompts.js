@@ -6,7 +6,8 @@
  * Each template mirrors the essence of a production prompt:
  * - rewrite: the Claude step of doc-strings-review.yml (redpanda /
  *   redpanda-operator PR review with GitHub suggestion blocks).
- * - upstreamPort: the Claude step of upstream-doc-strings.yml (docs repo's
+ * - upstreamPort: the Claude step of upstream-doc-strings.yml, which is not
+ *   built yet - this prompt is the contract it will have to meet (docs repo's
  *   override-upstreaming workflow).
  * - negativeReview / negativeAudit: the same review posture pointed at fully
  *   conforming input - the false-positive guard.
@@ -88,7 +89,8 @@ blocks:
 
 /**
  * Upstream-port prompt (behaviors B1-B2): mirror of the docs repo's
- * upstream-doc-strings.yml Claude step, adapted to a text-only contract.
+ * upstream-doc-strings.yml Claude step (not yet built; see the module
+ * header), adapted to a text-only contract.
  */
 function upstreamPort ({ candidate, fileRel, numberedFile, columnLimit }) {
   return `The candidate below is a property description override to upstream into an

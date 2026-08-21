@@ -65,8 +65,10 @@ deterministic lint findings into GitHub suggestion blocks
 the usage literal may change - the rest of the line is byte-compared)
 
 |B. Upstream port
-|`upstream-doc-strings.yml` (docs repo): Claude ports override prose into
-the C++ source string it masks
+|`upstream-doc-strings.yml`: Claude ports override prose into the C++
+source string it masks. NOT YET BUILT - no such workflow exists in this repo
+or the docs repo, so behavior B is currently exercised only by these evals.
+The evals are the contract the workflow will have to meet.
 |`upstream-clean` (UPSTREAMABLE text lands verbatim), `upstream-split`
 (SPLIT candidate: stripped prose lands, the xref must NOT reappear -
 `detectDocsMarkup` over the re-extracted string must be empty)
@@ -138,8 +140,9 @@ negative-review, negative-audit). CommonJS, zero new dependencies.
 `expectRules` / `expectClassBefore` preconditions that are asserted against
 the REAL tool output before the model is called - fixture drift aborts as
 `HARNESS_ERROR` instead of silently testing something else.
-|`prompts.js` |Prompt templates mirroring the production workflow prompts
-(`doc-strings-review.yml`, `upstream-doc-strings.yml`) plus the per-surface
+|`prompts.js` |Prompt templates mirroring the workflow prompts
+(`doc-strings-review.yml`, which ships here, and the not-yet-built
+`upstream-doc-strings.yml`) plus the per-surface
 contract from the doc-strings skill, and a machine-parsed OUTPUT CONTRACT
 section (the one deliberate delta from production, which posts via MCP
 instead).
