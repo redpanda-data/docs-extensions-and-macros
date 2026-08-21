@@ -28,10 +28,28 @@ describe('escapeHtml', () => {
 })
 
 /**
- * The same four-replacement escape had grown three private copies (one of them
- * partial, escaping quotes only). Keep it at one: this check fails if a copy
+ * The same four-replacement escape had grown private copies (one of them
+ * partial, escaping quotes only). Keep it at one: this check fails if a new copy
  * comes back, so nobody has to notice it in review.
+ *
+ * KNOWN_COPIES records the copies that exist today and are deliberately NOT
+ * consolidated yet, each with the reason. The list is an admission of debt, not
+ * a licence: anything not on it fails, so a new copy cannot arrive quietly, and
+ * removing an entry is how the debt gets paid.
  */
+const KNOWN_COPIES = Object.freeze({
+  // macros/badge.js defines its own escapeAttr. Consolidating it here would
+  // collide with PR #266 (fix/macro-adversarial-review-findings), which is open
+  // and adds three further escapeAttr call sites to this same function. #266
+  // merges before this PR, so the consolidation belongs in a follow-up on top of
+  // it rather than in a conflict resolved by whoever merges second. #266 also
+  // considered and declined replacing this escaper with the html-entities
+  // package, on the grounds that html-entities is only a transitive dependency
+  // here and a runtime dependency is a poor trade for four replace() calls, so
+  // the shared escapeHtml in this repo is the agreed destination.
+  [path.join('macros', 'badge.js')]: 'PR #266 adds call sites here; consolidate after it merges',
+})
+
 describe('no private copies of the HTML escape', () => {
   const shared = path.join('extension-utils', 'html-utils.js')
 
@@ -43,7 +61,7 @@ describe('no private copies of the HTML escape', () => {
         return entry.name.endsWith('.js') ? [next] : []
       })
     return walk(dir)
-  }).filter((file) => file !== shared)
+  }).filter((file) => file !== shared && !(file in KNOWN_COPIES))
 
   test.each(jsFiles)('%s does not define its own escape', (file) => {
     const source = fs.readFileSync(path.join(repoRoot, file), 'utf8')
@@ -51,5 +69,19 @@ describe('no private copies of the HTML escape', () => {
     // Replacing anything WITH &quot; is hand-rolled attribute escaping. The
     // reverse direction (unescaping &quot; back to a quote) is unrelated.
     expect(source).not.toMatch(/replace\([^)]*,\s*['"]&quot;['"]\)/)
+  })
+
+  // An entry that no longer describes a real copy is a mute button left on by
+  // accident, so it has to fail too: either the copy is gone and the entry
+  // should go with it, or the file moved and the entry is not protecting
+  // anything.
+  test.each(Object.keys(KNOWN_COPIES))('%s still contains the copy it is excused for', (file) => {
+    const full = path.join(repoRoot, file)
+    expect(fs.existsSync(full)).toBe(true)
+    const source = fs.readFileSync(full, 'utf8')
+    const hasCopy = /function\s+escape(Html|Attr)\s*\(/.test(source) ||
+      /const\s+escape(Html|Attr)\s*=/.test(source) ||
+      /replace\([^)]*,\s*['"]&quot;['"]\)/.test(source)
+    expect(hasCopy).toBe(true)
   })
 })
