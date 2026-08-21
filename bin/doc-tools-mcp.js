@@ -291,7 +291,7 @@ const tools = [
       properties: {
         output: {
           type: 'string',
-          description: 'Output file path relative to repo root (optional, defaults to "cloud-controlplane/x-topics/cloud-regions.md")'
+          description: 'Output file path relative to repo root; must stay inside the repository (optional, defaults to "cloud-controlplane/x-topics/cloud-regions.md")'
         },
         format: {
           type: 'string',
@@ -316,7 +316,7 @@ const tools = [
         },
         template: {
           type: 'string',
-          description: 'Path to custom Handlebars template relative to repo root (optional)'
+          description: 'Path to custom Handlebars template relative to repo root; must stay inside the repository (optional)'
         },
         cluster_type: {
           type: 'string',

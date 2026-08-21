@@ -9,13 +9,13 @@ const { getAntoraStructure } = require('./antora');
 /**
  * Generate cloud regions table documentation
  * @param {Object} args - Arguments
- * @param {string} [args.output] - Output file path (relative to repo root)
+ * @param {string} [args.output] - Output file path (relative to repo root, must stay inside the repository)
  * @param {string} [args.format] - Output format: 'md' or 'adoc'
  * @param {string} [args.owner] - GitHub repository owner
  * @param {string} [args.repo] - GitHub repository name
  * @param {string} [args.path] - Path to YAML file in repository
  * @param {string} [args.ref] - Git reference (branch, tag, or commit SHA)
- * @param {string} [args.template] - Path to custom Handlebars template
+ * @param {string} [args.template] - Path to custom Handlebars template (relative to repo root, must stay inside the repository)
  * @param {string} [args.cluster_type] - Only include regions/tiers available for this cluster type ('BYOC' or 'Dedicated')
  * @param {boolean} [args.dry_run] - Print output to stdout instead of writing file
  * @returns {Object} Generation results
