@@ -20,6 +20,8 @@ const { raiseListenerLimit } = require('./util/raise-listener-limit')
  * - xref:path.adoc[] (empty display uses page title or path)
  */
 
+const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
+
 module.exports.register = function () {
   raiseListenerLimit(this)
   const logger = this.getLogger('resolve-xrefs-in-attachments')
@@ -29,7 +31,15 @@ module.exports.register = function () {
     const allAttachments = contentCatalog.findBy({ family: 'attachment' })
     const jsonAttachments = allAttachments.filter((att) => {
       const path = att.src?.path || att.out?.path || ''
-      return path.endsWith('.json')
+      if (!path.endsWith('.json')) return false
+      // Property datasets are handled by render-property-descriptions, which
+      // converts their descriptions with Asciidoctor instead of rewriting xrefs
+      // by hand. Both running double-processed 53 descriptions in v26.2.1: the
+      // anchor inserted here was escaped to &lt;a href= by the converter. This
+      // extension still serves every other JSON attachment, including the
+      // Connect component catalog, which carries far more xrefs than the
+      // property files do.
+      return !PROPERTIES_JSON_RX.test(path.split('/').pop())
     })
 
     if (!jsonAttachments.length) {
