@@ -1,5 +1,7 @@
 'use strict';
 
+const { escapeHtml } = require('../extension-utils/html-utils');
+
 /**
  * Iceberg Mode Explorer block.
  *
@@ -145,12 +147,12 @@ function defineBlock (registry) {
       const engineBase = attrs['engine-base'] || '';
 
       const dataDefaults = defaults
-        ? escapeAttr(JSON.stringify(defaults))
+        ? escapeHtml(JSON.stringify(defaults))
         : '';
-      const dataConfig = initialConfig ? escapeAttr(initialConfig) : '';
+      const dataConfig = initialConfig ? escapeHtml(initialConfig) : '';
       const styleAttr = height ? ` style="min-height:${height}"` : '';
-      const versionAttr = version ? ` data-version="${escapeAttr(version)}"` : '';
-      const engineAttr = engineBase ? ` data-engine-base="${escapeAttr(engineBase)}"` : '';
+      const versionAttr = version ? ` data-version="${escapeHtml(version)}"` : '';
+      const engineAttr = engineBase ? ` data-engine-base="${escapeHtml(engineBase)}"` : '';
 
       // The container is a mount point only; docs-ui replaces its contents on
       // hydration. Until then the fallback paragraph is visible, so the two
@@ -198,19 +200,6 @@ function cssLength (raw, warn) {
     `height="${value}" is not a CSS length (for example, 400, 400px, 30rem, 60vh). Ignoring it.`
   );
   return '';
-}
-
-/**
- * Escape a value for safe inclusion inside a double-quoted HTML attribute.
- * @param {string} value
- * @returns {string}
- */
-function escapeAttr(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
 }
 
 module.exports.MOUNT_ATTRIBUTE = MOUNT_ATTRIBUTE;

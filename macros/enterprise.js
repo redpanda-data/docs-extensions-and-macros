@@ -56,6 +56,7 @@
 const yaml = require('js-yaml')
 const chalk = require('chalk')
 const { buildBadgeHtml } = require('./badge')
+const { escapeHtml } = require('../extension-utils/html-utils')
 
 const $enterpriseRegistry = Symbol('$enterpriseRegistry')
 
@@ -247,7 +248,7 @@ function resolveTooltipAttribute (raw) {
 function buildEnterpriseContent ({ feature, text, xref, url, tooltip, licensingPage, role, tooltipAttr, links }) {
   const display = text || feature
   const tooltipText = tooltip || `${feature} requires an Enterprise Edition license.`
-  const escapedTooltip = tooltipText.replace(/"/g, '&quot;')
+  const escapedTooltip = escapeHtml(tooltipText)
   const tooltipHtml = tooltipAttr ? ` ${tooltipAttr}="${escapedTooltip}"` : ''
   let inner = display
   if (links) {
