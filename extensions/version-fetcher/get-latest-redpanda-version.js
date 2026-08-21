@@ -38,11 +38,17 @@ module.exports = async (github, owner, repo, logger = null) => {
       const resolveCommitHash = async (release) => {
         if (!release) return null;
         try {
-          const commitData = await github.rest.git.getRef({
-            owner,
-            repo,
-            ref: `tags/${release.tag_name}`
-          });
+          // Retry the ref lookup on its own. A rate limit or a 5xx is transient
+          // and deserves the attempts; swallowing it immediately turned one
+          // blip into a permanently unset commit attribute. Retrying HERE
+          // rather than letting the error escape is what keeps a exhausted
+          // retry from also costing us the version, which is strictly worse
+          // than losing the commit hash.
+          const commitData = await retryWithBackoff(
+            () => github.rest.git.getRef({ owner, repo, ref: `tags/${release.tag_name}` }),
+            { shouldRetry: isRetryableGitHubError, operationName: `getRef ${release.tag_name}` },
+            logger
+          );
           return commitData.data.object.sha.substring(0, 7);
         } catch (error) {
           const message = `Could not resolve the commit for ${release.tag_name}, so its commit attribute is unset: ${error.status || ''} ${error.message || error}`;

@@ -174,3 +174,25 @@ describe('set-latest-version extension', () => {
     expect(latestAttributes['latest-redpanda-version-short']).toBe('26.2')
   })
 })
+
+describe('the sibling contract extensions/REFERENCE.adoc documents', () => {
+  // REFERENCE.adoc states that most <base>-version attributes get a -tag and a
+  // -version-short sibling, and that full-version is the exception and gets
+  // neither. That sentence was wrong once already, claiming EVERY attribute got
+  // both, and prose drifts without anything noticing. Pin both halves.
+  it('gives full-version neither sibling', () => {
+    const { latestAttributes } = runExtension()
+
+    expect(latestAttributes['full-version']).toBeDefined()
+    expect(latestAttributes['full-version-tag']).toBeUndefined()
+    expect(latestAttributes['full-version-short']).toBeUndefined()
+    expect(latestAttributes['full-version-version-short']).toBeUndefined()
+  })
+
+  it('gives latest-redpanda-version both, so the exception is a real exception', () => {
+    const { latestAttributes } = runExtension()
+
+    expect(latestAttributes['latest-redpanda-tag']).toBeDefined()
+    expect(latestAttributes['latest-redpanda-version-short']).toBeDefined()
+  })
+})

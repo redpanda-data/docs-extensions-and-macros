@@ -450,7 +450,10 @@ The following attributes are available to the latest version of each Antora comp
 
 ==== Tag and short-version siblings
 
-Every `<base>-version` attribute in the previous lists also gets two siblings:
+Most `<base>-version` attributes in the previous lists also get two siblings.
+`full-version` is the exception and gets neither, because it is set directly
+rather than through the shared helper, and it is the one attribute that only
+ever moves forwards.
 
 `<base>-tag`:: The version exactly as the release publishes it, including any `v` prefix (for example, `latest-redpanda-tag` is `v26.2.1`). Use this for container image tags and Git references. There is no tag attribute for `latest-operator-version` or `latest-redpanda-helm-chart-version`, which are already raw values.
 `<base>-version-short`:: Only the `major.minor` part (for example, `latest-redpanda-version-short` is `26.2` when `latest-redpanda-version` is `26.2.1`). Use this where a page needs the release line rather than an exact patch, such as a download directory or an install pack name.
