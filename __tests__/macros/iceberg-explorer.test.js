@@ -109,6 +109,11 @@ describe('iceberg-explorer macro', () => {
       expect(html).toContain('data-version="26.2"')
     })
 
+    test('falls back to the component version attribute', () => {
+      const html = convert('[iceberg-explorer]\n--\n--', { 'page-component-version': '25.3' })
+      expect(html).toContain('data-version="25.3"')
+    })
+
     test('omits data-version when no version attribute is set', () => {
       const html = convert('[iceberg-explorer]\n--\n--')
       expect(html).not.toContain('data-version=')

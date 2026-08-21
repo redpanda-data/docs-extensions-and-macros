@@ -1,10 +1,11 @@
 = Iceberg Mode Explorer Block Test
 :description: Test that the [iceberg-explorer] block emits a version-aware mount point that docs-ui hydrates.
-:page-version: 26.2
 
 {description}
 
 NOTE: The explorer UI lives in the docs-ui bundle. Until that module ships, each block below renders its fallback paragraph instead of an explorer. What this page verifies is the markup: one mount point per block, carrying the author's attributes.
+
+NOTE: This preview component is unversioned (`version: ~`), and Antora sets `page-version` from the component version and locks it, so no `data-version` appears below. A page header cannot override it. Versioned sites get `data-version` on every mount point.
 
 == Default explorer
 

@@ -345,6 +345,8 @@ Until the explorer module replaces the container's contents, the fallback paragr
 
 The page's component version (`page-version`, falling back to `page-component-version`) is stamped onto the mount point as `data-version` so the UI can load the engine build that matches the doc version. If neither attribute is set, `data-version` is omitted.
 
+Antora derives both attributes from the component version and locks them, so a page header cannot set them: an unversioned component (`version: ~`, which is what this repo's preview site uses) emits no `data-version`, and docs-ui falls back to its own version detection.
+
 === Mount contract
 
 docs-ui must hydrate on the `data-iceberg-explorer` attribute (`[data-iceberg-explorer]`), never on a class name that matches the block name.
