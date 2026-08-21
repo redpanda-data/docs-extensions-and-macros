@@ -22,6 +22,21 @@
  * a string that was authored as one, which is what makes the round trip safe.
  *
  * Numbers inside the safe range are untouched and stay plain numbers.
+ *
+ * KNOWN LIMITATION: this is a regex over the raw text, not a real JSON scanner,
+ * so it does not track string/escape state. A value that is legitimate JSON
+ * text APPEARING INSIDE an escaped string -- for example a Bloblang example
+ * embedded as an example value, `"{\"delay_for_ns\":110839937000000000}"` --
+ * is indistinguishable from real JSON structure to this regex, which inserts a
+ * quoted sentinel at that position and corrupts the document. This is confirmed
+ * against the real, published Connect component attachment, not a theoretical
+ * risk: parsing it throws "Expected ',' or ']' after array element". Do not
+ * apply this module to Connect/Bloblang-shaped JSON, or to any JSON whose string
+ * values may themselves contain escaped JSON-looking text. It has been checked
+ * against every redpanda-properties-*.json and property-overrides.json this
+ * repo could find (~50 files, every published version) with no false match, and
+ * is applied only to property-shaped data for that reason -- not because the
+ * risk is theoretical elsewhere.
  */
 
 // An integer literal too long to be safe, in JSON value position: after a colon,

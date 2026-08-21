@@ -82,6 +82,30 @@ describe('big-int-json', () => {
     })
   })
 
+  // A peer's review of a sibling PR's own lossless-JSON module named this class
+  // of defect for a regex-based approach; testing it against this module found
+  // it is not theoretical here either.
+  describe('known limitation: JSON-shaped text inside an escaped string', () => {
+    test('a Bloblang example value with an escaped colon-number-brace corrupts the document', () => {
+      // The real, published shape: a string field whose value is itself an
+      // escaped JSON snippet used as a config example.
+      const text = '{"example":"{\\"delay_for_ns\\":110839937000000000}"}'
+      // Confirms the shape is legal JSON to begin with.
+      expect(() => JSON.parse(text)).not.toThrow()
+      expect(() => bigIntJson.parse(text)).toThrow()
+    })
+
+    test('the real, published Connect attachment reproduces it', () => {
+      const fs = require('fs')
+      const path = require('path')
+      const file = path.join(__dirname, '../../preview/redpanda-connect/docs-data/connect-latest.json')
+      if (!fs.existsSync(file)) return // environment-dependent fixture; skip if absent
+      const raw = fs.readFileSync(file, 'utf8')
+      expect(() => JSON.parse(raw)).not.toThrow()
+      expect(() => bigIntJson.parse(raw)).toThrow()
+    })
+  })
+
   describe('isUnsafeInteger', () => {
     test.each([
       ['0', false],

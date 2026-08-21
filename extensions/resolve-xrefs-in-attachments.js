@@ -1,7 +1,6 @@
 'use strict'
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
-const bigIntJson = require('../cli-utils/big-int-json')
 
 /**
  * Resolves AsciiDoc xrefs in JSON attachment files to HTML links.
@@ -83,10 +82,20 @@ function processJsonAttachment (attachment, contentCatalog, logger) {
 
   let data
   try {
-    // bigIntJson: this function rewrites the attachment, so a plain round trip
-    // rounded every integer beyond 2^53 in whatever it touched. The Connect
-    // component catalog ships two int64 values that were corrupted this way.
-    data = bigIntJson.parse(contentStr)
+    // Deliberately plain JSON.parse, not bigIntJson: this function rewrites
+    // whatever JSON attachment it is handed, including the Connect component
+    // catalog, which contains example config text as an ESCAPED JSON-shaped
+    // string -- "{\"delay_for_ns\":110839937000000000}" -- indistinguishable
+    // by regex from real JSON value position. bigIntJson's value-position regex
+    // matched inside that escaped string and inserted stray quotes, which is not
+    // a rounding error, it is invalid JSON: confirmed to throw
+    // "Expected ',' or ']' after array element" on the real, currently-published
+    // connect-4.103.1.json attachment. A plain round trip still silently rounds
+    // large integers (the pre-existing, understood defect this file has always
+    // had), which is the safer failure mode until a real JSON scanner -- one
+    // that tracks string/escape state rather than pattern-matching text --
+    // replaces the regex here.
+    data = JSON.parse(contentStr)
   } catch (err) {
     logger.debug(`Skipping invalid JSON: ${attachment.src?.path}`)
     return { modified: false, xrefCount: 0 }
@@ -104,7 +113,7 @@ function processJsonAttachment (attachment, contentCatalog, logger) {
   const processed = processValue(data, contentCatalog, context, logger)
 
   // Write back the modified JSON
-  attachment.contents = Buffer.from(bigIntJson.stringify(processed, 2), 'utf8')
+  attachment.contents = Buffer.from(JSON.stringify(processed, null, 2), 'utf8')
 
   return { modified: true, xrefCount: context.xrefCount }
 }
