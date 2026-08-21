@@ -385,6 +385,8 @@ Or pass a JSON object as the block body to supply author-defined defaults:
 ----
 ```
 
+The explorer module reads only the `config` key and renders its own sample schema and record. Other keys are forwarded verbatim in `data-defaults` and ignored, so do not document author-supplied schemas or records as supported until docs-ui reads them.
+
 The JSON is attribute-escaped and emitted as `data-defaults`. The body must be a JSON *object*: `JSON.parse()` also accepts scalars and arrays, and docs-ui reads keys off the parsed value, so a bare `123` is as unusable as a syntax error. If the body is not a JSON object, the macro logs a warning that names the page, omits `data-defaults`, and still renders the mount point.
 
 The block accepts an open (`--`), listing (`----`), literal, or pass body. It is not registered for the paragraph context, because the processor replaces the block with the mount point: registering paragraphs would delete the prose under a stray `[iceberg-explorer]` line from the published page.
@@ -410,6 +412,18 @@ asciidoc:
   extensions:
     - '@redpanda-data/docs-extensions-and-macros/macros/iceberg-explorer'
 ----
+
+=== docs-ui dependency
+
+This block is half of a two-repo handshake and does nothing on its own. The explorer UI and its translation engine ship in docs-ui, and no released docs-ui bundle contains them yet: the explorer module is still open in `redpanda-data/docs-ui` (PR #404, `jake/iceberg-mode-explorer`), so on a site built with the current bundle the block renders the container and its fallback paragraph, nothing more.
+
+Order of operations before an author uses the block on a published page:
+
+. Merge and publish this package, so consumers can resolve the macro.
+. Merge and release docs-ui #404, with hydration keyed on `[data-iceberg-explorer]` (see <<Mount contract>>).
+. Add the macro to each consuming playbook's `asciidoc.extensions` (`redpanda-data/docs`, `cloud-docs`). Registering it in this repo's `local-antora-playbook.yml` covers only this repo's preview site.
+
+Until step 2 lands, a page that uses the block shows the fallback paragraph rather than an explorer. That is deliberate: it is visible, so a missing or outdated UI bundle looks broken rather than looking like a page with nothing on it.
 
 == components_by_category
 

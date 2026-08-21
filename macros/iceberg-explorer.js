@@ -36,11 +36,14 @@ const { escapeHtml } = require('../extension-utils/html-utils');
  *   [iceberg-explorer]
  *   ----
  *   {
- *     "config": "key:mode=binary;value:mode=schema_id_prefix,layout=flat;headers:value_type=binary",
- *     "schema": { ... },
- *     "record": { ... }
+ *     "config": "key:mode=binary;value:mode=schema_id_prefix,layout=flat;headers:value_type=binary"
  *   }
  *   ----
+ *
+ * The explorer module reads only the "config" key (docs-ui
+ * src/js/27-iceberg-explorer.js), rendering its own sample schema and record.
+ * Any other key is forwarded verbatim in `data-defaults` and ignored today, so
+ * do not advertise author-supplied schemas or records as supported.
  *
  * The block reads the page's component version and stamps it onto the mount
  * point so the UI can fetch the engine build that matches the doc version.
