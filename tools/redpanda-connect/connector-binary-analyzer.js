@@ -1,5 +1,5 @@
 const octokit = require('../../cli-utils/octokit-client');
-const { execSync, spawnSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -15,6 +15,31 @@ const https = require('https');
 
 const REPO_OWNER = 'redpanda-data';
 const REPO_NAME = 'connect';
+
+// Release asset prefixes per binary flavour. The plain OSS build is the one
+// `rpk connect install` puts on PATH, so fetching that asset directly yields
+// the same connector schema without passing a version through rpk's
+// --connect-version validation.
+const BINARY_ASSET_PREFIXES = {
+  oss: 'redpanda-connect',
+  cloud: 'redpanda-connect-cloud',
+  cgo: 'redpanda-connect-cgo'
+};
+
+/**
+ * Resolve a binary flavour to its release asset prefix.
+ * @param {string} binaryType - 'oss', 'cloud' or 'cgo'
+ * @returns {string} The asset name prefix
+ */
+function resolveAssetPrefix (binaryType) {
+  const prefix = BINARY_ASSET_PREFIXES[binaryType];
+  if (!prefix) {
+    throw new Error(
+      `Unknown binary type "${binaryType}" (expected one of ${Object.keys(BINARY_ASSET_PREFIXES).join(', ')})`
+    );
+  }
+  return prefix;
+}
 
 /**
  * Get platform-specific binary name
@@ -46,18 +71,21 @@ function getPlatformInfo() {
 
 /**
  * Get the latest release version from GitHub
- * @param {string} binaryType - Type of binary ('cloud' or 'cgo')
+ * @param {string} binaryType - Type of binary ('oss', 'cloud' or 'cgo')
  * @returns {Promise<string>} Version string (e.g., "4.76.0")
  */
 async function getLatestVersion(binaryType = 'cloud') {
+  // Resolved outside the try so an unknown flavour surfaces its own message
+  // instead of being wrapped as a failure to reach the GitHub API. tools/ is
+  // published, so callers outside this repo see this error.
+  const prefix = resolveAssetPrefix(binaryType);
+
   try {
     const { data: releases } = await octokit.repos.listReleases({
       owner: REPO_OWNER,
       repo: REPO_NAME,
       per_page: 20
     });
-
-    const prefix = resolveAssetPrefix(binaryType);
 
     // Find the latest release with the specified binary type. Match the
     // separator too: every prefix starts with 'redpanda-connect', so a bare
@@ -127,37 +155,102 @@ function downloadFile(url, destPath) {
 }
 
 /**
+ * Directory that holds downloaded Connect binaries for the life of the process.
+ *
+ * Binaries are ~320 MB extracted, so they never belong in docs-data: the
+ * consuming repo commits that directory wholesale, and a run killed before its
+ * cleanup would leave a blob over GitHub's 100 MB file limit staged for the
+ * auto-docs PR. One directory for the whole run also lets downloadBinary's
+ * skip-if-present check serve repeat requests: the multi-release loop asks for
+ * every interior version twice (as the new side of one diff pair and the old
+ * side of the next), and a per-call directory made that a second download.
+ *
+ * @returns {string} Path to the process-wide binary cache directory
+ */
+let binaryCacheDir = null;
+function getBinaryCacheDir () {
+  if (binaryCacheDir && fs.existsSync(binaryCacheDir)) return binaryCacheDir;
+
+  binaryCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpcn-binaries-'));
+  const created = binaryCacheDir;
+  process.on('exit', () => {
+    try {
+      fs.rmSync(created, { recursive: true, force: true });
+    } catch (err) {
+      // Nothing useful to do while exiting; the OS reclaims tmpdir anyway.
+    }
+  });
+  return binaryCacheDir;
+}
+
+// Cap the cache: a backfill can touch dozens of versions, but no more than a
+// handful of binaries are live at once (the two OSS versions of the current
+// diff pair plus the cloud and cgo binaries analysed alongside them). Without
+// a cap, sharing one directory would trade repeat downloads for unbounded disk.
+const BINARY_CACHE_LIMIT = 6;
+const binaryCacheUse = [];
+
+/**
+ * Record a binary as most recently used and evict the oldest beyond the cap.
+ * @param {string} destPath - Path to the binary just downloaded or reused
+ */
+function touchBinaryCache (destPath) {
+  const existing = binaryCacheUse.indexOf(destPath);
+  if (existing !== -1) binaryCacheUse.splice(existing, 1);
+  binaryCacheUse.push(destPath);
+
+  while (binaryCacheUse.length > BINARY_CACHE_LIMIT) {
+    const evicted = binaryCacheUse.shift();
+    try {
+      fs.rmSync(evicted, { force: true });
+    } catch (err) {
+      console.warn(`Warning: could not evict cached binary ${evicted}: ${err.message}`);
+    }
+  }
+}
+
+/**
+ * Extract the Connect binary out of a release tarball.
+ *
+ * Extraction goes into an empty directory of its own because the archive's
+ * inner file name is not the destination name, and the destination directory
+ * holds other flavours and versions whose names also contain
+ * 'redpanda-connect'. Scanning the shared directory instead would pick a
+ * neighbour in readdir order and analyse, say, the cloud binary as the cgo one.
+ *
+ * @param {string} tarballPath - Path to the downloaded .tar.gz
+ * @param {string} destPath - Path the extracted binary should end up at
+ * @returns {string} destPath
+ */
+function extractBinaryFromTarball (tarballPath, destPath) {
+  const extractDir = fs.mkdtempSync(`${destPath}.extract-`);
+  try {
+    execFileSync('tar', ['-xzf', tarballPath, '-C', extractDir], { stdio: 'ignore' });
+
+    const candidates = fs.readdirSync(extractDir)
+      .filter(name => name.includes('redpanda-connect') && !name.endsWith('.tar.gz'))
+      .filter(name => fs.statSync(path.join(extractDir, name)).isFile())
+      .sort();
+
+    if (candidates.length === 0) {
+      throw new Error('Binary not found after extraction');
+    }
+
+    fs.renameSync(path.join(extractDir, candidates[0]), destPath);
+    fs.chmodSync(destPath, 0o755);
+    return destPath;
+  } finally {
+    fs.rmSync(extractDir, { recursive: true, force: true });
+  }
+}
+
+/**
  * Download a binary from GitHub releases
- * @param {string} binaryType - 'cloud' or 'cgo'
+ * @param {string} binaryType - 'oss', 'cloud' or 'cgo'
  * @param {string} version - Version to download (e.g., "4.76.0")
  * @param {string} destDir - Destination directory
  * @returns {Promise<string>} Path to downloaded binary
  */
-// Release asset prefixes per binary flavour. The plain OSS build is the one
-// `rpk connect install` puts on PATH, so fetching that asset directly yields
-// the same connector schema without passing a version through rpk's
-// --connect-version validation.
-const BINARY_ASSET_PREFIXES = {
-  oss: 'redpanda-connect',
-  cloud: 'redpanda-connect-cloud',
-  cgo: 'redpanda-connect-cgo'
-};
-
-/**
- * Resolve a binary flavour to its release asset prefix.
- * @param {string} binaryType - 'oss', 'cloud' or 'cgo'
- * @returns {string} The asset name prefix
- */
-function resolveAssetPrefix (binaryType) {
-  const prefix = BINARY_ASSET_PREFIXES[binaryType];
-  if (!prefix) {
-    throw new Error(
-      `Unknown binary type "${binaryType}" (expected one of ${Object.keys(BINARY_ASSET_PREFIXES).join(', ')})`
-    );
-  }
-  return prefix;
-}
-
 async function downloadBinary(binaryType, version, destDir) {
   // cgo binaries are only available for linux/amd64, so force that platform
   const platformInfo = binaryType === 'cgo'
@@ -170,6 +263,7 @@ async function downloadBinary(binaryType, version, destDir) {
   // Skip download if already exists
   if (fs.existsSync(destPath)) {
     console.log(`✓ ${binaryType.toUpperCase()} binary already downloaded: ${binaryName}`);
+    touchBinaryCache(destPath);
     return destPath;
   }
 
@@ -197,35 +291,12 @@ async function downloadBinary(binaryType, version, destDir) {
 
     // Extract the binary
     console.log(`Extracting ${binaryType.toUpperCase()} binary...`);
-    execSync(`tar -xzf "${tarballPath}" -C "${destDir}"`, { stdio: 'ignore' });
-
-    // Find the extracted binary
-    const extractedFiles = fs.readdirSync(destDir);
-    let binaryPath = null;
-
-    for (const file of extractedFiles) {
-      const fullPath = path.join(destDir, file);
-      if (fs.statSync(fullPath).isFile() && file.includes('redpanda-connect') && !file.endsWith('.tar.gz')) {
-        binaryPath = fullPath;
-        break;
-      }
-    }
-
-    if (!binaryPath) {
-      throw new Error('Binary not found after extraction');
-    }
-
-    // Rename to standard name if needed
-    if (binaryPath !== destPath) {
-      fs.renameSync(binaryPath, destPath);
-    }
-
-    // Make executable
-    fs.chmodSync(destPath, 0o755);
+    extractBinaryFromTarball(tarballPath, destPath);
 
     // Clean up tarball
     fs.unlinkSync(tarballPath);
 
+    touchBinaryCache(destPath);
     console.log(`Done: Downloaded ${binaryType.toUpperCase()} binary: ${binaryName}`);
     return destPath;
   } catch (error) {
@@ -462,9 +533,10 @@ async function analyzeAllBinaries(ossVersion, cloudVersion = null, dataDir = nul
 
   const docsDataDir = dataDir || path.resolve(process.cwd(), 'docs-data');
 
-  // Use temp directory for binaries (not docs-data)
-  const os = require('os');
-  const binaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpcn-binaries-'));
+  // Use temp directory for binaries (not docs-data). Shared with every other
+  // download in this process, so a multi-release run fetches each cloud and cgo
+  // binary once instead of once per diff pair.
+  const binaryDir = getBinaryCacheDir();
 
   console.log(`📁 Using temp directory for binaries: ${binaryDir}`);
 
@@ -535,13 +607,8 @@ async function analyzeAllBinaries(ossVersion, cloudVersion = null, dataDir = nul
     console.log('⏩ Skipping cgo binary analysis');
   }
 
-  // Clean up temp binaries
-  try {
-    fs.rmSync(binaryDir, { recursive: true, force: true });
-    console.log(`🧹 Cleaned up temp binaries`);
-  } catch (err) {
-    console.warn(`Warning: Could not clean up temp directory: ${err.message}`);
-  }
+  // Binaries stay in the shared cache so the next diff pair can reuse them; the
+  // directory is removed when the process exits (see getBinaryCacheDir).
 
   // IMPORTANT: cgoOnly contains connectors that exist ONLY in the cgo binary
   // and NOT in the regular OSS binary (rpk connect list). These are the
@@ -593,7 +660,10 @@ module.exports = {
   analyzeAllBinaries,
   findCgoOnlyConnectors,
   getLatestVersion,
+  getPlatformInfo,
   resolveAssetPrefix,
+  getBinaryCacheDir,
+  extractBinaryFromTarball,
   downloadBinary,
   downloadCloudBinary,
   downloadCgoBinary,

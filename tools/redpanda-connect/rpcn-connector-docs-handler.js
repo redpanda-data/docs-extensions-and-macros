@@ -719,12 +719,12 @@ async function loadConnectorDataForVersion(version, dataDir, options = {}) {
   // for. The plain OSS asset is the same build rpk would have installed, so the
   // schema is identical, and this leaves the caller's own Connect installation
   // untouched instead of forcing a managed plugin over the top of it.
-  const scratchDir = path.join(dataDir, `.connect-binary-${version}`);
   try {
-    const { downloadBinary, getConnectorList } = require('./connector-binary-analyzer.js');
+    const { downloadBinary, getConnectorList, getBinaryCacheDir } = require('./connector-binary-analyzer.js');
 
-    fs.mkdirSync(scratchDir, { recursive: true });
-    const binaryPath = await downloadBinary('oss', version, scratchDir);
+    // Binaries go to the process-wide temp cache, never to dataDir: the
+    // consuming repo commits dataDir, and the extracted binary is ~320 MB.
+    const binaryPath = await downloadBinary('oss', version, getBinaryCacheDir());
     const parsed = getConnectorList(binaryPath);
 
     if (!parsed || typeof parsed !== 'object') {
@@ -745,8 +745,6 @@ async function loadConnectorDataForVersion(version, dataDir, options = {}) {
     // failure summary and the PR body, where a bare "data unavailable" sends
     // the reader back to the raw workflow log.
     throw new Error(`Cannot process version ${version} - data unavailable (${error.message})`);
-  } finally {
-    fs.rmSync(scratchDir, { recursive: true, force: true });
   }
 }
 
