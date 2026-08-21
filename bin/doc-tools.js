@@ -1788,6 +1788,13 @@ automation
  * generates either Markdown or AsciiDoc tables for documentation. Supports custom templates
  * and dry-run mode for previewing output.
  *
+ * A custom template is a Handlebars file inside this repository and receives this context:
+ * `providers`, each with `name` ("GCP"), `displayName` ("Google Cloud Platform (GCP)") and
+ * `regions`, each region with `name`, `zones` (comma separated) and `tiers`; `clusterType`,
+ * the cluster type the data was filtered to, set only with --cluster-type, in which case the
+ * tier entries carry no per-tier cluster type; and `lastUpdated`, an ISO timestamp. The
+ * bundled templates in tools/cloud-regions show all of it in use.
+ *
  * @why
  * Cloud region data changes frequently as new regions are added and tier availability evolves.
  * The cloudv2-infra repository contains the source of truth for cloud infrastructure. Manual
