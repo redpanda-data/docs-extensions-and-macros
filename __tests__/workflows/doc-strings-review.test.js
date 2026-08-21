@@ -157,11 +157,37 @@ describe('doc-strings-review workflow: static contracts', () => {
     }
   })
 
-  test('the job does not request id-token: write', () => {
-    // Nothing here mints an OIDC token, and a called workflow cannot elevate
-    // past the caller's token anyway.
+  test('the job requests id-token: write, which the review action needs', () => {
+    // anthropics/claude-code-action mints an OIDC token. Its setupGitHubToken
+    // short-circuits only when the github_token input is set; this workflow
+    // passes anthropic_api_key and no github_token, so the action calls
+    // core.getIDToken() and throws "Could not fetch an OIDC token" without this
+    // scope. The review step carries continue-on-error, so the failure is
+    // silent: the workflow reports success and posts nothing, on every PR.
+    // Sibling org workflows using the action the same way declare it too.
     expect(Object.keys(job.permissions)).toEqual(expect.arrayContaining(['contents', 'pull-requests']))
-    expect(job.permissions['id-token']).toBeUndefined()
+    expect(job.permissions['id-token']).toBe('write')
+  })
+
+  test('the caller contract grants every permission the job declares', () => {
+    // A called workflow cannot elevate past the caller's token, so any scope
+    // this job declares must also appear in the shim callers copy, or the job
+    // fails (or worse, silently no-ops) in every consuming repo.
+    const shim = fs.readFileSync(WORKFLOW_PATH, 'utf8')
+      .split('\n').filter((l) => l.startsWith('#'))
+      .join('\n')
+    for (const scope of Object.keys(job.permissions)) {
+      expect(shim).toMatch(new RegExp(`^#\\s+${scope}:`, 'm'))
+    }
+  })
+
+  test('the caller contract does not point at a ref that cannot resolve', () => {
+    // The repo publishes no git tags, so a @v<version> example in the shim
+    // hands every caller an unresolvable ref.
+    const shim = fs.readFileSync(WORKFLOW_PATH, 'utf8')
+    const refs = [...shim.matchAll(/doc-strings-review\.yml@([\w.\-/]+)/g)].map((m) => m[1])
+    expect(refs.length).toBeGreaterThan(0)
+    for (const ref of refs) expect(ref).not.toMatch(/^v\d/)
   })
 
   test('doc_tools_package pins a version, and the pin matches this package', () => {

@@ -32,12 +32,19 @@
 #   permissions:
 #     contents: read
 #     pull-requests: write
+#     id-token: write
 #   jobs:
 #     review:
-#       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/doc-strings-review.yml@v5.17.0
+#       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/doc-strings-review.yml@main
 #       secrets:
 #         anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 #         actions_bot_token: ${{ secrets.ACTIONS_BOT_TOKEN }}
+#
+# The ref above is `@main` because this repository publishes NO git tags: `git
+# ls-remote --tags` is empty and publish-to-npm.yaml only publishes to npm, it
+# creates no tag or release. A caller copying `@v<version>` would get an
+# unresolvable ref and a failing workflow. Pin to a tag once the release
+# pipeline creates one, or to a commit SHA for immutability today.
 #
 # Use `pull_request`, not `pull_request_target`. On `pull_request_target`,
 # actions/checkout without an explicit ref checks out the BASE commit, so the
@@ -83,6 +90,12 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # anthropics/claude-code-action mints an OIDC token: its setupGitHubToken
+      # short-circuits only when the github_token input is set, and otherwise
+      # calls core.getIDToken() unconditionally and throws without this scope.
+      # The review step carries continue-on-error, so omitting this makes the
+      # whole review pass green and post nothing, on every PR.
+      id-token: write
     steps:
       - name: Abort if PR modifies review configuration from a non-writer
         env:
