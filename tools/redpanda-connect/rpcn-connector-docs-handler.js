@@ -691,10 +691,51 @@ function logCollapsed (label, filesArray, maxToShow = 10) {
 
 
 /**
+ * Why a stored connect-<version>.json cannot stand in for a fresh fetch.
+ *
+ * The handler writes augmentConnectorData() output back over the same file, so
+ * a stored snapshot is not necessarily raw binary output. Reusing an augmented
+ * one would re-augment already-augmented data: the cloud-only and cgo-only
+ * entries injected by the previous run are not in the new analysis, so they
+ * survive with their platform markers reset and a cgo-only connector ends up
+ * published as an ordinary OSS one. The version field is the only provenance
+ * the downstream templates get, so a file that disagrees with its own name
+ * cannot be trusted either.
+ *
+ * @param {Object} data - Parsed contents of connect-<version>.json
+ * @param {string} version - Version the file is supposed to describe
+ * @returns {string|null} Reason it cannot be reused, or null if it can
+ */
+function snapshotReuseBlocker (data, version) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return 'file is not a connector index'
+  }
+
+  if (typeof data.version === 'string' && data.version !== version) {
+    return `file reports version ${data.version}`
+  }
+
+  const augmented = Object.values(data)
+    .filter(Array.isArray)
+    .some(components => components.some(c => c && typeof c === 'object' && (
+      c.cloudSupported !== undefined ||
+      c.requiresCgo !== undefined ||
+      c.cloudOnly !== undefined
+    )))
+
+  if (augmented) {
+    return 'file already carries cloud/cgo augmentation from an earlier run'
+  }
+
+  return null
+}
+
+/**
  * Load or fetch connector data for a specific version
  * @param {string} version - Version to load (e.g., "4.50.0")
  * @param {string} dataDir - Directory where JSON files are stored
  * @param {Object} options - Options for fetching if needed
+ * @param {boolean} [options.forceFresh] - Refetch even when a usable file exists
  * @returns {Promise<Object>} Parsed connector data
  */
 async function loadConnectorDataForVersion(version, dataDir, options = {}) {
@@ -702,14 +743,28 @@ async function loadConnectorDataForVersion(version, dataDir, options = {}) {
 
   // If forceFresh is set, always fetch even if file exists
   // This ensures we have accurate connector lists for diff comparison
+  let reason = options.forceFresh ? 'force refresh requested' : 'file not found';
+
   if (!options.forceFresh && fs.existsSync(dataFile)) {
-    console.log(`✓ Using existing data file: connect-${version}.json`);
-    const data = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
-    return data;
+    let stored = null;
+    let blocker = null;
+    try {
+      stored = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+      blocker = snapshotReuseBlocker(stored, version);
+    } catch (err) {
+      blocker = `file could not be parsed (${err.message})`;
+    }
+
+    if (!blocker) {
+      console.log(`✓ Using existing data file: connect-${version}.json`);
+      return stored;
+    }
+
+    console.warn(`↻ Ignoring existing connect-${version}.json: ${blocker}`);
+    reason = blocker;
   }
 
   // Fetch fresh data
-  const reason = options.forceFresh ? 'force refresh requested' : 'file not found';
   console.log(`📥 Fetching data for ${version} (${reason})...`);
 
   // Fetch the OSS release asset for this exact version instead of asking rpk to
@@ -729,6 +784,13 @@ async function loadConnectorDataForVersion(version, dataDir, options = {}) {
 
     if (!parsed || typeof parsed !== 'object') {
       throw new Error('connector list was empty or not an object');
+    }
+
+    // The asset name embeds the version and the release was fetched by tag, so
+    // a binary that reports a different version means the wrong asset was
+    // downloaded. Fail rather than publish a snapshot under the wrong name.
+    if (typeof parsed.version === 'string' && parsed.version !== version) {
+      throw new Error(`asset reports version ${parsed.version}, not ${version}`);
     }
 
     // Write via a temp file so an interrupted run cannot leave a half-written
@@ -2069,6 +2131,8 @@ module.exports = {
   capToTwoSentences,
   augmentConnectorData,
   buildCleanOssData,
+  loadConnectorDataForVersion,
+  snapshotReuseBlocker,
   fieldAnchor,
   buildFieldsTable,
   buildChangedDefaultsTable
