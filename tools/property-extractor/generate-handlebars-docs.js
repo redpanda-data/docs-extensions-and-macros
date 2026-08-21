@@ -120,13 +120,16 @@ function normalizeAnchorsInProperties(properties) {
   const seen = new Map();
   let total = 0;
 
+  let xrefTotal = 0;
   const fix = (value, scope) => {
     const { text, rewrites } = helpers.normalizePropertyAnchors(value, properties, scope);
     for (const r of rewrites) {
       total += 1;
       seen.set(r.from, r.to);
     }
-    return text;
+    const canonical = helpers.canonicalizePropertyXrefs(text);
+    xrefTotal += canonical.rewrites;
+    return canonical.text;
   };
 
   Object.values(properties).forEach((prop) => {
@@ -135,13 +138,27 @@ function normalizeAnchorsInProperties(properties) {
     if (typeof prop.description === 'string') prop.description = fix(prop.description, scope);
     if (typeof prop.acceptable_values === 'string') prop.acceptable_values = fix(prop.acceptable_values, scope);
     if (Array.isArray(prop.related_topics)) {
-      prop.related_topics = prop.related_topics.map((t) => (typeof t === 'string' ? fix(t, scope) : t));
+      // Canonicalizing collapses forms that differed only by prefix, which turns
+      // some entries into exact duplicates of each other. Drop the repeats.
+      const seenTopics = new Set();
+      prop.related_topics = prop.related_topics
+        .map((t) => (typeof t === 'string' ? fix(t, scope) : t))
+        .filter((t) => {
+          if (typeof t !== 'string') return true;
+          const key = t.trim();
+          if (seenTopics.has(key)) return false;
+          seenTopics.add(key);
+          return true;
+        });
     }
   });
 
   if (total > 0) {
     console.log(`Fixed ${total} property anchor(s) that would have rendered as dead links:`);
     for (const [from, to] of seen) console.log(`   <<${from}>> -> <<${to}>>`);
+  }
+  if (xrefTotal > 0) {
+    console.log(`Canonicalized ${xrefTotal} property-page xref(s) to reference:properties/…`);
   }
   return total;
 }

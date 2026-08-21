@@ -6,6 +6,7 @@ const handlebars = require('handlebars')
 
 const anchorName = require('../../../tools/property-extractor/helpers/anchorName')
 const normalizePropertyAnchors = require('../../../tools/property-extractor/helpers/normalizePropertyAnchors')
+const canonicalizePropertyXrefs = require('../../../tools/property-extractor/helpers/canonicalizePropertyXrefs')
 const helpers = require('../../../tools/property-extractor/helpers')
 
 const TEMPLATES = path.join(__dirname, '../../../tools/property-extractor/templates')
@@ -156,7 +157,7 @@ describe('topic property mappings table', () => {
       })]
     }), true)
     expect(cloud).toContain('`log_segment_size` or `compacted_log_segment_size`')
-    expect(cloud).not.toContain('xref:./cluster-properties.adoc#log_segment_size')
+    expect(cloud).not.toContain('xref:')
   })
 
   test('self-managed keeps both links', () => {
@@ -167,7 +168,50 @@ describe('topic property mappings table', () => {
         cluster_property_mapping_cloud_supported: false
       })]
     }), false)
-    expect(sm).toContain('xref:./cluster-properties.adoc#log_segment_size[`log_segment_size`]')
-    expect(sm).toContain('xref:./cluster-properties.adoc#compacted_log_segment_size[`compacted_log_segment_size`]')
+    expect(sm).toContain('xref:reference:properties/cluster-properties.adoc#log_segment_size[`log_segment_size`]')
+    expect(sm).toContain('xref:reference:properties/cluster-properties.adoc#compacted_log_segment_size[`compacted_log_segment_size`]')
+  })
+})
+
+describe('canonicalizePropertyXrefs', () => {
+  // Only the fully qualified module-and-path form resolves in both doc sets. The
+  // bare and `reference:`-prefixed forms resolve to the module root, where these
+  // pages no longer live; self-managed hides that with a page alias that
+  // cloud-docs does not have, so the same text renders as a working link there
+  // and an unresolved xref in Cloud.
+  test.each([
+    ['xref:cluster-properties.adoc#write_caching_default[`x`]', 'xref:reference:properties/cluster-properties.adoc#write_caching_default[`x`]'],
+    ['xref:./cluster-properties.adoc#log_retention_ms[y]', 'xref:reference:properties/cluster-properties.adoc#log_retention_ms[y]'],
+    ['xref:reference:cluster-properties.adoc#disk_reservation_percent[z]', 'xref:reference:properties/cluster-properties.adoc#disk_reservation_percent[z]'],
+    ['xref:./object-storage-properties.adoc#a[b]', 'xref:reference:properties/object-storage-properties.adoc#a[b]'],
+    ['xref:topic-properties.adoc#cleanup-policy[c]', 'xref:reference:properties/topic-properties.adoc#cleanup-policy[c]']
+  ])('canonicalizes %s', (input, expected) => {
+    expect(canonicalizePropertyXrefs(input).text).toBe(expected)
+  })
+
+  test('reports no rewrite when the form is already canonical', () => {
+    const input = 'xref:reference:properties/cluster-properties.adoc#a[b]'
+    const result = canonicalizePropertyXrefs(input)
+    expect(result.text).toBe(input)
+    expect(result.rewrites).toBe(0)
+  })
+
+  test.each([
+    'xref:manage:tiered-storage.adoc[Tiered Storage]',
+    'xref:reference:rpk/rpk-topic/rpk-topic-describe.adoc[`rpk topic describe`]',
+    'xref:develop:config-topics.adoc#configure-write-caching[Write caching]',
+    'text with no xrefs at all'
+  ])('leaves %s alone', (input) => {
+    const result = canonicalizePropertyXrefs(input)
+    expect(result.text).toBe(input)
+    expect(result.rewrites).toBe(0)
+  })
+
+  test('rewrites every occurrence in one string', () => {
+    const result = canonicalizePropertyXrefs(
+      'see xref:cluster-properties.adoc#a[a] and xref:./cluster-properties.adoc#b[b]'
+    )
+    expect(result.rewrites).toBe(2)
+    expect(result.text.match(/xref:reference:properties\//g)).toHaveLength(2)
   })
 })

@@ -7,13 +7,13 @@
 |
 ifdef::env-cloud[]
 {{#if cluster_property_mapping_cloud_supported}}
-{{#if alternate_cluster_property}}xref:./{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`] or xref:./{{alternate_cluster_property_doc_file}}#{{alternate_cluster_property}}[`{{alternate_cluster_property}}`]{{else}}xref:./{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`]{{/if}}
+{{#if alternate_cluster_property}}xref:reference:properties/{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`] or xref:reference:properties/{{alternate_cluster_property_doc_file}}#{{alternate_cluster_property}}[`{{alternate_cluster_property}}`]{{else}}xref:reference:properties/{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`]{{/if}}
 {{else}}
 {{#if alternate_cluster_property}}`{{corresponding_cluster_property}}` or `{{alternate_cluster_property}}`{{else}}`{{corresponding_cluster_property}}`{{/if}}
 {{/if}}
 endif::[]
 ifndef::env-cloud[]
-{{#if alternate_cluster_property}}xref:./{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`] or xref:./{{alternate_cluster_property_doc_file}}#{{alternate_cluster_property}}[`{{alternate_cluster_property}}`]{{else}}xref:./{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`]{{/if}}
+{{#if alternate_cluster_property}}xref:reference:properties/{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`] or xref:reference:properties/{{alternate_cluster_property_doc_file}}#{{alternate_cluster_property}}[`{{alternate_cluster_property}}`]{{else}}xref:reference:properties/{{cluster_property_doc_file}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`]{{/if}}
 endif::[]
 
 {{/each}}
