@@ -1100,3 +1100,75 @@ describe('regenerating a description partial warns before dropping a published s
     expect(warned).toContain('"Hand-written Caveats"');
   });
 });
+
+describe('one annotator: every scanner agrees about verbatim regions', () => {
+  const mu = require('../../tools/redpanda-connect/metadata-utils.js');
+  const { hasStructuralHeadings, firstHeadingDepth, escapePlaceholderBraces } = renderConnectDescription;
+
+  test('locateMetadata respects markdown fences, so a fenced example survives', () => {
+    // locateMetadata runs FIRST in the pipeline, before the scanners in
+    // renderConnectDescription. While it was the only fence-blind one, a
+    // `== Metadata` inside a fenced example was extracted into the metadata
+    // partial and the fence was destroyed: opening ``` orphaned, interior
+    // replaced by the include, closing ``` consumed.
+    const description = [
+      'Reads from a thing.',
+      '',
+      '```text',
+      '== Metadata',
+      'not really a section',
+      '```',
+      '',
+      'Trailing prose.',
+    ].join('\n');
+
+    expect(mu.locateMetadata(description)).toBeNull();
+
+    const out = renderConnectDescription({ type: 'input', name: 'demo', description });
+    expect(out).not.toContain('include::connect:components:partial$metadata/inputs/demo.adoc[]');
+    // The fence comes through byte-identical.
+    expect(out).toContain('```text\n== Metadata\nnot really a section\n```');
+  });
+
+  test('a real == Metadata section outside any fence is still extracted', () => {
+    // Negative control: the fence awareness must not disable extraction.
+    const description = [
+      'Reads from a thing.',
+      '',
+      '```yml',
+      'label: ""',
+      '```',
+      '',
+      '== Metadata',
+      '',
+      '- a: one',
+    ].join('\n');
+    expect(mu.locateMetadata(description)).not.toBeNull();
+    expect(renderConnectDescription({ type: 'input', name: 'demo', description }))
+      .toContain('include::connect:components:partial$metadata/inputs/demo.adoc[]');
+  });
+
+  test('an indented ---- is content for every scanner, matching Asciidoctor', () => {
+    // Asciidoctor only reads a block delimiter at column 0: an indented ----
+    // is a literal paragraph, and this input makes it emit "unterminated
+    // listing block". The two copies of the scanner disagreed here, one
+    // testing the trimmed line and one the raw line, so locateMetadata
+    // extracted a section that the brace escaper treated as verbatim.
+    const description = 'Intro paragraph.\n\n ----\n== Metadata\nValue {endpoint} here.\n----';
+
+    // All four scanners now read the same structure.
+    expect(mu.sectionHeadings(description)).toEqual(['Metadata']);
+    expect(hasStructuralHeadings(description)).toBe(true);
+    expect(firstHeadingDepth(description)).toBe(2);
+    expect(escapePlaceholderBraces(description)).toContain('\\{endpoint}');
+    expect(mu.locateMetadata(description)).not.toBeNull();
+  });
+
+  test('the annotator is exported once and layers the two delimiter kinds', () => {
+    const rows = mu.annotateVerbatimLines('a\n----\n```\nb\n```\n----\nc');
+    expect(rows.map((r) => r.verbatim)).toEqual([false, true, true, true, true, true, false]);
+    // A ---- inside a fence is content too, not a block opener.
+    expect(mu.annotateVerbatimLines('```\n----\n```\nd').map((r) => r.verbatim))
+      .toEqual([true, true, true, false]);
+  });
+});

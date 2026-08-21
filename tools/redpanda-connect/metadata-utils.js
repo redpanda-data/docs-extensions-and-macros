@@ -15,8 +15,14 @@
 
 const METADATA_HEADING = /^==\s+Metadata\s*$/;
 // AsciiDoc listing/literal block delimiter (`----`, possibly longer). Lines
-// inside such blocks must not be treated as headings.
+// inside such blocks must not be treated as headings. Asciidoctor only reads a
+// delimiter at column 0 -- an indented `----` is a literal paragraph -- so the
+// test is against the raw line, never a trimmed one.
 const BLOCK_DELIMITER = /^-{4,}$/;
+// Markdown-style fence delimiter (``` or ~~~, possibly with a language tag).
+// Descriptions and metadata blocks carry fenced examples alongside AsciiDoc
+// ---- blocks.
+const FENCE_DELIMITER = /^(`{3,}|~{3,})/;
 // The metadata block ends at the next structural element. Besides the next
 // level-2 heading, this also covers page-level constructs that follow the
 // section when locateMetadata runs against a full reference page (not just a
@@ -25,6 +31,48 @@ const BLOCK_DELIMITER = /^-{4,}$/;
 // section that is the last heading on a page would run to end-of-string and
 // swallow the trailing `include::...partial$fields[]` and `// end::single-source[]`.
 const SECTION_END = /^(?:==\s+\S|include::|\/\/\s*(?:tag|end)::)/;
+
+/**
+ * Split `text` into lines annotated with whether each line sits inside (or
+ * delimits) a verbatim region: an AsciiDoc `----` listing block or a markdown
+ * ```/~~~ fence. Every scanner over connector prose walks the text through
+ * this, so fence interiors are treated exactly like listing-block interiors:
+ * content, never headings, never escapable prose, never section terminators.
+ *
+ * Layered state: while one delimiter kind is open, only its own closer
+ * matters. A `----` line inside a fence (or a fence line inside a `----`
+ * block) is content -- treating it as a delimiter leaks the state and
+ * swallows everything after it.
+ *
+ * This is the only such state machine in the tree on purpose. There used to
+ * be three, and they had already drifted: two tested the trimmed line and one
+ * the raw line, so an indented `----` opened a verbatim region for one
+ * scanner and was plain content for another, on the same description in the
+ * same pipeline. Asciidoctor itself only honours a delimiter at column 0, so
+ * the raw-line test is the correct one and the only one here.
+ *
+ * @param {string} text
+ * @returns {Array<{line: string, verbatim: boolean}>}
+ */
+function annotateVerbatimLines (text) {
+  let inBlock = false;
+  let fence = null;
+  return String(text == null ? '' : text).split('\n').map((line) => {
+    if (inBlock) {
+      if (BLOCK_DELIMITER.test(line)) inBlock = false;
+      return { line, verbatim: true };
+    }
+    if (fence) {
+      const closer = line.match(FENCE_DELIMITER);
+      if (closer && closer[1][0] === fence) fence = null;
+      return { line, verbatim: true };
+    }
+    const fenceMatch = line.match(FENCE_DELIMITER);
+    if (fenceMatch) { fence = fenceMatch[1][0]; return { line, verbatim: true }; }
+    if (BLOCK_DELIMITER.test(line)) { inBlock = true; return { line, verbatim: true }; }
+    return { line, verbatim: false };
+  });
+}
 
 /**
  * Locate the `== Metadata` section within a description.
@@ -36,22 +84,19 @@ const SECTION_END = /^(?:==\s+\S|include::|\/\/\s*(?:tag|end)::)/;
 function locateMetadata (description) {
   if (!description || typeof description !== 'string') return null;
 
-  const lines = description.split('\n');
+  const annotated = annotateVerbatimLines(description);
+  const lines = annotated.map((a) => a.line);
   let headingLine = -1;
-  let inBlock = false;
-  for (let i = 0; i < lines.length; i++) {
-    if (BLOCK_DELIMITER.test(lines[i])) { inBlock = !inBlock; continue; }
-    if (!inBlock && METADATA_HEADING.test(lines[i])) { headingLine = i; break; }
+  for (let i = 0; i < annotated.length; i++) {
+    if (!annotated[i].verbatim && METADATA_HEADING.test(lines[i])) { headingLine = i; break; }
   }
   if (headingLine === -1) return null;
 
   // Find the terminating element after the metadata heading: the next level-2
   // heading, an Antora include directive, or a single-source tag comment.
   let endLine = lines.length;
-  inBlock = false;
-  for (let i = headingLine + 1; i < lines.length; i++) {
-    if (BLOCK_DELIMITER.test(lines[i])) { inBlock = !inBlock; continue; }
-    if (!inBlock && SECTION_END.test(lines[i])) { endLine = i; break; }
+  for (let i = headingLine + 1; i < annotated.length; i++) {
+    if (!annotated[i].verbatim && SECTION_END.test(lines[i])) { endLine = i; break; }
   }
 
   // Trim trailing blank lines inside the section so the block ends cleanly.
@@ -151,10 +196,6 @@ function descriptionIncludeLine (item, tag) {
   return `include::connect:components:partial$descriptions/${typeDirFor(item)}/${item.name}.adoc[${attrs}]`;
 }
 
-// Markdown-style fence delimiter (``` or ~~~, possibly with a language tag).
-// Metadata blocks can carry fenced examples alongside AsciiDoc ---- blocks.
-const FENCE_DELIMITER = /^(`{3,}|~{3,})/;
-
 /**
  * Collect the section heading titles in an AsciiDoc block, ignoring lines
  * inside `----` literal blocks and ```/~~~ fenced blocks. Titles are returned
@@ -167,25 +208,8 @@ const FENCE_DELIMITER = /^(`{3,}|~{3,})/;
 function sectionHeadings (text) {
   if (!text || typeof text !== 'string') return [];
   const headings = [];
-  let inBlock = false;
-  let fence = null;
-  for (const line of text.split('\n')) {
-    // Layered state: while inside one delimiter kind, the only thing that
-    // matters is its own closer. A fence-like line inside a ---- literal
-    // block (or a ---- line inside a fence) is content, not a delimiter —
-    // treating it as one leaks the state and swallows every later heading.
-    if (inBlock) {
-      if (BLOCK_DELIMITER.test(line)) inBlock = false;
-      continue;
-    }
-    if (fence) {
-      const closer = line.match(FENCE_DELIMITER);
-      if (closer && closer[1][0] === fence) fence = null;
-      continue;
-    }
-    const fenceMatch = line.match(FENCE_DELIMITER);
-    if (fenceMatch) { fence = fenceMatch[1][0]; continue; }
-    if (BLOCK_DELIMITER.test(line)) { inBlock = true; continue; }
+  for (const { line, verbatim } of annotateVerbatimLines(text)) {
+    if (verbatim) continue;
     const m = line.match(/^=+\s+(\S.*)$/);
     if (m) headings.push(m[1].trim());
   }
@@ -259,5 +283,7 @@ module.exports = {
   descriptionIncludeLine,
   sectionHeadings,
   lostMetadataSections,
+  annotateVerbatimLines,
+  BLOCK_DELIMITER,
   FENCE_DELIMITER,
 };

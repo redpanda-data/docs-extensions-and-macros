@@ -1,42 +1,9 @@
 'use strict';
 
-const { descriptionWithMetadataInclude, FENCE_DELIMITER } = require('../metadata-utils.js');
-
-// AsciiDoc listing/literal block delimiter (`----`, possibly longer). Lines
-// inside such blocks must not be treated as headings.
-const BLOCK_DELIMITER = /^-{4,}$/;
-
-/**
- * Split `body` into lines annotated with whether each line sits inside (or
- * delimits) a verbatim region: an AsciiDoc `----` listing block or a
- * markdown ```/~~~ fence (FENCE_DELIMITER, shared with metadata-utils'
- * sectionHeadings). Every scanner and rewriter in this module walks the body
- * through this so fence interiors are treated exactly like listing-block
- * interiors: content, never headings or escapable prose. Layered state: while
- * one delimiter kind is open, only its own closer matters — a ---- line
- * inside a fence (or a fence line inside a ---- block) is content.
- * @param {string} body
- * @returns {Array<{line: string, verbatim: boolean}>}
- */
-function annotateVerbatimLines (body) {
-  let inBlock = false;
-  let fence = null;
-  return body.split('\n').map((line) => {
-    if (inBlock) {
-      if (BLOCK_DELIMITER.test(line.trim())) inBlock = false;
-      return { line, verbatim: true };
-    }
-    if (fence) {
-      const closer = line.match(FENCE_DELIMITER);
-      if (closer && closer[1][0] === fence) fence = null;
-      return { line, verbatim: true };
-    }
-    if (BLOCK_DELIMITER.test(line.trim())) { inBlock = true; return { line, verbatim: true }; }
-    const fenceMatch = line.match(FENCE_DELIMITER);
-    if (fenceMatch) { fence = fenceMatch[1][0]; return { line, verbatim: true }; }
-    return { line, verbatim: false };
-  });
-}
+// One annotator for every scanner over connector prose, including the ones in
+// metadata-utils that run before these. See annotateVerbatimLines there for
+// why there is exactly one.
+const { descriptionWithMetadataInclude, annotateVerbatimLines } = require('../metadata-utils.js');
 
 // Length (characters) above which a heading-less description is reported as a
 // candidate for upstream structure. Roughly a screen of prose.
