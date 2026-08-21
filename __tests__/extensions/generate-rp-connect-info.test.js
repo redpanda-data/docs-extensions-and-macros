@@ -21,6 +21,39 @@ describe('generate-rp-connect-info extractDescription', () => {
     expect(extractDescription(src)).toBe('Attribute description wins')
   })
 
+  // The :description: attribute is AsciiDoc too, and it is the source almost
+  // every card uses, so it needs the same cleaning as the body fallback.
+  describe('the description attribute path', () => {
+    const body = '= Kafka\n\ncomponent_type_dropdown::[]\n\nIgnored body paragraph.\n'
+
+    test('strips URL macros, xrefs, backticks and attribute references', () => {
+      const src = page(body, {
+        description: 'Executes a http://jmespath.org/[JMESPath query] on `code` docs, see xref:reference:about.adoc[the reference] with {page-component-title}.'
+      })
+      expect(extractDescription(src)).toBe('Executes a JMESPath query on code docs, see the reference with.')
+    })
+
+    test('truncates at the first sentence and stays within the cap', () => {
+      const long = 'Streams change data capture events from the upstream database into the pipeline with configurable batching and checkpointing. It also does a great deal more that no card should try to show.'
+      expect(long.length).toBeGreaterThan(150)
+      const description = extractDescription(page(body, { description: long }))
+      expect(description).toBe('Streams change data capture events from the upstream database into the pipeline with configurable batching and checkpointing.')
+      expect(description.length).toBeLessThanOrEqual(150)
+    })
+
+    test('cuts a single long sentence at a word boundary, ellipsis included in the cap', () => {
+      const description = extractDescription(page(body, { description: 'A '.concat('very long single sentence with no punctuation at all '.repeat(6)) }))
+      expect(description.length).toBeLessThanOrEqual(150)
+      expect(description.endsWith('...')).toBe(true)
+      expect(description).not.toMatch(/\s\.\.\.$/)
+    })
+
+    test('keeps underscored identifiers intact while dropping formatting', () => {
+      const src = page(body, { description: 'Writes to redpanda_migrator_offsets using the *native* client.' })
+      expect(extractDescription(src)).toBe('Writes to redpanda_migrator_offsets using the native client.')
+    })
+  })
+
   test('falls back to an explicit :description: attribute in the raw contents', () => {
     const src = page('= Kafka\n:type: input\n:description: Reads records from Kafka topics.\n\ncomponent_type_dropdown::[]\n\nSomething else.\n')
     expect(extractDescription(src)).toBe('Reads records from Kafka topics.')

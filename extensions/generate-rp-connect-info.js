@@ -453,11 +453,63 @@ module.exports.register = function ({ config }) {
   }
 }
 
+const DESCRIPTION_MAX_LENGTH = 150
+
+/**
+ * Turns one line of AsciiDoc into the plain text a card can show: inline macros
+ * become their link text, formatting and attribute references are dropped, and
+ * the result is cut back to DESCRIPTION_MAX_LENGTH at a sentence or word
+ * boundary. Applied to every source, since a page's :description: attribute is
+ * AsciiDoc too and carries the same macros as the body. Exported for unit testing.
+ */
+function cleanDescription (text) {
+  if (!text) return ''
+
+  let description = String(text)
+    // Convert xref links: xref:path[text] -> text
+    .replace(/xref:[^[]+\[(.*?)\]/g, '$1')
+    // Convert HTTP links: https://url[text^] -> text
+    .replace(/https?:\/\/[^[\s]+\[(.*?)(?:\^)?\]/g, '$1')
+    // Remove "Introduced in version X.X.X" suffix
+    .replace(/\.\s*Introduced in version[\s\d.]+\.?$/i, '')
+    // Remove attribute references: {page-component-title}
+    .replace(/\{[a-zA-Z][\w-]*\}/g, '')
+    // Remove code backticks: `code`
+    .replace(/`([^`]+)`/g, '$1')
+    // Remove bold and emphasis, but only around whole words, so that connector
+    // names such as redpanda_migrator_offsets survive intact
+    .replace(/(^|[\s([])\*\*(\S(?:[^*]*\S)?)\*\*(?=[\s.,;:)\]!?]|$)/g, '$1$2')
+    .replace(/(^|[\s([])\*(\S(?:[^*]*\S)?)\*(?=[\s.,;:)\]!?]|$)/g, '$1$2')
+    .replace(/(^|[\s([])_(\S(?:[^_]*\S)?)_(?=[\s.,;:)\]!?]|$)/g, '$1$2')
+    // Normalize whitespace, including the gap a removed attribute reference
+    // leaves in front of punctuation
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .trim()
+
+  if (description.length > DESCRIPTION_MAX_LENGTH) {
+    const sentences = description.match(/[^.!?]+[.!?]+/g)
+    const firstSentence = sentences && sentences.length > 0 ? sentences[0].trim() : ''
+    if (firstSentence && firstSentence.length <= DESCRIPTION_MAX_LENGTH) {
+      description = firstSentence
+    } else {
+      // One long sentence: cut at the last word boundary inside the budget,
+      // leaving room for the ellipsis so the result still fits the cap
+      const head = description.substring(0, DESCRIPTION_MAX_LENGTH - 3)
+      const lastSpace = head.lastIndexOf(' ')
+      description = (lastSpace > 0 ? head.substring(0, lastSpace) : head).trim() + '...'
+    }
+  }
+
+  return description
+}
+
 /**
  * Extracts a short plain-text description for a connector from its documentation page.
  * Prefers the page's :description: attribute, then falls back to the first meaningful
- * paragraph after component_type_dropdown::[], stripped of AsciiDoc markup and truncated
- * at a sentence boundary (~150 chars). Exported for unit testing.
+ * paragraph after component_type_dropdown::[]. Whichever source wins goes through
+ * cleanDescription, so no card can ship raw AsciiDoc or an untruncated paragraph.
+ * Exported for unit testing.
  */
 function extractDescription (pageSrc) {
   if (!pageSrc) return ''
@@ -541,36 +593,8 @@ function extractDescription (pageSrc) {
               !cleaned.startsWith('include::') &&
               !cleaned.match(/^(TIP|NOTE|WARNING|CAUTION|IMPORTANT):/) &&
               cleaned.length > 20) {
-            // Clean up remaining markup
+            // Markup stripping and truncation happen once, on the way out
             description = cleaned
-              // Convert xref links: xref:path[text] -> text
-              .replace(/xref:[^\[]+\[(.*?)\]/g, '$1')
-              // Convert HTTP links: https://url[text^] -> text
-              .replace(/https?:\/\/[^\[]+\[(.*?)(?:\^)?\]/g, '$1')
-              // Remove "Introduced in version X.X.X" suffix
-              .replace(/\.\s*Introduced in version[\s\d.]+\.?$/i, '')
-              // Remove attributes: {attr}
-              .replace(/\{[^}]+\}/g, '')
-              // Remove bold: **text** or *text*
-              .replace(/\*\*([^*]+)\*\*/g, '$1')
-              .replace(/\*([^*]+)\*/g, '$1')
-              // Remove emphasis: _text_
-              .replace(/_([^_]+)_/g, '$1')
-              // Remove code backticks: `code`
-              .replace(/`([^`]+)`/g, '$1')
-              // Normalize whitespace
-              .replace(/\s+/g, ' ')
-              .trim()
-
-            // Truncate at sentence boundary if too long (max ~150 chars)
-            if (description.length > 150) {
-              const sentences = description.match(/[^.!?]+[.!?]+/g)
-              if (sentences && sentences.length > 0) {
-                description = sentences[0].trim()
-              } else {
-                description = description.substring(0, 150).trim() + '...'
-              }
-            }
             break
           }
         }
@@ -578,7 +602,8 @@ function extractDescription (pageSrc) {
     }
   }
 
-  return description
+  return cleanDescription(description)
 }
 
 module.exports.extractDescription = extractDescription
+module.exports.cleanDescription = cleanDescription
