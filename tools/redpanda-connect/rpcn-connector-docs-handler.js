@@ -1132,6 +1132,13 @@ async function handleRpcnConnectorDocs (options) {
   let partialsWritten, partialFiles
   const descriptionReports = []
   const lostSectionWarnings = []
+  // Both generator call sites (partials and drafts) feed the same PR summary,
+  // so they collect through one function. Pushed inline, the draft call site
+  // silently dropped descriptionReports for months: the structure reports for
+  // newly drafted connectors, the ones most likely to need an upstream fix,
+  // never reached the summary.
+  const { collectGeneratorReports } = require('./pr-summary-formatter.js')
+  const collect = (result) => collectGeneratorReports(result, { descriptionReports, lostSectionWarnings })
 
   try {
     const result = await generateRpcnConnectorDocs({
@@ -1151,8 +1158,7 @@ async function handleRpcnConnectorDocs (options) {
     })
     partialsWritten = result.partialsWritten
     partialFiles = result.partialFiles
-    descriptionReports.push(...(result.descriptionReports || []))
-    lostSectionWarnings.push(...(result.lostSectionWarnings || []))
+    collect(result)
   } catch (err) {
     console.error(`Error: Failed to generate partials: ${err.message}`)
     process.exit(1)
@@ -1947,7 +1953,7 @@ async function handleRpcnConnectorDocs (options) {
         fs.unlinkSync(tempDataPath)
         draftsWritten = draftResult.draftsWritten
         draftFiles = draftResult.draftFiles
-        lostSectionWarnings.push(...(draftResult.lostSectionWarnings || []))
+        collect(draftResult)
       }
     } catch (err) {
       console.error(`Error: Could not draft missing: ${err.message}`)

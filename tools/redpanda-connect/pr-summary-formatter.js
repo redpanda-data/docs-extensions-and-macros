@@ -1351,7 +1351,31 @@ function printPRSummary(diffData, binaryAnalysis = null, draftedConnectors = nul
   console.log('\n' + summary + '\n');
 }
 
+/**
+ * Merge one generateRpcnConnectorDocs result into the accumulators that feed
+ * this PR summary.
+ *
+ * Every report key the generator returns has to be collected at every call
+ * site, or the summary is quietly incomplete for whichever path forgot one.
+ * The draft call site pushed lostSectionWarnings inline and forgot
+ * descriptionReports, so structure reports for newly drafted connectors --
+ * the ones most likely to need an upstream fix -- never reached the summary.
+ * Doing the merge in one place is what makes that structural rather than
+ * something each call site has to remember.
+ *
+ * @param {object} result generator result
+ * @param {{descriptionReports: Array, lostSectionWarnings: Array}} into accumulators, mutated in place
+ * @returns {{descriptionReports: Array, lostSectionWarnings: Array}} the same accumulators
+ */
+function collectGeneratorReports (result, into) {
+  if (!result) return into;
+  into.descriptionReports.push(...(result.descriptionReports || []));
+  into.lostSectionWarnings.push(...(result.lostSectionWarnings || []));
+  return into;
+}
+
 module.exports = {
+  collectGeneratorReports,
   generatePRSummary,
   generateMultiVersionPRSummary,
   printPRSummary,
