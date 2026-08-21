@@ -457,7 +457,8 @@ features:
     // depend on that registration.
     test('renders a beta badge for entries marked beta', () => {
       const table = buildFeatureTable(features, 'operator')
-      expect(table).toContain('pass:[<span class="badge badge--beta ">(beta)</span>]')
+      expect(table).toContain('pass:[<span class="badge badge--beta " data-tooltip=')
+      expect(table).toContain('>(beta)</span>]')
       expect(table).not.toContain('badge::[')
       expect(table).not.toContain('badge:[label')
     })
@@ -478,11 +479,35 @@ features:
         .toBe('<span class="badge badge--beta " data-tooltip="Beta feature">(beta)</span>')
     })
 
+    // The badge carries a help cursor, so it must always have something to say.
+    // Only the unreleased badge had a default, so a beta badge from an entry
+    // without beta-tooltip invited a hover and then showed nothing.
+    test('every status badge carries hover text, with or without a registry field', () => {
+      // The unreleased badge only renders on a prerelease page, so use 26.3
+      // for both: a beta badge renders anywhere.
+      for (const status of ['beta', 'unreleased']) {
+        const yaml = `features:\n  - name: F\n    scope: redpanda\n    description: d\n    status: ${status}\n`
+        const html = convert('enterprise:F[]', {
+          catalog: catalogWithVersions(yaml, VERSIONS), component: 'streaming', version: '26.3',
+        })
+        expect(html).toContain(`badge--${status}`)
+        expect(html).toMatch(/data-tooltip="[^"]+"/)
+      }
+    })
+
+    test('a registry-supplied beta-tooltip wins over the default', () => {
+      const yaml = 'features:\n  - name: F\n    scope: redpanda\n    description: d\n    status: beta\n    beta-tooltip: A specific note.\n'
+      const html = convert('enterprise:F[]', {
+        catalog: catalogWithVersions(yaml, VERSIONS), component: 'streaming', version: '26.2',
+      })
+      expect(html).toContain('data-tooltip="A specific note."')
+    })
+
     test('places the beta badge after the feature suffix', () => {
       const table = buildFeatureTable(features, 'operator')
       expect(table).toContain(
         'xref:deploy:redpanda/kubernetes/k-stretch-clusters.adoc[Stretch Clusters] ' +
-        '(StretchCluster resource) pass:[<span class="badge badge--beta ">(beta)</span>]'
+        '(StretchCluster resource) pass:[<span class="badge badge--beta " data-tooltip='
       )
     })
 
@@ -503,7 +528,8 @@ features:
     test('adds the beta badge in prose for a feature marked beta', () => {
       const html = convert('enterprise:Stretch Clusters[]', { catalog: fakeCatalog() })
       expect(html).toContain('class="enterprise-feature"')
-      expect(html).toContain('class="badge badge--beta ">(beta)</span>')
+      expect(html).toContain('class="badge badge--beta "')
+      expect(html).toContain('>(beta)</span>')
       // The badge must be real markup, never the escaped source of a macro call.
       expect(html).not.toContain('badge::[')
       expect(html).not.toContain('&lt;span')

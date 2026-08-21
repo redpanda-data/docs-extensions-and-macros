@@ -55,7 +55,7 @@
 
 const yaml = require('js-yaml')
 const chalk = require('chalk')
-const { buildBadgeHtml } = require('./badge')
+const { buildBadgeHtml, DEFAULT_TOOLTIPS } = require('./badge')
 
 const $enterpriseRegistry = Symbol('$enterpriseRegistry')
 const $enterpriseRegistryUnreadable = Symbol('$enterpriseRegistryUnreadable')
@@ -77,8 +77,10 @@ const DEFAULT_LICENSING_PAGE = 'get-started:licensing/overview.adoc'
 const DEFAULT_ROLE = 'enterprise-feature'
 const BETA_LABEL = 'beta'
 const UNRELEASED_LABEL = 'unreleased'
-const UNRELEASED_TOOLTIP =
-  'This feature is not in a released version of Redpanda yet. It is documented here for the upcoming release.'
+// The badge macro supplies the default hover text for these labels, so the same
+// wording appears whether a badge comes from the registry or from a
+// badge::[label=beta] call in a page.
+const UNRELEASED_TOOLTIP = DEFAULT_TOOLTIPS.unreleased
 
 // Release status of a feature, which decides where it may be referenced.
 //

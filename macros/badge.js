@@ -15,6 +15,15 @@
  * @param {string} [opts.tooltip] - Tooltip text, rendered as `data-tooltip`.
  * @returns {string} Badge HTML.
  */
+// Hover text for the labels this macro is asked for by name. The badge is
+// styled with a help cursor, so a badge with nothing to say promises an
+// explanation and then withholds it. Callers with something more specific pass
+// their own tooltip, which wins.
+const DEFAULT_TOOLTIPS = {
+  beta: 'This feature is in public beta. You can enable it, but it may change before it is generally available.',
+  unreleased: 'This feature is not in a released version of Redpanda yet. It is documented here for the upcoming release.',
+};
+
 function buildBadgeHtml ({ label, size, tooltip } = {}) {
   const text = label || 'label';
   const isLarge = size === 'large';
@@ -31,7 +40,8 @@ function buildBadgeHtml ({ label, size, tooltip } = {}) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
   const className = `badge--${escapeAttr(text.toLowerCase().replace(/\s+/g, '-'))}`;
-  const tooltipAttr = tooltip ? ` data-tooltip="${escapeAttr(tooltip)}"` : '';
+  const hoverText = tooltip || DEFAULT_TOOLTIPS[text.trim().toLowerCase()];
+  const tooltipAttr = hoverText ? ` data-tooltip="${escapeAttr(hoverText)}"` : '';
 
   // Add brackets if not large. The brackets matter beyond styling: they are
   // real text content, so the label survives an HTML-to-Markdown conversion as
@@ -42,6 +52,7 @@ function buildBadgeHtml ({ label, size, tooltip } = {}) {
 }
 
 module.exports.buildBadgeHtml = buildBadgeHtml;
+module.exports.DEFAULT_TOOLTIPS = DEFAULT_TOOLTIPS;
 
 module.exports.register = function (registry) {
   registry.inlineMacro(function () {
