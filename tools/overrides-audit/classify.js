@@ -105,7 +105,14 @@ const MARKUP_PATTERNS = Object.freeze([
   // Property-link macros: config_ref: is the deprecated docs macro (the
   // extractor rewrites it to prop:), prop: is its replacement. Both resolve
   // against the published property JSON, so neither can ship in source.
-  { id: 'property-link', re: /\b(?:config_ref|prop):[^\s[]+\[[^\]]*\]/ }
+  { id: 'property-link', re: /\b(?:config_ref|prop):[^\s[]+\[[^\]]*\]/ },
+  // Audience prefix on a link or xref (tools/property-extractor/helpers/
+  // parseRelatedTopic.js). It is a docs-layer instruction about which product
+  // a link applies to, so it can never ship in a source string - and the bare
+  // prefix+URL form carries no other macro to trip the detectors above, so
+  // without this entry the audit proposed shipping the macro verbatim into
+  // C++. Anchored at a word boundary so it cannot match inside prose.
+  { id: 'audience-prefix', re: /\b(?:self-managed-only|cloud-only):/ }
 ])
 
 /**
@@ -154,6 +161,8 @@ function detectDocsMarkup (text, attrAllowlist = PRODUCT_ATTR_ALLOWLIST) {
  * - `glossterm:Term[definition]` keeps the term.
  * - `<<anchor,text>>` keeps the text; `<<anchor>>` keeps the anchor.
  * - `pass:q[content]` keeps the content.
+ * - `self-managed-only:` / `cloud-only:` audience prefixes are removed
+ *   before the macro rules run, so no prefix survives into the candidate.
  * - `include::` and `ifdef::`/`ifndef::`/`endif::` directive lines are
  *   dropped (conditional content between the directives is kept).
  * - Unresolvable `{attr}` references are left in place; the caller flags
@@ -164,6 +173,10 @@ function detectDocsMarkup (text, attrAllowlist = PRODUCT_ATTR_ALLOWLIST) {
  */
 function stripDocsMarkup (text) {
   let out = text
+  // Audience prefixes come off first: they wrap another macro
+  // (`self-managed-only:xref:...[...]`), so stripping them after the xref
+  // rule left a dangling `self-managed-only:` in the upstream candidate.
+  out = out.replace(/\b(?:self-managed-only|cloud-only):/g, '')
   // xref:module:page.adoc[link text] -> link text
   out = out.replace(/xref:([^\s[]+)\[([^\]]*)\]/g, (m, target, label) => {
     if (label.trim()) return label.trim()
@@ -200,6 +213,13 @@ function stripDocsMarkup (text) {
  * workflow: the same (name, override description) pair always hashes to the
  * same value, so an upstream PR already opened for this text is skipped.
  *
+ * The separator is a literal \n--\n rather than a control character: a raw
+ * NUL made this whole file binary to POSIX text tools, so grep and ripgrep
+ * silently skipped it during code search, and any editor round-trip or
+ * formatter that strips control characters would have rewritten every hash
+ * in the dedup manifest. A property name cannot contain a newline, so the
+ * separator is still unambiguous.
+ *
  * @param {string} name - Property (or command) name.
  * @param {string} overrideText - The override description text.
  * @returns {string} 16-hex-char sha256 prefix.
@@ -207,7 +227,7 @@ function stripDocsMarkup (text) {
 function contentHash (name, overrideText) {
   return crypto
     .createHash('sha256')
-    .update(`${name} ${normalizeText(overrideText)}`)
+    .update(`${name}\n--\n${normalizeText(overrideText)}`)
     .digest('hex')
     .slice(0, 16)
 }

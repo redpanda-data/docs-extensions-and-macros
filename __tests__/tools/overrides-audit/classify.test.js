@@ -41,7 +41,15 @@ describe('detectDocsMarkup', () => {
     ['anchor-xref', 'If not set, the <<kafka_api, `kafka_api`>> property is used.'],
     ['property-link', 'See config_ref:retention_ms,true,properties/cluster-properties[] for details.'],
     ['property-link', 'See prop:retention_ms[link=true] for details.'],
-    ['attribute', 'Runs on {node-count} brokers.']
+    ['attribute', 'Runs on {node-count} brokers.'],
+    // The audience prefix is a docs-layer instruction about which product a
+    // link applies to. The bare prefix+URL form carries no other macro, so
+    // before it had its own detector the audit proposed shipping the macro
+    // verbatim into a C++ source string - exactly what this detector exists to
+    // prevent.
+    ['audience-prefix', 'See self-managed-only:https://docs.redpanda.com/current/x[the guide] for details.'],
+    ['audience-prefix', 'This is self-managed-only: behavior.'],
+    ['audience-prefix', 'Applies cloud-only:xref:cloud:get-started.adoc[in Cloud] only.']
   ])('detects %s markup', (kind, text) => {
     expect(classify.detectDocsMarkup(text)).toContain(kind)
   })
@@ -258,5 +266,50 @@ describe('classifyProperties', () => {
     const first = classify.classifyProperties(overridesDoc, extractedDoc)
     const second = classify.classifyProperties(overridesDoc, extractedDoc)
     expect(JSON.stringify(second)).toBe(JSON.stringify(first))
+  })
+})
+
+describe('audience prefixes never reach an upstream candidate', () => {
+  const source = sourceProp({ description: 'The source description.' })
+
+  test.each([
+    ['bare prefix and URL', 'See self-managed-only:https://docs.redpanda.com/current/x[the guide] for details.'],
+    ['prefix in prose', 'This is self-managed-only: behavior.'],
+    ['prefix wrapping an xref', 'See self-managed-only:xref:manage:tiered.adoc[Tiered Storage] for details.'],
+    ['cloud-only prefix wrapping an xref', 'Applies cloud-only:xref:cloud:get-started.adoc[in Cloud] only.']
+  ])('%s is never UPSTREAMABLE and leaves no prefix behind', (_label, description) => {
+    const row = classify.classifyDescription('p', { description }, source)
+    expect(row.class).not.toBe(CLASSES.UPSTREAMABLE)
+    expect(row.upstream_candidate_text || '').not.toMatch(/self-managed-only:|cloud-only:/)
+  })
+
+  test('the prefix comes off before the inner macro, leaving no dangling colon', () => {
+    // Order matters: stripping the xref first left `self-managed-only:Tiered
+    // Storage` in the candidate.
+    expect(classify.stripDocsMarkup('See self-managed-only:xref:manage:tiered.adoc[Tiered Storage] for details.'))
+      .toBe('See Tiered Storage for details.')
+    expect(classify.stripDocsMarkup('Applies cloud-only:xref:cloud:get-started.adoc[in Cloud] only.'))
+      .toBe('Applies in Cloud only.')
+  })
+
+  test('prose that merely mentions the words is not flagged', () => {
+    // False-positive guard: the detector is anchored on the macro's colon.
+    for (const clean of [
+      'This is a self-managed deployment only.',
+      'Cloud only: this behavior differs.',
+      'Applies to self-managed and cloud alike.'
+    ]) {
+      expect(classify.detectDocsMarkup(clean)).toEqual([])
+    }
+  })
+
+  test('related_topics keeps its prefixes, by design', () => {
+    // related_topics is docs-layer enrichment that never ships upstream, so
+    // markup detection must not run on it.
+    const row = classify.classifyField(
+      'p', 'related_topics',
+      { related_topics: ['self-managed-only:xref:manage:tiered.adoc[Tiered Storage]'] },
+      source)
+    expect(row.class).toBe(CLASSES.KEEP)
   })
 })
