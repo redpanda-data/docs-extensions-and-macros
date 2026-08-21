@@ -93,6 +93,22 @@ describe('set-latest-version extension', () => {
     expect(versionAttributes['latest-redpanda-helm-chart-version-short']).toBe('5.10')
   })
 
+  it('names the failed lookup instead of throwing a TypeError from the logger', () => {
+    // A failed Redpanda fetch resolves to null releases rather than rejecting.
+    const { versionAttributes, latestAttributes, errors } = runExtension({
+      redpanda: { latestRedpandaRelease: null, latestRcRelease: null },
+    })
+
+    expect(errors.join('\n')).not.toMatch(/TypeError/)
+    expect(errors.join('\n')).toMatch(/Could not resolve the latest version of: Redpanda/)
+    expect(latestAttributes).not.toHaveProperty('latest-redpanda-version')
+    expect(latestAttributes).not.toHaveProperty('latest-redpanda-version-short')
+
+    // The components that did resolve are still published.
+    expect(versionAttributes['latest-console-version-short']).toBe('3.2')
+    expect(versionAttributes['latest-connect-version-short']).toBe('4.37')
+  })
+
   it('does not move full-version backwards, but still publishes the GA attributes', () => {
     const { latestAttributes } = runExtension({
       latestAttributes: { 'full-version': '99.0.0' },

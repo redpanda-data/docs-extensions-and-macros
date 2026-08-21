@@ -153,12 +153,26 @@ module.exports.register = function ({ config }) {
         }
       });
 
-      logger.info('Updated Redpanda documentation versions successfully:');
-      logger.info(`- Redpanda: ${latestVersions.redpanda.latestRedpandaRelease.version}${latestVersions.redpanda.latestRcRelease ? ', beta: ' + latestVersions.redpanda.latestRcRelease.version : ''}`);
-      logger.info(`- Connect: ${latestVersions.connect}`);
-      logger.info(`- Console: ${latestVersions.console.latestStableRelease}${latestVersions.console.latestBetaRelease ? ', beta: ' + latestVersions.console.latestBetaRelease : ''}`);
-      logger.info(`- Operator: ${latestVersions.operator?.latestStableRelease || 'unknown'}${latestVersions.operator?.latestBetaRelease ? ', beta: ' + latestVersions.operator.latestBetaRelease : ''}`);
-      logger.info(`- Helm chart: ${latestVersions.helmChart?.latestStableRelease || 'unknown'}${latestVersions.helmChart?.latestBetaRelease ? ', beta: ' + latestVersions.helmChart.latestBetaRelease : ''}`);
+      // Report what resolved and what did not. A failed lookup resolves to a null
+      // release rather than rejecting, so dereferencing it here used to throw and
+      // replace the real cause with a bare TypeError from the logger.
+      const summary = [
+        ['Redpanda', latestVersions.redpanda?.latestRedpandaRelease?.version, latestVersions.redpanda?.latestRcRelease?.version],
+        ['Connect', latestVersions.connect],
+        ['Console', latestVersions.console?.latestStableRelease, latestVersions.console?.latestBetaRelease],
+        ['Operator', latestVersions.operator?.latestStableRelease, latestVersions.operator?.latestBetaRelease],
+        ['Helm chart', latestVersions.helmChart?.latestStableRelease, latestVersions.helmChart?.latestBetaRelease],
+      ];
+      const unresolved = summary.filter(([, stableVersion]) => !stableVersion).map(([label]) => label);
+      if (unresolved.length) {
+        logger.error(`Could not resolve the latest version of: ${unresolved.join(', ')}. Pages that reference the matching attributes render the attribute name instead of a version unless antora.yml seeds a fallback.`);
+        logger.info('Updated Redpanda documentation versions with gaps:');
+      } else {
+        logger.info('Updated Redpanda documentation versions successfully:');
+      }
+      summary.forEach(([label, stableVersion, betaVersion]) => {
+        logger.info(`- ${label}: ${stableVersion || 'unknown'}${betaVersion ? ', beta: ' + betaVersion : ''}`);
+      });
     } catch (error) {
       logger.error(`Error updating versions: ${error}`);
     }
