@@ -11,6 +11,7 @@ const { getRpkConnectVersion, printDeltaReport } = require('./report-delta')
 const { discoverIntermediateReleases, findCloudVersionForDate } = require('./github-release-utils')
 const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
 const parseCSVConnectors = require('./parse-csv-connectors.js')
+const { resolvePageTypeDir } = require('./metadata-utils.js')
 const semver = require('semver')
 
 /**
@@ -1801,17 +1802,21 @@ async function handleRpcnConnectorDocs (options) {
       }
 
       // Check for missing connector documentation in rp-connect-docs
+      // `type` came from a data key, and the rate-limit family's data key
+      // ('rate-limits') is not its directory name ('rate_limits'). Resolve the
+      // directory against disk per root, or every existing rate-limit page is
+      // reported missing and drafted again beside itself.
       const allMissing = validConnectors.filter(({ name, type, cloudOnly }) => {
-        const relPath = path.join(`${type}s`, `${name}.adoc`)
+        const relPathIn = (root) => path.join(resolvePageTypeDir(root, `${type}s`), `${name}.adoc`)
 
         // For cloud-only connectors, ONLY check the cloud-only directory
         if (cloudOnly) {
-          return !fs.existsSync(path.join(roots.cloudOnly, relPath))
+          return !fs.existsSync(path.join(roots.cloudOnly, relPathIn(roots.cloudOnly)))
         }
 
         // For regular connectors, check pages and partials (not cloud-only)
         const existsInAny = [roots.pages, roots.partials].some(root =>
-          fs.existsSync(path.join(root, relPath))
+          fs.existsSync(path.join(root, relPathIn(root)))
         )
         return !existsInAny
       })
