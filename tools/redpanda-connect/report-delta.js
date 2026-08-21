@@ -68,10 +68,12 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       newFields.push({
         component: cKey,
         field: fName,
-        // The source data carries no per-field version metadata today, so
-        // fall back to the version this diff is comparing against — it's
-        // still an accurate "introduced in" answer, since this field is
-        // new as of exactly that release.
+        // Most fields carry no version of their own, so fall back to the
+        // version this diff is comparing against: the field is new as of
+        // exactly that release. Some fields do carry `version` (268 entries
+        // in connect-4.105.0), and that wins, because it can predate the
+        // span being compared: inputs:oracledb_cdc/snapshot_mode reports
+        // 4.99.0 in the 4.98.0 to 4.103.1 diff.
         introducedIn: (rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version)) || opts.newVersion || null,
         description: rawFieldObj && rawFieldObj.description
       });
