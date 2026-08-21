@@ -660,9 +660,9 @@ module.exports.register = function (registry, context) {
               }
               // Always show the type badge, with or without a link
               if (url) {
-                badges.push(`<a href="${url}" class="badge badge-type" title="Component type: ${capitalize(type)}">${capitalize(type)}</a>`);
+                badges.push(`<a href="${url}" class="badge badge-type" title="Component type: ${escapeHtml(capitalize(type))}">${escapeHtml(capitalize(type))}</a>`);
               } else {
-                badges.push(`<span class="badge badge-type" title="Component type: ${capitalize(type)}">${capitalize(type)}</span>`);
+                badges.push(`<span class="badge badge-type" title="Component type: ${escapeHtml(capitalize(type))}">${escapeHtml(capitalize(type))}</span>`);
               }
             });
             const uniqueBadges = [...new Set(badges)];
@@ -698,7 +698,7 @@ module.exports.register = function (registry, context) {
             const tooltip = supportLevel.toLowerCase() === 'certified'
               ? 'Certified: Fully supported and tested by Redpanda'
               : 'Community: Community-supported connector';
-            return `<span class="badge badge-support badge-support-${supportLevel.toLowerCase()}" title="${tooltip}">${capitalize(supportLevel)}</span>`;
+            return `<span class="badge badge-support badge-support-${escapeHtml(supportLevel.toLowerCase())}" title="${tooltip}">${escapeHtml(capitalize(supportLevel))}</span>`;
           })
           .join(' ');
 
@@ -711,10 +711,10 @@ module.exports.register = function (registry, context) {
           const communityDrivers = sqlDrivers.community.map(d => d.commercialName).join(', ');
 
           if (certifiedDrivers) {
-            sqlDriverBadges += `<span class="badge badge-support badge-support-certified" title="Certified drivers: ${certifiedDrivers}">Certified: ${certifiedDrivers}</span>`;
+            sqlDriverBadges += `<span class="badge badge-support badge-support-certified" title="Certified drivers: ${escapeHtml(certifiedDrivers)}">Certified: ${escapeHtml(certifiedDrivers)}</span>`;
           }
           if (communityDrivers) {
-            sqlDriverBadges += `<span class="badge badge-support badge-support-community" title="Community drivers: ${communityDrivers}">Community: ${communityDrivers}</span>`;
+            sqlDriverBadges += `<span class="badge badge-support badge-support-community" title="Community drivers: ${escapeHtml(communityDrivers)}">Community: ${escapeHtml(communityDrivers)}</span>`;
           }
         }
 
@@ -882,8 +882,8 @@ module.exports.register = function (registry, context) {
         Array.from(values)
           .map(value => `
             <label class="dropdown-checkbox-option">
-              <input type="checkbox" value="${value}" checked>
-              <span>${capitalize(value).replace("_", " ")}</span>
+              <input type="checkbox" value="${escapeHtml(value)}" checked>
+              <span>${escapeHtml(capitalize(value).replace("_", " "))}</span>
             </label>`)
           .join('');
 

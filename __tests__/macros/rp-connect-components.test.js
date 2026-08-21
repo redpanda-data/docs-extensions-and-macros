@@ -193,6 +193,55 @@ describe('connector logo lookup', () => {
   })
 })
 
+describe('escaping of every CSV-derived value', () => {
+  // Hostile values in the columns the first escaping pass missed: the CSV `type`
+  // (type badge text, title and filter checkbox value), `support_level` (support
+  // badge class, text and filter value) and the SQL driver `commercial_name`
+  // (driver badge title and text).
+  const HOSTILE_CSV = [
+    'connector,commercial_name,type,support_level,is_cloud_supported,is_licensed,redpandaConnectUrl,redpandaCloudUrl,description',
+    'sql_insert,SQL,output,certified,n,No,/connect/components/outputs/sql_insert/,,Inserts rows into SQL databases',
+    'sql_driver_evil,"Drv<img src=x onerror=alert(1)> & ""co""",sql_driver,community,n,No,,,',
+    'hostile,Hostile,in<b>put</b>,cert<script>x</script>,n,No,/connect/components/inputs/hostile/,,A component'
+  ].join('\n')
+
+  let html
+
+  beforeAll(() => {
+    html = renderComponentTable({ csv: HOSTILE_CSV })
+  })
+
+  test('no CSV value reaches the page as live markup', () => {
+    expect(html).not.toContain('<img src=x onerror=alert(1)>')
+    expect(html).not.toContain('in<b>put</b>')
+    expect(html).not.toContain('In<b>put</b>')
+    expect(html).not.toContain('<script>x</script>')
+  })
+
+  test('escapes the SQL driver commercial name in the badge title and text', () => {
+    const card = cardFor(html, 'sql_insert')
+    expect(card).toContain('title="Community drivers: Drv&lt;img src=x onerror=alert(1)&gt; &amp; &quot;co&quot;"')
+    expect(card).toContain('>Community: Drv&lt;img src=x onerror=alert(1)&gt; &amp; &quot;co&quot;<')
+  })
+
+  test('escapes the CSV type in the badge text and title', () => {
+    const card = cardFor(html, 'hostile')
+    expect(card).toContain('title="Component type: In&lt;b&gt;put&lt;/b&gt;"')
+    expect(card).toContain('>In&lt;b&gt;put&lt;/b&gt;</a>')
+  })
+
+  test('escapes the CSV support level in the badge class attribute', () => {
+    const card = cardFor(html, 'hostile')
+    expect(card).toContain('badge-support badge-support-cert&lt;script&gt;x&lt;/script&gt;')
+    expect(card).toContain('>Cert&lt;script&gt;x&lt;/script&gt;</span>')
+  })
+
+  test('escapes filter checkbox values built from CSV columns', () => {
+    expect(html).toContain('value="in&lt;b&gt;put&lt;/b&gt;"')
+    expect(html).toContain('value="cert&lt;script&gt;x&lt;/script&gt;"')
+  })
+})
+
 describe('UI bundle path resolution', () => {
   // Logos live in the docs-ui bundle at <site root>/_/img/logos. Antora gives
   // AsciiDoc extensions the page's path back to the site root as
