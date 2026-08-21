@@ -106,6 +106,23 @@ function capToTwoSentences (description) {
   return result.trim()
 }
 
+// Component families in a connector index, in the spelling the Connect binary
+// emits. Rate limits are 'rate-limits' there; 'rate_limits' is the docs page
+// directory spelling, which older snapshots also carry as an (always empty)
+// data key, so it is walked when present but never created. Every copy of this
+// list used to be the underscore form only, which meant rate-limit components
+// were never given cloudSupported or requiresCgo flags and any cgo-only or
+// cloud-only rate limit was dropped from the published snapshot.
+const COMPONENT_TYPE_KEYS = ['inputs', 'outputs', 'processors', 'caches', 'rate-limits',
+  'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers']
+
+// 'config' components live in the same index but have no config/fields wrapper.
+const COMPONENT_TYPE_KEYS_WITH_CONFIG = [...COMPONENT_TYPE_KEYS, 'config']
+
+// Keys kept only for snapshots written before the spelling was fixed. Walked
+// if a snapshot has them, never added to one.
+const LEGACY_COMPONENT_TYPE_KEYS = new Set(['rate_limits'])
+
 /**
  * Remove platform metadata fields from connectors
  * @param {Array} connectors - Array of connector objects
@@ -146,11 +163,9 @@ function augmentConnectorData (connectorData, binaryAnalysis) {
   let addedCgoCount = 0
   let addedCloudOnlyCount = 0
 
-  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-    'buffers', 'metrics', 'scanners', 'tracers', 'config']
-
-  for (const type of connectorTypes) {
+  for (const type of COMPONENT_TYPE_KEYS_WITH_CONFIG) {
     if (!Array.isArray(augmentedData[type])) {
+      if (LEGACY_COMPONENT_TYPE_KEYS.has(type)) continue
       augmentedData[type] = []
     }
 
@@ -219,10 +234,7 @@ function augmentConnectorData (connectorData, binaryAnalysis) {
  */
 function buildCleanOssData (connectorIndex) {
   const cleanData = JSON.parse(JSON.stringify(connectorIndex))
-  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-    'buffers', 'metrics', 'scanners', 'tracers']
-
-  for (const type of connectorTypes) {
+  for (const type of COMPONENT_TYPE_KEYS) {
     if (Array.isArray(cleanData[type])) {
       // Keep only connectors from OSS rpk (have config/fields)
       // Remove augmentation-only connectors (added by previous binary analysis)
@@ -1508,11 +1520,8 @@ async function handleRpcnConnectorDocs (options) {
 
       // Strip CGO/cloud-only connectors and metadata from old data
       oldIndexForDiff = JSON.parse(JSON.stringify(oldIndex))
-      const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-        'buffers', 'metrics', 'scanners', 'tracers', 'config']
-
       let totalStripped = 0
-      for (const type of connectorTypes) {
+      for (const type of COMPONENT_TYPE_KEYS_WITH_CONFIG) {
         if (Array.isArray(oldIndexForDiff[type])) {
           const originalCount = oldIndexForDiff[type].length
 
@@ -1699,8 +1708,7 @@ async function handleRpcnConnectorDocs (options) {
       const dataObj = JSON.parse(rawData)
 
       const validConnectors = []
-      const types = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers']
-      types.forEach(type => {
+      COMPONENT_TYPE_KEYS.forEach(type => {
         if (Array.isArray(dataObj[type])) {
           dataObj[type].forEach(connector => {
             if (connector.name) {
@@ -1771,8 +1779,7 @@ async function handleRpcnConnectorDocs (options) {
         // Fallback when binary analysis is unavailable:
         // Check all connectors that have cloudSupported flag or assume all non-deprecated are cloud-supported
         console.log('   ℹ️  Binary analysis unavailable - checking all non-deprecated connectors for cloud-docs')
-        const types = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers']
-        types.forEach(type => {
+        COMPONENT_TYPE_KEYS.forEach(type => {
           if (Array.isArray(dataObj[type])) {
             dataObj[type].forEach(connector => {
               // Include if cloudSupported is explicitly true, or if it's null/undefined and not deprecated
