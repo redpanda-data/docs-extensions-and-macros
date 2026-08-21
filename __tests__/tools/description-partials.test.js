@@ -1032,3 +1032,71 @@ describe('drafted pages are born wired to the description partial', () => {
     expect(bare).toContain('descriptions/outputs/no_summary.adoc[tag=body]');
   });
 });
+
+describe('regenerating a description partial warns before dropping a published section', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-lost-sections');
+  let originalCwd, templateFile;
+  const dPath = path.join(
+    tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'sql_raw.adoc'
+  );
+  const mPath = path.join(
+    tmpDir, 'modules', 'components', 'partials', 'metadata', 'outputs', 'sql_raw.adoc'
+  );
+
+  function writeData () {
+    const data = {
+      outputs: [
+        {
+          name: 'sql_raw',
+          type: 'output',
+          summary: 'Executes a query.',
+          description: 'Runs a query.\n\n== Metadata\n\n- kafka_partition: The partition.',
+          config: { children: [{ name: 'dsn', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    const dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    return dataFile;
+  }
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('the description partial reports lost sections the same way its metadata sibling does', async () => {
+    await generateRpcnConnectorDocs({ data: writeData(), template: templateFile });
+
+    // Somebody hand-migrated a section into each published partial. Both are
+    // regenerated on the next run, so both must warn.
+    for (const p of [dPath, mPath]) {
+      fs.writeFileSync(p, `${fs.readFileSync(p, 'utf8')}\n== Hand-written Caveats\n\nDetails.\n`, 'utf8');
+    }
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    let result, warned;
+    try {
+      result = await generateRpcnConnectorDocs({ data: writeData(), template: templateFile });
+      warned = warnSpy.mock.calls.map((a) => a.join(' ')).join('\n');
+    } finally {
+      warnSpy.mockRestore();
+    }
+
+    const partials = result.lostSectionWarnings.map((w) => w.partial);
+    expect(partials).toContain(path.join('modules', 'components', 'partials', 'descriptions', 'outputs', 'sql_raw.adoc'));
+    expect(partials).toContain(path.join('modules', 'components', 'partials', 'metadata', 'outputs', 'sql_raw.adoc'));
+    for (const w of result.lostSectionWarnings) expect(w.sections).toEqual(['Hand-written Caveats']);
+    expect(warned).toContain('regenerated description partial');
+    expect(warned).toContain('"Hand-written Caveats"');
+  });
+});

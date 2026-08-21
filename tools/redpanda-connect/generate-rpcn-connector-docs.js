@@ -572,6 +572,26 @@ async function generateRpcnConnectorDocs(options) {
         const dPath = path.join(descriptionOutRoot, partialTypeDir, `${name}.adoc`);
         if (descriptionOut.trim()) {
           fs.mkdirSync(path.dirname(dPath), { recursive: true });
+          if (fs.existsSync(dPath)) {
+            // Same content-loss check the metadata partial ten lines up has
+            // had since #236, for the same reason: regeneration is
+            // authoritative, but a section disappearing from a published
+            // partial is content loss, not cleanup. Now that pages include
+            // these files the risk is real -- a section can only vanish
+            // because it left the upstream description or because a human
+            // added it here -- so warn before overwriting instead of
+            // dropping it without a trace.
+            const lost = lostMetadataSections(fs.readFileSync(dPath, 'utf8'), descriptionOut);
+            if (lost.length) {
+              lostSectionWarnings.push({ partial: path.relative(process.cwd(), dPath), sections: lost });
+              console.warn(
+                `Warning: regenerated description partial ${path.relative(process.cwd(), dPath)} ` +
+                `drops previously published section(s): ${lost.map((h) => `"${h}"`).join(', ')}. ` +
+                'If this content is still wanted, move it to the connector page or restore it ' +
+                'in the upstream description.'
+              );
+            }
+          }
           fs.writeFileSync(dPath, descriptionOut);
           // The partial now exists for this connector, so a drafted page can
           // include its body instead of freezing the summary and description
