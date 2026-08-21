@@ -26,9 +26,13 @@ module.exports = async (github, owner, repo, logger = null) => {
         release => !release.tag_name.includes('-rc') && !release.draft
       );
 
-      // Find latest RC release (can be draft or not, adjust if needed)
+      // Find latest RC release that is NOT a draft. A draft release has no git
+      // tag until it is published, so including drafts here means the getRef
+      // below 404s and takes the whole lookup down with it, stable release
+      // included. Drafts are only visible to callers whose token has push
+      // access, which is why this stays invisible in unauthenticated CI.
       const latestRcRelease = sortedReleases.find(
-        release => release.tag_name.includes('-rc')
+        release => release.tag_name.includes('-rc') && !release.draft
       );
 
       let latestRedpandaReleaseCommitHash = null;
@@ -41,14 +45,30 @@ module.exports = async (github, owner, repo, logger = null) => {
         latestRedpandaReleaseCommitHash = commitData.data.object.sha;
       }
 
+      // Resolved separately from the stable release: an RC whose tag cannot be
+      // resolved should cost us the RC, not the stable version the caller
+      // probably asked for. Only a missing tag is tolerated; transient errors
+      // still propagate so retryWithBackoff can retry them.
       let latestRcReleaseCommitHash = null;
+      let resolvedRcRelease = latestRcRelease;
       if (latestRcRelease) {
-        const rcCommitData = await github.rest.git.getRef({
-          owner,
-          repo,
-          ref: `tags/${latestRcRelease.tag_name}`
-        });
-        latestRcReleaseCommitHash = rcCommitData.data.object.sha;
+        try {
+          const rcCommitData = await github.rest.git.getRef({
+            owner,
+            repo,
+            ref: `tags/${latestRcRelease.tag_name}`
+          });
+          latestRcReleaseCommitHash = rcCommitData.data.object.sha;
+        } catch (error) {
+          if (error.status !== 404) throw error;
+          const message = `No git tag for RC release ${latestRcRelease.tag_name}; ignoring it.`;
+          if (logger) {
+            logger.warn(message);
+          } else {
+            console.error(`⚠️  ${message}`);
+          }
+          resolvedRcRelease = null;
+        }
       }
 
       return {
@@ -56,8 +76,8 @@ module.exports = async (github, owner, repo, logger = null) => {
           version: latestRedpandaRelease.tag_name,
           commitHash: latestRedpandaReleaseCommitHash.substring(0, 7)
         } : null,
-        latestRcRelease: latestRcRelease ? {
-          version: latestRcRelease.tag_name,
+        latestRcRelease: resolvedRcRelease ? {
+          version: resolvedRcRelease.tag_name,
           commitHash: latestRcReleaseCommitHash.substring(0, 7)
         } : null
       };

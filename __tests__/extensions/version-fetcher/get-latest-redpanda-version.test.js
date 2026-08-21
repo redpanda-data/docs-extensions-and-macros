@@ -1,0 +1,126 @@
+const getLatestRedpandaVersion = require('../../../extensions/version-fetcher/get-latest-redpanda-version');
+
+// GitHub only returns draft releases to callers whose token has push access to
+// the repository, so these cases only reproduce with such a token. A draft
+// release has no git tag until it is published, which is what makes it
+// dangerous to feed into git.getRef.
+const release = (tag_name, draft = false) => ({ tag_name, draft });
+
+describe('getLatestRedpandaVersion', () => {
+  let mockGithub;
+
+  beforeEach(() => {
+    mockGithub = {
+      rest: {
+        repos: { listReleases: jest.fn() },
+        git: { getRef: jest.fn() }
+      }
+    };
+  });
+
+  const mockReleases = (releases) => {
+    mockGithub.rest.repos.listReleases.mockResolvedValue({ data: releases });
+  };
+
+  const mockTags = (tags) => {
+    mockGithub.rest.git.getRef.mockImplementation(async ({ ref }) => {
+      const tag = ref.replace(/^tags\//, '');
+      if (!(tag in tags)) {
+        const error = new Error('Not Found');
+        error.status = 404;
+        throw error;
+      }
+      return { data: { object: { sha: tags[tag] } } };
+    });
+  };
+
+  it('resolves the latest stable and RC releases', async () => {
+    mockReleases([
+      release('v26.2.2-rc1'),
+      release('v26.2.1'),
+      release('v26.1.17')
+    ]);
+    mockTags({
+      'v26.2.2-rc1': 'aaaaaaaaaaaaaaaa',
+      'v26.2.1': 'bbbbbbbbbbbbbbbb'
+    });
+
+    const result = await getLatestRedpandaVersion(mockGithub, 'redpanda-data', 'redpanda');
+
+    expect(result.latestRedpandaRelease).toEqual({ version: 'v26.2.1', commitHash: 'bbbbbbb' });
+    expect(result.latestRcRelease).toEqual({ version: 'v26.2.2-rc1', commitHash: 'aaaaaaa' });
+  });
+
+  it('skips a draft RC in favour of the newest published RC', async () => {
+    mockReleases([
+      release('v26.2.2-rc2', true),
+      release('v26.2.2-rc1'),
+      release('v26.2.1')
+    ]);
+    // No tag for the draft, matching what GitHub does until it is published.
+    mockTags({
+      'v26.2.2-rc1': 'aaaaaaaaaaaaaaaa',
+      'v26.2.1': 'bbbbbbbbbbbbbbbb'
+    });
+
+    const result = await getLatestRedpandaVersion(mockGithub, 'redpanda-data', 'redpanda');
+
+    expect(result.latestRcRelease).toEqual({ version: 'v26.2.2-rc1', commitHash: 'aaaaaaa' });
+    expect(result.latestRedpandaRelease).toEqual({ version: 'v26.2.1', commitHash: 'bbbbbbb' });
+    expect(mockGithub.rest.git.getRef).not.toHaveBeenCalledWith(
+      expect.objectContaining({ ref: 'tags/v26.2.2-rc2' })
+    );
+  });
+
+  it('still returns the stable release when every RC is a draft', async () => {
+    mockReleases([
+      release('v26.2.2-rc2', true),
+      release('v26.2.2-rc1', true),
+      release('v26.2.1')
+    ]);
+    mockTags({ 'v26.2.1': 'bbbbbbbbbbbbbbbb' });
+
+    const result = await getLatestRedpandaVersion(mockGithub, 'redpanda-data', 'redpanda');
+
+    expect(result.latestRedpandaRelease).toEqual({ version: 'v26.2.1', commitHash: 'bbbbbbb' });
+    expect(result.latestRcRelease).toBeNull();
+  });
+
+  it('drops an RC whose tag is missing rather than the whole result', async () => {
+    mockReleases([release('v26.2.2-rc1'), release('v26.2.1')]);
+    // Published RC, but the tag cannot be resolved for some other reason.
+    mockTags({ 'v26.2.1': 'bbbbbbbbbbbbbbbb' });
+
+    const result = await getLatestRedpandaVersion(mockGithub, 'redpanda-data', 'redpanda');
+
+    expect(result.latestRedpandaRelease).toEqual({ version: 'v26.2.1', commitHash: 'bbbbbbb' });
+    expect(result.latestRcRelease).toBeNull();
+  });
+
+  it('ignores draft stable releases', async () => {
+    mockReleases([release('v26.2.2', true), release('v26.2.1')]);
+    mockTags({ 'v26.2.1': 'bbbbbbbbbbbbbbbb' });
+
+    const result = await getLatestRedpandaVersion(mockGithub, 'redpanda-data', 'redpanda');
+
+    expect(result.latestRedpandaRelease).toEqual({ version: 'v26.2.1', commitHash: 'bbbbbbb' });
+  });
+
+  it('lets a non-404 error from the RC tag lookup propagate', async () => {
+    mockReleases([release('v26.2.2-rc1'), release('v26.2.1')]);
+    mockGithub.rest.git.getRef.mockImplementation(async ({ ref }) => {
+      if (ref === 'tags/v26.2.1') return { data: { object: { sha: 'bbbbbbbbbbbbbbbb' } } };
+      const error = new Error('Internal Server Error');
+      error.status = 500;
+      throw error;
+    });
+
+    // retryWithBackoff exhausts its retries, then the module's catch reports
+    // the failure as no version data at all.
+    const result = await getLatestRedpandaVersion(mockGithub, 'redpanda-data', 'redpanda');
+
+    expect(result).toEqual({ latestRedpandaRelease: null, latestRcRelease: null });
+    expect(mockGithub.rest.git.getRef.mock.calls.filter(([{ ref }]) => ref === 'tags/v26.2.2-rc1').length)
+      .toBeGreaterThan(1);
+  });
+});
