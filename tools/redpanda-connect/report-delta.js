@@ -61,6 +61,10 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     );
     added.forEach(fName => {
       const rawFieldObj = newMap[cKey].fieldMap.get(fName) || null;
+      // A field that arrives already deprecated gets no heading on the
+      // reference page, so advertising it under "New field support" would
+      // link to a fragment that never exists.
+      if (isDeprecatedField(rawFieldObj)) return;
       newFields.push({
         component: cKey,
         field: fName,
@@ -178,8 +182,8 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
       const oldFieldObj = oldMap[cKey].fieldMap.get(fName) || null;
       const newFieldObj = newMap[cKey].fieldMap.get(fName) || null;
 
-      const oldDeprecated = oldFieldObj && (oldFieldObj.is_deprecated === true || oldFieldObj.deprecated === true || (oldFieldObj.status || '').toLowerCase() === 'deprecated');
-      const newDeprecated = newFieldObj && (newFieldObj.is_deprecated === true || newFieldObj.deprecated === true || (newFieldObj.status || '').toLowerCase() === 'deprecated');
+      const oldDeprecated = isDeprecatedField(oldFieldObj);
+      const newDeprecated = isDeprecatedField(newFieldObj);
 
       if (!oldDeprecated && newDeprecated) {
         deprecatedFields.push({
@@ -369,6 +373,25 @@ function discoverComponentKeys(obj) {
 }
 
 /**
+ * Whether a field is marked deprecated.
+ *
+ * Three markers have been used by the source data over time. Only
+ * `is_deprecated` appears in current releases (verified across connect-4.63.0,
+ * 4.104.0 and 4.105.0: 85, 75 and 75 fields, zero uses of the other two), and
+ * it is the one renderConnectFields keys on when it decides not to render a
+ * heading for a field.
+ *
+ * @param {object} field - Field definition, or null
+ * @returns {boolean} True when the field is deprecated
+ */
+function isDeprecatedField(field) {
+  if (!field) return false;
+  return field.is_deprecated === true ||
+    field.deprecated === true ||
+    (field.status || '').toLowerCase() === 'deprecated';
+}
+
+/**
  * Drop paths whose parent changed in the same way, keeping only the topmost
  * field of each changed subtree.
  *
@@ -494,6 +517,7 @@ function printDeltaReport(oldIndex, newIndex) {
     );
     added.forEach(fName => {
       const rawFieldObj = newMap[cKey].fieldMap.get(fName) || null;
+      if (isDeprecatedField(rawFieldObj)) return;
       const introducedIn = rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version);
       const requiresVer = rawFieldObj && rawFieldObj.requiresVersion;
 
@@ -531,8 +555,8 @@ function printDeltaReport(oldIndex, newIndex) {
     commonFields.forEach(fName => {
       const oldFieldObj = oldMap[cKey].fieldMap.get(fName) || null;
       const newFieldObj = newMap[cKey].fieldMap.get(fName) || null;
-      const oldDeprecated = oldFieldObj && (oldFieldObj.is_deprecated === true || oldFieldObj.deprecated === true || (oldFieldObj.status || '').toLowerCase() === 'deprecated');
-      const newDeprecated = newFieldObj && (newFieldObj.is_deprecated === true || newFieldObj.deprecated === true || (newFieldObj.status || '').toLowerCase() === 'deprecated');
+      const oldDeprecated = isDeprecatedField(oldFieldObj);
+      const newDeprecated = isDeprecatedField(newFieldObj);
       if (!oldDeprecated && newDeprecated) {
         deprecatedFieldsList.push({ component: cKey, field: fName });
       }

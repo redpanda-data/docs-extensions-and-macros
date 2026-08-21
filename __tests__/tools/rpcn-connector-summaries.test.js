@@ -291,6 +291,29 @@ describe('generateConnectorDiffJson - config component status and cloud support'
     expect(diff.details.removedFields.map(f => f.field)).toEqual(['sasl.user']);
   });
 
+  test('leaves a field that arrives already deprecated out of the new-field set', () => {
+    // renderConnectFields renders no heading for a deprecated field, so a
+    // what's-new row would link to a fragment that does not exist.
+    const oldIndex = {
+      inputs: [{ name: 'aws_s3', config: { children: [{ name: 'sqs', kind: 'scalar', children: [{ name: 'url', kind: 'scalar' }] }] } }]
+    };
+    const newChildren = [{
+      name: 'sqs',
+      kind: 'scalar',
+      children: [
+        { name: 'url', kind: 'scalar' },
+        { name: 'legacy_poll', kind: 'scalar', is_deprecated: true, description: 'Old polling.' },
+        { name: 'wait_time', kind: 'scalar', description: 'Wait time.' }
+      ]
+    }];
+    const newIndex = { inputs: [{ name: 'aws_s3', config: { children: newChildren } }] };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, { oldVersion: '1.0.0', newVersion: '1.1.0' });
+
+    expect(diff.details.newFields.map(f => f.field)).toEqual(['sqs.wait_time']);
+    expect(String(renderConnectFields(newChildren, ''))).not.toContain('legacy_poll');
+  });
+
   test('keeps the [] marker on a field nested under an array-of-object group', () => {
     // `sasl` is kind: array in the real connect data, so the reference page
     // heads the field `sasl[].aws.tcp`. A what's-new row saying
