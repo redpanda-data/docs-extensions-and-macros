@@ -12,6 +12,8 @@ module.exports.register = function ({ config }) {
   const logger = this.getLogger('set-latest-version-extension');
 
   const { getGitHubToken } = require('../../cli-utils/github-token');
+  // Shared with tools/bundle-openapi.js so there is one major.minor derivation.
+  const { toShortVersion } = require('../../cli-utils/version');
   const token = getGitHubToken();
 
   if (!token) {
@@ -167,12 +169,6 @@ module.exports.register = function ({ config }) {
         logger.debug(`Updated ${baseName}-version to ${versionWithoutPrefix} and ${baseName}-tag to ${versionData}`);
       }
     }
-  }
-
-  // Helper function to derive the major.minor short version (for example, 26.2.1 -> 26.2)
-  function toShortVersion(version) {
-    const match = /^(\d+)\.(\d+)/.exec(version);
-    return match ? `${match[1]}.${match[2]}` : null;
   }
 
   // Helper function to sanitize version by removing "v" prefix
