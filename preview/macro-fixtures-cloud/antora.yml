@@ -1,0 +1,12 @@
+name: macro-fixtures-cloud
+title: Macro fixtures (cloud)
+version: ~
+nav:
+- modules/ROOT/nav.adoc
+asciidoc:
+  attributes:
+    # Marks this component as Cloud: it takes the newest GA self-managed
+    # dataset, never a release candidate, and only cloud_supported properties
+    # are available.
+    env-cloud: true
+    page-cloud: true

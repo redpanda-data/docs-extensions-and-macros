@@ -56,6 +56,7 @@ jobs:
             all_tests:
               - '__tests__/**'
               - 'jest.config.js'
+              - 'jest.unit.config.js'
               - '.github/workflows/**'
 
   test-extensions:
@@ -288,8 +289,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # jest.unit.config.js extends jest.config.js's testPathIgnorePatterns
+      # instead of repeating them here, because a CLI --testPathIgnorePatterns
+      # REPLACES the config array rather than adding to it — which is how the
+      # network-dependent CGO end-to-end test (excluded in jest.config.js) once
+      # crept back into this job, where a GitHub download hiccup fails PRs that
+      # never touched it. That test has its own workflow
+      # (test-cgo-detection.yml) and npm script (npm run test:cgo).
       - name: Run all tests
-        run: npm test -- --testPathIgnorePatterns="cli-contract.test.js|integration.test.js" --maxWorkers=2
+        run: npm run test:unit -- --maxWorkers=2
 
   # Summary job that all other jobs depend on
   test-summary:
