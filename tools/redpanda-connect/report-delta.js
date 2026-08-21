@@ -1,4 +1,5 @@
 const { execSync } = require('child_process');
+const { flattenConnectFields } = require('./helpers/flattenConnectFields');
 
 /**
  * Generate a JSON diff report between two connector index objects.
@@ -363,29 +364,6 @@ function discoverComponentKeys(obj) {
   return Object.keys(obj).filter(key => Array.isArray(obj[key]));
 }
 
-/**
- * Recursively flatten a field tree into dotted-path entries, so a field
- * added under an existing nested group (e.g. "sqs.zero_key_warn_interval"
- * added under aws_s3's pre-existing "sqs" group) is visible to a diff that
- * compares field-name sets. A flat map of top-level names alone treats that
- * as no change at all, because "sqs" itself isn't new.
- * @param {Array} children - field definitions (each may itself have `children`)
- * @param {string} [prefix] - dotted path of the parent, if any
- * @returns {Array<{path: string, field: object}>}
- */
-function flattenFields(children, prefix = '') {
-  const result = [];
-  (children || []).forEach(f => {
-    if (!f || !f.name) return;
-    const path = prefix ? `${prefix}.${f.name}` : f.name;
-    result.push({ path, field: f });
-    if (Array.isArray(f.children)) {
-      result.push(...flattenFields(f.children, path));
-    }
-  });
-  return result;
-}
-
 function buildComponentMap(indexObj) {
   const map = {};
   const types = discoverComponentKeys(indexObj);
@@ -408,7 +386,7 @@ function buildComponentMap(indexObj) {
         }
       }
 
-      const flattened = flattenFields(childArray);
+      const flattened = flattenConnectFields(childArray);
       const fieldNames = flattened.map(f => f.path);
       const fieldMap = new Map(flattened.map(f => [f.path, f.field]));
 
