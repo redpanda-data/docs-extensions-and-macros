@@ -798,6 +798,15 @@ async function handleRpcnConnectorDocs (options) {
       fs.closeSync(fd)
 
       const rawJson = fs.readFileSync(tmpFile, 'utf8')
+      // Deliberately plain JSON.parse/stringify, not bigIntJson: this is connect
+      // data, which carries example config text as escaped JSON-shaped strings
+      // (e.g. bloblang examples), indistinguishable by regex from real JSON
+      // value position. bigIntJson's value-position regex matches inside such a
+      // string and inserts stray quotes -- confirmed to throw on the real,
+      // currently-published connect attachment, not merely round a number. A
+      // plain round trip still silently rounds int64 defaults past MaxInt64 (the
+      // pre-existing defect this file has always had), which is the safer
+      // failure mode until a real JSON scanner replaces the regex.
       const parsed = JSON.parse(rawJson)
       fs.writeFileSync(finalFile, JSON.stringify(parsed, null, 2))
       fs.unlinkSync(tmpFile)
