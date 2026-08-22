@@ -11,6 +11,7 @@ const handlebars = require('handlebars')
 
 // Import and register Redpanda Connect helpers
 const helpers = require('../tools/redpanda-connect/helpers')
+const { flattenConnectFields } = require('../tools/redpanda-connect/helpers/flattenConnectFields')
 Object.entries(helpers).forEach(([name, fn]) => {
   if (typeof fn === 'function') {
     handlebars.registerHelper(name, fn)
@@ -25,18 +26,11 @@ handlebars.registerHelper('renderConnectFieldsTable', function (children) {
 
   const rows = []
 
-  function collectFields (fieldsList, pathPrefix = '') {
-    if (!Array.isArray(fieldsList)) return
-
-    fieldsList.forEach(field => {
-      if (field.is_deprecated || !field.name) return
-
-      const isArray = field.kind === 'array'
-      const nameWithArray = (typeof field.name === 'string' && isArray && !field.name.endsWith('[]'))
-        ? `${field.name}[]`
-        : field.name
-      const currentPath = pathPrefix ? `${pathPrefix}.${nameWithArray}` : nameWithArray
-
+  // The dotted paths, the `[]` array marker and the deprecated-field skipping
+  // all come from the shared walker, so this table, the reference-page
+  // headings and the connector delta report cannot drift apart.
+  flattenConnectFields(children, { arrayMarker: true, skipDeprecated: true })
+    .forEach(({ path: currentPath, field }) => {
       // Normalize type
       let displayType
       const isArrayTitle = typeof field.name === 'string' && field.name.endsWith('[]')
@@ -88,15 +82,7 @@ handlebars.registerHelper('renderConnectFieldsTable', function (children) {
         default: defaultValue || '-',
         description: desc || '-'
       })
-
-      // Recurse for children
-      if (field.children && Array.isArray(field.children) && field.children.length > 0) {
-        collectFields(field.children, currentPath)
-      }
     })
-  }
-
-  collectFields(children, '')
 
   if (rows.length === 0) return 'No configuration fields available.\n\n'
 
