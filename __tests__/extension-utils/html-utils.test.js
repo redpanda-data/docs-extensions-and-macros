@@ -38,16 +38,9 @@ describe('escapeHtml', () => {
  * removing an entry is how the debt gets paid.
  */
 const KNOWN_COPIES = Object.freeze({
-  // macros/badge.js defines its own escapeAttr. Consolidating it here would
-  // collide with PR #266 (fix/macro-adversarial-review-findings), which is open
-  // and adds three further escapeAttr call sites to this same function. #266
-  // merges before this PR, so the consolidation belongs in a follow-up on top of
-  // it rather than in a conflict resolved by whoever merges second. #266 also
-  // considered and declined replacing this escaper with the html-entities
-  // package, on the grounds that html-entities is only a transitive dependency
-  // here and a runtime dependency is a poor trade for four replace() calls, so
-  // the shared escapeHtml in this repo is the agreed destination.
-  [path.join('macros', 'badge.js')]: 'PR #266 adds call sites here; consolidate after it merges',
+  // Empty: the badge.js copy this list existed for is consolidated now that
+  // PR #266, which was adding call sites to it, has merged. Add an entry only
+  // with a reason and a plan to remove it; the test below fails on a stale one.
 })
 
 describe('no private copies of the HTML escape', () => {
@@ -75,7 +68,9 @@ describe('no private copies of the HTML escape', () => {
   // accident, so it has to fail too: either the copy is gone and the entry
   // should go with it, or the file moved and the entry is not protecting
   // anything.
-  test.each(Object.keys(KNOWN_COPIES))('%s still contains the copy it is excused for', (file) => {
+  const excused = Object.keys(KNOWN_COPIES)
+  const eachExcused = excused.length ? test.each(excused) : (_name, _fn) => {}
+  eachExcused('%s still contains the copy it is excused for', (file) => {
     const full = path.join(repoRoot, file)
     expect(fs.existsSync(full)).toBe(true)
     const source = fs.readFileSync(full, 'utf8')
