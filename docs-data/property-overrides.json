@@ -284,7 +284,7 @@
     },
     "cloud_storage_enable_segment_merging": {
       "related_topics": [
-        "xref:manage:tiered-storage.adoc#object-storage-housekeeping[Object storage housekeeping]"
+        "self-managed-only:xref:manage:tiered-storage.adoc#object-storage-housekeeping[Object storage housekeeping]"
       ]
     },
     "cloud_storage_enable_segment_uploads": {
@@ -610,7 +610,7 @@
       "description": "The retention time for tombstone records in a compacted topic. Redpanda removes tombstone records after the retention limit is exceeded.\n\nIf you have enabled Tiered Storage and set <<redpandaremoteread,`redpanda.remote.read`>> or <<redpandaremotewrite,`redpanda.remote.write`>> for the topic, you cannot enable tombstone removal.\n\nIf both `delete.retention.ms` and the cluster property config_ref:tombstone_retention_ms,true,properties/cluster-properties[] are set, `delete.retention.ms` overrides the cluster level tombstone retention for an individual topic.",
       "related_topics": [
         "xref:./cluster-properties.adoc#tombstone_retention_ms[`tombstone_retention_ms`]",
-        "xref:manage:cluster-maintenance/compaction-settings.adoc#tombstone-record-removal[Tombstone record removal]"
+        "self-managed-only:xref:manage:cluster-maintenance/compaction-settings.adoc#tombstone-record-removal[Tombstone record removal]"
       ],
       "config_scope": "topic"
     },
@@ -872,7 +872,7 @@
       "description": "A size-based initial retention limit for Tiered Storage that determines how much data in local storage is transferred to a partition replica when a cluster is resized. If `null` (default), all locally retained data is transferred.",
       "related_topics": [
         "xref:./cluster-properties.adoc#initial_retention_local_target_bytes[`initial_retention_local_target_bytes`]",
-        "xref:manage:tiered-storage.adoc#fast-commission-and-decommission[Fast commission and decommission through Tiered Storage]"
+        "self-managed-only:xref:manage:tiered-storage.adoc#fast-commission-and-decommission[Fast commission and decommission through Tiered Storage]"
       ],
       "config_scope": "topic"
     },
@@ -880,21 +880,21 @@
       "description": "A time-based initial retention limit for Tiered Storage that determines how much data in local storage is transferred to a partition replica when a cluster is resized. If `null` (default), all locally retained data is transferred.",
       "related_topics": [
         "xref:./cluster-properties.adoc#initial_retention_local_target_ms[`initial_retention_local_target_ms`]",
-        "xref:manage:tiered-storage.adoc#fast-commission-and-decommission[Fast commission and decommission through Tiered Storage]"
+        "self-managed-only:xref:manage:tiered-storage.adoc#fast-commission-and-decommission[Fast commission and decommission through Tiered Storage]"
       ],
       "config_scope": "topic"
     },
     "initial_retention_local_target_bytes_default": {
       "description": "Initial local retention size target for partitions of topics with xref:manage:tiered-storage.adoc[Tiered Storage] enabled. If no initial local target retention is configured, then  all locally-retained data will be delivered to learner when joining the partition replica set.",
       "related_topics": [
-        "xref:manage:tiered-storage.adoc[Tiered Storage]"
+        "self-managed-only:xref:manage:tiered-storage.adoc[Tiered Storage]"
       ],
       "config_scope": "cluster"
     },
     "initial_retention_local_target_ms_default": {
       "description": "Initial local retention time target for partitions of topics with xref:manage:tiered-storage.adoc[Tiered Storage] enabled. If no initial local target retention is configured, then all locally-retained data will be delivered to learner when joining the partition replica is set.",
       "related_topics": [
-        "xref:manage:tiered-storage.adoc[Tiered Storage]"
+        "self-managed-only:xref:manage:tiered-storage.adoc[Tiered Storage]"
       ],
       "config_scope": "cluster"
     },
@@ -1126,7 +1126,7 @@
       "related_topics": [
         "xref:cluster-properties.adoc#max_compaction_lag_ms[`max_compaction_lag_ms`]",
         "xref:./cluster-properties.adoc#max_compaction_lag_ms[`max_compaction_lag_ms`]",
-        "xref:manage:cluster-maintenance/compaction-settings.adoc#configuration-options[Configure maximum compaction lag]"
+        "self-managed-only:xref:manage:cluster-maintenance/compaction-settings.adoc#configuration-options[Configure maximum compaction lag]"
       ],
       "config_scope": "topic"
     },
@@ -1185,7 +1185,7 @@
       "related_topics": [
         "xref:cluster-properties.adoc#min_compaction_lag_ms[`min_compaction_lag_ms`]",
         "xref:./cluster-properties.adoc#min_compaction_lag_ms[`min_compaction_lag_ms`]",
-        "xref:manage:cluster-maintenance/compaction-settings.adoc#configure-min-compaction-lag[Configure minimum compaction lag]"
+        "self-managed-only:xref:manage:cluster-maintenance/compaction-settings.adoc#configure-min-compaction-lag[Configure minimum compaction lag]"
       ],
       "config_scope": "topic"
     },
@@ -1430,14 +1430,14 @@
     "redpanda.remote.delete": {
       "description": "A flag that enables deletion of data from object storage for Tiered Storage when it's deleted from local storage for a topic.\n\nNOTE: `redpanda.remote.delete` doesn't apply to Remote Read Replica topics: a Remote Read Replica topic isn't deleted from object storage when this flag is `true`.",
       "related_topics": [
-        "xref:manage:tiered-storage.adoc[Tiered Storage]"
+        "self-managed-only:xref:manage:tiered-storage.adoc[Tiered Storage]"
       ],
       "config_scope": "topic"
     },
     "redpanda.remote.read": {
-      "description": "A flag for enabling Redpanda to fetch data for a topic from object storage to local storage. When set to `true` together with <<redpandaremotewrite, `redpanda.remote.write`>>, it enables the xref:manage:tiered-storage.adoc[Tiered Storage] feature.",
+      "description": "A flag for enabling Redpanda to fetch data for a topic from object storage to local storage. When set to `true` together with <<redpandaremotewrite, `redpanda.remote.write`>>, it enables the Tiered Storage feature.",
       "related_topics": [
-        "xref:manage:tiered-storage.adoc[Tiered Storage]"
+        "self-managed-only:xref:manage:tiered-storage.adoc[Tiered Storage]"
       ],
       "config_scope": "topic"
     },
@@ -1447,19 +1447,20 @@
         "xref:manage:remote-read-replicas.adoc[Remote Read Replicas]"
       ],
       "config_scope": "topic",
-      "type": "string"
+      "type": "string",
+      "cloud_byoc_only": true
     },
     "redpanda.remote.recovery": {
       "description": "A flag that enables the recovery or reproduction of a topic from object storage for Tiered Storage. The recovered data is saved in local storage, and the maximum amount of recovered data is determined by the local storage retention limits of the topic.\n\nTIP: You can only configure `redpanda.remote.recovery` when you create a topic. You cannot apply this setting to existing topics.",
       "related_topics": [
-        "xref:manage:tiered-storage.adoc[Tiered Storage]"
+        "self-managed-only:xref:manage:tiered-storage.adoc[Tiered Storage]"
       ],
       "config_scope": "topic"
     },
     "redpanda.remote.write": {
-      "description": "A flag for enabling Redpanda to upload data for a topic from local storage to object storage. When set to `true` together with <<redpandaremoteread, `redpanda.remote.read`>>, it enables the xref:manage:tiered-storage.adoc[Tiered Storage] feature.",
+      "description": "A flag for enabling Redpanda to upload data for a topic from local storage to object storage. When set to `true` together with <<redpandaremoteread, `redpanda.remote.read`>>, it enables the Tiered Storage feature.",
       "related_topics": [
-        "xref:manage:tiered-storage.adoc[Tiered Storage]"
+        "self-managed-only:xref:manage:tiered-storage.adoc[Tiered Storage]"
       ],
       "config_scope": "topic"
     },
@@ -1470,21 +1471,21 @@
     "replication.factor": {
       "description": "The number of replicas of a topic to save in different nodes (brokers) of a cluster.\n\nIf `replication.factor` is set to a positive value, it overrides the cluster property xref:./cluster-properties.adoc#default_topic_replication[default_topic_replication] for the topic.\n\nNOTE: Although `replication.factor` isn't returned or displayed by xref:reference:rpk/rpk-topic/rpk-topic-describe.adoc[`rpk topic describe`] as a valid Kafka property, you can set it using xref:reference:rpk/rpk-topic/rpk-topic-alter-config.adoc[`rpk topic alter-config`]. When the `replication.factor` of a topic is altered, it isn't simply a property value that's updated, but rather the actual replica sets of topic partitions that are changed.",
       "related_topics": [
-        "xref:./cluster-properties.adoc#default_topic_replication[default_topic_replication]",
+        "xref:./cluster-properties.adoc#default_topic_replication[`default_topic_replication`]",
         "xref:reference:rpk/rpk-topic/rpk-topic-describe.adoc[`rpk topic describe`]",
         "xref:reference:rpk/rpk-topic/rpk-topic-alter-config.adoc[`rpk topic alter-config`]",
-        "xref:./cluster-properties.adoc#default_topic_replication[`default_topic_replication`]",
-        "xref:develop:config-topics.adoc#choose-the-replication-factor[Choose the replication factor]",
-        "xref:develop:config-topics.adoc#change-the-replication-factor[Change the replication factor]"
+        "self-managed-only:xref:develop:config-topics.adoc#choose-the-replication-factor[Choose the replication factor]",
+        "self-managed-only:xref:develop:config-topics.adoc#change-the-replication-factor[Change the replication factor]"
       ],
-      "config_scope": "topic"
+      "config_scope": "topic",
+      "acceptable_values": "ifdef::env-cloud[]\ninteger (3 or greater). Redpanda Cloud requires a minimum of three replicas. A topic created with a replication factor of `1` is reset to `3`.\nendif::[]\nifndef::env-cloud[]\ninteger (1 or greater)\nendif::[]"
     },
     "retention.bytes": {
       "description": "A size-based retention limit that configures the maximum size that a topic partition can grow before becoming eligible for cleanup.\n\nIf `retention.bytes` is set to a positive value, it overrides the cluster property xref:cluster-properties.adoc#retention_bytes[`retention_bytes`] for the topic, and the total retained size for the topic is `retention.bytes` multiplied by the number of partitions for the topic.\n\nWhen both size-based (`retention.bytes`) and time-based (`retention.ms`) retention limits are set, cleanup occurs when either limit is reached.",
       "related_topics": [
         "xref:cluster-properties.adoc#retention_bytes[`retention_bytes`]",
         "xref:./cluster-properties.adoc#retention_bytes[`retention_bytes`]",
-        "xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]"
+        "self-managed-only:xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]"
       ],
       "config_scope": "topic"
     },
@@ -1492,7 +1493,7 @@
       "description": "A size-based retention limit for Tiered Storage that configures the maximum size that a topic partition in local storage can grow before becoming eligible for cleanup. It applies per partition and is equivalent to <<retentionbytes, `retention.bytes`>> without Tiered Storage.",
       "related_topics": [
         "xref:./cluster-properties.adoc#retention_local_target_bytes[`retention_local_target_bytes`]",
-        "xref:manage:tiered-storage.adoc[Tiered Storage]"
+        "self-managed-only:xref:manage:tiered-storage.adoc[Tiered Storage]"
       ],
       "config_scope": "topic"
     },
@@ -1500,7 +1501,7 @@
       "description": "A time-based retention limit for Tiered Storage that sets the maximum duration that a log's segment file for a topic is retained in local storage before it's eligible for cleanup. This property is equivalent to <<retentionms, `retention.ms`>> without Tiered Storage.",
       "related_topics": [
         "xref:./cluster-properties.adoc#retention_local_target_ms[`retention_local_target_ms`]",
-        "xref:manage:tiered-storage.adoc[Tiered Storage]",
+        "self-managed-only:xref:manage:tiered-storage.adoc[Tiered Storage]",
         "xref:manage:remote-read-replicas.adoc[Remote Read Replicas]"
       ],
       "config_scope": "topic"
@@ -1510,7 +1511,7 @@
       "related_topics": [
         "xref:./cluster-properties.adoc#log_retention_ms[`log_retention_ms`]",
         "xref:./cluster-properties.adoc#log_retention_ms[`log_retention_ms`]",
-        "xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]"
+        "self-managed-only:xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]"
       ],
       "config_scope": "topic"
     },
@@ -1523,7 +1524,7 @@
     },
     "retention_local_target_bytes_default": {
       "related_topics": [
-        "xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]"
+        "self-managed-only:xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]"
       ],
       "config_scope": "cluster",
       "description": "Local retention size target for partitions of topics with object storage write enabled. If `null`, the property is disabled.\n\nThis property can be overridden on a per-topic basis by setting `retention.local.target.bytes` in each topic enabled for Tiered Storage. See xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]."
@@ -1538,7 +1539,7 @@
     },
     "retention_local_target_ms_default": {
       "related_topics": [
-        "xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]"
+        "self-managed-only:xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]"
       ],
       "config_scope": "cluster",
       "description": "Local retention time target for partitions of topics with object storage write enabled.\n\nThis property can be overridden on a per-topic basis by setting `retention.local.target.ms` in each topic enabled for Tiered Storage. See xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]."
@@ -1667,8 +1668,8 @@
       "related_topics": [
         "xref:./cluster-properties.adoc#log_segment_size[`log_segment_size`]",
         "xref:./cluster-properties.adoc#log_segment_size[`log_segment_size`]",
-        "xref:manage:cluster-maintenance/disk-utilization.adoc#configure-segment-size[Configure segment size]",
-        "xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]",
+        "self-managed-only:xref:manage:cluster-maintenance/disk-utilization.adoc#configure-segment-size[Configure segment size]",
+        "self-managed-only:xref:manage:cluster-maintenance/disk-utilization.adoc#configure-message-retention[Configure message retention]",
         "xref:manage:remote-read-replicas.adoc[Remote Read Replicas]"
       ],
       "config_scope": "topic"
@@ -1680,7 +1681,7 @@
         "xref:./cluster-properties.adoc#log_segment_ms_min[`log_segment_ms_min`]",
         "xref:./cluster-properties.adoc#log_segment_ms_max[`log_segment_ms_max`]",
         "xref:./cluster-properties.adoc#log_segment_ms[`log_segment_ms`]",
-        "xref:manage:cluster-maintenance/disk-utilization.adoc#log-rolling[Log rolling]"
+        "self-managed-only:xref:manage:cluster-maintenance/disk-utilization.adoc#log-rolling[Log rolling]"
       ],
       "config_scope": "topic"
     },
@@ -1722,7 +1723,7 @@
     "tombstone_retention_ms": {
       "description": "The retention time for tombstone records in a compacted topic. Cannot be enabled at the same time as any of `cloud_storage_enabled`, `cloud_storage_enable_remote_read`, or `cloud_storage_enable_remote_write`. A typical default setting is `86400000`, or 24 hours.",
       "related_topics": [
-        "xref:manage:cluster-maintenance/compaction-settings.adoc#tombstone-record-removal[Tombstone record removal]"
+        "self-managed-only:xref:manage:cluster-maintenance/compaction-settings.adoc#tombstone-record-removal[Tombstone record removal]"
       ],
       "config_scope": "cluster"
     },
@@ -1779,7 +1780,7 @@
       "description": "The write caching mode to apply to a topic.\n\nWhen `write.caching` is set, it overrides the cluster property xref:cluster-properties.adoc#write_caching_default[`write_caching_default`]. Write caching acknowledges a message as soon as it is received and acknowledged on a majority of brokers, without waiting for it to be written to disk. With `acks=all`, this provides lower latency while still ensuring that a majority of brokers acknowledge the write. Fsyncs follow <<flushms, `flush.ms`>> and <<flushbytes, `flush.bytes`>>, whichever is reached first.",
       "related_topics": [
         "xref:develop:config-topics.adoc#configure-write-caching[Write caching]",
-        "xref:manage:tiered-storage.adoc[Tiered Storage]"
+        "self-managed-only:xref:manage:tiered-storage.adoc[Tiered Storage]"
       ],
       "config_scope": "topic"
     },
