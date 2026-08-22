@@ -1,0 +1,20 @@
+= Prerelease fixtures
+
+Exercises the paths that only a prerelease branch reaches.
+
+== Property data comes from this series' release candidate
+
+`iceberg_delete_orphans_enabled` exists only in `redpanda-properties-v26.3.1-rc1.json`,
+so it validates here and nowhere else:
+
+* prop:iceberg_delete_orphans_enabled[] renders marked, from the RC dataset.
+* prop:log_segment_size[] also validates: the RC file carries the GA properties too.
+
+== An unreleased enterprise feature may be referenced here
+
+enterprise:Preview Unreleased Feature[] renders with an `unreleased` badge on
+this prerelease version. The same mention on a released version renders as
+plain text and warns.
+
+enterprise:Preview Beta Feature[] renders with a `beta` badge everywhere,
+because a public beta is available to readers.

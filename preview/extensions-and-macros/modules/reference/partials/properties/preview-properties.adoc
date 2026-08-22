@@ -1,0 +1,60 @@
+// Stands in for the generated property partials. Tag markers mirror the real
+// ones so the include filters below exercise the same code path.
+// tag::category-cluster[]
+=== cloud_storage_enabled
+
+Enables Tiered Storage for the cluster.
+
+// tag::redpanda-cloud[]
+=== iceberg_enabled
+
+Enables the Iceberg integration for the cluster.
+// end::redpanda-cloud[]
+
+=== log_segment_size
+
+Default log segment size in bytes.
+
+=== write_caching_default
+
+Default write caching mode for new topics.
+
+// tag::deprecated[]
+=== cloud_storage_max_partition_readers_per_shard
+
+Maximum partition readers per shard. Deprecated in the published data, and
+tagged deprecated here, which is why no page renders it.
+// end::deprecated[]
+// end::category-cluster[]
+
+// tag::category-object-storage[]
+=== cloud_storage_cache_size
+
+Maximum size of the disk cache used by Tiered Storage.
+// end::category-object-storage[]
+
+// tag::category-broker[]
+=== empty_seed_starts_cluster
+
+How a cluster forms when a broker has an empty seed server list.
+
+=== fips_mode
+
+Whether Redpanda starts in FIPS mode.
+
+=== admin
+
+Network address for the Admin API server.
+// end::category-broker[]
+
+// tag::category-topic[]
+=== retention.ms
+
+How long a topic retains data.
+
+// tag::redpanda-cloud[]
+=== redpanda.iceberg.mode
+
+How Redpanda translates records into an Iceberg table.
+// end::redpanda-cloud[]
+// end::category-topic[]

@@ -2248,7 +2248,7 @@ const validation = new Command('validate').description('Validate docs data again
  * @why A feature must only be documented as enterprise under its approved
  * external name. This check catches new license-gated features in core that
  * have no registry entry yet, registry pointers that no longer match core,
- * and stale connect enterprise lists.
+ * and registry connect-plugin entries that no longer match info.csv.
  *
  * @example
  * # Check everything against the default remote sources
@@ -2269,58 +2269,27 @@ validation
   .description('Check the enterprise features registry against core, connect, and docs sources of truth')
   .option('--registry <path>', 'Local path to enterprise-features.yml (default: fetch from docs repo main)')
   .option('--tag <ref>', 'Redpanda git ref for the core headers', 'dev')
-  .option('--connect-ref <ref>', 'Connect git ref for info.csv', 'main')
+  .option('--connect-ref <ref>', "Connect git ref for info.csv ('latest' resolves the newest release tag; the registry documents released state)", 'latest')
   .option('--docs-ref <ref>', 'Docs repo git ref for remote fetches', 'main')
   .option('--disable-page <path>', 'Local path to disable-enterprise-features.adoc (default: fetch from docs repo)')
-  .option('--antora <path>', 'Local path to rp-connect-docs antora.yml (default: fetch from rp-connect-docs main)')
   .option('--properties <path>', 'Local path to a generated cluster-properties JSON; enables existence checks for gating properties')
-  .option('--skip-connect', 'Skip the connect info.csv comparison')
+  .option('--skip-connect', 'Skip the connect check (info.csv is not fetched, so registry connect-plugin entries go unverified)')
   .option('--format <format>', 'Output format: text or json', 'text')
   .option('--write-mapping <path>', 'Write the internal-to-external name mapping partial to this path')
   .action(async (options) => {
     const { runChecks, buildMappingPartial } = require('../tools/enterprise-features/verify')
-    const { extractAntoraEnterpriseComponents } = require('../tools/enterprise-features/parsers')
-    const yamlLib = require('js-yaml')
-
-    const RAW = 'https://raw.githubusercontent.com'
-    // Sources that fail to load are reported as error-level findings rather
-    // than silently skipped, so CI cannot pass on a check that never ran.
-    const failedSources = []
-    async function fetchText (url, sourceName) {
-      const resp = await fetch(url)
-      if (!resp.ok) {
-        if (sourceName) {
-          failedSources.push({ level: 'error', check: 'fetch', message: `Could not load ${sourceName} (${url}): ${resp.status} ${resp.statusText}. The related checks did not run.` })
-          return undefined
-        }
-        throw new Error(`Failed to fetch ${url}: ${resp.status} ${resp.statusText}`)
-      }
-      return resp.text()
-    }
-    const readLocal = (p) => fs.readFileSync(path.resolve(p), 'utf8')
+    // Fetch wiring (GitHub auth, rejected-token retry, transient-failure
+    // retries, --skip-connect short-circuits) lives in
+    // cli-utils/enterprise-sources so it is testable without a network.
+    const { loadEnterpriseSources } = require('../cli-utils/enterprise-sources')
 
     try {
-      const registryYaml = options.registry
-        ? readLocal(options.registry)
-        : await fetchText(`${RAW}/redpanda-data/docs/${options.docsRef}/shared/modules/ROOT/partials/enterprise-features.yml`)
-      const coreHeader = await fetchText(`${RAW}/redpanda-data/redpanda/${options.tag}/src/v/features/enterprise_features.h`, 'core enterprise_features.h')
-      const configurationHeader = await fetchText(`${RAW}/redpanda-data/redpanda/${options.tag}/src/v/config/configuration.h`, 'core configuration.h')
-      const infoCsv = options.skipConnect
-        ? undefined
-        : await fetchText(`${RAW}/redpanda-data/connect/${options.connectRef}/internal/plugins/info.csv`, 'connect info.csv')
-      const disablePage = options.disablePage
-        ? readLocal(options.disablePage)
-        : await fetchText(`${RAW}/redpanda-data/docs/${options.docsRef}/modules/get-started/pages/licensing/disable-enterprise-features.adoc`, 'disable-enterprise-features.adoc')
-      const antoraYaml = options.antora
-        ? readLocal(options.antora)
-        : await fetchText(`${RAW}/redpanda-data/rp-connect-docs/main/antora.yml`, 'rp-connect-docs antora.yml')
-      const antoraEnterpriseComponents = antoraYaml
-        ? extractAntoraEnterpriseComponents(yamlLib.load(antoraYaml))
-        : undefined
+      const { registryYaml, coreHeader, configurationHeader, infoCsv, connectRef, disablePage, failedSources } =
+        await loadEnterpriseSources(options)
 
       let allPropertyNames
       if (options.properties) {
-        const propertyData = JSON.parse(readLocal(options.properties))
+        const propertyData = JSON.parse(fs.readFileSync(path.resolve(options.properties), 'utf8'))
         allPropertyNames = Object.keys(propertyData.properties || propertyData)
       }
 
@@ -2329,7 +2298,7 @@ validation
         coreHeader,
         configurationHeader,
         infoCsv,
-        antoraEnterpriseComponents,
+        connectRef,
         disablePage,
         allPropertyNames,
       })
