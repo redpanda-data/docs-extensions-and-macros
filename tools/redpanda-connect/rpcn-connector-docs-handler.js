@@ -2004,14 +2004,26 @@ async function handleRpcnConnectorDocs (options) {
 
   // Generate PR summary
   try {
-    const { printPRSummary } = require('./pr-summary-formatter.js')
+    const { printPRSummary, renderLostSectionWarnings, renderDescriptionReports } = require('./pr-summary-formatter.js')
     // Use master diff if available, otherwise use single diff. Content-loss
     // warnings and structure reports ride the diff object so they land in the
     // PR summary body instead of dying in the collapsed workflow log.
     const summaryDiff = masterDiff || diffJson
-    if (lostSectionWarnings.length) summaryDiff.lostSectionWarnings = lostSectionWarnings
-    if (descriptionReports.length) summaryDiff.descriptionReports = descriptionReports
-    printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
+    if (summaryDiff) {
+      if (lostSectionWarnings.length) summaryDiff.lostSectionWarnings = lostSectionWarnings
+      if (descriptionReports.length) summaryDiff.descriptionReports = descriptionReports
+      printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
+    } else if (lostSectionWarnings.length || descriptionReports.length) {
+      // No diff to summarize (no prior version, or versions match), but this
+      // run still produced content-loss warnings or description-structure
+      // reports that a reviewer needs to see -- print them on their own
+      // instead of losing them because there was nothing to diff against.
+      const lines = [
+        ...renderLostSectionWarnings(lostSectionWarnings),
+        ...renderDescriptionReports(descriptionReports)
+      ]
+      console.log('\n' + lines.join('\n') + '\n')
+    }
   } catch (err) {
     console.error(`Warning: Failed to generate PR summary: ${err.message}`)
   }

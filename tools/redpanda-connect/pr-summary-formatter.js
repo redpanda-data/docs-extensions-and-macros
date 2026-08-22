@@ -1379,5 +1379,7 @@ module.exports = {
   generatePRSummary,
   generateMultiVersionPRSummary,
   printPRSummary,
+  renderDescriptionReports,
+  renderLostSectionWarnings,
   truncateToSentence
 };

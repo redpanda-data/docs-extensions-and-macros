@@ -19,6 +19,10 @@ const METADATA_HEADING = /^==\s+Metadata\s*$/;
 // delimiter at column 0 -- an indented `----` is a literal paragraph -- so the
 // test is against the raw line, never a trimmed one.
 const BLOCK_DELIMITER = /^-{4,}$/;
+// AsciiDoc literal block delimiter (`....`, possibly longer) -- as
+// substitution-free as a ---- listing block, and just as liable to contain a
+// brace or heading-shaped line that must not be touched.
+const LITERAL_DELIMITER = /^\.{4,}$/;
 // Markdown-style fence delimiter (``` or ~~~, possibly with a language tag).
 // Descriptions and metadata blocks carry fenced examples alongside AsciiDoc
 // ---- blocks.
@@ -56,10 +60,15 @@ const SECTION_END = /^(?:==\s+\S|include::|\/\/\s*(?:tag|end)::)/;
  */
 function annotateVerbatimLines (text) {
   let inBlock = false;
+  let inLiteral = false;
   let fence = null;
   return String(text == null ? '' : text).split('\n').map((line) => {
     if (inBlock) {
       if (BLOCK_DELIMITER.test(line)) inBlock = false;
+      return { line, verbatim: true };
+    }
+    if (inLiteral) {
+      if (LITERAL_DELIMITER.test(line)) inLiteral = false;
       return { line, verbatim: true };
     }
     if (fence) {
@@ -70,6 +79,7 @@ function annotateVerbatimLines (text) {
     const fenceMatch = line.match(FENCE_DELIMITER);
     if (fenceMatch) { fence = fenceMatch[1][0]; return { line, verbatim: true }; }
     if (BLOCK_DELIMITER.test(line)) { inBlock = true; return { line, verbatim: true }; }
+    if (LITERAL_DELIMITER.test(line)) { inLiteral = true; return { line, verbatim: true }; }
     return { line, verbatim: false };
   });
 }
@@ -312,5 +322,6 @@ module.exports = {
   lostMetadataSections,
   annotateVerbatimLines,
   BLOCK_DELIMITER,
+  LITERAL_DELIMITER,
   FENCE_DELIMITER,
 };

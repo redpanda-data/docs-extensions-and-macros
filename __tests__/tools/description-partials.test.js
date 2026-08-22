@@ -545,6 +545,46 @@ describe('markdown fence awareness: fence interiors pass through byte-identical'
   });
 });
 
+describe('AsciiDoc literal block (....) awareness: as substitution-free as ----', () => {
+  const { escapePlaceholderBraces, hasStructuralHeadings } = renderConnectDescription;
+  const mu = require('../../tools/redpanda-connect/metadata-utils.js');
+
+  const literalInterior = [
+    'Uses {endpoint} literally.',
+    '== not a heading',
+  ].join('\n');
+  const body = [
+    'Prose with a real {placeholder} outside.',
+    '....',
+    literalInterior,
+    '....',
+    '',
+    'Trailing prose {token}.',
+  ].join('\n');
+
+  test('escapePlaceholderBraces leaves a .... literal block untouched, prose still escaped', () => {
+    const out = escapePlaceholderBraces(body);
+    expect(out).toContain('....\n' + literalInterior + '\n....');
+    expect(out).toContain('Prose with a real \\{placeholder} outside.');
+    expect(out).toContain('Trailing prose \\{token}.');
+  });
+
+  test('the heading scanner ignores a .... literal block interior', () => {
+    expect(hasStructuralHeadings(body)).toBe(false);
+  });
+
+  test('annotateVerbatimLines marks .... interiors verbatim, symmetric with ----', () => {
+    const rows = mu.annotateVerbatimLines('a\n....\nb\n{c}\n....\nd');
+    expect(rows.map((r) => r.verbatim)).toEqual([false, true, true, true, true, false]);
+  });
+
+  test('delimiters keep layered state: a .... inside a ---- block is content, not a literal opener', () => {
+    // If .... leaked into literal-block state independently, the real
+    // heading after the ---- block would be swallowed.
+    expect(hasStructuralHeadings('----\n....\n----\n\n== Real heading\n\nProse.')).toBe(true);
+  });
+});
+
 describe('generator blanks description partials orphaned by connectors deleted upstream', () => {
   const tmpDir = path.join(__dirname, 'tmp-description-orphan');
   let originalCwd, templateFile;
