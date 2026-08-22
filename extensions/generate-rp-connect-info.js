@@ -232,6 +232,10 @@ module.exports.register = function ({ config }) {
       const redpandaConnectUrl = connectPage?.pub?.url || ''
       const redpandaCloudUrl = cloudPage?.pub?.url || ''
 
+      // Extract description from page attributes or body content
+      const pageSrc = connectPage || cloudPage
+      const description = extractDescription(pageSrc)
+
       // Warn about missing docs (but not for deprecated or SQL drivers)
       if (deprecated !== 'y' && !connector.includes('sql_driver')) {
         // Check if this is a cloud-only connector (plugin)
@@ -261,7 +265,8 @@ module.exports.register = function ({ config }) {
         cloud_ai: cloudAi,
         is_licensed: isLicensed,
         redpandaConnectUrl,
-        redpandaCloudUrl
+        redpandaCloudUrl,
+        description
       }
     })
   }
@@ -447,3 +452,168 @@ module.exports.register = function ({ config }) {
     return JSON.stringify(items)
   }
 }
+
+const DESCRIPTION_MAX_LENGTH = 150
+
+/**
+ * Turns one line of AsciiDoc into the plain text a card can show: inline macros
+ * become their link text, formatting is dropped, attribute references
+ * substitute their real value when it's known (from the same page attributes
+ * extractDescription already reads for :description:) and are dropped only
+ * when it isn't, and the result is cut back to DESCRIPTION_MAX_LENGTH at a
+ * sentence or word boundary. Applied to every source, since a page's
+ * :description: attribute is AsciiDoc too and carries the same macros as the
+ * body. Exported for unit testing.
+ *
+ * @param {string} text
+ * @param {Object.<string,*>} [attributes] - the page's asciidoc attributes
+ *   (pageSrc.asciidoc.attributes), used to resolve {attr-name} references.
+ */
+function cleanDescription (text, attributes = {}) {
+  if (!text) return ''
+
+  let description = String(text)
+    // Convert xref links: xref:path[text] -> text
+    .replace(/xref:[^[]+\[(.*?)\]/g, '$1')
+    // Convert HTTP links: https://url[text^] -> text
+    .replace(/https?:\/\/[^[\s]+\[(.*?)(?:\^)?\]/g, '$1')
+    // Remove "Introduced in version X.X.X" suffix
+    .replace(/\.\s*Introduced in version[\s\d.]+\.?$/i, '')
+    // Substitute attribute references when the value is known ({max-batch} ->
+    // 100msgs); only drop the ones this page's attributes don't define.
+    .replace(/\{([a-zA-Z][\w-]*)\}/g, (match, name) =>
+      Object.prototype.hasOwnProperty.call(attributes, name) ? String(attributes[name]) : ''
+    )
+    // Remove code backticks: `code`
+    .replace(/`([^`]+)`/g, '$1')
+    // Remove bold and emphasis, but only around whole words, so that connector
+    // names such as redpanda_migrator_offsets survive intact
+    .replace(/(^|[\s([])\*\*(\S(?:[^*]*\S)?)\*\*(?=[\s.,;:)\]!?]|$)/g, '$1$2')
+    .replace(/(^|[\s([])\*(\S(?:[^*]*\S)?)\*(?=[\s.,;:)\]!?]|$)/g, '$1$2')
+    .replace(/(^|[\s([])_(\S(?:[^_]*\S)?)_(?=[\s.,;:)\]!?]|$)/g, '$1$2')
+    // Normalize whitespace, including the gap a removed attribute reference
+    // leaves in front of punctuation
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .trim()
+
+  if (description.length > DESCRIPTION_MAX_LENGTH) {
+    const sentences = description.match(/[^.!?]+[.!?]+/g)
+    const firstSentence = sentences && sentences.length > 0 ? sentences[0].trim() : ''
+    if (firstSentence && firstSentence.length <= DESCRIPTION_MAX_LENGTH) {
+      description = firstSentence
+    } else {
+      // One long sentence: cut at the last word boundary inside the budget,
+      // leaving room for the ellipsis so the result still fits the cap
+      const head = description.substring(0, DESCRIPTION_MAX_LENGTH - 3)
+      const lastSpace = head.lastIndexOf(' ')
+      description = (lastSpace > 0 ? head.substring(0, lastSpace) : head).trim() + '...'
+    }
+  }
+
+  return description
+}
+
+/**
+ * Extracts a short plain-text description for a connector from its documentation page.
+ * Prefers the page's :description: attribute, then falls back to the first meaningful
+ * paragraph after component_type_dropdown::[]. Whichever source wins goes through
+ * cleanDescription, so no card can ship raw AsciiDoc or an untruncated paragraph.
+ * Exported for unit testing.
+ */
+function extractDescription (pageSrc) {
+  if (!pageSrc) return ''
+
+  // Try to get from asciidoc attributes first
+  let description = pageSrc.asciidoc?.attributes?.description || ''
+
+  // Fallback: extract first paragraph from page body
+  if (!description && pageSrc.contents) {
+    const fileContents = pageSrc.contents.toString('utf8')
+
+    // First try explicit :description: attribute
+    const descAttrMatch = fileContents.match(/:description:\s*(.+)/)
+    if (descAttrMatch) {
+      description = descAttrMatch[1].trim()
+    } else {
+      // Extract first paragraph after component_type_dropdown or after header
+      // Pattern: Find text after component_type_dropdown::[] or after attributes block
+      const afterDropdown = fileContents.split('component_type_dropdown::[]')[1]
+      if (afterDropdown) {
+        // Remove various AsciiDoc blocks and markup that shouldn't be in descriptions
+        let cleanContent = afterDropdown
+          // Remove admonition blocks: [WARNING]\n.Title\n====\nContent\n====
+          .replace(/\[(WARNING|NOTE|TIP|CAUTION|IMPORTANT)\][^\n]*\n(?:\..*?\n)?====[\s\S]*?====\n*/g, '')
+          // Remove AsciiDoc conditionals: ifndef::env-cloud[] ... endif::[]
+          .replace(/^(ifndef|ifdef|ifeval|endif)::[^\n]*\n?/gm, '')
+          // Remove code blocks: ```yml ... ``` or ---- ... ----
+          .replace(/```[\s\S]*?```/g, '')
+          .replace(/^----[\s\S]*?^----/gm, '')
+          // Remove include directives
+          .replace(/^include::[^\n]+\n?/gm, '')
+          // Remove comments
+          .replace(/\/\/ .*$/gm, '')
+          // Remove tabs section and everything after
+          .replace(/\[tabs\][\s\S]*$/, '')
+          // Remove tag directives
+          .replace(/^\/\/ (tag|end)::[^\n]+\n?/gm, '')
+
+        // Join continuation lines (lines that don't end with punctuation or blank line)
+        // This handles links and text that span multiple lines
+        cleanContent = cleanContent
+          .split('\n')
+          .reduce((acc, line) => {
+            const trimmed = line.trim()
+            if (trimmed === '') {
+              acc.push('') // Keep paragraph breaks
+            } else if (acc.length > 0 && acc[acc.length - 1] !== '' &&
+                       !acc[acc.length - 1].match(/[.!?:]$/) &&
+                       !trimmed.match(/^[=\[\-`]/) &&
+                       !trimmed.startsWith('//')) {
+              // Continue previous line
+              acc[acc.length - 1] += ' ' + trimmed
+            } else {
+              acc.push(trimmed)
+            }
+            return acc
+          }, [])
+          .join('\n')
+
+        // Get first non-empty paragraph
+        const paragraphs = cleanContent.split('\n\n')
+        for (const para of paragraphs) {
+          let cleaned = para.trim()
+
+          // Stop at first heading (cut off everything after ==)
+          const headingMatch = cleaned.match(/^(.*?)\s*==/)
+          if (headingMatch) {
+            cleaned = headingMatch[1].trim()
+          }
+
+          if (cleaned &&
+              !cleaned.startsWith('[') &&
+              !cleaned.startsWith('```') &&
+              !cleaned.startsWith('=') &&
+              !cleaned.startsWith('--') &&
+              !cleaned.startsWith('tag::') &&
+              !cleaned.startsWith('endif::') &&
+              !cleaned.startsWith('ifdef::') &&
+              !cleaned.startsWith('ifndef::') &&
+              !cleaned.startsWith('yml') &&
+              !cleaned.startsWith('include::') &&
+              !cleaned.match(/^(TIP|NOTE|WARNING|CAUTION|IMPORTANT):/) &&
+              cleaned.length > 20) {
+            // Markup stripping and truncation happen once, on the way out
+            description = cleaned
+            break
+          }
+        }
+      }
+    }
+  }
+
+  return cleanDescription(description, pageSrc.asciidoc?.attributes || {})
+}
+
+module.exports.extractDescription = extractDescription
+module.exports.cleanDescription = cleanDescription

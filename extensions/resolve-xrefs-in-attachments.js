@@ -1,6 +1,7 @@
 'use strict'
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
+const { escapeHtml } = require('../extension-utils/html-utils')
 
 /**
  * Resolves AsciiDoc xrefs in JSON attachment files to HTML links.
@@ -216,16 +217,4 @@ function resolveXrefsInString (text, contentCatalog, context, logger) {
       return linkText || target.replace(/\.adoc$/, '').replace(/^.*\//, '')
     }
   })
-}
-
-/**
- * Escape HTML special characters to prevent XSS.
- */
-function escapeHtml (text) {
-  if (!text) return ''
-  return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
 }
