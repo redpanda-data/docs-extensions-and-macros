@@ -12,6 +12,7 @@ const { discoverIntermediateReleases, findCloudVersionForDate } = require('./git
 const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
 const parseCSVConnectors = require('./parse-csv-connectors.js')
 const semver = require('semver')
+const { CONNECTOR_TYPE_DIRS, CONNECTOR_DATA_KEYS } = require('./metadata-utils.js')
 
 /**
  * Cap description to two sentences
@@ -146,8 +147,7 @@ function augmentConnectorData (connectorData, binaryAnalysis) {
   let addedCgoCount = 0
   let addedCloudOnlyCount = 0
 
-  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-    'buffers', 'metrics', 'scanners', 'tracers', 'config']
+  const connectorTypes = CONNECTOR_DATA_KEYS
 
   for (const type of connectorTypes) {
     if (!Array.isArray(augmentedData[type])) {
@@ -219,8 +219,7 @@ function augmentConnectorData (connectorData, binaryAnalysis) {
  */
 function buildCleanOssData (connectorIndex) {
   const cleanData = JSON.parse(JSON.stringify(connectorIndex))
-  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-    'buffers', 'metrics', 'scanners', 'tracers']
+  const connectorTypes = CONNECTOR_TYPE_DIRS
 
   for (const type of connectorTypes) {
     if (Array.isArray(cleanData[type])) {
@@ -1130,7 +1129,15 @@ async function handleRpcnConnectorDocs (options) {
 
   console.log('Generating connector partials...')
   let partialsWritten, partialFiles
+  const descriptionReports = []
   const lostSectionWarnings = []
+  // Both generator call sites (partials and drafts) feed the same PR summary,
+  // so they collect through one function. Pushed inline, the draft call site
+  // silently dropped descriptionReports for months: the structure reports for
+  // newly drafted connectors, the ones most likely to need an upstream fix,
+  // never reached the summary.
+  const { collectGeneratorReports } = require('./pr-summary-formatter.js')
+  const collect = (result) => collectGeneratorReports(result, { descriptionReports, lostSectionWarnings })
 
   try {
     const result = await generateRpcnConnectorDocs({
@@ -1141,14 +1148,16 @@ async function handleRpcnConnectorDocs (options) {
       templateFields: options.templateFields,
       templateExamples: options.templateExamples,
       templateMetadata: options.templateMetadata,
+      templateDescription: options.templateDescription,
       templateBloblang: options.templateBloblang,
       writeFullDrafts: false,
+      pruneOrphanedDescriptions: !!options.pruneOrphanedDescriptions,
       includeBloblang: !!options.includeBloblang,
       csvMetadata
     })
     partialsWritten = result.partialsWritten
     partialFiles = result.partialFiles
-    lostSectionWarnings.push(...(result.lostSectionWarnings || []))
+    collect(result)
   } catch (err) {
     console.error(`Error: Failed to generate partials: ${err.message}`)
     process.exit(1)
@@ -1445,8 +1454,7 @@ async function handleRpcnConnectorDocs (options) {
 
       // Strip CGO/cloud-only connectors and metadata from old data
       oldIndexForDiff = JSON.parse(JSON.stringify(oldIndex))
-      const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-        'buffers', 'metrics', 'scanners', 'tracers', 'config']
+      const connectorTypes = CONNECTOR_DATA_KEYS
 
       let totalStripped = 0
       for (const type of connectorTypes) {
@@ -1636,7 +1644,7 @@ async function handleRpcnConnectorDocs (options) {
       const dataObj = JSON.parse(rawData)
 
       const validConnectors = []
-      const types = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers']
+      const types = CONNECTOR_TYPE_DIRS
       types.forEach(type => {
         if (Array.isArray(dataObj[type])) {
           dataObj[type].forEach(connector => {
@@ -1708,7 +1716,7 @@ async function handleRpcnConnectorDocs (options) {
         // Fallback when binary analysis is unavailable:
         // Check all connectors that have cloudSupported flag or assume all non-deprecated are cloud-supported
         console.log('   ℹ️  Binary analysis unavailable - checking all non-deprecated connectors for cloud-docs')
-        const types = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers']
+        const types = CONNECTOR_TYPE_DIRS
         types.forEach(type => {
           if (Array.isArray(dataObj[type])) {
             dataObj[type].forEach(connector => {
@@ -1780,6 +1788,12 @@ async function handleRpcnConnectorDocs (options) {
 
           // Check each cloud-supported connector
           // Filter to only check actual connector/component types that need individual pages
+          // NOT the shared CONNECTOR_TYPE_DIRS: this list deliberately omits
+          // rate_limits, per the comment below. rate_limits does have
+          // per-component pages, so the omission looks like a bug and rate
+          // limits are never checked for a cloud-docs stub -- but changing it
+          // adds cloud-docs findings in a path with no test coverage, so it
+          // needs its own ticket rather than riding along here.
           const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'buffers', 'scanners', 'metrics', 'tracers']
 
           for (const connectorKey of cloudSupportedSet) {
@@ -1932,6 +1946,7 @@ async function handleRpcnConnectorDocs (options) {
           templateFields: options.templateFields,
           templateExamples: options.templateExamples,
           templateMetadata: options.templateMetadata,
+          templateDescription: options.templateDescription,
           templateIntro: options.templateIntro,
           writeFullDrafts: true,
           cgoOnly: binaryAnalysis?.cgoOnly || [],
@@ -1942,7 +1957,7 @@ async function handleRpcnConnectorDocs (options) {
         fs.unlinkSync(tempDataPath)
         draftsWritten = draftResult.draftsWritten
         draftFiles = draftResult.draftFiles
-        lostSectionWarnings.push(...(draftResult.lostSectionWarnings || []))
+        collect(draftResult)
       }
     } catch (err) {
       console.error(`Error: Could not draft missing: ${err.message}`)
@@ -1989,13 +2004,26 @@ async function handleRpcnConnectorDocs (options) {
 
   // Generate PR summary
   try {
-    const { printPRSummary } = require('./pr-summary-formatter.js')
+    const { printPRSummary, renderLostSectionWarnings, renderDescriptionReports } = require('./pr-summary-formatter.js')
     // Use master diff if available, otherwise use single diff. Content-loss
-    // warnings ride the diff object so they lead the PR summary body instead
-    // of dying in the collapsed workflow log.
+    // warnings and structure reports ride the diff object so they land in the
+    // PR summary body instead of dying in the collapsed workflow log.
     const summaryDiff = masterDiff || diffJson
-    if (lostSectionWarnings.length) summaryDiff.lostSectionWarnings = lostSectionWarnings
-    printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
+    if (summaryDiff) {
+      if (lostSectionWarnings.length) summaryDiff.lostSectionWarnings = lostSectionWarnings
+      if (descriptionReports.length) summaryDiff.descriptionReports = descriptionReports
+      printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
+    } else if (lostSectionWarnings.length || descriptionReports.length) {
+      // No diff to summarize (no prior version, or versions match), but this
+      // run still produced content-loss warnings or description-structure
+      // reports that a reviewer needs to see -- print them on their own
+      // instead of losing them because there was nothing to diff against.
+      const lines = [
+        ...renderLostSectionWarnings(lostSectionWarnings),
+        ...renderDescriptionReports(descriptionReports)
+      ]
+      console.log('\n' + lines.join('\n') + '\n')
+    }
   } catch (err) {
     console.error(`Warning: Failed to generate PR summary: ${err.message}`)
   }
