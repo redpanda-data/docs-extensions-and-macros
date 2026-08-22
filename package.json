@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "5.19.0",
+  "version": "5.21.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -34,7 +34,8 @@
     "generate:cli-docs": "node tools/generate-cli-docs.js",
     "bundle:admin": "doc-tools generate bundle-openapi --surface admin",
     "bundle:connect": "doc-tools generate bundle-openapi --surface connect",
-    "bundle:both": "doc-tools generate bundle-openapi --surface both"
+    "bundle:both": "doc-tools generate bundle-openapi --surface both",
+    "test:unit": "jest --config jest.unit.config.js"
   },
   "contributors": [
     {
@@ -101,7 +102,8 @@
     "cli-utils",
     "tools",
     "docker-compose",
-    "mcp"
+    "mcp",
+    "docs-data/rpk-overrides.schema.json"
   ],
   "license": "ISC",
   "engines": {

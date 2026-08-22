@@ -1,0 +1,8 @@
+name: macro-fixtures
+title: Macro fixtures (beta)
+version: '26.3'
+# Antora marks this a prerelease, which is what lets an unreleased enterprise
+# feature be referenced here and nowhere else.
+prerelease: true
+nav:
+- modules/ROOT/nav.adoc

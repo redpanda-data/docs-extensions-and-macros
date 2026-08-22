@@ -77,7 +77,17 @@ endif::[]
 {{#if corresponding_cluster_property}}
 
 | Corresponding cluster property
-| xref:reference:cluster-properties.adoc#{{corresponding_cluster_property}}[{{corresponding_cluster_property}}]
+|
+ifdef::env-cloud[]
+{{#if corresponding_cluster_property_cloud_supported}}
+xref:reference:properties/{{#if cluster_property_doc_file}}{{cluster_property_doc_file}}{{else}}cluster-properties.adoc{{/if}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`]
+{{else}}
+`{{corresponding_cluster_property}}`
+{{/if}}
+endif::[]
+ifndef::env-cloud[]
+xref:reference:properties/{{#if cluster_property_doc_file}}{{cluster_property_doc_file}}{{else}}cluster-properties.adoc{{/if}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`]
+endif::[]
 {{/if}}
 {{#if (and minimum maximum)}}
 
