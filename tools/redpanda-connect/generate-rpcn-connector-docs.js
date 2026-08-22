@@ -5,7 +5,7 @@ const path = require('path');
 const handlebars = require('handlebars');
 const yaml = require('yaml');
 const helpers = require('./helpers');
-const { lostMetadataSections } = require('./metadata-utils.js');
+const { lostMetadataSections, resolvePageTypeDir } = require('./metadata-utils.js');
 
 // Register each helper under handlebars, verifying that it’s a function
 Object.entries(helpers).forEach(([name, fn]) => {
@@ -730,11 +730,7 @@ function backfillPageDescriptions (connectorData, { pagesRoot, dryRun = false } 
 
   for (const [dataKey, items] of Object.entries(connectorData)) {
     if (!PAGE_TYPE_DIRS.has(dataKey) || !Array.isArray(items)) continue;
-    // The data uses 'rate-limits' while the pages directory is
-    // 'rate_limits'. Resolve whichever spelling exists on disk.
-    const typeDir = fs.existsSync(path.join(root, dataKey))
-      ? dataKey
-      : dataKey.replace(/-/g, '_');
+    const typeDir = resolvePageTypeDir(root, dataKey);
     for (const item of items) {
       if (!item || !item.name) continue;
       const pagePath = path.join(root, typeDir, `${item.name}.adoc`);

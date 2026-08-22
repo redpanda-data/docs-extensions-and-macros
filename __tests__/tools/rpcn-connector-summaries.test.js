@@ -94,6 +94,75 @@ describe('augmentConnectorData - config components', () => {
   });
 });
 
+// The Connect binary emits rate limits under 'rate-limits'; the docs page
+// directory is 'rate_limits'. Every copy of the component-type list in the
+// handler used the page spelling, so rate limits were the one family that never
+// got platform flags and any cgo-only or cloud-only rate limit was dropped.
+describe('augmentConnectorData - rate limit components', () => {
+  const binaryAnalysis = {
+    comparison: {
+      inCloud: [{ type: 'rate-limits', name: 'local', status: 'stable' }],
+      cloudOnly: [{ type: 'rate-limits', name: 'cloud_quota', status: 'stable' }]
+    },
+    cgoOnly: [{ type: 'rate-limits', name: 'cgo_bucket', status: 'experimental' }]
+  };
+
+  test('stamps platform flags on rate limits the binary reports', () => {
+    const connectorData = {
+      'rate-limits': [
+        { name: 'local', type: 'rate_limit', config: {} },
+        { name: 'self_hosted_only', type: 'rate_limit', config: {} }
+      ]
+    };
+
+    const { augmentedData } = augmentConnectorData(connectorData, binaryAnalysis);
+
+    const local = augmentedData['rate-limits'].find(c => c.name === 'local');
+    expect(local.cloudSupported).toBe(true);
+    expect(local.requiresCgo).toBe(false);
+
+    const selfHosted = augmentedData['rate-limits'].find(c => c.name === 'self_hosted_only');
+    expect(selfHosted.cloudSupported).toBe(false);
+  });
+
+  test('keeps cgo-only and cloud-only rate limits instead of dropping them', () => {
+    const connectorData = { 'rate-limits': [{ name: 'local', type: 'rate_limit', config: {} }] };
+
+    const { augmentedData, addedCgoCount, addedCloudOnlyCount } =
+      augmentConnectorData(connectorData, binaryAnalysis);
+
+    expect(addedCgoCount).toBe(1);
+    expect(addedCloudOnlyCount).toBe(1);
+
+    const cgo = augmentedData['rate-limits'].find(c => c.name === 'cgo_bucket');
+    expect(cgo.requiresCgo).toBe(true);
+
+    const cloudOnly = augmentedData['rate-limits'].find(c => c.name === 'cloud_quota');
+    expect(cloudOnly.cloudOnly).toBe(true);
+  });
+
+  test('does not invent the page-directory spelling as a data key', () => {
+    const connectorData = { 'rate-limits': [{ name: 'local', type: 'rate_limit', config: {} }] };
+
+    const { augmentedData } = augmentConnectorData(connectorData, binaryAnalysis);
+
+    expect(Object.keys(augmentedData)).not.toContain('rate_limits');
+  });
+
+  test('still cleans a snapshot written under the old spelling', () => {
+    const legacy = {
+      rate_limits: [{ name: 'stale_cgo_entry', requiresCgo: true }],
+      'rate-limits': [{ name: 'local', type: 'rate_limit', config: {} }]
+    };
+
+    const clean = buildCleanOssData(legacy);
+
+    expect(clean.rate_limits).toEqual([]);
+    expect(clean['rate-limits'].map(c => c.name)).toEqual(['local']);
+    expect(clean['rate-limits'][0].requiresCgo).toBeUndefined();
+  });
+});
+
 describe('generateConnectorDiffJson - config component status and cloud support', () => {
   test('new config component without a status does not report its type as status', () => {
     const oldIndex = { config: [] };

@@ -1,5 +1,8 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+
 /**
  * Utilities for extracting the "== Metadata" section out of a connector's
  * `description` prose so it can be emitted as a regenerated partial (like the
@@ -88,6 +91,31 @@ function typeDirFor (item) {
 }
 
 /**
+ * Resolve the on-disk page/partial directory for a connector data key.
+ *
+ * The Connect binary emits the rate-limit family as `rate-limits` while the
+ * directory in rp-connect-docs is `rate_limits`, so the data key and the
+ * directory name disagree for exactly one family. Resolve against what is
+ * actually on disk rather than encoding either spelling: a caller that guesses
+ * `rate-limits` reports every existing rate-limit page as missing and then
+ * drafts a duplicate beside it, in a directory update-nav.js's regex does not
+ * match, re-added on every run.
+ *
+ * @param {string} root directory the type directories live under
+ * @param {string} dataKey the data key, for example `inputs` or `rate-limits`
+ * @returns {string} the directory name that exists, preferring the data key
+ */
+function resolvePageTypeDir (root, dataKey) {
+  if (!root || !dataKey) return dataKey || '';
+  if (fs.existsSync(path.join(root, dataKey))) return dataKey;
+  const underscored = dataKey.replace(/-/g, '_');
+  if (underscored !== dataKey && fs.existsSync(path.join(root, underscored))) return underscored;
+  const hyphenated = dataKey.replace(/_/g, '-');
+  if (hyphenated !== dataKey && fs.existsSync(path.join(root, hyphenated))) return hyphenated;
+  return dataKey;
+}
+
+/**
  * Build the Antora include directive for a connector's metadata partial.
  * @param {object} item connector data with `type`/`typeDir` and `name`
  * @returns {string}
@@ -170,6 +198,7 @@ function lostMetadataSections (oldContent, newContent) {
 
 module.exports = {
   locateMetadata,
+  resolvePageTypeDir,
   extractMetadata,
   typeDirFor,
   metadataIncludeLine,
