@@ -64,7 +64,6 @@ IMPORTANT: Extensions must be registered under the `antora.extensions` key in yo
 
 === Navigation
 * **unlisted-pages** - Manage pages that appear in navigation but aren't listed
-* **produce-redirects** - Generate redirect configurations
 * **unpublish-pages** - Mark pages as unpublished
 
 === Integrations
@@ -131,7 +130,6 @@ antora:
 ----
 antora:
   extensions:
-    - '@redpanda-data/docs-extensions-and-macros/extensions/produce-redirects.js'
 ----
 
 == Support
