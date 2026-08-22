@@ -110,7 +110,10 @@ function formatValue(value) {
     return `[${value.length} items]`;
   }
   if (typeof value === 'object') {
-    return JSON.stringify(value);
+    // bigIntJson, not JSON.stringify: a default/minimum/maximum value that's an
+    // object or array can itself carry an unsafe-integer BigInt from
+    // bigIntJson.parse(), which plain JSON.stringify throws on.
+    return bigIntJson.stringify(value);
   }
   if (typeof value === 'string') {
     return `"${value}"`;
@@ -394,7 +397,11 @@ function generateJsonReport(report, oldVersion, newVersion, outputPath) {
     details: report
   };
   
-  fs.writeFileSync(outputPath, JSON.stringify(jsonReport, null, 2));
+  // bigIntJson, not JSON.stringify: `report.details` carries oldDefault/newDefault
+  // values straight from bigIntJson.parse(), so an unsafe-integer default is a
+  // real BigInt here. Plain JSON.stringify throws on that ("Do not know how to
+  // serialize a BigInt") instead of writing the report.
+  fs.writeFileSync(outputPath, bigIntJson.stringify(jsonReport, 2));
   console.log(`📄 Detailed JSON report saved to: ${outputPath}`);
 }
 
