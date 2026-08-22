@@ -1,6 +1,7 @@
 const yaml = require('yaml');
 const renderYamlList = require('./renderYamlList');
 const handlebars = require('handlebars');
+const { connectFieldName } = require('./flattenConnectFields');
 
 /**
  * Renders the children of a configuration object into AsciiDoc.
@@ -56,11 +57,10 @@ module.exports = function renderConnectFields(children, prefix = '') {
     }
 
     let block = '';
-    const isArray = child.kind === 'array';
-    // Only append [] if kind is array and name does not already end with []
-    const nameWithArray = (typeof child.name === 'string' && isArray && !child.name.endsWith('[]'))
-      ? `${child.name}[]`
-      : child.name;
+    // Only append [] if kind is array and name does not already end with [].
+    // Shared with the delta report and the fields-only table so all three
+    // producers agree on what a field path looks like.
+    const nameWithArray = connectFieldName(child);
     const currentPath = prefix
       ? `${prefix}.${nameWithArray}`
       : `${nameWithArray}`;

@@ -772,9 +772,11 @@ automation
   .option('--template-fields <path>', 'Fields section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/fields-partials.hbs'))
   .option('--template-examples <path>', 'Examples section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/examples-partials.hbs'))
   .option('--template-metadata <path>', 'Metadata section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/metadata-partials.hbs'))
+  .option('--template-description <path>', 'Description section partial template', path.resolve(__dirname, '../tools/redpanda-connect/templates/descriptions-partials.hbs'))
   .option('--template-bloblang <path>', 'Custom Handlebars template for bloblang function/method partials')
   .option('--overrides <path>', 'Optional JSON file with overrides', 'docs-data/overrides.json')
   .option('--include-bloblang', 'Include Bloblang functions and methods in generation')
+  .option('--prune-orphaned-descriptions', 'Allow the description-partial orphan sweep to blank more than 10% of the tree. Only use this when the connector dataset is confirmed complete: an incomplete dataset looks identical to a mass upstream deletion and the sweep blanks published content')
   .option('--cloud-version <version>', 'Cloud binary version (default: auto-detect latest)')
   .option('--cgo-version <version>', 'cgo binary version (default: same as cloud-version)')
   .option('--skip-intermediate', 'Skip intermediate release processing (legacy mode - only compare latest vs last documented)')
@@ -792,6 +794,43 @@ automation
 
     const { handleRpcnConnectorDocs } = require('../tools/redpanda-connect/rpcn-connector-docs-handler.js')
     await handleRpcnConnectorDocs(options)
+  })
+
+/**
+ * generate migrate-rpcn-descriptions
+ *
+ * @description
+ * One-time migration that rewires published connector reference pages onto the
+ * regenerated description partial: the header `:description:` becomes
+ * `include::...[tag=attrs]` and the frozen intro prose becomes
+ * `include::...[tag=body]`. Afterwards `generate rpcn-connector-docs` keeps
+ * both fresh on every run.
+ *
+ * @why
+ * Connector pages are one-time first drafts, so their summary, "Introduced in
+ * version" line and description prose never change again even when the
+ * connector does. The body rewire is guarded: a page whose intro carries
+ * anything the partial does not reproduce is reported and left for a human,
+ * because rewriting it would delete published content.
+ *
+ * @example
+ * # Dry run (default): report the pages that would change
+ * npx doc-tools generate migrate-rpcn-descriptions
+ *
+ * # Apply the migration
+ * npx doc-tools generate migrate-rpcn-descriptions --write
+ *
+ * # Rewire page headers only, leaving the body prose alone
+ * npx doc-tools generate migrate-rpcn-descriptions --write --skip-body
+ */
+automation
+  .command('migrate-rpcn-descriptions')
+  .description('One-time migration of frozen connector summaries and description prose onto the regenerated description partial. Dry run unless --write is given.')
+  .option('--write', 'Apply changes (default is a dry run that only reports)')
+  .option('--skip-body', 'Rewire page headers only, leaving the frozen intro prose in the page')
+  .action((options) => {
+    const { migrateDescriptionsToPartials } = require('../tools/redpanda-connect/migrate-descriptions-to-partials.js')
+    migrateDescriptionsToPartials({ write: Boolean(options.write), skipBody: Boolean(options.skipBody) })
   })
 
 /**

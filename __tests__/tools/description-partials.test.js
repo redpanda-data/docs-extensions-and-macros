@@ -1,0 +1,1383 @@
+'use strict';
+
+const path = require('path');
+const fs = require('fs');
+const handlebars = require('handlebars');
+const helpers = require('../../tools/redpanda-connect/helpers/index.js');
+
+Object.entries(helpers).forEach(([name, fn]) => handlebars.registerHelper(name, fn));
+
+const {
+  descriptionIncludeLine,
+  metadataIncludeLine,
+} = require('../../tools/redpanda-connect/metadata-utils.js');
+
+const renderConnectDescription = require('../../tools/redpanda-connect/helpers/renderConnectDescription.js');
+const { generateRpcnConnectorDocs, backfillPageDescriptions } = require('../../tools/redpanda-connect/generate-rpcn-connector-docs.js');
+
+// @asciidoctor/core is a transitive dependency (via @antora/asciidoc-loader),
+// so it may not be hoisted to the top-level node_modules. Resolve it the same
+// way Antora's loader does; skip the render-level assertions if unavailable.
+let asciidoctor = null;
+try {
+  asciidoctor = require('@asciidoctor/core')();
+} catch (_) {
+  try {
+    const { createRequire } = require('module');
+    asciidoctor = createRequire(require.resolve('@antora/asciidoc-loader'))('@asciidoctor/core')();
+  } catch (_) { /* optional: render tests are skipped */ }
+}
+const renderTest = asciidoctor ? test : test.skip;
+
+describe('metadata-utils: descriptionIncludeLine', () => {
+  test('builds the descriptions partial include path from type and name', () => {
+    expect(descriptionIncludeLine({ type: 'output', name: 'sql_raw' }))
+      .toBe('include::connect:components:partial$descriptions/outputs/sql_raw.adoc[]');
+  });
+
+  test('respects an explicit typeDir', () => {
+    expect(descriptionIncludeLine({ typeDir: 'caches', name: 'memory' }))
+      .toBe('include::connect:components:partial$descriptions/caches/memory.adoc[]');
+  });
+});
+
+describe('renderConnectDescription helper', () => {
+  test('replaces an inline == Metadata block with the metadata partial include', () => {
+    const item = {
+      type: 'input',
+      name: 'thing',
+      description: [
+        'Reads from a thing.',
+        '',
+        '== Metadata',
+        '',
+        '- a: one',
+        '',
+        '== Permissions',
+        '',
+        'Needs access.',
+      ].join('\n'),
+    };
+    const out = renderConnectDescription(item);
+    expect(out).toContain('Reads from a thing.');
+    expect(out).toContain('include::connect:components:partial$metadata/inputs/thing.adoc[]');
+    expect(out).toContain('== Permissions');
+    // The metadata bullets themselves are de-duplicated out of the description.
+    expect(out).not.toContain('- a: one');
+  });
+
+  test('passes every description through unchanged: no collapsing, no demotion', () => {
+    // Collapsible wrapping was evaluated and rejected: it hides primary
+    // content, breaks on bodies with their own ==== delimiters, and
+    // find/deep-link behavior into closed details is browser-dependent.
+    // Heading demotion was rejected: the description renders before the
+    // page's first == section, so demoted headings are out of sequence.
+    const structured = 'Intro paragraph.\n\n== Details\n\n' + 'word '.repeat(500);
+    expect(renderConnectDescription({ type: 'output', name: 'x', description: structured }))
+      .toBe(structured.trim());
+
+    const wall = 'Lead paragraph.\n\n' + 'more '.repeat(600);
+    const out = renderConnectDescription({ type: 'output', name: 'x', description: wall });
+    expect(out).toBe(wall.trim());
+    expect(out).not.toContain('[%collapsible]');
+  });
+
+  test('returns empty string for a missing description', () => {
+    expect(renderConnectDescription({ type: 'output', name: 'x' })).toBe('');
+  });
+
+  renderTest('Asciidoctor renders embedded headings as clean top-level sections (published-page parity)', () => {
+    const body = [
+      'Lead paragraph.',
+      '',
+      '== Credentials',
+      '',
+      'How to authenticate.',
+      '',
+      '=== Key pair authentication',
+      '',
+      'Details.',
+    ].join('\n');
+    const out = renderConnectDescription({ type: 'output', name: 'snowflake_put', description: body });
+    const mem = asciidoctor.MemoryLogger.create();
+    asciidoctor.LoggerManager.setLogger(mem);
+    const html = asciidoctor.convert(`= snowflake_put\n\n${out}\n\n== Fields\n\nfields`);
+    // Passthrough produces the same h2/h3 structure the published pages have
+    // today, with zero section-sequence warnings. (Demotion produces
+    // "section title out of sequence" for every embedded heading.)
+    expect(html).toMatch(/<h2[^>]*>(<a[^>]*><\/a>)?Credentials/);
+    expect(html).toMatch(/<h3[^>]*>(<a[^>]*><\/a>)?Key pair authentication/);
+    expect(mem.getMessages().length).toBe(0);
+  });
+});
+
+describe('hasStructuralHeadings', () => {
+  const { hasStructuralHeadings, LONG_HEADINGLESS_THRESHOLD } = renderConnectDescription;
+
+  test('detects headings outside listing blocks and ignores ones inside', () => {
+    expect(hasStructuralHeadings('Prose.\n\n== Section\n\nMore.')).toBe(true);
+    expect(hasStructuralHeadings('Prose.\n\n----\n== not a heading\n----\n')).toBe(false);
+    expect(hasStructuralHeadings('Just prose.')).toBe(false);
+  });
+
+  test('exports the reporting threshold', () => {
+    expect(LONG_HEADINGLESS_THRESHOLD).toBe(1200);
+  });
+
+  test('markdown ## headings do not count as structure', () => {
+    // The descriptions that render worst are exactly the ones whose only
+    // structure is markdown headings — they must NOT be exempted from the
+    // long-description report.
+    expect(hasStructuralHeadings('Prose.\n\n## Markdown heading\n\nMore.')).toBe(false);
+  });
+});
+
+describe('hasMarkdownHeadings', () => {
+  const { hasMarkdownHeadings } = renderConnectDescription;
+
+  test('detects markdown headings outside listing blocks only', () => {
+    expect(hasMarkdownHeadings('Prose.\n\n## Section\n\nMore.')).toBe(true);
+    expect(hasMarkdownHeadings('Prose.\n\n----\n## comment in code\n----\n')).toBe(false);
+    expect(hasMarkdownHeadings('Prose.\n\n== AsciiDoc only.')).toBe(false);
+  });
+});
+
+describe('summaryAttribute helper', () => {
+  const summaryAttribute = require('../../tools/redpanda-connect/helpers/summaryAttribute.js');
+
+  test('flattens multi-line summaries to a single attribute-safe line', () => {
+    expect(summaryAttribute('Executes a query\nfor each message.'))
+      .toBe('Executes a query for each message.');
+  });
+
+  test('passes single-line summaries through and handles empties', () => {
+    expect(summaryAttribute('Already one line.')).toBe('Already one line.');
+    expect(summaryAttribute('')).toBe('');
+    expect(summaryAttribute(undefined)).toBe('');
+  });
+
+  test('flattens AsciiDoc markup, matching backfillPageDescriptions exactly', () => {
+    // The attrs region becomes the page's <meta name="description">, so raw
+    // markup here ships into search snippets, link previews and cloud-docs
+    // stubs. Verified in a real Antora build before this was flattened.
+    const summary = 'The `branch` processor creates a request via a '
+      + 'xref:guides:bloblang/about.adoc[Bloblang mapping], see '
+      + 'https://example.com/x[Docs^] and <<patterns>>.';
+    expect(summaryAttribute(summary)).toBe(
+      'The branch processor creates a request via a Bloblang mapping, see Docs and patterns.'
+    );
+
+    // Same input, same output as the page-header backfill: one flattener,
+    // two call sites, so a page cannot publish one meta description before
+    // migrating to the partial and a different one after.
+    const root = fs.mkdtempSync(path.join(require('os').tmpdir(), 'flatten-parity-'));
+    try {
+      fs.mkdirSync(path.join(root, 'processors'), { recursive: true });
+      fs.writeFileSync(path.join(root, 'processors', 'branch.adoc'),
+        '= branch\n// tag::single-source[]\n:type: processor\n\nBody.\n', 'utf8');
+      backfillPageDescriptions({ processors: [{ name: 'branch', summary }] }, { pagesRoot: root });
+      const page = fs.readFileSync(path.join(root, 'processors', 'branch.adoc'), 'utf8');
+      expect(page).toContain(`:description: ${summaryAttribute(summary)}`);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('generator writes a regenerated description partial', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-output');
+  let originalCwd, dataFile, templateFile;
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+
+    const data = {
+      outputs: [
+        {
+          name: 'sql_raw',
+          type: 'output',
+          version: '3.65.0',
+          summary: 'Executes an arbitrary SQL query for each message.',
+          description: [
+            'Runs a query.',
+            '',
+            '== Metadata',
+            '',
+            '- kafka_partition: The partition.',
+          ].join('\n'),
+          config: { children: [{ name: 'dsn', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+      // Non-connector data key: no reference page will ever include a
+      // description partial for these, so none must be emitted.
+      config: [
+        {
+          name: 'logger',
+          type: 'object',
+          description: 'Configures the service-wide logger.',
+          config: { children: [{ name: 'level', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('emits partials/descriptions/<type>/<name>.adoc with summary, version, and metadata include', () => {
+    return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
+      const dPath = path.join(
+        tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'sql_raw.adoc'
+      );
+      expect(fs.existsSync(dPath)).toBe(true);
+
+      const content = fs.readFileSync(dPath, 'utf8');
+      expect(content).toContain('This content is autogenerated. Do not edit manually.');
+      expect(content).toContain('Executes an arbitrary SQL query for each message.');
+      expect(content).toContain('Introduced in version 3.65.0.');
+      expect(content).toContain('Runs a query.');
+      // Metadata is emitted as its own partial and included, not inlined here.
+      expect(content).toContain('include::connect:components:partial$metadata/outputs/sql_raw.adoc[]');
+      expect(content).not.toContain('- kafka_partition: The partition.');
+    });
+  });
+
+  test('emits attrs and body tags so pages can refresh :description: and the body from one file', () => {
+    return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
+      const dPath = path.join(
+        tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'sql_raw.adoc'
+      );
+      const content = fs.readFileSync(dPath, 'utf8');
+      expect(content).toContain('// tag::attrs[]');
+      expect(content).toContain(':description: Executes an arbitrary SQL query for each message.');
+      expect(content).toContain('// end::attrs[]');
+      expect(content).toContain('// tag::body[]');
+      expect(content).toContain('// end::body[]');
+      // The attribute line sits inside the attrs tag, before the body tag.
+      const attrLine = content.indexOf(':description: Executes');
+      expect(attrLine).toBeGreaterThan(content.indexOf('// tag::attrs[]'));
+      expect(attrLine).toBeLessThan(content.indexOf('// tag::body[]'));
+    });
+  });
+
+  renderTest('a page consuming both tags gets a fresh :description: attribute and body', () => {
+    return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
+      const dPath = path.join(
+        tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'sql_raw.adoc'
+      );
+      const page = [
+        '= sql_raw',
+        `include::${dPath}[tag=attrs]`,
+        '',
+        `include::${dPath}[tag=body]`,
+        '',
+        '== Fields',
+        '',
+        'fields',
+      ].join('\n');
+      const pagePath = path.join(tmpDir, 'page.adoc');
+      fs.writeFileSync(pagePath, page, 'utf8');
+      const doc = asciidoctor.loadFile(pagePath, { safe: 'unsafe' });
+      expect(doc.getAttribute('description')).toBe('Executes an arbitrary SQL query for each message.');
+      const html = doc.convert();
+      expect(html).toContain('Executes an arbitrary SQL query for each message.');
+      expect(html).toContain('Runs a query.');
+    });
+  });
+
+  test('reports long heading-less descriptions as upstream structure candidates', () => {
+    const wallData = {
+      outputs: [
+        {
+          name: 'walloftext',
+          type: 'output',
+          summary: 'Writes somewhere.',
+          description: 'Lead paragraph. ' + 'prose '.repeat(300),
+          config: { children: [{ name: 'dsn', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    const wallFile = path.join(tmpDir, 'wall.json');
+    fs.writeFileSync(wallFile, JSON.stringify(wallData), 'utf8');
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    return generateRpcnConnectorDocs({ data: wallFile, template: templateFile }).then(() => {
+      const warned = warnSpy.mock.calls.map(args => args.join(' ')).join('\n');
+      warnSpy.mockRestore();
+      expect(warned).toContain('Long heading-less description: outputs/walloftext');
+      expect(warned).toContain('adding == sections upstream');
+    }, (err) => { warnSpy.mockRestore(); throw err; });
+  });
+
+  test('does not emit description partials for non-connector data keys such as config', () => {
+    return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
+      const configsDir = path.join(
+        tmpDir, 'modules', 'components', 'partials', 'descriptions', 'configs'
+      );
+      expect(fs.existsSync(configsDir)).toBe(false);
+    });
+  });
+});
+
+describe('generator empties a stale description partial when the description is removed', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-stale');
+  let originalCwd, templateFile;
+  const dPath = path.join(
+    tmpDir, 'modules', 'components', 'partials', 'descriptions', 'inputs', 'dropped_desc.adoc'
+  );
+
+  function writeData (withDescription) {
+    const data = {
+      inputs: [
+        {
+          name: 'dropped_desc',
+          type: 'input',
+          ...(withDescription ? { description: 'Reads from a thing that still exists upstream.' } : {}),
+          config: { children: [{ name: 'foo', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    const dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    return dataFile;
+  }
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('keeps the file (include stays resolvable) but blanks its content and logs', async () => {
+    // First run: the connector still has a description, so a partial is written.
+    await generateRpcnConnectorDocs({ data: writeData(true), template: templateFile });
+    expect(fs.existsSync(dPath)).toBe(true);
+    expect(fs.readFileSync(dPath, 'utf8')).toContain('Reads from a thing that still exists upstream.');
+
+    // Second run: the description disappeared upstream.
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    let logged;
+    try {
+      await generateRpcnConnectorDocs({ data: writeData(false), template: templateFile });
+      logged = logSpy.mock.calls.map(args => args.join(' ')).join('\n');
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    // The file must survive so any hardcoded include directive still resolves...
+    expect(fs.existsSync(dPath)).toBe(true);
+    const content = fs.readFileSync(dPath, 'utf8');
+    // ...but the stale description is gone, replaced by a banner-only file.
+    expect(content).not.toContain('Reads from a thing that still exists upstream.');
+    expect(content).toContain('This content is autogenerated. Do not edit manually.');
+    expect(content).toContain('intentionally empty');
+
+    // And a human-facing log line points at the stale partial.
+    expect(logged).toContain('Description removed upstream');
+    expect(logged).toContain(path.join('descriptions', 'inputs', 'dropped_desc.adoc'));
+  });
+});
+
+describe('summary-only and escapable-summary connectors (CodeRabbit findings)', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-summary-only');
+  let originalCwd, templateFile;
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('a connector with a summary but no description still gets a partial (40 real connectors)', () => {
+    const data = {
+      outputs: [
+        {
+          name: 'summary_only',
+          type: 'output',
+          summary: "Caches messages & forwards them to Bob's <special> queue.",
+          config: { children: [{ name: 'x', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    const dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
+      const dPath = path.join(
+        tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'summary_only.adoc'
+      );
+      expect(fs.existsSync(dPath)).toBe(true);
+      const content = fs.readFileSync(dPath, 'utf8');
+      // Not blanked as "removed upstream"
+      expect(content).not.toContain('intentionally empty');
+      expect(content).toContain('// tag::attrs[]');
+      // The attribute value is raw text, never HTML-escaped
+      expect(content).toContain(":description: Caches messages & forwards them to Bob's <special> queue.");
+      expect(content).not.toContain('&amp;');
+      expect(content).not.toContain('&#x27;');
+      expect(content).not.toContain('&lt;');
+    });
+  });
+});
+
+describe('placeholder escaping and heading-sequence reporting', () => {
+  test('escapes brace placeholders in prose and spans, never in listing blocks', () => {
+    const { escapePlaceholderBraces } = renderConnectDescription;
+    const input = 'Posts to `{endpoint}/v1/traces` and /data/{api_version}/graphql.\n\n----\ncurl {endpoint}/v1/logs\n----';
+    const out = escapePlaceholderBraces(input);
+    expect(out).toContain('`\\{endpoint}/v1/traces`');
+    expect(out).toContain('/data/\\{api_version}/graphql');
+    // Inside the listing block the braces are already literal
+    expect(out).toContain('curl {endpoint}/v1/logs');
+  });
+
+  test('renderConnectDescription applies the escaping (otlp_http case)', () => {
+    const out = renderConnectDescription({
+      type: 'output', name: 'otlp_http',
+      description: 'Traces go to `{endpoint}/v1/traces`.',
+    });
+    expect(out).toContain('\\{endpoint}');
+  });
+
+  test('firstHeadingDepth flags markdown ### and asciidoc === starts, accepts == and ##', () => {
+    const { firstHeadingDepth } = renderConnectDescription;
+    expect(firstHeadingDepth('Intro.\n\n### Prerequisites\n\nBody.')).toBe(3);
+    expect(firstHeadingDepth('Intro.\n\n=== Apache Polaris\n\nBody.')).toBe(3);
+    expect(firstHeadingDepth('Intro.\n\n== Operators\n\n=== to_json')).toBe(2);
+    expect(firstHeadingDepth('No headings at all.')).toBe(null);
+    expect(firstHeadingDepth('----\n=== inside block\n----\nprose')).toBe(null);
+  });
+});
+
+describe('ensureHeadingSeparation', () => {
+  const { ensureHeadingSeparation } = renderConnectDescription;
+
+  test('inserts the blank line a glued heading needs (protobuf case)', () => {
+    const input = 'Prose paragraph.\n== Operators\n\n=== `to_json`\n\nBody.';
+    const out = ensureHeadingSeparation(input);
+    expect(out).toContain('Prose paragraph.\n\n== Operators');
+  });
+
+  test('leaves already-separated headings and listing blocks alone', () => {
+    const ok = 'Prose.\n\n== Section\n\n----\ntext\n== not a heading\n----';
+    expect(ensureHeadingSeparation(ok)).toBe(ok);
+  });
+});
+
+describe('markdown fence awareness: fence interiors pass through byte-identical', () => {
+  const {
+    escapePlaceholderBraces,
+    ensureHeadingSeparation,
+    hasStructuralHeadings,
+    hasMarkdownHeadings,
+    firstHeadingDepth,
+  } = renderConnectDescription;
+
+  // A fenced example whose interior exercises every rewriter: a glued
+  // #-comment line (ensureHeadingSeparation must NOT push a blank line into
+  // the example), a {token} placeholder (escapePlaceholderBraces must NOT
+  // prepend a backslash — `\{endpoint}` renders with a literal backslash),
+  // and a `==` line (the scanners must not count it as a heading).
+  const fenceInterior = [
+    '## endpoint config',
+    'url: {endpoint}/v1/logs',
+    '== not a heading',
+  ].join('\n');
+  const body = [
+    'Prose with a real {placeholder} outside.',
+    '```yaml',
+    fenceInterior,
+    '```',
+    '',
+    'Trailing prose {token}.',
+  ].join('\n');
+
+  test('escapePlaceholderBraces and ensureHeadingSeparation leave the fence interior untouched, prose still escaped (otlp_http corruption case)', () => {
+    const out = escapePlaceholderBraces(ensureHeadingSeparation(body));
+    // Byte-identical passthrough of the whole fenced block.
+    expect(out).toContain('```yaml\n' + fenceInterior + '\n```');
+    // Prose outside the fence still gets the escape.
+    expect(out).toContain('Prose with a real \\{placeholder} outside.');
+    expect(out).toContain('Trailing prose \\{token}.');
+  });
+
+  test('renderConnectDescription end-to-end never corrupts a fenced example', () => {
+    const out = renderConnectDescription({ type: 'output', name: 'otlp_http', description: body });
+    expect(out).toContain('url: {endpoint}/v1/logs');
+    expect(out).not.toContain('\\{endpoint}');
+    expect(out).toContain('```yaml\n## endpoint config');
+  });
+
+  test('the heading scanners ignore fence interiors (``` and ~~~)', () => {
+    expect(hasStructuralHeadings(body)).toBe(false);
+    expect(hasMarkdownHeadings(body)).toBe(false);
+    expect(firstHeadingDepth(body)).toBe(null);
+    expect(hasMarkdownHeadings('Prose.\n\n~~~\n## a comment\n~~~')).toBe(false);
+  });
+
+  test('delimiters keep layered state: a ---- inside a fence is content, not a block opener', () => {
+    // If the ---- leaked into block state, the real heading after the fence
+    // would be swallowed as "inside a listing block".
+    expect(hasStructuralHeadings('```\n----\n```\n\n== Real heading\n\nProse.')).toBe(true);
+  });
+});
+
+describe('AsciiDoc literal block (....) awareness: as substitution-free as ----', () => {
+  const { escapePlaceholderBraces, hasStructuralHeadings } = renderConnectDescription;
+  const mu = require('../../tools/redpanda-connect/metadata-utils.js');
+
+  const literalInterior = [
+    'Uses {endpoint} literally.',
+    '== not a heading',
+  ].join('\n');
+  const body = [
+    'Prose with a real {placeholder} outside.',
+    '....',
+    literalInterior,
+    '....',
+    '',
+    'Trailing prose {token}.',
+  ].join('\n');
+
+  test('escapePlaceholderBraces leaves a .... literal block untouched, prose still escaped', () => {
+    const out = escapePlaceholderBraces(body);
+    expect(out).toContain('....\n' + literalInterior + '\n....');
+    expect(out).toContain('Prose with a real \\{placeholder} outside.');
+    expect(out).toContain('Trailing prose \\{token}.');
+  });
+
+  test('the heading scanner ignores a .... literal block interior', () => {
+    expect(hasStructuralHeadings(body)).toBe(false);
+  });
+
+  test('annotateVerbatimLines marks .... interiors verbatim, symmetric with ----', () => {
+    const rows = mu.annotateVerbatimLines('a\n....\nb\n{c}\n....\nd');
+    expect(rows.map((r) => r.verbatim)).toEqual([false, true, true, true, true, false]);
+  });
+
+  test('delimiters keep layered state: a .... inside a ---- block is content, not a literal opener', () => {
+    // If .... leaked into literal-block state independently, the real
+    // heading after the ---- block would be swallowed.
+    expect(hasStructuralHeadings('----\n....\n----\n\n== Real heading\n\nProse.')).toBe(true);
+  });
+});
+
+describe('generator blanks description partials orphaned by connectors deleted upstream', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-orphan');
+  let originalCwd, templateFile;
+  const keptPath = path.join(
+    tmpDir, 'modules', 'components', 'partials', 'descriptions', 'inputs', 'still_here.adoc'
+  );
+  const orphanPath = path.join(
+    tmpDir, 'modules', 'components', 'partials', 'descriptions', 'inputs', 'deleted_upstream.adoc'
+  );
+
+  function writeData (names) {
+    const data = {
+      inputs: names.map((name) => ({
+        name,
+        type: 'input',
+        description: `Reads things for ${name}.`,
+        config: { children: [{ name: 'foo', type: 'string', kind: 'scalar', description: 'A field.' }] },
+      })),
+    };
+    const dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    return dataFile;
+  }
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('a partial whose connector vanished from the dataset is blanked and reported', async () => {
+    // First run: both connectors exist.
+    await generateRpcnConnectorDocs({ data: writeData(['still_here', 'deleted_upstream']), template: templateFile });
+    expect(fs.readFileSync(orphanPath, 'utf8')).toContain('Reads things for deleted_upstream.');
+
+    // Second run: deleted_upstream is gone from the dataset entirely, so the
+    // in-loop stale handling never sees it. The post-loop sweep must.
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    let result, logged;
+    try {
+      result = await generateRpcnConnectorDocs({ data: writeData(['still_here']), template: templateFile });
+      logged = logSpy.mock.calls.map(args => args.join(' ')).join('\n');
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    // The orphan survives as a file (includes stay resolvable) but is blanked.
+    expect(fs.existsSync(orphanPath)).toBe(true);
+    const content = fs.readFileSync(orphanPath, 'utf8');
+    expect(content).not.toContain('Reads things for deleted_upstream.');
+    expect(content).toContain('intentionally empty');
+
+    // The surviving connector's partial is untouched.
+    expect(fs.readFileSync(keptPath, 'utf8')).toContain('Reads things for still_here.');
+
+    // Reported in descriptionReports (surfaces in the PR summary) and logged.
+    expect(result.descriptionReports).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        connector: 'inputs/deleted_upstream',
+        message: expect.stringContaining('Connector removed upstream'),
+      }),
+    ]));
+    expect(logged).toContain(path.join('descriptions', 'inputs', 'deleted_upstream.adoc'));
+
+    // Merged-return sanity: this PR's report key coexists with the keys main
+    // added for lost sections and description backfill.
+    expect(result).toHaveProperty('lostSectionWarnings');
+    expect(result).toHaveProperty('descriptionBackfill');
+  });
+
+  test('an already-blanked orphan is not re-reported on the next run', async () => {
+    const result = await generateRpcnConnectorDocs({ data: writeData(['still_here']), template: templateFile });
+    expect(result.descriptionReports).toEqual([]);
+    expect(fs.readFileSync(orphanPath, 'utf8')).toContain('intentionally empty');
+  });
+});
+
+describe('summaries are brace-escaped like description bodies', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-summary-braces');
+  let originalCwd, templateFile, dataFile;
+  const dPath = path.join(
+    tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'braced_summary.adoc'
+  );
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+    const data = {
+      outputs: [
+        {
+          name: 'braced_summary',
+          type: 'output',
+          summary: 'Sends batches to {endpoint} for processing.',
+          description: 'Longer prose.',
+          config: { children: [{ name: 'x', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('the emitted partial escapes {placeholder} in both the body summary and the :description: attribute', () => {
+    return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
+      const content = fs.readFileSync(dPath, 'utf8');
+      // Body copy of the summary.
+      expect(content).toContain('Sends batches to \\{endpoint} for processing.');
+      // Attribute copy: without the escape Asciidoctor consumes {endpoint}
+      // as a missing attribute reference and drops it from search snippets.
+      expect(content).toContain(':description: Sends batches to \\{endpoint} for processing.');
+      expect(content).not.toContain(':description: Sends batches to {endpoint}');
+    });
+  });
+
+  renderTest('Asciidoctor round-trips the escaped summary back to literal braces', () => {
+    return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
+      const page = [
+        '= braced_summary',
+        `include::${dPath}[tag=attrs]`,
+        '',
+        `include::${dPath}[tag=body]`,
+      ].join('\n');
+      const pagePath = path.join(tmpDir, 'page.adoc');
+      fs.writeFileSync(pagePath, page, 'utf8');
+      const doc = asciidoctor.loadFile(pagePath, { safe: 'unsafe' });
+      expect(doc.getAttribute('description')).toBe('Sends batches to {endpoint} for processing.');
+      expect(doc.convert()).toContain('{endpoint}');
+    });
+  });
+});
+
+describe('orphan sweep blast-radius guard', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-sweep-guard');
+  let originalCwd, templateFile;
+  const descRoot = path.join(tmpDir, 'modules', 'components', 'partials', 'descriptions', 'inputs');
+
+  function writeData (count, offset = 0) {
+    const data = {
+      inputs: Array.from({ length: count }, (_, i) => ({
+        name: `conn_${i + offset}`,
+        type: 'input',
+        description: `Reads things for conn_${i + offset}.`,
+        config: { children: [{ name: 'foo', type: 'string', kind: 'scalar', description: 'A field.' }] },
+      })),
+    };
+    const dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    return dataFile;
+  }
+
+  function run (opts) {
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    return generateRpcnConnectorDocs({ template: templateFile, ...opts }).then((result) => {
+      const errors = errSpy.mock.calls.map((a) => a.join(' ')).join('\n');
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+      return { result, errors };
+    }, (err) => {
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+      throw err;
+    });
+  }
+
+  function bodies () {
+    return fs.readdirSync(descRoot)
+      .filter((f) => f.endsWith('.adoc'))
+      .filter((f) => fs.readFileSync(path.join(descRoot, f), 'utf8').includes('Reads things for'))
+      .length;
+  }
+
+  beforeEach(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('refuses to blank the tree when a truncated dataset orphans most of it', async () => {
+    // Run 1: the complete dataset.
+    await run({ data: writeData(20) });
+    expect(bodies()).toBe(20);
+
+    // Run 2: the same tool pointed at a dataset that only carries one
+    // component (a truncated fetch, a hand-made subset, a half-succeeded
+    // --force-fresh). Without a guard this blanks 19 published partials.
+    const { result, errors } = await run({ data: writeData(1) });
+
+    expect(bodies()).toBe(20);
+    expect(result.orphanSweepSkipped).toEqual({
+      orphans: 19,
+      partialsOnDisk: 20,
+      connectors: expect.arrayContaining(['inputs/conn_19']),
+    });
+    expect(errors).toContain('Orphan sweep refused');
+    expect(errors).toContain('19 of 20 description partial(s) (95%)');
+    // The refusal is reported to the PR summary, not just the workflow log.
+    expect(result.descriptionReports).toEqual(expect.arrayContaining([
+      expect.objectContaining({ message: expect.stringContaining('Orphan sweep refused') }),
+    ]));
+    // Nothing was reported as removed upstream, because nothing was.
+    expect(result.descriptionReports.some((r) => /removed upstream/.test(r.message))).toBe(false);
+  });
+
+  test('the explicit opt-in still sweeps the same truncated dataset', async () => {
+    await run({ data: writeData(20) });
+    const { result } = await run({ data: writeData(1), pruneOrphanedDescriptions: true });
+
+    expect(bodies()).toBe(1);
+    expect(result.orphanSweepSkipped).toBeNull();
+    expect(result.descriptionReports.filter((r) => /removed upstream/.test(r.message))).toHaveLength(19);
+  });
+
+  // Negative controls: the guard must not be a blanket "never sweep".
+  test('a plausible small upstream deletion is still swept', async () => {
+    await run({ data: writeData(20) });
+    const { result } = await run({ data: writeData(18) });
+
+    expect(bodies()).toBe(18);
+    expect(result.orphanSweepSkipped).toBeNull();
+    expect(result.descriptionReports.filter((r) => /removed upstream/.test(r.message))).toHaveLength(2);
+  });
+
+  test('a large but proportionally small deletion is still swept', async () => {
+    // 15 of 200 is over the always-allowed count but under the 10% fraction,
+    // so the fraction arm of the guard (not just the count arm) is exercised.
+    await run({ data: writeData(200) });
+    const { result } = await run({ data: writeData(185) });
+
+    expect(bodies()).toBe(185);
+    expect(result.orphanSweepSkipped).toBeNull();
+    expect(result.descriptionReports.filter((r) => /removed upstream/.test(r.message))).toHaveLength(15);
+  });
+});
+
+describe('rate limits: the partial is written where its include line points', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-rate-limits');
+  let originalCwd, templateFile, dataFile;
+  const partialsRoot = path.join(tmpDir, 'modules', 'components', 'partials');
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    // The upstream dataset key is 'rate-limits' while item.type is
+    // 'rate_limit' and the pages directory is 'rate_limits'.
+    const data = {
+      'rate-limits': [
+        {
+          name: 'local',
+          type: 'rate_limit',
+          summary: 'A simple X every Y rate limit.',
+          description: 'Shared across components.\n\n== Metadata\n\n- a: one',
+          config: { children: [{ name: 'count', type: 'int', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('the description and metadata partials land on the path the include lines use', async () => {
+    await generateRpcnConnectorDocs({ data: dataFile, template: templateFile });
+
+    const item = { type: 'rate_limit', name: 'local' };
+    // The include line a page (or the migration) writes...
+    const descInclude = descriptionIncludeLine(item);
+    const metaInclude = metadataIncludeLine(item);
+    expect(descInclude).toContain('partial$descriptions/rate_limits/local.adoc');
+    expect(metaInclude).toContain('partial$metadata/rate_limits/local.adoc');
+
+    // ...must name a file that exists. Resolve the partial$ target the way
+    // Antora does: <partials root>/<the path after partial$>.
+    const resolve = (line) => path.join(
+      partialsRoot, line.match(/partial\$([^[]+)/)[1]
+    );
+    expect(fs.existsSync(resolve(descInclude))).toBe(true);
+    expect(fs.existsSync(resolve(metaInclude))).toBe(true);
+
+    // The hyphenated spelling must not also exist: two directories for one
+    // component family is how the mismatch came back last time.
+    expect(fs.existsSync(path.join(partialsRoot, 'descriptions', 'rate-limits'))).toBe(false);
+    expect(fs.existsSync(path.join(partialsRoot, 'metadata', 'rate-limits'))).toBe(false);
+
+    // Fields and examples are unchanged: published pages already include
+    // them under the raw data-key spelling, so that path must not move.
+    expect(fs.existsSync(path.join(partialsRoot, 'fields', 'rate-limits', 'local.adoc'))).toBe(true);
+  });
+});
+
+describe('a blanked description partial still answers both tags', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-blank-tags');
+  let originalCwd, templateFile;
+  const dPath = path.join(
+    tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'gone.adoc'
+  );
+
+  function writeData (withDescription) {
+    const data = {
+      outputs: [
+        {
+          name: 'gone',
+          type: 'output',
+          ...(withDescription ? { summary: 'Writes somewhere.', description: 'Writes to a thing.' } : {}),
+          config: { children: [{ name: 'foo', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    const dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    return dataFile;
+  }
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  renderTest('Asciidoctor reports no missing tag when a consuming page is built', async () => {
+    // Run 1 publishes the partial and (notionally) the page that includes it.
+    await generateRpcnConnectorDocs({ data: writeData(true), template: templateFile });
+    // Run 2: the description vanished upstream, so the partial is blanked
+    // while the page's two tagged includes stay exactly where they were.
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await generateRpcnConnectorDocs({ data: writeData(false), template: templateFile });
+    } finally {
+      logSpy.mockRestore();
+    }
+    expect(fs.readFileSync(dPath, 'utf8')).not.toContain('Writes to a thing.');
+
+    const pagePath = path.join(tmpDir, 'page.adoc');
+    fs.writeFileSync(pagePath, [
+      '= gone',
+      `include::${dPath}[tag=attrs]`,
+      '',
+      `include::${dPath}[tag=body]`,
+      '',
+      '== Fields',
+      '',
+      'fields',
+    ].join('\n'), 'utf8');
+
+    const mem = asciidoctor.MemoryLogger.create();
+    asciidoctor.LoggerManager.setLogger(mem);
+    const doc = asciidoctor.loadFile(pagePath, { safe: 'unsafe' });
+    const html = doc.convert();
+    const messages = mem.getMessages().map((m) => m.getText());
+
+    // The include resolved and rendered nothing, and neither tag was missing.
+    expect(messages).toEqual([]);
+    expect(html).not.toContain('Writes to a thing.');
+    expect(html).not.toContain('autogenerated');
+  });
+});
+
+describe('drafted pages are born wired to the description partial', () => {
+  const REPO_ROOT = path.resolve(__dirname, '../..');
+  const tmpDir = path.join(__dirname, 'tmp-description-drafts');
+  let originalCwd, dataFile;
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    const data = {
+      outputs: [
+        {
+          name: 'sql_raw',
+          type: 'output',
+          version: '3.65.0',
+          summary: 'Executes an arbitrary SQL query for each `message`.',
+          description: 'Runs a query with {endpoint}.',
+          config: { children: [{ name: 'dsn', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+        {
+          // No summary: the attrs region sets nothing, so this page must keep
+          // an inline attribute rather than an include that sets no
+          // :description: at all.
+          name: 'no_summary',
+          type: 'output',
+          description: 'Writes to a thing.',
+          config: { children: [{ name: 'dsn', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function draft (name) {
+    return fs.readFileSync(path.join(tmpDir, 'modules', 'components', 'pages', 'outputs', `${name}.adoc`), 'utf8');
+  }
+
+  test('the draft includes the partial instead of freezing the summary and prose into the page', async () => {
+    await generateRpcnConnectorDocs({
+      data: dataFile,
+      template: path.join(REPO_ROOT, 'tools/redpanda-connect/templates/connector.hbs'),
+      templateIntro: path.join(REPO_ROOT, 'tools/redpanda-connect/templates/intro.hbs'),
+      templateFields: path.join(REPO_ROOT, 'tools/redpanda-connect/templates/fields-partials.hbs'),
+      templateExamples: path.join(REPO_ROOT, 'tools/redpanda-connect/templates/examples-partials.hbs'),
+      writeFullDrafts: true,
+    });
+
+    const page = draft('sql_raw');
+    expect(page).toContain('include::connect:components:partial$descriptions/outputs/sql_raw.adoc[tag=attrs]');
+    expect(page).toContain('include::connect:components:partial$descriptions/outputs/sql_raw.adoc[tag=body]');
+    // The attrs include lives inside the meta tag region so single-source
+    // stubs still inherit :description:.
+    const lines = page.split('\n');
+    const at = lines.findIndex((l) => l.includes('tag=attrs'));
+    expect(lines[at - 1]).toBe('// tag::meta[]');
+    expect(lines[at + 1]).toBe('// end::meta[]');
+    // Nothing is frozen into the page any more: no literal attribute, no
+    // copy of the summary, no copy of the description.
+    expect(page).not.toContain(':description:');
+    expect(page).not.toContain('Executes an arbitrary SQL query');
+    expect(page).not.toContain('Runs a query with');
+    expect(page).not.toContain('Introduced in version');
+    // The rest of the page is unaffected.
+    expect(page).toContain('include::connect:components:partial$fields/outputs/sql_raw.adoc[]');
+
+    // The partial the page points at was written by the same run.
+    const partial = fs.readFileSync(path.join(
+      tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'sql_raw.adoc'
+    ), 'utf8');
+    expect(partial).toContain(':description: Executes an arbitrary SQL query for each message.');
+    expect(partial).toContain('Introduced in version 3.65.0.');
+    expect(partial).toContain('Runs a query with \\{endpoint}.');
+
+    // Negative control: a summary-less connector keeps the inline attribute,
+    // flattened, because the attrs region would set nothing.
+    const bare = draft('no_summary');
+    expect(bare).toContain(':description: Writes to a thing.');
+    expect(bare).not.toContain('tag=attrs');
+    // Its body still comes from the partial, which does have a description.
+    expect(bare).toContain('descriptions/outputs/no_summary.adoc[tag=body]');
+  });
+});
+
+describe('regenerating a description partial warns before dropping a published section', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-lost-sections');
+  let originalCwd, templateFile;
+  const dPath = path.join(
+    tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'sql_raw.adoc'
+  );
+  const mPath = path.join(
+    tmpDir, 'modules', 'components', 'partials', 'metadata', 'outputs', 'sql_raw.adoc'
+  );
+
+  function writeData () {
+    const data = {
+      outputs: [
+        {
+          name: 'sql_raw',
+          type: 'output',
+          summary: 'Executes a query.',
+          description: 'Runs a query.\n\n== Metadata\n\n- kafka_partition: The partition.',
+          config: { children: [{ name: 'dsn', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    };
+    const dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf8');
+    return dataFile;
+  }
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    templateFile = path.join(tmpDir, 'main.hbs');
+    fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('the description partial reports lost sections the same way its metadata sibling does', async () => {
+    await generateRpcnConnectorDocs({ data: writeData(), template: templateFile });
+
+    // Somebody hand-migrated a section into each published partial. Both are
+    // regenerated on the next run, so both must warn.
+    for (const p of [dPath, mPath]) {
+      fs.writeFileSync(p, `${fs.readFileSync(p, 'utf8')}\n== Hand-written Caveats\n\nDetails.\n`, 'utf8');
+    }
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    let result, warned;
+    try {
+      result = await generateRpcnConnectorDocs({ data: writeData(), template: templateFile });
+      warned = warnSpy.mock.calls.map((a) => a.join(' ')).join('\n');
+    } finally {
+      warnSpy.mockRestore();
+    }
+
+    const partials = result.lostSectionWarnings.map((w) => w.partial);
+    expect(partials).toContain(path.join('modules', 'components', 'partials', 'descriptions', 'outputs', 'sql_raw.adoc'));
+    expect(partials).toContain(path.join('modules', 'components', 'partials', 'metadata', 'outputs', 'sql_raw.adoc'));
+    for (const w of result.lostSectionWarnings) expect(w.sections).toEqual(['Hand-written Caveats']);
+    expect(warned).toContain('regenerated description partial');
+    expect(warned).toContain('"Hand-written Caveats"');
+  });
+});
+
+describe('one annotator: every scanner agrees about verbatim regions', () => {
+  const mu = require('../../tools/redpanda-connect/metadata-utils.js');
+  const { hasStructuralHeadings, firstHeadingDepth, escapePlaceholderBraces } = renderConnectDescription;
+
+  test('locateMetadata respects markdown fences, so a fenced example survives', () => {
+    // locateMetadata runs FIRST in the pipeline, before the scanners in
+    // renderConnectDescription. While it was the only fence-blind one, a
+    // `== Metadata` inside a fenced example was extracted into the metadata
+    // partial and the fence was destroyed: opening ``` orphaned, interior
+    // replaced by the include, closing ``` consumed.
+    const description = [
+      'Reads from a thing.',
+      '',
+      '```text',
+      '== Metadata',
+      'not really a section',
+      '```',
+      '',
+      'Trailing prose.',
+    ].join('\n');
+
+    expect(mu.locateMetadata(description)).toBeNull();
+
+    const out = renderConnectDescription({ type: 'input', name: 'demo', description });
+    expect(out).not.toContain('include::connect:components:partial$metadata/inputs/demo.adoc[]');
+    // The fence comes through byte-identical.
+    expect(out).toContain('```text\n== Metadata\nnot really a section\n```');
+  });
+
+  test('a real == Metadata section outside any fence is still extracted', () => {
+    // Negative control: the fence awareness must not disable extraction.
+    const description = [
+      'Reads from a thing.',
+      '',
+      '```yml',
+      'label: ""',
+      '```',
+      '',
+      '== Metadata',
+      '',
+      '- a: one',
+    ].join('\n');
+    expect(mu.locateMetadata(description)).not.toBeNull();
+    expect(renderConnectDescription({ type: 'input', name: 'demo', description }))
+      .toContain('include::connect:components:partial$metadata/inputs/demo.adoc[]');
+  });
+
+  test('an indented ---- is content for every scanner, matching Asciidoctor', () => {
+    // Asciidoctor only reads a block delimiter at column 0: an indented ----
+    // is a literal paragraph, and this input makes it emit "unterminated
+    // listing block". The two copies of the scanner disagreed here, one
+    // testing the trimmed line and one the raw line, so locateMetadata
+    // extracted a section that the brace escaper treated as verbatim.
+    const description = 'Intro paragraph.\n\n ----\n== Metadata\nValue {endpoint} here.\n----';
+
+    // All four scanners now read the same structure.
+    expect(mu.sectionHeadings(description)).toEqual(['Metadata']);
+    expect(hasStructuralHeadings(description)).toBe(true);
+    expect(firstHeadingDepth(description)).toBe(2);
+    expect(escapePlaceholderBraces(description)).toContain('\\{endpoint}');
+    expect(mu.locateMetadata(description)).not.toBeNull();
+  });
+
+  test('the annotator is exported once and layers the two delimiter kinds', () => {
+    const rows = mu.annotateVerbatimLines('a\n----\n```\nb\n```\n----\nc');
+    expect(rows.map((r) => r.verbatim)).toEqual([false, true, true, true, true, true, false]);
+    // A ---- inside a fence is content too, not a block opener.
+    expect(mu.annotateVerbatimLines('```\n----\n```\nd').map((r) => r.verbatim))
+      .toEqual([true, true, true, false]);
+  });
+});
+
+describe('one connector-type list', () => {
+  const { CONNECTOR_TYPE_DIRS, CONNECTOR_DATA_KEYS } = require('../../tools/redpanda-connect/metadata-utils.js');
+
+  test('covers every page-backed family exactly once, in canonical spelling', () => {
+    expect(CONNECTOR_TYPE_DIRS).toEqual([
+      'inputs', 'outputs', 'processors', 'caches', 'rate_limits',
+      'buffers', 'metrics', 'scanners', 'tracers',
+    ]);
+    // The copies this replaces disagreed three ways: rate_limits missing from
+    // one, both rate-limit spellings in two, config in two.
+    expect(new Set(CONNECTOR_TYPE_DIRS).size).toBe(CONNECTOR_TYPE_DIRS.length);
+    expect(CONNECTOR_TYPE_DIRS).toContain('rate_limits');
+    expect(CONNECTOR_TYPE_DIRS).not.toContain('rate-limits');
+    expect(CONNECTOR_TYPE_DIRS).not.toContain('config');
+    // Dataset walkers need config as well; page writers must not have it.
+    expect(CONNECTOR_DATA_KEYS).toEqual([...CONNECTOR_TYPE_DIRS, 'config']);
+  });
+
+  test('the generator gates every per-page partial on that one list', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'type-dirs-'));
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(tmpDir);
+      const templateFile = path.join(tmpDir, 'main.hbs');
+      fs.writeFileSync(templateFile, '= {{name}}\n', 'utf8');
+      const dataFile = path.join(tmpDir, 'data.json');
+      const withMetadata = (name) => ({
+        name,
+        description: 'Prose.\n\n== Metadata\n\n- a: one',
+        examples: [{ title: 'One', summary: 'S', config: 'x: 1' }],
+        config: { children: [{ name: 'f', type: 'string', kind: 'scalar', description: 'A field.' }] },
+      });
+      fs.writeFileSync(dataFile, JSON.stringify({
+        outputs: [{ ...withMetadata('sql_raw'), type: 'output' }],
+        // Not a page-backed family: no page can include a partial for it, so
+        // the metadata and examples partials must not be written either. The
+        // old denylist named only the two bloblang keys and let this through.
+        config: [{ ...withMetadata('logger'), type: 'object' }],
+      }), 'utf8');
+
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        await generateRpcnConnectorDocs({
+          data: dataFile,
+          template: templateFile,
+          templateExamples: path.resolve(originalCwd, 'tools/redpanda-connect/templates/examples-partials.hbs'),
+        });
+      } finally {
+        warnSpy.mockRestore();
+      }
+
+      const partials = path.join(tmpDir, 'modules', 'components', 'partials');
+      for (const kind of ['descriptions', 'metadata', 'examples']) {
+        expect(fs.readdirSync(path.join(partials, kind)).sort()).toEqual(['outputs']);
+      }
+    } finally {
+      process.chdir(originalCwd);
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('the description template is overridable and the guard covers version-only connectors', () => {
+  const tmpDir = path.join(__dirname, 'tmp-description-template-flag');
+  let originalCwd, dataFile;
+
+  beforeAll(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    fs.writeFileSync(path.join(tmpDir, 'main.hbs'), '= {{name}}\n', 'utf8');
+    dataFile = path.join(tmpDir, 'data.json');
+    fs.writeFileSync(dataFile, JSON.stringify({
+      outputs: [
+        {
+          name: 'sql_raw',
+          type: 'output',
+          summary: 'Executes a query.',
+          description: 'Runs a query.\n\n== Metadata\n\n- a: one',
+          config: { children: [{ name: 'dsn', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+        {
+          // Version only: no summary, no description. The outer guard used to
+          // test (or summary description), so this connector got no partial
+          // at all and its "Introduced in version" line was lost.
+          name: 'vonly',
+          type: 'output',
+          version: '4.1.0',
+          config: { children: [{ name: 'dsn', type: 'string', kind: 'scalar', description: 'A field.' }] },
+        },
+      ],
+    }), 'utf8');
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function partialFor (name) {
+    const p = path.join(tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', `${name}.adoc`);
+    return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
+  }
+
+  test('a version-only connector still gets a partial carrying its version line', async () => {
+    await generateRpcnConnectorDocs({ data: dataFile, template: path.join(tmpDir, 'main.hbs') });
+    const partial = partialFor('vonly');
+    expect(partial).not.toBeNull();
+    expect(partial).toContain('Introduced in version 4.1.0.');
+    // With no summary the attrs region sets nothing, so a page keeps its own
+    // :description: rather than losing it.
+    const attrs = partial.split('// tag::attrs[]')[1].split('// end::attrs[]')[0];
+    expect(attrs.trim()).toBe('');
+  });
+
+  test('--template-description swaps the template that produces the partial', async () => {
+    const stub = path.join(tmpDir, 'stub-description.hbs');
+    fs.writeFileSync(stub, 'STUB-DESCRIPTION-MARKER {{name}}\n', 'utf8');
+    const stubMetadata = path.join(tmpDir, 'stub-metadata.hbs');
+    fs.writeFileSync(stubMetadata, 'STUB-METADATA-MARKER {{name}}\n', 'utf8');
+
+    await generateRpcnConnectorDocs({
+      data: dataFile,
+      template: path.join(tmpDir, 'main.hbs'),
+      templateDescription: stub,
+      templateMetadata: stubMetadata,
+    });
+
+    expect(partialFor('sql_raw')).toContain('STUB-DESCRIPTION-MARKER sql_raw');
+    expect(fs.readFileSync(path.join(
+      tmpDir, 'modules', 'components', 'partials', 'metadata', 'outputs', 'sql_raw.adoc'
+    ), 'utf8')).toContain('STUB-METADATA-MARKER sql_raw');
+  });
+
+  test('the CLI exposes --template-description and --prune-orphaned-descriptions', () => {
+    const help = require('child_process').execFileSync(
+      process.execPath,
+      [path.resolve(originalCwd, 'bin/doc-tools.js'), 'generate', 'rpcn-connector-docs', '--help'],
+      { encoding: 'utf8' }
+    );
+    // CLI_REFERENCE.adoc documents both, and the CLI contract check does not
+    // notice a documented flag going missing.
+    expect(help).toContain('--template-description');
+    expect(help).toContain('--prune-orphaned-descriptions');
+  });
+});
+
+describe('intro.hbs shares the renderer with the description partial', () => {
+  const REPO_ROOT = path.resolve(__dirname, '../..');
+
+  test('the intro template applies brace escaping and heading separation too', () => {
+    // intro.hbs is the fallback body for component families with no
+    // description partial. It called descriptionWithMetadataInclude directly,
+    // so it shipped unescaped {placeholder} braces and headings glued to the
+    // paragraph above -- the two defects the PR advertises as fixed.
+    const intro = fs.readFileSync(path.join(REPO_ROOT, 'tools/redpanda-connect/templates/intro.hbs'), 'utf8');
+    const item = {
+      type: 'output',
+      name: 'otlp_http',
+      summary: 'Sends telemetry.',
+      description: 'Post to {endpoint}/v1/logs.\nParagraph.\n== Operators\n\nDetails.',
+    };
+    const out = handlebars.compile(intro)(item);
+    expect(out).toContain('Post to \\{endpoint}/v1/logs.');
+    expect(out).toContain('Paragraph.\n\n== Operators');
+  });
+});
