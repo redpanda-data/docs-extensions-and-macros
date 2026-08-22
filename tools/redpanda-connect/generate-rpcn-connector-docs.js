@@ -6,7 +6,7 @@ const handlebars = require('handlebars');
 const yaml = require('yaml');
 const helpers = require('./helpers');
 const {
-  lostMetadataSections, typeDirFor, normalizeTypeDir, flattenToAttributeValue, CONNECTOR_TYPE_DIRS,
+  lostMetadataSections, typeDirFor, flattenToAttributeValue, CONNECTOR_TYPE_DIRS, resolvePageTypeDir,
 } = require('./metadata-utils.js');
 
 // Register each helper under handlebars, verifying that it’s a function
@@ -943,6 +943,13 @@ async function generateRpcnConnectorDocs(options) {
   };
 }
 
+// Connector page families that have per-component pages under
+// modules/components/pages/. Other data keys (config, bloblang-functions,
+// bloblang-methods) have no per-component page to backfill.
+const PAGE_TYPE_DIRS = new Set([
+  'inputs', 'outputs', 'processors', 'caches', 'buffers', 'metrics',
+  'tracers', 'scanners', 'rate-limits', 'rate_limits'
+]);
 
 /**
  * Insert a tagged :description: into existing connector page headers that
@@ -970,14 +977,8 @@ function backfillPageDescriptions (connectorData, { pagesRoot, dryRun = false } 
   if (!fs.existsSync(root)) return results;
 
   for (const [dataKey, items] of Object.entries(connectorData)) {
-    // Membership is tested on the canonical spelling, so the list does not
-    // have to carry both spellings of rate limits (which is how one copy of
-    // it ended up missing rate limits entirely).
-    const canonical = normalizeTypeDir(dataKey);
-    if (!CONNECTOR_PAGE_TYPE_DIRS.has(canonical) || !Array.isArray(items)) continue;
-    // The data uses 'rate-limits' while the pages directory is
-    // 'rate_limits'. Resolve whichever spelling exists on disk.
-    const typeDir = fs.existsSync(path.join(root, dataKey)) ? dataKey : canonical;
+    if (!PAGE_TYPE_DIRS.has(dataKey) || !Array.isArray(items)) continue;
+    const typeDir = resolvePageTypeDir(root, dataKey);
     for (const item of items) {
       if (!item || !item.name) continue;
       const pagePath = path.join(root, typeDir, `${item.name}.adoc`);
