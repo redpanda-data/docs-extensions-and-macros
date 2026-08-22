@@ -40,18 +40,38 @@ const providerMap = {
   CLOUD_PROVIDER_AZURE: 'Azure',
 };
 const providerOrder = ['GCP', 'AWS', 'Azure'];
+const providerDisplayNames = {
+  GCP: 'Google Cloud Platform (GCP)',
+  AWS: 'Amazon Web Services (AWS)',
+  Azure: 'Azure',
+};
 const clusterTypeMap = {
   CLUSTER_TYPE_BYOC: 'BYOC',
   CLUSTER_TYPE_DEDICATED: 'Dedicated',
   CLUSTER_TYPE_FMC: 'Dedicated',
 };
+// Warn once per unmapped cluster type per process, so a rename upstream is loud
+// instead of being spread over every region row.
+const warnedClusterTypes = new Set();
+
 /**
  * Returns the display name for a given cluster type, or the original value if unmapped.
+ *
+ * An unmapped value is a signal, not a detail: it reaches the published table
+ * verbatim, and if a mapped enum is ever renamed upstream the table it feeds
+ * (every Dedicated region comes from CLUSTER_TYPE_FMC) empties out quietly. Warn
+ * so that shows up in the generation logs.
+ *
  * @param {string} ct - The internal cluster type identifier.
  * @return {string} The display name for the cluster type.
  */
 function displayClusterType(ct) {
-  return clusterTypeMap[ct] || ct;
+  if (clusterTypeMap[ct]) return clusterTypeMap[ct];
+  if (!warnedClusterTypes.has(ct)) {
+    warnedClusterTypes.add(ct);
+    console.warn(`[cloud-regions] WARN: Unmapped cluster type '${ct}'. It appears in the table exactly as written here, and --cluster-type has to be given that same value. Add it to clusterTypeMap to give it a display name.`);
+  }
+  return ct;
 }
 
 /**
@@ -105,15 +125,42 @@ async function fetchYaml({ owner, repo, path, ref = 'main', token }) {
 }
 
 /**
- * Parses YAML text describing cloud regions and products, filters for public products, and organizes regions by provider.
+ * Collects every cluster type display name that the source data offers on a
+ * public tier, together with the ones this tool maps by default.
  *
- * The function expects YAML content with a top-level `regions` array and an optional `products` array. It groups regions by cloud provider, includes only those with at least one public product tier, and formats tier and cluster type information for each region. Providers and regions without public tiers are excluded from the result.
+ * @param {Array<Object>} regions - The `regions` array from the source YAML.
+ * @param {Set<string>} publicProductNames - Names of products marked public.
+ * @return {Set<string>} Cluster type display names available for filtering.
+ */
+function collectClusterTypes(regions, publicProductNames) {
+  const available = new Set(Object.values(clusterTypeMap));
+  for (const region of regions) {
+    const availability = region.redpandaProductAvailability;
+    if (!availability || typeof availability !== 'object') continue;
+    for (const tier of Object.values(availability)) {
+      if (!tier.redpandaProductName || !publicProductNames.has(tier.redpandaProductName)) continue;
+      if (!Array.isArray(tier.clusterTypes)) continue;
+      for (const ct of tier.clusterTypes) available.add(displayClusterType(ct));
+    }
+  }
+  return available;
+}
+
+/**
+ * Parses YAML text describing cloud regions and products and returns both the
+ * providers and the cluster type the result was filtered to.
+ *
+ * Templates need the resolved cluster type, not the string the caller typed, so
+ * that a filtered table can name it in a heading or an intro. Keeping the
+ * resolution here means the YAML is parsed once.
  *
  * @param {string} yamlText - The YAML content to parse and process.
- * @return {Array<Object>} An array of provider objects, each containing a name and a list of regions with their available public product tiers.
- * @throws {Error} If the YAML is malformed or missing the required `regions` array.
+ * @param {Object} [options] - Processing options.
+ * @param {string} [options.clusterType] - Optional cluster type display name (case-insensitive).
+ * @return {{providers: Array<Object>, clusterType: string|undefined}} The providers and the resolved cluster type filter.
+ * @throws {Error} If the YAML is malformed, missing the required `regions` array, or the cluster type is unsupported.
  */
-function processCloudRegions(yamlText) {
+function buildCloudRegions(yamlText, { clusterType } = {}) {
   let data;
   try {
     data = jsYaml.load(yamlText);
@@ -146,13 +193,33 @@ function processCloudRegions(yamlText) {
   } else {
     console.warn('[cloud-regions] WARN: No products array found in YAML.');
   }
+  // Accept any cluster type the source data actually offers, not only the ones
+  // clusterTypeMap knows about: an unmapped type such as CLUSTER_TYPE_SERVERLESS
+  // already shows up verbatim in the unfiltered table, so refusing to filter on
+  // it would be inconsistent with the output.
+  let clusterTypeFilter;
+  if (clusterType) {
+    const validClusterTypes = [...collectClusterTypes(data.regions, publicProductNames)].sort();
+    const wanted = String(clusterType).trim().toLowerCase();
+    clusterTypeFilter = validClusterTypes.find((ct) => ct.toLowerCase() === wanted);
+    if (!clusterTypeFilter) {
+      throw new Error(`Unsupported cluster type: ${clusterType}. Use one of: ${validClusterTypes.join(', ')}.`);
+    }
+  }
   // Prepare providers array for template, only including public products and using name
   const providers = providerOrder
     .filter((prov) => grouped[prov] && grouped[prov].length > 0)
     .map((prov) => {
       // Only include regions that have at least one public product/tier
       const filteredRegions = grouped[prov].map((region) => {
-        const zones = Array.isArray(region.zones) ? region.zones.join(',') : (region.zones || '');
+        // Sort so a pure reordering upstream cannot produce a docs diff, and join
+        // with ', ' so long zone lists can wrap inside table cells.
+        const zones = Array.isArray(region.zones)
+          ? [...region.zones]
+            .map(String)
+            .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
+            .join(', ')
+          : (region.zones || '');
         let tiers = [];
         if (region.redpandaProductAvailability && typeof region.redpandaProductAvailability === 'object') {
           // Group by tier name, collect all cluster types for that tier
@@ -161,14 +228,22 @@ function processCloudRegions(yamlText) {
             if (!t.redpandaProductName || !publicProductNames.has(t.redpandaProductName)) {
               continue;
             }
+            let displayTypes = Array.isArray(t.clusterTypes) ? t.clusterTypes.map(displayClusterType) : [];
+            if (clusterTypeFilter) {
+              displayTypes = displayTypes.filter((ct) => ct === clusterTypeFilter);
+              if (displayTypes.length === 0) continue;
+            }
             const productName = t.redpandaProductName;
             if (!tierMap[productName]) tierMap[productName] = new Set();
-            if (Array.isArray(t.clusterTypes)) {
-              for (const ct of t.clusterTypes) tierMap[productName].add(displayClusterType(ct));
-            }
+            for (const ct of displayTypes) tierMap[productName].add(ct);
           }
           tiers = Object.entries(tierMap)
-            .map(([productName, cts]) => `${productName}: ${Array.from(cts).sort().join(', ')}`)
+            // With a filter every tier carries exactly the filtered type, so
+            // repeating it on all 50-odd rows is noise: the template says it
+            // once from clusterType instead.
+            .map(([productName, cts]) => (clusterTypeFilter
+              ? productName
+              : `${productName}: ${Array.from(cts).sort().join(', ')}`))
             .sort((a, b) => a.localeCompare(b));
         }
         return {
@@ -178,10 +253,12 @@ function processCloudRegions(yamlText) {
         };
       }).filter(region => region.tiers && region.tiers.length > 0);
       if (filteredRegions.length === 0) {
-        console.info(`[cloud-regions] INFO: No public tiers found for provider '${prov}'.`);
+        const because = clusterTypeFilter ? ` available for ${clusterTypeFilter} clusters` : '';
+        console.info(`[cloud-regions] INFO: No public tiers${because} found for provider '${prov}'.`);
       }
       return {
         name: prov,
+        displayName: providerDisplayNames[prov] || prov,
         regions: filteredRegions,
       };
     })
@@ -189,7 +266,22 @@ function processCloudRegions(yamlText) {
   if (providers.length === 0) {
     console.warn('[cloud-regions] WARN: No providers/regions found after filtering.');
   }
-  return providers;
+  return { providers, clusterType: clusterTypeFilter };
+}
+
+/**
+ * Parses YAML text describing cloud regions and products, filters for public products, and organizes regions by provider.
+ *
+ * The function expects YAML content with a top-level `regions` array and an optional `products` array. It groups regions by cloud provider, includes only those with at least one public product tier, and formats tier and cluster type information for each region. Providers and regions without public tiers are excluded from the result.
+ *
+ * @param {string} yamlText - The YAML content to parse and process.
+ * @param {Object} [options] - Processing options.
+ * @param {string} [options.clusterType] - Optional cluster type display name ('BYOC' or 'Dedicated', case-insensitive). When set, only tiers available for that cluster type are included, and regions with no matching tiers are dropped.
+ * @return {Array<Object>} An array of provider objects, each containing a name and a list of regions with their available public product tiers.
+ * @throws {Error} If the YAML is malformed or missing the required `regions` array.
+ */
+function processCloudRegions(yamlText, options = {}) {
+  return buildCloudRegions(yamlText, options).providers;
 }
 
 /**
@@ -206,10 +298,11 @@ function processCloudRegions(yamlText) {
  * @param {string} [options.format='md'] - The output format (for example, 'md' for Markdown).
  * @param {string} [options.token] - Optional GitHub token for authentication.
  * @param {string} [options.template] - Optional path to custom Handlebars template.
+ * @param {string} [options.clusterType] - Optional cluster type filter ('BYOC' or 'Dedicated', case-insensitive).
  * @returns {string} The rendered cloud regions output.
  * @throws {Error} If fetching, processing, or rendering fails, or if no valid providers or regions are found.
  */
-async function generateCloudRegions({ owner, repo, path, ref = 'main', format = 'md', token, template }) {
+async function generateCloudRegions({ owner, repo, path, ref = 'main', format = 'md', token, template, clusterType }) {
   let yamlText;
   try {
     yamlText = await fetchYaml({ owner, repo, path, ref, token });
@@ -218,8 +311,9 @@ async function generateCloudRegions({ owner, repo, path, ref = 'main', format = 
     throw err;
   }
   let providers;
+  let resolvedClusterType;
   try {
-    providers = processCloudRegions(yamlText);
+    ({ providers, clusterType: resolvedClusterType } = buildCloudRegions(yamlText, { clusterType }));
   } catch (err) {
     console.error(`[cloud-regions] ERROR: Failed to process cloud regions: ${err.message}`);
     throw err;
@@ -230,7 +324,7 @@ async function generateCloudRegions({ owner, repo, path, ref = 'main', format = 
   }
   const lastUpdated = new Date().toISOString();
   try {
-    return renderCloudRegions({ providers, format, lastUpdated, template });
+    return renderCloudRegions({ providers, format, lastUpdated, template, clusterType: resolvedClusterType });
   } catch (err) {
     console.error(`[cloud-regions] ERROR: Failed to render cloud regions: ${err.message}`);
     throw err;

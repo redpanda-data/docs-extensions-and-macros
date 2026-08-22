@@ -203,13 +203,14 @@ npx doc-tools generate cloud-regions [options]
 
 *Optional flags:*
 
---output:: Output file path
---format:: Output format (json, yaml, adoc)
+--output:: Output file path, relative to repo root and inside the repository
+--format:: Output format (md, adoc)
 --owner:: GitHub repository owner
 --repo:: GitHub repository name
 --path:: Path to regions file in repository
 --ref:: Git reference (branch, tag, commit)
---template:: AsciiDoc template file
+--template:: Handlebars template file, relative to repo root and inside the repository. The template decides the markup, so `--format` is then only checked for validity
+--cluster-type:: Only include regions and tiers available for one cluster type, such as BYOC or Dedicated. Requires `--output` or `--dry-run`
 --dry-run:: Show what would be generated without writing files
 
 === crd-spec
