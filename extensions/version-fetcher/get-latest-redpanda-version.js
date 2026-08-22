@@ -31,34 +31,47 @@ module.exports = async (github, owner, repo, logger = null) => {
         release => release.tag_name.includes('-rc')
       );
 
-      let latestRedpandaReleaseCommitHash = null;
-      if (latestRedpandaRelease) {
-        const commitData = await github.rest.git.getRef({
-          owner,
-          repo,
-          ref: `tags/${latestRedpandaRelease.tag_name}`
-        });
-        latestRedpandaReleaseCommitHash = commitData.data.object.sha;
-      }
+      // A release can exist before its tag is pushed, which is routine for draft
+      // RCs, and GitHub answers the ref lookup with a 404. Losing the commit hash
+      // must not cost us the version: an uncaught 404 here aborts the whole
+      // lookup and every latest-redpanda-* attribute goes unset for the build.
+      const resolveCommitHash = async (release) => {
+        if (!release) return null;
+        try {
+          // Retry the ref lookup on its own. A rate limit or a 5xx is transient
+          // and deserves the attempts; swallowing it immediately turned one
+          // blip into a permanently unset commit attribute. Retrying HERE
+          // rather than letting the error escape is what keeps a exhausted
+          // retry from also costing us the version, which is strictly worse
+          // than losing the commit hash.
+          const commitData = await retryWithBackoff(
+            () => github.rest.git.getRef({ owner, repo, ref: `tags/${release.tag_name}` }),
+            { shouldRetry: isRetryableGitHubError, operationName: `getRef ${release.tag_name}` },
+            logger
+          );
+          return commitData.data.object.sha.substring(0, 7);
+        } catch (error) {
+          const message = `Could not resolve the commit for ${release.tag_name}, so its commit attribute is unset: ${error.status || ''} ${error.message || error}`;
+          if (logger) {
+            logger.warn(message);
+          } else {
+            console.warn(message);
+          }
+          return null;
+        }
+      };
 
-      let latestRcReleaseCommitHash = null;
-      if (latestRcRelease) {
-        const rcCommitData = await github.rest.git.getRef({
-          owner,
-          repo,
-          ref: `tags/${latestRcRelease.tag_name}`
-        });
-        latestRcReleaseCommitHash = rcCommitData.data.object.sha;
-      }
+      const latestRedpandaReleaseCommitHash = await resolveCommitHash(latestRedpandaRelease);
+      const latestRcReleaseCommitHash = await resolveCommitHash(latestRcRelease);
 
       return {
         latestRedpandaRelease: latestRedpandaRelease ? {
           version: latestRedpandaRelease.tag_name,
-          commitHash: latestRedpandaReleaseCommitHash.substring(0, 7)
+          commitHash: latestRedpandaReleaseCommitHash
         } : null,
         latestRcRelease: latestRcRelease ? {
           version: latestRcRelease.tag_name,
-          commitHash: latestRcReleaseCommitHash.substring(0, 7)
+          commitHash: latestRcReleaseCommitHash
         } : null
       };
     },

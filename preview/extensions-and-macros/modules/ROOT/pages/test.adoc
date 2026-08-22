@@ -204,14 +204,23 @@ The `version fetcher` extension gets the latest version of Redpanda and Redpanda
 
 - `\{full-version}`: {full-version}
 - `\{latest-redpanda-version}`: {latest-redpanda-version}
+- `\{latest-redpanda-tag}`: {latest-redpanda-tag}
+- `\{latest-redpanda-version-short}`: {latest-redpanda-version-short}
 - `\{redpanda-beta-version}`: {redpanda-beta-version}
 - `\{redpanda-beta-tag}`: {redpanda-beta-tag}
+- `\{redpanda-beta-version-short}`: {redpanda-beta-version-short}
 - `\{latest-release-commit}`: {latest-release-commit}
 - `\{latest-console-version}`: {latest-console-version}
+- `\{latest-console-version-short}`: {latest-console-version-short}
 - `\{console-beta-version}`: {console-beta-version}
 - `\{console-beta-tag}`: {console-beta-tag}
+- `\{console-beta-version-short}`: {console-beta-version-short}
+- `\{latest-connect-version}`: {latest-connect-version}
+- `\{latest-connect-version-short}`: {latest-connect-version-short}
 - `\{latest-operator-version}`: {latest-operator-version}
+- `\{latest-operator-version-short}`: {latest-operator-version-short}
 - `\{latest-redpanda-helm-chart-version}`: {latest-redpanda-helm-chart-version}
+- `\{latest-redpanda-helm-chart-version-short}`: {latest-redpanda-helm-chart-version-short}
 
 == Attachments
 
