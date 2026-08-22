@@ -27,10 +27,25 @@ so one sentence reads correctly for both audiences.
 
 The path is derived per property rather than prefixed blindly:
 `storage.tiered.config.*` for tiered storage settings, `config.node.*` for
-broker properties, and `config.cluster.*` for everything else. The deprecated
+broker properties, and `config.cluster.*` for cluster properties. The deprecated
 `config_ref` macro prefixed *every* property with `storage.tiered.config.`,
 which is why the live docs once showed `storage.tiered.config.log_segment_size`
 -- a path that mislabels where that setting belongs.
+
+== A property with no Helm path
+
+[,asciidoc]
+----
+prop:retention.ms[helm-path=auto]
+----
+
+prop:retention.ms[helm-path=auto]
+
+Topic properties render as the plain name even here, because they have no
+`values.yaml` key at all -- they are set per topic through the Kafka API, rpk,
+or a Topic resource. Deriving `config.cluster.retention.ms` for them would hand
+the reader a confident, copy-pasteable key that does not exist, which is the
+same failure as the `config_ref` prefixing above, just less obvious.
 
 == With a link
 

@@ -54,11 +54,12 @@
  */
 
 const yaml = require('js-yaml')
-const chalk = require('chalk')
-const { buildBadgeHtml } = require('./badge')
 const { escapeHtml } = require('../extension-utils/html-utils')
+const chalk = require('chalk')
+const { buildBadgeHtml, DEFAULT_TOOLTIPS } = require('./badge')
 
 const $enterpriseRegistry = Symbol('$enterpriseRegistry')
+const $enterpriseRegistryUnreadable = Symbol('$enterpriseRegistryUnreadable')
 const $warned = Symbol('$warned')
 
 /**
@@ -77,8 +78,10 @@ const DEFAULT_LICENSING_PAGE = 'get-started:licensing/overview.adoc'
 const DEFAULT_ROLE = 'enterprise-feature'
 const BETA_LABEL = 'beta'
 const UNRELEASED_LABEL = 'unreleased'
-const UNRELEASED_TOOLTIP =
-  'This feature is not in a released version of Redpanda yet. It is documented here for the upcoming release.'
+// The badge macro supplies the default hover text for these labels, so the same
+// wording appears whether a badge comes from the registry or from a
+// badge::[label=beta] call in a page.
+const UNRELEASED_TOOLTIP = DEFAULT_TOOLTIPS.unreleased
 
 // Release status of a feature, which decides where it may be referenced.
 //
@@ -98,9 +101,12 @@ const VALID_STATUSES = [STATUS_GA, STATUS_BETA, STATUS_UNRELEASED]
  * The release status of a registry entry.
  *
  * `beta: true` predates the status field and still means beta, so old entries
- * keep working. An explicit status wins. An unrecognized status is reported
- * rather than quietly treated as shipped, which is the failure mode that lets a
- * typo publish an unreleased feature.
+ * keep working. An explicit status wins. An unrecognized status is reported AND
+ * treated as unreleased: a typo must not be the thing that publishes an
+ * unreleased feature. The two failure directions are not symmetric -- gating a
+ * shipped feature shows a writer a warning and an unstyled mention they will
+ * notice, while publishing an unreleased one promises readers a feature they
+ * cannot get, and nothing on the page looks wrong.
  *
  * @param {object} entry - Registry entry.
  * @param {object} [report] - {mode, filePath} to report an invalid status.
@@ -108,14 +114,22 @@ const VALID_STATUSES = [STATUS_GA, STATUS_BETA, STATUS_UNRELEASED]
  */
 function entryStatus (entry, report) {
   if (!entry) return STATUS_GA
+  // Any present key goes through validation, including a blank value. An absent
+  // key means no status was intended, so GA is the right default; `status:` with
+  // nothing after it means the writer meant to say something and did not, which
+  // is the same mistake as a typo and must fail the same way. Treating blank as
+  // absent reopened the hole this function exists to close: a forgotten value
+  // published an unreleased feature with no warning at all.
   if (entry.status !== undefined) {
-    const status = String(entry.status).trim().toLowerCase()
+    const raw = entry.status === null ? '' : String(entry.status).trim()
+    const status = raw.toLowerCase()
     if (VALID_STATUSES.includes(status)) return status
     if (report && report.mode !== 'off') {
       const where = report.filePath ? ` in ${report.filePath}` : ''
+      const what = raw === '' ? 'an empty status' : `status '${entry.status}'`
       const message =
-        `enterprise:${entry.name}[]${where}: registry status '${entry.status}' is not one of ${VALID_STATUSES.join(', ')}, so the feature is treated as released. ` +
-        'Fix the status in enterprise-features.yml.'
+        `enterprise:${entry.name}[]${where}: registry has ${what}, which is not one of ${VALID_STATUSES.join(', ')}, so the feature is treated as unreleased and is left unpublished on released pages. ` +
+        'Fix the status in enterprise-features.yml, or remove the key entirely if the feature has shipped.'
       // Honour error mode like every other registry diagnostic. A typo here is
       // exactly what publishes an unreleased feature, so the strictest setting
       // has to stop it.
@@ -125,7 +139,7 @@ function entryStatus (entry, report) {
       if (report.contentCatalog) warnOnce(report.contentCatalog, `status:${entry.name}`, message)
       else console.warn(chalk.yellow(message))
     }
-    return STATUS_GA
+    return STATUS_UNRELEASED
   }
   return entry.beta === true ? STATUS_BETA : STATUS_GA
 }
@@ -240,7 +254,14 @@ let warnedNoRegistry = false
  * @returns {{features: object[], lookup: Map<string, object>}}
  */
 function parseRegistry (source, origin = REGISTRY_FILENAME) {
-  const data = yaml.load(source)
+  let data
+  try {
+    data = yaml.load(source)
+  } catch (error) {
+    // Every other throw below names the file, so this one does too: the caller
+    // then reports whatever it catches verbatim, and the path appears once.
+    throw new Error(`Enterprise features registry ${origin} is not valid YAML (${error.message}).`)
+  }
   if (!data || !Array.isArray(data.features)) {
     throw new Error(`Enterprise features registry ${origin} has no 'features' list.`)
   }
@@ -288,8 +309,17 @@ function loadRegistry (config) {
       // Caching the failure also stops the error being re-raised per macro call
       // and attributed to whichever page happened to convert first.
       registry = null
+      // Remember that the file was found and unreadable, so the caller does not
+      // then also report it missing. Saying "not found" about a file we just
+      // read and failed to parse sends the writer looking for the wrong problem.
+      contentCatalog[$enterpriseRegistryUnreadable] = true
+      // Report the error as thrown. It already names the file and says exactly
+      // what is wrong -- invalid YAML, a missing features list, an entry with no
+      // name, an unknown scope, or a duplicate name or alias. Wrapping it in
+      // "could not be read" was inaccurate for all but the first (the file read
+      // fine; its contents are invalid) and printed the path twice.
       warnOnce(contentCatalog, 'badregistry',
-        `Enterprise features registry ${registryFile.path} could not be read (${error.message}); enterprise: targets are not validated.`)
+        `${error.message} No enterprise: target is validated, no feature is gated by release status, and the licensing tables are empty until this is fixed.`)
     }
   }
   // Cache null too, so a missing registry is only searched for once per build.
@@ -298,6 +328,8 @@ function loadRegistry (config) {
 }
 
 function warnNoRegistry (contentCatalog) {
+  // Already reported as unreadable: one problem, one diagnostic.
+  if (contentCatalog && contentCatalog[$enterpriseRegistryUnreadable]) return
   const message = "Enterprise features registry (enterprise-features.yml in the 'shared' component) not found; enterprise: targets are not validated."
   // Deduplicate per build, not per process: Antora's watch mode reuses one
   // process across builds, and a module-level guard reported this only on a
@@ -378,6 +410,11 @@ function resolveTooltipAttribute (raw) {
 function buildEnterpriseContent ({ feature, text, xref, url, tooltip, licensingPage, role, tooltipAttr, links }) {
   const display = text || feature
   const tooltipText = tooltip || `${feature} requires an Enterprise Edition license.`
+  // All four, matching badge.js. Escaping only the quote kept the attribute
+  // intact but let < and > through from a registry tooltip field, which any
+  // consumer that re-parses the page then reads as markup -- the docs UI
+  // promotes this attribute into a tooltip, the Markdown converter and the
+  // search indexer both re-read it.
   const escapedTooltip = escapeHtml(tooltipText)
   const tooltipHtml = tooltipAttr ? ` ${tooltipAttr}="${escapedTooltip}"` : ''
   let inner = display
@@ -409,7 +446,15 @@ function buildFeatureTable (features, scope, opts = {}) {
   const report = opts.report
   const rows = features
     .filter((feature) => feature.scope === scope)
-    .filter((feature) => includeUnreleased || entryStatus(feature, report) !== STATUS_UNRELEASED)
+    // Evaluate the status first: `includeUnreleased || entryStatus(...)` skipped
+    // the call entirely on a prerelease page, so a typo'd status went unreported
+    // on the beta branch -- the one branch where unreleased features are
+    // actually authored and the table renders them -- and enterprise-validate=error
+    // did not fail there either.
+    .filter((feature) => {
+      const status = entryStatus(feature, report)
+      return includeUnreleased || status !== STATUS_UNRELEASED
+    })
     .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }))
   const title = opts.title || TABLE_TITLES[scope]
   const heading = opts.heading || THIRD_COLUMN_HEADINGS[scope] || THIRD_COLUMN_HEADINGS.default

@@ -6,7 +6,7 @@
  *
  *   prop:cloud_storage_enabled[]
  *   prop:iceberg_enabled[link=true]
- *   prop:retention_ms[link=true,page=properties/topic-properties]
+ *   prop:retention.ms[link=true,page=properties/topic-properties]
  *   prop:write_caching_default[text=write caching]
  *
  * The property renders as a marked <code> element that the docs UI decorates
@@ -99,7 +99,10 @@ const SURFACE_CLOUD = 'cloud'
 const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
 
 const $propertyPageIndex = Symbol('$propertyPageIndex')
-const HEADING_RX = /^=+\s+(\S+)\s*$/
+// Two or more '=': a level-0 heading is the page title, which generates no
+// anchor, so treating it as a property heading produced a link and a tooltip
+// URL pointing at a fragment that does not exist on the page.
+const HEADING_RX = /^={2,}\s+(\S+)\s*$/
 const TAG_MARKER_RX = /^\/\/\s*(tag|end)::([\w-]+)\[\]\s*$/
 const INCLUDE_RX = /^include::([^[]+)\[([^\]]*)\]/
 // A reference page declaring the property collection it publishes.
@@ -315,7 +318,14 @@ function buildPageIndex (contentCatalog, component, properties, version) {
       if (!include) continue
       const partialRef = parsePartialTarget(include[1].trim(), page.src)
       if (!partialRef) continue
-      const tagsMatch = include[2].match(/tags?=([^,\]]+)/)
+      // Match a quoted value first. An unquoted value ends at the next comma
+      // because the attrlist is comma-separated -- but a quoted one may contain
+      // commas, and that is AsciiDoc's documented way to write a comma-separated
+      // tag list. Capturing up to the first comma regardless truncated
+      // tags="!deprecated,!exclude-from-docs" to '"!deprecated', which matches
+      // nothing, so the page indexed no properties and every link on it silently
+      // disappeared. Asciidoctor honours the quoted form, so the index has to.
+      const tagsMatch = include[2].match(/tags?=("[^"]*"|'[^']*'|[^,\]]*)/)
       const expression = tagsMatch && tagsMatch[1]
       const partials = contentCatalog.findBy({ component: partialRef.component, module: partialRef.module, family: 'partial' }) || []
       const matching = partials.filter((candidate) => candidate.src.relative === partialRef.relative)
@@ -365,6 +375,13 @@ function propertyAnchor (name) {
 // config.node, and every other cluster property maps to config.cluster --
 // the path the docs recommend for all cluster properties.
 function helmValuesPath (name, scope) {
+  // Topic properties are not set in values.yaml at all -- they are set per topic
+  // through the Kafka API, rpk, or a Topic resource -- so there is no Helm path
+  // to show. Returning config.cluster.<name> for them produced a confident,
+  // copy-pasteable key that does not exist, which is the exact failure the
+  // config_ref macro's blanket prefixing had. Undefined means "no Helm path",
+  // and the caller falls back to the plain property name.
+  if (scope === 'topic') return undefined
   if (name.startsWith('cloud_storage_')) return `storage.tiered.config.${name}`
   if (scope === 'broker') return `config.node.${name}`
   return `config.cluster.${name}`
@@ -524,7 +541,7 @@ function loadProperties (config) {
  * property-page-index extension can warm the caches before conversion.
  */
 function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
-  const cacheKey = `${pageComponent}@${pageVersion}` || '$any'
+  const cacheKey = `${pageComponent}@${pageVersion}`
   const cache = contentCatalog[$propertyRegistry] || (contentCatalog[$propertyRegistry] = {})
   if (cache[cacheKey] !== undefined) return cache[cacheKey] || undefined
 
@@ -532,6 +549,12 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
   const own = datasets.filter((d) => d.component === pageComponent)
   let pick
   let surface
+  // The candidates the corrupt-file fallback may fall back TO. It has to be the
+  // same filtered set `pick` was chosen from, not everything the component
+  // publishes: falling back across release series would validate a 25.3 page
+  // against 25.2 data, which is exactly the borrowing this function refuses to
+  // do on the primary path.
+  let pool
 
   // Cloud is decided first, and deliberately outranks the component's own
   // attachments. The property extractor writes
@@ -547,6 +570,7 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
     // version is not a Redpanda release candidate.
     const lenders = datasets.filter((d) => d.component === 'streaming' || d.component === 'ROOT')
     const released = lenders.filter((d) => !isPrerelease(d.tag))
+    pool = released
     pick =
       newestDataset(released.filter((d) => d.component === 'streaming')) ||
       newestDataset(released.filter((d) => d.component === 'ROOT'))
@@ -568,6 +592,7 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
     const series = releaseSeries(pageVersion)
     if (series) {
       const inSeries = own.filter((d) => releaseSeries(d.tag) === series)
+      pool = inSeries
       pick = newestDataset(inSeries.filter((d) => d.version === pageVersion)) || newestDataset(inSeries)
       if (!pick) {
         // Record the gap rather than reporting it here: this also runs from the
@@ -586,6 +611,7 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
         return undefined
       }
     } else {
+      pool = own
       pick = newestDataset(own.filter((d) => d.version === pageVersion)) || newestDataset(own)
     }
   }
@@ -594,11 +620,25 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
   // and must not mask a good file: try candidates newest-first and use the
   // first one that actually carries properties, reporting each one skipped.
   let registry = null
-  for (const candidate of orderedCandidates(pick, own, datasets, surface)) {
+  const candidates = orderedCandidates(pick, pool)
+  for (const candidate of candidates) {
     const properties = readProperties(candidate, contentCatalog)
     if (!properties) continue
     registry = { tag: candidate.tag, properties, component: candidate.component, version: candidate.version, surface }
     break
+  }
+  if (!registry && candidates.length) {
+    // Every candidate was unusable. Record that, because the caller's fallback
+    // diagnostic says no attachment exists anywhere -- which contradicts the
+    // per-file warning readProperties just emitted and sends the writer looking
+    // for a file that is sitting right there.
+    const gaps = contentCatalog[$propertySeriesGap] || (contentCatalog[$propertySeriesGap] = {})
+    gaps[cacheKey] = {
+      kind: 'unusable',
+      component: pageComponent,
+      version: pageVersion,
+      have: [...new Set(candidates.map((d) => d.tag))].sort(compareTags),
+    }
   }
   // Cache null too, so a missing dataset is only searched for once per build.
   cache[cacheKey] = registry
@@ -610,12 +650,9 @@ function loadPropertiesFor (contentCatalog, pageComponent, pageVersion) {
  * descending release order, so an unusable file falls through to the next best
  * rather than voiding the component's data entirely.
  */
-function orderedCandidates (pick, own, datasets, surface) {
+function orderedCandidates (pick, pool) {
   if (!pick) return []
-  const pool = surface === SURFACE_CLOUD
-    ? datasets.filter((d) => (d.component === 'streaming' || d.component === 'ROOT') && !isPrerelease(d.tag))
-    : own
-  const rest = pool
+  const rest = (pool || [])
     .filter((d) => d !== pick)
     .sort((a, b) => compareTags(b.tag, a.tag) || stableKey(a).localeCompare(stableKey(b)))
   return [pick, ...rest]
@@ -684,6 +721,12 @@ function warnSeriesMissing (contentCatalog, pageComponent, pageVersion) {
   const gap = gaps && gaps[`${pageComponent}@${pageVersion}`]
   if (!gap) return false
   const have = gap.have.join(', ')
+  if (gap.kind === 'unusable') {
+    warnOnce(contentCatalog, `unusable:${gap.component}@${gap.version}`,
+      `prop macro: every property attachment for ${gap.component}@${gap.version} is unusable (${have}); see the per-file warning above for why. ` +
+      'prop: targets are therefore not validated and their tooltips carry no data. Regenerate the file with \'npx doc-tools generate property-docs\' rather than treating this as missing data.')
+    return true
+  }
   if (gap.kind === 'cloud-prerelease-only') {
     warnOnce(contentCatalog, `cloudpre:${gap.component}@${gap.version}`,
       `prop macro: ${gap.component} found only prerelease property data (${have}). Cloud runs released Redpanda, so it uses GA property data and will not validate against a release candidate. ` +
@@ -789,7 +832,7 @@ function reportUnpublishedProperty ({ name, registry, mode, filePath }) {
  * @returns {string}
  */
 function buildPropContent ({ name, text, link, page, scope, role, helmPath = false, docUrl, plain = false }) {
-  const display = text || (helmPath ? helmValuesPath(name, scope) : name)
+  const display = text || (helmPath && helmValuesPath(name, scope)) || name
   if (plain) return `<code>${display}</code>`
   const inner = link && page
     ? `xref:reference:${page}.adoc#${propertyAnchor(name)}[${display}]`
@@ -905,7 +948,11 @@ function propInlineMacro (config) {
  * hardcoded storage.tiered.config prefixing).
  */
 function helmPathRequested (attributes, document) {
-  return attributes['helm-path'] === 'auto' && document.getAttribute('env-kubernetes') !== undefined
+  // isAttributeSet, not a bare !== undefined: Antora yields the string 'false'
+  // for `env-kubernetes: false` in antora.yml, and a bare presence check read
+  // that as "Kubernetes page", so a Linux page in a component that explicitly
+  // turned the attribute off still told readers to set a values.yaml key.
+  return attributes['helm-path'] === 'auto' && isAttributeSet(document.getAttribute('env-kubernetes'))
 }
 
 function register (registry, config = {}) {
