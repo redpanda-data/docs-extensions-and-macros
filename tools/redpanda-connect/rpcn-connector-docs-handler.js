@@ -426,7 +426,7 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
       if (regularFields.length > 0) {
         section += '\n=== New field support\n\n'
         section += 'This release adds support for the following new fields:\n\n'
-        section += buildFieldsTable(regularFields, capToTwoSentences)
+        section += buildFieldsTable(regularFields, capToTwoSentences, { showIntroducedIn: true })
       }
     }
 
@@ -566,24 +566,35 @@ function fieldAnchor (fieldName) {
  * @param {Function} capFn - Caption function
  * @returns {string} AsciiDoc table
  */
-function buildFieldsTable (fields, capFn) {
+function buildFieldsTable (fields, capFn, opts = {}) {
+  const { showIntroducedIn = false } = opts
   const byField = {}
   for (const field of fields) {
     const [type, compName] = field.component.split(':')
-    if (!byField[field.field]) {
-      byField[field.field] = {
+    // Two components can gain the same field path in different releases
+    // (`urls` arrived in 3.58.0 for one and 4.23.0 for another). Merging those
+    // into a single row would publish the first version for both, so when the
+    // version is on show it is part of the row's identity.
+    const key = showIntroducedIn
+      ? `${field.field}\u0000${field.introducedIn || ''}`
+      : field.field
+    if (!byField[key]) {
+      byField[key] = {
+        field: field.field,
         description: field.description,
+        introducedIn: field.introducedIn,
         components: []
       }
     }
-    byField[field.field].components.push({ type, name: compName })
+    byField[key].components.push({ type, name: compName })
   }
 
-  let section = '[cols="1m,3,2a"]\n'
+  let section = showIntroducedIn ? '[cols="1m,3,2a,1m"]\n' : '[cols="1m,3,2a"]\n'
   section += '|===\n'
-  section += '|Field |Description |Affected components\n\n'
+  section += showIntroducedIn ? '|Field |Description |Affected components |Introduced in\n\n' : '|Field |Description |Affected components\n\n'
 
-  for (const [fieldName, info] of Object.entries(byField)) {
+  for (const info of Object.values(byField)) {
+    const fieldName = info.field
     const byType = {}
     for (const comp of info.components) {
       if (!byType[comp.type]) byType[comp.type] = []
@@ -608,7 +619,9 @@ function buildFieldsTable (fields, capFn) {
 
     section += `|${fieldName}\n`
     section += `|${desc}\n`
-    section += `|${componentList}\n\n`
+    section += `|${componentList}\n`
+    if (showIntroducedIn) section += `|${info.introducedIn || '-'}\n`
+    section += '\n'
   }
 
   section += '|===\n\n'
@@ -1554,7 +1567,7 @@ async function handleRpcnConnectorDocs (options) {
       }
     }
 
-    printDeltaReport(oldIndexForDiff, newIndex)
+    printDeltaReport(oldIndexForDiff, newIndex, { newVersion })
 
     const { generateConnectorDiffJson } = require('./report-delta.js')
     diffJson = generateConnectorDiffJson(

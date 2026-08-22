@@ -19,7 +19,8 @@
 jest.mock('../../cli-utils/octokit-client', () => ({}));
 
 const { capToTwoSentences, augmentConnectorData, buildCleanOssData, fieldAnchor, buildFieldsTable, buildChangedDefaultsTable } = require('../../tools/redpanda-connect/rpcn-connector-docs-handler');
-const { generateConnectorDiffJson } = require('../../tools/redpanda-connect/report-delta');
+const { generateConnectorDiffJson, printDeltaReport } = require('../../tools/redpanda-connect/report-delta');
+const renderConnectFields = require('../../tools/redpanda-connect/helpers/renderConnectFields');
 
 describe('capToTwoSentences - xref and filename protection', () => {
   test('does not truncate descriptions containing xref macros', () => {
@@ -225,6 +226,325 @@ describe('generateConnectorDiffJson - config component status and cloud support'
     expect(inDetails).toBe(true);
     expect(added.cloudSupported).toBe(true);
   });
+
+  test('detects a new field nested under an existing group, not just new top-level fields', () => {
+    // aws_s3's "sqs" group already exists in both versions; only a field
+    // nested inside it is new. A diff that only compares top-level field
+    // names would see "sqs" unchanged and report zero new fields, even
+    // though sqs.zero_key_warn_interval is genuinely new.
+    const oldIndex = {
+      inputs: [
+        {
+          name: 'aws_s3',
+          config: {
+            children: [
+              { name: 'bucket', description: 'Bucket name.' },
+              {
+                name: 'sqs',
+                children: [
+                  { name: 'url', description: 'Queue URL.' }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    };
+    const newIndex = {
+      inputs: [
+        {
+          name: 'aws_s3',
+          config: {
+            children: [
+              { name: 'bucket', description: 'Bucket name.' },
+              {
+                name: 'sqs',
+                children: [
+                  { name: 'url', description: 'Queue URL.' },
+                  { name: 'zero_key_warn_interval', description: 'Warn interval.' }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.103.1',
+      newVersion: '4.104.0'
+    });
+
+    expect(diff.summary.newFields).toBe(1);
+    const added = diff.details.newFields.find(f => f.field === 'sqs.zero_key_warn_interval');
+    expect(added).toBeDefined();
+    expect(added.component).toBe('inputs:aws_s3');
+  });
+
+  test('reports a newly added group once, not once per field inside it', () => {
+    const oldIndex = {
+      inputs: [{ name: 'kafka', config: { children: [{ name: 'topics', kind: 'scalar' }] } }]
+    };
+    const newIndex = {
+      inputs: [{
+        name: 'kafka',
+        config: {
+          children: [
+            { name: 'topics', kind: 'scalar' },
+            {
+              name: 'sasl',
+              kind: 'scalar',
+              description: 'SASL settings.',
+              children: [
+                { name: 'mechanism', kind: 'scalar' },
+                { name: 'user', kind: 'scalar' },
+                { name: 'password', kind: 'scalar' }
+              ]
+            }
+          ]
+        }
+      }]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, { oldVersion: '1.0.0', newVersion: '1.1.0' });
+
+    // The group row already covers everything inside it.
+    expect(diff.details.newFields.map(f => f.field)).toEqual(['sasl']);
+    expect(diff.summary.newFields).toBe(1);
+  });
+
+  test('reports a removed group once, not once per field inside it', () => {
+    const withSasl = () => ({
+      inputs: [{
+        name: 'kafka',
+        config: {
+          children: [
+            { name: 'topics', kind: 'scalar' },
+            {
+              name: 'sasl',
+              kind: 'scalar',
+              children: [
+                { name: 'mechanism', kind: 'scalar' },
+                { name: 'user', kind: 'scalar' },
+                { name: 'password', kind: 'scalar' }
+              ]
+            }
+          ]
+        }
+      }]
+    });
+    const newIndex = {
+      inputs: [{ name: 'kafka', config: { children: [{ name: 'topics', kind: 'scalar' }] } }]
+    };
+
+    const diff = generateConnectorDiffJson(withSasl(), newIndex, { oldVersion: '1.0.0', newVersion: '1.1.0' });
+
+    expect(diff.details.removedFields.map(f => f.field)).toEqual(['sasl']);
+    expect(diff.summary.removedFields).toBe(1);
+  });
+
+  test('still reports a field removed from a group that survives', () => {
+    const children = (saslChildren) => ([
+      { name: 'topics', kind: 'scalar' },
+      { name: 'sasl', kind: 'scalar', children: saslChildren }
+    ]);
+    const oldIndex = {
+      inputs: [{ name: 'kafka', config: { children: children([{ name: 'mechanism', kind: 'scalar' }, { name: 'user', kind: 'scalar' }]) } }]
+    };
+    const newIndex = {
+      inputs: [{ name: 'kafka', config: { children: children([{ name: 'mechanism', kind: 'scalar' }]) } }]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, { oldVersion: '1.0.0', newVersion: '1.1.0' });
+
+    expect(diff.details.removedFields.map(f => f.field)).toEqual(['sasl.user']);
+  });
+
+  test('leaves a field that arrives already deprecated out of the new-field set', () => {
+    // renderConnectFields renders no heading for a deprecated field, so a
+    // what's-new row would link to a fragment that does not exist.
+    const oldIndex = {
+      inputs: [{ name: 'aws_s3', config: { children: [{ name: 'sqs', kind: 'scalar', children: [{ name: 'url', kind: 'scalar' }] }] } }]
+    };
+    const newChildren = [{
+      name: 'sqs',
+      kind: 'scalar',
+      children: [
+        { name: 'url', kind: 'scalar' },
+        { name: 'legacy_poll', kind: 'scalar', is_deprecated: true, description: 'Old polling.' },
+        { name: 'wait_time', kind: 'scalar', description: 'Wait time.' }
+      ]
+    }];
+    const newIndex = { inputs: [{ name: 'aws_s3', config: { children: newChildren } }] };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, { oldVersion: '1.0.0', newVersion: '1.1.0' });
+
+    expect(diff.details.newFields.map(f => f.field)).toEqual(['sqs.wait_time']);
+    expect(String(renderConnectFields(newChildren, ''))).not.toContain('legacy_poll');
+  });
+
+  test('keeps the [] marker on a field nested under an array-of-object group', () => {
+    // `sasl` is kind: array in the real connect data, so the reference page
+    // heads the field `sasl[].aws.tcp`. A what's-new row saying
+    // `sasl.aws.tcp` publishes a config path that does not exist.
+    const saslChildren = (awsExtra = []) => ([
+      {
+        name: 'sasl',
+        kind: 'array',
+        type: 'object',
+        children: [
+          { name: 'mechanism', kind: 'scalar', type: 'string' },
+          {
+            name: 'aws',
+            kind: 'scalar',
+            type: 'object',
+            children: [{ name: 'region', kind: 'scalar', type: 'string' }, ...awsExtra]
+          }
+        ]
+      }
+    ]);
+    const oldIndex = { inputs: [{ name: 'redpanda', config: { children: saslChildren() } }] };
+    const newChildren = saslChildren([
+      { name: 'tcp', kind: 'scalar', type: 'string', description: 'TCP settings.' }
+    ]);
+    const newIndex = { inputs: [{ name: 'redpanda', config: { children: newChildren } }] };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.103.1',
+      newVersion: '4.104.0'
+    });
+    const paths = diff.details.newFields.map(f => f.field);
+
+    expect(paths).toContain('sasl[].aws.tcp');
+    expect(paths).not.toContain('sasl.aws.tcp');
+
+    // Every reported path must match a heading the reference page renders,
+    // because the what's-new table links to those headings.
+    const headings = String(renderConnectFields(newChildren, ''))
+      .split('\n')
+      .filter(line => line.startsWith('=== '))
+      .map(line => line.replace(/^=== `?|`?$/g, ''));
+    paths.forEach(fieldPath => expect(headings).toContain(fieldPath));
+
+    // The link target is unchanged: the anchor normalizes the marker away.
+    expect(fieldAnchor('sasl[].aws.tcp')).toBe('sasl-aws-tcp');
+    expect(fieldAnchor('sasl[].aws.tcp')).toBe(fieldAnchor('sasl.aws.tcp'));
+  });
+
+  test('stamps the diff target version onto a new field when the source data carries none', () => {
+    const oldIndex = { inputs: [{ name: 'foo', config: { children: [] } }] };
+    const newIndex = {
+      inputs: [{ name: 'foo', config: { children: [{ name: 'bar', description: 'A field.' } ] } }]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.103.1',
+      newVersion: '4.104.0'
+    });
+
+    expect(diff.details.newFields[0].introducedIn).toBe('4.104.0');
+  });
+
+  test('prefers a field-level version over the diff target version, when the source data has one', () => {
+    const oldIndex = { inputs: [{ name: 'foo', config: { children: [] } }] };
+    const newIndex = {
+      inputs: [{ name: 'foo', config: { children: [{ name: 'bar', introducedInVersion: '4.99.0' }] } }]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.103.1',
+      newVersion: '4.104.0'
+    });
+
+    expect(diff.details.newFields[0].introducedIn).toBe('4.99.0');
+  });
+
+  // renderConnectFields never renders a field under a deprecated group, so a
+  // leaf-only deprecation check reported a field added under an
+  // existing-but-deprecated group in "New field support" -- a link to a
+  // fragment that never exists on the page.
+  test('does not report a new field added under an existing deprecated group', () => {
+    const deprecatedGroup = (children) => ({
+      name: 'legacy_options',
+      kind: 'object',
+      is_deprecated: true,
+      children
+    });
+    const oldIndex = {
+      inputs: [{
+        name: 'foo',
+        config: { children: [deprecatedGroup([{ name: 'existing_opt', kind: 'string' }])] }
+      }]
+    };
+    const newIndex = {
+      inputs: [{
+        name: 'foo',
+        config: {
+          children: [deprecatedGroup([
+            { name: 'existing_opt', kind: 'string' },
+            { name: 'new_opt', kind: 'string' }
+          ])]
+        }
+      }]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.103.1',
+      newVersion: '4.104.0'
+    });
+
+    expect(diff.details.newFields.some((f) => f.field.includes('new_opt'))).toBe(false);
+    expect(diff.summary.newFields).toBe(0);
+  });
+});
+
+describe('printDeltaReport - console report agrees with the diff JSON', () => {
+  const oldIndex = { inputs: [{ name: 'aws_s3', config: { children: [{ name: 'bucket', kind: 'scalar' }] } }] };
+  const newIndex = {
+    inputs: [{
+      name: 'aws_s3',
+      config: { children: [{ name: 'bucket', kind: 'scalar' }, { name: 'region', kind: 'scalar' }] }
+    }]
+  };
+
+  const capture = (fn) => {
+    const out = [];
+    const log = jest.spyOn(console, 'log').mockImplementation(msg => out.push(String(msg === undefined ? '' : msg)));
+    const write = jest.spyOn(process.stdout, 'write').mockImplementation(msg => { out.push(String(msg)); return true; });
+    try {
+      fn();
+    } finally {
+      log.mockRestore();
+      write.mockRestore();
+    }
+    return out.join('');
+  };
+
+  test('stamps the diff target version onto a new field, like the diff JSON does', () => {
+    const report = capture(() => printDeltaReport(oldIndex, newIndex, { newVersion: '4.104.0' }));
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, { oldVersion: '4.103.1', newVersion: '4.104.0' });
+
+    expect(report).toContain('introducedIn: 4.104.0');
+    expect(diff.details.newFields[0].introducedIn).toBe('4.104.0');
+  });
+
+  test('reports an added group once, like the diff JSON does', () => {
+    const withGroup = {
+      inputs: [{
+        name: 'aws_s3',
+        config: {
+          children: [
+            { name: 'bucket', kind: 'scalar' },
+            { name: 'sqs', kind: 'scalar', children: [{ name: 'url', kind: 'scalar' }, { name: 'wait', kind: 'scalar' }] }
+          ]
+        }
+      }]
+    };
+    const report = capture(() => printDeltaReport(oldIndex, withGroup, { newVersion: '4.104.0' }));
+
+    expect(report).toContain('inputs:aws_s3 → sqs');
+    expect(report).not.toContain('sqs.url');
+  });
 });
 
 describe('buildCleanOssData - pure OSS snapshot for binary analysis', () => {
@@ -387,6 +707,64 @@ describe('buildFieldsTable - whats-new field links', () => {
     ], cap);
 
     expect(table).toContain('* xref:components:inputs/kafka_franz.adoc#regexp_topics_exclude[kafka_franz]');
+  });
+
+  test('keeps distinct "Introduced in" versions apart when two components gain the same field', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:a', field: 'urls', description: 'Urls A.', introducedIn: '3.58.0' },
+      { component: 'inputs:b', field: 'urls', description: 'Urls B.', introducedIn: '4.23.0' }
+    ], cap, { showIntroducedIn: true });
+
+    expect(table).toContain('|3.58.0');
+    expect(table).toContain('|4.23.0');
+    expect(table.match(/\|urls\n/g)).toHaveLength(2);
+    expect(table).toContain('xref:components:inputs/a.adoc#urls[a]');
+    expect(table).toContain('xref:components:inputs/b.adoc#urls[b]');
+  });
+
+  test('still merges components that gained the same field in the same release', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:a', field: 'urls', description: 'Urls.', introducedIn: '4.23.0' },
+      { component: 'inputs:b', field: 'urls', description: 'Urls.', introducedIn: '4.23.0' }
+    ], cap, { showIntroducedIn: true });
+
+    expect(table.match(/\|urls\n/g)).toHaveLength(1);
+    expect(table).toContain('xref:components:inputs/a.adoc#urls[a]');
+    expect(table).toContain('xref:components:inputs/b.adoc#urls[b]');
+  });
+
+  test('merges components into one row when the version column is off', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:a', field: 'urls', description: 'Urls A.', introducedIn: '3.58.0' },
+      { component: 'inputs:b', field: 'urls', description: 'Urls B.', introducedIn: '4.23.0' }
+    ], cap);
+
+    expect(table.match(/\|urls\n/g)).toHaveLength(1);
+  });
+
+  test('omits the "Introduced in" column by default', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:aws_s3', field: 'sqs.zero_key_warn_interval', description: 'Warn interval.', introducedIn: '4.104.0' }
+    ], cap);
+
+    expect(table).not.toContain('Introduced in');
+  });
+
+  test('adds an "Introduced in" column when showIntroducedIn is set', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:aws_s3', field: 'sqs.zero_key_warn_interval', description: 'Warn interval.', introducedIn: '4.104.0' }
+    ], cap, { showIntroducedIn: true });
+
+    expect(table).toContain('|Field |Description |Affected components |Introduced in');
+    expect(table).toContain('|4.104.0');
+  });
+
+  test('"Introduced in" column falls back to a dash when a field has no version', () => {
+    const table = buildFieldsTable([
+      { component: 'inputs:aws_s3', field: 'sqs.zero_key_warn_interval', description: 'Warn interval.' }
+    ], cap, { showIntroducedIn: true });
+
+    expect(table).toContain('|-\n');
   });
 });
 
