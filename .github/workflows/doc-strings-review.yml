@@ -113,7 +113,21 @@ jobs:
           # --paginate, not `gh pr view --json files`, which caps at 100 files:
           # a PR larger than that could otherwise hide a workflow edit past
           # the cap.
-          files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].path')
+          #
+          # `.filename` is the field this endpoint returns. `.path` looks
+          # plausible and is what the contents API uses, but here it yields one
+          # null per file, so the grep below sees blank lines, matches nothing
+          # and waves every PR through. That is a worse failure than the 100
+          # file cap it replaced, and neither errexit nor pipefail catches it
+          # because jq exits 0. Hence the emptiness assertion that follows.
+          files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename')
+          # A pull request always changes at least one file, so an empty or
+          # all-blank list means the query returned something unusable, not that
+          # there is nothing to check. Fail closed.
+          if [ -z "$(printf '%s\n' "$files" | tr -d '[:space:]')" ]; then
+            echo "::error::Could not read the changed-file list for PR $PR; refusing to run the review."
+            exit 1
+          fi
           if printf '%s\n' "$files" | grep -qE '(^|/)\.claude/|(^|/)CLAUDE\.md$|^\.github/workflows/|^\.github/actions/|^action\.ya?ml$'; then
             perm=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$AUTHOR/permission" -q .permission || echo none)
             if [ "$perm" != "admin" ] && [ "$perm" != "write" ]; then

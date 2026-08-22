@@ -318,6 +318,55 @@ describe('doc-strings-review workflow: tamper guard (executed)', () => {
     expect(r.status).not.toBe(0)
   })
 
+  // The stubs above hand the step a bare list of filenames, which is what the
+  // step WANTS rather than what `gh api` returns, so they never exercise the
+  // --jq filter. That is precisely how a wrong field name survived review: the
+  // endpoint returns `filename`, and asking for `.path` yields one null per
+  // file, so the guard greps blank lines and passes every PR. This stub
+  // emulates `gh api --jq` for real: it emits the API's own JSON shape and
+  // applies whatever filter the workflow asked for.
+  const ghApiStub = (payload) => `#!/bin/bash
+args=("$@")
+filter=""
+for i in "\${!args[@]}"; do
+  if [ "\${args[$i]}" = "--jq" ]; then filter="\${args[$((i+1))]}"; fi
+done
+if [ -n "$filter" ]; then
+  printf '%s' '${JSON.stringify(payload)}' | jq -r "$filter"
+else
+  printf '%s' '${JSON.stringify(payload)}'
+fi
+`
+
+  test('selects the field this endpoint actually returns, not a plausible one', () => {
+    // Real shape: pulls/{n}/files items carry filename, status, additions...
+    // and no `path` key at all.
+    const payload = [
+      { filename: '.github/workflows/doc-strings-review.yml', status: 'modified', additions: 3 },
+      { filename: 'src/v/config/configuration.cc', status: 'modified', additions: 1 }
+    ]
+    const r = execRun(step, {
+      env: { ...env, AUTHOR: 'outsider' },
+      stubs: {
+        gh: ghApiStub(payload),
+        jq: `#!/bin/bash\nexec ${JSON.stringify(require('child_process').execSync('command -v jq').toString().trim())} "$@"\n`
+      }
+    })
+    // The PR edits a protected workflow and the author is not a writer, so the
+    // guard MUST abort. With `.path` it silently passed.
+    expect(r.status).not.toBe(0)
+  })
+
+  test('fails CLOSED when the file query returns nothing usable', () => {
+    // A pull request always changes at least one file, so an empty list means
+    // the query is broken, not that there is nothing to check.
+    const r = execRun(step, {
+      env,
+      stubs: { gh: '#!/bin/bash\nexit 0\n' }
+    })
+    expect(r.status).not.toBe(0)
+  })
+
   test('reads the file list with a paginated request, defeating the 100-file cap', () => {
     const r = execRun(step, {
       env,
