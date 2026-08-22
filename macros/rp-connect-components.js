@@ -1187,7 +1187,13 @@ module.exports.register = function (registry, context) {
             align-items: center;
           }
 
-          .badge {
+          /* Scoped to this macro's two badge containers (the card's
+             .badge-group-badges and the legend modal's .badge-legend-item),
+             not a bare .badge -- the site-wide .badge class from docs-ui's
+             metadata.css (border-radius: 10px) is what badge:[] macro output
+             uses on the same page, and a bare rule here overrode it. */
+          .badge-group-badges .badge,
+          .badge-legend-item .badge {
             display: inline-block;
             border-radius: 6px;
             text-decoration: none;
@@ -1504,23 +1510,12 @@ module.exports.register = function (registry, context) {
             color: #d0d5dd;
           }
 
-          html[data-theme="dark"] .badge-input {
-            background: rgba(69, 123, 157, 0.2);
-            border-color: rgba(96, 165, 250, 0.3);
-            color: #93c5fd;
-          }
-
-          html[data-theme="dark"] .badge-output {
-            background: rgba(56, 161, 105, 0.2);
-            border-color: rgba(134, 239, 172, 0.3);
-            color: #86efac;
-          }
-
-          html[data-theme="dark"] .badge-processor {
-            background: rgba(124, 58, 237, 0.2);
-            border-color: rgba(196, 181, 253, 0.3);
-            color: #c4b5fd;
-          }
+          /* .badge-input/.badge-output/.badge-processor/.badge-self-managed
+             removed here: none of them are ever emitted by this macro (badge
+             markup only ever carries class="badge badge-type", with the type
+             itself in the title/text, never as its own class), and none had a
+             light-mode rule either -- these were always fully dead, not a
+             dark-mode-only regression. */
 
           html[data-theme="dark"] .badge-enterprise {
             background: rgba(202, 138, 4, 0.2);
@@ -1534,12 +1529,6 @@ module.exports.register = function (registry, context) {
             color: #6ee7b7;
           }
 
-          html[data-theme="dark"] .badge-self-managed {
-            background: rgba(124, 45, 18, 0.2);
-            border-color: rgba(253, 186, 116, 0.3);
-            color: #fdba74;
-          }
-
           html[data-theme="dark"] .badge-legend-button {
             background: rgba(255, 255, 255, 0.07);
             color: #d0d5dd;
@@ -1550,9 +1539,11 @@ module.exports.register = function (registry, context) {
             color: #fff;
           }
 
-          html[data-theme="dark"] .badge-legend-overlay {
-            background: rgba(16, 24, 40, 0.8);
-          }
+          /* .badge-legend-overlay removed here: the overlay/backdrop is
+             .badge-legend-modal itself (position: fixed, rgba(0,0,0,0.5)
+             background, !important in light mode) -- no element ever carries
+             a badge-legend-overlay class, and the black 50%-opacity backdrop
+             already reads correctly against either theme. */
 
           html[data-theme="dark"] .badge-legend-content {
             background: #101828;
@@ -1564,7 +1555,9 @@ module.exports.register = function (registry, context) {
             border-bottom-color: rgba(255, 255, 255, 0.1);
           }
 
-          html[data-theme="dark"] .badge-legend-title {
+          /* The legend title is <h3 id="badgeLegendTitle">, not a
+             .badge-legend-title element. */
+          html[data-theme="dark"] #badgeLegendTitle {
             color: #fff;
           }
 
@@ -1577,7 +1570,9 @@ module.exports.register = function (registry, context) {
             color: #fff;
           }
 
-          html[data-theme="dark"] .badge-legend-section-title {
+          /* Section titles are a plain <h4> inside .badge-legend-section --
+             there is no .badge-legend-section-title class. */
+          html[data-theme="dark"] .badge-legend-section h4 {
             color: #fff;
           }
 
@@ -1589,7 +1584,9 @@ module.exports.register = function (registry, context) {
             background: rgba(255, 255, 255, 0.05);
           }
 
-          html[data-theme="dark"] .badge-legend-item-label {
+          /* Item labels are a plain <p> inside .badge-legend-item -- there is
+             no .badge-legend-item-label class. */
+          html[data-theme="dark"] .badge-legend-item p {
             color: #d0d5dd;
           }
 

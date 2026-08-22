@@ -90,6 +90,20 @@ describe('generate-rp-connect-info extractDescription', () => {
     expect(extractDescription(src)).toBe('Consumes data from Apache Kafka using the native client with tuned batching.')
   })
 
+  // Same body, but the page actually defines {max-batch} -- the value must
+  // survive into the card, not just leave a gap where it was dropped.
+  test('substitutes an attribute reference the page actually defines', () => {
+    const src = page([
+      '= Kafka',
+      '',
+      'component_type_dropdown::[]',
+      '',
+      'Consumes data from xref:components/inputs/kafka.adoc[Apache Kafka] using the *native* `client` with _tuned_ {max-batch} batching.',
+      ''
+    ].join('\n'), { 'max-batch': '100msgs' })
+    expect(extractDescription(src)).toBe('Consumes data from Apache Kafka using the native client with tuned 100msgs batching.')
+  })
+
   test('converts external links spanning source lines to their text', () => {
     const src = page([
       '= Kafka',

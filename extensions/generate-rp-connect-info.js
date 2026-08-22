@@ -457,12 +457,19 @@ const DESCRIPTION_MAX_LENGTH = 150
 
 /**
  * Turns one line of AsciiDoc into the plain text a card can show: inline macros
- * become their link text, formatting and attribute references are dropped, and
- * the result is cut back to DESCRIPTION_MAX_LENGTH at a sentence or word
- * boundary. Applied to every source, since a page's :description: attribute is
- * AsciiDoc too and carries the same macros as the body. Exported for unit testing.
+ * become their link text, formatting is dropped, attribute references
+ * substitute their real value when it's known (from the same page attributes
+ * extractDescription already reads for :description:) and are dropped only
+ * when it isn't, and the result is cut back to DESCRIPTION_MAX_LENGTH at a
+ * sentence or word boundary. Applied to every source, since a page's
+ * :description: attribute is AsciiDoc too and carries the same macros as the
+ * body. Exported for unit testing.
+ *
+ * @param {string} text
+ * @param {Object.<string,*>} [attributes] - the page's asciidoc attributes
+ *   (pageSrc.asciidoc.attributes), used to resolve {attr-name} references.
  */
-function cleanDescription (text) {
+function cleanDescription (text, attributes = {}) {
   if (!text) return ''
 
   let description = String(text)
@@ -472,8 +479,11 @@ function cleanDescription (text) {
     .replace(/https?:\/\/[^[\s]+\[(.*?)(?:\^)?\]/g, '$1')
     // Remove "Introduced in version X.X.X" suffix
     .replace(/\.\s*Introduced in version[\s\d.]+\.?$/i, '')
-    // Remove attribute references: {page-component-title}
-    .replace(/\{[a-zA-Z][\w-]*\}/g, '')
+    // Substitute attribute references when the value is known ({max-batch} ->
+    // 100msgs); only drop the ones this page's attributes don't define.
+    .replace(/\{([a-zA-Z][\w-]*)\}/g, (match, name) =>
+      Object.prototype.hasOwnProperty.call(attributes, name) ? String(attributes[name]) : ''
+    )
     // Remove code backticks: `code`
     .replace(/`([^`]+)`/g, '$1')
     // Remove bold and emphasis, but only around whole words, so that connector
@@ -602,7 +612,7 @@ function extractDescription (pageSrc) {
     }
   }
 
-  return cleanDescription(description)
+  return cleanDescription(description, pageSrc.asciidoc?.attributes || {})
 }
 
 module.exports.extractDescription = extractDescription

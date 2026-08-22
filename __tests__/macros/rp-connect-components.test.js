@@ -423,6 +423,42 @@ describe('emitted inline scripts', () => {
   })
 })
 
+describe('badge CSS scoping', () => {
+  // A bare `.badge { ... }` rule collided with docs-ui's site-wide .badge
+  // class (used by the unrelated badge:[] macro on the same page). It must
+  // only ever be scoped to this macro's own two badge containers.
+  test('the .badge rule is scoped, not a bare selector', () => {
+    const html = renderComponentTable()
+    const styleBlock = html.match(/<style>([\s\S]*?)<\/style>/)[1]
+    expect(styleBlock).toMatch(/\.badge-group-badges \.badge,\s*\n\s*\.badge-legend-item \.badge \{/)
+    // A bare rule starts its line with only whitespace before ".badge {" --
+    // ".badge-legend-item .badge {" above does not, since something real
+    // precedes it on the same line.
+    expect(styleBlock).not.toMatch(/^[ \t]*\.badge[ \t]*\{/m)
+  })
+
+  // These four classes were never emitted by the macro in either theme (the
+  // type badges only ever carry class="badge badge-type"); the dark-mode
+  // rules were dead code, not a real color-coding feature lost in dark mode.
+  // Checked as CSS rules (selector + brace), not a bare substring, since the
+  // removal comment mentions the class names in prose.
+  test('dead dark-mode selectors for never-emitted classes are gone', () => {
+    const html = renderComponentTable()
+    for (const dead of ['badge-input', 'badge-output', 'badge-processor', 'badge-self-managed', 'badge-legend-overlay']) {
+      expect(html).not.toMatch(new RegExp(`\\.${dead}[ \\t]*\\{`))
+    }
+  })
+
+  // The legend title/section-titles/item labels are a real <h3 id="...">,
+  // plain <h4>, and plain <p> -- not classes that were never emitted.
+  test('dark-mode legend text selectors target the real elements', () => {
+    const html = renderComponentTable()
+    expect(html).toContain('html[data-theme="dark"] #badgeLegendTitle')
+    expect(html).toContain('html[data-theme="dark"] .badge-legend-section h4')
+    expect(html).toContain('html[data-theme="dark"] .badge-legend-item p')
+  })
+})
+
 describe('rp-connect-components macro', () => {
   describe('content catalog URL resolution', () => {
     // Test the URL resolution logic used for removed connectors
