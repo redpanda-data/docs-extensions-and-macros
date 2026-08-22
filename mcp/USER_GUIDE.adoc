@@ -1202,7 +1202,7 @@ claude mcp add --transport stdio --scope user redpanda-docs-tool-assistant -- \
 [,bash]
 ----
 claude mcp add --transport stdio --scope user redpanda-docs-tool-assistant -- \
-  npx -y doc-tools-mcp
+  npx -y --package=@redpanda-data/docs-extensions-and-macros doc-tools-mcp
 ----
 
 This adds the MCP server configuration to `~/.claude.json`.

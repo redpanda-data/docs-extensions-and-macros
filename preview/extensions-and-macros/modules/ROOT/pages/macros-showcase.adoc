@@ -1,0 +1,172 @@
+= Property and enterprise macros: showcase
+:description: Every behaviour of the prop and enterprise macros, with the source, the rendered result, and why.
+:page-toclevels: 2
+
+Each case below shows the macro call as you would write it, the rendered
+result, and what the build did to produce it.
+
+This page belongs to the `preview` component, which publishes its own
+`redpanda-properties-v26.2.1.json` and four reference pages that each declare
+`page-property-source`. Hover any marked property to see the tooltip the docs
+UI attaches.
+
+== Marking a property
+
+[,asciidoc]
+----
+Set prop:cloud_storage_enabled[] to enable Tiered Storage.
+----
+
+Set prop:cloud_storage_enabled[] to enable Tiered Storage.
+
+The name is checked against the published property data at build time. The
+result is a marked `<code>` element carrying `data-property-name`, which is the
+only thing the docs UI decorates -- so an ordinary backticked word never gets a
+tooltip by accident. That matters because five real property names are ordinary
+words: `admin`, `brokers`, `rack`, `retries`, and `superusers`.
+
+== Linking to the reference page
+
+[,asciidoc]
+----
+Tune prop:log_segment_size[link=true] for larger segments.
+----
+
+Tune prop:log_segment_size[link=true] for larger segments.
+
+You do not name the page. The build works out which page documents the
+property and links there. A link is only ever emitted when a page in *this*
+component documents it: nothing is borrowed from another doc set, and no target
+is guessed from the property's scope, because a link the build cannot verify is
+a broken link.
+
+== Declaring which page is the reference
+
+The four fixture pages in this component each declare what they publish:
+
+[,asciidoc]
+----
+= Cluster properties
+:page-property-source: cluster-properties
+----
+
+Claims are then ranked: a declared page first, then a property heading pulled
+in from a generated partial, then a bare heading that merely happens to match a
+property name. Without that ranking, any page titled `= admin` would claim the
+`admin` broker property from the page that documents it -- and a page title
+generates no anchor, so the link and the tooltip URL would both point at
+nothing.
+
+xref:reference:properties/cluster-properties.adoc[See the declared page^].
+
+== Display text
+
+[,asciidoc]
+----
+Enable prop:write_caching_default[text=write caching] for lower latency.
+----
+
+Enable prop:write_caching_default[text=write caching] for lower latency.
+
+The tooltip still describes `write_caching_default`; only the visible text
+changes, so a sentence can read naturally without losing the reference.
+
+== Choosing the page explicitly
+
+[,asciidoc]
+----
+prop:cloud_storage_cache_size[link=true,page=properties/object-storage-properties]
+----
+
+prop:cloud_storage_cache_size[link=true,page=properties/object-storage-properties]
+
+`page=` overrides discovery for the rare case a writer knows better. Note it
+supplies no tooltip documentation link, because the build has not verified the
+target -- discovery would have provided one.
+
+== A name the build cannot verify
+
+[,asciidoc]
+----
+prop:not_a_real_property[]
+----
+
+prop:not_a_real_property[]
+
+Rendered as plain code, with no marker and therefore no tooltip, plus a build
+warning naming the file and offering close matches. A tooltip the build could
+not check is worse than none, because the reader has no way to tell it is
+wrong.
+
+== A property no page publishes
+
+[,asciidoc]
+----
+prop:cloud_storage_max_partition_readers_per_shard[link=true]
+----
+
+prop:cloud_storage_max_partition_readers_per_shard[link=true]
+
+This property is deprecated. Every reference page filters out the `deprecated`
+include tag, so no page renders a heading for it, and there is nothing to link
+to: `link=true` renders unlinked and warns.
+
+It keeps its tooltip, though, because the published data still describes the
+property accurately -- including a *deprecated* badge, which the docs UI adds
+from the data's `is_deprecated` field. That is the point of the distinction: a
+reader who meets a deprecated property in older prose still gets told what it
+was, without being sent to a reference page that deliberately omits it.
+
+Note that the include tag and the data field are separate mechanisms. The tag
+decides whether a *page* renders the property; `is_deprecated` decides what the
+*tooltip* says. They agree here, and they should, but nothing enforces it --
+tagging a property `deprecated` in the partial without setting the field would
+hide it from every page while its tooltip claimed it was current.
+
+== Enterprise features
+
+[,asciidoc]
+----
+enterprise:Tiered Storage[] requires a licence.
+----
+
+enterprise:Tiered Storage[] requires a licence.
+
+The feature name is validated against the enterprise features registry, and the
+rendered term carries a tooltip explaining the licence requirement plus a link
+to the feature's documentation.
+
+=== Release status
+
+A registry entry declares where a feature may be referenced.
+
+[,yaml]
+----
+- name: Preview Beta Feature
+  status: beta          # public beta: referenced anywhere, badged
+- name: Preview Unreleased Feature
+  status: unreleased    # release candidate only: prerelease pages only
+----
+
+enterprise:Preview Beta Feature[] renders with a badge everywhere, because a
+public beta is something readers can actually turn on.
+
+enterprise:Preview Unreleased Feature[] is `unreleased`, and this page belongs
+to a released version, so it renders as plain text with no enterprise styling,
+no tooltip and no link -- and the build says why. Presenting it as an available
+enterprise feature would promise readers something they cannot get.
+
+xref:ROOT:release-status-test.adoc[The gating fixtures^] show the same two features
+side by side, and the
+xref:macro-fixtures::index.adoc[prerelease fixtures^] show the unreleased one
+rendering with its badge on a beta branch.
+
+== Where else to look
+
+* xref:macro-fixtures-cloud::index.adoc[Cloud fixtures^] -- only
+  `cloud_supported` properties are available, and release candidates are
+  ignored because Cloud runs released Redpanda.
+* xref:macro-fixtures::index.adoc[Prerelease fixtures^] -- a beta branch
+  validates against its own release candidate data.
+* xref:ROOT:macros-showcase-kubernetes.adoc[Kubernetes variant^] -- the same
+  properties rendered as Helm values paths.

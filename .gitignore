@@ -22,6 +22,18 @@ mcp-usage-stats.json
 docs-data/rpk-vdev.json
 docs-data/rpk-vlocal.json
 
+# E2E fixture sites are real content trees; keep them tracked despite modules/
+!__tests__/fixtures/**
+
+# The preview site is a real content tree too; keep it tracked despite modules/
+!preview/**
 # Property extractor working data (cloned/built at run time)
 tools/property-extractor/tmp/
 tools/property-extractor/tree-sitter/tree-sitter-cpp/
+# Output of local-antora-playbook.yml (the preview site build)
+build/
+# Output of scripts/macro-test.sh
+macro-test-out/
+macro-test.log
+# Generated when DOCS_DIR/CLOUD_DOCS_DIR are set
+.macro-test-local-playbook.yml

@@ -40,18 +40,9 @@ describe('Text Transformations', () => {
     })
   })
 
-  describe('Default Transformations', () => {
-    it('should have default transformations in rpk-overrides.json', () => {
-      const overridesPath = path.join(__dirname, '../../../docs-data/rpk-overrides.json')
-      const overrides = JSON.parse(fs.readFileSync(overridesPath, 'utf8'))
-
-      expect(overrides).toHaveProperty('textTransformations')
-      expect(overrides.textTransformations).toHaveProperty('inlineCode')
-      expect(Array.isArray(overrides.textTransformations.inlineCode)).toBe(true)
-      expect(overrides.textTransformations.inlineCode.length).toBeGreaterThan(0)
-    })
-
-  })
+  // The overrides file itself lives in the docs repo (this repo ships only
+  // the schema), so there is no repo-local default-transformations content
+  // to assert on — the schema and integration tests below cover the code.
 
   describe('Integration Test', () => {
     it('should apply transformations during generation', async () => {
