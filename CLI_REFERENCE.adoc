@@ -36,6 +36,7 @@ display help for command
 * `fetch` - Fetch a file or directory from GitHub and save it locally
 * `setup-mcp` - Configure the Redpanda Docs MCP server for Claude Code/Desktop
 * `validate-mcp` - Validate MCP server configuration (tools, resources)
+* `sync-schemas` - Sync this package's docs-data/*.schema.json into a content repo's docs-data/
 * `mcp-version` - Show MCP server version and configuration information
 * `generate` - Run docs automations
 * `validate` - Validate docs data against internal sources of truth
@@ -426,6 +427,7 @@ display help for command
 * `fetch` - Fetch a file or directory from GitHub and save it locally
 * `setup-mcp` - Configure the Redpanda Docs MCP server for Claude Code/Desktop
 * `validate-mcp` - Validate MCP server configuration (tools, resources)
+* `sync-schemas` - Sync this package's docs-data/*.schema.json into a content repo's docs-data/
 * `mcp-version` - Show MCP server version and configuration information
 * `generate` - Run docs automations
 * `validate` - Validate docs data against internal sources of truth
