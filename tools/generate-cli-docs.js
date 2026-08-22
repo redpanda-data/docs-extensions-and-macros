@@ -126,9 +126,19 @@ function parseJSDocComments(sourceFile) {
   const content = fs.readFileSync(sourceFile, 'utf8');
   const comments = {};
 
-  // Regex to match JSDoc comments followed by command definitions
-  // Matches both top-level commands and automation.command()
-  const pattern = /\/\*\*\s*([\s\S]*?)\s*\*\/\s*(?:programCli|automation|validation)\s*\.command\(['"]([^'"]+)['"]\)/g;
+  // Regex to match JSDoc comments followed by command definitions.
+  // Matches both top-level commands and automation.command().
+  //
+  // The comment body is `(?:(?!\*\/)[\s\S])*?`, a tempered match that cannot
+  // cross a closing `*\/`, rather than a plain `[\s\S]*?`. With the plain
+  // version two ADJACENT JSDoc blocks merged into one match: the lazy body ran
+  // past the first block's terminator, because that terminator is followed by
+  // `/**` rather than by `.command(`, and kept going to the second. The
+  // extractor then took the FIRST @description it found, so the second command
+  // was documented with the first command's prose. That is exactly what
+  // happened to `generate migrate-rpcn-descriptions`, which shipped a
+  // regenerated section describing migrate-rpcn-metadata.
+  const pattern = /\/\*\*\s*((?:(?!\*\/)[\s\S])*?)\s*\*\/\s*(?:programCli|automation|validation)\s*\.command\(['"]([^'"]+)['"]\)/g;
 
   let match;
   while ((match = pattern.exec(content)) !== null) {
@@ -306,7 +316,8 @@ IMPORTANT: This documentation is auto-generated. Do not edit manually. Run \`npm
     'crd-spec',
     'bundle-openapi',
     'update-connect-version',
-    'migrate-rpcn-metadata'
+    'migrate-rpcn-metadata',
+    'migrate-rpcn-descriptions'
   ];
 
   generateSubcommands.forEach(subcmd => {
