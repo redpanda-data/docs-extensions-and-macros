@@ -124,3 +124,48 @@ describe('getLatestRedpandaVersion', () => {
       .toBeGreaterThan(1);
   });
 });
+
+describe('resolveCommitHash error handling (stable release)', () => {
+  // Two failures that look alike and are not. A tag that is not yet pushed
+  // answers 404 for good, so retrying is waste and the version must survive
+  // without a commit. A rate limit or a 5xx is transient, so it has to get its
+  // attempts, and must ALSO leave the version intact once they are exhausted:
+  // losing the whole version to a blip is strictly worse than losing a commit
+  // hash, which is why the retry lives on the ref lookup rather than around it.
+  const releases = [
+    { tag_name: 'v26.2.1', prerelease: false, published_at: '2026-08-01T00:00:00Z' },
+  ];
+
+  function throwingGitHub (error) {
+    const state = { attempts: 0 };
+    state.gh = {
+      rest: {
+        repos: { listReleases: async () => ({ data: releases }) },
+        git: { getRef: async () => { state.attempts++; throw error; } },
+      },
+    };
+    return state;
+  }
+
+  it('does not retry a 404, and keeps the version', async () => {
+    const s = throwingGitHub(Object.assign(new Error('Not Found'), { status: 404 }));
+    const result = await getLatestRedpandaVersion(s.gh);
+    expect(s.attempts).toBe(1);
+    expect(result.latestRedpandaRelease.version).toBe('v26.2.1');
+    expect(result.latestRedpandaRelease.commitHash).toBeNull();
+  });
+
+  it.each([
+    ['a rate limit', Object.assign(new Error('API rate limit exceeded'), { status: 403 })],
+    ['a 502', Object.assign(new Error('Bad Gateway'), { status: 502 })],
+    ['a connection reset', Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' })],
+  ])('retries %s and still keeps the version', async (_label, err) => {
+    const s = throwingGitHub(err);
+    const result = await getLatestRedpandaVersion(s.gh);
+    // More than one attempt is the point: swallowing the error immediately gave
+    // exactly one, so this is what fails if the guard is widened again.
+    expect(s.attempts).toBeGreaterThan(1);
+    expect(result.latestRedpandaRelease.version).toBe('v26.2.1');
+    expect(result.latestRedpandaRelease.commitHash).toBeNull();
+  });
+});
