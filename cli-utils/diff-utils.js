@@ -288,6 +288,82 @@ function insertVersionIntoRawJson (raw, propName, newTag, indentUnit) {
 }
 
 /**
+ * Repair property-reference anchors in the published properties JSON.
+ *
+ * The generated .adoc partials get their anchors normalized in Phase 3, but the
+ * JSON attachment is written in Phase 2 and the docs UI reads THAT for its
+ * property tooltips. So the two disagreed: the partials linked
+ * `<<flush-bytes>>` while the attachment still said `<<flushbytes>>`, which
+ * resolves to nothing.
+ *
+ * Like updatePropertiesJsonWithVersion above, this is a TEXTUAL edit and not a
+ * parse/re-serialize round-trip. That matters more here than anywhere else in
+ * the pipeline: this file carries the uint64 and int64 limits as property
+ * maxima, and JSON.stringify rounds all three (18446744073709551615 becomes
+ * 18446744073709552000, which the server rejects). Two separate attempts to
+ * make a round-trip safe by writing a lossless JSON parser were both wrong -
+ * one corrupted escaped-JSON examples, the other could be forged by a string
+ * containing its own marker - and neither was necessary, because
+ * normalizePropertyAnchors only ever rewrites `<<anchor` tokens and those can
+ * only occur inside a JSON string value. Applying it to the raw text therefore
+ * cannot touch a number, a key or the structure.
+ *
+ * @param {string} jsonPath - Path to the properties attachment.
+ * @returns {number} Anchors rewritten.
+ */
+function repairPropertyAnchorsInJson (jsonPath) {
+  try {
+    if (!fs.existsSync(jsonPath)) {
+      console.warn(`Warning: Cannot repair anchors: ${jsonPath} does not exist`)
+      return 0
+    }
+    const raw = fs.readFileSync(jsonPath, 'utf8')
+    // Parsed only to learn the property names. The parsed object is never
+    // written back; the edit is applied to `raw`.
+    let properties
+    try {
+      const data = JSON.parse(raw)
+      properties = data.properties || data.topic_properties
+    } catch (err) {
+      console.warn(`Warning: Cannot repair anchors: ${jsonPath} is not valid JSON (${err.message})`)
+      return 0
+    }
+    if (!properties || typeof properties !== 'object') return 0
+
+    const normalizePropertyAnchors = require('../tools/property-extractor/helpers/normalizePropertyAnchors')
+    const { text, rewrites } = normalizePropertyAnchors(raw, properties)
+    if (!rewrites.length) return 0
+
+    // Belt and braces: the edit is meant to touch nothing but anchors, so prove
+    // it before overwriting published data. Masking every <<...>> in both
+    // versions must leave the two byte-identical.
+    const mask = (v) => v.replace(/<<[^<>]*>>/g, '\u0000')
+    if (mask(raw) !== mask(text)) {
+      console.error('Error: anchor repair changed something other than an anchor; not writing')
+      return 0
+    }
+    // And the result must still parse.
+    try {
+      JSON.parse(text)
+    } catch (err) {
+      console.error(`Error: anchor repair produced invalid JSON (${err.message}); not writing`)
+      return 0
+    }
+
+    fs.writeFileSync(jsonPath, text)
+    const shown = [...new Set(rewrites.map((r) => `${r.from} -> ${r.to}`))]
+    console.log(
+      `Repaired ${rewrites.length} property anchor(s) in ${path.basename(jsonPath)}: ` +
+      shown.slice(0, 8).join(', ') + (shown.length > 8 ? `, +${shown.length - 8} more` : '')
+    )
+    return rewrites.length
+  } catch (err) {
+    console.warn(`Warning: Failed to repair property anchors: ${err.message}`)
+    return 0
+  }
+}
+
+/**
  * Create a unified diff patch between two directories and clean them up.
  *
  * @param {string} kind - Logical category for the diff (for example, "metrics" or "rpk")
@@ -387,5 +463,6 @@ module.exports = {
   generatePropertyComparisonReport,
   updatePropertyOverridesWithVersion,
   updatePropertiesJsonWithVersion,
+  repairPropertyAnchorsInJson,
   diffDirs
 }

@@ -27,6 +27,7 @@ const {
   generatePropertyComparisonReport,
   updatePropertyOverridesWithVersion,
   updatePropertiesJsonWithVersion,
+  repairPropertyAnchorsInJson,
   cleanupOldDiffs,
   resolveDiffBaseline
 } = require('../cli-utils/diff-utils')
@@ -501,6 +502,7 @@ programCli
       { name: 'generate_cloud_regions', description: 'Generate cloud regions documentation' },
       { name: 'generate_bundle_openapi', description: 'Bundle OpenAPI specifications' },
       { name: 'review_generated_docs', description: 'Review generated documentation' },
+      { name: 'audit_overrides', description: 'Audit docs-side overrides against extracted source strings' },
       { name: 'run_doc_tools_command', description: 'Run raw doc-tools command' },
       { name: 'get_job_status', description: 'Get background job status' },
       { name: 'list_jobs', description: 'List background jobs' }
@@ -1067,6 +1069,12 @@ automation
             // properties new in this release instead of one release late.
             const extractedJsonPath = path.resolve(outputDir, 'attachments', `redpanda-properties-${newTag}.json`)
             updatePropertiesJsonWithVersion(extractedJsonPath, diffData, newTag)
+            // Repair anchors HERE, in Phase 2, so the attachment the docs UI
+            // reads and the partials Phase 3 renders come from the same
+            // corrected text. Normalizing only in Phase 3 left the two
+            // disagreeing: the partials linked <<flush-bytes>> while the
+            // published attachment still said <<flushbytes>>.
+            repairPropertyAnchorsInJson(extractedJsonPath)
           }
         }
       } catch (err) {
@@ -2304,6 +2312,146 @@ validation
     }
   })
 
+/**
+ * lint-strings
+ *
+ * @description
+ * Deterministic lint for user-facing doc strings embedded in engineering
+ * source code (property descriptions, metric help strings, ...). These
+ * strings ship verbatim to docs.redpanda.com, so this command surfaces
+ * quality problems (empty descriptions, broken markup, name-echo
+ * tautologies, convention drift) at write time, with exact file:line spans
+ * for each declaration.
+ *
+ * @why
+ * The docs team currently patches bad source strings after the fact via
+ * override files. Linting where engineers write the strings - including a
+ * declaration-anchored --diff mode for PR reviews - retires that drift debt.
+ *
+ * @example
+ * # Lint all supported surfaces in a local redpanda checkout
+ * npx doc-tools lint-strings --repo ~/redpanda
+ *
+ * # Lint only properties, machine-readable
+ * npx doc-tools lint-strings --repo ~/redpanda --surface properties --format json
+ *
+ * # PR mode: only declarations whose span intersects the diff
+ * npx doc-tools lint-strings --repo ~/redpanda --diff origin/dev
+ */
+programCli
+  .command('lint-strings')
+  .description('Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)')
+  .requiredOption('--repo <path>', 'Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned.')
+  .option('--surface <list>', 'Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect')
+  .option('--diff <base>', 'Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD')
+  .option('--format <format>', 'Output format: human or json', 'human')
+  .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
+  .option('--only-rules <list>', 'Comma-separated rule ids to run exclusively')
+  .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
+  .action((options) => {
+    const { runCli } = require('../tools/lint-strings')
+    runCli(options)
+  })
+
+/**
+ * preview-string
+ *
+ * @description
+ * Render ONE doc-string declaration from local engineering source to the
+ * final published snippet: properties through the real extractor +
+ * Handlebars template (two panes when --overrides shows a docs-repo
+ * override masking the source string), rpk through the real
+ * formatDescription() transformer, and metrics/helm/crd/connect in their
+ * published output shapes.
+ *
+ * @why
+ * Engineers can see what their embedded string becomes on
+ * docs.redpanda.com BEFORE it ships - including whether an override in the
+ * docs repo would silently mask their fix.
+ *
+ * @example
+ * # What does this property's docs section look like?
+ * npx doc-tools preview-string --repo ~/redpanda --surface properties --name log_segment_size
+ *
+ * # Is my override masking the source string?
+ * npx doc-tools preview-string --repo ~/redpanda --surface properties --name log_segment_size --overrides ~/docs/docs-data/property-overrides.json
+ *
+ * # What does formatDescription do to my rpk Long text?
+ * npx doc-tools preview-string --repo ~/redpanda --surface rpk --name health
+ */
+programCli
+  .command('preview-string')
+  .description('Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish')
+  .requiredOption('--repo <path>', 'Path to an existing engineering checkout. Nothing is cloned.')
+  .requiredOption('--surface <surface>', 'One of: properties, rpk, metrics, helm, crd, connect')
+  .requiredOption('--name <name>', 'Declaration name: property name, rpk command token or --flag, metric name, helm key path, CRD json field (or Struct.field), connect component/field name')
+  .option('--overrides <path>', 'Docs-repo overrides JSON (properties only): adds an "as shipped" pane and a MASKED-BY-OVERRIDE notice when the override differs')
+  .action((options) => {
+    const { runCli } = require('../tools/preview-string')
+    runCli(options)
+  })
+
+// ====================================================================
+// OVERRIDES COMMANDS
+// ====================================================================
+const overridesGroup = new Command('overrides').description('Audit docs-side override files against extracted source strings')
+
+/**
+ * @description Field-level classification of override entries against the
+ * strings extracted from engineering source. Each override field classifies
+ * as REDUNDANT (source already matches; retire it), UPSTREAMABLE (send the
+ * prose upstream), KEEP_UNTIL_UPSTREAMED (markup-laden SPLIT case with a
+ * stripped upstream candidate), UPSTREAMABLE_SLOT (migrate to a source
+ * metadata slot), REDUNDANT_OR_UPSTREAMABLE (needs a human ruling), KEEP
+ * (docs enrichment by design), or REVIEW (possible source bug; never
+ * auto-delete). See tools/overrides-audit/README.adoc for the full rules
+ * and the upstream_ref policy.
+ *
+ * @why Description overrides are stopgaps awaiting an upstream source fix;
+ * once the fixed string ships in a release they silently mask all future
+ * source improvements. This audit powers the retirement loop (delete
+ * REDUNDANT fields on each release regeneration) and the upstreaming loop
+ * (draft source PRs from the UPSTREAMABLE/SPLIT candidates).
+ *
+ * @example
+ * # Audit the docs repo property overrides against a raw extraction
+ * npx doc-tools overrides audit \
+ *   --overrides docs-data/property-overrides.json \
+ *   --extracted tools/property-extractor/gen/properties-output.json \
+ *   --format human
+ *
+ * @requirements
+ * The --extracted file must be the property extractor's RAW output (its
+ * --output file, without overrides applied). The enhanced output and the
+ * versioned redpanda-properties-<tag>.json attachments already have
+ * overrides applied, so auditing against them classifies everything
+ * REDUNDANT.
+ */
+overridesGroup
+  .command('audit')
+  .description('Classify each override field as redundant, upstreamable, or keep against extracted source strings')
+  .requiredOption('--overrides <path>', 'Path to the overrides JSON file (for example docs-data/property-overrides.json)')
+  .option('--extracted <path>', 'Path to the extracted source JSON (property extractor raw output; required for the properties surface)')
+  .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk', 'connect']).default('properties'))
+  .addOption(new Option('--format <format>', 'Output format').choices(['json', 'human']).default('json'))
+  .option('--repo <path>', 'Redpanda checkout to extract raw source strings from (alternative to --extracted)')
+  .option('--output <path>', 'Also write the JSON result to this file')
+  .action((options) => {
+    const { runAudit, formatHumanReport } = require('../tools/overrides-audit')
+    try {
+      const result = runAudit(options)
+      if (options.output) {
+        fs.mkdirSync(path.dirname(path.resolve(options.output)), { recursive: true })
+        fs.writeFileSync(path.resolve(options.output), JSON.stringify(result, null, 2) + '\n')
+        console.error(`JSON result written to ${options.output}`)
+      }
+      console.log(options.format === 'human' ? formatHumanReport(result) : JSON.stringify(result, null, 2))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
 programCli.addCommand(automation)
 programCli.addCommand(validation)
+programCli.addCommand(overridesGroup)
 programCli.parse(process.argv)

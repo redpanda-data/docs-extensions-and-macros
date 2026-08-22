@@ -50,6 +50,22 @@ describe('CLI Contract Tests', () => {
       const result = executeCLI('get-console-version --help');
       expect(result.success).toBe(true);
     });
+
+    test('lint-strings command exists with the flags the MCP wrapper passes', () => {
+      const result = executeCLI('lint-strings --help');
+      expect(result.success).toBe(true);
+      for (const flag of ['--repo', '--surface', '--diff', '--format', '--skip-rules', '--only-rules']) {
+        expect(result.output).toContain(flag);
+      }
+    });
+
+    test('preview-string command exists with the flags the MCP wrapper passes', () => {
+      const result = executeCLI('preview-string --help');
+      expect(result.success).toBe(true);
+      for (const flag of ['--repo', '--surface', '--name', '--overrides']) {
+        expect(result.output).toContain(flag);
+      }
+    });
   });
 
   describe('Generate Subcommands', () => {
