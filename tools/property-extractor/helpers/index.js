@@ -16,8 +16,7 @@ module.exports = {
   anchorName: require('./anchorName.js'),
   normalizePropertyAnchors: require('./normalizePropertyAnchors.js'),
   canonicalizePropertyXrefs: require('./canonicalizePropertyXrefs.js'),
-  parseRelatedTopic: require('./parseRelatedTopic.js'),
-  allTopicsConditional: require('./allTopicsConditional.js'),
+  seeAlsoView: require('./seeAlsoView.js'),
   capitalize: require('./capitalize.js'),
   length: require('./length.js'),
 };

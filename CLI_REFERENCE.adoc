@@ -1313,6 +1313,7 @@ display help for command
 *Commands:*
 
 * `enterprise-features` - Check the enterprise features registry against core, connect, and docs sources of truth
+* `property-overrides` - Validate property-overrides.json against its schema
 * `help` - display help for command
 
 === validate enterprise-features
