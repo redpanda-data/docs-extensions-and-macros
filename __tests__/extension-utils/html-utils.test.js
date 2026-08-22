@@ -24,6 +24,13 @@ describe('escapeHtml', () => {
     expect(escapeHtml(42)).toBe('42')
   })
 
+  test.each([[0, '0'], [false, 'false'], [NaN, 'NaN'], [null, ''], [undefined, ''], ['', '']])(
+    'coerces %p to %p rather than blanking it', (input, expected) => {
+      // A falsy guard blanked 0, false and NaN. A connector card rendering a
+      // documented default of 0 showed an empty cell.
+      expect(escapeHtml(input)).toBe(expected)
+    })
+
   test('is the single implementation: nobody keeps a private copy', () => {
     const { execFileSync } = require('child_process')
     const path = require('path')
@@ -38,7 +45,14 @@ describe('escapeHtml', () => {
       // grep exits 1 when there are no matches
       hits = error.status === 1 ? '' : (() => { throw error })()
     }
-    const files = hits.split('\n').filter(Boolean).map(line => line.split(':')[0])
-    expect([...new Set(files)]).toEqual(['extension-utils/html-utils.js'])
+    // macros/badge.js and macros/enterprise.js each carry a copy on main. PR
+    // #219 consolidates both and merges before this one, so duplicating that
+    // work here would only create a conflict. Listed rather than ignored so the
+    // set cannot grow quietly, and the assertion below fails if an entry stops
+    // being a real copy, which is how this list gets retired.
+    const CONSOLIDATED_BY_219 = ['macros/badge.js', 'macros/enterprise.js', 'macros/prop.js']
+    const files = [...new Set(hits.split('\n').filter(Boolean).map(line => line.split(':')[0]))]
+    expect(files.filter((f) => !CONSOLIDATED_BY_219.includes(f))).toEqual(['extension-utils/html-utils.js'])
+    for (const f of CONSOLIDATED_BY_219) expect(files).toContain(f)
   })
 })
