@@ -43,3 +43,18 @@ describe('package exports cover all extensions', () => {
     expect(Object.keys(pkg.exports || {})).toContain(specifier)
   })
 })
+
+/**
+ * A release only reaches consuming repos if the version moves. The publish
+ * workflow is a no-op for a version npm already has, and package-lock.json
+ * mirrors the version in two places, so a half-applied bump is easy to miss.
+ */
+describe('package version', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'))
+  const lock = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package-lock.json'), 'utf8'))
+
+  test('package-lock mirrors the package version in both places', () => {
+    expect(lock.version).toBe(pkg.version)
+    expect(lock.packages[''].version).toBe(pkg.version)
+  })
+})
