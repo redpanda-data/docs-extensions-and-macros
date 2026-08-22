@@ -389,6 +389,44 @@ describe('generateConnectorDiffJson - config component status and cloud support'
 
     expect(diff.details.newFields[0].introducedIn).toBe('4.99.0');
   });
+
+  // renderConnectFields never renders a field under a deprecated group, so a
+  // leaf-only deprecation check reported a field added under an
+  // existing-but-deprecated group in "New field support" -- a link to a
+  // fragment that never exists on the page.
+  test('does not report a new field added under an existing deprecated group', () => {
+    const deprecatedGroup = (children) => ({
+      name: 'legacy_options',
+      kind: 'object',
+      is_deprecated: true,
+      children
+    });
+    const oldIndex = {
+      inputs: [{
+        name: 'foo',
+        config: { children: [deprecatedGroup([{ name: 'existing_opt', kind: 'string' }])] }
+      }]
+    };
+    const newIndex = {
+      inputs: [{
+        name: 'foo',
+        config: {
+          children: [deprecatedGroup([
+            { name: 'existing_opt', kind: 'string' },
+            { name: 'new_opt', kind: 'string' }
+          ])]
+        }
+      }]
+    };
+
+    const diff = generateConnectorDiffJson(oldIndex, newIndex, {
+      oldVersion: '4.103.1',
+      newVersion: '4.104.0'
+    });
+
+    expect(diff.details.newFields.some((f) => f.field.includes('new_opt'))).toBe(false);
+    expect(diff.summary.newFields).toBe(0);
+  });
 });
 
 describe('printDeltaReport - console report agrees with the diff JSON', () => {

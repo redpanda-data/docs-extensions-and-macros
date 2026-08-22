@@ -61,10 +61,11 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     );
     added.forEach(fName => {
       const rawFieldObj = newMap[cKey].fieldMap.get(fName) || null;
-      // A field that arrives already deprecated gets no heading on the
-      // reference page, so advertising it under "New field support" would
-      // link to a fragment that never exists.
-      if (isDeprecatedField(rawFieldObj)) return;
+      // A field that arrives already deprecated -- or sits under a
+      // deprecated ancestor group -- gets no heading on the reference page,
+      // so advertising it under "New field support" would link to a fragment
+      // that never exists.
+      if (isDeprecatedOrDescendsFromDeprecated(fName, newMap[cKey].fieldMap, newMap[cKey].parents)) return;
       newFields.push({
         component: cKey,
         field: fName,
@@ -391,6 +392,24 @@ function isDeprecatedField(field) {
   return field.is_deprecated === true ||
     field.deprecated === true ||
     (field.status || '').toLowerCase() === 'deprecated';
+}
+
+/**
+ * True if `fName` or any of its ancestor fields is deprecated.
+ *
+ * renderConnectFields never renders a field under a deprecated group (the
+ * whole group is hidden), so a leaf-only check reports a field added under an
+ * existing-but-deprecated group in "New field support" even though it never
+ * appears on the page. Walking the parent chain via `parents` is what
+ * catches that.
+ */
+function isDeprecatedOrDescendsFromDeprecated(fName, fieldMap, parents) {
+  let current = fName;
+  while (current) {
+    if (isDeprecatedField(fieldMap.get(current))) return true;
+    current = parents && parents.get(current);
+  }
+  return false;
 }
 
 /**
