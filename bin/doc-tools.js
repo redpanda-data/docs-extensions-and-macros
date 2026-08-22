@@ -12,7 +12,7 @@ const path = require('path')
 const fs = require('fs')
 
 // Import extracted utility modules
-const { findRepoRoot, fail, commonOptions } = require('../cli-utils/doc-tools-utils')
+const { findRepoRoot, resolveInsideRepo, fail, commonOptions } = require('../cli-utils/doc-tools-utils')
 const {
   requireTool,
   requireCmd,
@@ -1827,6 +1827,14 @@ automation
  * generates either Markdown or AsciiDoc tables for documentation. Supports custom templates
  * and dry-run mode for previewing output.
  *
+ * A custom template is a Handlebars file inside this repository and receives this context:
+ * `providers`, each with `name` ("GCP"), `displayName` ("Google Cloud Platform (GCP)") and
+ * `regions`, each region with `name`, `zones` (comma separated) and `tiers`; `clusterType`,
+ * the cluster type the data was filtered to, set only with --cluster-type, in which case the
+ * tier entries carry no per-tier cluster type; and `lastUpdated`, an ISO timestamp. The
+ * bundled templates in tools/cloud-regions show all of it in use. The template decides the
+ * markup, so with --template the --format value is only checked for validity.
+ *
  * @why
  * Cloud region data changes frequently as new regions are added and tier availability evolves.
  * The cloudv2-infra repository contains the source of truth for cloud infrastructure. Manual
@@ -1852,6 +1860,12 @@ automation
  * npx doc-tools generate cloud-regions \
  *   --output custom/path/regions.md
  *
+ * # Generate an AsciiDoc partial for one cluster type with a custom template
+ * export GITHUB_TOKEN=ghp_xxx
+ * npx doc-tools generate cloud-regions --format adoc --cluster-type BYOC \
+ *   --template docs-data/templates/cloud-regions.hbs \
+ *   --output modules/reference/partials/generated/regions-byoc.adoc
+ *
  * # Use different branch for testing
  * export GITHUB_TOKEN=ghp_xxx
  * npx doc-tools generate cloud-regions --ref staging
@@ -1864,32 +1878,44 @@ automation
 automation
   .command('cloud-regions')
   .description('Generate Markdown table of cloud regions and tiers from GitHub YAML file')
-  .option('--output <file>', 'Output file (relative to repo root)', 'cloud-controlplane/x-topics/cloud-regions.md')
+  .option('--output <file>', 'Output file (relative to repo root, must stay inside the repository)', 'cloud-controlplane/x-topics/cloud-regions.md')
   .option('--format <fmt>', 'Output format: md (Markdown) or adoc (AsciiDoc)', 'md')
   .option('--owner <owner>', 'GitHub repository owner', 'redpanda-data')
   .option('--repo <repo>', 'GitHub repository name', 'cloudv2-infra')
   .option('--path <path>', 'Path to YAML file in repository', 'apps/master-data-reconciler/manifests/overlays/production/master-data.yaml')
   .option('--ref <ref>', 'Git reference (branch, tag, or commit SHA)', 'integration')
-  .option('--template <path>', 'Path to custom Handlebars template (relative to repo root)')
+  .option('--template <path>', 'Path to custom Handlebars template (relative to repo root, must stay inside the repository)')
+  .option('--cluster-type <type>', 'Only include regions/tiers available for this cluster type, such as BYOC or Dedicated (requires --output or --dry-run)')
   .option('--dry-run', 'Print output to stdout instead of writing file')
-  .action(async (options) => {
+  .action(async (options, command) => {
     const { generateCloudRegions } = require('../tools/cloud-regions/generate-cloud-regions.js')
     const { getGitHubToken } = require('../cli-utils/github-token')
 
     try {
+      // The default output path holds the unfiltered table, so a filtered run
+      // that forgets --output silently replaces it, and the documented
+      // BYOC-then-Dedicated pair would leave only whichever ran last.
+      if (options.clusterType && !options.dryRun && command.getOptionValueSource('output') === 'default') {
+        throw new Error('--cluster-type needs its own destination: pass --output <file> for the filtered table, or --dry-run to preview it.')
+      }
+      // Contain every caller-supplied path before doing any work: both options
+      // are also reachable through the MCP server, so --template must not read
+      // and --output must not write outside the repository.
+      const repoRoot = findRepoRoot()
+      const templatePath = options.template
+        ? resolveInsideRepo(repoRoot, options.template, '--template')
+        : undefined
+      if (templatePath && !fs.existsSync(templatePath)) {
+        throw new Error(`Custom template not found: ${templatePath}`)
+      }
+      const absOutput = options.dryRun
+        ? undefined
+        : resolveInsideRepo(repoRoot, options.output, '--output')
       const token = getGitHubToken()
       if (!token) {
         throw new Error('GitHub token is required to fetch from private cloudv2-infra repo.')
       }
       const fmt = (options.format || 'md').toLowerCase()
-      let templatePath
-      if (options.template) {
-        const repoRoot = findRepoRoot()
-        templatePath = path.resolve(repoRoot, options.template)
-        if (!fs.existsSync(templatePath)) {
-          throw new Error(`Custom template not found: ${templatePath}`)
-        }
-      }
       const out = await generateCloudRegions({
         owner: options.owner,
         repo: options.repo,
@@ -1897,14 +1923,13 @@ automation
         ref: options.ref,
         format: fmt,
         token,
-        template: templatePath
+        template: templatePath,
+        clusterType: options.clusterType
       })
       if (options.dryRun) {
         process.stdout.write(out)
         console.log(`\nDone: (dry-run) ${fmt === 'adoc' ? 'AsciiDoc' : 'Markdown'} output printed to stdout.`)
       } else {
-        const repoRoot = findRepoRoot()
-        const absOutput = path.resolve(repoRoot, options.output)
         fs.mkdirSync(path.dirname(absOutput), { recursive: true })
         fs.writeFileSync(absOutput, out, 'utf8')
         console.log(`Done: Wrote ${absOutput}`)

@@ -291,7 +291,7 @@ const tools = [
       properties: {
         output: {
           type: 'string',
-          description: 'Output file path relative to repo root (optional, defaults to "cloud-controlplane/x-topics/cloud-regions.md")'
+          description: 'Output file path relative to repo root; must stay inside the repository (optional, defaults to "cloud-controlplane/x-topics/cloud-regions.md")'
         },
         format: {
           type: 'string',
@@ -316,7 +316,11 @@ const tools = [
         },
         template: {
           type: 'string',
-          description: 'Path to custom Handlebars template relative to repo root (optional)'
+          description: 'Path to custom Handlebars template relative to repo root; must stay inside the repository (optional)'
+        },
+        cluster_type: {
+          type: 'string',
+          description: 'Only include regions/tiers available for this cluster type, usually "BYOC" or "Dedicated"; the CLI validates the value against the cluster types the source data offers and lists them if it does not match (optional, requires output or dry_run)'
         },
         dry_run: {
           type: 'boolean',
