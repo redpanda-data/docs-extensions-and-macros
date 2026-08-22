@@ -27,6 +27,7 @@ const {
   generatePropertyComparisonReport,
   updatePropertyOverridesWithVersion,
   updatePropertiesJsonWithVersion,
+  repairPropertyAnchorsInJson,
   cleanupOldDiffs,
   resolveDiffBaseline
 } = require('../cli-utils/diff-utils')
@@ -1068,6 +1069,12 @@ automation
             // properties new in this release instead of one release late.
             const extractedJsonPath = path.resolve(outputDir, 'attachments', `redpanda-properties-${newTag}.json`)
             updatePropertiesJsonWithVersion(extractedJsonPath, diffData, newTag)
+            // Repair anchors HERE, in Phase 2, so the attachment the docs UI
+            // reads and the partials Phase 3 renders come from the same
+            // corrected text. Normalizing only in Phase 3 left the two
+            // disagreeing: the partials linked <<flush-bytes>> while the
+            // published attachment still said <<flushbytes>>.
+            repairPropertyAnchorsInJson(extractedJsonPath)
           }
         }
       } catch (err) {
