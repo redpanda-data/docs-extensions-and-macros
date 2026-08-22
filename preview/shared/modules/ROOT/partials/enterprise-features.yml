@@ -84,3 +84,26 @@ features:
     source:
       kind: manual
       value: Aggregate entry; individual connectors are tracked in connect internal/plugins/info.csv.
+  - name: Preview Unreleased Feature
+    scope: redpanda
+    # Only in a release candidate. May be referenced from a prerelease version
+    # and nowhere else; a mention on a released version renders as plain text.
+    status: unreleased
+    description: |
+      Fixture for the unreleased release status. Not available to any reader yet.
+    expiration: |
+      Not applicable while the feature is unreleased.
+    source:
+      kind: core-enum
+      value: preview_unreleased
+  - name: Preview Beta Feature
+    scope: redpanda
+    # Publicly available as a beta: referenced anywhere, badged so readers know.
+    status: beta
+    description: |
+      Fixture for the beta release status. Available to readers, still changing.
+    expiration: |
+      The feature is disabled.
+    source:
+      kind: core-enum
+      value: preview_beta

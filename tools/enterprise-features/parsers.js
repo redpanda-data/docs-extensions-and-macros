@@ -112,23 +112,9 @@ function parseDisableTable (source) {
   return rows
 }
 
-/**
- * Extract the enterprise-components attribute list from rp-connect-docs
- * antora.yml, without a YAML dependency on the full file structure.
- *
- * @param {object} antoraConfig - Parsed antora.yml object.
- * @returns {string[]|undefined} The list, or undefined when absent.
- */
-function extractAntoraEnterpriseComponents (antoraConfig) {
-  const attributes = antoraConfig && antoraConfig.asciidoc && antoraConfig.asciidoc.attributes
-  const list = attributes && attributes['enterprise-components']
-  return Array.isArray(list) ? list.map(String) : undefined
-}
-
 module.exports = {
   parseCoreEnum,
   parseEnterpriseProperties,
   parseConnectEnterprisePlugins,
   parseDisableTable,
-  extractAntoraEnterpriseComponents,
 }

@@ -30,3 +30,10 @@ docs-data/rpk-vlocal.json
 # Property extractor working data (cloned/built at run time)
 tools/property-extractor/tmp/
 tools/property-extractor/tree-sitter/tree-sitter-cpp/
+# Output of local-antora-playbook.yml (the preview site build)
+build/
+# Output of scripts/macro-test.sh
+macro-test-out/
+macro-test.log
+# Generated when DOCS_DIR/CLOUD_DOCS_DIR are set
+.macro-test-local-playbook.yml

@@ -68,17 +68,212 @@ function fakeCatalog (yamlSource = REGISTRY_YAML) {
   }
 }
 
-function convert (input, { catalog, attributes = {}, filePath = 'modules/manage/pages/example.adoc' } = {}) {
+function convert (input, { catalog, attributes = {}, filePath = 'modules/manage/pages/example.adoc', component = 'streaming', version = '26.2' } = {}) {
   const Asciidoctor = require('@asciidoctor/core')()
   const extensionRegistry = Asciidoctor.Extensions.create()
   register(extensionRegistry, catalog && {
     contentCatalog: catalog,
-    file: { src: { path: filePath } },
+    file: { src: { path: filePath, component, version } },
   })
   return Asciidoctor.convert(input, { extension_registry: extensionRegistry, attributes })
 }
 
+/**
+ * A catalog whose component versions carry Antora's prerelease flag, which is
+ * how the macro tells a beta branch from released docs.
+ */
+function catalogWithVersions (yamlSource, versions) {
+  return {
+    findBy: jest.fn(() => [
+      { path: 'modules/ROOT/partials/enterprise-features.yml', contents: Buffer.from(yamlSource) },
+    ]),
+    getComponent: (name) => name === 'streaming'
+      ? { name, versions, latest: versions[0] }
+      : undefined,
+  }
+}
+
+const VERSIONS = [{ version: '26.2' }, { version: '26.3', prerelease: true }]
+
 describe('enterprise macro', () => {
+  // jest.spyOn returns the existing spy when console.warn is already mocked, so
+  // a test that does not restore its own leaks its calls into the next test.
+  afterEach(() => jest.restoreAllMocks())
+
+  describe('release status', () => {
+    // A release cycle: a feature lands in an RC (unreleased), later becomes a
+    // public beta, later ships. Each state decides where it may be referenced.
+    const STATUS_YAML = `
+schema-version: 1
+features:
+  - name: Shipped Feature
+    scope: redpanda
+    description: Already released.
+    expiration: Restricted.
+    kind: license
+    source: x
+    value: y
+  - name: Public Beta Feature
+    scope: redpanda
+    status: beta
+    description: Available as a beta.
+    expiration: Restricted.
+    kind: license
+    source: x
+    value: y
+  - name: Upcoming Feature
+    scope: redpanda
+    status: unreleased
+    description: Only in a release candidate.
+    expiration: Restricted.
+    kind: license
+    source: x
+    value: y
+  - name: Legacy Beta Feature
+    scope: redpanda
+    beta: true
+    description: Marked with the older boolean.
+    expiration: Restricted.
+    kind: license
+    source: x
+    value: y
+`
+    const catalog = () => catalogWithVersions(STATUS_YAML, VERSIONS)
+    const onReleased = (input) => convert(input, { catalog: catalog(), component: 'streaming', version: '26.2' })
+    const onBeta = (input) => convert(input, { catalog: catalog(), component: 'streaming', version: '26.3' })
+
+    test('a shipped feature renders normally on released docs', () => {
+      const html = onReleased('enterprise:Shipped Feature[]')
+      expect(html).toContain('class="enterprise-feature"')
+      expect(html).not.toContain('unreleased')
+      expect(html).not.toContain('>beta<')
+    })
+
+    test('a public beta feature renders with a beta badge anywhere', () => {
+      for (const html of [onReleased('enterprise:Public Beta Feature[]'), onBeta('enterprise:Public Beta Feature[]')]) {
+        expect(html).toContain('class="enterprise-feature"')
+        expect(html).toContain('beta')
+      }
+    })
+
+    test('beta: true still means beta, so existing entries keep working', () => {
+      const html = onReleased('enterprise:Legacy Beta Feature[]')
+      expect(html).toContain('class="enterprise-feature"')
+      expect(html).toContain('beta')
+    })
+
+    test('an unreleased feature on released docs renders as plain text and warns', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = onReleased('enterprise:Upcoming Feature[]')
+      // No enterprise styling, no tooltip, no link: the reader cannot get it.
+      expect(html).not.toContain('enterprise-feature')
+      expect(html).not.toContain('unreleased')
+      expect(html).toContain('Upcoming Feature')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('status: unreleased'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('prerelease (beta) branch'))
+    })
+
+    test('an unreleased feature on a prerelease page renders with an unreleased badge', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = onBeta('enterprise:Upcoming Feature[]')
+      expect(html).toContain('class="enterprise-feature"')
+      expect(html).toContain('unreleased')
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('the display text override survives the plain rendering', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      expect(onReleased('enterprise:Upcoming Feature[text=the upcoming thing]')).toContain('the upcoming thing')
+      warn.mockRestore()
+    })
+
+    test('enterprise-validate=error fails the build on a released page', () => {
+      expect(() => convert('enterprise:Upcoming Feature[]', {
+        catalog: catalog(), component: 'streaming', version: '26.2',
+        attributes: { 'enterprise-validate': 'error' },
+      })).toThrow(/status: unreleased/)
+    })
+
+    test('enterprise-validate=off silences the report', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Upcoming Feature[]', {
+        catalog: catalog(), component: 'streaming', version: '26.2',
+        attributes: { 'enterprise-validate': 'off' },
+      })
+      expect(html).toContain('Upcoming Feature')
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    // A typo in the status is the one thing that must not publish an unreleased
+    // feature, so an unrecognized value fails closed. The two directions are not
+    // symmetric: gating a shipped feature shows the writer a warning and an
+    // unstyled mention they will notice, while publishing an unreleased one
+    // promises readers a feature they cannot get and looks entirely normal.
+    test('an unrecognized status is treated as unreleased, not as shipped', () => {
+      const typo = STATUS_YAML.replace('status: unreleased', 'status: unreleaased')
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Upcoming Feature[]', {
+        catalog: catalogWithVersions(typo, VERSIONS), component: 'streaming', version: '26.2',
+      })
+      expect(html).not.toContain('class="enterprise-feature"')
+      expect(html).toContain('Upcoming Feature')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("status 'unreleaased', which is not one of"))
+    })
+
+    // An absent key means no status was intended, so GA is the right default. A
+    // key with nothing after it means the writer meant to say something and did
+    // not, which is the same mistake as a typo and fails the same way -- an
+    // earlier version of this fix treated blank as absent and so republished
+    // unreleased features silently, which is the hole the fix exists to close.
+    test.each([
+      ['status:', 'an empty status'],
+      ['status: ~', 'an empty status'],
+      ['status: "   "', 'an empty status'],
+      ['status: unreleaased', "status 'unreleaased'"],
+    ])('%s is invalid and fails closed', (line, expected) => {
+      const yaml = STATUS_YAML.replace('status: unreleased', line)
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Upcoming Feature[]', {
+        catalog: catalogWithVersions(yaml, VERSIONS), component: 'streaming', version: '26.2',
+      })
+      expect(html).not.toContain('class="enterprise-feature"')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(expected))
+    })
+
+    test('an absent status defaults to released', () => {
+      const noStatus = STATUS_YAML.replace(/^\s*status: unreleased\n/m, '')
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Upcoming Feature[]', {
+        catalog: catalogWithVersions(noStatus, VERSIONS), component: 'streaming', version: '26.2',
+      })
+      expect(html).toContain('class="enterprise-feature"')
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('not one of'))
+    })
+
+    test('the licensing table omits unreleased features on released docs', () => {
+      const html = onReleased('enterprise_features::redpanda[]')
+      expect(html).toContain('Shipped Feature')
+      expect(html).toContain('Public Beta Feature')
+      expect(html).not.toContain('Upcoming Feature')
+    })
+
+    test('the licensing table lists them on prerelease docs, badged', () => {
+      const html = onBeta('enterprise_features::redpanda[]')
+      expect(html).toContain('Upcoming Feature')
+      expect(html).toContain('unreleased')
+    })
+
+    test('a playbook attribute can declare prerelease-ness directly', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Upcoming Feature[]', {
+        catalog: catalog(), component: 'streaming', version: '26.2',
+        attributes: { 'page-component-version-is-prerelease': 'true' },
+      })
+      expect(html).toContain('class="enterprise-feature"')
+      expect(warn).not.toHaveBeenCalled()
+    })
+  })
+
   describe('buildEnterpriseContent', () => {
     const defaults = {
       licensingPage: 'get-started:licensing/overview.adoc',
@@ -188,6 +383,37 @@ describe('enterprise macro', () => {
     test('throws when the features list is missing', () => {
       expect(() => parseRegistry('schema-version: 1\n')).toThrow(/no 'features' list/)
     })
+
+    // Invalid YAML used to escape as the raw js-yaml message, which names no
+    // file, so the caller had to prefix a path -- and then printed it twice for
+    // the four throws above, which name the file themselves.
+    test('names the file when the YAML itself is invalid', () => {
+      expect(() => parseRegistry('features: [oops\n', 'shared/enterprise-features.yml'))
+        .toThrow(/registry shared\/enterprise-features\.yml is not valid YAML/)
+    })
+
+    test('every failure names the file exactly once', () => {
+      const origin = 'shared/modules/ROOT/partials/enterprise-features.yml'
+      const broken = [
+        'features: [oops\n',
+        'schema-version: 1\n',
+        'features:\n  - description: x\n',
+        'features:\n  - name: A\n    scope: nonsense\n',
+        'features:\n  - name: A\n    aliases: [dup]\n  - name: B\n    aliases: [dup]\n',
+      ]
+      for (const source of broken) {
+        let message = ''
+        try {
+          parseRegistry(source, origin)
+        } catch (error) {
+          message = error.message
+        }
+        expect(message).toContain(origin)
+        expect(message.split(origin).length - 1).toBe(1)
+        // "could not be read" was inaccurate for everything but invalid YAML.
+        expect(message).not.toMatch(/could not be read/)
+      }
+    })
   })
 
   describe('buildFeatureTable', () => {
@@ -231,16 +457,80 @@ describe('enterprise macro', () => {
     // depend on that registration.
     test('renders a beta badge for entries marked beta', () => {
       const table = buildFeatureTable(features, 'operator')
-      expect(table).toContain('pass:[<span class="badge badge--beta ">(beta)</span>]')
+      expect(table).toContain('pass:[<span class="badge badge--beta " data-tooltip=')
+      expect(table).toContain('>(beta)</span>]')
       expect(table).not.toContain('badge::[')
       expect(table).not.toContain('badge:[label')
+    })
+
+    // The label lands in the class attribute and in the text content, so it
+    // needs escaping as much as the tooltip does. Escaping only the tooltip left
+    // a label free to close the class attribute and add an event handler.
+    test('a hostile badge label cannot escape the class attribute', () => {
+      const { buildBadgeHtml } = require('../../macros/badge')
+      const html = buildBadgeHtml({ label: 'x" onmouseover="alert(1)', tooltip: 'safe' })
+      expect(html).not.toContain('onmouseover="alert(1)"')
+      expect(html).toContain('&quot;')
+      const withTag = buildBadgeHtml({ label: '<img src=x onerror=alert(1)>' })
+      expect(withTag).not.toContain('<img')
+      expect(withTag).toContain('&lt;img')
+      // Ordinary labels are untouched.
+      expect(buildBadgeHtml({ label: 'beta', tooltip: 'Beta feature' }))
+        .toBe('<span class="badge badge--beta " data-tooltip="Beta feature">(beta)</span>')
+    })
+
+    // The badge carries a help cursor, so it must always have something to say.
+    // Only the unreleased badge had a default, so a beta badge from an entry
+    // without beta-tooltip invited a hover and then showed nothing.
+    test('every status badge carries hover text, with or without a registry field', () => {
+      // The unreleased badge only renders on a prerelease page, so use 26.3
+      // for both: a beta badge renders anywhere.
+      for (const status of ['beta', 'unreleased']) {
+        const yaml = `features:\n  - name: F\n    scope: redpanda\n    description: d\n    status: ${status}\n`
+        const html = convert('enterprise:F[]', {
+          catalog: catalogWithVersions(yaml, VERSIONS), component: 'streaming', version: '26.3',
+        })
+        expect(html).toContain(`badge--${status}`)
+        expect(html).toMatch(/data-tooltip="[^"]+"/)
+      }
+    })
+
+    // A plain-object lookup keyed on the label returned Object.prototype members,
+    // so label=constructor shipped 'function Object() { [native code] }' as hover
+    // text. Escaping made it harmless but not sane.
+    test.each(['constructor', '__proto__', 'toString', 'valueOf', 'ga'])(
+      'the label %s gets no default tooltip', (label) => {
+        const { buildBadgeHtml } = require('../../macros/badge')
+        const html = buildBadgeHtml({ label })
+        expect(html).not.toContain('data-tooltip')
+        expect(html).not.toContain('native code')
+      })
+
+    // The table filter short-circuited on a prerelease page, so entryStatus was
+    // never called with the reporter -- and the beta branch is the one place
+    // unreleased features are authored and the table renders them.
+    test('a bad status in the table is reported on a prerelease page too', () => {
+      const yaml = 'features:\n  - name: F\n    scope: redpanda\n    description: d\n    status: unrelesed\n'
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      convert('enterprise_features::redpanda[]', {
+        catalog: catalogWithVersions(yaml, VERSIONS), component: 'streaming', version: '26.3',
+      })
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("status 'unrelesed'"))
+    })
+
+    test('a registry-supplied beta-tooltip wins over the default', () => {
+      const yaml = 'features:\n  - name: F\n    scope: redpanda\n    description: d\n    status: beta\n    beta-tooltip: A specific note.\n'
+      const html = convert('enterprise:F[]', {
+        catalog: catalogWithVersions(yaml, VERSIONS), component: 'streaming', version: '26.2',
+      })
+      expect(html).toContain('data-tooltip="A specific note."')
     })
 
     test('places the beta badge after the feature suffix', () => {
       const table = buildFeatureTable(features, 'operator')
       expect(table).toContain(
         'xref:deploy:redpanda/kubernetes/k-stretch-clusters.adoc[Stretch Clusters] ' +
-        '(StretchCluster resource) pass:[<span class="badge badge--beta ">(beta)</span>]'
+        '(StretchCluster resource) pass:[<span class="badge badge--beta " data-tooltip='
       )
     })
 
@@ -261,7 +551,8 @@ describe('enterprise macro', () => {
     test('adds the beta badge in prose for a feature marked beta', () => {
       const html = convert('enterprise:Stretch Clusters[]', { catalog: fakeCatalog() })
       expect(html).toContain('class="enterprise-feature"')
-      expect(html).toContain('class="badge badge--beta ">(beta)</span>')
+      expect(html).toContain('class="badge badge--beta "')
+      expect(html).toContain('>(beta)</span>')
       // The badge must be real markup, never the escaped source of a macro call.
       expect(html).not.toContain('badge::[')
       expect(html).not.toContain('&lt;span')

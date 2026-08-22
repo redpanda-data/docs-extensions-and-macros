@@ -105,6 +105,103 @@ function registerPartials() {
 }
 
 /**
+ * Rewrite property anchors across every description and related-topics entry so
+ * they match the heading IDs Asciidoctor will actually emit.
+ *
+ * Runs once over the whole property map before rendering, because a property's
+ * description routinely links to a sibling property and the anchor shapes differ
+ * by where the text came from. Reports what it corrected: a steady stream of
+ * rewrites is a signal to fix the upstream doc string, not to lean on this pass.
+ *
+ * @param {Object<string, Object>} properties - Property map, mutated in place.
+ * @returns {number} Number of anchors rewritten.
+ */
+function normalizeAnchorsInProperties(properties) {
+  const seen = new Map();
+  let total = 0;
+
+  let xrefTotal = 0;
+  const fix = (value, scope) => {
+    const { text, rewrites } = helpers.normalizePropertyAnchors(value, properties, scope);
+    for (const r of rewrites) {
+      total += 1;
+      seen.set(r.from, r.to);
+    }
+    const canonical = helpers.canonicalizePropertyXrefs(text);
+    xrefTotal += canonical.rewrites;
+    return canonical.text;
+  };
+
+  Object.values(properties).forEach((prop) => {
+    if (!prop || typeof prop !== 'object') return;
+    const scope = prop.config_scope;
+    if (typeof prop.description === 'string') prop.description = fix(prop.description, scope);
+    if (typeof prop.acceptable_values === 'string') prop.acceptable_values = fix(prop.acceptable_values, scope);
+    if (Array.isArray(prop.related_topics)) {
+      // Canonicalizing collapses forms that differed only by prefix, which turns
+      // some entries into exact duplicates of each other. Drop the repeats.
+      const seenTopics = new Set();
+      prop.related_topics = prop.related_topics
+        .map((t) => (typeof t === 'string' ? fix(t, scope) : t))
+        .filter((t) => {
+          if (typeof t !== 'string') return true;
+          const key = t.trim();
+          if (seenTopics.has(key)) return false;
+          seenTopics.add(key);
+          return true;
+        });
+    }
+  });
+
+  if (total > 0) {
+    console.log(`Fixed ${total} property anchor(s) that would have rendered as dead links:`);
+    for (const [from, to] of seen) console.log(`   <<${from}>> -> <<${to}>>`);
+  }
+  if (xrefTotal > 0) {
+    console.log(`Canonicalized ${xrefTotal} property-page xref(s) to reference:properties/…`);
+  }
+  return total;
+}
+
+/**
+ * Record whether a topic property's corresponding cluster property is one a Cloud
+ * customer can actually reach.
+ *
+ * Cloud publishes a subset of cluster properties, so linking a topic property to
+ * its cluster counterpart unconditionally sends Cloud readers to an anchor that
+ * does not exist on their reference page. `cloud_supported` on the cluster
+ * property is the authority here: it is derived from the install pack's
+ * customer_managed_configs and readonly_cluster_config, so true means the Cloud
+ * page publishes it.
+ *
+ * Note what this flag does NOT say. False means the control plane does not expose
+ * the property to customers; it does not distinguish "Redpanda manages the value"
+ * from "the property does not apply to Cloud at all". So the template drops the
+ * link and keeps the name, and asserts nothing about who sets it.
+ *
+ * Both the primary and the alternate mapping are resolved, because a row that
+ * links to two cluster properties needs both to be reachable before it is worth
+ * linking either.
+ *
+ * @param {Object} prop - Topic property to annotate in place.
+ * @param {Object<string, Object>} properties - Full property map, used to look up counterparts.
+ */
+function annotateCorrespondingClusterSupport(prop, properties) {
+  const isSupported = (name) => {
+    if (!name) return false;
+    const target = properties[name];
+    return Boolean(target && target.cloud_supported);
+  };
+
+  const primary = isSupported(prop.corresponding_cluster_property);
+  prop.corresponding_cluster_property_cloud_supported = primary;
+  prop.alternate_cluster_property_cloud_supported = isSupported(prop.alternate_cluster_property);
+  prop.cluster_property_mapping_cloud_supported = prop.alternate_cluster_property
+    ? primary && prop.alternate_cluster_property_cloud_supported
+    : primary;
+}
+
+/**
  * Generate AsciiDoc partial files grouping input properties by scope (cluster, topic, broker, object-storage).
  *
  * Reads property and topic templates, groups provided properties by their config_scope (treating keys as authoritative property names),
@@ -119,6 +216,8 @@ function registerPartials() {
  */
 function generatePropertyPartials(properties, partialsDir, onRender) {
   console.log(`📝 Generating consolidated property partials in ${partialsDir}…`);
+
+  normalizeAnchorsInProperties(properties);
 
   const propertyTemplate = handlebars.compile(
     fs.readFileSync(getTemplatePath(path.join(__dirname, 'templates', 'property.hbs'), 'TEMPLATE_PROPERTY'), 'utf8')
@@ -151,6 +250,7 @@ function generatePropertyPartials(properties, partialsDir, onRender) {
 
     switch (prop.config_scope) {
       case 'topic':
+        annotateCorrespondingClusterSupport(prop, properties);
         propertyGroups.topic.push(prop);
         break;
       case 'broker':
