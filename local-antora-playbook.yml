@@ -102,4 +102,5 @@ antora:
   - require: './extensions/aggregate-terms'
   - require: './extensions/property-page-index'
   - require: './extensions/set-available-attachment-versions'
+  - require: './extensions/render-property-descriptions'
 

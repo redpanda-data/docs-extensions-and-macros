@@ -11,6 +11,7 @@ const { getRpkConnectVersion, printDeltaReport } = require('./report-delta')
 const { discoverIntermediateReleases, findCloudVersionForDate } = require('./github-release-utils')
 const { analyzeAllBinaries } = require('./connector-binary-analyzer.js')
 const parseCSVConnectors = require('./parse-csv-connectors.js')
+const { resolvePageTypeDir } = require('./metadata-utils.js')
 const semver = require('semver')
 
 /**
@@ -106,6 +107,23 @@ function capToTwoSentences (description) {
   return result.trim()
 }
 
+// Component families in a connector index, in the spelling the Connect binary
+// emits. Rate limits are 'rate-limits' there; 'rate_limits' is the docs page
+// directory spelling, which older snapshots also carry as an (always empty)
+// data key, so it is walked when present but never created. Every copy of this
+// list used to be the underscore form only, which meant rate-limit components
+// were never given cloudSupported or requiresCgo flags and any cgo-only or
+// cloud-only rate limit was dropped from the published snapshot.
+const COMPONENT_TYPE_KEYS = ['inputs', 'outputs', 'processors', 'caches', 'rate-limits',
+  'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers']
+
+// 'config' components live in the same index but have no config/fields wrapper.
+const COMPONENT_TYPE_KEYS_WITH_CONFIG = [...COMPONENT_TYPE_KEYS, 'config']
+
+// Keys kept only for snapshots written before the spelling was fixed. Walked
+// if a snapshot has them, never added to one.
+const LEGACY_COMPONENT_TYPE_KEYS = new Set(['rate_limits'])
+
 /**
  * Remove platform metadata fields from connectors
  * @param {Array} connectors - Array of connector objects
@@ -146,11 +164,9 @@ function augmentConnectorData (connectorData, binaryAnalysis) {
   let addedCgoCount = 0
   let addedCloudOnlyCount = 0
 
-  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-    'buffers', 'metrics', 'scanners', 'tracers', 'config']
-
-  for (const type of connectorTypes) {
+  for (const type of COMPONENT_TYPE_KEYS_WITH_CONFIG) {
     if (!Array.isArray(augmentedData[type])) {
+      if (LEGACY_COMPONENT_TYPE_KEYS.has(type)) continue
       augmentedData[type] = []
     }
 
@@ -219,10 +235,7 @@ function augmentConnectorData (connectorData, binaryAnalysis) {
  */
 function buildCleanOssData (connectorIndex) {
   const cleanData = JSON.parse(JSON.stringify(connectorIndex))
-  const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-    'buffers', 'metrics', 'scanners', 'tracers']
-
-  for (const type of connectorTypes) {
+  for (const type of COMPONENT_TYPE_KEYS) {
     if (Array.isArray(cleanData[type])) {
       // Keep only connectors from OSS rpk (have config/fields)
       // Remove augmentation-only connectors (added by previous binary analysis)
@@ -413,7 +426,7 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
       if (regularFields.length > 0) {
         section += '\n=== New field support\n\n'
         section += 'This release adds support for the following new fields:\n\n'
-        section += buildFieldsTable(regularFields, capToTwoSentences)
+        section += buildFieldsTable(regularFields, capToTwoSentences, { showIntroducedIn: true })
       }
     }
 
@@ -553,24 +566,35 @@ function fieldAnchor (fieldName) {
  * @param {Function} capFn - Caption function
  * @returns {string} AsciiDoc table
  */
-function buildFieldsTable (fields, capFn) {
+function buildFieldsTable (fields, capFn, opts = {}) {
+  const { showIntroducedIn = false } = opts
   const byField = {}
   for (const field of fields) {
     const [type, compName] = field.component.split(':')
-    if (!byField[field.field]) {
-      byField[field.field] = {
+    // Two components can gain the same field path in different releases
+    // (`urls` arrived in 3.58.0 for one and 4.23.0 for another). Merging those
+    // into a single row would publish the first version for both, so when the
+    // version is on show it is part of the row's identity.
+    const key = showIntroducedIn
+      ? `${field.field}\u0000${field.introducedIn || ''}`
+      : field.field
+    if (!byField[key]) {
+      byField[key] = {
+        field: field.field,
         description: field.description,
+        introducedIn: field.introducedIn,
         components: []
       }
     }
-    byField[field.field].components.push({ type, name: compName })
+    byField[key].components.push({ type, name: compName })
   }
 
-  let section = '[cols="1m,3,2a"]\n'
+  let section = showIntroducedIn ? '[cols="1m,3,2a,1m"]\n' : '[cols="1m,3,2a"]\n'
   section += '|===\n'
-  section += '|Field |Description |Affected components\n\n'
+  section += showIntroducedIn ? '|Field |Description |Affected components |Introduced in\n\n' : '|Field |Description |Affected components\n\n'
 
-  for (const [fieldName, info] of Object.entries(byField)) {
+  for (const info of Object.values(byField)) {
+    const fieldName = info.field
     const byType = {}
     for (const comp of info.components) {
       if (!byType[comp.type]) byType[comp.type] = []
@@ -595,7 +619,9 @@ function buildFieldsTable (fields, capFn) {
 
     section += `|${fieldName}\n`
     section += `|${desc}\n`
-    section += `|${componentList}\n\n`
+    section += `|${componentList}\n`
+    if (showIntroducedIn) section += `|${info.introducedIn || '-'}\n`
+    section += '\n'
   }
 
   section += '|===\n\n'
@@ -691,10 +717,51 @@ function logCollapsed (label, filesArray, maxToShow = 10) {
 
 
 /**
+ * Why a stored connect-<version>.json cannot stand in for a fresh fetch.
+ *
+ * The handler writes augmentConnectorData() output back over the same file, so
+ * a stored snapshot is not necessarily raw binary output. Reusing an augmented
+ * one would re-augment already-augmented data: the cloud-only and cgo-only
+ * entries injected by the previous run are not in the new analysis, so they
+ * survive with their platform markers reset and a cgo-only connector ends up
+ * published as an ordinary OSS one. The version field is the only provenance
+ * the downstream templates get, so a file that disagrees with its own name
+ * cannot be trusted either.
+ *
+ * @param {Object} data - Parsed contents of connect-<version>.json
+ * @param {string} version - Version the file is supposed to describe
+ * @returns {string|null} Reason it cannot be reused, or null if it can
+ */
+function snapshotReuseBlocker (data, version) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return 'file is not a connector index'
+  }
+
+  if (typeof data.version === 'string' && data.version !== version) {
+    return `file reports version ${data.version}`
+  }
+
+  const augmented = Object.values(data)
+    .filter(Array.isArray)
+    .some(components => components.some(c => c && typeof c === 'object' && (
+      c.cloudSupported !== undefined ||
+      c.requiresCgo !== undefined ||
+      c.cloudOnly !== undefined
+    )))
+
+  if (augmented) {
+    return 'file already carries cloud/cgo augmentation from an earlier run'
+  }
+
+  return null
+}
+
+/**
  * Load or fetch connector data for a specific version
  * @param {string} version - Version to load (e.g., "4.50.0")
  * @param {string} dataDir - Directory where JSON files are stored
  * @param {Object} options - Options for fetching if needed
+ * @param {boolean} [options.forceFresh] - Refetch even when a usable file exists
  * @returns {Promise<Object>} Parsed connector data
  */
 async function loadConnectorDataForVersion(version, dataDir, options = {}) {
@@ -702,51 +769,75 @@ async function loadConnectorDataForVersion(version, dataDir, options = {}) {
 
   // If forceFresh is set, always fetch even if file exists
   // This ensures we have accurate connector lists for diff comparison
+  let reason = options.forceFresh ? 'force refresh requested' : 'file not found';
+
   if (!options.forceFresh && fs.existsSync(dataFile)) {
-    console.log(`✓ Using existing data file: connect-${version}.json`);
-    const data = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
-    return data;
+    let stored = null;
+    let blocker = null;
+    try {
+      stored = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+      blocker = snapshotReuseBlocker(stored, version);
+    } catch (err) {
+      blocker = `file could not be parsed (${err.message})`;
+    }
+
+    if (!blocker) {
+      console.log(`✓ Using existing data file: connect-${version}.json`);
+      return stored;
+    }
+
+    console.warn(`↻ Ignoring existing connect-${version}.json: ${blocker}`);
+    reason = blocker;
   }
 
   // Fetch fresh data
-  const reason = options.forceFresh ? 'force refresh requested' : 'file not found';
   console.log(`📥 Fetching data for ${version} (${reason})...`);
 
+  // Fetch the OSS release asset for this exact version instead of asking rpk to
+  // install it. rpk's validateVersion (rpk/pkg/cli/connect/install.go) matches
+  // --connect-version against a regex that caps each segment at two digits, so
+  // it rejects every version >= 4.100.0, which is every version worth asking
+  // for. The cap is lifted in rpk v26.1.15 and on dev, but v26.1.14 and the
+  // whole v26.2.x line still carry it, so which versions can be installed
+  // depends on which rpk happens to be on PATH. Fetching the asset removes that
+  // dependency instead of working around one rpk release, so this is the
+  // permanent mechanism rather than something to revert once rpk ships a fix:
+  // the plain OSS asset is the same build rpk would have installed, so the
+  // schema is identical, and this leaves the caller's own Connect installation
+  // untouched instead of forcing a managed plugin over the top of it.
   try {
-    // Try installing that specific version and fetching data
-    console.log(`   Installing Redpanda Connect version ${version}...`);
-    const installResult = spawnSync('rpk', ['connect', 'install', '--connect-version', version, '--force'], {
-      stdio: 'pipe'
-    });
+    const { downloadBinary, getConnectorList, getBinaryCacheDir } = require('./connector-binary-analyzer.js');
 
-    if (installResult.status !== 0) {
-      throw new Error(`Failed to install Connect version ${version}`);
+    // Binaries go to the process-wide temp cache, never to dataDir: the
+    // consuming repo commits dataDir, and the extracted binary is ~320 MB.
+    const binaryPath = await downloadBinary('oss', version, getBinaryCacheDir());
+    const parsed = getConnectorList(binaryPath);
+
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('connector list was empty or not an object');
     }
 
-    // Fetch connector list
+    // The asset name embeds the version and the release was fetched by tag, so
+    // a binary that reports a different version means the wrong asset was
+    // downloaded. Fail rather than publish a snapshot under the wrong name.
+    if (typeof parsed.version === 'string' && parsed.version !== version) {
+      throw new Error(`asset reports version ${parsed.version}, not ${version}`);
+    }
+
+    // Write via a temp file so an interrupted run cannot leave a half-written
+    // snapshot that the next run would happily reuse.
     const tmpFile = path.join(dataDir, `connect-${version}.tmp.json`);
-    const fd = fs.openSync(tmpFile, 'w');
-    const listResult = spawnSync('rpk', ['connect', 'list', '--format', 'json-full'], {
-      stdio: ['ignore', fd, 'pipe']
-    });
-    fs.closeSync(fd);
-
-    if (listResult.status !== 0) {
-      throw new Error(`Failed to fetch connector list for version ${version}`);
-    }
-
-    // Parse and validate
-    const rawJson = fs.readFileSync(tmpFile, 'utf8');
-    const parsed = JSON.parse(rawJson);
-
-    // Move to final location
+    fs.writeFileSync(tmpFile, JSON.stringify(parsed, null, 2));
     fs.renameSync(tmpFile, dataFile);
 
     console.log(`✓ Successfully fetched data for version ${version}`);
     return parsed;
   } catch (error) {
     console.error(`❌ Failed to fetch data for version ${version}: ${error.message}`);
-    throw new Error(`Cannot process version ${version} - data unavailable`);
+    // Carry the reason into the thrown error: this message is what reaches the
+    // failure summary and the PR body, where a bare "data unavailable" sends
+    // the reader back to the raw workflow log.
+    throw new Error(`Cannot process version ${version} - data unavailable (${error.message})`);
   }
 }
 
@@ -776,34 +867,47 @@ async function handleRpcnConnectorDocs (options) {
           console.error('Expected format: X.Y.Z (e.g., 4.50.0)')
           process.exit(1)
         }
-        console.log(`Installing Redpanda Connect version ${options.connectVersion}...`)
-        const installResult = spawnSync('rpk', ['connect', 'install', '--connect-version', options.connectVersion, '--force'], {
-          stdio: 'inherit'
-        })
-        if (installResult.status !== 0) {
-          throw new Error(`Failed to install Connect version ${options.connectVersion}`)
-        }
-        console.log(`Done: Installed Redpanda Connect version ${options.connectVersion}`)
         newVersion = options.connectVersion
+        // An explicit version comes from the release asset rather than from
+        // rpk, which rejects anything >= 4.100.0 on the rpk releases this
+        // pipeline runs. See loadConnectorDataForVersion. Reuses an existing
+        // snapshot when it is raw, unaugmented output for this same version,
+        // and leaves the caller's own Connect install alone either way.
+        console.log(`Fetching connector data for Connect ${newVersion}...`)
+        await loadConnectorDataForVersion(newVersion, dataDir)
+        dataFile = path.join(dataDir, `connect-${newVersion}.json`)
+        needsAugmentation = true
+        console.log(`Done: Fetched connector data for version ${newVersion}`)
       } else {
+        // No version asked for, so read whatever rpk has: this is install's
+        // unvalidated "latest" path, which the version regex never sees.
         newVersion = getRpkConnectVersion()
+        console.log(`Fetching connector data from Connect ${newVersion}...`)
+
+        const tmpFile = path.join(dataDir, `connect-${newVersion}.tmp.json`)
+        const finalFile = path.join(dataDir, `connect-${newVersion}.json`)
+
+        const fd = fs.openSync(tmpFile, 'w')
+        spawnSync('rpk', ['connect', 'list', '--format', 'json-full'], { stdio: ['ignore', fd, 'inherit'] })
+        fs.closeSync(fd)
+
+        const rawJson = fs.readFileSync(tmpFile, 'utf8')
+        // Deliberately plain JSON.parse/stringify, not bigIntJson: this is connect
+        // data, which carries example config text as escaped JSON-shaped strings
+        // (e.g. bloblang examples), indistinguishable by regex from real JSON
+        // value position. bigIntJson's value-position regex matches inside such a
+        // string and inserts stray quotes -- confirmed to throw on the real,
+        // currently-published connect attachment, not merely round a number. A
+        // plain round trip still silently rounds int64 defaults past MaxInt64 (the
+        // pre-existing defect this file has always had), which is the safer
+        // failure mode until a real JSON scanner replaces the regex.
+        const parsed = JSON.parse(rawJson)
+        fs.writeFileSync(finalFile, JSON.stringify(parsed, null, 2))
+        fs.unlinkSync(tmpFile)
+        dataFile = finalFile
+        needsAugmentation = true
+        console.log(`Done: Fetched connector data for version ${newVersion}`)
       }
-      console.log(`Fetching connector data from Connect ${newVersion}...`)
-
-      const tmpFile = path.join(dataDir, `connect-${newVersion}.tmp.json`)
-      const finalFile = path.join(dataDir, `connect-${newVersion}.json`)
-
-      const fd = fs.openSync(tmpFile, 'w')
-      const r = spawnSync('rpk', ['connect', 'list', '--format', 'json-full'], { stdio: ['ignore', fd, 'inherit'] })
-      fs.closeSync(fd)
-
-      const rawJson = fs.readFileSync(tmpFile, 'utf8')
-      const parsed = JSON.parse(rawJson)
-      fs.writeFileSync(finalFile, JSON.stringify(parsed, null, 2))
-      fs.unlinkSync(tmpFile)
-      dataFile = finalFile
-      needsAugmentation = true
-      console.log(`Done: Fetched connector data for version ${newVersion}`)
 
       // Fetch info.csv
       try {
@@ -1130,7 +1234,15 @@ async function handleRpcnConnectorDocs (options) {
 
   console.log('Generating connector partials...')
   let partialsWritten, partialFiles
+  const descriptionReports = []
   const lostSectionWarnings = []
+  // Both generator call sites (partials and drafts) feed the same PR summary,
+  // so they collect through one function. Pushed inline, the draft call site
+  // silently dropped descriptionReports for months: the structure reports for
+  // newly drafted connectors, the ones most likely to need an upstream fix,
+  // never reached the summary.
+  const { collectGeneratorReports } = require('./pr-summary-formatter.js')
+  const collect = (result) => collectGeneratorReports(result, { descriptionReports, lostSectionWarnings })
 
   try {
     const result = await generateRpcnConnectorDocs({
@@ -1141,14 +1253,16 @@ async function handleRpcnConnectorDocs (options) {
       templateFields: options.templateFields,
       templateExamples: options.templateExamples,
       templateMetadata: options.templateMetadata,
+      templateDescription: options.templateDescription,
       templateBloblang: options.templateBloblang,
       writeFullDrafts: false,
+      pruneOrphanedDescriptions: !!options.pruneOrphanedDescriptions,
       includeBloblang: !!options.includeBloblang,
       csvMetadata
     })
     partialsWritten = result.partialsWritten
     partialFiles = result.partialFiles
-    lostSectionWarnings.push(...(result.lostSectionWarnings || []))
+    collect(result)
   } catch (err) {
     console.error(`Error: Failed to generate partials: ${err.message}`)
     process.exit(1)
@@ -1445,11 +1559,8 @@ async function handleRpcnConnectorDocs (options) {
 
       // Strip CGO/cloud-only connectors and metadata from old data
       oldIndexForDiff = JSON.parse(JSON.stringify(oldIndex))
-      const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits',
-        'buffers', 'metrics', 'scanners', 'tracers', 'config']
-
       let totalStripped = 0
-      for (const type of connectorTypes) {
+      for (const type of COMPONENT_TYPE_KEYS_WITH_CONFIG) {
         if (Array.isArray(oldIndexForDiff[type])) {
           const originalCount = oldIndexForDiff[type].length
 
@@ -1475,7 +1586,7 @@ async function handleRpcnConnectorDocs (options) {
       }
     }
 
-    printDeltaReport(oldIndexForDiff, newIndex)
+    printDeltaReport(oldIndexForDiff, newIndex, { newVersion })
 
     const { generateConnectorDiffJson } = require('./report-delta.js')
     diffJson = generateConnectorDiffJson(
@@ -1636,8 +1747,7 @@ async function handleRpcnConnectorDocs (options) {
       const dataObj = JSON.parse(rawData)
 
       const validConnectors = []
-      const types = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers']
-      types.forEach(type => {
+      COMPONENT_TYPE_KEYS.forEach(type => {
         if (Array.isArray(dataObj[type])) {
           dataObj[type].forEach(connector => {
             if (connector.name) {
@@ -1708,8 +1818,7 @@ async function handleRpcnConnectorDocs (options) {
         // Fallback when binary analysis is unavailable:
         // Check all connectors that have cloudSupported flag or assume all non-deprecated are cloud-supported
         console.log('   ℹ️  Binary analysis unavailable - checking all non-deprecated connectors for cloud-docs')
-        const types = ['inputs', 'outputs', 'processors', 'caches', 'rate_limits', 'buffers', 'metrics', 'scanners', 'tracers']
-        types.forEach(type => {
+        COMPONENT_TYPE_KEYS.forEach(type => {
           if (Array.isArray(dataObj[type])) {
             dataObj[type].forEach(connector => {
               // Include if cloudSupported is explicitly true, or if it's null/undefined and not deprecated
@@ -1725,17 +1834,21 @@ async function handleRpcnConnectorDocs (options) {
       }
 
       // Check for missing connector documentation in rp-connect-docs
+      // `type` came from a data key, and the rate-limit family's data key
+      // ('rate-limits') is not its directory name ('rate_limits'). Resolve the
+      // directory against disk per root, or every existing rate-limit page is
+      // reported missing and drafted again beside itself.
       const allMissing = validConnectors.filter(({ name, type, cloudOnly }) => {
-        const relPath = path.join(`${type}s`, `${name}.adoc`)
+        const relPathIn = (root) => path.join(resolvePageTypeDir(root, `${type}s`), `${name}.adoc`)
 
         // For cloud-only connectors, ONLY check the cloud-only directory
         if (cloudOnly) {
-          return !fs.existsSync(path.join(roots.cloudOnly, relPath))
+          return !fs.existsSync(path.join(roots.cloudOnly, relPathIn(roots.cloudOnly)))
         }
 
         // For regular connectors, check pages and partials (not cloud-only)
         const existsInAny = [roots.pages, roots.partials].some(root =>
-          fs.existsSync(path.join(root, relPath))
+          fs.existsSync(path.join(root, relPathIn(root)))
         )
         return !existsInAny
       })
@@ -1780,6 +1893,12 @@ async function handleRpcnConnectorDocs (options) {
 
           // Check each cloud-supported connector
           // Filter to only check actual connector/component types that need individual pages
+          // NOT the shared CONNECTOR_TYPE_DIRS: this list deliberately omits
+          // rate_limits, per the comment below. rate_limits does have
+          // per-component pages, so the omission looks like a bug and rate
+          // limits are never checked for a cloud-docs stub -- but changing it
+          // adds cloud-docs findings in a path with no test coverage, so it
+          // needs its own ticket rather than riding along here.
           const connectorTypes = ['inputs', 'outputs', 'processors', 'caches', 'buffers', 'scanners', 'metrics', 'tracers']
 
           for (const connectorKey of cloudSupportedSet) {
@@ -1932,6 +2051,7 @@ async function handleRpcnConnectorDocs (options) {
           templateFields: options.templateFields,
           templateExamples: options.templateExamples,
           templateMetadata: options.templateMetadata,
+          templateDescription: options.templateDescription,
           templateIntro: options.templateIntro,
           writeFullDrafts: true,
           cgoOnly: binaryAnalysis?.cgoOnly || [],
@@ -1942,7 +2062,7 @@ async function handleRpcnConnectorDocs (options) {
         fs.unlinkSync(tempDataPath)
         draftsWritten = draftResult.draftsWritten
         draftFiles = draftResult.draftFiles
-        lostSectionWarnings.push(...(draftResult.lostSectionWarnings || []))
+        collect(draftResult)
       }
     } catch (err) {
       console.error(`Error: Could not draft missing: ${err.message}`)
@@ -1989,13 +2109,26 @@ async function handleRpcnConnectorDocs (options) {
 
   // Generate PR summary
   try {
-    const { printPRSummary } = require('./pr-summary-formatter.js')
+    const { printPRSummary, renderLostSectionWarnings, renderDescriptionReports } = require('./pr-summary-formatter.js')
     // Use master diff if available, otherwise use single diff. Content-loss
-    // warnings ride the diff object so they lead the PR summary body instead
-    // of dying in the collapsed workflow log.
+    // warnings and structure reports ride the diff object so they land in the
+    // PR summary body instead of dying in the collapsed workflow log.
     const summaryDiff = masterDiff || diffJson
-    if (lostSectionWarnings.length) summaryDiff.lostSectionWarnings = lostSectionWarnings
-    printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
+    if (summaryDiff) {
+      if (lostSectionWarnings.length) summaryDiff.lostSectionWarnings = lostSectionWarnings
+      if (descriptionReports.length) summaryDiff.descriptionReports = descriptionReports
+      printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
+    } else if (lostSectionWarnings.length || descriptionReports.length) {
+      // No diff to summarize (no prior version, or versions match), but this
+      // run still produced content-loss warnings or description-structure
+      // reports that a reviewer needs to see -- print them on their own
+      // instead of losing them because there was nothing to diff against.
+      const lines = [
+        ...renderLostSectionWarnings(lostSectionWarnings),
+        ...renderDescriptionReports(descriptionReports)
+      ]
+      console.log('\n' + lines.join('\n') + '\n')
+    }
   } catch (err) {
     console.error(`Warning: Failed to generate PR summary: ${err.message}`)
   }
@@ -2068,6 +2201,8 @@ module.exports = {
   capToTwoSentences,
   augmentConnectorData,
   buildCleanOssData,
+  loadConnectorDataForVersion,
+  snapshotReuseBlocker,
   fieldAnchor,
   buildFieldsTable,
   buildChangedDefaultsTable

@@ -1,29 +1,40 @@
-const { describe, it, expect } = require('@jest/globals')
-const fs = require('fs')
-const path = require('path')
+'use strict';
 
-// The publish workflow only publishes when package.json carries a version that is
-// not on npm yet, and npm ci fails when the lockfile records a different version
-// than package.json. A bump that misses either mirrored slot in the lockfile
-// therefore breaks a release, so pin all three values together.
-const repoRoot = path.resolve(__dirname, '..')
-const readJson = (file) => JSON.parse(fs.readFileSync(path.join(repoRoot, file), 'utf8'))
+/**
+ * The published version lives in three places: package.json and the two
+ * mirrored copies in package-lock.json. Bumping only some of them leaves the
+ * lockfile disagreeing with the manifest, which npm then rewrites on the next
+ * install and which makes a release look bumped when it is not.
+ *
+ * A release that forgets the bump entirely is worse than a no-op: the publish
+ * step silently does nothing because the version already exists on the
+ * registry, while the dispatch job still tells rp-connect-docs to npm update,
+ * so the consumer pulls the same old tarball and reports success.
+ */
+
+const fs = require('fs');
+const path = require('path');
+const semver = require('semver');
+
+const repoRoot = path.resolve(__dirname, '..');
+const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+const lock = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package-lock.json'), 'utf8'));
 
 describe('package version', () => {
-  const pkg = readJson('package.json')
-  const lock = readJson('package-lock.json')
+  test('is a valid semver version', () => {
+    expect(semver.valid(pkg.version)).toBe(pkg.version);
+  });
 
-  it('is a plain three-part version', () => {
-    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/)
-  })
+  test('matches the top-level version in package-lock.json', () => {
+    expect(lock.version).toBe(pkg.version);
+  });
 
-  it('matches both mirrored versions in package-lock.json', () => {
-    expect(lock.version).toBe(pkg.version)
-    expect(lock.packages[''].version).toBe(pkg.version)
-  })
+  test('matches the root package entry in package-lock.json', () => {
+    expect(lock.packages[''].version).toBe(pkg.version);
+  });
 
-  it('names the same package in both files', () => {
-    expect(lock.name).toBe(pkg.name)
-    expect(lock.packages[''].name).toBe(pkg.name)
-  })
-})
+  test('names the same package in both files', () => {
+    expect(lock.name).toBe(pkg.name);
+    expect(lock.packages[''].name).toBe(pkg.name);
+  });
+});
