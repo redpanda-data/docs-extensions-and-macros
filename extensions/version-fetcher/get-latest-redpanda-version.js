@@ -26,11 +26,12 @@ module.exports = async (github, owner, repo, logger = null) => {
         release => !release.tag_name.includes('-rc') && !release.draft
       );
 
-      // Find latest RC release that is NOT a draft. A draft release has no git
-      // tag until it is published, so including drafts here means the getRef
-      // below 404s and takes the whole lookup down with it, stable release
-      // included. Drafts are only visible to callers whose token has push
-      // access, which is why this stays invisible in unauthenticated CI.
+      // Find latest RC release that is NOT a draft. The primary risk is a draft
+      // outranking the real latest RC (a token with push access sees drafts;
+      // unauthenticated CI does not, which is why this stays invisible there).
+      // A draft's git tag usually already exists, but isn't guaranteed to --
+      // when it's missing, the getRef below 404s, which the caller now handles
+      // per-RC instead of letting it take down the whole lookup.
       const latestRcRelease = sortedReleases.find(
         release => release.tag_name.includes('-rc') && !release.draft
       );
