@@ -54,6 +54,7 @@
  */
 
 const yaml = require('js-yaml')
+const { escapeHtml } = require('../extension-utils/html-utils')
 const chalk = require('chalk')
 const { buildBadgeHtml, DEFAULT_TOOLTIPS } = require('./badge')
 
@@ -414,11 +415,7 @@ function buildEnterpriseContent ({ feature, text, xref, url, tooltip, licensingP
   // consumer that re-parses the page then reads as markup -- the docs UI
   // promotes this attribute into a tooltip, the Markdown converter and the
   // search indexer both re-read it.
-  const escapedTooltip = tooltipText
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+  const escapedTooltip = escapeHtml(tooltipText)
   const tooltipHtml = tooltipAttr ? ` ${tooltipAttr}="${escapedTooltip}"` : ''
   let inner = display
   if (links) {
