@@ -138,7 +138,18 @@ function buildNative(sourceDir) {
  */
 function buildAndRunInDocker(sourceDir) {
   checkDockerAvailable()
-  console.log(`Building and running rp_util in a ${DOCKER_LINUX_IMAGE} container...`)
+
+  // Match the container's CPU architecture to the host's. Forcing
+  // linux/amd64 on an Apple Silicon host makes Docker emulate x86_64 via
+  // Rosetta for every single instruction in a from-source C++ build (boost,
+  // seastar, openssl, ...) -- observed to turn a ~10-20min native build into
+  // a multi-hour one. CI itself builds natively on arm64 hardware; there's
+  // no reason a local arm64 Mac shouldn't too.
+  const dockerArch = os.arch() === 'arm64' ? 'arm64' : 'amd64'
+  const dockerPlatform = `linux/${dockerArch}`
+  const bazeliskAsset = `bazelisk-linux-${dockerArch}`
+
+  console.log(`Building and running rp_util in a ${dockerPlatform} ${DOCKER_LINUX_IMAGE} container...`)
 
   const binPath = RP_UTIL_BIN_RELPATH.split(path.sep).join('/')
   const dumpCommands = SCHEMA_FLAGS
@@ -151,7 +162,7 @@ function buildAndRunInDocker(sourceDir) {
     // against libatomic.so.1, which a bare ubuntu:22.04 image doesn't ship.
     'apt-get update -qq && apt-get install -qq -y libatomic1 curl ca-certificates',
     '&& curl -fsSL -o /usr/local/bin/bazel',
-    'https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64',
+    `https://github.com/bazelbuild/bazelisk/releases/latest/download/${bazeliskAsset}`,
     '&& chmod +x /usr/local/bin/bazel',
     `&& bazel --output_user_root=/bazel-cache build --lockfile_mode=off ${RP_UTIL_TARGET}`,
     dumpCommands,
@@ -159,7 +170,7 @@ function buildAndRunInDocker(sourceDir) {
   ].join(' ')
 
   const result = spawnSync('docker', [
-    'run', '--rm', '--platform', 'linux/amd64',
+    'run', '--rm', '--platform', dockerPlatform,
     '-v', `${sourceDir}:/work`,
     '-v', `${DOCKER_BAZEL_CACHE_VOLUME}:/bazel-cache`,
     '-v', `${DOCKER_BAZELISK_CACHE_VOLUME}:/root/.cache/bazelisk`,
