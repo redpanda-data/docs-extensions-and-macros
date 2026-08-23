@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../tools/prope
 from rp_util_merge import (
     _parse_embedded_json,
     _derive_enterprise_fields,
+    _resolve_type,
     map_rp_util_property,
     map_schema,
     map_rp_util_schemas,
@@ -111,7 +112,7 @@ class TestMapRpUtilProperty(unittest.TestCase):
             "is_enterprise": False,
         }
         prop = map_rp_util_property("abort_index_segment_size", meta, "cluster",
-                                     "src/v/config/configuration.cc")
+                                     "src/v/config/configuration.cc", {})
         self.assertEqual(prop["name"], "abort_index_segment_size")
         self.assertEqual(prop["config_scope"], "cluster")
         self.assertEqual(prop["defined_in"], "src/v/config/configuration.cc")
@@ -120,6 +121,7 @@ class TestMapRpUtilProperty(unittest.TestCase):
         self.assertEqual(prop["maximum"], 4294967295)
         self.assertFalse(prop["is_enterprise"])
         self.assertFalse(prop["is_deprecated"])
+        self.assertFalse(prop["is_secret"])
 
     def test_maps_a_broker_property_with_object_default(self):
         meta = {
@@ -131,7 +133,7 @@ class TestMapRpUtilProperty(unittest.TestCase):
             "default_value": '{"address":"127.0.0.1","port":9644}',
             "is_enterprise": False,
         }
-        prop = map_rp_util_property("admin", meta, "broker", "src/v/config/node_config.cc")
+        prop = map_rp_util_property("admin", meta, "broker", "src/v/config/node_config.cc", {})
         self.assertEqual(prop["default"], {"address": "127.0.0.1", "port": 9644})
         self.assertEqual(prop["config_scope"], "broker")
 
@@ -141,15 +143,142 @@ class TestMapRpUtilProperty(unittest.TestCase):
             "enum_values": ["none", "delete", "compact"], "is_enterprise": False,
         }
         prop = map_rp_util_property("log_cleanup_policy", meta, "cluster",
-                                     "src/v/config/configuration.cc")
+                                     "src/v/config/configuration.cc", {})
         self.assertEqual(prop["enum"], ["none", "delete", "compact"])
         self.assertNotIn("enum_values", prop)
 
     def test_omits_optional_fields_when_absent(self):
         meta = {"description": "d", "type": "boolean", "default_value": "false", "is_enterprise": False}
-        prop = map_rp_util_property("x", meta, "cluster", "src/v/config/configuration.cc")
-        for key in ("enum", "items", "example", "units", "aliases", "minimum", "maximum"):
+        prop = map_rp_util_property("x", meta, "cluster", "src/v/config/configuration.cc", {})
+        for key in ("enum", "items", "example", "units", "aliases", "minimum", "maximum", "default_human_readable"):
             self.assertNotIn(key, prop)
+
+    def test_is_secret_defaults_false_and_maps_true(self):
+        meta = {"description": "d", "type": "string", "default_value": '""', "is_enterprise": False}
+        prop = map_rp_util_property("x", meta, "cluster", "src/v/config/configuration.cc", {})
+        self.assertFalse(prop["is_secret"])
+
+        meta["is_secret"] = True
+        prop = map_rp_util_property("cloud_storage_secret_key", meta, "cluster",
+                                     "src/v/config/configuration.cc", {})
+        self.assertTrue(prop["is_secret"])
+
+    def test_example_gets_wrapped_in_backticks_like_ExampleTransformer(self):
+        meta = {
+            "description": "d", "type": "integer", "default_value": "1073741824",
+            "example": "1073741824", "is_enterprise": False,
+        }
+        prop = map_rp_util_property("x", meta, "cluster", "src/v/config/configuration.cc", {})
+        self.assertEqual(prop["example"], "`1073741824`")
+
+    def test_units_abbreviation_expands_to_full_word(self):
+        meta = {
+            "description": "d", "type": "integer", "default_value": "5000",
+            "units": "ms", "is_enterprise": False,
+        }
+        prop = map_rp_util_property("alive_timeout_ms", meta, "cluster",
+                                     "src/v/config/configuration.cc", {})
+        self.assertEqual(prop["units"], "milliseconds")
+
+    def test_default_human_readable_computed_for_ms_and_s_properties(self):
+        meta = {
+            "description": "d", "type": "integer", "default_value": "5000",
+            "units": "ms", "is_enterprise": False,
+        }
+        prop = map_rp_util_property("alive_timeout_ms", meta, "cluster",
+                                     "src/v/config/configuration.cc", {})
+        self.assertEqual(prop["default_human_readable"], "5 seconds")
+
+    def test_default_human_readable_skipped_when_default_is_null(self):
+        # nullable chrono properties (e.g. crash_loop_sleep_sec) have no
+        # default to format -- must not raise or fabricate a value.
+        meta = {
+            "description": "d", "type": "integer", "default_value": "null",
+            "units": "s", "nullable": True, "is_enterprise": False,
+        }
+        prop = map_rp_util_property("crash_loop_sleep_sec", meta, "cluster",
+                                     "src/v/config/configuration.cc", {})
+        self.assertNotIn("default_human_readable", prop)
+
+    def test_non_primitive_type_resolved_against_definitions(self):
+        definitions = {"model::rack_id": {"type": "string"}}
+        meta = {"description": "d", "type": "rack_id", "default_value": '""', "is_enterprise": False}
+        prop = map_rp_util_property("rack", meta, "broker", "src/v/config/node_config.cc", definitions)
+        self.assertEqual(prop["type"], "string")
+
+    def test_enum_backed_definition_type_renders_as_string_not_enum(self):
+        definitions = {
+            "model::partition_autobalancing_mode": {"type": "enum", "enum": ["off", "continuous"]},
+        }
+        meta = {
+            "description": "d", "type": "partition_autobalancing_mode",
+            "default_value": '"off"', "is_enterprise": False,
+        }
+        prop = map_rp_util_property("partition_autobalancing_mode", meta, "cluster",
+                                     "src/v/config/configuration.cc", definitions)
+        self.assertEqual(prop["type"], "string")
+
+    def test_unresolvable_non_primitive_type_falls_back_to_object(self):
+        # tls_config is a real, confirmed gap in baseline's definitions dict.
+        meta = {"description": "d", "type": "tls_config", "default_value": "{}", "is_enterprise": False}
+        prop = map_rp_util_property("broker_tls", meta, "broker",
+                                     "src/v/kafka/client/configuration.cc", {})
+        self.assertEqual(prop["type"], "object")
+
+    def test_unresolvable_type_falls_back_to_string_when_enum_values_present(self):
+        meta = {
+            "description": "d", "type": "some_unmapped_enum_type", "default_value": '"a"',
+            "enum_values": ["a", "b"], "is_enterprise": False,
+        }
+        prop = map_rp_util_property("x", meta, "cluster", "src/v/config/configuration.cc", {})
+        self.assertEqual(prop["type"], "string")
+
+    def test_single_element_list_default_unwraps_to_bare_scalar(self):
+        # Matches baseline's own convention (confirmed for admin, kafka_api,
+        # pandaproxy_api, schema_registry_api, sasl_mechanisms) -- otherwise
+        # formatPropertyValue.js renders a visible "[SCRAM]" where today's
+        # docs show a bare "SCRAM".
+        meta = {
+            "description": "d", "type": "array", "default_value": '["SCRAM"]',
+            "items": {"type": "string"}, "is_enterprise": False,
+        }
+        prop = map_rp_util_property("sasl_mechanisms", meta, "cluster",
+                                     "src/v/config/configuration.cc", {})
+        self.assertEqual(prop["default"], "SCRAM")
+
+    def test_multi_element_list_default_is_not_unwrapped(self):
+        meta = {
+            "description": "d", "type": "array", "default_value": '["a", "b"]',
+            "items": {"type": "string"}, "is_enterprise": False,
+        }
+        prop = map_rp_util_property("x", meta, "cluster", "src/v/config/configuration.cc", {})
+        self.assertEqual(prop["default"], ["a", "b"])
+
+    def test_items_type_is_also_resolved(self):
+        definitions = {"model::broker_endpoint": {"type": "object"}}
+        meta = {
+            "description": "d", "type": "array", "default_value": "[]",
+            "items": {"type": "broker_endpoint"}, "is_enterprise": False,
+        }
+        prop = map_rp_util_property("admin", meta, "broker", "src/v/config/node_config.cc", definitions)
+        self.assertEqual(prop["items"]["type"], "object")
+
+
+class TestResolveType(unittest.TestCase):
+    def test_primitive_passes_through(self):
+        self.assertEqual(_resolve_type("integer", False, {}), "integer")
+        self.assertEqual(_resolve_type("object", False, {}), "object")
+
+    def test_tries_bare_then_model_then_config_prefix(self):
+        self.assertEqual(_resolve_type("rack_id", False, {"model::rack_id": {"type": "string"}}), "string")
+        self.assertEqual(
+            _resolve_type("leaders_preference", False, {"config::leaders_preference": {"type": "object"}}),
+            "object",
+        )
+        self.assertEqual(
+            _resolve_type("net::unresolved_address", False, {"net::unresolved_address": {"type": "object"}}),
+            "object",
+        )
 
 
 class TestMapSchema(unittest.TestCase):
@@ -157,13 +286,13 @@ class TestMapSchema(unittest.TestCase):
         schema = {"properties": {
             "foo": {"description": "d", "type": "boolean", "default_value": "true", "is_enterprise": False},
         }}
-        mapped = map_schema(schema, "nodeSchema")
+        mapped = map_schema(schema, "nodeSchema", {})
         self.assertEqual(mapped["foo"]["config_scope"], "broker")
         self.assertEqual(mapped["foo"]["defined_in"], "src/v/config/node_config.cc")
 
     def test_empty_schema_maps_to_empty_dict(self):
-        self.assertEqual(map_schema({"properties": {}}, "clusterSchema"), {})
-        self.assertEqual(map_schema(None, "clusterSchema"), {})
+        self.assertEqual(map_schema({"properties": {}}, "clusterSchema", {}), {})
+        self.assertEqual(map_schema(None, "clusterSchema", {}), {})
 
 
 class TestMapRpUtilSchemas(unittest.TestCase):
@@ -251,6 +380,121 @@ class TestMergeWithExistingOutput(unittest.TestCase):
             merged["properties"]["abort_index_segment_size"]["description"],
             "overridden description",
         )
+
+    def test_topic_only_overrides_do_not_clobber_the_topic_property(self):
+        # Regression: docs-data/property-overrides.json's overrides are
+        # mostly topic-scoped, but `raw` here only ever has cluster+broker
+        # keys. An unfiltered apply_property_overrides call treats every
+        # topic-only key as unmatched and fabricates a phantom stub for it
+        # -- which then overwrites the topic property's real entry below.
+        existing = {
+            "properties": {
+                "abort_index_segment_size": {
+                    "name": "abort_index_segment_size", "config_scope": "cluster", "default": 999,
+                },
+                "retention.ms": {
+                    "name": "retention.ms", "config_scope": "topic", "is_topic_property": True,
+                    "default": 604800000, "description": "real topic description",
+                },
+            },
+            "definitions": {},
+        }
+        rp_util_schemas = {"clusterSchema": {"properties": {
+            "abort_index_segment_size": {
+                "description": "d", "type": "integer", "default_value": "50000", "is_enterprise": False,
+            },
+        }}}
+        overrides = {"properties": {
+            # A real override key from docs-data/property-overrides.json,
+            # topic-scoped, with no corresponding cluster/broker entry.
+            "retention.ms": {"description": "overridden topic description"},
+        }}
+
+        merged = merge_with_existing_output(existing, rp_util_schemas, overrides)
+
+        self.assertEqual(merged["properties"]["retention.ms"], existing["properties"]["retention.ms"])
+        self.assertNotIn("retention.ms", map_rp_util_schemas(rp_util_schemas))
+
+    def test_preserves_baseline_validator_derived_enum_when_rp_util_has_none(self):
+        # sasl_mechanisms: a plain property<vector<sstring>> with a runtime
+        # validator, not an enum_property<T> -- rp_util structurally cannot
+        # produce this enum/x-enum-metadata; it must not be clobbered.
+        # Real shape (confirmed against actual baseline output): for an
+        # array-typed property this lives under "items", not top-level.
+        existing = {
+            "properties": {
+                "sasl_mechanisms": {
+                    "name": "sasl_mechanisms", "config_scope": "cluster",
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["GSSAPI", "SCRAM", "OAUTHBEARER", "PLAIN"],
+                        "x-enum-metadata": {
+                            "GSSAPI": {"is_enterprise": True},
+                            "OAUTHBEARER": {"is_enterprise": True},
+                        },
+                    },
+                },
+            },
+            "definitions": {},
+        }
+        rp_util_schemas = {"clusterSchema": {"properties": {
+            "sasl_mechanisms": {
+                "description": "d", "type": "array", "default_value": '["SCRAM"]',
+                "items": {"type": "string"}, "is_enterprise": False,
+            },
+        }}}
+
+        merged = merge_with_existing_output(existing, rp_util_schemas, overrides={})
+
+        self.assertEqual(merged["properties"]["sasl_mechanisms"]["items"]["enum"],
+                          ["GSSAPI", "SCRAM", "OAUTHBEARER", "PLAIN"])
+        self.assertEqual(merged["properties"]["sasl_mechanisms"]["items"]["x-enum-metadata"],
+                          {"GSSAPI": {"is_enterprise": True}, "OAUTHBEARER": {"is_enterprise": True}})
+
+    def test_does_not_override_enum_rp_util_actually_provides(self):
+        existing = {
+            "properties": {
+                "log_cleanup_policy": {
+                    "name": "log_cleanup_policy", "config_scope": "cluster",
+                    "enum": ["delete", "compact", "compact,delete", "count"],
+                },
+            },
+            "definitions": {},
+        }
+        rp_util_schemas = {"clusterSchema": {"properties": {
+            "log_cleanup_policy": {
+                "description": "d", "type": "string", "default_value": '"delete"',
+                "enum_values": ["delete", "compact", "compact,delete"], "is_enterprise": False,
+            },
+        }}}
+
+        merged = merge_with_existing_output(existing, rp_util_schemas, overrides={})
+
+        # rp_util's own (correct) enum wins -- not baseline's fabricated "count".
+        self.assertEqual(merged["properties"]["log_cleanup_policy"]["enum"],
+                          ["delete", "compact", "compact,delete"])
+
+    def test_carries_forward_gets_restored_from_baseline(self):
+        existing = {
+            "properties": {
+                "cloud_storage_access_key": {
+                    "name": "cloud_storage_access_key", "config_scope": "cluster",
+                    "gets_restored": False,
+                },
+            },
+            "definitions": {},
+        }
+        rp_util_schemas = {"clusterSchema": {"properties": {
+            "cloud_storage_access_key": {
+                "description": "d", "type": "string", "default_value": "null",
+                "is_secret": True, "is_enterprise": False,
+            },
+        }}}
+
+        merged = merge_with_existing_output(existing, rp_util_schemas, overrides={})
+
+        self.assertFalse(merged["properties"]["cloud_storage_access_key"]["gets_restored"])
 
     def test_no_cloud_config_does_not_raise(self):
         existing = {"properties": {}, "definitions": {}}
