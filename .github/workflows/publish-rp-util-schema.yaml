@@ -40,12 +40,16 @@ jobs:
           path: streaming-enterprise
       - name: Install build dependencies
         # libatomic1: the hermetic LLVM toolchain's clang binary is linked
-        # against libatomic.so.1. build-essential: some genrules (e.g.
-        # liburing's) shell out straight to configure+make on PATH rather
-        # than through Bazel's own toolchain resolution. Usually already
-        # present on ubuntu-latest, but installed explicitly rather than
-        # assumed.
-        run: sudo apt-get update -qq && sudo apt-get install -qq -y libatomic1 build-essential
+        # against libatomic.so.1. build-essential + the autotools set below:
+        # several rules_foreign_cc genrules (liburing, krb5, ...) shell out
+        # straight to configure+make on PATH rather than through Bazel's own
+        # toolchain resolution. Usually already present on ubuntu-latest, but
+        # installed explicitly rather than assumed -- see rp-util-fetch.js's
+        # Docker path for how this list was arrived at.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq -y libatomic1 build-essential \
+            perl bison flex python3 pkg-config m4 autoconf automake libtool gawk texinfo
       - uses: bazel-contrib/setup-bazel@0.19.0
         with:
           bazelisk-cache: true
