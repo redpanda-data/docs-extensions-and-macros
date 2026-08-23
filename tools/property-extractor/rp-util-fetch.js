@@ -29,6 +29,12 @@ const STREAMING_ENTERPRISE_REPO = 'https://github.com/redpanda-data/streaming-en
 const RP_UTIL_TARGET = '//src/v/rp_util:rp_util'
 const RP_UTIL_BIN_RELPATH = path.join('bazel-bin', 'src', 'v', 'rp_util', 'rp_util')
 const DOCKER_LINUX_IMAGE = 'ubuntu:22.04'
+// Named (not anonymous) volumes so Bazel's output/repository cache survives
+// across separate `docker run --rm` invocations -- without this, every local
+// macOS run pays a full cold Bazel build (boost, seastar, openssl, ...) under
+// Rosetta emulation, which can take hours instead of minutes.
+const DOCKER_BAZEL_CACHE_VOLUME = 'rp-util-bazel-cache'
+const DOCKER_BAZELISK_CACHE_VOLUME = 'rp-util-bazelisk-cache'
 
 // Every schema rp_util can dump, and the key each shows up under in
 // getRpUtilSchema()'s return value. One flag per config_store class --
@@ -147,7 +153,7 @@ function buildAndRunInDocker(sourceDir) {
     '&& curl -fsSL -o /usr/local/bin/bazel',
     'https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64',
     '&& chmod +x /usr/local/bin/bazel',
-    `&& bazel build --lockfile_mode=off ${RP_UTIL_TARGET}`,
+    `&& bazel --output_user_root=/bazel-cache build --lockfile_mode=off ${RP_UTIL_TARGET}`,
     dumpCommands,
     copyCommand
   ].join(' ')
@@ -155,10 +161,12 @@ function buildAndRunInDocker(sourceDir) {
   const result = spawnSync('docker', [
     'run', '--rm', '--platform', 'linux/amd64',
     '-v', `${sourceDir}:/work`,
+    '-v', `${DOCKER_BAZEL_CACHE_VOLUME}:/bazel-cache`,
+    '-v', `${DOCKER_BAZELISK_CACHE_VOLUME}:/root/.cache/bazelisk`,
     '-w', '/work',
     DOCKER_LINUX_IMAGE,
     'bash', '-c', command
-  ], { encoding: 'utf8', timeout: 1800000, maxBuffer: 50 * 1024 * 1024 })
+  ], { encoding: 'utf8', timeout: 10800000, maxBuffer: 50 * 1024 * 1024 })
 
   if (result.status !== 0) {
     throw new Error(`Failed to build/run rp_util in Docker: ${result.stderr}`)
