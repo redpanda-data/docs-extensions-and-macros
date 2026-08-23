@@ -20,7 +20,12 @@ permissions:
   contents: write
 jobs:
   build-and-publish:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: Bazel's rules_foreign_cc bundles a prebuilt
+    # ninja binary requiring glibc >= 2.38, which Ubuntu 22.04 (glibc 2.35)
+    # doesn't have. Confirmed locally via CMake's own "GLIBC_2.38 not found"
+    # failure. ubuntu-latest is migrating to 24.04 but isn't there on every
+    # runner yet, so pin explicitly rather than depend on the rollout.
+    runs-on: ubuntu-24.04
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
         with:

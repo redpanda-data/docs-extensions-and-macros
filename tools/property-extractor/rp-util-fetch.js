@@ -28,7 +28,10 @@ const { getGitHubToken, getAuthenticatedGitHubUrl } = require('../../cli-utils/g
 const STREAMING_ENTERPRISE_REPO = 'https://github.com/redpanda-data/streaming-enterprise.git'
 const RP_UTIL_TARGET = '//src/v/rp_util:rp_util'
 const RP_UTIL_BIN_RELPATH = path.join('bazel-bin', 'src', 'v', 'rp_util', 'rp_util')
-const DOCKER_LINUX_IMAGE = 'ubuntu:22.04'
+// 24.04, not 22.04: Bazel's rules_foreign_cc bundles a prebuilt ninja binary
+// requiring glibc >= 2.38, which Ubuntu 22.04 (glibc 2.35) doesn't have --
+// confirmed via CMake's own "GLIBC_2.38 not found" failure trying to run it.
+const DOCKER_LINUX_IMAGE = 'ubuntu:24.04'
 // Named (not anonymous) volumes so Bazel's output/repository cache survives
 // across separate `docker run --rm` invocations -- without this, every local
 // macOS run pays a full cold Bazel build (boost, seastar, openssl, ...) under
