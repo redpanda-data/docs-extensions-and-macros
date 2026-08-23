@@ -78,6 +78,12 @@ clean:
 # subcommand), never embedded in the remote URL, so no token is persisted in
 # the clone's .git/config. The clone lives inside the installed package dir,
 # so a persisted token would be readable by anything that can list it.
+# GH_TOKEN is checked first because `doc-tools generate property-docs`
+# pre-resolves it via cli-utils/github-token.js's full priority chain
+# (notably GIT_CREDENTIALS, the token Antora/Netlify builds actually
+# populate) before invoking this Makefile. REDPANDA_GITHUB_TOKEN/
+# GITHUB_TOKEN are the fallback for invoking `make` directly, without going
+# through doc-tools.js.
 redpanda-git:
 	@mkdir -p "$(TMP_ROOT)"
 	@echo "🔄 Cloning/updating Redpanda into $(REDPANDA_SRC)…"
@@ -86,7 +92,7 @@ redpanda-git:
 	    git -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "+refs/heads/$(TAG):refs/remotes/origin/$(TAG)" 2>/dev/null || \
 	    git -C "$(REDPANDA_SRC)" fetch --all --tags -q; \
 	else \
-	  GH_TOKEN=$${REDPANDA_GITHUB_TOKEN:-$${GITHUB_TOKEN:-$${GH_TOKEN}}}; \
+	  GH_TOKEN=$${GH_TOKEN:-$${REDPANDA_GITHUB_TOKEN:-$${GITHUB_TOKEN}}}; \
 	  REPO_URL="https://github.com/redpanda-data/redpanda.git"; \
 	  if [ -n "$$GH_TOKEN" ]; then \
 	    echo "🔑 Using authenticated clone (token provided)"; \

@@ -975,6 +975,7 @@ automation
   .option('--overrides <path>', 'Optional JSON file with property description overrides', 'docs-data/property-overrides.json')
   .option('--output-dir <dir>', 'Where to write all generated files', 'modules/reference')
   .option('--cloud-support', 'Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. Set the token as an environment variable using GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN', true)
+  .option('--no-cloud-support', 'Skip Cloud support tags entirely -- and the GitHub token requirement that comes with them')
   .option('--template-property <path>', 'Custom Handlebars template for individual property sections')
   .option('--template-topic-property <path>', 'Custom Handlebars template for topic property sections')
   .option('--template-topic-property-mappings <path>', 'Custom Handlebars template for topic property mappings table')
@@ -992,11 +993,20 @@ automation
 
     const newTag = options.tag || options.branch || 'dev'
 
+    // Resolved once, via the same priority chain every other GitHub-fetching
+    // command in this CLI already uses (cli-utils/github-token.js) --
+    // notably GIT_CREDENTIALS, which is the token Antora/Netlify builds
+    // actually populate, and which the Makefile's own narrower shell
+    // fallback (REDPANDA_GITHUB_TOKEN/GITHUB_TOKEN/GH_TOKEN only) can't see.
+    // Passed through as GH_TOKEN so the Makefile's clone step picks up
+    // whatever this resolved, private-repo access included, without having
+    // to duplicate the GIT_CREDENTIALS parsing logic in shell.
+    const { getGitHubToken } = require('../cli-utils/github-token')
+    const githubToken = getGitHubToken()
+
     if (options.cloudSupport) {
       console.log('Validating cloud support dependencies...')
-      const { getGitHubToken } = require('../cli-utils/github-token')
-      const token = getGitHubToken()
-      if (!token) {
+      if (!githubToken) {
         console.error('Error: Cloud support requires a GitHub token')
         console.error('   Set: export GITHUB_TOKEN=your_token_here')
         console.error('   Or disable cloud support with: --no-cloud-support')
@@ -1028,6 +1038,7 @@ automation
       console.log(`Building property docs for ${tag}…`)
       const args = ['build', `TAG=${tag}`]
       const env = { ...process.env }
+      if (githubToken) env.GH_TOKEN = githubToken
       if (overrides) env.OVERRIDES = path.resolve(overrides)
       if (options.cloudSupport) env.CLOUD_SUPPORT = '1'
       if (templates.property) env.TEMPLATE_PROPERTY = path.resolve(templates.property)
