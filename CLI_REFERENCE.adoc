@@ -542,6 +542,9 @@ Where to write all generated files (default: "modules/reference")
 `--cloud-support`::
 Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. Set the token as an environment variable using GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN (default: true)
 
+`--no-cloud-support`::
+Skip Cloud support tags entirely -- and the GitHub token requirement that comes with them
+
 `--template-property <path>`::
 Custom Handlebars template for individual property sections
 
