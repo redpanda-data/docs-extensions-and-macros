@@ -38,11 +38,14 @@ jobs:
           ref: ${{ inputs.tag }}
           token: ${{ env.ACTIONS_BOT_TOKEN }}
           path: streaming-enterprise
-      - name: Install libatomic1
-        # The hermetic LLVM toolchain's clang binary is linked against
-        # libatomic.so.1. Usually already present on ubuntu-latest, but
-        # installed explicitly rather than assumed.
-        run: sudo apt-get update -qq && sudo apt-get install -qq -y libatomic1
+      - name: Install build dependencies
+        # libatomic1: the hermetic LLVM toolchain's clang binary is linked
+        # against libatomic.so.1. build-essential: some genrules (e.g.
+        # liburing's) shell out straight to configure+make on PATH rather
+        # than through Bazel's own toolchain resolution. Usually already
+        # present on ubuntu-latest, but installed explicitly rather than
+        # assumed.
+        run: sudo apt-get update -qq && sudo apt-get install -qq -y libatomic1 build-essential
       - uses: bazel-contrib/setup-bazel@0.19.0
         with:
           bazelisk-cache: true

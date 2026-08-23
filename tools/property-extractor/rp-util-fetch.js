@@ -160,7 +160,11 @@ function buildAndRunInDocker(sourceDir) {
   const command = [
     // libatomic1: the hermetic LLVM toolchain's clang binary is linked
     // against libatomic.so.1, which a bare ubuntu:22.04 image doesn't ship.
-    'apt-get update -qq && apt-get install -qq -y libatomic1 curl ca-certificates',
+    // build-essential: some genrules (e.g. liburing's) shell out straight to
+    // `configure`+`make` on PATH rather than going through Bazel's own
+    // toolchain resolution, so they need a real host make/cc regardless of
+    // the hermetic LLVM toolchain also being present.
+    'apt-get update -qq && apt-get install -qq -y libatomic1 build-essential curl ca-certificates',
     '&& curl -fsSL -o /usr/local/bin/bazel',
     `https://github.com/bazelbuild/bazelisk/releases/latest/download/${bazeliskAsset}`,
     '&& chmod +x /usr/local/bin/bazel',
