@@ -18,6 +18,7 @@ const { spawnSync } = require('child_process')
 const githubToken = require('../../cli-utils/github-token')
 const {
   getRpUtilSchema,
+  SCHEMA_FLAGS,
   cloneStreamingEnterprise,
   buildNative,
   runSchemaFlag
@@ -166,21 +167,21 @@ describe('getRpUtilSchema', () => {
     fs.rmSync.mockRestore()
   })
 
-  test('uses an existing sourcePath as-is and never clones', () => {
+  test('uses an existing sourcePath as-is, never clones, and fetches every schema', () => {
     jest.spyOn(os, 'platform').mockReturnValue('linux')
-    spawnSync
-      .mockReturnValueOnce({ status: 0, stdout: 'bazel 7.0.0', stderr: '' }) // bazel --version
-      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' }) // bazel build
-      .mockReturnValueOnce({ status: 0, stdout: '{"cluster":true}', stderr: '' })
-      .mockReturnValueOnce({ status: 0, stdout: '{"node":true}', stderr: '' })
+    spawnSync.mockImplementation((cmd, args) => {
+      if (args[0] === '--version') return { status: 0, stdout: 'bazel 7.0.0', stderr: '' }
+      if (args[0] === 'build') return { status: 0, stdout: '', stderr: '' }
+      // one of SCHEMA_FLAGS' --*_schema_json flags
+      return { status: 0, stdout: JSON.stringify({ flag: args[0] }), stderr: '' }
+    })
 
     const result = getRpUtilSchema('v26.2.2', { sourcePath: '/existing/checkout' })
 
-    expect(result).toEqual({
-      clusterSchema: { cluster: true },
-      nodeSchema: { node: true },
-      sourcePath: '/existing/checkout'
-    })
+    expect(result.sourcePath).toBe('/existing/checkout')
+    for (const { key, flag } of SCHEMA_FLAGS) {
+      expect(result[key]).toEqual({ flag })
+    }
     expect(fs.mkdtempSync).not.toHaveBeenCalled()
     os.platform.mockRestore()
   })
@@ -189,12 +190,7 @@ describe('getRpUtilSchema', () => {
     jest.spyOn(os, 'platform').mockReturnValue('linux')
     githubToken.getGitHubToken.mockReturnValue('tok')
     githubToken.getAuthenticatedGitHubUrl.mockReturnValue('https://tok@github.com/redpanda-data/streaming-enterprise.git')
-    spawnSync
-      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' }) // clone
-      .mockReturnValueOnce({ status: 0, stdout: 'bazel 7.0.0', stderr: '' })
-      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })
-      .mockReturnValueOnce({ status: 0, stdout: '{}', stderr: '' })
-      .mockReturnValueOnce({ status: 0, stdout: '{}', stderr: '' })
+    spawnSync.mockReturnValue({ status: 0, stdout: '{}', stderr: '' })
 
     getRpUtilSchema('v26.2.2')
 

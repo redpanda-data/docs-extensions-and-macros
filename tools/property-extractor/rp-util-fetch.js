@@ -7,8 +7,8 @@ const path = require('path')
 const { getGitHubToken, getAuthenticatedGitHubUrl } = require('../../cli-utils/github-token')
 
 /**
- * rp_util's cluster/node config schema JSON, for any streaming-enterprise
- * ref (tag, branch, or SHA), built from source every time.
+ * rp_util's config schema JSON, for any streaming-enterprise ref (tag,
+ * branch, or SHA), built from source every time.
  *
  * This is the foundation, not a fallback: doc generation for work-in-progress
  * branches depends on this working on its own, with no dependency on any
@@ -17,14 +17,29 @@ const { getGitHubToken, getAuthenticatedGitHubUrl } = require('../../cli-utils/g
  * see the publish-rp-util-schema workflow -- and always falls through to
  * this module when the cache misses.
  *
- * rp_util covers cluster and node (broker) scope only -- topic properties
- * stay on the existing C++-source-parsing path (property_extractor.py).
+ * rp_util covers cluster scope (config::configuration) and everything that
+ * makes up broker scope: config::node_config plus the three standalone
+ * config_store classes that live alongside it (Pandaproxy, its Kafka
+ * client, and Schema Registry). Topic properties stay on the existing
+ * C++-source-parsing path (property_extractor.py) -- rp_util has no
+ * equivalent for them.
  */
 
 const STREAMING_ENTERPRISE_REPO = 'https://github.com/redpanda-data/streaming-enterprise.git'
 const RP_UTIL_TARGET = '//src/v/rp_util:rp_util'
 const RP_UTIL_BIN_RELPATH = path.join('bazel-bin', 'src', 'v', 'rp_util', 'rp_util')
 const DOCKER_LINUX_IMAGE = 'ubuntu:22.04'
+
+// Every schema rp_util can dump, and the key each shows up under in
+// getRpUtilSchema()'s return value. One flag per config_store class --
+// see rp_util/main.cc.
+const SCHEMA_FLAGS = [
+  { key: 'clusterSchema', flag: '--config_schema_json' },
+  { key: 'nodeSchema', flag: '--node_config_schema_json' },
+  { key: 'pandaproxySchema', flag: '--pandaproxy_config_schema_json' },
+  { key: 'kafkaClientSchema', flag: '--kafka_client_config_schema_json' },
+  { key: 'schemaRegistrySchema', flag: '--schema_registry_config_schema_json' }
+]
 
 /**
  * Shallow-clone streaming-enterprise at a ref into destDir. Tries a
@@ -108,25 +123,33 @@ function buildNative(sourceDir) {
 
 /**
  * Build //src/v/rp_util:rp_util inside a Linux Docker container, and run
- * both schema dumps inside that same container -- the binary itself is a
+ * every schema dump inside that same container -- the binary itself is a
  * Linux ELF that can't be exec'd directly on the host once the container
  * exits, so unlike buildNative() this returns the parsed JSON directly
  * rather than a binary path.
  * @param {string} sourceDir - streaming-enterprise checkout root
- * @returns {{clusterSchema: object, nodeSchema: object}}
+ * @returns {object} keyed by SCHEMA_FLAGS' `key`s
  */
 function buildAndRunInDocker(sourceDir) {
   checkDockerAvailable()
   console.log(`Building and running rp_util in a ${DOCKER_LINUX_IMAGE} container...`)
 
+  const binPath = RP_UTIL_BIN_RELPATH.split(path.sep).join('/')
+  const dumpCommands = SCHEMA_FLAGS
+    .map(({ key, flag }) => `&& ./${binPath} ${flag} > /tmp/${key}.json`)
+    .join(' ')
+  const copyCommand = `&& cp ${SCHEMA_FLAGS.map(({ key }) => `/tmp/${key}.json`).join(' ')} /work/`
+
   const command = [
-    'curl -fsSL -o /usr/local/bin/bazel',
+    // libatomic1: the hermetic LLVM toolchain's clang binary is linked
+    // against libatomic.so.1, which a bare ubuntu:22.04 image doesn't ship.
+    'apt-get update -qq && apt-get install -qq -y libatomic1 curl ca-certificates',
+    '&& curl -fsSL -o /usr/local/bin/bazel',
     'https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64',
     '&& chmod +x /usr/local/bin/bazel',
     `&& bazel build --lockfile_mode=off ${RP_UTIL_TARGET}`,
-    `&& ./${RP_UTIL_BIN_RELPATH.split(path.sep).join('/')} --config_schema_json > /tmp/cluster.json`,
-    `&& ./${RP_UTIL_BIN_RELPATH.split(path.sep).join('/')} --node_config_schema_json > /tmp/node.json`,
-    '&& cp /tmp/cluster.json /tmp/node.json /work/'
+    dumpCommands,
+    copyCommand
   ].join(' ')
 
   const result = spawnSync('docker', [
@@ -141,10 +164,11 @@ function buildAndRunInDocker(sourceDir) {
     throw new Error(`Failed to build/run rp_util in Docker: ${result.stderr}`)
   }
 
-  return {
-    clusterSchema: JSON.parse(fs.readFileSync(path.join(sourceDir, 'cluster.json'), 'utf8')),
-    nodeSchema: JSON.parse(fs.readFileSync(path.join(sourceDir, 'node.json'), 'utf8'))
+  const schemas = {}
+  for (const { key } of SCHEMA_FLAGS) {
+    schemas[key] = JSON.parse(fs.readFileSync(path.join(sourceDir, `${key}.json`), 'utf8'))
   }
+  return schemas
 }
 
 function runSchemaFlag(binaryPath, flag) {
@@ -162,14 +186,16 @@ function runSchemaFlag(binaryPath, flag) {
 }
 
 /**
- * Get rp_util's cluster and node (broker) config schema JSON for a
- * streaming-enterprise ref, building from source every time.
+ * Get every schema rp_util can dump (cluster, plus everything that makes up
+ * broker scope) for a streaming-enterprise ref, building from source every
+ * time.
  * @param {string} ref - Branch, tag, or commit SHA in redpanda-data/streaming-enterprise
  * @param {object} [options]
  * @param {string} [options.sourcePath] - Use an existing local streaming-enterprise
  *   checkout instead of cloning (caller is responsible for it being at `ref`)
  * @param {boolean} [options.keepSource] - Don't delete a clone this function made
- * @returns {{clusterSchema: object, nodeSchema: object, sourcePath: string}}
+ * @returns {{clusterSchema: object, nodeSchema: object, pandaproxySchema: object,
+ *   kafkaClientSchema: object, schemaRegistrySchema: object, sourcePath: string}}
  */
 function getRpUtilSchema(ref, options = {}) {
   const { sourcePath, keepSource = false } = options
@@ -188,16 +214,17 @@ function getRpUtilSchema(ref, options = {}) {
   }
 
   try {
+    let schemas
     if (os.platform() === 'linux') {
       const binaryPath = buildNative(sourceDir)
-      return {
-        clusterSchema: runSchemaFlag(binaryPath, '--config_schema_json'),
-        nodeSchema: runSchemaFlag(binaryPath, '--node_config_schema_json'),
-        sourcePath: sourceDir
+      schemas = {}
+      for (const { key, flag } of SCHEMA_FLAGS) {
+        schemas[key] = runSchemaFlag(binaryPath, flag)
       }
+    } else {
+      schemas = buildAndRunInDocker(sourceDir)
     }
-    const { clusterSchema, nodeSchema } = buildAndRunInDocker(sourceDir)
-    return { clusterSchema, nodeSchema, sourcePath: sourceDir }
+    return { ...schemas, sourcePath: sourceDir }
   } finally {
     if (ownsClone && !keepSource) {
       fs.rmSync(sourceDir, { recursive: true, force: true })
@@ -207,6 +234,7 @@ function getRpUtilSchema(ref, options = {}) {
 
 module.exports = {
   getRpUtilSchema,
+  SCHEMA_FLAGS,
   // exported for testing
   cloneStreamingEnterprise,
   buildNative,
