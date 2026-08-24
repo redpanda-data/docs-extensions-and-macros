@@ -53,8 +53,12 @@ describe('cloneStreamingEnterprise', () => {
   beforeEach(() => {
     spawnSync.mockReset()
     githubToken.getGitHubToken.mockReset()
-    githubToken.getAuthenticatedGitHubUrl.mockReset()
   })
+
+  // Basic auth header for x-access-token:tok, asserted against directly
+  // rather than recomputed, so a broken encoding in the implementation
+  // can't silently agree with itself.
+  const AUTH_HEADER_TOK = 'http.https://github.com/.extraheader=AUTHORIZATION: basic eC1hY2Nlc3MtdG9rZW46dG9r'
 
   test('throws when no GitHub token is available -- the repo is private', () => {
     githubToken.getGitHubToken.mockReturnValue(null)
@@ -63,22 +67,22 @@ describe('cloneStreamingEnterprise', () => {
     expect(spawnSync).not.toHaveBeenCalled()
   })
 
-  test('clones shallow by branch/tag name when that succeeds', () => {
+  test('clones shallow by branch/tag name when that succeeds, with the token passed as a per-invocation header, never in the URL', () => {
     githubToken.getGitHubToken.mockReturnValue('tok')
-    githubToken.getAuthenticatedGitHubUrl.mockReturnValue('https://tok@github.com/redpanda-data/streaming-enterprise.git')
     spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' })
 
     cloneStreamingEnterprise('v26.2.2', '/tmp/dest')
 
     expect(spawnSync).toHaveBeenCalledTimes(1)
     const args = spawnSync.mock.calls[0][1]
-    expect(args).toEqual(['clone', '-q', '--depth', '1', '--branch', 'v26.2.2',
-      'https://tok@github.com/redpanda-data/streaming-enterprise.git', '/tmp/dest'])
+    expect(args).toEqual(['-c', AUTH_HEADER_TOK, 'clone', '-q', '--depth', '1', '--branch', 'v26.2.2',
+      'https://github.com/redpanda-data/streaming-enterprise.git', '/tmp/dest'])
+    // The plain repo URL never carries the token in its userinfo.
+    expect(args.some((a) => a.includes('@github.com'))).toBe(false)
   })
 
   test('falls back to a full clone + checkout when the ref is not a branch/tag at HEAD', () => {
     githubToken.getGitHubToken.mockReturnValue('tok')
-    githubToken.getAuthenticatedGitHubUrl.mockReturnValue('https://tok@github.com/redpanda-data/streaming-enterprise.git')
 
     jest.spyOn(fs, 'rmSync').mockImplementation(() => {})
     spawnSync
@@ -90,8 +94,9 @@ describe('cloneStreamingEnterprise', () => {
 
     expect(spawnSync).toHaveBeenCalledTimes(3)
     expect(spawnSync.mock.calls[1][1]).toEqual(
-      ['clone', '-q', 'https://tok@github.com/redpanda-data/streaming-enterprise.git', '/tmp/dest']
+      ['-c', AUTH_HEADER_TOK, 'clone', '-q', 'https://github.com/redpanda-data/streaming-enterprise.git', '/tmp/dest']
     )
+    // Checkout runs against the already-cloned local repo -- no auth needed.
     expect(spawnSync.mock.calls[2]).toEqual([
       'git', ['checkout', '-q', '48fb6d6f93d8f16fb08c81a2802dc17f1df1d46d'],
       expect.objectContaining({ cwd: '/tmp/dest' })
@@ -101,7 +106,6 @@ describe('cloneStreamingEnterprise', () => {
 
   test('throws when both the shallow and full clone attempts fail', () => {
     githubToken.getGitHubToken.mockReturnValue('tok')
-    githubToken.getAuthenticatedGitHubUrl.mockReturnValue('https://tok@github.com/redpanda-data/streaming-enterprise.git')
 
     jest.spyOn(fs, 'rmSync').mockImplementation(() => {})
     spawnSync
@@ -113,23 +117,34 @@ describe('cloneStreamingEnterprise', () => {
     fs.rmSync.mockRestore()
   })
 
-  test('redacts the embedded token from git stderr before throwing', () => {
-    // getAuthenticatedGitHubUrl embeds the token in the URL userinfo (see
-    // cli-utils/github-token.js) -- git echoes that same URL back in common
-    // failures (private repo not found, bad ref, ...), so a raw stderr
-    // passthrough would leak the token into plain CI logs.
+  test('never embeds the token in the remote URL, for either the shallow or the full-clone fallback', () => {
     githubToken.getGitHubToken.mockReturnValue('super-secret-token')
-    githubToken.getAuthenticatedGitHubUrl.mockReturnValue(
-      'https://super-secret-token@github.com/redpanda-data/streaming-enterprise.git'
-    )
 
     jest.spyOn(fs, 'rmSync').mockImplementation(() => {})
     spawnSync
+      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'branch not found' }) // shallow clone fails
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' }) // full clone
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' }) // checkout
+
+    cloneStreamingEnterprise('some-ref', '/tmp/dest')
+
+    for (const call of spawnSync.mock.calls) {
+      expect(JSON.stringify(call)).not.toContain('super-secret-token')
+    }
+    fs.rmSync.mockRestore()
+  })
+
+  test('redacts a leaked authorization header from git stderr before throwing', () => {
+    // Defense in depth: even though the token now travels only via the -c
+    // extraheader flag (never the URL), redactCredentials still scrubs it
+    // if git ever echoed a failing invocation's config back in stderr.
+    githubToken.getGitHubToken.mockReturnValue('super-secret-token')
+
+    jest.spyOn(fs, 'rmSync').mockImplementation(() => {})
+    const leakedHeader = `AUTHORIZATION: basic ${Buffer.from('x-access-token:super-secret-token').toString('base64')}`
+    spawnSync
       .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'branch not found' })
-      .mockReturnValueOnce({
-        status: 1, stdout: '',
-        stderr: "fatal: repository 'https://super-secret-token@github.com/redpanda-data/streaming-enterprise.git/' not found",
-      })
+      .mockReturnValueOnce({ status: 1, stdout: '', stderr: `fatal: unable to access, config dump: http.extraheader=${leakedHeader}` })
 
     let thrown
     try {
@@ -139,7 +154,6 @@ describe('cloneStreamingEnterprise', () => {
     }
     expect(thrown).toBeDefined()
     expect(thrown.message).not.toContain('super-secret-token')
-    expect(thrown.message).toContain('https://***@github.com')
     fs.rmSync.mockRestore()
   })
 })

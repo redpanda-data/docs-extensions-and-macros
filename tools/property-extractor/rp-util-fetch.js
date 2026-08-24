@@ -4,7 +4,7 @@ const { spawnSync } = require('child_process')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { getGitHubToken, getAuthenticatedGitHubUrl } = require('../../cli-utils/github-token')
+const { getGitHubToken } = require('../../cli-utils/github-token')
 
 /**
  * rp_util's config schema JSON, for any streaming-enterprise ref (tag,
@@ -59,14 +59,33 @@ const SCHEMA_FLAGS = [
  * @param {string} destDir - Destination directory (must not exist yet)
  */
 /**
- * Strip a credential embedded in a Git remote URL's userinfo (e.g.
- * https://<token>@github.com/...) out of text before it's surfaced anywhere
- * that gets logged -- an Error message ends up in plain CI logs, and Git
- * echoes the authenticated remote URL verbatim in common failures (a
- * private repo it can't access, a bad ref, ...).
+ * Strip a credential out of text before it's surfaced anywhere that gets
+ * logged -- an Error message ends up in plain CI logs. Covers both a
+ * credential embedded in a Git remote URL's userinfo (e.g.
+ * https://<token>@github.com/...), which Git echoes back verbatim in common
+ * failures (a private repo it can't access, a bad ref, ...), and the
+ * base64-encoded Basic-auth header this module passes via `git -c
+ * http.extraheader`, in case Git ever echoes a failing command's config back.
  */
 function redactCredentials(text) {
-  return String(text || '').replace(/\/\/[^/@\s]+@/g, '//***@')
+  return String(text || '')
+    .replace(/\/\/[^/@\s]+@/g, '//***@')
+    .replace(/(authorization:\s*basic\s+)\S+/gi, '$1***')
+}
+
+/**
+ * Build the `git -c ...` args that authenticate a github.com request via a
+ * per-invocation HTTP header, the same pattern this repo's own
+ * `tools/property-extractor/Makefile` (`redpanda-git` target) uses -- so the
+ * token is only ever passed at process-invocation time and never written
+ * into the resulting clone's .git/config, where it would otherwise sit
+ * readable on disk for the entire downstream Bazel/Docker build.
+ * @param {string} token
+ * @returns {string[]} args to splice in before the git subcommand (e.g. `clone`)
+ */
+function gitAuthConfigArgs(token) {
+  const basicAuth = Buffer.from(`x-access-token:${token}`).toString('base64')
+  return ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basicAuth}`]
 }
 
 function cloneStreamingEnterprise(ref, destDir) {
@@ -77,11 +96,14 @@ function cloneStreamingEnterprise(ref, destDir) {
       'Set GITHUB_TOKEN, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, or GIT_CREDENTIALS.'
     )
   }
-  const repoUrl = getAuthenticatedGitHubUrl(STREAMING_ENTERPRISE_REPO)
+  // Plain (unauthenticated) URL -- auth travels only via the per-invocation
+  // header below, so it's never written to destDir/.git/config.
+  const repoUrl = STREAMING_ENTERPRISE_REPO
+  const authArgs = gitAuthConfigArgs(token)
 
   console.log(`Cloning streaming-enterprise@${ref} into ${destDir}...`)
   const shallow = spawnSync('git', [
-    'clone', '-q', '--depth', '1', '--branch', ref, repoUrl, destDir
+    ...authArgs, 'clone', '-q', '--depth', '1', '--branch', ref, repoUrl, destDir
   ], { encoding: 'utf8', timeout: 300000 })
 
   if (shallow.status === 0) return
@@ -89,7 +111,7 @@ function cloneStreamingEnterprise(ref, destDir) {
   // Not a branch/tag name at HEAD -- full clone, then checkout the ref directly.
   fs.rmSync(destDir, { recursive: true, force: true })
   console.log(`'${ref}' is not a branch/tag at HEAD; cloning full history to resolve it...`)
-  const full = spawnSync('git', ['clone', '-q', repoUrl, destDir], {
+  const full = spawnSync('git', [...authArgs, 'clone', '-q', repoUrl, destDir], {
     encoding: 'utf8', timeout: 600000
   })
   if (full.status !== 0) {

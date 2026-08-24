@@ -148,6 +148,10 @@ ifndef::env-cloud[]
 
 | Restored on xref:manage:whole-cluster-restore.adoc[Whole Cluster Restore]
 | {{#if gets_restored}}Yes{{else}}No{{/if}}
+{{else if (eq rp_util_merge_status "unavailable")}}
+
+| Restored on xref:manage:whole-cluster-restore.adoc[Whole Cluster Restore]
+| Unknown (rp_util merge unavailable this build)
 {{/if}}
 endif::[]
 {{#if visibility}}

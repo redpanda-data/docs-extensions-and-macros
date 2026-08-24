@@ -20,10 +20,11 @@ jest.mock('../../tools/property-extractor/rp-util-fetch', () => ({
 }))
 
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 const { getRpUtilSchema } = require('../../tools/property-extractor/rp-util-fetch')
-const { main } = require('../../tools/property-extractor/merge-rp-util')
+const { main, markRpUtilMergeUnavailable } = require('../../tools/property-extractor/merge-rp-util')
 
 describe('merge-rp-util main()', () => {
   let tmpDir
@@ -144,28 +145,47 @@ describe('merge-rp-util main()', () => {
     expect(getRpUtilSchema).toHaveBeenCalledWith('v26.2.2', undefined)
   })
 
-  test('never touches the real output when getRpUtilSchema rejects', async () => {
+  test('never touches the real output when getRpUtilSchema rejects, but marks cluster/broker properties as unavailable', async () => {
     getRpUtilSchema.mockRejectedValue(new Error('no token, and Docker is not running'))
+    jest.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({
+      properties: {
+        a: { config_scope: 'cluster' }, // no gets_restored -- should be marked
+        b: { config_scope: 'cluster', gets_restored: true }, // already has it -- untouched
+        c: { config_scope: 'topic' } // out of rp_util's scope -- untouched
+      }
+    }))
 
     await main()
 
     expect(spawnSync).not.toHaveBeenCalled()
     expect(renamed).toBeNull()
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('no token, and Docker is not running'))
+    const written = JSON.parse(writtenFiles['/gen/v26.2.2-properties.json'])
+    expect(written.properties.a.rp_util_merge_status).toBe('unavailable')
+    expect(written.properties.b.rp_util_merge_status).toBeUndefined()
+    expect(written.properties.c.rp_util_merge_status).toBeUndefined()
   })
 
-  test('skips the merge entirely when rp_util returned no schemas at all', async () => {
+  test('skips the merge entirely when rp_util returned no schemas at all, and marks properties as unavailable', async () => {
     getRpUtilSchema.mockResolvedValue({ sourcePath: null })
+    jest.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({
+      properties: { a: { config_scope: 'broker' } }
+    }))
 
     await main()
 
     expect(spawnSync).not.toHaveBeenCalled()
     expect(renamed).toBeNull()
+    const written = JSON.parse(writtenFiles['/gen/v26.2.2-properties.json'])
+    expect(written.properties.a.rp_util_merge_status).toBe('unavailable')
   })
 
-  test('never renames the temp file over the real output when the merge subprocess fails', async () => {
+  test('never renames the temp file over the real output when the merge subprocess fails, and marks properties as unavailable', async () => {
     getRpUtilSchema.mockResolvedValue({ clusterSchema: { a: 1 }, sourcePath: null })
     spawnSync.mockReturnValue({ status: 1 })
+    jest.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({
+      properties: { a: { config_scope: 'cluster' } }
+    }))
 
     await main()
 
@@ -173,16 +193,27 @@ describe('merge-rp-util main()', () => {
     // The (failed) temp output is cleaned up rather than left behind.
     expect(removedPaths).toContain('/gen/v26.2.2-properties.json.rp-util-merge-tmp')
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('rp_util merge failed'))
+    const written = JSON.parse(writtenFiles['/gen/v26.2.2-properties.json'])
+    expect(written.properties.a.rp_util_merge_status).toBe('unavailable')
   })
 
   test('never renames the temp file over the real output when spawnSync itself errors', async () => {
     getRpUtilSchema.mockResolvedValue({ clusterSchema: { a: 1 }, sourcePath: null })
     spawnSync.mockReturnValue({ error: new Error('python3 not found'), status: null })
+    jest.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({ properties: {} }))
 
     await main()
 
     expect(renamed).toBeNull()
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('python3 not found'))
+  })
+
+  test('never throws when the enhanced file cannot be read while marking unavailable properties', async () => {
+    getRpUtilSchema.mockRejectedValue(new Error('boom'))
+    jest.spyOn(fs, 'readFileSync').mockImplementation(() => { throw new Error('ENOENT') })
+
+    await expect(main()).resolves.toBeUndefined()
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('could not mark rp_util merge as unavailable'))
   })
 
   test('still cleans up the schema scratch dir when the merge subprocess fails', async () => {
@@ -203,5 +234,57 @@ describe('merge-rp-util main()', () => {
 
     const pythonBin = spawnSync.mock.calls[0][0]
     expect(pythonBin).toBe('python3')
+  })
+})
+
+// Genuine end-to-end coverage against a real file on disk -- no fs mocking
+// here, unlike the main() suite above.
+describe('markRpUtilMergeUnavailable', () => {
+  let tmpFile
+
+  beforeEach(() => {
+    tmpFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'merge-rp-util-test-')), 'enhanced.json')
+  })
+
+  afterEach(() => {
+    fs.rmSync(path.dirname(tmpFile), { recursive: true, force: true })
+  })
+
+  test('marks cluster/broker properties missing gets_restored, leaves everything else untouched', () => {
+    fs.writeFileSync(tmpFile, JSON.stringify({
+      properties: {
+        needs_mark: { config_scope: 'cluster' },
+        already_known: { config_scope: 'broker', gets_restored: false },
+        topic_scoped: { config_scope: 'topic' },
+        no_scope: { name: 'weird_but_real' }
+      }
+    }))
+
+    markRpUtilMergeUnavailable(tmpFile)
+
+    const result = JSON.parse(fs.readFileSync(tmpFile, 'utf8'))
+    expect(result.properties.needs_mark.rp_util_merge_status).toBe('unavailable')
+    expect(result.properties.already_known.rp_util_merge_status).toBeUndefined()
+    expect(result.properties.already_known.gets_restored).toBe(false)
+    expect(result.properties.topic_scoped.rp_util_merge_status).toBeUndefined()
+    expect(result.properties.no_scope.rp_util_merge_status).toBeUndefined()
+  })
+
+  test('does not rewrite the file at all when nothing needs marking', () => {
+    fs.writeFileSync(tmpFile, JSON.stringify({
+      properties: { a: { config_scope: 'cluster', gets_restored: true } }
+    }))
+    const before = fs.statSync(tmpFile).mtimeMs
+
+    markRpUtilMergeUnavailable(tmpFile)
+
+    expect(fs.statSync(tmpFile).mtimeMs).toBe(before)
+  })
+
+  test('warns but does not throw when the file does not exist', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(() => markRpUtilMergeUnavailable(path.join(path.dirname(tmpFile), 'missing.json'))).not.toThrow()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not mark rp_util merge as unavailable'))
+    warn.mockRestore()
   })
 })

@@ -25,10 +25,46 @@ const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 const { getRpUtilSchema, SCHEMA_FLAGS } = require('./rp-util-fetch')
+const bigIntJson = require('../../cli-utils/big-int-json')
 
 function getArg(args, flag) {
   const i = args.indexOf(flag)
   return i === -1 ? undefined : args[i + 1]
+}
+
+// rp_util covers every cluster/broker-scope property (see this file's own
+// header comment), so when its merge is skipped or fails, any cluster/
+// broker property still missing gets_restored isn't "no annotation exists"
+// (the pre-existing, legitimate case property.hbs already renders as an
+// absent row) -- it's "we don't know, because the merge that would have
+// told us didn't run". Mark those explicitly so the template can render
+// that as a visible "Unknown" state instead of silently rendering nothing,
+// which previously made a flaky rp_util fetch indistinguishable from a
+// real upstream change in the generated docs.
+const RP_UTIL_COVERED_SCOPES = new Set(['cluster', 'broker'])
+
+function markRpUtilMergeUnavailable(enhancedPath) {
+  let data
+  try {
+    data = bigIntJson.parse(fs.readFileSync(enhancedPath, 'utf8'))
+  } catch (err) {
+    console.warn(`Warning: could not mark rp_util merge as unavailable in ${enhancedPath}: ${err.message}`)
+    return
+  }
+  const properties = data.properties || {}
+  let marked = 0
+  for (const prop of Object.values(properties)) {
+    if (!prop || !RP_UTIL_COVERED_SCOPES.has(prop.config_scope)) continue
+    if (prop.gets_restored !== undefined) continue
+    prop.rp_util_merge_status = 'unavailable'
+    marked++
+  }
+  if (marked === 0) return
+  try {
+    fs.writeFileSync(enhancedPath, bigIntJson.stringify(data))
+  } catch (err) {
+    console.warn(`Warning: could not write rp_util-unavailable marker to ${enhancedPath}: ${err.message}`)
+  }
 }
 
 async function main() {
@@ -58,6 +94,7 @@ async function main() {
   } catch (err) {
     console.warn(`Warning: could not get rp_util schema for ${tag}: ${err.message}`)
     console.warn('Skipping rp_util merge -- keeping the Tree-sitter-only extraction for cluster/broker scope.')
+    markRpUtilMergeUnavailable(enhanced)
     return
   }
 
@@ -66,12 +103,13 @@ async function main() {
     let anySchema = false
     for (const { key } of SCHEMA_FLAGS) {
       if (schemas[key]) {
-        fs.writeFileSync(path.join(schemaDir, `${key}.json`), JSON.stringify(schemas[key]))
+        fs.writeFileSync(path.join(schemaDir, `${key}.json`), bigIntJson.stringify(schemas[key]))
         anySchema = true
       }
     }
     if (!anySchema) {
       console.warn(`Warning: rp_util schema for ${tag} came back empty. Skipping rp_util merge.`)
+      markRpUtilMergeUnavailable(enhanced)
       return
     }
 
@@ -101,6 +139,7 @@ async function main() {
         'Keeping the Tree-sitter-only extraction for cluster/broker scope.'
       )
       fs.rmSync(tempOutput, { force: true })
+      markRpUtilMergeUnavailable(enhanced)
     } else {
       fs.renameSync(tempOutput, output)
     }
@@ -109,7 +148,7 @@ async function main() {
   }
 }
 
-module.exports = { main }
+module.exports = { main, markRpUtilMergeUnavailable }
 
 if (require.main === module) {
   main()
