@@ -636,7 +636,6 @@ display help for command
 * `rpk-docs` - Generate rpk CLI documentation from source. Builds rpk and parses source for platform detection.
 * `rpk-env-partial` - Generate the -X -> RPK_* env var mapping partial from rpk -X list output.
 * `rpk-plugin-stubs` - Reconcile single-source stub pages and nav against the docs repo's rpk plugin partials. Run from the consumer repo root.
-* `rpk-overrides` - Validate rpk-overrides.json against schema and check for common issues
 * `helm-spec` - Generate AsciiDoc documentation for Helm charts. Requires either --tag or --branch for GitHub URLs.
 * `cloud-regions` - Generate Markdown table of cloud regions and tiers from GitHub YAML file
 * `crd-spec` - Generate Asciidoc documentation for Kubernetes CRD references. Requires either --tag or --branch.
@@ -1184,56 +1183,6 @@ Report what would change without writing
 `-h, --help`::
 display help for command
 
-=== generate rpk-overrides
-
-Validates the rpk-overrides.json file against the JSON schema and checks for common issues: - Schema compliance (required fields, valid types) - Valid $ref references (no broken or circular refs) - Valid command paths (compared against actual rpk command tree) - Valid admonition locations (after_flags, after_usage, etc.) - Valid platform values (linux, darwin, windows)
-
-*Why use it:*
-
-Catching override errors early prevents broken documentation. This command lets writers validate their changes before generation, avoiding cryptic errors during the build process.
-
-*Usage:*
-
-[,bash]
-----
-doc-tools generate rpk-overrides [options]
-----
-
-*Options:*
-
-`--overrides <path>`::
-Path to overrides JSON file (default: "docs-data/rpk-overrides.json")
-
-`--tree <path>`::
-Path to rpk tree JSON file for command path validation (e.g., docs-data/rpk-v26.2.0.json)
-
-`--strict`::
-Exit with error code on validation failures
-
-`-h, --help`::
-display help for command
-
-*Examples:*
-
-[,bash]
-----
-# Validate overrides with default paths
-npx doc-tools validate rpk-overrides
-
-# Validate against a specific rpk tree (for complete command path validation)
-npx doc-tools validate rpk-overrides --tree docs-data/rpk-v26.2.0.json
-
-# Validate a custom overrides file
-npx doc-tools validate rpk-overrides --overrides my-overrides.json
-
-# Strict mode - exit with error code on validation failures
-npx doc-tools validate rpk-overrides --strict
-----
-
-*Requirements:*
-
-- rpk-overrides.schema.json in docs-data/
-
 === generate helm-spec
 
 Generates Helm chart reference documentation by parsing values.yaml files and README.md documentation from Helm chart repositories. Supports both local chart directories and GitHub URLs. Extracts all configuration options with their types, defaults, and descriptions, and generates comprehensive AsciiDoc documentation. Can process single charts or entire chart repositories with multiple charts.
@@ -1591,8 +1540,59 @@ display help for command
 
 *Commands:*
 
+* `rpk-overrides` - Validate rpk-overrides.json against schema and check for common issues
 * `enterprise-features` - Check the enterprise features registry against core, connect, and docs sources of truth
 * `help` - display help for command
+
+=== validate rpk-overrides
+
+Validates the rpk-overrides.json file against the JSON schema and checks for common issues: - Schema compliance (required fields, valid types) - Valid $ref references (no broken or circular refs) - Valid command paths (compared against actual rpk command tree) - Valid admonition locations (after_flags, after_usage, etc.) - Valid platform values (linux, darwin, windows)
+
+*Why use it:*
+
+Catching override errors early prevents broken documentation. This command lets writers validate their changes before generation, avoiding cryptic errors during the build process.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools validate rpk-overrides [options]
+----
+
+*Options:*
+
+`--overrides <path>`::
+Path to overrides JSON file (default: "docs-data/rpk-overrides.json")
+
+`--tree <path>`::
+Path to rpk tree JSON file for command path validation (e.g., docs-data/rpk-v26.2.0.json)
+
+`--strict`::
+Exit with error code on validation failures
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Validate overrides with default paths
+npx doc-tools validate rpk-overrides
+
+# Validate against a specific rpk tree (for complete command path validation)
+npx doc-tools validate rpk-overrides --tree docs-data/rpk-v26.2.0.json
+
+# Validate a custom overrides file
+npx doc-tools validate rpk-overrides --overrides my-overrides.json
+
+# Strict mode - exit with error code on validation failures
+npx doc-tools validate rpk-overrides --strict
+----
+
+*Requirements:*
+
+- rpk-overrides.schema.json in docs-data/
 
 === validate enterprise-features
 

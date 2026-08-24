@@ -1471,108 +1471,6 @@ automation
     }
   })
 
-/**
- * validate rpk-overrides
- *
- * @description
- * Validates the rpk-overrides.json file against the JSON schema and checks for common issues:
- * - Schema compliance (required fields, valid types)
- * - Valid $ref references (no broken or circular refs)
- * - Valid command paths (compared against actual rpk command tree)
- * - Valid admonition locations (after_flags, after_usage, etc.)
- * - Valid platform values (linux, darwin, windows)
- *
- * @why
- * Catching override errors early prevents broken documentation. This command lets writers
- * validate their changes before generation, avoiding cryptic errors during the build process.
- *
- * @example
- * # Validate overrides with default paths
- * npx doc-tools validate rpk-overrides
- *
- * # Validate against a specific rpk tree (for complete command path validation)
- * npx doc-tools validate rpk-overrides --tree docs-data/rpk-v26.2.0.json
- *
- * # Validate a custom overrides file
- * npx doc-tools validate rpk-overrides --overrides my-overrides.json
- *
- * # Strict mode - exit with error code on validation failures
- * npx doc-tools validate rpk-overrides --strict
- *
- * @requirements
- * - rpk-overrides.schema.json in docs-data/
- */
-automation
-  .command('rpk-overrides')
-  .description('Validate rpk-overrides.json against schema and check for common issues')
-  .option('--overrides <path>', 'Path to overrides JSON file', 'docs-data/rpk-overrides.json')
-  .option('--tree <path>', 'Path to rpk tree JSON file for command path validation (e.g., docs-data/rpk-v26.2.0.json)')
-  .option('--strict', 'Exit with error code on validation failures')
-  .action((options) => {
-    try {
-      const { loadAndValidateOverrides } = require('../tools/rpk-docs/validate-overrides.js')
-      const repoRoot = findRepoRoot()
-      const overridesPath = path.resolve(repoRoot, options.overrides)
-
-      // Load tree if provided for command path validation
-      let commandTree = null
-      if (options.tree) {
-        const treePath = path.resolve(repoRoot, options.tree)
-        if (!fs.existsSync(treePath)) {
-          console.error(`Error: Tree file not found: ${treePath}`)
-          process.exit(1)
-        }
-        const treeData = JSON.parse(fs.readFileSync(treePath, 'utf8'))
-        commandTree = treeData.tree || treeData
-      }
-
-      console.log(`Validating: ${overridesPath}`)
-      if (commandTree) {
-        console.log(`Comparing against tree from: ${options.tree}`)
-      } else {
-        console.log('Note: Skipping command path validation (no --tree provided)')
-      }
-      console.log('')
-
-      const { overrides, validation } = loadAndValidateOverrides(overridesPath, commandTree)
-
-      if (!overrides) {
-        console.error('Error: Could not load overrides file')
-        process.exit(1)
-      }
-
-      // Print results
-      console.log('=' .repeat(60))
-      console.log('VALIDATION RESULTS')
-      console.log('='.repeat(60))
-
-      if (validation.errors.length === 0 && validation.warnings.length === 0) {
-        console.log('✓ No issues found')
-      } else {
-        console.log(validation.format())
-      }
-
-      console.log('='.repeat(60))
-      console.log(`Errors: ${validation.errors.length}`)
-      console.log(`Warnings: ${validation.warnings.length}`)
-      console.log('='.repeat(60))
-
-      // Exit with appropriate code
-      if (options.strict && !validation.valid) {
-        console.log('\n✗ Validation failed (strict mode)')
-        process.exit(1)
-      } else if (validation.valid) {
-        console.log('\n✓ Validation passed')
-        process.exit(0)
-      } else {
-        console.log('\n⚠ Validation completed with errors (use --strict to fail)')
-        process.exit(0)
-      }
-    } catch (err) {
-      console.error(`Error: ${err.message}`)
-      process.exit(1)
-    }
-  })
 
 
 /**
@@ -2219,6 +2117,110 @@ automation
   })
 
 const validation = new Command('validate').description('Validate docs data against internal sources of truth')
+
+/**
+ * validate rpk-overrides
+ *
+ * @description
+ * Validates the rpk-overrides.json file against the JSON schema and checks for common issues:
+ * - Schema compliance (required fields, valid types)
+ * - Valid $ref references (no broken or circular refs)
+ * - Valid command paths (compared against actual rpk command tree)
+ * - Valid admonition locations (after_flags, after_usage, etc.)
+ * - Valid platform values (linux, darwin, windows)
+ *
+ * @why
+ * Catching override errors early prevents broken documentation. This command lets writers
+ * validate their changes before generation, avoiding cryptic errors during the build process.
+ *
+ * @example
+ * # Validate overrides with default paths
+ * npx doc-tools validate rpk-overrides
+ *
+ * # Validate against a specific rpk tree (for complete command path validation)
+ * npx doc-tools validate rpk-overrides --tree docs-data/rpk-v26.2.0.json
+ *
+ * # Validate a custom overrides file
+ * npx doc-tools validate rpk-overrides --overrides my-overrides.json
+ *
+ * # Strict mode - exit with error code on validation failures
+ * npx doc-tools validate rpk-overrides --strict
+ *
+ * @requirements
+ * - rpk-overrides.schema.json in docs-data/
+ */
+validation
+  .command('rpk-overrides')
+  .description('Validate rpk-overrides.json against schema and check for common issues')
+  .option('--overrides <path>', 'Path to overrides JSON file', 'docs-data/rpk-overrides.json')
+  .option('--tree <path>', 'Path to rpk tree JSON file for command path validation (e.g., docs-data/rpk-v26.2.0.json)')
+  .option('--strict', 'Exit with error code on validation failures')
+  .action((options) => {
+    try {
+      const { loadAndValidateOverrides } = require('../tools/rpk-docs/validate-overrides.js')
+      const repoRoot = findRepoRoot()
+      const overridesPath = path.resolve(repoRoot, options.overrides)
+
+      // Load tree if provided for command path validation
+      let commandTree = null
+      if (options.tree) {
+        const treePath = path.resolve(repoRoot, options.tree)
+        if (!fs.existsSync(treePath)) {
+          console.error(`Error: Tree file not found: ${treePath}`)
+          process.exit(1)
+        }
+        const treeData = JSON.parse(fs.readFileSync(treePath, 'utf8'))
+        commandTree = treeData.tree || treeData
+      }
+
+      console.log(`Validating: ${overridesPath}`)
+      if (commandTree) {
+        console.log(`Comparing against tree from: ${options.tree}`)
+      } else {
+        console.log('Note: Skipping command path validation (no --tree provided)')
+      }
+      console.log('')
+
+      const { overrides, validation } = loadAndValidateOverrides(overridesPath, commandTree)
+
+      if (!overrides) {
+        console.error('Error: Could not load overrides file')
+        process.exit(1)
+      }
+
+      // Print results
+      console.log('=' .repeat(60))
+      console.log('VALIDATION RESULTS')
+      console.log('='.repeat(60))
+
+      if (validation.errors.length === 0 && validation.warnings.length === 0) {
+        console.log('✓ No issues found')
+      } else {
+        console.log(validation.format())
+      }
+
+      console.log('='.repeat(60))
+      console.log(`Errors: ${validation.errors.length}`)
+      console.log(`Warnings: ${validation.warnings.length}`)
+      console.log('='.repeat(60))
+
+      // Exit with appropriate code
+      if (options.strict && !validation.valid) {
+        console.log('\n✗ Validation failed (strict mode)')
+        process.exit(1)
+      } else if (validation.valid) {
+        console.log('\n✓ Validation passed')
+        process.exit(0)
+      } else {
+        console.log('\n⚠ Validation completed with errors (use --strict to fail)')
+        process.exit(0)
+      }
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
 
 /**
  * @description Checks the enterprise features registry (the shared component's
