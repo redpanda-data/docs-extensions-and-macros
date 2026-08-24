@@ -58,6 +58,7 @@ jobs:
               - 'jest.config.js'
               - 'jest.unit.config.js'
               - '.github/workflows/**'
+              - '.github/scripts/**'
 
   test-extensions:
     needs: detect-changes
@@ -355,16 +356,35 @@ jobs:
       - name: Run all tests
         run: npm run test:unit -- --maxWorkers=2
 
+  # The generated-files guard is a merge gate for other repos, so its bash gets
+  # linted as well as tested. actionlint checks the workflow and shellchecks the
+  # run: block it embeds; shellcheck checks .github/scripts/guard-generated-files.sh,
+  # the file that block is generated from. Scoped to those two files on purpose:
+  # a repo-wide actionlint run reports pre-existing findings in the other
+  # workflows and would be red on arrival.
+  lint-guard-workflow:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.all_tests == 'true' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint the guard workflow and its embedded bash
+        run: docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color .github/workflows/guard-generated-files.yml
+
+      - name: Shellcheck the guard script
+        run: docker run --rm -v "$PWD":/mnt -w /mnt koalaman/shellcheck:v0.10.0 .github/scripts/guard-generated-files.sh
+
   # Summary job that all other jobs depend on
   test-summary:
     if: always()
-    needs: [detect-changes, test-extensions, test-macros, test-asciidoc-extensions, test-tools, test-property-extractor, test-all]
+    needs: [detect-changes, test-extensions, test-macros, test-asciidoc-extensions, test-tools, test-property-extractor, test-all, lint-guard-workflow]
     runs-on: ubuntu-latest
     steps:
       - name: Check test results
         run: |
           # Check if any required job failed
-          if [[ "${{ needs.test-extensions.result }}" == "failure" || "${{ needs.test-macros.result }}" == "failure" || "${{ needs.test-asciidoc-extensions.result }}" == "failure" || "${{ needs.test-tools.result }}" == "failure" || "${{ needs.test-property-extractor.result }}" == "failure" || "${{ needs.test-all.result }}" == "failure" ]]; then
+          if [[ "${{ needs.test-extensions.result }}" == "failure" || "${{ needs.test-macros.result }}" == "failure" || "${{ needs.test-asciidoc-extensions.result }}" == "failure" || "${{ needs.test-tools.result }}" == "failure" || "${{ needs.test-property-extractor.result }}" == "failure" || "${{ needs.test-all.result }}" == "failure" || "${{ needs.lint-guard-workflow.result }}" == "failure" ]]; then
             echo "❌ Some tests failed"
             exit 1
           else

@@ -428,19 +428,53 @@ antora:
 
 This extension fetches the latest release versions from GitHub.
 
+=== Attributes
+
 The following attributes are available to all versions of all Antora components:
 
-`latest-console-version`: The latest release version of Redpanda Console.
-`latest-connect-version`: The latest release version of Redpanda Connect.
-`redpanda-beta-version`: The latest RC version of Redpanda.
-`redpanda-beta-commit`: The commit hash for the latest RC version of Redpanda.
+`latest-console-version`:: The latest release version of Redpanda Console.
+`latest-connect-version`:: The latest release version of Redpanda Connect.
+`redpanda-beta-version`:: The latest RC version of Redpanda.
+`redpanda-beta-commit`:: The commit hash for the latest RC version of Redpanda.
+`console-beta-version`:: The latest beta version of Redpanda Console.
+`operator-beta-version`:: The latest beta version of the Redpanda Operator.
+`helm-beta-version`:: The latest beta version of the Redpanda Helm chart.
+`latest-operator-version`:: The latest release version of the Redpanda Operator. This value keeps its `v` prefix (for example, `v25.1.3`) because pages pass it straight to `helm --version`.
+`latest-redpanda-helm-chart-version`:: The latest release version of the Redpanda Helm chart.
 
-The following attributes are available to the latest version of the `ROOT` component (Redpanda docs):
+The following attributes are available to the latest version of each Antora component:
 
-`full-version`: The latest release version of Redpanda.
-`latest-release-commit`: The commit hash for the latest release version of Redpanda.
-`latest-operator-version`: The latest release version of the Redpanda Operator.
-`latest-redpanda-helm-chart-version`: The latest release version of the Redpanda Helm chart.
+`full-version`:: The latest release version of Redpanda. Only ever moves forwards: if the component's `antora.yml` already pins a higher version, that pin wins.
+`latest-redpanda-version`:: The latest release version of Redpanda.
+`latest-release-commit`:: The commit hash for the latest release version of Redpanda.
+
+==== Tag and short-version siblings
+
+Most `<base>-version` attributes in the previous lists also get two siblings.
+`full-version` is the exception and gets neither, because it is set directly
+rather than through the shared helper, and it is the one attribute that only
+ever moves forwards.
+
+`<base>-tag`:: The version exactly as the release publishes it, including any `v` prefix (for example, `latest-redpanda-tag` is `v26.2.1`). Use this for container image tags and Git references. There is no tag attribute for `latest-operator-version` or `latest-redpanda-helm-chart-version`, which are already raw values.
+`<base>-version-short`:: Only the `major.minor` part (for example, `latest-redpanda-version-short` is `26.2` when `latest-redpanda-version` is `26.2.1`). Use this where a page needs the release line rather than an exact patch, such as a download directory or an install pack name.
+
+A short attribute is only set when a `major.minor` pair can be derived. Release channels that are not versions, such as `nightly` or `latest`, get a `-version` and a `-tag` but no `-version-short`, so a page never renders a fabricated release line.
+
+==== Seed a fallback in antora.yml
+
+Every attribute here depends on a successful GitHub lookup at build time. If a lookup fails, for example because of a rate limit or a missing token, the attribute is never set and any page that references it renders the attribute name in braces.
+
+To keep a page buildable, seed a soft default in the consuming component's `antora.yml`. The trailing `@` makes it a fallback that the extension overwrites when the fetch succeeds:
+
+[,yaml]
+----
+asciidoc:
+  attributes:
+    latest-redpanda-version: 26.2.1@
+    latest-redpanda-version-short: 26.2@
+----
+
+CAUTION: Do not seed `full-version` with a value higher than the current release. `full-version` is the one attribute the extension refuses to move backwards, so a pin that is ahead of the current release stays ahead.
 
 === Environment variables
 

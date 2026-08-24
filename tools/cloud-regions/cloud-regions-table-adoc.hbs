@@ -11,7 +11,7 @@ For source code and documentation:
 - Docs: https://redpandadata.atlassian.net/wiki/spaces/DOC/pages/1185054748/Doc+Tools+CLI
 ////
 
-Usage tiers define the sizing of a cluster and provide tested and guaranteed workload configurations for throughput, logical partitions, and connections. Availability depends on the region and the cluster type (BYOC, Dedicated). See link:https://docs.redpanda.com/redpanda-cloud/reference/tiers/byoc-tiers/[BYOC tiers] and link:https://docs.redpanda.com/redpanda-cloud/reference/tiers/dedicated-tiers/[Dedicated tiers] for further details.
+Usage tiers define the sizing of a cluster and provide tested and guaranteed workload configurations for throughput, logical partitions, and connections. Availability depends on the region{{#if clusterType}}. This table lists only the tiers available for {{clusterType}} clusters{{else}} and the cluster type (BYOC, Dedicated){{/if}}. See link:https://docs.redpanda.com/redpanda-cloud/reference/tiers/byoc-tiers/[BYOC tiers] and link:https://docs.redpanda.com/redpanda-cloud/reference/tiers/dedicated-tiers/[Dedicated tiers] for further details.
 
 {{!--{{#if lastUpdated}}
 _Last Updated: {{lastUpdated}}_

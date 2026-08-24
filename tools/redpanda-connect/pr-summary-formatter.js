@@ -116,6 +116,29 @@ function renderBloblangChanges(data, includeVersion = false) {
 }
 
 /**
+ * Render upstream description-structure findings as a collapsed section of
+ * the PR summary. These are advisory (the fix belongs in the Connect
+ * source), but console.warn output dies in the collapsed workflow log, so
+ * they surface here where the PR reviewer actually looks.
+ * @param {Array<{connector: string, message: string}>} reports
+ * @returns {string[]} lines (empty when there is nothing to report)
+ */
+function renderDescriptionReports(reports) {
+  if (!Array.isArray(reports) || reports.length === 0) return [];
+  const lines = [];
+  lines.push('<details>');
+  lines.push(`<summary>:pencil2: ${reports.length} description(s) need structure fixes upstream in the Connect source</summary>`);
+  lines.push('');
+  for (const r of reports) {
+    lines.push(`- ${r.message}`);
+  }
+  lines.push('');
+  lines.push('</details>');
+  lines.push('');
+  return lines;
+}
+
+/**
  * Generate PR summary for multiple releases
  * @param {object} masterDiff - Master diff with releases array
  * @param {object} binaryAnalysis - Cloud support data (from latest release)
@@ -153,6 +176,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
   lines.push(...renderLostSectionWarnings(masterDiff?.lostSectionWarnings));
+  lines.push(...renderDescriptionReports(masterDiff?.descriptionReports));
   lines.push('## Redpanda Connect Documentation Update');
   lines.push('');
   lines.push(`**Multi-Release Update:** ${startVersion} → ${endVersion}`);
@@ -559,6 +583,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
   lines.push(...renderLostSectionWarnings(diffData.lostSectionWarnings));
+  lines.push(...renderDescriptionReports(diffData.descriptionReports));
 
   // Detect if this is a master diff
   if (!isMultiVersion && diffData.releases && diffData.totalSummary) {
@@ -1326,9 +1351,35 @@ function printPRSummary(diffData, binaryAnalysis = null, draftedConnectors = nul
   console.log('\n' + summary + '\n');
 }
 
+/**
+ * Merge one generateRpcnConnectorDocs result into the accumulators that feed
+ * this PR summary.
+ *
+ * Every report key the generator returns has to be collected at every call
+ * site, or the summary is quietly incomplete for whichever path forgot one.
+ * The draft call site pushed lostSectionWarnings inline and forgot
+ * descriptionReports, so structure reports for newly drafted connectors --
+ * the ones most likely to need an upstream fix -- never reached the summary.
+ * Doing the merge in one place is what makes that structural rather than
+ * something each call site has to remember.
+ *
+ * @param {object} result generator result
+ * @param {{descriptionReports: Array, lostSectionWarnings: Array}} into accumulators, mutated in place
+ * @returns {{descriptionReports: Array, lostSectionWarnings: Array}} the same accumulators
+ */
+function collectGeneratorReports (result, into) {
+  if (!result) return into;
+  into.descriptionReports.push(...(result.descriptionReports || []));
+  into.lostSectionWarnings.push(...(result.lostSectionWarnings || []));
+  return into;
+}
+
 module.exports = {
+  collectGeneratorReports,
   generatePRSummary,
   generateMultiVersionPRSummary,
   printPRSummary,
+  renderDescriptionReports,
+  renderLostSectionWarnings,
   truncateToSentence
 };

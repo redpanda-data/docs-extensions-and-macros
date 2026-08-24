@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync, spawnSync } = require('child_process');
 const yaml = require('yaml');
+const { getMajorMinor } = require('../cli-utils/version');
 
 /**
  * Normalize a Git tag into a semantic version string.
@@ -39,36 +40,9 @@ function normalizeTag(tag) {
   return tag;
 }
 
-/**
- * Return the major.minor portion of a semantic version string.
- *
- * Accepts a semantic version like `25.1.1` and yields `25.1`. The special value
- * `'dev'` is returned unchanged.
- * @param {string} version - Semantic version (for example, `'25.1.1'`) or `'dev'`.
- * @returns {string} The `major.minor` string (for example, `'25.1'`) or `'dev'`.
- * @throws {Error} If `version` is not a non-empty string, lacks major/minor parts, or if major/minor are not numeric.
- */
-function getMajorMinor(version) {
-  if (!version || typeof version !== 'string') {
-    throw new Error('Version must be a non-empty string');
-  }
-  
-  // Only process if valid semver, else return as-is (branch name)
-  const semverPattern = /^\d+\.\d+\.\d+(-[\w\.-]+)?(\+[\w\.-]+)?$/;
-  if (!semverPattern.test(version)) {
-    return version;
-  }
-  const parts = version.split('.');
-  if (parts.length < 2) {
-    throw new Error(`Invalid version format: ${version}. Expected X.Y.Z format`);
-  }
-  const major = parseInt(parts[0], 10);
-  const minor = parseInt(parts[1], 10);
-  if (isNaN(major) || isNaN(minor)) {
-    throw new Error(`Major and minor versions must be numbers: ${version}`);
-  }
-  return `${major}.${minor}`;
-}
+// `getMajorMinor` lives in cli-utils/version.js so the Antora version fetcher and
+// this bundler share one major.minor derivation instead of drifting apart.
+// That module also exports the lenient `toShortVersion` variant.
 
 /**
  * Produce a new value with object keys sorted recursively for deterministic output.

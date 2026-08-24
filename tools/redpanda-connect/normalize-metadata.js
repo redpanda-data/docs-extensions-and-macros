@@ -24,8 +24,10 @@ const FENCE_OPEN = /^(\s*)(```|~~~)(.*)$/;
 const BULLET = /^(\s*[-*]\s+)(.*)$/;
 // AsciiDoc literal/listing block delimiter. Content inside `----` blocks is
 // rendered verbatim, so backticks would show up literally — such regions must
-// pass through untouched (no field-name inline-coding).
-const BLOCK_DELIMITER = /^-{4,}$/;
+// pass through untouched (no field-name inline-coding). Shared with the
+// scanners in metadata-utils rather than redeclared: three copies of this had
+// already drifted into disagreeing about indented delimiters.
+const { BLOCK_DELIMITER } = require('./metadata-utils.js');
 // A metadata field bullet: the leading token is a lowercase snake_case
 // identifier (gcs_key, http_server_verb, header), optionally followed by a
 // parenthetical annotation (for example "(RFC3339)"), and optionally a
@@ -71,12 +73,12 @@ function normalizeMetadataBlock (block) {
     // AsciiDoc literal/listing block: pass the whole `----` … `----` region
     // through verbatim. Field-name lines inside are rendered literally, so they
     // must not be inline-coded (backticks would appear as visible characters).
-    if (BLOCK_DELIMITER.test(lines[i].trim())) {
+    if (BLOCK_DELIMITER.test(lines[i])) {
       out.push(lines[i]);
       let j = i + 1;
       for (; j < lines.length; j++) {
         out.push(lines[j]);
-        if (BLOCK_DELIMITER.test(lines[j].trim())) break;
+        if (BLOCK_DELIMITER.test(lines[j])) break;
       }
       i = j;
       continue;
