@@ -411,6 +411,36 @@ def _carry_forward_cloud_metadata(prop, existing_prop):
             prop[field] = existing_prop[field]
 
 
+def _resync_topic_properties_inherited_from_cluster(merged_properties):
+    """topic_property_extractor.py (property_extractor.py's Tree-sitter pass)
+    copies `default`/`default_human_readable`/`type` from a topic property's
+    corresponding_cluster_property onto the topic property itself, at
+    extraction time -- before this module ever runs. Once rp_util has
+    corrected that same cluster property's default/type here, the topic
+    property's own copy of it is stale (confirmed real: log_segment_ms's
+    default was the human string "2 weeks" in the old extraction and the
+    correct raw integer via rp_util; a topic property that inherited the
+    stale one would keep showing "2 weeks" as its own default forever,
+    since nothing re-copies it after this point otherwise). Mirror that
+    same copy here, now that the source it copies from is corrected.
+    """
+    for prop in merged_properties.values():
+        cluster_prop_name = prop.get("corresponding_cluster_property")
+        if not cluster_prop_name:
+            continue
+        cluster_prop = merged_properties.get(cluster_prop_name)
+        if not cluster_prop:
+            continue
+        if "default" in cluster_prop:
+            prop["default"] = cluster_prop["default"]
+        if "default_human_readable" in cluster_prop:
+            prop["default_human_readable"] = cluster_prop["default_human_readable"]
+        elif "default_human_readable" in prop:
+            del prop["default_human_readable"]
+        if "type" in cluster_prop:
+            prop["type"] = cluster_prop["type"]
+
+
 def merge_with_existing_output(
     existing_properties_and_definitions, rp_util_schemas, overrides,
     overrides_file_path=None, cloud_config=None,
@@ -467,6 +497,8 @@ def merge_with_existing_output(
     replaced = sum(1 for name in enhanced if name in merged_properties)
     added = len(enhanced) - replaced
     merged_properties.update(enhanced)
+
+    _resync_topic_properties_inherited_from_cluster(merged_properties)
 
     logger.info(
         "rp_util merge: replaced %d existing propert%s, added %d new from rp_util",

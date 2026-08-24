@@ -20,6 +20,7 @@ from rp_util_merge import (
     _resolve_type,
     _carry_forward_example,
     _carry_forward_cloud_metadata,
+    _resync_topic_properties_inherited_from_cluster,
     map_rp_util_property,
     map_schema,
     map_rp_util_schemas,
@@ -458,6 +459,70 @@ class TestCarryForwardCloudMetadata(unittest.TestCase):
             self.assertNotIn(field, prop)
 
 
+class TestResyncTopicPropertiesInheritedFromCluster(unittest.TestCase):
+    """topic_property_extractor.py copies default/type from a topic
+    property's corresponding_cluster_property at Tree-sitter extraction
+    time, before rp_util corrects that same cluster property here. Without
+    re-syncing, a topic property keeps showing the pre-correction value
+    forever (confirmed real for log_segment_ms/segment.ms: "2 weeks" vs the
+    correct raw integer 1209600000)."""
+
+    def test_resyncs_default_and_type_from_the_now_corrected_cluster_property(self):
+        merged = {
+            "log_segment_ms": {"name": "log_segment_ms", "default": 1209600000, "type": "integer"},
+            "segment.ms": {
+                "name": "segment.ms", "config_scope": "topic",
+                "corresponding_cluster_property": "log_segment_ms",
+                "default": "2 weeks", "type": "integer",
+            },
+        }
+        _resync_topic_properties_inherited_from_cluster(merged)
+        self.assertEqual(merged["segment.ms"]["default"], 1209600000)
+
+    def test_resyncs_type_even_when_only_type_is_stale(self):
+        merged = {
+            "log_retention_ms": {"name": "log_retention_ms", "default": 604800000, "type": "integer"},
+            "retention.ms": {
+                "name": "retention.ms", "config_scope": "topic",
+                "corresponding_cluster_property": "log_retention_ms",
+                "default": 604800000, "type": "object",
+            },
+        }
+        _resync_topic_properties_inherited_from_cluster(merged)
+        self.assertEqual(merged["retention.ms"]["type"], "integer")
+
+    def test_resyncs_default_human_readable_including_removing_a_stale_one(self):
+        merged = {
+            "cluster_prop": {"name": "cluster_prop", "default": 5000, "default_human_readable": "5 seconds"},
+            "topic_prop": {
+                "name": "topic_prop", "config_scope": "topic",
+                "corresponding_cluster_property": "cluster_prop",
+                "default": 5000, "default_human_readable": "5000 milliseconds",
+            },
+        }
+        _resync_topic_properties_inherited_from_cluster(merged)
+        self.assertEqual(merged["topic_prop"]["default_human_readable"], "5 seconds")
+
+        merged["cluster_prop"].pop("default_human_readable")
+        _resync_topic_properties_inherited_from_cluster(merged)
+        self.assertNotIn("default_human_readable", merged["topic_prop"])
+
+    def test_no_op_for_a_topic_property_with_no_cluster_mapping(self):
+        merged = {"standalone_topic_prop": {"name": "standalone_topic_prop", "default": "x"}}
+        _resync_topic_properties_inherited_from_cluster(merged)
+        self.assertEqual(merged["standalone_topic_prop"]["default"], "x")
+
+    def test_no_op_when_the_mapped_cluster_property_does_not_exist(self):
+        merged = {
+            "topic_prop": {
+                "name": "topic_prop", "corresponding_cluster_property": "nonexistent_cluster_prop",
+                "default": "unchanged",
+            },
+        }
+        _resync_topic_properties_inherited_from_cluster(merged)
+        self.assertEqual(merged["topic_prop"]["default"], "unchanged")
+
+
 class TestMergeWithExistingOutput(unittest.TestCase):
     def test_replaces_cluster_and_broker_properties_keeps_topic_untouched(self):
         existing = {
@@ -582,6 +647,40 @@ class TestMergeWithExistingOutput(unittest.TestCase):
         self.assertFalse(prop["cloud_readonly"])
         self.assertTrue(prop["cloud_supported"])
         self.assertFalse(prop["cloud_byoc_only"])
+
+    def test_topic_property_inherits_the_rp_util_corrected_cluster_default(self):
+        # Regression guard for a real bug: log_segment_ms's default used to
+        # be the human string "2 weeks" from the old Tree-sitter extractor;
+        # rp_util reports the correct raw integer. segment.ms (the topic
+        # property) had already baked in "2 weeks" at Tree-sitter extraction
+        # time, before this merge runs -- it must pick up the corrected
+        # value, not keep showing the stale one forever.
+        existing = {
+            "properties": {
+                "log_segment_ms": {
+                    "name": "log_segment_ms", "config_scope": "cluster", "default": "2 weeks", "type": "integer",
+                },
+                "segment.ms": {
+                    "name": "segment.ms", "config_scope": "topic",
+                    "corresponding_cluster_property": "log_segment_ms",
+                    "default": "2 weeks", "type": "integer",
+                },
+            },
+            "definitions": {},
+        }
+        rp_util_schemas = {
+            "clusterSchema": {"properties": {
+                "log_segment_ms": {
+                    "description": "d", "type": "integer",
+                    "default_value": "1209600000", "is_enterprise": False,
+                },
+            }},
+        }
+
+        merged = merge_with_existing_output(existing, rp_util_schemas, overrides={})
+
+        self.assertEqual(merged["properties"]["log_segment_ms"]["default"], 1209600000)
+        self.assertEqual(merged["properties"]["segment.ms"]["default"], 1209600000)
 
     def test_topic_only_overrides_do_not_clobber_the_topic_property(self):
         # Regression: docs-data/property-overrides.json's overrides are
