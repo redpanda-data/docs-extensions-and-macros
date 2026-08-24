@@ -21,7 +21,8 @@ const {
   SCHEMA_FLAGS,
   cloneStreamingEnterprise,
   buildNative,
-  runSchemaFlag
+  runSchemaFlag,
+  fetchPublishedSchema
 } = require('../../tools/property-extractor/rp-util-fetch')
 
 describe('runSchemaFlag', () => {
@@ -176,6 +177,77 @@ describe('buildNative', () => {
   })
 })
 
+describe('fetchPublishedSchema', () => {
+  beforeEach(() => {
+    githubToken.getGitHubToken.mockReset()
+  })
+
+  afterEach(() => {
+    delete global.fetch
+  })
+
+  test('returns null when no release exists for this tag', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 404, ok: false })
+
+    const result = await fetchPublishedSchema('v0.0.0-not-a-real-tag')
+
+    expect(result).toBeNull()
+  })
+
+  test('downloads and maps every recognized asset to its schema key', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          assets: [
+            { name: 'cluster-config-schema.json', url: 'https://api.github.com/asset/1' },
+            { name: 'node-config-schema.json', url: 'https://api.github.com/asset/2' },
+            { name: 'pandaproxy-config-schema.json', url: 'https://api.github.com/asset/3' },
+            { name: 'kafka-client-config-schema.json', url: 'https://api.github.com/asset/4' },
+            { name: 'schema-registry-config-schema.json', url: 'https://api.github.com/asset/5' },
+            { name: 'README.md', url: 'https://api.github.com/asset/6' }
+          ]
+        })
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ a: 1 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ b: 2 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ c: 3 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ d: 4 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ e: 5 }) })
+
+    const result = await fetchPublishedSchema('v26.2.2')
+
+    expect(result).toEqual({
+      clusterSchema: { a: 1 },
+      nodeSchema: { b: 2 },
+      pandaproxySchema: { c: 3 },
+      kafkaClientSchema: { d: 4 },
+      schemaRegistrySchema: { e: 5 }
+    })
+    // The unrecognized README.md asset must not trigger a 6th download.
+    expect(global.fetch).toHaveBeenCalledTimes(6)
+  })
+
+  test('sends the GitHub token as a bearer header when available', async () => {
+    githubToken.getGitHubToken.mockReturnValue('tok')
+    global.fetch = jest.fn().mockResolvedValue({ status: 404, ok: false })
+
+    await fetchPublishedSchema('v26.2.2')
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      { headers: { Authorization: 'Bearer tok' } }
+    )
+  })
+
+  test('throws a descriptive error on a non-404 failure', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 500, ok: false, statusText: 'Internal Server Error' })
+
+    await expect(fetchPublishedSchema('v26.2.2')).rejects.toThrow(/500/)
+  })
+})
+
 describe('getRpUtilSchema', () => {
   let tmpDirs
 
@@ -190,14 +262,19 @@ describe('getRpUtilSchema', () => {
       return dir
     })
     jest.spyOn(fs, 'rmSync').mockImplementation(() => {})
+    // A sourcePath is passed in most of these tests, which already skips the
+    // published-release check -- but the "no sourcePath" test below needs a
+    // 404 so it falls through to the from-source path exercised elsewhere.
+    global.fetch = jest.fn().mockResolvedValue({ status: 404, ok: false })
   })
 
   afterEach(() => {
     fs.mkdtempSync.mockRestore()
     fs.rmSync.mockRestore()
+    delete global.fetch
   })
 
-  test('uses an existing sourcePath as-is, never clones, and fetches every schema', () => {
+  test('uses an existing sourcePath as-is, never clones, and fetches every schema', async () => {
     jest.spyOn(os, 'platform').mockReturnValue('linux')
     spawnSync.mockImplementation((cmd, args) => {
       if (args[0] === '--version') return { status: 0, stdout: 'bazel 7.0.0', stderr: '' }
@@ -206,25 +283,71 @@ describe('getRpUtilSchema', () => {
       return { status: 0, stdout: JSON.stringify({ flag: args[0] }), stderr: '' }
     })
 
-    const result = getRpUtilSchema('v26.2.2', { sourcePath: '/existing/checkout' })
+    const result = await getRpUtilSchema('v26.2.2', { sourcePath: '/existing/checkout' })
 
     expect(result.sourcePath).toBe('/existing/checkout')
     for (const { key, flag } of SCHEMA_FLAGS) {
       expect(result[key]).toEqual({ flag })
     }
     expect(fs.mkdtempSync).not.toHaveBeenCalled()
+    expect(global.fetch).not.toHaveBeenCalled()
     os.platform.mockRestore()
   })
 
-  test('cleans up a clone it made unless keepSource is set', () => {
+  test('cleans up a clone it made unless keepSource is set', async () => {
     jest.spyOn(os, 'platform').mockReturnValue('linux')
     githubToken.getGitHubToken.mockReturnValue('tok')
     githubToken.getAuthenticatedGitHubUrl.mockReturnValue('https://tok@github.com/redpanda-data/streaming-enterprise.git')
     spawnSync.mockReturnValue({ status: 0, stdout: '{}', stderr: '' })
 
-    getRpUtilSchema('v26.2.2')
+    await getRpUtilSchema('v26.2.2')
 
     expect(fs.rmSync).toHaveBeenCalledWith(tmpDirs[0], { recursive: true, force: true })
+    os.platform.mockRestore()
+  })
+
+  test('skips the published-release check when sourcePath is given', async () => {
+    jest.spyOn(os, 'platform').mockReturnValue('linux')
+    spawnSync.mockReturnValue({ status: 0, stdout: '{}', stderr: '' })
+
+    await getRpUtilSchema('v26.2.2', { sourcePath: '/existing/checkout' })
+
+    expect(global.fetch).not.toHaveBeenCalled()
+    os.platform.mockRestore()
+  })
+
+  test('uses a published release instead of building when one exists', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          assets: [
+            { name: 'cluster-config-schema.json', url: 'https://api.github.com/asset/1' },
+            { name: 'node-config-schema.json', url: 'https://api.github.com/asset/2' }
+          ]
+        })
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ cluster: true }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ node: true }) })
+
+    const result = await getRpUtilSchema('v26.2.2')
+
+    expect(result.clusterSchema).toEqual({ cluster: true })
+    expect(result.nodeSchema).toEqual({ node: true })
+    expect(result.sourcePath).toBeNull()
+    expect(spawnSync).not.toHaveBeenCalled()
+  })
+
+  test('preferPublished: false always builds from source, even if a release exists', async () => {
+    jest.spyOn(os, 'platform').mockReturnValue('linux')
+    githubToken.getGitHubToken.mockReturnValue('tok')
+    githubToken.getAuthenticatedGitHubUrl.mockReturnValue('https://tok@github.com/redpanda-data/streaming-enterprise.git')
+    spawnSync.mockReturnValue({ status: 0, stdout: '{}', stderr: '' })
+
+    await getRpUtilSchema('v26.2.2', { preferPublished: false })
+
+    expect(global.fetch).not.toHaveBeenCalled()
     os.platform.mockRestore()
   })
 })

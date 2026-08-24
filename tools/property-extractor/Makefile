@@ -52,6 +52,16 @@ build: venv redpanda-git treesitter
 		$(if $(CLOUD_SUPPORT),--cloud-support,)
 	@echo "✅ JSON generated at $(TOOL_ROOT)/gen/properties-output.json"
 	@echo "✅ Enhanced JSON (with overrides) generated at $(TOOL_ROOT)/gen/$(TAG)-properties.json"
+	@if [ -z "$(SKIP_RP_UTIL)" ]; then \
+	  echo "🔀 Merging rp_util schema for cluster/broker scope…"; \
+	  cd $(TOOL_ROOT) && node merge-rp-util.js \
+	    --tag $(TAG) \
+	    --enhanced gen/$(TAG)-properties.json \
+	    --output gen/$(TAG)-properties.json \
+	    $(if $(OVERRIDES),$(if $(shell [ -f "$(OVERRIDES)" ] && echo exists),--overrides $(OVERRIDES),),); \
+	else \
+	  echo "⏭️  Skipping rp_util merge (SKIP_RP_UTIL set) -- cluster/broker scope stays Tree-sitter-only"; \
+	fi
 	@$(MAKE) generate-docs
 
 # --- Ensure Python venv & dependencies ---

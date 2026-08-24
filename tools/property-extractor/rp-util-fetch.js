@@ -228,20 +228,92 @@ function runSchemaFlag(binaryPath, flag) {
   }
 }
 
+// Where publish-rp-util-schema.yaml uploads its release assets, and the
+// mapping from each asset's filename back to the schema key rp_util_merge.py
+// and this module's own callers key everything by.
+const RP_UTIL_SCHEMA_RELEASE_REPO = 'redpanda-data/docs-extensions-and-macros'
+const RELEASE_ASSET_TO_SCHEMA_KEY = {
+  'cluster-config-schema.json': 'clusterSchema',
+  'node-config-schema.json': 'nodeSchema',
+  'pandaproxy-config-schema.json': 'pandaproxySchema',
+  'kafka-client-config-schema.json': 'kafkaClientSchema',
+  'schema-registry-config-schema.json': 'schemaRegistrySchema'
+}
+
+/**
+ * Fetch rp_util's schema from a previously published GitHub release
+ * (publish-rp-util-schema.yaml's rp-util-schema-<tag> release in this repo)
+ * instead of building rp_util from source. A real doc-generation run can't
+ * afford a from-source Bazel build (15-45 minutes observed) every time --
+ * this is the fast path that exists so it doesn't have to.
+ * @param {string} tag - The exact tag the release was published for (e.g. "v26.2.2")
+ * @returns {Promise<object|null>} Schemas keyed like SCHEMA_FLAGS, or null if
+ *   no release exists for this tag (caller should fall back to building)
+ */
+async function fetchPublishedSchema(tag) {
+  const token = getGitHubToken()
+  const headers = token ? { Authorization: `Bearer ${token}` } : {}
+
+  const releaseResp = await fetch(
+    `https://api.github.com/repos/${RP_UTIL_SCHEMA_RELEASE_REPO}/releases/tags/rp-util-schema-${tag}`,
+    { headers }
+  )
+  if (releaseResp.status === 404) return null
+  if (!releaseResp.ok) {
+    throw new Error(
+      `Failed to look up published rp_util schema release for ${tag}: ` +
+      `${releaseResp.status} ${releaseResp.statusText}`
+    )
+  }
+  const release = await releaseResp.json()
+
+  const schemas = {}
+  for (const asset of release.assets || []) {
+    const key = RELEASE_ASSET_TO_SCHEMA_KEY[asset.name]
+    if (!key) continue
+    const assetResp = await fetch(asset.url, {
+      headers: { ...headers, Accept: 'application/octet-stream' }
+    })
+    if (!assetResp.ok) {
+      throw new Error(
+        `Failed to download published rp_util schema asset ${asset.name}: ${assetResp.status}`
+      )
+    }
+    schemas[key] = await assetResp.json()
+  }
+  return schemas
+}
+
 /**
  * Get every schema rp_util can dump (cluster, plus everything that makes up
- * broker scope) for a streaming-enterprise ref, building from source every
- * time.
+ * broker scope) for a streaming-enterprise ref.
+ *
+ * Tries a previously published release first (fast: a few small downloads)
+ * and only falls back to building rp_util from source (slow: a from-scratch
+ * Bazel build) when no published release exists for this exact ref, or when
+ * the caller explicitly asks to skip that check.
  * @param {string} ref - Branch, tag, or commit SHA in redpanda-data/streaming-enterprise
  * @param {object} [options]
+ * @param {boolean} [options.preferPublished] - Try fetchPublishedSchema(ref) first.
+ *   Default true. Set false to always build from source (e.g. `ref` isn't a
+ *   released tag, or the caller explicitly wants a from-source build).
  * @param {string} [options.sourcePath] - Use an existing local streaming-enterprise
- *   checkout instead of cloning (caller is responsible for it being at `ref`)
+ *   checkout instead of cloning (caller is responsible for it being at `ref`).
+ *   Implies building from source -- skips the published-release check.
  * @param {boolean} [options.keepSource] - Don't delete a clone this function made
- * @returns {{clusterSchema: object, nodeSchema: object, pandaproxySchema: object,
- *   kafkaClientSchema: object, schemaRegistrySchema: object, sourcePath: string}}
+ * @returns {Promise<{clusterSchema: object, nodeSchema: object, pandaproxySchema: object,
+ *   kafkaClientSchema: object, schemaRegistrySchema: object, sourcePath: string|null}>}
  */
-function getRpUtilSchema(ref, options = {}) {
-  const { sourcePath, keepSource = false } = options
+async function getRpUtilSchema(ref, options = {}) {
+  const { sourcePath, keepSource = false, preferPublished = true } = options
+
+  if (!sourcePath && preferPublished) {
+    const published = await fetchPublishedSchema(ref)
+    if (published) {
+      return { ...published, sourcePath: null }
+    }
+    console.log(`No published rp_util schema release for ${ref}; building from source...`)
+  }
 
   let sourceDir = sourcePath
   let ownsClone = false
@@ -282,5 +354,6 @@ module.exports = {
   cloneStreamingEnterprise,
   buildNative,
   buildAndRunInDocker,
-  runSchemaFlag
+  runSchemaFlag,
+  fetchPublishedSchema
 }
