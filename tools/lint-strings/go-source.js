@@ -150,12 +150,23 @@ function collectStringConsts (masked) {
       pattern.lastIndex = close + 1
     } else {
       // Single-const form: the statement ends at the first newline OUTSIDE
-      // a string (a raw-string value may span lines).
+      // a string (a raw-string value may span lines), unless that newline
+      // follows a `+` continuation - Go allows a string concatenation to
+      // wrap across lines with no surrounding parens.
       let j = i
-      while (j < masked.length && masked[j] !== '\n') {
+      while (j < masked.length) {
         if (masked[j] === '"' || masked[j] === '`' || masked[j] === "'") {
           j = skipString(masked, j)
           continue
+        }
+        if (masked[j] === '\n') {
+          let k = j - 1
+          while (k >= i && /[ \t\r]/.test(masked[k])) k--
+          if (k >= i && masked[k] === '+') {
+            j++
+            continue
+          }
+          break
         }
         j++
       }
@@ -168,7 +179,9 @@ function collectStringConsts (masked) {
 
 /** Parse `name [type] = <string expr>` lines inside a const region. */
 function collectConstEntries (regionText, consts) {
-  // Split on newlines OUTSIDE strings (raw strings may span lines).
+  // Split on newlines OUTSIDE strings (raw strings may span lines), unless
+  // the newline follows a `+` continuation - a string concatenation may
+  // wrap across lines with no surrounding parens, and must stay one entry.
   const lines = []
   let start = 0
   let i = 0
@@ -179,6 +192,12 @@ function collectConstEntries (regionText, consts) {
       continue
     }
     if (ch === '\n') {
+      let k = i - 1
+      while (k >= start && /[ \t\r]/.test(regionText[k])) k--
+      if (k >= start && regionText[k] === '+') {
+        i++
+        continue
+      }
       lines.push(regionText.slice(start, i))
       start = i + 1
     }
