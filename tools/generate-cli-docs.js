@@ -324,7 +324,8 @@ IMPORTANT: This documentation is auto-generated. Do not edit manually. Run \`npm
   doc += generateCommandDoc('validate', validateData, null, 2);
 
   const validateSubcommands = [
-    'enterprise-features'
+    'enterprise-features',
+    'property-overrides'
   ];
 
   validateSubcommands.forEach(subcmd => {

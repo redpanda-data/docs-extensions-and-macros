@@ -1382,3 +1382,47 @@ npx doc-tools validate enterprise-features --write-mapping modules/get-started/p
 Network access to raw.githubusercontent.com for any source not supplied
 with a local path option.
 
+=== validate property-overrides
+
+Validates docs-data/property-overrides.json against its JSON Schema: unknown keys (a typo that would otherwise be silently dropped by the extractor), and the see_also shape (a plain string, or an object naming exactly one of cloud_only/self_hosted_only).
+
+*Why use it:*
+
+property-overrides.json has no catch-all pass-through when an override targets an existing property — an unrecognized key like the typo `acceptable_values` (the generated-only field is `acceptable_values`, but the override key the extractor reads is `accepted_values`) is silently ignored rather than erroring. This check catches that class of mistake before generation, the same way `validate rpk-overrides` does for rpk.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools validate property-overrides [options]
+----
+
+*Options:*
+
+`--overrides <path>`::
+Path to overrides JSON file (default: "docs-data/property-overrides.json")
+
+`--strict`::
+Exit with error code on validation failures
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Validate overrides with the default path
+npx doc-tools validate property-overrides
+
+# Validate a custom overrides file
+npx doc-tools validate property-overrides --overrides my-overrides.json
+
+# Strict mode - exit with error code on validation failures
+npx doc-tools validate property-overrides --strict
+----
+
+*Requirements:*
+
+- property-overrides.schema.json in docs-data/
+
