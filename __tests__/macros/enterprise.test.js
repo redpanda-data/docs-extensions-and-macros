@@ -350,6 +350,33 @@ features:
       expect(html).toContain('class="enterprise-feature"')
     })
 
+    test('an unparsable since value warns, unlike an absent one', () => {
+      const badSince = SINCE_YAML.replace("since: '26.3'", 'since: not-a-version')
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      convert('enterprise:Iceberg Topics[]', { catalog: fakeCatalog(badSince), version: '20.1' })
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("since: 'not-a-version'"))
+      warn.mockClear()
+      convert('enterprise:No Since Feature[]', { catalog: fakeCatalog(badSince), version: '20.1' })
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('enterprise-validate=off silences the unparsable since warning', () => {
+      const badSince = SINCE_YAML.replace("since: '26.3'", 'since: not-a-version')
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      convert('enterprise:Iceberg Topics[]', {
+        catalog: fakeCatalog(badSince), version: '20.1', attributes: { 'enterprise-validate': 'off' },
+      })
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('the licensing table also warns on an unparsable since value', () => {
+      const badSince = SINCE_YAML.replace("since: '26.3'", 'since: not-a-version')
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise_features::redpanda[]', { catalog: fakeCatalog(badSince), version: '20.1' })
+      expect(html).toContain('Iceberg Topics')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("since: 'not-a-version'"))
+    })
+
     test('the licensing table omits a feature on a page before its since version', () => {
       const html = convert('enterprise_features::redpanda[]', { catalog: catalog(), version: '24.1' })
       expect(html).toContain('No Since Feature')

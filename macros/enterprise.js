@@ -246,13 +246,32 @@ function coerceVersion (raw) {
  * because it is the one mistake that could publish an unreleased feature,
  * a `since` typo or a build with no page-version context has no such
  * asymmetry to protect against, so it defaults to not gating rather than
- * hiding a shipped feature over unrelated bad data.
+ * hiding a shipped feature over unrelated bad data. An unparsable `since`
+ * is still reported, the same way an unrecognized `status` is: the failure
+ * mode differs (not gated, instead of gated), but a silent typo is exactly
+ * as easy to miss either way.
+ *
+ * @param {object} entry - Registry entry.
+ * @param {object} [config] - Extension config, used to read the page's own
+ *   version.
+ * @param {object} [report] - {mode, filePath, contentCatalog} to report an
+ *   unparsable since value. Omit to check silently.
  */
-function isFeatureShippedOnPage (entry, config) {
+function isFeatureShippedOnPage (entry, config, report) {
   const since = entry && entry.since
   if (since === undefined || since === null || String(since).trim() === '') return true
   const sinceVersion = coerceVersion(since)
-  if (!sinceVersion) return true
+  if (!sinceVersion) {
+    if (report && report.mode !== 'off') {
+      const where = report.filePath ? ` in ${report.filePath}` : ''
+      const message =
+        `enterprise:${entry.name}[]${where}: registry has since: '${since}', which is not a parsable version, so the since-gating check is skipped and the feature renders as already shipped. ` +
+        'Fix the since value in enterprise-features.yml (e.g. "26.3"), or remove the key if the feature has always been available.'
+      if (report.contentCatalog) warnOnce(report.contentCatalog, `since:${entry.name}`, message)
+      else console.warn(chalk.yellow(message))
+    }
+    return true
+  }
   const src = config && config.file && config.file.src
   const pageVersion = src && coerceVersion(src.version)
   if (!pageVersion) return true
@@ -527,7 +546,7 @@ function buildFeatureTable (features, scope, opts = {}) {
       // unreleased filter above: an older version's table naturally does not
       // list a feature that did not exist yet on that version, which is not
       // a writer mistake worth warning about.
-      return status === STATUS_UNRELEASED || isFeatureShippedOnPage(feature, opts.config)
+      return status === STATUS_UNRELEASED || isFeatureShippedOnPage(feature, opts.config, report)
     })
     .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }))
   const title = opts.title || TABLE_TITLES[scope]
@@ -588,7 +607,7 @@ function enterpriseInlineMacro (config) {
         reportUnreleasedFeature({ feature, mode, filePath })
         return self.createInline(parent, 'quoted', attributes.text || feature)
       }
-      if (!isFeatureShippedOnPage(entry, config)) {
+      if (!isFeatureShippedOnPage(entry, config, { mode, filePath, contentCatalog: config && config.contentCatalog })) {
         // isFeatureShippedOnPage only returns false when entry.since parsed,
         // so entry is defined here.
         reportFeatureNotYetShipped({
