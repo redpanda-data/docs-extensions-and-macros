@@ -58,6 +58,17 @@ const SCHEMA_FLAGS = [
  * @param {string} ref - Branch, tag, or commit SHA
  * @param {string} destDir - Destination directory (must not exist yet)
  */
+/**
+ * Strip a credential embedded in a Git remote URL's userinfo (e.g.
+ * https://<token>@github.com/...) out of text before it's surfaced anywhere
+ * that gets logged -- an Error message ends up in plain CI logs, and Git
+ * echoes the authenticated remote URL verbatim in common failures (a
+ * private repo it can't access, a bad ref, ...).
+ */
+function redactCredentials(text) {
+  return String(text || '').replace(/\/\/[^/@\s]+@/g, '//***@')
+}
+
 function cloneStreamingEnterprise(ref, destDir) {
   const token = getGitHubToken()
   if (!token) {
@@ -82,13 +93,13 @@ function cloneStreamingEnterprise(ref, destDir) {
     encoding: 'utf8', timeout: 600000
   })
   if (full.status !== 0) {
-    throw new Error(`Failed to clone streaming-enterprise: ${full.stderr}`)
+    throw new Error(`Failed to clone streaming-enterprise: ${redactCredentials(full.stderr)}`)
   }
   const checkout = spawnSync('git', ['checkout', '-q', ref], {
     cwd: destDir, encoding: 'utf8', timeout: 60000
   })
   if (checkout.status !== 0) {
-    throw new Error(`Failed to checkout ref '${ref}' in streaming-enterprise: ${checkout.stderr}`)
+    throw new Error(`Failed to checkout ref '${ref}' in streaming-enterprise: ${redactCredentials(checkout.stderr)}`)
   }
 }
 

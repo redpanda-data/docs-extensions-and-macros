@@ -389,6 +389,28 @@ def _carry_forward_example(prop, existing_prop):
         prop["example"] = existing_prop["example"]
 
 
+CLOUD_METADATA_FIELDS = ("cloud_editable", "cloud_readonly", "cloud_supported", "cloud_byoc_only")
+
+
+def _carry_forward_cloud_metadata(prop, existing_prop):
+    """add_cloud_support_metadata (cloud_config.py) is the only source of
+    cloud_editable/cloud_readonly/cloud_supported/cloud_byoc_only, and it
+    only runs when merge_with_existing_output is given a CloudConfig (the
+    --cloud-support flag). Without one, a rp_util-covered property's
+    replaced entry has none of these four fields, silently erasing them for
+    any property that had real cloud metadata from an earlier
+    --cloud-support run -- until the next run happens to pass one again.
+    Preserve the existing values whenever they're missing, the same
+    fallback treatment gets_restored/example already get. A no-op whenever
+    add_cloud_support_metadata did run, since it always sets all four.
+    """
+    if not existing_prop:
+        return
+    for field in CLOUD_METADATA_FIELDS:
+        if field not in prop and field in existing_prop:
+            prop[field] = existing_prop[field]
+
+
 def merge_with_existing_output(
     existing_properties_and_definitions, rp_util_schemas, overrides,
     overrides_file_path=None, cloud_config=None,
@@ -435,6 +457,7 @@ def merge_with_existing_output(
         _preserve_validator_derived_enum_data(prop, existing_properties.get(name))
         _carry_forward_gets_restored(prop, existing_properties.get(name))
         _carry_forward_example(prop, existing_properties.get(name))
+        _carry_forward_cloud_metadata(prop, existing_properties.get(name))
 
     if cloud_config is not None:
         from cloud_config import add_cloud_support_metadata

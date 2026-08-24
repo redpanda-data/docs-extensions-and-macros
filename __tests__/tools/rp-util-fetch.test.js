@@ -111,6 +111,36 @@ describe('cloneStreamingEnterprise', () => {
       .toThrow(/Failed to clone streaming-enterprise: network unreachable/)
     fs.rmSync.mockRestore()
   })
+
+  test('redacts the embedded token from git stderr before throwing', () => {
+    // getAuthenticatedGitHubUrl embeds the token in the URL userinfo (see
+    // cli-utils/github-token.js) -- git echoes that same URL back in common
+    // failures (private repo not found, bad ref, ...), so a raw stderr
+    // passthrough would leak the token into plain CI logs.
+    githubToken.getGitHubToken.mockReturnValue('super-secret-token')
+    githubToken.getAuthenticatedGitHubUrl.mockReturnValue(
+      'https://super-secret-token@github.com/redpanda-data/streaming-enterprise.git'
+    )
+
+    jest.spyOn(fs, 'rmSync').mockImplementation(() => {})
+    spawnSync
+      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'branch not found' })
+      .mockReturnValueOnce({
+        status: 1, stdout: '',
+        stderr: "fatal: repository 'https://super-secret-token@github.com/redpanda-data/streaming-enterprise.git/' not found",
+      })
+
+    let thrown
+    try {
+      cloneStreamingEnterprise('bad-ref', '/tmp/dest')
+    } catch (err) {
+      thrown = err
+    }
+    expect(thrown).toBeDefined()
+    expect(thrown.message).not.toContain('super-secret-token')
+    expect(thrown.message).toContain('https://***@github.com')
+    fs.rmSync.mockRestore()
+  })
 })
 
 describe('buildNative', () => {

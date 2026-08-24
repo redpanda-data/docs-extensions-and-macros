@@ -19,6 +19,7 @@ from rp_util_merge import (
     _derive_enterprise_fields,
     _resolve_type,
     _carry_forward_example,
+    _carry_forward_cloud_metadata,
     map_rp_util_property,
     map_schema,
     map_rp_util_schemas,
@@ -428,6 +429,35 @@ class TestCarryForwardExample(unittest.TestCase):
         self.assertNotIn("example", prop)
 
 
+class TestCarryForwardCloudMetadata(unittest.TestCase):
+    def test_preserves_all_four_fields_when_rp_util_has_none(self):
+        prop = {"name": "x"}
+        existing_prop = {
+            "cloud_editable": True, "cloud_readonly": False,
+            "cloud_supported": True, "cloud_byoc_only": False,
+        }
+        _carry_forward_cloud_metadata(prop, existing_prop)
+        self.assertEqual(prop["cloud_editable"], True)
+        self.assertEqual(prop["cloud_readonly"], False)
+        self.assertEqual(prop["cloud_supported"], True)
+        self.assertEqual(prop["cloud_byoc_only"], False)
+
+    def test_does_not_overwrite_freshly_computed_fields(self):
+        prop = {"name": "x", "cloud_supported": False}
+        existing_prop = {"cloud_supported": True}
+        _carry_forward_cloud_metadata(prop, existing_prop)
+        self.assertFalse(prop["cloud_supported"])
+
+    def test_no_op_when_neither_side_has_cloud_metadata(self):
+        prop = {"name": "x"}
+        _carry_forward_cloud_metadata(prop, {"name": "x"})
+        for field in ("cloud_editable", "cloud_readonly", "cloud_supported", "cloud_byoc_only"):
+            self.assertNotIn(field, prop)
+        _carry_forward_cloud_metadata(prop, None)
+        for field in ("cloud_editable", "cloud_readonly", "cloud_supported", "cloud_byoc_only"):
+            self.assertNotIn(field, prop)
+
+
 class TestMergeWithExistingOutput(unittest.TestCase):
     def test_replaces_cluster_and_broker_properties_keeps_topic_untouched(self):
         existing = {
@@ -521,6 +551,37 @@ class TestMergeWithExistingOutput(unittest.TestCase):
         merged = merge_with_existing_output(existing, rp_util_schemas, overrides={})
 
         self.assertEqual(merged["properties"]["scram_username"]["example"], "`myuser`")
+
+    def test_keeps_existing_cloud_metadata_when_cloud_config_not_given(self):
+        # Regression guard: without --cloud-support, add_cloud_support_metadata
+        # never runs, so a rp_util-covered property must not lose cloud
+        # metadata an earlier --cloud-support run had already recorded for it.
+        existing = {
+            "properties": {
+                "audit_enabled": {
+                    "name": "audit_enabled", "config_scope": "cluster",
+                    "cloud_editable": True, "cloud_readonly": False,
+                    "cloud_supported": True, "cloud_byoc_only": False,
+                },
+            },
+            "definitions": {},
+        }
+        rp_util_schemas = {
+            "clusterSchema": {"properties": {
+                "audit_enabled": {
+                    "description": "d", "type": "boolean",
+                    "default_value": "false", "is_enterprise": False,
+                },
+            }},
+        }
+
+        merged = merge_with_existing_output(existing, rp_util_schemas, overrides={})
+
+        prop = merged["properties"]["audit_enabled"]
+        self.assertTrue(prop["cloud_editable"])
+        self.assertFalse(prop["cloud_readonly"])
+        self.assertTrue(prop["cloud_supported"])
+        self.assertFalse(prop["cloud_byoc_only"])
 
     def test_topic_only_overrides_do_not_clobber_the_topic_property(self):
         # Regression: docs-data/property-overrides.json's overrides are
