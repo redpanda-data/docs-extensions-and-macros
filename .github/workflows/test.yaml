@@ -216,11 +216,28 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.property_extractor == 'true' || needs.detect-changes.outputs.all_tests == 'true' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    # Needed to assume the AWS role below, which fetches the bot token that
+    # authenticates the clone of streaming-enterprise (private) in the
+    # "Generate test fixtures" step.
+    permissions:
+      id-token: write
+      contents: read
     strategy:
       matrix:
         python-version: ['3.9', '3.11']
     steps:
       - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+
+      - uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/actions_bot_token
+          parse-json-secrets: true
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -238,13 +255,17 @@ jobs:
         id: date
         run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
-      - name: Cache Redpanda repository
+      - name: Cache streaming-enterprise repository
         uses: actions/cache@v4
         with:
           path: tools/property-extractor/tmp/redpanda
-          key: redpanda-repo-dev-${{ steps.date.outputs.date }}
+          # Renamed from redpanda-repo-dev-* (pre-migration): that key's cached
+          # clone has its origin remote pointed at the old public redpanda
+          # repo, so restoring it would make the fetch step below silently
+          # pull from the wrong repo instead of streaming-enterprise.
+          key: streaming-enterprise-repo-dev-${{ steps.date.outputs.date }}
           restore-keys: |
-            redpanda-repo-dev-
+            streaming-enterprise-repo-dev-
 
       - name: Cache tree-sitter build
         uses: actions/cache@v4
@@ -263,6 +284,8 @@ jobs:
 
       - name: Generate test fixtures
         working-directory: tools/property-extractor
+        env:
+          GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
         run: |
           make build
 
