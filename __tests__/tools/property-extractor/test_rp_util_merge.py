@@ -273,6 +273,72 @@ class TestMapRpUtilProperty(unittest.TestCase):
         prop = map_rp_util_property("admin", meta, "broker", "src/v/config/node_config.cc", definitions)
         self.assertEqual(prop["items"]["type"], "object")
 
+    def test_scalar_enum_with_enterprise_subset_builds_x_enum_metadata(self):
+        meta = {
+            "description": "d", "type": "string", "default_value": '"delete"',
+            "enum_values": ["none", "delete", "compact"],
+            "enterprise_enum_values": ["compact"], "is_enterprise": False,
+        }
+        prop = map_rp_util_property("x", meta, "cluster", "src/v/config/configuration.cc", {})
+        self.assertEqual(prop["enum"], ["none", "delete", "compact"])
+        self.assertEqual(prop["x-enum-metadata"], {
+            "none": {"is_enterprise": False},
+            "delete": {"is_enterprise": False},
+            "compact": {"is_enterprise": True},
+        })
+
+    def test_scalar_enum_without_enterprise_subset_omits_x_enum_metadata(self):
+        # A plain (non-licensing-gated) enum -- e.g. log_cleanup_policy --
+        # must not get a vacuous all-false x-enum-metadata block baseline
+        # never produced for it either.
+        meta = {
+            "description": "d", "type": "string", "default_value": '"delete"',
+            "enum_values": ["none", "delete", "compact"], "is_enterprise": False,
+        }
+        prop = map_rp_util_property("log_cleanup_policy", meta, "cluster",
+                                     "src/v/config/configuration.cc", {})
+        self.assertNotIn("x-enum-metadata", prop)
+
+    def test_items_enum_values_map_to_items_enum(self):
+        # Array-element accepted values (e.g. sasl_mechanisms via
+        # enum_set_property) belong under items, not the top-level "enum" --
+        # they constrain each element, not the whole array value.
+        meta = {
+            "description": "d", "type": "array", "default_value": '["SCRAM"]',
+            "items": {
+                "type": "string",
+                "enum_values": ["GSSAPI", "SCRAM", "OAUTHBEARER", "PLAIN"],
+                "enterprise_enum_values": ["GSSAPI", "OAUTHBEARER"],
+            },
+            "is_enterprise": True,
+        }
+        prop = map_rp_util_property("sasl_mechanisms", meta, "cluster",
+                                     "src/v/config/configuration.cc", {})
+        self.assertNotIn("enum", prop)
+        self.assertEqual(
+            prop["items"]["enum"], ["GSSAPI", "SCRAM", "OAUTHBEARER", "PLAIN"])
+        self.assertEqual(prop["items"]["x-enum-metadata"], {
+            "GSSAPI": {"is_enterprise": True},
+            "SCRAM": {"is_enterprise": False},
+            "OAUTHBEARER": {"is_enterprise": True},
+            "PLAIN": {"is_enterprise": False},
+        })
+        self.assertNotIn("enum_values", prop["items"])
+        self.assertNotIn("enterprise_enum_values", prop["items"])
+
+    def test_items_without_enum_values_omits_enum_key(self):
+        # Regression guard: an ordinary array property with no accepted-
+        # values list (e.g. admin's broker_endpoint items) must not gain a
+        # spurious "enum" key just because items.pop() now runs.
+        definitions = {"model::broker_endpoint": {"type": "object"}}
+        meta = {
+            "description": "d", "type": "array", "default_value": "[]",
+            "items": {"type": "broker_endpoint"}, "is_enterprise": False,
+        }
+        prop = map_rp_util_property("admin", meta, "broker", "src/v/config/node_config.cc", definitions)
+        self.assertNotIn("enum", prop["items"])
+        self.assertNotIn("x-enum-metadata", prop["items"])
+
 
 class TestResolveType(unittest.TestCase):
     def test_primitive_passes_through(self):

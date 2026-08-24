@@ -77,6 +77,20 @@ def _parse_embedded_json(value, property_name, field_name):
         return None
 
 
+def _build_enum_metadata(enum_values, enterprise_enum_values):
+    """Map rp_util's enterprise_enum_values (the subset of enum_values that
+    requires an enterprise license) into baseline's x-enum-metadata shape:
+    every enum value mapped to {"is_enterprise": bool}. Returns None when
+    rp_util reports no enterprise-restricted values at all, so a property
+    with a plain (non-enterprise) enum never gets a vacuous all-false
+    x-enum-metadata block baseline never produced either.
+    """
+    if not enum_values or not enterprise_enum_values:
+        return None
+    enterprise_set = set(enterprise_enum_values)
+    return {v: {"is_enterprise": v in enterprise_set} for v in enum_values}
+
+
 def _derive_enterprise_fields(meta, default_value, property_name):
     """Recreate is_enterprise/enterprise_constructor/enterprise_value/
     enterprise_restricted_value/enterprise_sanctioned_value -- the fields
@@ -201,10 +215,25 @@ def map_rp_util_property(name, meta, config_scope, defined_in, definitions):
 
     if has_enum_values:
         prop["enum"] = meta["enum_values"]
+        metadata = _build_enum_metadata(meta["enum_values"], meta.get("enterprise_enum_values"))
+        if metadata:
+            prop["x-enum-metadata"] = metadata
     if meta.get("items"):
         items = dict(meta["items"])
+        item_enum_values = items.pop("enum_values", None)
+        item_enterprise_values = items.pop("enterprise_enum_values", None)
         if items.get("type"):
-            items["type"] = _resolve_type(items["type"], False, definitions)
+            items["type"] = _resolve_type(items["type"], bool(item_enum_values), definitions)
+        if item_enum_values:
+            # rp_util reports an array property's per-element accepted
+            # values under items.enum_values -- baseline (and property.hbs)
+            # expect them nested the same way, but keyed "enum" (matching
+            # the top-level convention: "enum_values" only because swagger
+            # forbids the reserved word "enum" as a generated struct member).
+            items["enum"] = item_enum_values
+            metadata = _build_enum_metadata(item_enum_values, item_enterprise_values)
+            if metadata:
+                items["x-enum-metadata"] = metadata
         prop["items"] = items
     if meta.get("example") is not None:
         # Matches ExampleTransformer (transformers.py): wrap in backticks for
@@ -274,17 +303,19 @@ def map_rp_util_schemas(schemas, definitions=None):
 
 
 def _preserve_validator_derived_enum_data(prop, existing_prop):
-    """Some properties' accepted-value list comes from analyzing a runtime
-    *validator function*'s source (ValidatorEnumExtractor in
-    transformers.py) rather than from the C++ type itself -- e.g.
-    sasl_mechanisms is a plain property<vector<sstring>> whose real
-    constraint (and enterprise-tier flags in x-enum-metadata) only exists in
-    validate_sasl_mechanisms' source. rp_util's compiled-type introspection
-    structurally cannot produce this; leaving it unfilled after a merge
-    would silently drop real, verified, licensing-relevant content that
+    """FALLBACK, not the primary path (mirrors _carry_forward_gets_restored):
+    rp_util now exposes accepted-value/enterprise-tier data for properties
+    like sasl_mechanisms directly (enum_set_property's enum_values()/
+    enterprise_enum_values(), see streaming-enterprise's property.h) instead
+    of it living only in a validator function's source, which
+    ValidatorEnumExtractor (transformers.py) used to have to parse. This
+    only fires against an rp_util build from before that existed, as a
+    stopgap so a stale rp_util binary doesn't regress published docs by
+    silently dropping real, verified, licensing-relevant content that
     baseline already has. Preserve baseline's value whenever rp_util's
     entry has none -- the same pass-through treatment topic properties
-    already get.
+    already get. Should be removed once every consumer reliably runs an
+    rp_util build new enough to report this itself.
     """
     if not existing_prop:
         return
