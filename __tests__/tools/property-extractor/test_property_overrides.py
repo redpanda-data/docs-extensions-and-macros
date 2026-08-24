@@ -175,6 +175,30 @@ class TestAdmonitionsOverride(unittest.TestCase):
 
         self.assertNotIn("admonitions", result["x"])
 
+    def test_phantom_stub_normalizes_admonitions_type(self):
+        """A new property created from an unmatched override key must go
+        through the same normalization as an existing property, not a raw
+        passthrough -- otherwise it ships with a lowercase `type` that
+        AsciiDoc won't render as a real admonition block."""
+        overrides = {"properties": {"ghost_property": {
+            "admonitions": [{"type": "warning", "text": "x"}],
+        }}}
+
+        result = apply_property_overrides({}, overrides)
+
+        self.assertEqual(result["ghost_property"]["admonitions"],
+                          [{"type": "WARNING", "text": "x"}])
+
+    def test_phantom_stub_malformed_admonitions_does_not_set_field(self):
+        """A malformed admonitions value on a phantom stub is dropped with a
+        warning, not passed through unvalidated."""
+        overrides = {"properties": {"ghost_property": {"admonitions": "not a list"}}}
+
+        with self.assertLogs("viewer", level="WARNING"):
+            result = apply_property_overrides({}, overrides)
+
+        self.assertNotIn("admonitions", result["ghost_property"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1209,7 +1209,7 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
         if key not in ["description", "type", "default", "config_scope", "version",
                        "example", "example_file", "example_yaml", "related_topics",
                        "is_deprecated", "visibility", "exclude_from_docs", "category",
-                       "accepted_values", "_comment"]:
+                       "accepted_values", "admonitions", "_comment"]:
             new_property[key] = value
 
     # Add exclude_from_docs if specified
@@ -1226,6 +1226,14 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
             new_property["enum"] = override["accepted_values"]
         else:
             logger.warning(f"accepted_values for property '{prop_name}' must be an array")
+
+    # Add admonitions if specified - run through the same validation/normalization
+    # as the existing-property path so a malformed entry is dropped with a warning
+    # rather than silently rendering as an unstyled, lowercase-typed block.
+    if "admonitions" in override:
+        normalized = _normalize_admonitions(override["admonitions"])
+        if normalized is not None:
+            new_property["admonitions"] = normalized
 
     return new_property
 
