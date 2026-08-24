@@ -35,6 +35,26 @@ const CONVENTION = {
 const API_ROOT = path.join('operator', 'api', 'redpanda')
 const CONFIG_PATH = path.join('operator', 'crd-ref-docs-config.yaml')
 
+/**
+ * Compile a list of regex source strings, skipping (with a warning) any
+ * pattern that isn't valid JS regex syntax instead of throwing. The config
+ * file is written for a Go tool (crd-ref-docs), so it can legally contain
+ * Go/RE2-only constructs like `(?i)` or `(?P<name>...)` that JS's RegExp
+ * rejects - one such pattern must not abort the entire lint run.
+ */
+function compilePatterns (patterns, configKey) {
+  const compiled = []
+  for (const p of patterns) {
+    try {
+      compiled.push(new RegExp(p))
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`lint-strings: skipping invalid ${configKey} pattern in ${CONFIG_PATH} (${JSON.stringify(p)}): ${err.message}`)
+    }
+  }
+  return compiled
+}
+
 /** Load ignore rules from crd-ref-docs-config.yaml (absent file = no rules). */
 function loadConfig (repo) {
   const configPath = path.join(repo, CONFIG_PATH)
@@ -42,8 +62,8 @@ function loadConfig (repo) {
   if (!fs.existsSync(configPath)) return config
   const parsed = yaml.load(fs.readFileSync(configPath, 'utf8')) || {}
   const processor = parsed.processor || {}
-  config.ignoreTypes = (processor.ignoreTypes || []).map((p) => new RegExp(p))
-  config.ignoreFields = (processor.ignoreFields || []).map((p) => new RegExp(p))
+  config.ignoreTypes = compilePatterns(processor.ignoreTypes || [], 'processor.ignoreTypes')
+  config.ignoreFields = compilePatterns(processor.ignoreFields || [], 'processor.ignoreFields')
   return config
 }
 
