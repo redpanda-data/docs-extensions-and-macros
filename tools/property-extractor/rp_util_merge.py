@@ -182,18 +182,30 @@ def map_rp_util_property(name, meta, config_scope, defined_in, definitions):
     has_enum_values = bool(meta.get("enum_values"))
 
     # Baseline consistently unwraps a single-element list default to its
-    # bare element (confirmed for admin/kafka_api/pandaproxy_api/
-    # schema_registry_api/sasl_mechanisms) -- formatPropertyValue.js renders
-    # a bare list literally (e.g. "[SCRAM]"), so left as-is this is a real,
-    # if minor, rendered-output regression relative to today's docs, not
-    # just a JSON-shape difference. The property's own "type" still
-    # correctly says "array" regardless, so no information is lost. Only
-    # the *displayed* default is unwrapped -- _derive_enterprise_fields
-    # below still gets the original shape, since its
-    # enterprise_sanctioned_value == default_value comparison needs to
-    # match rp_util's own (unwrapped) val_container_t serialization.
+    # bare element when that element is a plain scalar (confirmed for
+    # sasl_mechanisms) -- formatPropertyValue.js renders a bare scalar list
+    # literally (e.g. "[SCRAM]"), so left as-is this is a real, if minor,
+    # rendered-output regression relative to today's docs, not just a
+    # JSON-shape difference. The property's own "type" still correctly says
+    # "array" regardless, so no information is lost. Only the *displayed*
+    # default is unwrapped -- _derive_enterprise_fields below still gets the
+    # original shape, since its enterprise_sanctioned_value == default_value
+    # comparison needs to match rp_util's own (unwrapped) val_container_t
+    # serialization.
+    #
+    # This must NOT apply when the single element is an object (confirmed
+    # for admin/kafka_api/pandaproxy_api/schema_registry_api): unwrapping
+    # there strips the array away before formatPropertyValue.js ever sees
+    # it, so its correct array-of-object branch never runs and its object
+    # branch renders a bracket-less `{name: "", address: ..., port: ...}`
+    # instead -- contradicting the property's own "array" type and not
+    # something a reader could paste back into a real array-typed config.
     display_default = default_value
-    if isinstance(display_default, list) and len(display_default) == 1:
+    if (
+        isinstance(display_default, list)
+        and len(display_default) == 1
+        and not isinstance(display_default[0], dict)
+    ):
         display_default = display_default[0]
 
     prop = {
@@ -355,6 +367,28 @@ def _carry_forward_gets_restored(prop, existing_prop):
         prop["gets_restored"] = existing_prop["gets_restored"]
 
 
+def _carry_forward_example(prop, existing_prop):
+    """rp_util's own `example` field (config::base_property::example(), a
+    plain C++ string literal) only exists for a property whose author wrote
+    one there -- unlike enum/gets_restored data, there is no equivalent
+    override or dynamic source to fall back to, and no expectation that
+    every property should have one. But a property that already had a
+    correct, hand-written multi-line example in the existing output (e.g.
+    ExampleOverrideTransformer-applied content, or one baseline's own
+    parser found) must not silently lose it just because rp_util itself
+    reports none for that property. Preserve baseline's value whenever
+    rp_util's entry has none -- the same pass-through treatment topic
+    properties already get. Unlike the other two fallbacks above, this is
+    not a stopgap for a stale rp_util binary: rp_util is not expected to
+    ever report every property's example, so this keeps applying
+    indefinitely.
+    """
+    if "example" in prop:
+        return
+    if existing_prop and "example" in existing_prop:
+        prop["example"] = existing_prop["example"]
+
+
 def merge_with_existing_output(
     existing_properties_and_definitions, rp_util_schemas, overrides,
     overrides_file_path=None, cloud_config=None,
@@ -400,6 +434,7 @@ def merge_with_existing_output(
     for name, prop in enhanced.items():
         _preserve_validator_derived_enum_data(prop, existing_properties.get(name))
         _carry_forward_gets_restored(prop, existing_properties.get(name))
+        _carry_forward_example(prop, existing_properties.get(name))
 
     if cloud_config is not None:
         from cloud_config import add_cloud_support_metadata

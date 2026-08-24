@@ -18,6 +18,7 @@ from rp_util_merge import (
     _parse_embedded_json,
     _derive_enterprise_fields,
     _resolve_type,
+    _carry_forward_example,
     map_rp_util_property,
     map_schema,
     map_rp_util_schemas,
@@ -243,11 +244,10 @@ class TestMapRpUtilProperty(unittest.TestCase):
         prop = map_rp_util_property("x", meta, "cluster", "src/v/config/configuration.cc", {})
         self.assertEqual(prop["type"], "string")
 
-    def test_single_element_list_default_unwraps_to_bare_scalar(self):
-        # Matches baseline's own convention (confirmed for admin, kafka_api,
-        # pandaproxy_api, schema_registry_api, sasl_mechanisms) -- otherwise
-        # formatPropertyValue.js renders a visible "[SCRAM]" where today's
-        # docs show a bare "SCRAM".
+    def test_single_element_scalar_list_default_unwraps_to_bare_scalar(self):
+        # Matches baseline's own convention (confirmed for sasl_mechanisms)
+        # -- otherwise formatPropertyValue.js renders a visible "[SCRAM]"
+        # where today's docs show a bare "SCRAM".
         meta = {
             "description": "d", "type": "array", "default_value": '["SCRAM"]',
             "items": {"type": "string"}, "is_enterprise": False,
@@ -263,6 +263,22 @@ class TestMapRpUtilProperty(unittest.TestCase):
         }
         prop = map_rp_util_property("x", meta, "cluster", "src/v/config/configuration.cc", {})
         self.assertEqual(prop["default"], ["a", "b"])
+
+    def test_single_element_object_list_default_is_not_unwrapped(self):
+        # admin/kafka_api/pandaproxy_api/schema_registry_api are single-
+        # element lists of *objects*, not scalars -- unwrapping one of these
+        # strips the array away before formatPropertyValue.js's correct
+        # array-of-object branch ever runs, producing a bracket-less
+        # `{name: ..., address: ..., port: ...}` that contradicts the
+        # property's own "array" type and isn't valid to paste back into a
+        # real array-typed config.
+        meta = {
+            "description": "d", "type": "array",
+            "default_value": '[{"name": "", "address": "127.0.0.1", "port": 9644}]',
+            "items": {"type": "broker_endpoint"}, "is_enterprise": False,
+        }
+        prop = map_rp_util_property("admin", meta, "broker", "src/v/config/node_config.cc", {})
+        self.assertEqual(prop["default"], [{"name": "", "address": "127.0.0.1", "port": 9644}])
 
     def test_items_type_is_also_resolved(self):
         definitions = {"model::broker_endpoint": {"type": "object"}}
@@ -391,6 +407,27 @@ class TestMapRpUtilSchemas(unittest.TestCase):
         self.assertEqual(map_rp_util_schemas({}), {})
 
 
+class TestCarryForwardExample(unittest.TestCase):
+    def test_preserves_existing_example_when_rp_util_has_none(self):
+        prop = {"name": "x"}
+        existing_prop = {"example": "`some hand-written example`"}
+        _carry_forward_example(prop, existing_prop)
+        self.assertEqual(prop["example"], "`some hand-written example`")
+
+    def test_does_not_overwrite_rp_utils_own_example(self):
+        prop = {"name": "x", "example": "`1073741824`"}
+        existing_prop = {"example": "`some other example`"}
+        _carry_forward_example(prop, existing_prop)
+        self.assertEqual(prop["example"], "`1073741824`")
+
+    def test_no_op_when_neither_side_has_an_example(self):
+        prop = {"name": "x"}
+        _carry_forward_example(prop, {"name": "x"})
+        self.assertNotIn("example", prop)
+        _carry_forward_example(prop, None)
+        self.assertNotIn("example", prop)
+
+
 class TestMergeWithExistingOutput(unittest.TestCase):
     def test_replaces_cluster_and_broker_properties_keeps_topic_untouched(self):
         existing = {
@@ -456,6 +493,34 @@ class TestMergeWithExistingOutput(unittest.TestCase):
             merged["properties"]["abort_index_segment_size"]["description"],
             "overridden description",
         )
+
+    def test_keeps_existing_example_when_rp_util_reports_none(self):
+        # Regression guard: pandaproxy_api_tls/scram_username/schema_registry_
+        # replication_factor/verbose_logging_timeout_sec_max all have a
+        # correct, hand-written example in today's published docs, but no
+        # example field in rp_util's own schema -- merging must not silently
+        # drop it just because rp_util now covers the property.
+        existing = {
+            "properties": {
+                "scram_username": {
+                    "name": "scram_username", "config_scope": "cluster",
+                    "example": "`myuser`",
+                },
+            },
+            "definitions": {},
+        }
+        rp_util_schemas = {
+            "clusterSchema": {"properties": {
+                "scram_username": {
+                    "description": "d", "type": "string",
+                    "default_value": "null", "is_enterprise": False,
+                },
+            }},
+        }
+
+        merged = merge_with_existing_output(existing, rp_util_schemas, overrides={})
+
+        self.assertEqual(merged["properties"]["scram_username"]["example"], "`myuser`")
 
     def test_topic_only_overrides_do_not_clobber_the_topic_property(self):
         # Regression: docs-data/property-overrides.json's overrides are

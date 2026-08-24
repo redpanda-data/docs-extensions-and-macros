@@ -36,7 +36,7 @@ ifndef::env-cloud[]
 ====
 {{#if enterprise_constructor}}
 {{#if (eq enterprise_constructor "simple")}}
-This property requires an Enterprise license to use.
+Some values of this property require an Enterprise license.
 {{else if (eq enterprise_constructor "restricted_only")}}
 The following values require an Enterprise license: {{#each enterprise_restricted_value}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
 {{else if (eq enterprise_constructor "restricted_with_sanctioned")}}
@@ -87,17 +87,17 @@ ifdef::env-cloud[]
 {{#each items.enum}}`{{this}}`{{#unless @last}}, {{/unless}}{{/each}}
 endif::[]
 {{/if}}{{/if}}
-{{#if (and minimum maximum)}}
+{{#if (and (ne minimum undefined) (ne maximum undefined))}}
 
 | Range
 | [`{{minimum}}`, `{{maximum}}`]
 {{else}}
-{{#if minimum}}
+{{#if (ne minimum undefined)}}
 
 | Minimum
 | `{{minimum}}`
 {{/if}}
-{{#if maximum}}
+{{#if (ne maximum undefined)}}
 
 | Maximum
 | `{{maximum}}`
@@ -144,8 +144,11 @@ endif::[]
 {{/if}}
 
 ifndef::env-cloud[]
+{{#if (ne gets_restored undefined)}}
+
 | Restored on xref:manage:whole-cluster-restore.adoc[Whole Cluster Restore]
-| {{#if (ne gets_restored false)}}Yes{{else}}No{{/if}}
+| {{#if gets_restored}}Yes{{else}}No{{/if}}
+{{/if}}
 endif::[]
 {{#if visibility}}
 
