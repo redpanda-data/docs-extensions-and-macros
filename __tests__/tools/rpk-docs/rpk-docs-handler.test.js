@@ -4,13 +4,13 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 
-// Only prepareSourceFromRef's tests below use this; every other spawnSync
-// call in this module (docker-based builds) is exercised by no test here,
-// so auto-mocking child_process at the module boundary doesn't change
-// behavior for the rest of the suite. Must be mocked before the handler
-// module below is required: it destructures spawnSync from child_process
-// at load time, so a later jest.spyOn on the child_process export would
-// not reach that already-bound local reference.
+// Only prepareSourceFromRef's and downloadRpkRelease's tests below use this;
+// every other spawnSync call in this module (docker-based builds) is
+// exercised by no test here, so auto-mocking child_process at the module
+// boundary doesn't change behavior for the rest of the suite. Must be
+// mocked before the handler module below is required: it destructures
+// spawnSync from child_process at load time, so a later jest.spyOn on the
+// child_process export would not reach that already-bound local reference.
 jest.mock('child_process')
 const { spawnSync } = require('child_process')
 
@@ -23,7 +23,8 @@ const {
   addPlatformMarkersFromSource,
   countCommands,
   getRequiredGoVersion,
-  prepareSourceFromRef
+  prepareSourceFromRef,
+  downloadRpkRelease
 } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
 
 describe('rpk Docs Handler', () => {
@@ -605,6 +606,50 @@ describe('rpk Docs Handler', () => {
       spawnSync.mockReturnValue({ status: 1, stdout: '', stderr: 'fatal: repository not found' })
 
       expect(() => prepareSourceFromRef('nonexistent-ref')).toThrow(/Failed to clone streaming-enterprise repo/)
+    })
+  })
+
+  describe('downloadRpkRelease (private streaming-enterprise release assets)', () => {
+    const TOKEN_VARS = ['GIT_CREDENTIALS', 'REDPANDA_GITHUB_TOKEN', 'ACTIONS_BOT_TOKEN', 'GITHUB_TOKEN', 'VBOT_GITHUB_API_TOKEN', 'GH_TOKEN']
+    const savedEnv = {}
+    let tempDir
+
+    beforeEach(() => {
+      spawnSync.mockReset()
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-release-test-'))
+      for (const name of TOKEN_VARS) {
+        savedEnv[name] = process.env[name]
+        delete process.env[name]
+      }
+    })
+
+    afterEach(() => {
+      fs.rmSync(tempDir, { recursive: true, force: true })
+      for (const name of TOKEN_VARS) {
+        if (savedEnv[name] === undefined) delete process.env[name]
+        else process.env[name] = savedEnv[name]
+      }
+    })
+
+    test('returns null without spawning curl when there is no token', () => {
+      expect(downloadRpkRelease('v26.2.2', tempDir)).toBeNull()
+      expect(spawnSync).not.toHaveBeenCalled()
+    })
+
+    test('sends the token as an Authorization header against streaming-enterprise, never in the URL', () => {
+      process.env.GH_TOKEN = 'test-token-789'
+      // Asset missing (status 1): downloadRpkRelease returns null cleanly
+      // here, which is enough to inspect the curl invocation it made.
+      spawnSync.mockReturnValue({ status: 1, stdout: '', stderr: 'not found' })
+
+      expect(downloadRpkRelease('v26.2.2', tempDir)).toBeNull()
+      expect(spawnSync).toHaveBeenCalledTimes(1)
+
+      const [cmd, args] = spawnSync.mock.calls[0]
+      expect(cmd).toBe('curl')
+      expect(args).toEqual(expect.arrayContaining(['-H', 'Authorization: token test-token-789']))
+      expect(args.some((a) => typeof a === 'string' && a.includes('streaming-enterprise/releases/download/v26.2.2'))).toBe(true)
+      expect(args.join(' ')).not.toContain('test-token-789@')
     })
   })
 })

@@ -1305,14 +1305,30 @@ function downloadRpkRelease(tag, destDir) {
     return null
   }
 
+  // Releases now publish to streaming-enterprise (private), not the public
+  // redpanda-data/redpanda. This function already has a fallback (the
+  // caller builds from source instead), so a missing token warns and
+  // returns null here rather than throwing the way the clone-only paths do.
+  const { getGitHubToken } = require('../../cli-utils/github-token')
+  const token = getGitHubToken()
+  if (!token) {
+    console.warn('No GitHub token available for the private streaming-enterprise release download; falling back to a source build.')
+    return null
+  }
+
   const assetName = `rpk-${osName}-${archName}.zip`
-  const baseUrl = `https://github.com/redpanda-data/redpanda/releases/download/${tag}`
+  const baseUrl = `https://github.com/redpanda-data/streaming-enterprise/releases/download/${tag}`
   const zipPath = path.join(destDir, assetName)
+  // curl only sends this header to github.com, not to the redirect target
+  // (release assets are served from a separate storage domain), so the
+  // token is never sent to that third-party host.
+  const authHeader = `Authorization: token ${token}`
 
   console.log(`Downloading ${assetName} for ${tag}...`)
   const curlResult = spawnSync('curl', [
     '-fL', '--retry', '5', '--retry-all-errors',
     '--connect-timeout', '30', '--max-time', '300',
+    '-H', authHeader,
     '-o', zipPath, `${baseUrl}/${assetName}`
   ], { encoding: 'utf8', timeout: 360000 })
 
@@ -1326,6 +1342,7 @@ function downloadRpkRelease(tag, destDir) {
   const checksumPath = path.join(destDir, checksumAsset)
   const checksumResult = spawnSync('curl', [
     '-fsSL', '--retry', '3', '--connect-timeout', '30', '--max-time', '60',
+    '-H', authHeader,
     '-o', checksumPath, `${baseUrl}/${checksumAsset}`
   ], { encoding: 'utf8', timeout: 90000 })
 
