@@ -802,7 +802,7 @@ automation
  * @description
  * One-time migration that rewires published connector reference pages onto the
  * regenerated description partial: the header `:description:` becomes
- * `include::...[tag=attrs]` and the frozen intro prose becomes
+ * `include::...[tag=meta]` and the frozen intro prose becomes
  * `include::...[tag=body]`. Afterwards `generate rpcn-connector-docs` keeps
  * both fresh on every run.
  *

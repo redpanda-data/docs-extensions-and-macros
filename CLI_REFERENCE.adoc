@@ -1312,7 +1312,7 @@ npx doc-tools generate migrate-rpcn-metadata --write
 
 === generate migrate-rpcn-descriptions
 
-One-time migration that rewires published connector reference pages onto the regenerated description partial: the header `:description:` becomes `include::...[tag=attrs]` and the frozen intro prose becomes `include::...[tag=body]`. Afterwards `generate rpcn-connector-docs` keeps both fresh on every run.
+One-time migration that rewires published connector reference pages onto the regenerated description partial: the header `:description:` becomes `include::...[tag=meta]` and the frozen intro prose becomes `include::...[tag=body]`. Afterwards `generate rpcn-connector-docs` keeps both fresh on every run.
 
 *Why use it:*
 
