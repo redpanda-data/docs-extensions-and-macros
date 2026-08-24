@@ -82,7 +82,7 @@ describe('CLI Contract Tests', () => {
       {
         name: 'cloud-regions',
         requiredFlags: [],
-        optionalFlags: ['--output', '--format', '--owner', '--repo', '--path', '--ref', '--template', '--dry-run']
+        optionalFlags: ['--output', '--format', '--owner', '--repo', '--path', '--ref', '--template', '--cluster-type', '--dry-run']
       },
       {
         name: 'crd-spec',

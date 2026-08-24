@@ -94,7 +94,7 @@ describe('unified-navigation extension', () => {
 
       const dataPlatform = {
         name: 'data-platform',
-        latestVersion: null, // Will be set below
+        latest: null, // Set below, as Antora does
         versions: [{
           version: 'master',
           displayVersion: 'master',
@@ -117,11 +117,11 @@ describe('unified-navigation extension', () => {
           },
         }],
       }
-      dataPlatform.latestVersion = dataPlatform.versions[0]
+      dataPlatform.latest = dataPlatform.versions[0]
 
       const cloudDataPlatform = {
         name: 'cloud-data-platform',
-        latestVersion: null,
+        latest: null,
         versions: [{
           version: 'master',
           displayVersion: 'master',
@@ -130,11 +130,11 @@ describe('unified-navigation extension', () => {
           asciidoc: { attributes: { 'component-metadata': { title: 'Cloud', color: '#blue', icon: 'cloud' } } },
         }],
       }
-      cloudDataPlatform.latestVersion = cloudDataPlatform.versions[0]
+      cloudDataPlatform.latest = cloudDataPlatform.versions[0]
 
       const selfManaged = {
         name: 'self-managed',
-        latestVersion: null,
+        latest: null,
         versions: [{
           version: 'master',
           displayVersion: 'master',
@@ -143,7 +143,7 @@ describe('unified-navigation extension', () => {
           asciidoc: { attributes: { 'component-metadata': { title: 'Self-Managed', color: '#red', icon: 'server' } } },
         }],
       }
-      selfManaged.latestVersion = selfManaged.versions[0]
+      selfManaged.latest = selfManaged.versions[0]
 
       mockComponents.push(dataPlatform, cloudDataPlatform, selfManaged)
 
@@ -180,7 +180,7 @@ describe('unified-navigation extension', () => {
 
       const selfManaged = {
         name: 'self-managed',
-        latestVersion: { version: 'master' },
+        latest: { version: 'master' },
         versions: [{
           version: 'master',
           navigation: [{ content: 'Self-Managed Home', url: '/self-managed/', urlType: 'internal' }],
@@ -199,7 +199,7 @@ describe('unified-navigation extension', () => {
 
       const streaming = {
         name: 'streaming',
-        latestVersion: null,
+        latest: null,
         versions: [{
           version: 'master',
           displayVersion: 'master',
@@ -208,11 +208,11 @@ describe('unified-navigation extension', () => {
           asciidoc: { attributes: { 'component-metadata': { title: 'Streaming', color: '#green' } } },
         }],
       }
-      streaming.latestVersion = streaming.versions[0]
+      streaming.latest = streaming.versions[0]
 
       const connect = {
         name: 'connect',
-        latestVersion: null,
+        latest: null,
         versions: [{
           version: 'master',
           displayVersion: 'master',
@@ -221,7 +221,7 @@ describe('unified-navigation extension', () => {
           asciidoc: { attributes: { 'component-metadata': { title: 'Connect', color: '#purple' } } },
         }],
       }
-      connect.latestVersion = connect.versions[0]
+      connect.latest = connect.versions[0]
 
       mockComponents.push(selfManaged, streaming, connect)
 
@@ -276,7 +276,7 @@ describe('unified-navigation extension', () => {
 
       const parent = {
         name: 'parent',
-        latestVersion: null,
+        latest: null,
         versions: [{
           version: 'master',
           displayVersion: 'master',
@@ -290,11 +290,11 @@ describe('unified-navigation extension', () => {
           },
         }],
       }
-      parent.latestVersion = parent.versions[0]
+      parent.latest = parent.versions[0]
 
       const docs = {
         name: 'docs',
-        latestVersion: null,
+        latest: null,
         versions: [{
           version: 'master',
           displayVersion: 'master',
@@ -310,7 +310,7 @@ describe('unified-navigation extension', () => {
           },
         }],
       }
-      docs.latestVersion = docs.versions[0]
+      docs.latest = docs.versions[0]
 
       mockComponents.push(parent, docs)
 
@@ -340,7 +340,7 @@ describe('unified-navigation extension', () => {
 
       const agenticDataPlane = {
         name: 'agentic-data-plane',
-        latestVersion: null,
+        latest: null,
         versions: [{
           version: 'master',
           displayVersion: 'master',
@@ -354,7 +354,7 @@ describe('unified-navigation extension', () => {
           },
         }],
       }
-      agenticDataPlane.latestVersion = agenticDataPlane.versions[0]
+      agenticDataPlane.latest = agenticDataPlane.versions[0]
 
       mockComponents.push(agenticDataPlane)
 
@@ -364,6 +364,108 @@ describe('unified-navigation extension', () => {
       // Assert: standalone components should not get custom navigation
       expect(page.asciidoc.attributes['page-custom-navigation']).toBeUndefined()
       expect(page.asciidoc.attributes['page-has-custom-nav']).toBeUndefined()
+    })
+  })
+
+  describe('a component with a prerelease version', () => {
+    // Antora sets `latest` (newest non-prerelease) and `latestPrerelease` on a
+    // component, and stores `versions` newest-first WITH prereleases at the
+    // front. It never sets `latestVersion` -- so reading that property fell
+    // through to versions[0], the prerelease, and every bucket took its
+    // metadata, nav and version label from an unreleased version.
+    //
+    // The mocks in the tests above set `latestVersion` themselves, which is why
+    // this went unnoticed: they described a component shape Antora does not
+    // produce, and each had a single version, so both expressions agreed.
+    function componentWithPrerelease () {
+      const prerelease = {
+        version: '26.1',
+        displayVersion: '26.1 (beta)',
+        prerelease: true,
+        url: '/self-managed/26.1/',
+        navigation: [{ content: 'Nav from prerelease', url: '/self-managed/26.1/', urlType: 'internal' }],
+        asciidoc: { attributes: { 'component-metadata': { title: 'FROM PRERELEASE', color: '#pre', icon: 'beta' } } },
+      }
+      const stable = {
+        version: '25.3',
+        displayVersion: '25.3',
+        url: '/self-managed/25.3/',
+        navigation: [{ content: 'Nav from stable', url: '/self-managed/25.3/', urlType: 'internal' }],
+        asciidoc: { attributes: { 'component-metadata': { title: 'FROM STABLE', color: '#stable', icon: 'server' } } },
+      }
+      // Antora's ordering and properties, not a convenient approximation.
+      return { name: 'self-managed', versions: [prerelease, stable], latest: stable, latestPrerelease: prerelease }
+    }
+
+    function parentOwningTheConfig () {
+      const version = {
+        version: 'master',
+        displayVersion: 'master',
+        url: '/data-platform/',
+        navigation: [{ content: 'Overview', url: '/data-platform/', urlType: 'internal' }],
+        asciidoc: {
+          attributes: {
+            'component-metadata': { title: 'Data Platform', color: '#5239CC', icon: 'stack-2' },
+            'page-navigation': '\n                - data-platform:\n                    - self-managed\n              ',
+          },
+        },
+      }
+      return { name: 'data-platform', versions: [version], latest: version }
+    }
+
+    function bucketsFor (page) {
+      extensionInstance._handlers.navigationBuilt({ contentCatalog: mockContentCatalog })
+      return JSON.parse(page.asciidoc.attributes['page-custom-navigation'])
+    }
+
+    it('takes bucket metadata from the latest released version, not the prerelease', () => {
+      const page = {
+        src: { component: 'data-platform', version: 'master' },
+        asciidoc: { attributes: {} },
+        out: {},
+        pub: { url: '/data-platform/' },
+      }
+      // Published pages for every nav target, so nothing is filtered out.
+      mockPages.push(
+        page,
+        { src: { component: 'self-managed', version: '25.3' }, asciidoc: { attributes: {} }, out: {}, pub: { url: '/self-managed/25.3/' } },
+        { src: { component: 'self-managed', version: '26.1' }, asciidoc: { attributes: {} }, out: {}, pub: { url: '/self-managed/26.1/' } }
+      )
+      mockComponents.push(parentOwningTheConfig(), componentWithPrerelease())
+
+      const buckets = bucketsFor(page)
+      const selfManaged = buckets.find((b) => b.componentName === 'self-managed')
+
+      expect(selfManaged).toBeDefined()
+      expect(selfManaged.title).toBe('FROM STABLE')
+      expect(selfManaged.icon).toBe('server')
+      expect(selfManaged.currentVersion).toBe('25.3')
+      expect(selfManaged.items[0].content).toBe('Nav from stable')
+    })
+
+    it('still works for a component whose only version is a prerelease', () => {
+      // Antora sets latest to the prerelease when there is nothing else, so the
+      // fallback must not be removed.
+      const prereleaseOnly = componentWithPrerelease()
+      prereleaseOnly.versions = [prereleaseOnly.versions[0]]
+      prereleaseOnly.latest = prereleaseOnly.versions[0]
+      delete prereleaseOnly.latestPrerelease
+
+      const page = {
+        src: { component: 'data-platform', version: 'master' },
+        asciidoc: { attributes: {} },
+        out: {},
+        pub: { url: '/data-platform/' },
+      }
+      mockPages.push(
+        page,
+        { src: { component: 'self-managed', version: '26.1' }, asciidoc: { attributes: {} }, out: {}, pub: { url: '/self-managed/26.1/' } }
+      )
+      mockComponents.push(parentOwningTheConfig(), prereleaseOnly)
+
+      const selfManaged = bucketsFor(page).find((b) => b.componentName === 'self-managed')
+      expect(selfManaged.title).toBe('FROM PRERELEASE')
+      expect(selfManaged.currentVersion).toBe('26.1 (beta)')
     })
   })
 })
