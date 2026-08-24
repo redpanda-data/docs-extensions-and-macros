@@ -196,13 +196,14 @@ describe('connector logo lookup', () => {
 describe('escaping of every CSV-derived value', () => {
   // Hostile values in the columns the first escaping pass missed: the CSV `type`
   // (type badge text, title and filter checkbox value), `support_level` (support
-  // badge class, text and filter value) and the SQL driver `commercial_name`
-  // (driver badge title and text).
+  // badge class, text and filter value), the SQL driver `commercial_name`
+  // (driver badge title and text), and `redpandaConnectUrl` (the type badge href
+  // and the card title link href, both built from the same URL value).
   const HOSTILE_CSV = [
     'connector,commercial_name,type,support_level,is_cloud_supported,is_licensed,redpandaConnectUrl,redpandaCloudUrl,description',
     'sql_insert,SQL,output,certified,n,No,/connect/components/outputs/sql_insert/,,Inserts rows into SQL databases',
     'sql_driver_evil,"Drv<img src=x onerror=alert(1)> & ""co""",sql_driver,community,n,No,,,',
-    'hostile,Hostile,in<b>put</b>,cert<script>x</script>,n,No,/connect/components/inputs/hostile/,,A component'
+    'hostile,Hostile,in<b>put</b>,cert<script>x</script>,n,No,"/connect/components/inputs/hostile/"" onmouseover=""alert(1)"" x=""",,A component'
   ].join('\n')
 
   let html
@@ -239,6 +240,17 @@ describe('escaping of every CSV-derived value', () => {
   test('escapes filter checkbox values built from CSV columns', () => {
     expect(html).toContain('value="in&lt;b&gt;put&lt;/b&gt;"')
     expect(html).toContain('value="cert&lt;script&gt;x&lt;/script&gt;"')
+  })
+
+  test('escapes the connector URL in the type badge href', () => {
+    const card = cardFor(html, 'hostile')
+    expect(card).not.toMatch(/<a href="[^"]*" onmouseover="alert\(1\)"/)
+    expect(card).toContain('<a href="/connect/components/inputs/hostile/&quot; onmouseover=&quot;alert(1)&quot; x=&quot;" class="badge badge-type"')
+  })
+
+  test('escapes the connector URL in the card title link href', () => {
+    const card = cardFor(html, 'hostile')
+    expect(card).toContain('<a href="/connect/components/inputs/hostile/&quot; onmouseover=&quot;alert(1)&quot; x=&quot;" class="card-title-link">')
   })
 })
 

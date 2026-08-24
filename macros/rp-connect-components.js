@@ -582,7 +582,7 @@ module.exports.register = function (registry, context) {
               }
               // Always show the type badge, with or without a link
               if (url) {
-                badges.push(`<a href="${url}" class="badge badge-type" title="Component type: ${escapeHtml(capitalize(type))}">${escapeHtml(capitalize(type))}</a>`);
+                badges.push(`<a href="${escapeHtml(url)}" class="badge badge-type" title="Component type: ${escapeHtml(capitalize(type))}">${escapeHtml(capitalize(type))}</a>`);
               } else {
                 badges.push(`<span class="badge badge-type" title="Component type: ${escapeHtml(capitalize(type))}">${escapeHtml(capitalize(type))}</span>`);
               }
@@ -687,7 +687,7 @@ module.exports.register = function (registry, context) {
                 ${firstUrl
                   // Same degradation as the type badge below: with no page to link
                   // to, the title is plain text rather than an anchor to nowhere.
-                  ? `<a href="${firstUrl}" class="card-title-link">
+                  ? `<a href="${escapeHtml(firstUrl)}" class="card-title-link">
                   <h3 class="card-title"><code>${escapeHtml(connector)}</code></h3>
                 </a>`
                   : `<h3 class="card-title"><code>${escapeHtml(connector)}</code></h3>`}
