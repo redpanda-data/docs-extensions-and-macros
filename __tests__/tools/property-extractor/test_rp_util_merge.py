@@ -150,8 +150,18 @@ class TestMapRpUtilProperty(unittest.TestCase):
     def test_omits_optional_fields_when_absent(self):
         meta = {"description": "d", "type": "boolean", "default_value": "false", "is_enterprise": False}
         prop = map_rp_util_property("x", meta, "cluster", "src/v/config/configuration.cc", {})
-        for key in ("enum", "items", "example", "units", "aliases", "minimum", "maximum", "default_human_readable"):
+        for key in ("enum", "items", "example", "units", "aliases", "minimum", "maximum",
+                    "default_human_readable", "gets_restored"):
             self.assertNotIn(key, prop)
+
+    def test_maps_gets_restored_when_rp_util_provides_it(self):
+        meta = {
+            "description": "d", "type": "string", "default_value": "null",
+            "gets_restored": False, "is_enterprise": False,
+        }
+        prop = map_rp_util_property("cloud_storage_access_key", meta, "cluster",
+                                     "src/v/config/configuration.cc", {})
+        self.assertFalse(prop["gets_restored"])
 
     def test_is_secret_defaults_false_and_maps_true(self):
         meta = {"description": "d", "type": "string", "default_value": '""', "is_enterprise": False}
@@ -475,7 +485,7 @@ class TestMergeWithExistingOutput(unittest.TestCase):
         self.assertEqual(merged["properties"]["log_cleanup_policy"]["enum"],
                           ["delete", "compact", "compact,delete"])
 
-    def test_carries_forward_gets_restored_from_baseline(self):
+    def test_carries_forward_gets_restored_from_baseline_when_rp_util_lacks_it(self):
         existing = {
             "properties": {
                 "cloud_storage_access_key": {
@@ -489,6 +499,28 @@ class TestMergeWithExistingOutput(unittest.TestCase):
             "cloud_storage_access_key": {
                 "description": "d", "type": "string", "default_value": "null",
                 "is_secret": True, "is_enterprise": False,
+                # no "gets_restored" key -- an rp_util build from before it existed.
+            },
+        }}}
+
+        merged = merge_with_existing_output(existing, rp_util_schemas, overrides={})
+
+        self.assertFalse(merged["properties"]["cloud_storage_access_key"]["gets_restored"])
+
+    def test_uses_rp_utils_own_gets_restored_when_present_not_baselines(self):
+        existing = {
+            "properties": {
+                "cloud_storage_access_key": {
+                    "name": "cloud_storage_access_key", "config_scope": "cluster",
+                    "gets_restored": True,  # stale/wrong on the baseline side
+                },
+            },
+            "definitions": {},
+        }
+        rp_util_schemas = {"clusterSchema": {"properties": {
+            "cloud_storage_access_key": {
+                "description": "d", "type": "string", "default_value": "null",
+                "is_secret": True, "gets_restored": False, "is_enterprise": False,
             },
         }}}
 

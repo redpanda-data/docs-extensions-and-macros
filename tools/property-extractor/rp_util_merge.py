@@ -221,6 +221,8 @@ def map_rp_util_property(name, meta, config_scope, defined_in, definitions):
         prop["units"] = UNIT_ABBREVIATION_TO_WORD.get(units, units)
     if meta.get("aliases"):
         prop["aliases"] = meta["aliases"]
+    if "gets_restored" in meta:
+        prop["gets_restored"] = bool(meta["gets_restored"])
 
     minimum = _parse_embedded_json(meta.get("minimum"), name, "minimum")
     if minimum is not None:
@@ -301,19 +303,23 @@ def _preserve_validator_derived_enum_data(prop, existing_prop):
 
 
 def _carry_forward_gets_restored(prop, existing_prop):
-    """INTERIM STOPGAP, not a real fix: gets_restored does not exist in any
-    of rp_util's schema outputs today (confirmed by enumerating every key
-    across all five schemas), and property.hbs/topic-property.hbs render
-    its absence as "Yes" via {{#if (ne gets_restored false)}} -- silently
-    inverting the correct "No" for properties like cloud_storage_access_key.
-    Carrying forward baseline's existing value by property name avoids that
-    active-harm regression, but is fragile: it's silently wrong for any
-    newly-introduced property (never seen in a baseline run) and silently
-    stale if a property's real flag value ever changes upstream. Remove
-    this once rp_util exposes gets_restored/restored directly (cluster
-    scope only -- the only C++ consumer, cluster_recovery_reconciler.cc,
-    walks the cluster-wide config singleton exclusively).
+    """FALLBACK, not the primary path: rp_util now exposes gets_restored
+    directly (map_rp_util_property sets it from meta["gets_restored"] when
+    present -- see streaming-enterprise's cluster_config_schema_util.cc).
+    This only fires against an rp_util build from before that field existed
+    (confirmed absent by enumerating every key across all five schemas as of
+    PR #63's original state), as a stopgap so a stale rp_util binary doesn't
+    actively regress published docs in the meantime: property.hbs/
+    topic-property.hbs render a missing gets_restored as "Yes" via
+    {{#if (ne gets_restored false)}}, silently inverting the correct "No"
+    for properties like cloud_storage_access_key. This fallback is itself
+    imperfect -- fragile for a newly-introduced property (never seen in a
+    baseline run) and silently stale if a property's real flag value ever
+    changes upstream -- so it should be removed once every consumer is
+    reliably running an rp_util build that includes the field.
     """
+    if "gets_restored" in prop:
+        return
     if existing_prop and "gets_restored" in existing_prop:
         prop["gets_restored"] = existing_prop["gets_restored"]
 
