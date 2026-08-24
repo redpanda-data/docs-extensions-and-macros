@@ -15,7 +15,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../tools/property-extractor'))
 
 import property_extractor
-from property_extractor import apply_property_overrides, report_phantom_stubs
+from property_extractor import apply_property_overrides, report_phantom_stubs, _normalize_admonitions
 
 
 class TestPhantomStubTracking(unittest.TestCase):
@@ -110,6 +110,70 @@ class TestPhantomStubTracking(unittest.TestCase):
             logging.getLogger("viewer").warning("sentinel")
             report_phantom_stubs()
         self.assertEqual(captured.output, ["WARNING:viewer:sentinel"])
+
+
+class TestAdmonitionsOverride(unittest.TestCase):
+    """Structured NOTE/TIP/IMPORTANT/WARNING/CAUTION callouts, applied as an
+    override field instead of markup embedded in the description text."""
+
+    def test_normalizes_type_to_uppercase(self):
+        result = _normalize_admonitions([{"type": "note", "text": "Be careful."}])
+        self.assertEqual(result, [{"type": "NOTE", "text": "Be careful."}])
+
+    def test_preserves_optional_title(self):
+        result = _normalize_admonitions([{"type": "warning", "title": "Don't do this.", "text": "x"}])
+        self.assertEqual(result, [{"type": "WARNING", "title": "Don't do this.", "text": "x"}])
+
+    def test_omits_title_key_when_not_given(self):
+        result = _normalize_admonitions([{"type": "note", "text": "x"}])
+        self.assertNotIn("title", result[0])
+
+    def test_accepts_every_admonition_type(self):
+        entries = [{"type": t, "text": "x"} for t in
+                   ("note", "tip", "important", "warning", "caution")]
+        result = _normalize_admonitions(entries)
+        self.assertEqual([e["type"] for e in result],
+                          ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"])
+
+    def test_drops_entry_with_unknown_type(self):
+        with self.assertLogs("viewer", level="WARNING") as captured:
+            result = _normalize_admonitions([
+                {"type": "note", "text": "kept"},
+                {"type": "danger", "text": "dropped, not a real AsciiDoc admonition type"},
+            ])
+        self.assertEqual(result, [{"type": "NOTE", "text": "kept"}])
+        self.assertIn("unknown type", "\n".join(captured.output))
+
+    def test_drops_entry_missing_text_or_type(self):
+        with self.assertLogs("viewer", level="WARNING"):
+            result = _normalize_admonitions([{"type": "note"}, {"text": "no type"}])
+        self.assertEqual(result, [])
+
+    def test_returns_none_for_non_list_input(self):
+        with self.assertLogs("viewer", level="WARNING") as captured:
+            result = _normalize_admonitions("not a list")
+        self.assertIsNone(result)
+        self.assertIn("must be an array", "\n".join(captured.output))
+
+    def test_applies_to_existing_property_via_override(self):
+        properties = {"seed_servers": {"name": "seed_servers", "description": "d"}}
+        overrides = {"properties": {"seed_servers": {
+            "admonitions": [{"type": "important", "text": "Only one broker should have an empty seed_servers list."}],
+        }}}
+
+        result = apply_property_overrides(properties, overrides)
+
+        self.assertEqual(result["seed_servers"]["admonitions"],
+                          [{"type": "IMPORTANT", "text": "Only one broker should have an empty seed_servers list."}])
+
+    def test_malformed_admonitions_override_does_not_set_field(self):
+        properties = {"x": {"name": "x", "description": "d"}}
+        overrides = {"properties": {"x": {"admonitions": "not a list"}}}
+
+        with self.assertLogs("viewer", level="WARNING"):
+            result = apply_property_overrides(properties, overrides)
+
+        self.assertNotIn("admonitions", result["x"])
 
 
 if __name__ == "__main__":

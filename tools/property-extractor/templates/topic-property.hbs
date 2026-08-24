@@ -26,6 +26,18 @@
 No description available.
 
 {{/if}}
+{{#if admonitions}}
+{{#each admonitions}}
+
+{{#if title}}
+.{{{title}}}
+{{/if}}
+[{{type}}]
+====
+{{{text}}}
+====
+{{/each}}
+{{/if}}
 {{#if is_enterprise}}
 
 ifndef::env-cloud[]

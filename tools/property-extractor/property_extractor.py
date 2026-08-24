@@ -1079,6 +1079,39 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
     return properties
 
 
+ADMONITION_TYPES = {"note", "tip", "important", "warning", "caution"}
+
+
+def _normalize_admonitions(admonitions):
+    """Validate an admonitions override and normalize each entry's `type`
+    to the uppercase form AsciiDoc's admonition block syntax expects
+    (`[NOTE]`, not `[note]`). Returns None (logging a warning) if the
+    override isn't shaped as a list of {type, text} entries, so a malformed
+    override doesn't silently render as nothing instead of surfacing the
+    mistake.
+    """
+    if not isinstance(admonitions, list):
+        logger.warning("admonitions for property must be an array")
+        return None
+    normalized = []
+    for entry in admonitions:
+        if not isinstance(entry, dict) or "type" not in entry or "text" not in entry:
+            logger.warning(f"admonitions entry must be {{type, text}}, got: {entry!r}")
+            continue
+        entry_type = str(entry["type"]).strip().lower()
+        if entry_type not in ADMONITION_TYPES:
+            logger.warning(
+                f"admonitions entry has unknown type '{entry['type']}', "
+                f"expected one of {sorted(ADMONITION_TYPES)}"
+            )
+            continue
+        normalized_entry = {"type": entry_type.upper(), "text": entry["text"]}
+        if entry.get("title"):
+            normalized_entry["title"] = entry["title"]
+        normalized.append(normalized_entry)
+    return normalized
+
+
 def _apply_override_to_existing_property(property_dict, override, overrides_file_path):
     """Apply overrides to an existing property."""
     # Apply description override
@@ -1128,6 +1161,16 @@ def _apply_override_to_existing_property(property_dict, override, overrides_file
             property_dict["enum"] = override["accepted_values"]
         else:
             logger.warning(f"accepted_values for property must be an array")
+
+    # Apply admonitions override - structured NOTE/TIP/IMPORTANT/WARNING/CAUTION
+    # callouts, rendered as real AsciiDoc admonition blocks by property.hbs/
+    # topic-property.hbs. Exists so a callout never has to be hand-written as
+    # markup mixed into the description text -- see minimize-overrides
+    # guidance: an admonition is structured data, not embedded prose markup.
+    if "admonitions" in override:
+        normalized = _normalize_admonitions(override["admonitions"])
+        if normalized is not None:
+            property_dict["admonitions"] = normalized
 
 
 def _create_property_from_override(prop_name, override, overrides_file_path):
