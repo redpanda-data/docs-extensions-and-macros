@@ -4,6 +4,16 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 
+// Only prepareSourceFromRef's tests below use this; every other spawnSync
+// call in this module (docker-based builds) is exercised by no test here,
+// so auto-mocking child_process at the module boundary doesn't change
+// behavior for the rest of the suite. Must be mocked before the handler
+// module below is required: it destructures spawnSync from child_process
+// at load time, so a later jest.spyOn on the child_process export would
+// not reach that already-bound local reference.
+jest.mock('child_process')
+const { spawnSync } = require('child_process')
+
 const {
   updateOverridesWithIntroducedVersions,
   isPluginStampAttributable,
@@ -12,7 +22,8 @@ const {
   detectLinuxOnlyFromSource,
   addPlatformMarkersFromSource,
   countCommands,
-  getRequiredGoVersion
+  getRequiredGoVersion,
+  prepareSourceFromRef
 } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
 
 describe('rpk Docs Handler', () => {
@@ -534,6 +545,66 @@ describe('rpk Docs Handler', () => {
     test('handles two-part go version (no patch)', () => {
       fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module example.com/rpk\n\ngo 1.26\n')
       expect(getRequiredGoVersion(tempDir)).toBe('1.26')
+    })
+  })
+
+  describe('prepareSourceFromRef (sparse-clone of the private streaming-enterprise repo)', () => {
+    const TOKEN_VARS = ['GIT_CREDENTIALS', 'REDPANDA_GITHUB_TOKEN', 'ACTIONS_BOT_TOKEN', 'GITHUB_TOKEN', 'VBOT_GITHUB_API_TOKEN', 'GH_TOKEN']
+    const savedEnv = {}
+
+    beforeEach(() => {
+      spawnSync.mockReset()
+      for (const name of TOKEN_VARS) {
+        savedEnv[name] = process.env[name]
+        delete process.env[name]
+      }
+    })
+
+    afterEach(() => {
+      for (const name of TOKEN_VARS) {
+        if (savedEnv[name] === undefined) delete process.env[name]
+        else process.env[name] = savedEnv[name]
+      }
+    })
+
+    test('throws a clear error when there is no token, without spawning git', () => {
+      expect(() => prepareSourceFromRef('dev')).toThrow(/streaming-enterprise is a private repository/)
+      expect(spawnSync).not.toHaveBeenCalled()
+    })
+
+    test('sparse-clones streaming-enterprise with the same auth header on the clone and the sparse-checkout set', () => {
+      process.env.GH_TOKEN = 'test-token-456'
+      spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' })
+
+      expect(() => prepareSourceFromRef('v26.2.0')).not.toThrow()
+      expect(spawnSync).toHaveBeenCalledTimes(2)
+
+      const [cloneCmd, cloneArgs] = spawnSync.mock.calls[0]
+      expect(cloneCmd).toBe('git')
+      expect(cloneArgs).toEqual(expect.arrayContaining([
+        'clone', '--branch', 'v26.2.0', 'https://github.com/redpanda-data/streaming-enterprise.git'
+      ]))
+      expect(cloneArgs.join(' ')).not.toContain('test-token-456@')
+      const cloneAuthArg = cloneArgs.find((a) => a.startsWith('http.https://github.com/.extraheader='))
+      expect(cloneAuthArg).toBeDefined()
+
+      const [sparseCmd, sparseArgs] = spawnSync.mock.calls[1]
+      expect(sparseCmd).toBe('git')
+      expect(sparseArgs).toEqual(expect.arrayContaining(['sparse-checkout', 'set', 'src/go/rpk']))
+      // Same auth header on the follow-up invocation: with --filter=blob:none,
+      // the rpk blobs are fetched lazily here, not by the clone above, and
+      // the header was never persisted into .git/config by that first call.
+      expect(sparseArgs.find((a) => a.startsWith('http.https://github.com/.extraheader='))).toBe(cloneAuthArg)
+
+      const decoded = Buffer.from(cloneAuthArg.split('AUTHORIZATION: basic ')[1], 'base64').toString()
+      expect(decoded).toBe('x-access-token:test-token-456')
+    })
+
+    test('surfaces a clear error when the clone itself fails', () => {
+      process.env.GH_TOKEN = 'test-token-456'
+      spawnSync.mockReturnValue({ status: 1, stdout: '', stderr: 'fatal: repository not found' })
+
+      expect(() => prepareSourceFromRef('nonexistent-ref')).toThrow(/Failed to clone streaming-enterprise repo/)
     })
   })
 })

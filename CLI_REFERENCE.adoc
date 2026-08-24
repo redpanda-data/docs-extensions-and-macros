@@ -608,7 +608,9 @@ npx doc-tools generate property-docs \
 
 - Python 3.9 or higher
 - Git
-- Internet connection to clone Redpanda repository
+- A GitHub token (GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN) with
+  access to redpanda-data/streaming-enterprise, which is private
+- Internet connection to clone the streaming-enterprise repository
 - For --cloud-support: GitHub token with repo permissions (GITHUB_TOKEN env var)
 - For --cloud-support: Python packages pyyaml and requests
 
@@ -681,7 +683,7 @@ npx doc-tools generate metrics-docs --tag $VERSION
 
 === generate rpk-docs
 
-Generates comprehensive CLI reference documentation for rpk (Redpanda Keeper). Clones the Redpanda source, builds rpk with Go, and parses `rpk --print-tree` JSON output. Detects Linux-only commands by analyzing Go build tags in the source code. Key features: - Clones source from GitHub (sparse checkout for speed) - Builds rpk from source using Go - Parses Go build tags to detect Linux-only commands - Automatically includes rpk plugins (connect, ai, check, etc.) - Supports overrides.json for description improvements - Generates versioned JSON files for downstream consumers (tooltips, etc.) - Generates diffs between versions for release notes
+Generates comprehensive CLI reference documentation for rpk (Redpanda Keeper). Clones the Redpanda source from streaming-enterprise (private), builds rpk with Go, and parses `rpk --print-tree` JSON output. Detects Linux-only commands by analyzing Go build tags in the source code. Key features: - Clones source from GitHub (sparse checkout for speed) - Builds rpk from source using Go - Parses Go build tags to detect Linux-only commands - Automatically includes rpk plugins (connect, ai, check, etc.) - Supports overrides.json for description improvements - Generates versioned JSON files for downstream consumers (tooltips, etc.) - Generates diffs between versions for release notes
 
 *Why use it:*
 
@@ -777,6 +779,9 @@ npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
 
 - Go must be installed (https://go.dev/)
 - Git must be installed (for cloning source)
+- A GitHub token (GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN) with
+  access to redpanda-data/streaming-enterprise, which is private (not
+  needed when --from-source points at an existing local checkout)
 
 === generate rpk-env-partial
 
@@ -1178,7 +1183,7 @@ Git tag for released content
 Branch name for in-progress content
 
 `--repo <url>`::
-Repository URL (default: "https://github.com/redpanda-data/redpanda.git")
+Repository URL. The default is a private repo, so requires a GitHub token (GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN) (default: "https://github.com/redpanda-data/streaming-enterprise.git")
 
 `-s, --surface <surface>`::
 Which API surfaces to bundle (choices: "admin", "connect", "both")
@@ -1235,7 +1240,9 @@ npx doc-tools generate bundle-openapi --tag $VERSION --surface both
 
 *Requirements:*
 
-- Git to clone Redpanda repository
+- Git to clone the streaming-enterprise repository
+- A GitHub token (GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN) with
+  access to redpanda-data/streaming-enterprise, which is private
 - Buf tool (automatically installed via npm)
 - Redocly CLI or vacuum for OpenAPI bundling (automatically detected)
 - Internet connection to clone repository

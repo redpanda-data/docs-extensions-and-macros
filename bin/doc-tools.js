@@ -958,7 +958,9 @@ automation
  * @requirements
  * - Python 3.9 or higher
  * - Git
- * - Internet connection to clone Redpanda repository
+ * - A GitHub token (GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN) with
+ *   access to redpanda-data/streaming-enterprise, which is private
+ * - Internet connection to clone the streaming-enterprise repository
  * - For --cloud-support: GitHub token with repo permissions (GITHUB_TOKEN env var)
  * - For --cloud-support: Python packages pyyaml and requests
  */
@@ -1196,8 +1198,9 @@ automation
  *
  * @description
  * Generates comprehensive CLI reference documentation for rpk (Redpanda Keeper).
- * Clones the Redpanda source, builds rpk with Go, and parses `rpk --print-tree` JSON output.
- * Detects Linux-only commands by analyzing Go build tags in the source code.
+ * Clones the Redpanda source from streaming-enterprise (private), builds rpk
+ * with Go, and parses `rpk --print-tree` JSON output. Detects Linux-only
+ * commands by analyzing Go build tags in the source code.
  *
  * Key features:
  * - Clones source from GitHub (sparse checkout for speed)
@@ -1231,6 +1234,9 @@ automation
  * @requirements
  * - Go must be installed (https://go.dev/)
  * - Git must be installed (for cloning source)
+ * - A GitHub token (GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN) with
+ *   access to redpanda-data/streaming-enterprise, which is private (not
+ *   needed when --from-source points at an existing local checkout)
  */
 automation
   .command('rpk-docs')
@@ -2177,7 +2183,9 @@ automation
  * npx doc-tools generate bundle-openapi --tag $VERSION --surface both
  *
  * @requirements
- * - Git to clone Redpanda repository
+ * - Git to clone the streaming-enterprise repository
+ * - A GitHub token (GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN) with
+ *   access to redpanda-data/streaming-enterprise, which is private
  * - Buf tool (automatically installed via npm)
  * - Redocly CLI or vacuum for OpenAPI bundling (automatically detected)
  * - Internet connection to clone repository
@@ -2188,7 +2196,7 @@ automation
   .description('Bundle Redpanda OpenAPI fragments for admin and connect APIs. Requires either --tag or --branch.')
   .option('-t, --tag <tag>', 'Git tag for released content')
   .option('-b, --branch <branch>', 'Branch name for in-progress content')
-  .option('--repo <url>', 'Repository URL', 'https://github.com/redpanda-data/redpanda.git')
+  .option('--repo <url>', 'Repository URL. The default is a private repo, so requires a GitHub token (GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN)', 'https://github.com/redpanda-data/streaming-enterprise.git')
   .addOption(new Option('-s, --surface <surface>', 'Which API surfaces to bundle').choices(['admin', 'connect', 'both']).makeOptionMandatory())
   .option('--out-admin <path>', 'Output path for admin API', 'admin/redpanda-admin-api.yaml')
   .option('--out-connect <path>', 'Output path for connect API', 'connect/redpanda-connect-api.yaml')

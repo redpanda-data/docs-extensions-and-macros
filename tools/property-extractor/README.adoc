@@ -1282,7 +1282,7 @@ node generate-handlebars-docs.js test-input.json test-output
 
 == Additional resources
 
-* https://github.com/redpanda-data/redpanda[Redpanda GitHub Repository]
+* https://github.com/redpanda-data/streaming-enterprise[streaming-enterprise Repository] (private; this is where the extractor clones Redpanda's source from)
 * https://github.com/redpanda-data/docs-extensions-and-macros[docs-extensions-and-macros Repository]
 * https://tree-sitter.github.io/tree-sitter/[Tree-sitter Documentation]
 * https://handlebarsjs.com/[Handlebars.js Guide]

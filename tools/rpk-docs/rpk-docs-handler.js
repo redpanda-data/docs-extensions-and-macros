@@ -241,16 +241,32 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-source-'))
   const repoDir = path.join(tmpDir, 'redpanda')
 
-  console.log(`Sparse-cloning redpanda repo (ref: ${sourceRef}) to ${repoDir}...`)
+  // streaming-enterprise is private, so a token is required. Auth is passed
+  // as a per-invocation HTTP header (git -c on every network operation, not
+  // just the clone), never embedded in the remote URL, so no token is
+  // persisted in the clone's .git/config.
+  const { getGitHubToken } = require('../../cli-utils/github-token')
+  const token = getGitHubToken()
+  if (!token) {
+    throw new Error(
+      'redpanda-data/streaming-enterprise is a private repository.\n' +
+      'Set GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN so the clone can authenticate.'
+    )
+  }
+  const authHeader = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`
+  const gitAuthArgs = ['-c', `http.https://github.com/.extraheader=${authHeader}`]
+
+  console.log(`Sparse-cloning streaming-enterprise repo (ref: ${sourceRef}) to ${repoDir}...`)
 
   // Clone with sparse checkout
   const cloneResult = spawnSync('git', [
+    ...gitAuthArgs,
     'clone',
     '--depth', '1',
     '--filter=blob:none',
     '--sparse',
     '--branch', sourceRef,
-    'https://github.com/redpanda-data/redpanda.git',
+    'https://github.com/redpanda-data/streaming-enterprise.git',
     repoDir
   ], {
     encoding: 'utf8',
@@ -260,14 +276,16 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
 
   if (cloneResult.status !== 0) {
     throw new Error(
-      `Failed to clone redpanda repo with ref '${sourceRef}'.\n` +
+      `Failed to clone streaming-enterprise repo with ref '${sourceRef}'.\n` +
       `Make sure the branch or tag exists.\n` +
       `Error: ${cloneResult.stderr}`
     )
   }
 
-  // Set sparse checkout to only get rpk
-  const sparseResult = spawnSync('git', ['sparse-checkout', 'set', 'src/go/rpk'], {
+  // Set sparse checkout to only get rpk. With --filter=blob:none, the blobs
+  // for src/go/rpk were not fetched by the clone above and are pulled lazily
+  // here, so this invocation needs the same auth header.
+  const sparseResult = spawnSync('git', [...gitAuthArgs, 'sparse-checkout', 'set', 'src/go/rpk'], {
     cwd: repoDir,
     encoding: 'utf8',
     timeout: 60000
@@ -292,8 +310,8 @@ function fetchRpkTreeFromSource(sourcePath) {
   if (!fs.existsSync(sourcePath)) {
     throw new Error(
       `rpk source directory not found: ${sourcePath}\n` +
-      'To use --from-source, you need a local checkout of the redpanda repository.\n' +
-      'Clone it with: git clone https://github.com/redpanda-data/redpanda.git\n' +
+      'To use --from-source, you need a local checkout of the streaming-enterprise repository (private).\n' +
+      'Clone it with: git clone https://github.com/redpanda-data/streaming-enterprise.git\n' +
       'Then point to: <repo>/src/go/rpk'
     )
   }
@@ -393,8 +411,8 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
   if (!fs.existsSync(absoluteSourcePath)) {
     throw new Error(
       `rpk source directory not found: ${absoluteSourcePath}\n` +
-      'Expected a checkout of the redpanda repository.\n' +
-      'Clone it with: git clone https://github.com/redpanda-data/redpanda.git'
+      'Expected a checkout of the streaming-enterprise repository (private).\n' +
+      'Clone it with: git clone https://github.com/redpanda-data/streaming-enterprise.git'
     )
   }
 
