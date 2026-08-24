@@ -273,7 +273,14 @@ function buildComponentVersionNavMap(components) {
     map.set(component.name, {
       component,
       versionMap,
-      latestVersion: component.latestVersion || component.versions[0],
+      // component.latest, not component.latestVersion: the latter is not part of
+      // Antora's component model (content-catalog.js sets `latest` and
+      // `latestPrerelease`), so it was always undefined and this always fell
+      // through to versions[0]. Antora stores versions newest-first WITH
+      // prereleases at the front, so on any build containing a prerelease the
+      // whole bucket -- component metadata, nav tree, version dropdown -- was
+      // read from the unreleased version. Nothing threw, so nothing showed it.
+      latestVersion: component.latest || component.versions[0],
     })
   }
 
@@ -550,7 +557,7 @@ function buildBucketsFromConfig(
       return null // Component not found
     }
 
-    const latestVersion = component.latestVersion || component.versions[0]
+    const latestVersion = component.latest || component.versions[0]
     if (!latestVersion) {
       return null
     }
@@ -646,7 +653,7 @@ function findComponentPath(configTree, targetComponent, contentCatalog) {
 
       if (!component) continue
 
-      const latestVersion = component.latestVersion || component.versions[0]
+      const latestVersion = component.latest || component.versions[0]
       const metadata = latestVersion ? getHeaderData(latestVersion) : null
 
       const breadcrumbItem = {

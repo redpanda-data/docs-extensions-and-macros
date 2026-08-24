@@ -3,23 +3,36 @@
 :type: {{type}}
 {{#if support}}:support: {{support}}{{/if}}
 :categories: [{{join categories ", "}}]
-{{#if summary}}
+{{#if hasDescriptionAttrs}}
 // tag::meta[]
-:description: {{{summary}}}
+{{{descriptionInclude this "attrs"}}}
+// end::meta[]
+{{else if summary}}
+// tag::meta[]
+:description: {{{summaryAttribute summary}}}
 // end::meta[]
 {{else if description}}
 // tag::meta[]
-:description: {{description}}
+:description: {{{summaryAttribute description}}}
 // end::meta[]
 {{/if}}
-{{!-- No fallback line when neither exists: an emitted TODO would become
+{{!-- The attrs include stays inside the meta tag region so single-source
+     stubs keep inheriting :description: as a header attribute, and the
+     value now refreshes with the connector instead of being frozen at
+     first draft. Component families with no description partial keep the
+     inline attribute.
+     No fallback line when neither exists: an emitted TODO would become
      the attribute VALUE and stubs would inherit it into their meta tags.
      Missing descriptions are the tracked editorial backlog
      (cloud-docs .github/description-allowlist.txt). --}}
 
 component_type_dropdown::[]
 
+{{#if hasDescriptionPartial}}
+{{{descriptionInclude this "body"}}}
+{{else}}
 {{> intro}}
+{{/if}}
 
 {{#if (or this.config.children children)}}
 [tabs]

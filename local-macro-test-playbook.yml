@@ -5,6 +5,11 @@
 #   - the docs and cloud-docs content sources, which track the WIP branches
 #   - a separate output directory and log, so it never clobbers your normal build
 #
+# __tests__/playbook-parity.test.js enforces that claim for the extension list.
+# It had drifted: two extensions were registered only in the other playbook, so
+# this harness reported on a build where they never ran, and their diagnostic
+# counters read zero -- indistinguishable from "no problems found".
+#
 #   ./scripts/macro-test.sh              build, then a focused report
 #   ./scripts/macro-test.sh --serve      build, report, serve on :5002
 #   DOCS_DIR=~/Documents/docs ./scripts/macro-test.sh    use a local checkout
@@ -64,6 +69,7 @@ asciidoc:
   - './macros/prop'
   - './macros/helm-ref'
   - './macros/rp-connect-components'
+  - './macros/iceberg-explorer'
   - './asciidoc-extensions/add-line-numbers-highlights'
 antora:
   extensions:
@@ -127,4 +133,6 @@ antora:
     enabled: true
   - require: './extensions/aggregate-terms'
   - require: './extensions/property-page-index'
+  - require: './extensions/set-available-attachment-versions'
+  - require: './extensions/render-property-descriptions'
 
