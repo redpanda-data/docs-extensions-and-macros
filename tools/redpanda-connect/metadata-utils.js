@@ -1,5 +1,8 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+
 /**
  * Utilities for extracting the "== Metadata" section out of a connector's
  * `description` prose so it can be emitted as a regenerated partial (like the
@@ -15,8 +18,18 @@
 
 const METADATA_HEADING = /^==\s+Metadata\s*$/;
 // AsciiDoc listing/literal block delimiter (`----`, possibly longer). Lines
-// inside such blocks must not be treated as headings.
+// inside such blocks must not be treated as headings. Asciidoctor only reads a
+// delimiter at column 0 -- an indented `----` is a literal paragraph -- so the
+// test is against the raw line, never a trimmed one.
 const BLOCK_DELIMITER = /^-{4,}$/;
+// AsciiDoc literal block delimiter (`....`, possibly longer) -- as
+// substitution-free as a ---- listing block, and just as liable to contain a
+// brace or heading-shaped line that must not be touched.
+const LITERAL_DELIMITER = /^\.{4,}$/;
+// Markdown-style fence delimiter (``` or ~~~, possibly with a language tag).
+// Descriptions and metadata blocks carry fenced examples alongside AsciiDoc
+// ---- blocks.
+const FENCE_DELIMITER = /^(`{3,}|~{3,})/;
 // The metadata block ends at the next structural element. Besides the next
 // level-2 heading, this also covers page-level constructs that follow the
 // section when locateMetadata runs against a full reference page (not just a
@@ -25,6 +38,54 @@ const BLOCK_DELIMITER = /^-{4,}$/;
 // section that is the last heading on a page would run to end-of-string and
 // swallow the trailing `include::...partial$fields[]` and `// end::single-source[]`.
 const SECTION_END = /^(?:==\s+\S|include::|\/\/\s*(?:tag|end)::)/;
+
+/**
+ * Split `text` into lines annotated with whether each line sits inside (or
+ * delimits) a verbatim region: an AsciiDoc `----` listing block or a markdown
+ * ```/~~~ fence. Every scanner over connector prose walks the text through
+ * this, so fence interiors are treated exactly like listing-block interiors:
+ * content, never headings, never escapable prose, never section terminators.
+ *
+ * Layered state: while one delimiter kind is open, only its own closer
+ * matters. A `----` line inside a fence (or a fence line inside a `----`
+ * block) is content -- treating it as a delimiter leaks the state and
+ * swallows everything after it.
+ *
+ * This is the only such state machine in the tree on purpose. There used to
+ * be three, and they had already drifted: two tested the trimmed line and one
+ * the raw line, so an indented `----` opened a verbatim region for one
+ * scanner and was plain content for another, on the same description in the
+ * same pipeline. Asciidoctor itself only honours a delimiter at column 0, so
+ * the raw-line test is the correct one and the only one here.
+ *
+ * @param {string} text
+ * @returns {Array<{line: string, verbatim: boolean}>}
+ */
+function annotateVerbatimLines (text) {
+  let inBlock = false;
+  let inLiteral = false;
+  let fence = null;
+  return String(text == null ? '' : text).split('\n').map((line) => {
+    if (inBlock) {
+      if (BLOCK_DELIMITER.test(line)) inBlock = false;
+      return { line, verbatim: true };
+    }
+    if (inLiteral) {
+      if (LITERAL_DELIMITER.test(line)) inLiteral = false;
+      return { line, verbatim: true };
+    }
+    if (fence) {
+      const closer = line.match(FENCE_DELIMITER);
+      if (closer && closer[1][0] === fence) fence = null;
+      return { line, verbatim: true };
+    }
+    const fenceMatch = line.match(FENCE_DELIMITER);
+    if (fenceMatch) { fence = fenceMatch[1][0]; return { line, verbatim: true }; }
+    if (BLOCK_DELIMITER.test(line)) { inBlock = true; return { line, verbatim: true }; }
+    if (LITERAL_DELIMITER.test(line)) { inLiteral = true; return { line, verbatim: true }; }
+    return { line, verbatim: false };
+  });
+}
 
 /**
  * Locate the `== Metadata` section within a description.
@@ -36,22 +97,19 @@ const SECTION_END = /^(?:==\s+\S|include::|\/\/\s*(?:tag|end)::)/;
 function locateMetadata (description) {
   if (!description || typeof description !== 'string') return null;
 
-  const lines = description.split('\n');
+  const annotated = annotateVerbatimLines(description);
+  const lines = annotated.map((a) => a.line);
   let headingLine = -1;
-  let inBlock = false;
-  for (let i = 0; i < lines.length; i++) {
-    if (BLOCK_DELIMITER.test(lines[i])) { inBlock = !inBlock; continue; }
-    if (!inBlock && METADATA_HEADING.test(lines[i])) { headingLine = i; break; }
+  for (let i = 0; i < annotated.length; i++) {
+    if (!annotated[i].verbatim && METADATA_HEADING.test(lines[i])) { headingLine = i; break; }
   }
   if (headingLine === -1) return null;
 
   // Find the terminating element after the metadata heading: the next level-2
   // heading, an Antora include directive, or a single-source tag comment.
   let endLine = lines.length;
-  inBlock = false;
-  for (let i = headingLine + 1; i < lines.length; i++) {
-    if (BLOCK_DELIMITER.test(lines[i])) { inBlock = !inBlock; continue; }
-    if (!inBlock && SECTION_END.test(lines[i])) { endLine = i; break; }
+  for (let i = headingLine + 1; i < annotated.length; i++) {
+    if (!annotated[i].verbatim && SECTION_END.test(lines[i])) { endLine = i; break; }
   }
 
   // Trim trailing blank lines inside the section so the block ends cleanly.
@@ -75,16 +133,89 @@ function extractMetadata (description) {
   return found ? found.block : '';
 }
 
+// Rate limits are the one component family the upstream data and the docs
+// repo spell differently: the dataset key is `rate-limits`, `item.type` is
+// `rate_limit`, and the pages directory is `rate_limits`. Every spelling has
+// to collapse to one partial directory or the write path and the include path
+// disagree and the include does not resolve.
+const TYPE_DIR_ALIASES = new Map([
+  ['rate-limit', 'rate_limits'],
+  ['rate-limits', 'rate_limits'],
+  ['rate_limit', 'rate_limits'],
+]);
+
 /**
- * Derive the plural type directory (for example `input` -> `inputs`).
+ * The component families that have their own reference pages under
+ * `modules/components/pages/<typeDir>/`, in canonical typeDir spelling.
+ *
+ * This list existed in eight places and the copies disagreed three ways:
+ * `config` was in two of them, `rate_limits` was missing from one, and two
+ * carried both rate-limit spellings. A component family added upstream that
+ * is missed by one copy silently gets no partial, no page backfill or no
+ * cloud-docs check, depending on which copy forgot it.
+ * @type {string[]}
+ */
+const CONNECTOR_TYPE_DIRS = [
+  'inputs', 'outputs', 'processors', 'caches', 'rate_limits',
+  'buffers', 'metrics', 'scanners', 'tracers',
+];
+
+/**
+ * Every top-level key of the connector dataset that holds component objects:
+ * the page-backed families plus `config`, which has entries but no per-entry
+ * page. Callers that walk the dataset (augmenting, diffing, stripping) want
+ * this; callers that write per-page artifacts want CONNECTOR_TYPE_DIRS.
+ * @type {string[]}
+ */
+const CONNECTOR_DATA_KEYS = [...CONNECTOR_TYPE_DIRS, 'config'];
+
+/**
+ * Canonical partial directory for a plural type directory. Applied to every
+ * derivation of a type directory so `typeDirFor` is the single source of truth
+ * for both the file the generator writes and the include line a page carries.
+ * @param {string} typeDir
+ * @returns {string}
+ */
+function normalizeTypeDir (typeDir) {
+  return TYPE_DIR_ALIASES.get(typeDir) || typeDir;
+}
+
+/**
+ * Derive the plural, canonical type directory (for example `input` ->
+ * `inputs`, `rate-limits` -> `rate_limits`).
  * @param {object} item connector data with `type` and/or `typeDir`
  * @returns {string}
  */
 function typeDirFor (item) {
-  if (item && item.typeDir) return item.typeDir;
+  if (item && item.typeDir) return normalizeTypeDir(item.typeDir);
   const type = item && item.type;
   if (!type) return '';
-  return type.endsWith('s') ? type : `${type}s`;
+  return normalizeTypeDir(type.endsWith('s') ? type : `${type}s`);
+}
+
+/**
+ * Resolve the on-disk page/partial directory for a connector data key.
+ *
+ * The Connect binary emits the rate-limit family as `rate-limits` while the
+ * directory in rp-connect-docs is `rate_limits`, so the data key and the
+ * directory name disagree for exactly one family. Resolve against what is
+ * actually on disk rather than encoding either spelling: a caller that guesses
+ * `rate-limits` reports every existing rate-limit page as missing and then
+ * drafts a duplicate beside it, in a directory update-nav.js's regex does not
+ * match, re-added on every run.
+ *
+ * @param {string} root directory the type directories live under
+ * @param {string} dataKey the data key, for example `inputs` or `rate-limits`
+ * @returns {string} the directory name that exists, preferring the data key
+ */
+function resolvePageTypeDir (root, dataKey) {
+  if (!root || !dataKey) return dataKey || '';
+  if (fs.existsSync(path.join(root, dataKey))) return dataKey;
+  const underscored = dataKey.replace(/-/g, '_');
+  if (underscored !== dataKey && fs.existsSync(path.join(root, underscored))) return underscored;
+  const hyphenated = dataKey.replace(/_/g, '-');
+  if (hyphenated !== dataKey && fs.existsSync(path.join(root, hyphenated))) return hyphenated;
+  return dataKey;
 }
 
 /**
@@ -111,9 +242,22 @@ function descriptionWithMetadataInclude (item) {
   return description.slice(0, found.start) + metadataIncludeLine(item) + description.slice(found.end);
 }
 
-// Markdown-style fence delimiter (``` or ~~~, possibly with a language tag).
-// Metadata blocks can carry fenced examples alongside AsciiDoc ---- blocks.
-const FENCE_DELIMITER = /^(`{3,}|~{3,})/;
+/**
+ * Build the Antora include directive for a connector's description partial.
+ * Mirrors {@link metadataIncludeLine} so a drafted page can pull its
+ * auto-generated summary and description from a regenerated partial instead of
+ * freezing them into the page body at first draft.
+ *
+ * The partial defines two tag regions, so pages address it twice: `attrs` in
+ * the page header (sets `:description:`) and `body` where the prose renders.
+ * @param {object} item connector data with `type`/`typeDir` and `name`
+ * @param {string} [tag] tag region to include (`attrs` or `body`); omit for the whole file
+ * @returns {string}
+ */
+function descriptionIncludeLine (item, tag) {
+  const attrs = tag ? `tag=${tag}` : '';
+  return `include::connect:components:partial$descriptions/${typeDirFor(item)}/${item.name}.adoc[${attrs}]`;
+}
 
 /**
  * Collect the section heading titles in an AsciiDoc block, ignoring lines
@@ -127,25 +271,8 @@ const FENCE_DELIMITER = /^(`{3,}|~{3,})/;
 function sectionHeadings (text) {
   if (!text || typeof text !== 'string') return [];
   const headings = [];
-  let inBlock = false;
-  let fence = null;
-  for (const line of text.split('\n')) {
-    // Layered state: while inside one delimiter kind, the only thing that
-    // matters is its own closer. A fence-like line inside a ---- literal
-    // block (or a ---- line inside a fence) is content, not a delimiter —
-    // treating it as one leaks the state and swallows every later heading.
-    if (inBlock) {
-      if (BLOCK_DELIMITER.test(line)) inBlock = false;
-      continue;
-    }
-    if (fence) {
-      const closer = line.match(FENCE_DELIMITER);
-      if (closer && closer[1][0] === fence) fence = null;
-      continue;
-    }
-    const fenceMatch = line.match(FENCE_DELIMITER);
-    if (fenceMatch) { fence = fenceMatch[1][0]; continue; }
-    if (BLOCK_DELIMITER.test(line)) { inBlock = true; continue; }
+  for (const { line, verbatim } of annotateVerbatimLines(text)) {
+    if (verbatim) continue;
     const m = line.match(/^=+\s+(\S.*)$/);
     if (m) headings.push(m[1].trim());
   }
@@ -168,12 +295,62 @@ function lostMetadataSections (oldContent, newContent) {
   return sectionHeadings(oldContent).filter((h) => !newHeadings.has(h));
 }
 
+/**
+ * Flatten AsciiDoc prose into a value usable as a `:description:` attribute
+ * and, downstream, as the page's `<meta name="description">`.
+ *
+ * Meta descriptions are read as plain text by search results, link previews
+ * and assistants, so markup has to come out mechanically: xref and link
+ * macros become their labels, bare URL macros become their labels, `<<>>`
+ * shorthand becomes its text, the "open in new tab" caret goes, inline code
+ * loses its backticks, and whitespace (including hard line breaks, which an
+ * attribute value cannot carry) collapses to single spaces. No prose is
+ * edited.
+ *
+ * This is the one implementation: `summaryAttribute` (the description
+ * partial's attrs region) and `backfillPageDescriptions` (the page-header
+ * self-heal) both call it, so the two paths cannot drift into publishing
+ * different meta descriptions for the same summary.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function flattenToAttributeValue (text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/(?:xref|link):[^\[\]]+\[([^\]]*)\]/g, '$1')
+    // Bare URL macros (no xref:/link: prefix) and internal xref shorthand
+    // also appear in source summaries and render literally if left in place.
+    .replace(/https?:\/\/[^\s\[\]]+\[([^\]]*)\]/g, '$1')
+    // image:: and inline image: macros have no textual value in a meta
+    // description; drop them rather than leaking the target path.
+    .replace(/image:{1,2}[^\[\]\s]*\[[^\]]*\]/g, '')
+    .replace(/<<[^,>]+,([^>]+)>>/g, '$1')
+    .replace(/<<([^>]+)>>/g, '$1')
+    // Strip the "open in new tab" caret that AsciiDoc URL macros carry
+    // inside the link text, e.g. [Open Telemetry collector^].
+    .replace(/\^/g, '')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 module.exports = {
   locateMetadata,
+  flattenToAttributeValue,
+  CONNECTOR_TYPE_DIRS,
+  CONNECTOR_DATA_KEYS,
+  normalizeTypeDir,
+  resolvePageTypeDir,
   extractMetadata,
   typeDirFor,
   metadataIncludeLine,
   descriptionWithMetadataInclude,
+  descriptionIncludeLine,
   sectionHeadings,
   lostMetadataSections,
+  annotateVerbatimLines,
+  BLOCK_DELIMITER,
+  LITERAL_DELIMITER,
+  FENCE_DELIMITER,
 };

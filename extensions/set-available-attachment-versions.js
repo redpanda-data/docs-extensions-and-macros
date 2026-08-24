@@ -2,7 +2,12 @@
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
-const semver = require('semver')
+// The same comparator the prop macro uses to pick a dataset. semver.coerce
+// keeps 'rc10' as one alphanumeric identifier and string-compares it, so it
+// ranked v26.3.1-rc2 above v26.3.1-rc10 while the macro ranked them correctly:
+// build-time validation and the runtime tooltip fetch would then read different
+// files. Sharing the comparator is the only way they cannot disagree.
+const { compareTags } = require('../macros/prop')
 
 /**
  * Points UI templates at generated JSON attachments that actually exist.
@@ -19,7 +24,9 @@ const semver = require('semver')
  * component version:
  *
  * - available-properties-tag: newest redpanda-properties-<tag>.json attachment
- *   in the reference module of each streaming (ROOT) component version
+ *   in the reference module of a component version that publishes property
+ *   data (the ROOT and streaming components, plus any component shipping such
+ *   an attachment of its own)
  * - available-connect-version: newest connect-<version>.json attachment in the
  *   components module of the connect component
  * - page-disable-property-tooltips: 'true' on streaming versions that have no
@@ -54,8 +61,19 @@ module.exports.register = function () {
       if (!isProperties && !isConnect) return
 
       component.versions.forEach((compVer) => {
-        const attributes = ((compVer.asciidoc = compVer.asciidoc || {}).attributes =
-          compVer.asciidoc.attributes || {})
+        // Copy before writing. Antora hands every component version whose
+        // antora.yml declares no `asciidoc:` block THE SAME siteAsciiDocConfig
+        // object -- see the NOTE at content-classifier/lib/content-catalog.js
+        // ("if no AsciiDoc attributes are defined in the component descriptor,
+        // asciidoc is the siteAsciiDocConfig object"). Mutating it in place
+        // wrote these attributes into the shared site config, so a component
+        // publishing no property data still advertised a dataset, and because
+        // the write is guarded on the attribute being unset, the first version
+        // processed won and every later version silently kept that value --
+        // no log line, and the wrong tag. Cloning both levels makes the write
+        // per-version, which is what the attribute means.
+        const asciidoc = (compVer.asciidoc = { ...compVer.asciidoc })
+        const attributes = (asciidoc.attributes = { ...asciidoc.attributes })
         const attachments = contentCatalog.findBy({
           component: component.name,
           version: compVer.version,
@@ -98,17 +116,13 @@ module.exports.register = function () {
 
 function findNewestVersion (attachments, module, rx) {
   let newestRaw = null
-  let newestSemver = null
   attachments.forEach((attachment) => {
     if (attachment.src.module !== module) return
     const basename = attachment.src.relative.split('/').pop()
     const match = basename.match(rx)
     if (!match) return
     const raw = match[1]
-    const parsed = semver.coerce(raw, { includePrerelease: true })
-    if (!parsed) return
-    if (!newestSemver || semver.gt(parsed, newestSemver)) {
-      newestSemver = parsed
+    if (!newestRaw || compareTags(raw, newestRaw) > 0) {
       newestRaw = raw
     }
   })
