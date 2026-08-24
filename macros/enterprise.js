@@ -31,6 +31,12 @@
  * registry is available (for example, outside an Antora build), the macros
  * fall back to unvalidated rendering with a single warning.
  *
+ * A registry entry's `since` field, when set, is checked against the page
+ * being converted, not the newest release: a mention or table row for a
+ * feature whose `since` postdates the page's own version renders unstyled,
+ * the same way an unreleased feature renders on released docs, because as
+ * of that page's version the feature had not shipped yet.
+ *
  * Document or site attributes:
  *
  *   enterprise-validate        'warn' (default) to log unknown feature names,
@@ -55,6 +61,7 @@
 
 const yaml = require('js-yaml')
 const chalk = require('chalk')
+const semver = require('semver')
 const { buildBadgeHtml, DEFAULT_TOOLTIPS } = require('./badge')
 
 const $enterpriseRegistry = Symbol('$enterpriseRegistry')
@@ -207,6 +214,62 @@ function reportUnreleasedFeature ({ feature, mode, filePath }) {
     `enterprise:${feature}[]${where}: '${feature}' is marked status: unreleased in the enterprise features registry, so it is only documented for an upcoming release. ` +
     'This page belongs to a released version, so the mention renders as plain text with no enterprise styling, tooltip, or link. ' +
     'Move the mention to the prerelease (beta) branch, or change the status once the feature ships.'
+  if (mode === 'error') throw new Error(message)
+  console.warn(chalk.yellow(message))
+}
+
+/**
+ * Parse a version string into a semver for comparison, or undefined when it
+ * cannot be parsed. Lenient the same way `semver.coerce` is: Redpanda docs
+ * versions are "MAJOR.MINOR", not full semver, so an exact-match parse would
+ * reject every one of them.
+ */
+function coerceVersion (raw) {
+  if (raw === undefined || raw === null) return undefined
+  return semver.coerce(String(raw)) || undefined
+}
+
+/**
+ * Whether a registry entry's `since` version has shipped as of the page
+ * being converted.
+ *
+ * enterprise-features.yml lives in the non-versioned 'shared' component, so
+ * every version branch reads the exact same entry -- unlike property data,
+ * which has one JSON file per release and is checked against the page's
+ * own version (see PROPERTY_AND_ENTERPRISE_REFERENCES.adoc). Without this
+ * check, a feature that ships in 26.3 renders as fully available -- linked,
+ * badge-free, no warning -- on a 24.1 page that predates it by two years.
+ *
+ * Returns true (shipped) when `since` is absent, unparsable, or the page's
+ * own version cannot be determined. That default favors data quality over
+ * release-readiness: unlike an unrecognized `status`, which fails closed
+ * because it is the one mistake that could publish an unreleased feature,
+ * a `since` typo or a build with no page-version context has no such
+ * asymmetry to protect against, so it defaults to not gating rather than
+ * hiding a shipped feature over unrelated bad data.
+ */
+function isFeatureShippedOnPage (entry, config) {
+  const since = entry && entry.since
+  if (since === undefined || since === null || String(since).trim() === '') return true
+  const sinceVersion = coerceVersion(since)
+  if (!sinceVersion) return true
+  const src = config && config.file && config.file.src
+  const pageVersion = src && coerceVersion(src.version)
+  if (!pageVersion) return true
+  return semver.gte(pageVersion, sinceVersion)
+}
+
+/**
+ * Report an inline mention of a feature before its `since` version, on a
+ * page whose own version predates it.
+ */
+function reportFeatureNotYetShipped ({ feature, since, pageVersion, mode, filePath }) {
+  if (mode === 'off') return
+  const where = filePath ? ` in ${filePath}` : ''
+  const message =
+    `enterprise:${feature}[]${where}: '${feature}' is marked since: ${since} in the enterprise features registry, but this page is version ${pageVersion}, which predates it. ` +
+    'The mention renders as plain text with no enterprise styling, tooltip, or link. ' +
+    'Move the mention to a page whose version is at or after the since version, or remove since if the feature covers this version too.'
   if (mode === 'error') throw new Error(message)
   console.warn(chalk.yellow(message))
 }
@@ -436,6 +499,8 @@ function buildEnterpriseContent ({ feature, text, xref, url, tooltip, licensingP
  * @param {object} [opts]
  * @param {string} [opts.title] - Table title override.
  * @param {string} [opts.heading] - Third column heading override.
+ * @param {object} [opts.config] - Extension config, used to read the page's
+ *   own version for since-gating (see isFeatureShippedOnPage).
  * @returns {string}
  */
 function buildFeatureTable (features, scope, opts = {}) {
@@ -456,7 +521,13 @@ function buildFeatureTable (features, scope, opts = {}) {
     // did not fail there either.
     .filter((feature) => {
       const status = entryStatus(feature, report)
-      return includeUnreleased || status !== STATUS_UNRELEASED
+      if (!includeUnreleased && status === STATUS_UNRELEASED) return false
+      // since only describes a shipped feature's first version, so it does
+      // not apply to one that has not released at all yet. Silent, like the
+      // unreleased filter above: an older version's table naturally does not
+      // list a feature that did not exist yet on that version, which is not
+      // a writer mistake worth warning about.
+      return status === STATUS_UNRELEASED || isFeatureShippedOnPage(feature, opts.config)
     })
     .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }))
   const title = opts.title || TABLE_TITLES[scope]
@@ -517,6 +588,18 @@ function enterpriseInlineMacro (config) {
         reportUnreleasedFeature({ feature, mode, filePath })
         return self.createInline(parent, 'quoted', attributes.text || feature)
       }
+      if (!isFeatureShippedOnPage(entry, config)) {
+        // isFeatureShippedOnPage only returns false when entry.since parsed,
+        // so entry is defined here.
+        reportFeatureNotYetShipped({
+          feature,
+          since: entry.since,
+          pageVersion: config && config.file && config.file.src && config.file.src.version,
+          mode,
+          filePath,
+        })
+        return self.createInline(parent, 'quoted', attributes.text || feature)
+      }
       let content = buildEnterpriseContent({
         feature,
         text: attributes.text,
@@ -568,6 +651,7 @@ function enterpriseFeaturesBlockMacro (config) {
         // Prerelease docs describe the upcoming release, so they list features
         // that are still only in a release candidate.
         includeUnreleased: isPrereleasePage(config, parent.getDocument()),
+        config,
       })
       // A block anchor before the macro call ([[my-id]]) is consumed into the
       // macro's id attribute. Re-emit it so crossrefs to the table keep working.
@@ -598,3 +682,4 @@ module.exports.buildFeatureTable = buildFeatureTable
 module.exports.parseRegistry = parseRegistry
 module.exports.resolveEntryXref = resolveEntryXref
 module.exports.resolveTooltipAttribute = resolveTooltipAttribute
+module.exports.isFeatureShippedOnPage = isFeatureShippedOnPage
