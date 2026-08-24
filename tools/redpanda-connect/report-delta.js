@@ -1,4 +1,5 @@
 const { execSync } = require('child_process');
+const { flattenConnectFields } = require('./helpers/flattenConnectFields');
 
 /**
  * Generate a JSON diff report between two connector index objects.
@@ -54,22 +55,29 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     if (!(cKey in oldMap)) return;
     const oldFields = new Set(oldMap[cKey].fields || []);
     const newFieldsArr = newMap[cKey].fields || [];
-    newFieldsArr.forEach(fName => {
-      if (!oldFields.has(fName)) {
-        const [type, compName] = cKey.split(':');
-        let rawFieldObj = null;
-        if (type === 'config') {
-          rawFieldObj = (newMap[cKey].raw.children || []).find(f => f.name === fName);
-        } else {
-          rawFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
-        }
-        newFields.push({
-          component: cKey,
-          field: fName,
-          introducedIn: rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version),
-          description: rawFieldObj && rawFieldObj.description
-        });
-      }
+    const added = collapseToTopmost(
+      newFieldsArr.filter(fName => !oldFields.has(fName)),
+      newMap[cKey].parents
+    );
+    added.forEach(fName => {
+      const rawFieldObj = newMap[cKey].fieldMap.get(fName) || null;
+      // A field that arrives already deprecated -- or sits under a
+      // deprecated ancestor group -- gets no heading on the reference page,
+      // so advertising it under "New field support" would link to a fragment
+      // that never exists.
+      if (isDeprecatedOrDescendsFromDeprecated(fName, newMap[cKey].fieldMap, newMap[cKey].parents)) return;
+      newFields.push({
+        component: cKey,
+        field: fName,
+        // Most fields carry no version of their own, so fall back to the
+        // version this diff is comparing against: the field is new as of
+        // exactly that release. Some fields do carry `version` (268 entries
+        // in connect-4.105.0), and that wins, because it can predate the
+        // span being compared: inputs:oracledb_cdc/snapshot_mode reports
+        // 4.99.0 in the 4.98.0 to 4.103.1 diff.
+        introducedIn: (rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version)) || opts.newVersion || null,
+        description: rawFieldObj && rawFieldObj.description
+      });
     });
   });
 
@@ -79,13 +87,15 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     if (!(cKey in newMap)) return;
     const newFieldsSet = new Set(newMap[cKey].fields || []);
     const oldFieldsArr = oldMap[cKey].fields || [];
-    oldFieldsArr.forEach(fName => {
-      if (!newFieldsSet.has(fName)) {
-        removedFields.push({
-          component: cKey,
-          field: fName
-        });
-      }
+    const removed = collapseToTopmost(
+      oldFieldsArr.filter(fName => !newFieldsSet.has(fName)),
+      oldMap[cKey].parents
+    );
+    removed.forEach(fName => {
+      removedFields.push({
+        component: cKey,
+        field: fName
+      });
     });
   });
 
@@ -172,26 +182,11 @@ function generateConnectorDiffJson(oldIndex, newIndex, opts = {}) {
     // Check fields that exist in both versions
     const commonFields = oldFieldsArr.filter(f => newFieldsArr.includes(f));
     commonFields.forEach(fName => {
-      const [type, compName] = cKey.split(':');
+      const oldFieldObj = oldMap[cKey].fieldMap.get(fName) || null;
+      const newFieldObj = newMap[cKey].fieldMap.get(fName) || null;
 
-      // Get old field object
-      let oldFieldObj = null;
-      if (type === 'config') {
-        oldFieldObj = (oldMap[cKey].raw.children || []).find(f => f.name === fName);
-      } else {
-        oldFieldObj = (oldMap[cKey].raw.config?.children || []).find(f => f.name === fName);
-      }
-
-      // Get new field object
-      let newFieldObj = null;
-      if (type === 'config') {
-        newFieldObj = (newMap[cKey].raw.children || []).find(f => f.name === fName);
-      } else {
-        newFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
-      }
-
-      const oldDeprecated = oldFieldObj && (oldFieldObj.is_deprecated === true || oldFieldObj.deprecated === true || (oldFieldObj.status || '').toLowerCase() === 'deprecated');
-      const newDeprecated = newFieldObj && (newFieldObj.is_deprecated === true || newFieldObj.deprecated === true || (newFieldObj.status || '').toLowerCase() === 'deprecated');
+      const oldDeprecated = isDeprecatedField(oldFieldObj);
+      const newDeprecated = isDeprecatedField(newFieldObj);
 
       if (!oldDeprecated && newDeprecated) {
         deprecatedFields.push({
@@ -380,6 +375,67 @@ function discoverComponentKeys(obj) {
   return Object.keys(obj).filter(key => Array.isArray(obj[key]));
 }
 
+/**
+ * Whether a field is marked deprecated.
+ *
+ * Three markers have been used by the source data over time. Only
+ * `is_deprecated` appears in current releases (verified across connect-4.63.0,
+ * 4.104.0 and 4.105.0: 85, 75 and 75 fields, zero uses of the other two), and
+ * it is the one renderConnectFields keys on when it decides not to render a
+ * heading for a field.
+ *
+ * @param {object} field - Field definition, or null
+ * @returns {boolean} True when the field is deprecated
+ */
+function isDeprecatedField(field) {
+  if (!field) return false;
+  return field.is_deprecated === true ||
+    field.deprecated === true ||
+    (field.status || '').toLowerCase() === 'deprecated';
+}
+
+/**
+ * True if `fName` or any of its ancestor fields is deprecated.
+ *
+ * renderConnectFields never renders a field under a deprecated group (the
+ * whole group is hidden), so a leaf-only check reports a field added under an
+ * existing-but-deprecated group in "New field support" even though it never
+ * appears on the page. Walking the parent chain via `parents` is what
+ * catches that.
+ */
+function isDeprecatedOrDescendsFromDeprecated(fName, fieldMap, parents) {
+  let current = fName;
+  while (current) {
+    if (isDeprecatedField(fieldMap.get(current))) return true;
+    current = parents && parents.get(current);
+  }
+  return false;
+}
+
+/**
+ * Drop paths whose parent changed in the same way, keeping only the topmost
+ * field of each changed subtree.
+ *
+ * Adding or removing one group adds or removes every field under it, and the
+ * flattened field list contains all of them. Reporting each descendant turns
+ * a single change into one row per node: removing `batching` from
+ * outputs:redpanda_migrator would list `batching` plus batching.count,
+ * .byte_size, .period, .check and .processors, and the group row already says
+ * all of that. Only the fields added to or removed from a group that still
+ * exists are news.
+ *
+ * @param {Array<string>} changedPaths - Paths that are new (or removed)
+ * @param {Map<string, (string|null)>} parents - Path to parent path
+ * @returns {Array<string>} The topmost changed path of each subtree, in order
+ */
+function collapseToTopmost(changedPaths, parents) {
+  const changed = new Set(changedPaths);
+  return changedPaths.filter(path => {
+    const parent = parents && parents.get(path);
+    return !(parent && changed.has(parent));
+  });
+}
+
 function buildComponentMap(indexObj) {
   const map = {};
   const types = discoverComponentKeys(indexObj);
@@ -402,7 +458,14 @@ function buildComponentMap(indexObj) {
         }
       }
 
-      const fieldNames = childArray.map(f => f.name);
+      // arrayMarker keeps the paths identical to the headings
+      // renderConnectFields emits, so a field name in the what's-new table is
+      // a config path a reader can paste into YAML (`sasl[].aws.tcp`, not the
+      // invalid `sasl.aws.tcp`).
+      const flattened = flattenConnectFields(childArray, { arrayMarker: true });
+      const fieldNames = flattened.map(f => f.path);
+      const fieldMap = new Map(flattened.map(f => [f.path, f.field]));
+      const parents = new Map(flattened.map(f => [f.path, f.parentPath]));
 
       // Preserve platform metadata for accurate diff comparison
       const metadata = {
@@ -414,6 +477,8 @@ function buildComponentMap(indexObj) {
       map[lookupKey] = {
         raw: component,
         fields: fieldNames,
+        fieldMap: fieldMap,
+        parents: parents,
         metadata: metadata
       };
     });
@@ -499,8 +564,11 @@ function getRpkConnectVersion() {
  *  • which connectors/components are brand-new
  *  • which new fields appeared under existing connectors (including “config” entries)
  *  • for each new component/field, if the raw object contains “version” or “introducedInVersion” or “requiresVersion” metadata, print it
+ * @param {object} oldIndex - Previous version connector index
+ * @param {object} newIndex - Current version connector index
+ * @param {object} [opts] - { newVersion } used as the introducedIn fallback
  */
-function printDeltaReport(oldIndex, newIndex) {
+function printDeltaReport(oldIndex, newIndex, opts = {}) {
   const oldMap = buildComponentMap(oldIndex);
   const newMap = buildComponentMap(newIndex);
 
@@ -513,27 +581,24 @@ function printDeltaReport(oldIndex, newIndex) {
     if (!(cKey in oldMap)) return; // skip brand-new components here
     const oldFields = new Set(oldMap[cKey].fields || []);
     const newFieldsArr = newMap[cKey].fields || [];
-    newFieldsArr.forEach(fName => {
-      if (!oldFields.has(fName)) {
-        // fetch raw field metadata if available
-        const [type, compName] = cKey.split(':');
-        let rawFieldObj = null;
-        if (type === 'config') {
-          rawFieldObj = (newMap[cKey].raw.children || []).find(f => f.name === fName);
-        } else {
-          rawFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
-        }
+    const added = collapseToTopmost(
+      newFieldsArr.filter(fName => !oldFields.has(fName)),
+      newMap[cKey].parents
+    );
+    added.forEach(fName => {
+      const rawFieldObj = newMap[cKey].fieldMap.get(fName) || null;
+      if (isDeprecatedField(rawFieldObj)) return;
+      // Same fallback as generateConnectorDiffJson, so the console report and
+      // the published table cannot disagree about the same input.
+      const introducedIn = (rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version)) || opts.newVersion || null;
+      const requiresVer = rawFieldObj && rawFieldObj.requiresVersion;
 
-        let introducedIn = rawFieldObj && (rawFieldObj.introducedInVersion || rawFieldObj.version);
-        let requiresVer = rawFieldObj && rawFieldObj.requiresVersion;
-
-        newFields.push({
-          component: cKey,
-          field: fName,
-          introducedIn,
-          requiresVersion: requiresVer,
-        });
-      }
+      newFields.push({
+        component: cKey,
+        field: fName,
+        introducedIn,
+        requiresVersion: requiresVer,
+      });
     });
   });
 
@@ -560,21 +625,10 @@ function printDeltaReport(oldIndex, newIndex) {
     const commonFields = oldFieldsArr.filter(f => newFieldsArr.includes(f));
 
     commonFields.forEach(fName => {
-      const [type, compName] = cKey.split(':');
-      let oldFieldObj = null;
-      if (type === 'config') {
-        oldFieldObj = (oldMap[cKey].raw.children || []).find(f => f.name === fName);
-      } else {
-        oldFieldObj = (oldMap[cKey].raw.config?.children || []).find(f => f.name === fName);
-      }
-      let newFieldObj = null;
-      if (type === 'config') {
-        newFieldObj = (newMap[cKey].raw.children || []).find(f => f.name === fName);
-      } else {
-        newFieldObj = (newMap[cKey].raw.config?.children || []).find(f => f.name === fName);
-      }
-      const oldDeprecated = oldFieldObj && (oldFieldObj.is_deprecated === true || oldFieldObj.deprecated === true || (oldFieldObj.status || '').toLowerCase() === 'deprecated');
-      const newDeprecated = newFieldObj && (newFieldObj.is_deprecated === true || newFieldObj.deprecated === true || (newFieldObj.status || '').toLowerCase() === 'deprecated');
+      const oldFieldObj = oldMap[cKey].fieldMap.get(fName) || null;
+      const newFieldObj = newMap[cKey].fieldMap.get(fName) || null;
+      const oldDeprecated = isDeprecatedField(oldFieldObj);
+      const newDeprecated = isDeprecatedField(newFieldObj);
       if (!oldDeprecated && newDeprecated) {
         deprecatedFieldsList.push({ component: cKey, field: fName });
       }

@@ -641,3 +641,50 @@ describe('PR summary leads with content-loss warnings', () => {
     expect(summary).not.toContain('deletes previously published metadata sections');
   });
 });
+
+describe('resolvePageTypeDir', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { resolvePageTypeDir } = require('../../tools/redpanda-connect/metadata-utils.js');
+
+  let root;
+  beforeAll(() => {
+    // Built from the real shape in rp-connect-docs: every family's directory
+    // matches its data key EXCEPT the rate-limit family, whose data key from
+    // the Connect binary is 'rate-limits' while the directory is 'rate_limits'.
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'page-type-dirs-'));
+    for (const d of ['inputs', 'outputs', 'caches', 'rate_limits']) {
+      fs.mkdirSync(path.join(root, d), { recursive: true });
+    }
+  });
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  test('resolves the rate-limit data key to the underscored directory on disk', () => {
+    // The regression this pins: guessing 'rate-limits' reports every existing
+    // rate-limit page as missing, and draft mode then writes a duplicate page
+    // into a directory update-nav.js's regex does not match, on every run.
+    expect(resolvePageTypeDir(root, 'rate-limits')).toBe('rate_limits');
+  });
+
+  test('leaves a data key alone when its own spelling is on disk', () => {
+    for (const d of ['inputs', 'outputs', 'caches', 'rate_limits']) {
+      expect(resolvePageTypeDir(root, d)).toBe(d);
+    }
+  });
+
+  test('resolves the reverse direction when only the hyphenated form exists', () => {
+    fs.mkdirSync(path.join(root, 'some-family'), { recursive: true });
+    expect(resolvePageTypeDir(root, 'some_family')).toBe('some-family');
+  });
+
+  test('returns the data key unchanged when no directory exists, rather than inventing one', () => {
+    expect(resolvePageTypeDir(root, 'nonexistent')).toBe('nonexistent');
+  });
+
+  test('tolerates a missing root or key instead of throwing mid-report', () => {
+    expect(resolvePageTypeDir(path.join(root, 'no-such-root'), 'inputs')).toBe('inputs');
+    expect(resolvePageTypeDir('', 'inputs')).toBe('inputs');
+    expect(resolvePageTypeDir(root, '')).toBe('');
+  });
+});

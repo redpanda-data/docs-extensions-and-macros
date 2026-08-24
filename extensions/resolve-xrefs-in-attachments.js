@@ -21,6 +21,8 @@ const { escapeHtml } = require('../extension-utils/html-utils')
  * - xref:path.adoc[] (empty display uses page title or path)
  */
 
+const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
+
 module.exports.register = function () {
   raiseListenerLimit(this)
   const logger = this.getLogger('resolve-xrefs-in-attachments')
@@ -30,7 +32,15 @@ module.exports.register = function () {
     const allAttachments = contentCatalog.findBy({ family: 'attachment' })
     const jsonAttachments = allAttachments.filter((att) => {
       const path = att.src?.path || att.out?.path || ''
-      return path.endsWith('.json')
+      if (!path.endsWith('.json')) return false
+      // Property datasets are handled by render-property-descriptions, which
+      // converts their descriptions with Asciidoctor instead of rewriting xrefs
+      // by hand. Both running double-processed 53 descriptions in v26.2.1: the
+      // anchor inserted here was escaped to &lt;a href= by the converter. This
+      // extension still serves every other JSON attachment, including the
+      // Connect component catalog, which carries far more xrefs than the
+      // property files do.
+      return !PROPERTIES_JSON_RX.test(path.split('/').pop())
     })
 
     if (!jsonAttachments.length) {
@@ -73,6 +83,19 @@ function processJsonAttachment (attachment, contentCatalog, logger) {
 
   let data
   try {
+    // Deliberately plain JSON.parse, not bigIntJson: this function rewrites
+    // whatever JSON attachment it is handed, including the Connect component
+    // catalog, which contains example config text as an ESCAPED JSON-shaped
+    // string -- "{\"delay_for_ns\":110839937000000000}" -- indistinguishable
+    // by regex from real JSON value position. bigIntJson's value-position regex
+    // matched inside that escaped string and inserted stray quotes, which is not
+    // a rounding error, it is invalid JSON: confirmed to throw
+    // "Expected ',' or ']' after array element" on the real, currently-published
+    // connect-4.103.1.json attachment. A plain round trip still silently rounds
+    // large integers (the pre-existing, understood defect this file has always
+    // had), which is the safer failure mode until a real JSON scanner -- one
+    // that tracks string/escape state rather than pattern-matching text --
+    // replaces the regex here.
     data = JSON.parse(contentStr)
   } catch (err) {
     logger.debug(`Skipping invalid JSON: ${attachment.src?.path}`)
