@@ -214,7 +214,11 @@ jobs:
 
   test-property-extractor:
     needs: detect-changes
-    if: needs.detect-changes.outputs.property_extractor == 'true' || needs.detect-changes.outputs.all_tests == 'true' || github.event_name == 'schedule'
+    # Skip on pull_request runs from a fork: forked PRs get neither the
+    # OIDC id-token nor repo secrets this job's AWS auth step below needs,
+    # so it would fail before "make build" ever runs. Same-repo PRs, pushes,
+    # and the weekly schedule run are unaffected.
+    if: (needs.detect-changes.outputs.property_extractor == 'true' || needs.detect-changes.outputs.all_tests == 'true' || github.event_name == 'schedule') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     # Needed to assume the AWS role below, which fetches the bot token that
     # authenticates the clone of streaming-enterprise (private) in the

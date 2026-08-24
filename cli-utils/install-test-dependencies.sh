@@ -462,20 +462,62 @@ install_rpk() {
             ;;
     esac
     
-    # Construct download URL and filename
+    # rpk releases now publish to the private redpanda-data/streaming-enterprise,
+    # not the public redpanda-data/redpanda, so a token is required (same
+    # priority order as cli-utils/github-token.js's getGitHubToken(), minus
+    # GIT_CREDENTIALS, which is Antora's own credential store and doesn't
+    # apply to this standalone installer script).
+    local gh_token="${REDPANDA_GITHUB_TOKEN:-${ACTIONS_BOT_TOKEN:-${GITHUB_TOKEN:-${VBOT_GITHUB_API_TOKEN:-${GH_TOKEN:-}}}}}"
+    if [ -z "$gh_token" ]; then
+        log_warn "No GitHub token found (checked REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, GH_TOKEN)."
+        log_warn "rpk releases are now published to the private redpanda-data/streaming-enterprise repo and require authentication."
+        log_warn "Please install rpk manually:"
+        log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
+        return 1
+    fi
+
     local rpk_filename="rpk-${rpk_os}-${rpk_arch}.zip"
-    local rpk_url="https://github.com/redpanda-data/redpanda/releases/latest/download/${rpk_filename}"
-    
-    log_info "Detected ${os_name} ${arch_name}, downloading ${rpk_filename}..."
-    
+    local releases_api="https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/latest"
+
+    log_info "Detected ${os_name} ${arch_name}, looking up the latest rpk release..."
+
+    local release_json
+    if ! release_json=$(curl -fsSL --retry 5 --retry-all-errors \
+            --connect-timeout 30 --max-time 60 --retry-max-time 120 \
+            -H "Authorization: token ${gh_token}" \
+            -H "Accept: application/vnd.github+json" \
+            "$releases_api"); then
+        log_warn "Failed to query the latest release from streaming-enterprise"
+        log_warn "Please install rpk manually:"
+        log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
+        return 1
+    fi
+
+    # Resolve the asset's API url (not browser_download_url): only the API
+    # asset endpoint accepts the Authorization header this private repo needs.
+    local rpk_url
+    rpk_url=$(printf '%s' "$release_json" | jq -r --arg name "$rpk_filename" '.assets[] | select(.name == $name) | .url')
+    if [ -z "$rpk_url" ] || [ "$rpk_url" = "null" ]; then
+        log_warn "Latest streaming-enterprise release has no asset named ${rpk_filename}"
+        log_warn "Please install rpk manually:"
+        log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
+        return 1
+    fi
+
+    log_info "Downloading ${rpk_filename}..."
+
     # Try to download and install rpk.
     # Use -f so HTTP errors (e.g. 403/404/429/503) fail instead of writing an
     # error page into the zip, and retry with curl's default exponential
     # backoff (1s, 2s, 4s, ...) to ride out transient GitHub/CDN and network
     # errors, including rate limits that need time to clear. --retry-max-time
     # caps the whole retry window so CI fails fast on persistent errors.
+    # Accept: application/octet-stream is required on the API asset url to
+    # receive the binary itself instead of its JSON metadata.
     if curl -fL --retry 5 --retry-all-errors \
             --connect-timeout 30 --max-time 300 --retry-max-time 600 \
+            -H "Authorization: token ${gh_token}" \
+            -H "Accept: application/octet-stream" \
             -o "$rpk_filename" "$rpk_url"; then
         if unzip "$rpk_filename" 2>/dev/null; then
             mkdir -p ~/.local/bin
