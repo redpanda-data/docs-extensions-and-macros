@@ -499,7 +499,11 @@ const tools = [
         },
         extracted: {
           type: 'string',
-          description: 'Path to the extracted source JSON: the property extractor\'s RAW --output file, without overrides applied (required for the properties surface)'
+          description: 'Path to the extracted source JSON: the property extractor\'s RAW --output file, without overrides applied (required for the properties surface, alternative to "repo")'
+        },
+        repo: {
+          type: 'string',
+          description: 'Redpanda checkout to extract raw source strings from (properties surface only, alternative to "extracted")'
         },
         surface: {
           type: 'string',
