@@ -2,6 +2,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { isDeepStrictEqual } = require('util')
 
 /**
  * Schemas that document docs-data/*.json files (rpk-overrides.schema.json,
@@ -111,11 +112,19 @@ function syncSchemas ({ destDir, check = false, force = false } = {}) {
     let destOnlyPaths
     if (!destExists) {
       status = 'created'
-    } else if (destContent === sourceContent) {
-      status = 'unchanged'
     } else {
-      destOnlyPaths = findDestOnlyPaths(JSON.parse(sourceContent), JSON.parse(destContent))
-      status = destOnlyPaths.length > 0 ? 'diverged' : 'updated'
+      // Compare parsed content, not raw text — a destination reformatted by a
+      // content repo's own prettier/editorconfig (different indent, key
+      // order, trailing newline) with no real data change must not read as
+      // drift.
+      const sourceParsed = JSON.parse(sourceContent)
+      const destParsed = JSON.parse(destContent)
+      if (isDeepStrictEqual(sourceParsed, destParsed)) {
+        status = 'unchanged'
+      } else {
+        destOnlyPaths = findDestOnlyPaths(sourceParsed, destParsed)
+        status = destOnlyPaths.length > 0 ? 'diverged' : 'updated'
+      }
     }
 
     const shouldWrite = !check && (status === 'created' || status === 'updated' || (status === 'diverged' && force))

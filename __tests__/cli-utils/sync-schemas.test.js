@@ -58,6 +58,28 @@ describe('sync-schemas', () => {
       expect(fs.readFileSync(path.join(tempDir, 'rpk-overrides.schema.json'), 'utf8')).toBe(before)
     })
 
+    it('treats a cosmetic reformat (different indentation, no data change) as unchanged, not drift', () => {
+      // Reproduces a real false-positive: a content repo's own prettier or
+      // editorconfig reformats the synced JSON on save, with zero semantic
+      // change. Raw-string comparison would misclassify that as 'updated'
+      // (or fail --check) on every single run.
+      const realSchema = JSON.parse(fs.readFileSync(
+        path.join(PACKAGE_SCHEMA_DIR, 'rpk-overrides.schema.json'), 'utf8'
+      ))
+      const reformatted = JSON.stringify(realSchema, null, 4) // package ships 2-space
+
+      const schemaFile = path.join(tempDir, 'rpk-overrides.schema.json')
+      fs.mkdirSync(tempDir, { recursive: true })
+      fs.writeFileSync(schemaFile, reformatted)
+
+      const { results, drift } = syncSchemas({ destDir: tempDir })
+
+      expect(drift).toBe(false)
+      const rpk = results.find((r) => r.name === 'rpk-overrides.schema.json')
+      expect(rpk.status).toBe('unchanged')
+      expect(fs.readFileSync(schemaFile, 'utf8')).toBe(reformatted) // left untouched
+    })
+
     it('detects and fixes a stale destination copy (the drift this command exists to catch)', () => {
       // "Stale" means the destination lacks content the source has -- a
       // strict subset, safe to overwrite. Built by deleting a real field
