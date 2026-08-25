@@ -95,8 +95,12 @@ jobs:
             TEST_PATTERNS="__tests__/extensions/"
             for file in $CHANGED_FILES; do
               extension_name=$(basename "$file" .js)
-              # Add specific test file pattern (will be joined with | by Jest)
-              TEST_PATTERNS="$TEST_PATTERNS ${extension_name}"
+              # Anchored to .test.js so this doesn't match as a bare
+              # substring against unrelated suites elsewhere in the tree
+              # (e.g. "prop" would otherwise also select
+              # __tests__/tools/lint-strings/properties-surface.test.js,
+              # which needs an environment this job never bootstraps).
+              TEST_PATTERNS="$TEST_PATTERNS ${extension_name}\.test\.js"
             done
             echo "test-patterns=$TEST_PATTERNS" >> $GITHUB_OUTPUT
             echo "Changed extensions: $CHANGED_FILES"
@@ -149,8 +153,12 @@ jobs:
             TEST_PATTERNS="__tests__/macros/"
             for file in $CHANGED_FILES; do
               macro_name=$(basename "$file" .js)
-              # Add specific test file pattern (will be joined with | by Jest)
-              TEST_PATTERNS="$TEST_PATTERNS ${macro_name}"
+              # Anchored to .test.js so this doesn't match as a bare
+              # substring against unrelated suites elsewhere in the tree
+              # (e.g. "prop" would otherwise also select
+              # __tests__/tools/lint-strings/properties-surface.test.js,
+              # which needs an environment this job never bootstraps).
+              TEST_PATTERNS="$TEST_PATTERNS ${macro_name}\.test\.js"
             done
             echo "test-patterns=$TEST_PATTERNS" >> $GITHUB_OUTPUT
             echo "Changed macros: $CHANGED_FILES"
