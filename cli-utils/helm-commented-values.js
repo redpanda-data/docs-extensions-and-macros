@@ -44,6 +44,8 @@ const REAL_KEY_RE = /^(\s*)([A-Za-z0-9_."/-]+):(.*)$/
 const DESC_MARKER_RE = /^\s*#\s*--\s*(?!-)(.*)$/
 const AT_DOC_RE = /^\s*#\s*@doc\s+([A-Za-z0-9_./-]+)\s+--\s*(.*)$/
 const AT_DEFAULT_RE = /^\s*#\s*@default\s+--\s*(.*)$/
+// helm-docs' bare word annotations: `# @raw`, `# @ignored`.
+const AT_WORD_RE = /^\s*#\s*@(\w+)\s*$/
 const COMMENT_RE = /^\s*#\s?(.*)$/
 // A block scalar header may carry an explicit indentation indicator digit on
 // either side of the chomping indicator: `|2`, `|-2`, `|2-`, `>2`, ...
@@ -51,14 +53,40 @@ const BLOCK_SCALAR_RE = /[|>][0-9]?[+-]?[0-9]?\s*(#.*)?$/
 const LIST_ITEM_RE = /^\s*-\s/
 
 /**
- * Parse values.yaml text and return entries for documented commented-out keys.
+ * The one values.yaml comment walk in this repo. Two consumers share it:
+ *
+ * - `extractCommentedValueDocs` below, which the helm-spec generator uses to
+ *   inject rows for documented commented-out keys.
+ * - `tools/lint-strings/surfaces/helm.js`, which needs the same attachment
+ *   decisions plus line spans, real-key (helm-docs) attachments, and the
+ *   blocks that attach to NOTHING.
+ *
+ * The linter used to hold a byte-identical copy of every regex above and a
+ * near-copy of this walk, so that "the linter never calls a marker dead that
+ * the generator in this repo renders" - a promise nothing enforced. When the
+ * copies drifted, the linter emitted exactly the false dead-marker the
+ * comment promised to prevent and every test stayed green. There is now one
+ * walk, so they cannot disagree.
+ *
+ * Records are the union of what both consumers need. Line numbers are
+ * 0-indexed; descriptions are returned as the raw comment lines so each
+ * consumer can join them its own way (the generator preserves newlines, the
+ * linter flattens to one line).
  *
  * @param {string} yamlText - Raw contents of values.yaml.
- * @returns {Array<{path: string, description: string, default: string}>}
+ * @param {object} [options]
+ * @param {boolean} [options.attachRealKeys=false] - Model helm-docs' own
+ *   attachment: a `# --` block sitting DIRECTLY above an uncommented key
+ *   documents that key, and a top-level uncommented key with no block above
+ *   it is recorded as undocumented. The generator leaves this off because
+ *   helm-docs already renders those rows; only the linter judges them.
+ * @returns {Array<object>} records: { kind: 'key'|'dead-marker', path,
+ *   descLines, default, annotations, lineStart, lineEnd, commentedOut,
+ *   topLevel, undocumented }
  */
-function extractCommentedValueDocs (yamlText) {
+function parseValuesFile (yamlText, { attachRealKeys = false } = {}) {
   const lines = yamlText.split(/\r?\n/)
-  const entries = []
+  const records = []
   const stack = [] // enclosing real keys: { name, indent }
 
   // Accumulating comment block: { descLines, default, candidate }. The
@@ -69,36 +97,81 @@ function extractCommentedValueDocs (yamlText) {
   let atDoc = null // accumulating @doc entry: { path, descLines, default }
   let skipScalarIndent = -1 // inside a block scalar when >= 0
   let suppressInnerIndent = -1 // inside an emitted commented key's subtree when >= 0
+  let looseIgnored = false // bare `# @ignored` with no `# --` block above a key
+
+  const record = (fields) => {
+    records.push({
+      kind: 'key',
+      path: null,
+      descLines: [],
+      default: '',
+      annotations: {},
+      lineStart: 0,
+      lineEnd: 0,
+      commentedOut: false,
+      topLevel: false,
+      undocumented: false,
+      ...fields,
+    })
+  }
 
   const flushAtDoc = () => {
     if (atDoc) {
-      entries.push({
+      record({
         path: atDoc.path,
-        description: atDoc.descLines.join('\n').trim(),
-        default: atDoc.default || '`nil`',
+        descLines: atDoc.descLines,
+        default: atDoc.default,
+        annotations: atDoc.annotations,
+        lineStart: atDoc.line,
+        lineEnd: atDoc.lastLine,
+        commentedOut: true,
+        topLevel: !atDoc.path.includes('.'),
       })
       atDoc = null
     }
+  }
+
+  // A `# --` block that reached the end of its life with no key to attach to.
+  // The generator drops these; the linter reports them, because their
+  // description silently never ships.
+  const emitDead = (b) => {
+    record({
+      kind: 'dead-marker',
+      descLines: b.descLines,
+      default: b.default,
+      annotations: b.annotations,
+      lineStart: b.markerLine,
+      lineEnd: b.lastLine,
+    })
   }
 
   // Emit the active block's candidate, if any, and close the block. The
   // emitted key suppresses its own commented subtree until real content
   // appears, so nested example structures do not emit bogus paths.
   const flushBlock = () => {
-    if (block && block.candidate) {
+    if (!block) return
+    if (block.candidate) {
       const { name, effIndent } = block.candidate
       const parents = stack.filter((k) => k.indent < effIndent).map((k) => k.name)
-      entries.push({
+      record({
         path: [...parents, name].join('.'),
-        description: block.descLines.join('\n').trim(),
-        default: block.default || '`nil`',
+        descLines: block.descLines,
+        default: block.default,
+        annotations: block.annotations,
+        lineStart: block.markerLine,
+        lineEnd: block.lastLine,
+        commentedOut: true,
+        topLevel: parents.length === 0,
       })
       suppressInnerIndent = effIndent
+    } else {
+      emitDead(block)
     }
     block = null
   }
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
     // Skip the body of block scalars so their content is never mistaken for
     // keys or comments.
     if (skipScalarIndent >= 0) {
@@ -111,14 +184,21 @@ function extractCommentedValueDocs (yamlText) {
     if (atDocMatch) {
       flushAtDoc()
       flushBlock()
-      atDoc = { path: atDocMatch[1], descLines: [atDocMatch[2]], default: '' }
+      atDoc = { line: i, lastLine: i, path: atDocMatch[1], descLines: [atDocMatch[2]], default: '', annotations: {} }
       continue
     }
 
     const atDefault = line.match(AT_DEFAULT_RE)
     if (atDefault) {
-      if (atDoc) atDoc.default = atDefault[1].trim()
-      else if (block) block.default = atDefault[1].trim()
+      if (atDoc) { atDoc.default = atDefault[1].trim(); atDoc.lastLine = i }
+      else if (block) { block.default = atDefault[1].trim(); block.lastLine = i }
+      continue
+    }
+
+    const atWord = line.match(AT_WORD_RE)
+    if (atWord) {
+      if (block) { block.annotations[atWord[1]] = true; block.lastLine = i }
+      else if (atWord[1] === 'ignored') looseIgnored = true
       continue
     }
 
@@ -137,8 +217,10 @@ function extractCommentedValueDocs (yamlText) {
       // the result lines up with the real-key indents held on the stack.
       const effIndent = commentedKey[1].length + Math.max(0, commentedKey[2].length - 1)
       // A previously emitted commented key suppresses its own commented
-      // subtree, so nested example structures do not emit bogus paths.
+      // subtree, so nested example structures do not emit bogus paths. A
+      // marker in there is documentation neither pipeline ever renders.
       if (suppressInnerIndent >= 0 && effIndent > suppressInnerIndent) {
+        if (block) emitDead(block)
         block = null
         continue
       }
@@ -157,6 +239,7 @@ function extractCommentedValueDocs (yamlText) {
           // and deeper lines are nested example structures.
           block.candidate = { name: commentedKey[3], effIndent }
         }
+        block.lastLine = i
         continue
       }
     }
@@ -165,16 +248,18 @@ function extractCommentedValueDocs (yamlText) {
     if (descMarker) {
       flushAtDoc()
       flushBlock()
-      block = { descLines: [descMarker[1]], default: '', candidate: null }
+      block = { markerLine: i, lastLine: i, descLines: [descMarker[1]], default: '', annotations: {}, candidate: null }
       continue
     }
 
     const comment = line.match(COMMENT_RE)
     if (comment && line.trim().startsWith('#')) {
-      if (atDoc) atDoc.descLines.push(comment[1])
+      if (atDoc) { atDoc.descLines.push(comment[1]); atDoc.lastLine = i }
       // Description lines precede the documented key; once a candidate
-      // exists, trailing comment lines belong to its example structure.
-      else if (block && !block.candidate) block.descLines.push(comment[1])
+      // exists, trailing comment lines belong to its example structure and
+      // only extend the span.
+      else if (block && !block.candidate) { block.descLines.push(comment[1]); block.lastLine = i }
+      else if (block) block.lastLine = i
       continue
     }
 
@@ -183,26 +268,76 @@ function extractCommentedValueDocs (yamlText) {
     // structure must not re-enable emission against a stale parent key, since
     // the real-key stack is not rebuilt by comment lines.
     flushAtDoc()
+
+    const realKey = line.match(REAL_KEY_RE)
+    if (attachRealKeys && realKey && block && !block.candidate && block.lastLine === i - 1) {
+      // helm-docs' own attachment: the block sits DIRECTLY above a real key.
+      const indent = realKey[1].length
+      while (stack.length > 0 && stack[stack.length - 1].indent >= indent) stack.pop()
+      const name = realKey[2].replace(/^"|"$/g, '')
+      const keyPath = [...stack.map((k) => k.name), name].join('.')
+      stack.push({ name, indent })
+      if (!block.annotations.ignored) {
+        record({
+          path: keyPath,
+          descLines: block.descLines,
+          default: block.default,
+          annotations: block.annotations,
+          lineStart: block.markerLine,
+          lineEnd: i,
+          topLevel: indent === 0,
+        })
+      }
+      block = null
+      suppressInnerIndent = -1
+      if (BLOCK_SCALAR_RE.test(realKey[3])) skipScalarIndent = indent
+      continue
+    }
+
     flushBlock()
     if (line.trim() === '') continue
     suppressInnerIndent = -1
 
     if (LIST_ITEM_RE.test(line)) continue
 
-    const realKey = line.match(REAL_KEY_RE)
     if (realKey) {
       const indent = realKey[1].length
       while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
         stack.pop()
       }
-      stack.push({ name: realKey[2].replace(/^"|"$/g, ''), indent })
+      const name = realKey[2].replace(/^"|"$/g, '')
+      stack.push({ name, indent })
       if (BLOCK_SCALAR_RE.test(realKey[3])) skipScalarIndent = indent
+      if (attachRealKeys && indent === 0 && !looseIgnored) {
+        // Top-level user-visible key with no attached `# --` marker.
+        record({ path: name, lineStart: i, lineEnd: i, topLevel: true, undocumented: true })
+      }
     }
+    looseIgnored = false
   }
 
   flushAtDoc()
   flushBlock()
-  return entries
+  return records
+}
+
+/**
+ * Parse values.yaml text and return entries for documented commented-out keys.
+ *
+ * A filter over `parseValuesFile`: the commented-out keys it attaches, with
+ * their comment lines joined the way the AsciiDoc injector wants them.
+ *
+ * @param {string} yamlText - Raw contents of values.yaml.
+ * @returns {Array<{path: string, description: string, default: string}>}
+ */
+function extractCommentedValueDocs (yamlText) {
+  return parseValuesFile(yamlText)
+    .filter((r) => r.kind === 'key' && r.commentedOut)
+    .map((r) => ({
+      path: r.path,
+      description: r.descLines.join('\n').trim(),
+      default: r.default || '`nil`',
+    }))
 }
 
 /**
@@ -354,8 +489,22 @@ function injectIntoAsciiDoc (adoc, entries) {
 }
 
 module.exports = {
+  parseValuesFile,
   extractCommentedValueDocs,
   injectIntoAsciiDoc,
   filterEntriesBySchema,
   isPathAllowedBySchema,
+  // Exported so the lint surface cannot hold its own copy. Every one of these
+  // was duplicated character-for-character before.
+  PATTERNS: {
+    COMMENTED_KEY_RE,
+    REAL_KEY_RE,
+    DESC_MARKER_RE,
+    AT_DOC_RE,
+    AT_DEFAULT_RE,
+    AT_WORD_RE,
+    COMMENT_RE,
+    BLOCK_SCALAR_RE,
+    LIST_ITEM_RE,
+  },
 }

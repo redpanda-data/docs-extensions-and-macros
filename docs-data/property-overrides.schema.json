@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redpanda.com/schemas/property-overrides.schema.json",
+  "title": "Property overrides",
+  "description": "Hand-authored corrections and additions applied on top of properties extracted from Redpanda's C++ source. See tools/property-extractor/README.adoc.",
+  "type": "object",
+  "properties": {
+    "properties": {
+      "type": "object",
+      "description": "Keyed by property key or name (see property_extractor.py's name-fallback lookup). An override key that matches neither creates a phantom stub property — see property_extractor.py's report_phantom_stubs().",
+      "additionalProperties": { "$ref": "#/$defs/propertyOverride" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "propertyOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "_comment": {
+          "type": "string",
+          "description": "Free-text note to whoever edits this entry next. Never read by the generator."
+        },
+        "description": { "type": "string" },
+        "version": {
+          "type": "string",
+          "description": "Version the property was introduced in (e.g. 'v23.1.0')."
+        },
+        "example": {
+          "description": "Literal example content, or an example_file/example_yaml reference resolved relative to this overrides file."
+        },
+        "example_file": { "type": "string" },
+        "example_yaml": { "type": "string" },
+        "default": {
+          "description": "Replaces the extracted default. Prefer leaving this unset — it silently pins a value the extractor would otherwise keep in sync with the C++ source on every release."
+        },
+        "type": { "type": "string" },
+        "config_scope": {
+          "enum": ["cluster", "broker", "topic", null],
+          "description": "Almost always inferred automatically from defined_in — see property_extractor.py's add_config_scope(). Only set this for an override-created property (defined_in: 'override'), which has no source file to infer from."
+        },
+        "exclude_from_docs": { "type": "boolean" },
+        "category": {
+          "type": "string",
+          "description": "Documentation grouping. Not inferable for cluster/broker properties; topic properties get a mechanical default from infer_category() that this can still override."
+        },
+        "accepted_values": {
+          "type": "array",
+          "description": "Replaces the enum field to filter displayed values (e.g. hiding an internal-only mode).",
+          "items": {}
+        },
+        "is_deprecated": { "type": "boolean" },
+        "visibility": { "type": "string" },
+        "related_topics": {
+          "type": "array",
+          "deprecated": true,
+          "description": "Deprecated — use see_also. A plain string, or one prefixed 'cloud-only:'/'self-managed-only:' for conditional display. The prefix is free text with no validation; still read for existing entries, normalized alongside see_also by seeAlsoView.js.",
+          "items": { "type": "string" }
+        },
+        "see_also": {
+          "type": "array",
+          "description": "Related commands or documentation pages, in the docs-data/rpk-overrides.json 'seeAlso' shape. Each item is a plain string (shown everywhere) or an object naming exactly one of cloud_only/self_hosted_only (shown only in that build).",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "xref link or related-topic text, shown in every build."
+              },
+              {
+                "type": "object",
+                "description": "Conditional see-also item shown only in the named build.",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "The xref link or related-topic text."
+                  },
+                  "cloud_only": {
+                    "type": "boolean",
+                    "description": "If true, only shown in Cloud docs (wrapped with ifdef::env-cloud[])."
+                  },
+                  "self_hosted_only": {
+                    "type": "boolean",
+                    "description": "If true, only shown in self-hosted docs (wrapped with ifndef::env-cloud[])."
+                  }
+                },
+                "required": ["content"],
+                "additionalProperties": false,
+                "oneOf": [
+                  {
+                    "required": ["cloud_only"],
+                    "not": { "required": ["self_hosted_only"] }
+                  },
+                  {
+                    "required": ["self_hosted_only"],
+                    "not": { "required": ["cloud_only"] }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

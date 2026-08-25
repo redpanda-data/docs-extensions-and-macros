@@ -655,8 +655,10 @@ class BasicInfoTransformer:
     EXPECTED FINAL RESULT:
     {
         "name": "property_name",           # Clean identifier for JSON keys
-        "description": "Human readable...", # Description for documentation  
-        "defined_in": "src/v/config/..."   # Normalized file path
+        "description": "Human readable...", # Description for documentation
+        "defined_in": "src/v/config/...",  # Normalized file path
+        "line_start": 1852,                # First line of the declaration (1-indexed)
+        "line_end": 1858                   # Last line of the declaration (inclusive)
     }
     
     DOWNSTREAM USAGE:
@@ -724,6 +726,17 @@ class BasicInfoTransformer:
         property["defined_in"] = re.sub(
             r"^.*src/", "src/", str(file_pair.implementation)
         )
+
+        # --- Step 4: line span (additive) ---
+        # 1-indexed, inclusive lines of the full member-initializer entry in
+        # the implementation file named by defined_in. Recorded by the parser
+        # (parse_cpp_source) from the tree-sitter field_initializer node.
+        # Spans the whole declaration, not just the description literal, so
+        # diff-anchored tooling can match clang-format-wrapped strings.
+        if info.get("line_start") is not None:
+            property["line_start"] = info["line_start"]
+            property["line_end"] = info.get("line_end", info["line_start"])
+
         return property
 
 @debug_transformer
