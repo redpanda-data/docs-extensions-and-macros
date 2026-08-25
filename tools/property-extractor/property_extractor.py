@@ -963,6 +963,44 @@ def clean_private_fields_from_definitions(definitions):
 
 
 # The definitions.json file contains type definitions that the extractor uses to standardize and centralize type information. After extracting and transforming the properties from the source code, the function merge_properties_and_definitions looks up each property's type in the definitions. If a property's type (or the type of its items, in the case of arrays) matches one of the definitions, the transformer replaces that type with a JSON pointer ( such as #/definitions/<type>) to the corresponding entry in definitions.json. The final JSON output then includes both a properties section (with types now referencing the definitions) and a definitions section, so that consumers of the output can easily resolve the full type information.
+# Fields recorded for tooling only. lint-strings and preview-string read them
+# from the raw --output to anchor a finding to its declaration; nothing on the
+# docs site does. The enhanced JSON is copied verbatim into
+# modules/reference/attachments and downloaded by every browser that hovers a
+# prop: macro, so ~40 bytes per property (~56KB across the real ~1400-property
+# file) would be paid by readers for data no reader uses.
+TOOLING_ONLY_PROPERTY_FIELDS = ("line_start", "line_end")
+
+
+def strip_tooling_only_fields(properties):
+    """
+    Remove tooling-only span fields from properties bound for the PUBLISHED
+    JSON attachment.
+
+    Only the enhanced output is published; the raw --output keeps the spans,
+    because that is the file lint-strings and preview-string consume.
+
+    Args:
+        properties: Dictionary of properties
+
+    Returns:
+        The same dictionary, with the tooling-only fields removed
+    """
+    removed = 0
+    for prop in properties.values():
+        if not isinstance(prop, dict):
+            continue
+        for field in TOOLING_ONLY_PROPERTY_FIELDS:
+            if field in prop:
+                del prop[field]
+                removed += 1
+    if removed:
+        logging.info(
+            f"Stripped {removed} tooling-only span field(s) from the published properties JSON"
+        )
+    return properties
+
+
 def merge_properties_and_definitions(properties, definitions):
     # Do not overwrite the resolved type/default with a reference. Just return the resolved properties and definitions.
     return dict(properties=properties, definitions=definitions)
@@ -3160,6 +3198,9 @@ def main():
 
     # 7. Clean private fields from definitions (keep JSON output clean)
     filtered_enhanced_definitions = clean_private_fields_from_definitions(filtered_enhanced_definitions)
+
+    # 8. Drop tooling-only spans: this JSON is the published attachment.
+    enhanced_properties = strip_tooling_only_fields(enhanced_properties)
 
     # Generate enhanced properties JSON (with overrides)
     enhanced_properties_and_definitions = merge_properties_and_definitions(

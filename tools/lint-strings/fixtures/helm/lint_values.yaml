@@ -1,0 +1,47 @@
+# lint-strings test fixture: helm-docs conventions with known-bads and
+# conforming counterparts.
+
+# -- Enable or disable the thing entirely. This description conforms.
+enabled: true
+
+# -- Image settings for the fixture chart.
+image:
+  # -- The container image repository to pull from.
+  repository: docker.redpanda.com/redpandadata/redpanda
+  tag: latest
+
+# -- Service settings that were commented out wholesale. The nested markers
+# below are dead: no pipeline can attach them.
+# service:
+#   -- set service.name to override the default service name
+#   name: redpanda
+#   -- internal Service settings
+#   internal:
+#     annotations: {}
+
+
+# A marker separated from any key by a blank line is dead too:
+# -- This orphaned description attaches to nothing.
+
+# @doc external.domain -- Optional domain advertised to external clients.
+# @default -- `nil`
+
+resources:
+  # -- Requested CPU cores. Commented-out key documented in place:
+  # cpu: 1
+
+# @ignored
+internalHiddenKey: {}
+
+undocumentedTopLevel:
+  child: value
+
+config: |
+  # -- inside a block scalar this marker is content, not documentation
+  some: content
+
+# -- External access settings.
+external:
+  # -- Optional domain advertised to external clients. Hyphenated key names
+  # must survive both the generator and the linter.
+  # my-domain: local

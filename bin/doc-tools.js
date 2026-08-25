@@ -27,6 +27,7 @@ const {
   generatePropertyComparisonReport,
   updatePropertyOverridesWithVersion,
   updatePropertiesJsonWithVersion,
+  repairPropertyAnchorsInJson,
   cleanupOldDiffs,
   resolveDiffBaseline
 } = require('../cli-utils/diff-utils')
@@ -501,6 +502,7 @@ programCli
       { name: 'generate_cloud_regions', description: 'Generate cloud regions documentation' },
       { name: 'generate_bundle_openapi', description: 'Bundle OpenAPI specifications' },
       { name: 'review_generated_docs', description: 'Review generated documentation' },
+      { name: 'audit_overrides', description: 'Audit docs-side overrides against extracted source strings' },
       { name: 'run_doc_tools_command', description: 'Run raw doc-tools command' },
       { name: 'get_job_status', description: 'Get background job status' },
       { name: 'list_jobs', description: 'List background jobs' }
@@ -525,6 +527,103 @@ programCli
       }
     } catch (err) {
       console.error(`Error: Validation failed: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
+ * @description Copy this package's docs-data/*.schema.json files into a
+ * content repo's own docs-data/ (the file that documents docs-data/x.json
+ * lives alongside x.json itself, so a writer can change both in one PR
+ * without waiting on a package release first). Run this after bumping
+ * @redpanda-data/docs-extensions-and-macros so the local copy picks up
+ * whatever changed upstream.
+ * @why Nothing keeps a content repo's schema copy in sync with this
+ * package's copy today, in either direction. A content repo's copy can
+ * legitimately be ahead of this package's (confirmed happening in
+ * practice: the docs repo's rpk-overrides.schema.json documents a real,
+ * working `asPartial` override field that this package's own copy is
+ * missing) — overwriting it in that case would delete real, correct
+ * documentation, not fix drift. This only overwrites when this package's
+ * copy is a strict superset of the destination; otherwise it reports which
+ * keys only the destination has and leaves the file alone (status
+ * 'diverged') unless --force is passed. --check never writes, for a CI
+ * gate.
+ * @example
+ * # Sync into ./docs-data (writes any missing or out-of-date schema)
+ * npx doc-tools sync-schemas
+ *
+ * # Report drift without writing -- exits 1 if anything is out of sync
+ * npx doc-tools sync-schemas --check
+ *
+ * # Sync into a non-default location
+ * npx doc-tools sync-schemas --dest path/to/docs-data
+ *
+ * # Overwrite even a destination that has diverged (rarely correct --
+ * # read the 'diverged' output first; it names what would be lost)
+ * npx doc-tools sync-schemas --force
+ * @requirements None.
+ */
+programCli
+  .command('sync-schemas')
+  .description("Sync this package's docs-data/*.schema.json into a content repo's docs-data/")
+  .option('--dest <path>', 'Destination docs-data directory', 'docs-data')
+  .option('--check', 'Report drift without writing; exit 1 if any schema is missing, out of date, or diverged')
+  .option('--force', 'Overwrite even a destination that has diverged (has content this package lacks)')
+  .action((options) => {
+    const { syncSchemas } = require('../cli-utils/sync-schemas')
+
+    try {
+      const { destDir, results, drift } = syncSchemas({
+        destDir: options.dest,
+        check: Boolean(options.check),
+        force: Boolean(options.force),
+      })
+
+      if (results.length === 0) {
+        console.log('No *.schema.json files found in this package to sync.')
+        process.exit(0)
+      }
+
+      console.log(`${options.check ? 'Checking' : 'Syncing'} against: ${destDir}`)
+      console.log('')
+      let hasUnresolvedDivergence = false
+      for (const { name, status, destOnlyPaths } of results) {
+        const label = {
+          unchanged: '✓ up to date',
+          created: '+ created',
+          updated: '↻ updated',
+          diverged: options.force ? '↻ updated (forced)' : '⚠ diverged, left alone',
+        }[status]
+        console.log(`  ${label}  ${name}`)
+        if (status === 'diverged' && !options.force) {
+          hasUnresolvedDivergence = true
+          for (const p of destOnlyPaths) console.log(`      only in the destination: ${p}`)
+        }
+      }
+      console.log('')
+
+      if (options.check) {
+        if (drift) {
+          const hint = hasUnresolvedDivergence
+            ? 'A diverged file needs a human decision (see paths above), not just a re-run.'
+            : 'Run `npx doc-tools sync-schemas` to fix.'
+          console.log(`✗ One or more schemas are out of date. ${hint}`)
+          process.exit(1)
+        }
+        console.log('✓ All schemas are in sync.')
+        process.exit(0)
+      }
+
+      if (hasUnresolvedDivergence) {
+        console.log('⚠ Synced what was safe to sync. One or more files diverged and were left alone -- see paths above. Re-run with --force only after confirming the destination-only content should be lost.')
+        process.exit(1)
+      }
+
+      console.log(drift ? '✓ Synced.' : '✓ Already in sync -- nothing to do.')
+      process.exit(0)
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
       process.exit(1)
     }
   })
@@ -1106,6 +1205,12 @@ automation
             // properties new in this release instead of one release late.
             const extractedJsonPath = path.resolve(outputDir, 'attachments', `redpanda-properties-${newTag}.json`)
             updatePropertiesJsonWithVersion(extractedJsonPath, diffData, newTag)
+            // Repair anchors HERE, in Phase 2, so the attachment the docs UI
+            // reads and the partials Phase 3 renders come from the same
+            // corrected text. Normalizing only in Phase 3 left the two
+            // disagreeing: the partials linked <<flush-bytes>> while the
+            // published attachment still said <<flushbytes>>.
+            repairPropertyAnchorsInJson(extractedJsonPath)
           }
         }
       } catch (err) {
@@ -1502,108 +1607,6 @@ automation
     }
   })
 
-/**
- * validate rpk-overrides
- *
- * @description
- * Validates the rpk-overrides.json file against the JSON schema and checks for common issues:
- * - Schema compliance (required fields, valid types)
- * - Valid $ref references (no broken or circular refs)
- * - Valid command paths (compared against actual rpk command tree)
- * - Valid admonition locations (after_flags, after_usage, etc.)
- * - Valid platform values (linux, darwin, windows)
- *
- * @why
- * Catching override errors early prevents broken documentation. This command lets writers
- * validate their changes before generation, avoiding cryptic errors during the build process.
- *
- * @example
- * # Validate overrides with default paths
- * npx doc-tools validate rpk-overrides
- *
- * # Validate against a specific rpk tree (for complete command path validation)
- * npx doc-tools validate rpk-overrides --tree docs-data/rpk-v26.2.0.json
- *
- * # Validate a custom overrides file
- * npx doc-tools validate rpk-overrides --overrides my-overrides.json
- *
- * # Strict mode - exit with error code on validation failures
- * npx doc-tools validate rpk-overrides --strict
- *
- * @requirements
- * - rpk-overrides.schema.json in docs-data/
- */
-automation
-  .command('rpk-overrides')
-  .description('Validate rpk-overrides.json against schema and check for common issues')
-  .option('--overrides <path>', 'Path to overrides JSON file', 'docs-data/rpk-overrides.json')
-  .option('--tree <path>', 'Path to rpk tree JSON file for command path validation (e.g., docs-data/rpk-v26.2.0.json)')
-  .option('--strict', 'Exit with error code on validation failures')
-  .action((options) => {
-    try {
-      const { loadAndValidateOverrides } = require('../tools/rpk-docs/validate-overrides.js')
-      const repoRoot = findRepoRoot()
-      const overridesPath = path.resolve(repoRoot, options.overrides)
-
-      // Load tree if provided for command path validation
-      let commandTree = null
-      if (options.tree) {
-        const treePath = path.resolve(repoRoot, options.tree)
-        if (!fs.existsSync(treePath)) {
-          console.error(`Error: Tree file not found: ${treePath}`)
-          process.exit(1)
-        }
-        const treeData = JSON.parse(fs.readFileSync(treePath, 'utf8'))
-        commandTree = treeData.tree || treeData
-      }
-
-      console.log(`Validating: ${overridesPath}`)
-      if (commandTree) {
-        console.log(`Comparing against tree from: ${options.tree}`)
-      } else {
-        console.log('Note: Skipping command path validation (no --tree provided)')
-      }
-      console.log('')
-
-      const { overrides, validation } = loadAndValidateOverrides(overridesPath, commandTree)
-
-      if (!overrides) {
-        console.error('Error: Could not load overrides file')
-        process.exit(1)
-      }
-
-      // Print results
-      console.log('=' .repeat(60))
-      console.log('VALIDATION RESULTS')
-      console.log('='.repeat(60))
-
-      if (validation.errors.length === 0 && validation.warnings.length === 0) {
-        console.log('✓ No issues found')
-      } else {
-        console.log(validation.format())
-      }
-
-      console.log('='.repeat(60))
-      console.log(`Errors: ${validation.errors.length}`)
-      console.log(`Warnings: ${validation.warnings.length}`)
-      console.log('='.repeat(60))
-
-      // Exit with appropriate code
-      if (options.strict && !validation.valid) {
-        console.log('\n✗ Validation failed (strict mode)')
-        process.exit(1)
-      } else if (validation.valid) {
-        console.log('\n✓ Validation passed')
-        process.exit(0)
-      } else {
-        console.log('\n⚠ Validation completed with errors (use --strict to fail)')
-        process.exit(0)
-      }
-    } catch (err) {
-      console.error(`Error: ${err.message}`)
-      process.exit(1)
-    }
-  })
 
 
 /**
@@ -2277,6 +2280,110 @@ automation
 const validation = new Command('validate').description('Validate docs data against internal sources of truth')
 
 /**
+ * validate rpk-overrides
+ *
+ * @description
+ * Validates the rpk-overrides.json file against the JSON schema and checks for common issues:
+ * - Schema compliance (required fields, valid types)
+ * - Valid $ref references (no broken or circular refs)
+ * - Valid command paths (compared against actual rpk command tree)
+ * - Valid admonition locations (after_flags, after_usage, etc.)
+ * - Valid platform values (linux, darwin, windows)
+ *
+ * @why
+ * Catching override errors early prevents broken documentation. This command lets writers
+ * validate their changes before generation, avoiding cryptic errors during the build process.
+ *
+ * @example
+ * # Validate overrides with default paths
+ * npx doc-tools validate rpk-overrides
+ *
+ * # Validate against a specific rpk tree (for complete command path validation)
+ * npx doc-tools validate rpk-overrides --tree docs-data/rpk-v26.2.0.json
+ *
+ * # Validate a custom overrides file
+ * npx doc-tools validate rpk-overrides --overrides my-overrides.json
+ *
+ * # Strict mode - exit with error code on validation failures
+ * npx doc-tools validate rpk-overrides --strict
+ *
+ * @requirements
+ * - rpk-overrides.schema.json in docs-data/
+ */
+validation
+  .command('rpk-overrides')
+  .description('Validate rpk-overrides.json against schema and check for common issues')
+  .option('--overrides <path>', 'Path to overrides JSON file', 'docs-data/rpk-overrides.json')
+  .option('--tree <path>', 'Path to rpk tree JSON file for command path validation (e.g., docs-data/rpk-v26.2.0.json)')
+  .option('--strict', 'Exit with error code on validation failures')
+  .action((options) => {
+    try {
+      const { loadAndValidateOverrides } = require('../tools/rpk-docs/validate-overrides.js')
+      const repoRoot = findRepoRoot()
+      const overridesPath = path.resolve(repoRoot, options.overrides)
+
+      // Load tree if provided for command path validation
+      let commandTree = null
+      if (options.tree) {
+        const treePath = path.resolve(repoRoot, options.tree)
+        if (!fs.existsSync(treePath)) {
+          console.error(`Error: Tree file not found: ${treePath}`)
+          process.exit(1)
+        }
+        const treeData = JSON.parse(fs.readFileSync(treePath, 'utf8'))
+        commandTree = treeData.tree || treeData
+      }
+
+      console.log(`Validating: ${overridesPath}`)
+      if (commandTree) {
+        console.log(`Comparing against tree from: ${options.tree}`)
+      } else {
+        console.log('Note: Skipping command path validation (no --tree provided)')
+      }
+      console.log('')
+
+      const { overrides, validation } = loadAndValidateOverrides(overridesPath, commandTree)
+
+      if (!overrides) {
+        console.error('Error: Could not load overrides file')
+        process.exit(1)
+      }
+
+      // Print results
+      console.log('=' .repeat(60))
+      console.log('VALIDATION RESULTS')
+      console.log('='.repeat(60))
+
+      if (validation.errors.length === 0 && validation.warnings.length === 0) {
+        console.log('✓ No issues found')
+      } else {
+        console.log(validation.format())
+      }
+
+      console.log('='.repeat(60))
+      console.log(`Errors: ${validation.errors.length}`)
+      console.log(`Warnings: ${validation.warnings.length}`)
+      console.log('='.repeat(60))
+
+      // Exit with appropriate code
+      if (options.strict && !validation.valid) {
+        console.log('\n✗ Validation failed (strict mode)')
+        process.exit(1)
+      } else if (validation.valid) {
+        console.log('\n✓ Validation passed')
+        process.exit(0)
+      } else {
+        console.log('\n⚠ Validation completed with errors (use --strict to fail)')
+        process.exit(0)
+      }
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+
+/**
  * @description Checks the enterprise features registry (the shared component's
  * enterprise-features.yml in the docs repo) against the internal sources of
  * truth: the license_required_feature enum and config::enterprise<> property
@@ -2450,6 +2557,146 @@ validation
     }
   })
 
+/**
+ * lint-strings
+ *
+ * @description
+ * Deterministic lint for user-facing doc strings embedded in engineering
+ * source code (property descriptions, metric help strings, ...). These
+ * strings ship verbatim to docs.redpanda.com, so this command surfaces
+ * quality problems (empty descriptions, broken markup, name-echo
+ * tautologies, convention drift) at write time, with exact file:line spans
+ * for each declaration.
+ *
+ * @why
+ * The docs team currently patches bad source strings after the fact via
+ * override files. Linting where engineers write the strings - including a
+ * declaration-anchored --diff mode for PR reviews - retires that drift debt.
+ *
+ * @example
+ * # Lint all supported surfaces in a local redpanda checkout
+ * npx doc-tools lint-strings --repo ~/redpanda
+ *
+ * # Lint only properties, machine-readable
+ * npx doc-tools lint-strings --repo ~/redpanda --surface properties --format json
+ *
+ * # PR mode: only declarations whose span intersects the diff
+ * npx doc-tools lint-strings --repo ~/redpanda --diff origin/dev
+ */
+programCli
+  .command('lint-strings')
+  .description('Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)')
+  .requiredOption('--repo <path>', 'Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned.')
+  .option('--surface <list>', 'Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect')
+  .option('--diff <base>', 'Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD')
+  .option('--format <format>', 'Output format: human or json', 'human')
+  .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
+  .option('--only-rules <list>', 'Comma-separated rule ids to run exclusively')
+  .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
+  .action((options) => {
+    const { runCli } = require('../tools/lint-strings')
+    runCli(options)
+  })
+
+/**
+ * preview-string
+ *
+ * @description
+ * Render ONE doc-string declaration from local engineering source to the
+ * final published snippet: properties through the real extractor +
+ * Handlebars template (two panes when --overrides shows a docs-repo
+ * override masking the source string), rpk through the real
+ * formatDescription() transformer, and metrics/helm/crd/connect in their
+ * published output shapes.
+ *
+ * @why
+ * Engineers can see what their embedded string becomes on
+ * docs.redpanda.com BEFORE it ships - including whether an override in the
+ * docs repo would silently mask their fix.
+ *
+ * @example
+ * # What does this property's docs section look like?
+ * npx doc-tools preview-string --repo ~/redpanda --surface properties --name log_segment_size
+ *
+ * # Is my override masking the source string?
+ * npx doc-tools preview-string --repo ~/redpanda --surface properties --name log_segment_size --overrides ~/docs/docs-data/property-overrides.json
+ *
+ * # What does formatDescription do to my rpk Long text?
+ * npx doc-tools preview-string --repo ~/redpanda --surface rpk --name health
+ */
+programCli
+  .command('preview-string')
+  .description('Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish')
+  .requiredOption('--repo <path>', 'Path to an existing engineering checkout. Nothing is cloned.')
+  .requiredOption('--surface <surface>', 'One of: properties, rpk, metrics, helm, crd, connect')
+  .requiredOption('--name <name>', 'Declaration name: property name, rpk command token or --flag, metric name, helm key path, CRD json field (or Struct.field), connect component/field name')
+  .option('--overrides <path>', 'Docs-repo overrides JSON (properties only): adds an "as shipped" pane and a MASKED-BY-OVERRIDE notice when the override differs')
+  .action((options) => {
+    const { runCli } = require('../tools/preview-string')
+    runCli(options)
+  })
+
+// ====================================================================
+// OVERRIDES COMMANDS
+// ====================================================================
+const overridesGroup = new Command('overrides').description('Audit docs-side override files against extracted source strings')
+
+/**
+ * @description Field-level classification of override entries against the
+ * strings extracted from engineering source. Each override field classifies
+ * as REDUNDANT (source already matches; retire it), UPSTREAMABLE (send the
+ * prose upstream), KEEP_UNTIL_UPSTREAMED (markup-laden SPLIT case with a
+ * stripped upstream candidate), UPSTREAMABLE_SLOT (migrate to a source
+ * metadata slot), REDUNDANT_OR_UPSTREAMABLE (needs a human ruling), KEEP
+ * (docs enrichment by design), or REVIEW (possible source bug; never
+ * auto-delete). See tools/overrides-audit/README.adoc for the full rules
+ * and the upstream_ref policy.
+ *
+ * @why Description overrides are stopgaps awaiting an upstream source fix;
+ * once the fixed string ships in a release they silently mask all future
+ * source improvements. This audit powers the retirement loop (delete
+ * REDUNDANT fields on each release regeneration) and the upstreaming loop
+ * (draft source PRs from the UPSTREAMABLE/SPLIT candidates).
+ *
+ * @example
+ * # Audit the docs repo property overrides against a raw extraction
+ * npx doc-tools overrides audit \
+ *   --overrides docs-data/property-overrides.json \
+ *   --extracted tools/property-extractor/gen/properties-output.json \
+ *   --format human
+ *
+ * @requirements
+ * The --extracted file must be the property extractor's RAW output (its
+ * --output file, without overrides applied). The enhanced output and the
+ * versioned redpanda-properties-<tag>.json attachments already have
+ * overrides applied, so auditing against them classifies everything
+ * REDUNDANT.
+ */
+overridesGroup
+  .command('audit')
+  .description('Classify each override field as redundant, upstreamable, or keep against extracted source strings')
+  .requiredOption('--overrides <path>', 'Path to the overrides JSON file (for example docs-data/property-overrides.json)')
+  .option('--extracted <path>', 'Path to the extracted source JSON (property extractor raw output; required for the properties surface)')
+  .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk', 'connect']).default('properties'))
+  .addOption(new Option('--format <format>', 'Output format').choices(['json', 'human']).default('json'))
+  .option('--repo <path>', 'Redpanda checkout to extract raw source strings from (alternative to --extracted)')
+  .option('--output <path>', 'Also write the JSON result to this file')
+  .action((options) => {
+    const { runAudit, formatHumanReport } = require('../tools/overrides-audit')
+    try {
+      const result = runAudit(options)
+      if (options.output) {
+        fs.mkdirSync(path.dirname(path.resolve(options.output)), { recursive: true })
+        fs.writeFileSync(path.resolve(options.output), JSON.stringify(result, null, 2) + '\n')
+        console.error(`JSON result written to ${options.output}`)
+      }
+      console.log(options.format === 'human' ? formatHumanReport(result) : JSON.stringify(result, null, 2))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
 programCli.addCommand(automation)
 programCli.addCommand(validation)
+programCli.addCommand(overridesGroup)
 programCli.parse(process.argv)
