@@ -530,6 +530,103 @@ programCli
   })
 
 /**
+ * @description Copy this package's docs-data/*.schema.json files into a
+ * content repo's own docs-data/ (the file that documents docs-data/x.json
+ * lives alongside x.json itself, so a writer can change both in one PR
+ * without waiting on a package release first). Run this after bumping
+ * @redpanda-data/docs-extensions-and-macros so the local copy picks up
+ * whatever changed upstream.
+ * @why Nothing keeps a content repo's schema copy in sync with this
+ * package's copy today, in either direction. A content repo's copy can
+ * legitimately be ahead of this package's (confirmed happening in
+ * practice: the docs repo's rpk-overrides.schema.json documents a real,
+ * working `asPartial` override field that this package's own copy is
+ * missing) — overwriting it in that case would delete real, correct
+ * documentation, not fix drift. This only overwrites when this package's
+ * copy is a strict superset of the destination; otherwise it reports which
+ * keys only the destination has and leaves the file alone (status
+ * 'diverged') unless --force is passed. --check never writes, for a CI
+ * gate.
+ * @example
+ * # Sync into ./docs-data (writes any missing or out-of-date schema)
+ * npx doc-tools sync-schemas
+ *
+ * # Report drift without writing -- exits 1 if anything is out of sync
+ * npx doc-tools sync-schemas --check
+ *
+ * # Sync into a non-default location
+ * npx doc-tools sync-schemas --dest path/to/docs-data
+ *
+ * # Overwrite even a destination that has diverged (rarely correct --
+ * # read the 'diverged' output first; it names what would be lost)
+ * npx doc-tools sync-schemas --force
+ * @requirements None.
+ */
+programCli
+  .command('sync-schemas')
+  .description("Sync this package's docs-data/*.schema.json into a content repo's docs-data/")
+  .option('--dest <path>', 'Destination docs-data directory', 'docs-data')
+  .option('--check', 'Report drift without writing; exit 1 if any schema is missing, out of date, or diverged')
+  .option('--force', 'Overwrite even a destination that has diverged (has content this package lacks)')
+  .action((options) => {
+    const { syncSchemas } = require('../cli-utils/sync-schemas')
+
+    try {
+      const { destDir, results, drift } = syncSchemas({
+        destDir: options.dest,
+        check: Boolean(options.check),
+        force: Boolean(options.force),
+      })
+
+      if (results.length === 0) {
+        console.log('No *.schema.json files found in this package to sync.')
+        process.exit(0)
+      }
+
+      console.log(`${options.check ? 'Checking' : 'Syncing'} against: ${destDir}`)
+      console.log('')
+      let hasUnresolvedDivergence = false
+      for (const { name, status, destOnlyPaths } of results) {
+        const label = {
+          unchanged: '✓ up to date',
+          created: '+ created',
+          updated: '↻ updated',
+          diverged: options.force ? '↻ updated (forced)' : '⚠ diverged, left alone',
+        }[status]
+        console.log(`  ${label}  ${name}`)
+        if (status === 'diverged' && !options.force) {
+          hasUnresolvedDivergence = true
+          for (const p of destOnlyPaths) console.log(`      only in the destination: ${p}`)
+        }
+      }
+      console.log('')
+
+      if (options.check) {
+        if (drift) {
+          const hint = hasUnresolvedDivergence
+            ? 'A diverged file needs a human decision (see paths above), not just a re-run.'
+            : 'Run `npx doc-tools sync-schemas` to fix.'
+          console.log(`✗ One or more schemas are out of date. ${hint}`)
+          process.exit(1)
+        }
+        console.log('✓ All schemas are in sync.')
+        process.exit(0)
+      }
+
+      if (hasUnresolvedDivergence) {
+        console.log('⚠ Synced what was safe to sync. One or more files diverged and were left alone -- see paths above. Re-run with --force only after confirming the destination-only content should be lost.')
+        process.exit(1)
+      }
+
+      console.log(drift ? '✓ Synced.' : '✓ Already in sync -- nothing to do.')
+      process.exit(0)
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
  * @description Show MCP server version information including available tools
  * and optionally usage statistics from previous sessions.
  * @why Use this command to see what MCP capabilities are available.
