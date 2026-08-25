@@ -121,15 +121,7 @@ antora:
 
 === Redirect management
 
-Generate redirects from old URLs to new ones:
-
-[,yaml]
-----
-antora:
-  extensions:
-----
-
-Define redirects in your `antora.yml`:
+No extension required: core Antora (>= 3.1.8) generates redirects for old URLs automatically. Define redirects in your `antora.yml`:
 
 [,yaml]
 ----

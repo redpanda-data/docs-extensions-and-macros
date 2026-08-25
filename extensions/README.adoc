@@ -124,12 +124,16 @@ antora:
       algolia_index_name: YOUR_INDEX
 ----
 
-=== Generate redirects
+=== Redirects
+
+No extension required: core Antora (>= 3.1.8) generates redirects for https://docs.antora.org/antora/latest/page/page-aliases/[page aliases] automatically on every build. Define aliases in your `antora.yml`:
 
 [,yaml]
 ----
-antora:
-  extensions:
+name: redpanda
+asciidoc:
+  attributes:
+    page-aliases: old-page.adoc,another-old-page.adoc
 ----
 
 == Support
