@@ -87,7 +87,7 @@ Section 4 has you reproduce the `status: unreleased` gate yourself, on this page
 
 This paragraph writes `+enterprise:Sandbox Example Feature[]+` -- rendered: enterprise:Sandbox Example Feature[]
 
-*Step 1 -- see it fail.* Rebuild. The name matches nothing, so it renders as plain text and the log says so:
+*Step 1 -- notice it "succeeds" when it shouldn't.* Rebuild if you haven't yet, then hover the mention above. It's already styled, with a tooltip and a link, even though that name doesn't exist in the registry yet. Unlike `prop:`, `enterprise:` has no early return for an unrecognized name -- it falls straight through to the same styled output a real feature gets, just with a generic fallback tooltip ("Sandbox Example Feature requires an Enterprise Edition license.") and a link to the licensing page. The only sign anything is wrong is in the build log:
 
 [literal]
 ----
@@ -96,19 +96,22 @@ any feature in the enterprise features registry. Add the feature to
 enterprise-features.yml in the shared component first.
 ----
 
-*Step 2 -- register it.* Open `preview/shared/modules/ROOT/partials/enterprise-features.yml`. Add an entry to the `features` list (indentation matters -- match the entries around it):
+A reader can't tell a typo'd feature name from a real one -- only the build log can. Worth remembering next time you're reviewing a PR that adds one.
+
+*Step 2 -- register it for real.* Open `preview/shared/modules/ROOT/partials/enterprise-features.yml`. Add an entry to the `features` list (indentation matters -- match the entries around it):
 
 [,yaml]
 ----
   - name: Sandbox Example Feature
     scope: redpanda
+    tooltip: Registered for real now -- this text comes from the registry, not the generic fallback.
     description: |
       Practice feature for the macros course. Not a real Redpanda feature.
     expiration: |
       The feature is disabled.
 ----
 
-Rebuild. The mention above now renders as a styled term with a tooltip -- no `status` key at all means GA, so it's available everywhere, on every version, with no badge.
+Rebuild and hover the mention again. The tooltip text changed -- that's the real registry entry talking now, not the fallback -- and the build warning is gone. No `status` key at all means GA: available everywhere, on every version, with no badge.
 
 *Step 3 -- mark it unreleased.* Add one line to the entry you just wrote:
 
