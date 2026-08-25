@@ -32,6 +32,12 @@ output:
 runtime:
   log:
     level: warn
+    # Without this, warnings land in macro-showcase.log as raw JSON lines --
+    # Antora's logger defaults to JSON once output isn't a TTY, which is
+    # always true here since the wrapper script redirects to a file.
+    # 'pretty' forces the human-readable [time] LEVEL (name): message form
+    # regardless of destination, which is the point of a log meant to be read.
+    format: pretty
 content:
   sources:
   - url: .
