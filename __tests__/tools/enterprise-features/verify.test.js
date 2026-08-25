@@ -170,6 +170,34 @@ features:
     expect(messages).toMatch(/'C' has no description/)
   })
 
+  test('lintRegistry flags an unparsable since value', () => {
+    const bad = `
+features:
+  - name: A
+    scope: redpanda
+    since: not-a-version
+    description: |
+      x
+    source: {kind: manual, value: ok}
+  - name: B
+    scope: redpanda
+    since: '26.3'
+    description: |
+      x
+    source: {kind: manual, value: ok}
+  - name: C
+    scope: redpanda
+    description: |
+      x
+    source: {kind: manual, value: ok}
+`
+    const { findings } = lintRegistry(bad)
+    const messages = findings.map((f) => f.message).join('\n')
+    expect(messages).toMatch(/'A' has since 'not-a-version', which is not a parsable version/)
+    expect(messages).not.toMatch(/'B' has since/)
+    expect(messages).not.toMatch(/'C' has since/)
+  })
+
   test('a new core enum value is reported as needs-human', () => {
     const { features } = lintRegistry(REGISTRY)
     const findings = checkCoreEnum(features, ['audit_logging', 'cloud_storage', 'partition_auto_balancing_continuous', 'fips', 'quantum_topics'])
