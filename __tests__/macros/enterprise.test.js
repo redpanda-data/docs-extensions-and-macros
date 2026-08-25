@@ -728,6 +728,20 @@ features:
       warn.mockRestore()
     })
 
+    test('renders an unknown feature name plain, not styled with a generic fallback', () => {
+      // A typo has nothing behind it to style -- no xref, no real tooltip, no
+      // licence terms. Styling it anyway (a generic fallback tooltip and a
+      // link to the licensing page) let a typo pass for a real feature with
+      // nothing on the page to show a reader it was wrong. Mirrors prop:'s
+      // plain fallback for an unrecognized property name.
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Warp Drive[]', { catalog: fakeCatalog() })
+      expect(html).toContain('Warp Drive')
+      expect(html).not.toContain('class="enterprise-feature"')
+      expect(html).not.toContain('licensing')
+      warn.mockRestore()
+    })
+
     test('fails the conversion in error mode', () => {
       expect(() => convert('enterprise:Warp Drive[]', {
         catalog: fakeCatalog(),
@@ -760,10 +774,13 @@ features:
       expect(catalog.findBy).toHaveBeenCalledTimes(1)
     })
 
-    test('renders unvalidated without a catalog (graceful degradation)', () => {
+    test('renders plain with no catalog to check against', () => {
+      // Nothing to validate means nothing to assert, so no styling, tooltip,
+      // or link rather than an unchecked one -- mirrors prop:'s plain
+      // fallback for the same reason.
       const html = convert('enterprise:Anything Goes[]', {})
       expect(html).toContain('Anything Goes')
-      expect(html).toContain('class="enterprise-feature"')
+      expect(html).not.toContain('class="enterprise-feature"')
     })
 
     test('renders the feature table through the block macro', () => {

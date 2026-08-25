@@ -68,7 +68,7 @@ asciidoc:
 
 This inline macro marks a feature as an enterprise feature in prose. The feature name renders as a uniquely styled term with a tooltip explaining that the feature requires an Enterprise Edition license, and links to the feature's documentation or to the licensing page.
 
-The macro validates its target against the enterprise features registry: `modules/ROOT/partials/enterprise-features.yml` in the `shared` component (the `shared/` folder of the docs repository). The registry is the canonical list of enterprise features and their approved external names. Targets are matched case-insensitively, including aliases, and the canonical name, feature page link, and tooltip come from the matching entry. A target that matches no entry is reported according to `enterprise-validate`. To mark a new feature as enterprise, add it to the registry first.
+The macro validates its target against the enterprise features registry: `modules/ROOT/partials/enterprise-features.yml` in the `shared` component (the `shared/` folder of the docs repository). The registry is the canonical list of enterprise features and their approved external names. Targets are matched case-insensitively, including aliases, and the canonical name, feature page link, and tooltip come from the matching entry. A target that matches no entry is reported according to `enterprise-validate` and renders as plain text -- no styling, tooltip, or link, since there is nothing verified to style it with. To mark a new feature as enterprise, add it to the registry first.
 
 === Usage
 
