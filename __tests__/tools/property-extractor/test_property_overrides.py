@@ -149,6 +149,18 @@ class TestAdmonitionsOverride(unittest.TestCase):
             result = _normalize_admonitions([{"type": "note"}, {"text": "no type"}])
         self.assertEqual(result, [])
 
+    def test_drops_entry_with_non_string_text(self):
+        with self.assertLogs("viewer", level="WARNING") as captured:
+            result = _normalize_admonitions([{"type": "note", "text": ["not", "a", "string"]}])
+        self.assertEqual(result, [])
+        self.assertIn("string type and text", "\n".join(captured.output))
+
+    def test_drops_entry_with_non_string_title(self):
+        with self.assertLogs("viewer", level="WARNING") as captured:
+            result = _normalize_admonitions([{"type": "note", "text": "x", "title": 123}])
+        self.assertEqual(result, [])
+        self.assertIn("title must be a string", "\n".join(captured.output))
+
     def test_returns_none_for_non_list_input(self):
         with self.assertLogs("viewer", level="WARNING") as captured:
             result = _normalize_admonitions("not a list")

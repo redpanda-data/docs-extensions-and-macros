@@ -1095,8 +1095,14 @@ def _normalize_admonitions(admonitions):
         return None
     normalized = []
     for entry in admonitions:
-        if not isinstance(entry, dict) or "type" not in entry or "text" not in entry:
-            logger.warning(f"admonitions entry must be {{type, text}}, got: {entry!r}")
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("type"), str)
+            or not isinstance(entry.get("text"), str)
+        ):
+            logger.warning(
+                f"admonitions entry must contain string type and text values, got: {entry!r}"
+            )
             continue
         entry_type = str(entry["type"]).strip().lower()
         if entry_type not in ADMONITION_TYPES:
@@ -1106,8 +1112,12 @@ def _normalize_admonitions(admonitions):
             )
             continue
         normalized_entry = {"type": entry_type.upper(), "text": entry["text"]}
-        if entry.get("title"):
-            normalized_entry["title"] = entry["title"]
+        if "title" in entry:
+            if not isinstance(entry["title"], str):
+                logger.warning(f"admonitions entry title must be a string, got: {entry!r}")
+                continue
+            if entry["title"]:
+                normalized_entry["title"] = entry["title"]
         normalized.append(normalized_entry)
     return normalized
 
