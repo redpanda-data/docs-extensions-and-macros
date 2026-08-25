@@ -6,6 +6,7 @@ const {
   buildFeatureTable,
   parseRegistry,
   resolveTooltipAttribute,
+  isFeatureShippedOnPage,
 } = require('../../macros/enterprise')
 
 const REGISTRY_YAML = `
@@ -271,6 +272,131 @@ features:
       })
       expect(html).toContain('class="enterprise-feature"')
       expect(warn).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('since gating', () => {
+    // enterprise-features.yml lives in the non-versioned 'shared' component,
+    // so every version branch reads the same entry. A feature's `since`
+    // version is checked against the page being converted, so a feature
+    // that ships in 26.3 does not render as available on a 24.1 page.
+    const SINCE_YAML = `
+schema-version: 1
+features:
+  - name: Iceberg Topics
+    scope: redpanda
+    since: '26.3'
+    description: Exports topic data to an Iceberg catalog.
+    expiration: Restricted.
+    source:
+      kind: core-enum
+      value: iceberg_enabled
+  - name: No Since Feature
+    scope: redpanda
+    description: Has no since field.
+    expiration: Restricted.
+    source:
+      kind: manual
+      value: x
+`
+    const catalog = () => fakeCatalog(SINCE_YAML)
+
+    test('a feature renders normally on a page at or after its since version', () => {
+      expect(convert('enterprise:Iceberg Topics[]', { catalog: catalog(), version: '26.3' }))
+        .toContain('class="enterprise-feature"')
+      expect(convert('enterprise:Iceberg Topics[]', { catalog: catalog(), version: '27.1' }))
+        .toContain('class="enterprise-feature"')
+    })
+
+    test('a feature mentioned before its since version renders as plain text and warns', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Iceberg Topics[]', { catalog: catalog(), version: '24.1' })
+      expect(html).not.toContain('enterprise-feature')
+      expect(html).toContain('Iceberg Topics')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('since: 26.3'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('version 24.1'))
+    })
+
+    test('the display text override survives the plain rendering', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Iceberg Topics[text=Iceberg]', { catalog: catalog(), version: '24.1' })
+      expect(html).toContain('Iceberg')
+      warn.mockRestore()
+    })
+
+    test('enterprise-validate=error fails the build on a page before the since version', () => {
+      expect(() => convert('enterprise:Iceberg Topics[]', {
+        catalog: catalog(), version: '24.1', attributes: { 'enterprise-validate': 'error' },
+      })).toThrow(/since: 26\.3/)
+    })
+
+    test('enterprise-validate=off silences the report', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Iceberg Topics[]', {
+        catalog: catalog(), version: '24.1', attributes: { 'enterprise-validate': 'off' },
+      })
+      expect(html).toContain('Iceberg Topics')
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('a feature with no since field is unaffected by page version', () => {
+      const html = convert('enterprise:No Since Feature[]', { catalog: catalog(), version: '20.1' })
+      expect(html).toContain('class="enterprise-feature"')
+    })
+
+    test('an unparsable since value does not gate the feature', () => {
+      const badSince = SINCE_YAML.replace("since: '26.3'", 'since: not-a-version')
+      const html = convert('enterprise:Iceberg Topics[]', { catalog: fakeCatalog(badSince), version: '20.1' })
+      expect(html).toContain('class="enterprise-feature"')
+    })
+
+    test('an unparsable since value warns, unlike an absent one', () => {
+      const badSince = SINCE_YAML.replace("since: '26.3'", 'since: not-a-version')
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      convert('enterprise:Iceberg Topics[]', { catalog: fakeCatalog(badSince), version: '20.1' })
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("since: 'not-a-version'"))
+      warn.mockClear()
+      convert('enterprise:No Since Feature[]', { catalog: fakeCatalog(badSince), version: '20.1' })
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('enterprise-validate=off silences the unparsable since warning', () => {
+      const badSince = SINCE_YAML.replace("since: '26.3'", 'since: not-a-version')
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      convert('enterprise:Iceberg Topics[]', {
+        catalog: fakeCatalog(badSince), version: '20.1', attributes: { 'enterprise-validate': 'off' },
+      })
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('the licensing table also warns on an unparsable since value', () => {
+      const badSince = SINCE_YAML.replace("since: '26.3'", 'since: not-a-version')
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise_features::redpanda[]', { catalog: fakeCatalog(badSince), version: '20.1' })
+      expect(html).toContain('Iceberg Topics')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("since: 'not-a-version'"))
+    })
+
+    test('the licensing table omits a feature on a page before its since version', () => {
+      const html = convert('enterprise_features::redpanda[]', { catalog: catalog(), version: '24.1' })
+      expect(html).toContain('No Since Feature')
+      expect(html).not.toContain('Iceberg Topics')
+    })
+
+    test('the licensing table lists the feature once the page reaches its since version', () => {
+      const html = convert('enterprise_features::redpanda[]', { catalog: catalog(), version: '26.3' })
+      expect(html).toContain('Iceberg Topics')
+    })
+
+    test('isFeatureShippedOnPage compares the since version against the page version', () => {
+      const entry = { since: '26.3' }
+      expect(isFeatureShippedOnPage(entry, { file: { src: { version: '25.1' } } })).toBe(false)
+      expect(isFeatureShippedOnPage(entry, { file: { src: { version: '26.3' } } })).toBe(true)
+      expect(isFeatureShippedOnPage(entry, { file: { src: { version: '27.0' } } })).toBe(true)
+      expect(isFeatureShippedOnPage({}, { file: { src: { version: '20.1' } } })).toBe(true)
+      expect(isFeatureShippedOnPage(entry, { file: { src: {} } })).toBe(true)
+      expect(isFeatureShippedOnPage(entry, undefined)).toBe(true)
+      expect(isFeatureShippedOnPage({ since: 'not-a-version' }, { file: { src: { version: '20.1' } } })).toBe(true)
     })
   })
 
