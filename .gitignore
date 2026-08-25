@@ -37,3 +37,6 @@ macro-test-out/
 macro-test.log
 # Generated when DOCS_DIR/CLOUD_DOCS_DIR are set
 .macro-test-local-playbook.yml
+
+# Doc-strings eval harness output (real model runs; never committed)
+evals/doc-strings/results/
