@@ -3,6 +3,7 @@
 const {
   register,
   buildPropContent,
+  resolvePageTarget,
   compareTags,
   isPrerelease,
   extractHeadingsWithTags,
@@ -125,6 +126,26 @@ describe('prop macro', () => {
       expect(html).toContain('xref:reference:properties/object-storage-properties.adoc#cloud_storage_enabled[')
     })
 
+    test('a module-qualified page overrides the module, staying in this component', () => {
+      const html = buildPropContent({
+        name: 'cloud_storage_enabled',
+        link: true,
+        page: 'guides:cloud/object-storage',
+        role: 'property-ref',
+      })
+      expect(html).toContain('xref:guides:cloud/object-storage.adoc#cloud_storage_enabled[')
+    })
+
+    test('a component-and-module-qualified page links across components', () => {
+      const html = buildPropContent({
+        name: 'cloud_storage_enabled',
+        link: true,
+        page: 'cloud:reference:properties/cluster-properties',
+        role: 'property-ref',
+      })
+      expect(html).toContain('xref:cloud:reference:properties/cluster-properties.adoc#cloud_storage_enabled[')
+    })
+
     test('plain rendering drops the marker entirely', () => {
       // No marker means the docs UI adds no tooltip, which is what an
       // unverified property should get.
@@ -135,6 +156,21 @@ describe('prop macro', () => {
       const html = buildPropContent({ name: 'write_caching_default', text: 'write caching', link: false, role: 'property-ref' })
       expect(html).toContain('>write caching</code>')
       expect(html).toContain('data-property-name="write_caching_default"')
+    })
+  })
+
+  describe('resolvePageTarget', () => {
+    test('a bare page name stays module-relative within reference', () => {
+      expect(resolvePageTarget('properties/topic-properties')).toBe('reference:properties/topic-properties')
+    })
+
+    test('a module-qualified page is passed through untouched', () => {
+      expect(resolvePageTarget('guides:cloud/object-storage')).toBe('guides:cloud/object-storage')
+    })
+
+    test('a component-and-module-qualified page is passed through untouched', () => {
+      expect(resolvePageTarget('cloud:reference:properties/cluster-properties'))
+        .toBe('cloud:reference:properties/cluster-properties')
     })
   })
 

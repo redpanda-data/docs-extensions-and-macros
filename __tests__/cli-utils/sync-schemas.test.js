@@ -63,13 +63,11 @@ describe('sync-schemas', () => {
       // editorconfig reformats the synced JSON on save, with zero semantic
       // change. Raw-string comparison would misclassify that as 'updated'
       // (or fail --check) on every single run.
-      const realSchema = JSON.parse(fs.readFileSync(
-        path.join(PACKAGE_SCHEMA_DIR, 'rpk-overrides.schema.json'), 'utf8'
-      ))
-      const reformatted = JSON.stringify(realSchema, null, 4) // package ships 2-space
+      syncSchemas({ destDir: tempDir }) // first sync creates every schema as an exact copy
 
       const schemaFile = path.join(tempDir, 'rpk-overrides.schema.json')
-      fs.mkdirSync(tempDir, { recursive: true })
+      const realSchema = JSON.parse(fs.readFileSync(schemaFile, 'utf8'))
+      const reformatted = JSON.stringify(realSchema, null, 4) // package ships 2-space
       fs.writeFileSync(schemaFile, reformatted)
 
       const { results, drift } = syncSchemas({ destDir: tempDir })

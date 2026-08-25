@@ -1041,7 +1041,7 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
     - Otherwise, searches existing properties for an entry whose `"name"` equals the override key and applies the override if found.
     - If no matching property is found, creates a new property from the override and adds it under the override key.
     
-    The function supports overrides that add or replace description, version, example content, default, type, config_scope, related_topics, and other metadata. When examples reference external files, relative paths are resolved relative to overrides_file_path.
+    The function supports overrides that add or replace description, version, example content, default, type, config_scope, see_also (related_topics is the deprecated predecessor, still read for existing overrides), and other metadata. When examples reference external files, relative paths are resolved relative to overrides_file_path.
     
     Parameters:
         properties (dict): Mapping of existing property entries (modified in-place).
@@ -1144,12 +1144,23 @@ def _apply_override_to_existing_property(property_dict, override, overrides_file
     if "config_scope" in override:
         property_dict["config_scope"] = override["config_scope"]
     
-    # Apply related_topics override
+    # Apply related_topics override (deprecated, see see_also)
     if "related_topics" in override:
         if isinstance(override["related_topics"], list):
             property_dict["related_topics"] = override["related_topics"]
         else:
             logger.warning(f"related_topics for property must be an array")
+
+    # Apply see_also override. Structural shape (plain string, or an object
+    # naming exactly one of cloud_only/self_hosted_only) is enforced by
+    # docs-data/property-overrides.schema.json via `doc-tools validate
+    # property-overrides`, not here — this just passes the data through for
+    # seeAlsoView.js to normalize at render time.
+    if "see_also" in override:
+        if isinstance(override["see_also"], list):
+            property_dict["see_also"] = override["see_also"]
+        else:
+            logger.warning(f"see_also for property must be an array")
 
     # Apply exclude_from_docs override
     if "exclude_from_docs" in override:
@@ -1192,19 +1203,26 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
     if example_content:
         new_property["example"] = example_content
     
-    # Add related_topics if specified
+    # Add related_topics if specified (deprecated, see see_also)
     if "related_topics" in override:
         if isinstance(override["related_topics"], list):
             new_property["related_topics"] = override["related_topics"]
         else:
             logger.warning(f"related_topics for property '{prop_name}' must be an array")
-    
+
+    # Add see_also if specified
+    if "see_also" in override:
+        if isinstance(override["see_also"], list):
+            new_property["see_also"] = override["see_also"]
+        else:
+            logger.warning(f"see_also for property '{prop_name}' must be an array")
+
     # Add any other custom fields from override
     for key, value in override.items():
         if key not in ["description", "type", "default", "config_scope", "version",
                        "example", "example_file", "example_yaml", "related_topics",
-                       "is_deprecated", "visibility", "exclude_from_docs", "category",
-                       "accepted_values", "_comment"]:
+                       "see_also", "is_deprecated", "visibility", "exclude_from_docs",
+                       "category", "accepted_values", "_comment"]:
             new_property[key] = value
 
     # Add exclude_from_docs if specified

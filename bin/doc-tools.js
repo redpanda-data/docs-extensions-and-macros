@@ -2476,6 +2476,88 @@ validation
   })
 
 /**
+ * validate property-overrides
+ *
+ * @description
+ * Validates docs-data/property-overrides.json against its JSON Schema:
+ * unknown keys (a typo that would otherwise be silently dropped by the
+ * extractor), and the see_also shape (a plain string, or an object naming
+ * exactly one of cloud_only/self_hosted_only).
+ *
+ * @why
+ * property-overrides.json has no catch-all pass-through when an override
+ * targets an existing property — an unrecognized key like the typo
+ * `acceptable_values` (the generated-only field is `acceptable_values`, but
+ * the override key the extractor reads is `accepted_values`) is silently
+ * ignored rather than erroring. This check catches that class of mistake
+ * before generation, the same way `validate rpk-overrides` does for rpk.
+ *
+ * @example
+ * # Validate overrides with the default path
+ * npx doc-tools validate property-overrides
+ *
+ * # Validate a custom overrides file
+ * npx doc-tools validate property-overrides --overrides my-overrides.json
+ *
+ * # Strict mode - exit with error code on validation failures
+ * npx doc-tools validate property-overrides --strict
+ *
+ * @requirements
+ * - property-overrides.schema.json in docs-data/
+ */
+validation
+  .command('property-overrides')
+  .description('Validate property-overrides.json against its schema')
+  .option('--overrides <path>', 'Path to overrides JSON file', 'docs-data/property-overrides.json')
+  .option('--strict', 'Exit with error code on validation failures')
+  .action((options) => {
+    try {
+      const { loadAndValidateOverrides } = require('../tools/property-extractor/validate-overrides.js')
+      const repoRoot = findRepoRoot()
+      const overridesPath = path.resolve(repoRoot, options.overrides)
+
+      console.log(`Validating: ${overridesPath}`)
+      console.log('')
+
+      const { overrides, validation: result } = loadAndValidateOverrides(overridesPath)
+
+      if (!overrides) {
+        console.error('Error: Could not load overrides file')
+        process.exit(1)
+      }
+
+      console.log('='.repeat(60))
+      console.log('VALIDATION RESULTS')
+      console.log('='.repeat(60))
+
+      if (result.errors.length === 0 && result.warnings.length === 0) {
+        console.log('✓ No issues found')
+      } else {
+        console.log(result.format())
+      }
+
+      console.log('='.repeat(60))
+      console.log(`Errors: ${result.errors.length}`)
+      console.log(`Warnings: ${result.warnings.length}`)
+      console.log('='.repeat(60))
+
+      if (options.strict && !result.valid) {
+        console.log('\n✗ Validation failed (strict mode)')
+        process.exit(1)
+      } else if (result.valid) {
+        console.log('\n✓ Validation passed')
+        process.exit(0)
+      } else {
+        console.log('\n⚠ Validation completed with errors (use --strict to fail)')
+        process.exit(0)
+      }
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
  * lint-strings
  *
  * @description
