@@ -47,16 +47,16 @@ The build validates the name against the RC data. A typo gets a warning naming t
 
 === If you forget the property data
 
-You get told, once per component version, with the command to run:
+You get told, once per component version, with the command to run. Every excerpt below is what actually lands in the build log, through Antora's own logger rather than the macro printing its own text -- `HH:MM:SS.mmm` stands in for the real timestamp, which varies on every build:
 
 [literal]
 ----
-prop macro: streaming@26.3 publishes no redpanda-properties-v26.3.*.json attachment
-in its reference module (found for other series: v26.2.1). prop: targets on 26.3
-pages are therefore not validated and their tooltips carry no data, rather than
-being checked against another release's properties. Generate it with
-'npx doc-tools generate property-docs --tag v26.3.<patch>' on that branch, or
-leave prop: out of 26.3 content.
+[HH:MM:SS.mmm] WARN (prop-macro): prop macro: streaming@26.3 publishes no
+redpanda-properties-v26.3.*.json attachment in its reference module (found for
+other series: v26.2.1). prop: targets on 26.3 pages are therefore not validated
+and their tooltips carry no data, rather than being checked against another
+release's properties. Generate it with 'npx doc-tools generate property-docs
+--tag v26.3.<patch>' on that branch, or leave prop: out of 26.3 content.
 ----
 
 Mentions render as plain code with no tooltip until the file exists. That is deliberate: validating 26.3 content against 26.2 data would accept properties that release never had and flag removed ones as typos.
@@ -135,10 +135,11 @@ The check is against the *page's own version*, not the newest release: a mention
 
 [literal]
 ----
-enterprise:My Shipped Feature[] in modules/manage/pages/example.adoc: 'My Shipped Feature'
-is marked since: 26.3 in the enterprise features registry, but this page is version 26.2,
-which predates it. Move the mention to a page whose version is at or after the since
-version, or remove since if the feature covers this version too.
+[HH:MM:SS.mmm] WARN (enterprise-macro): enterprise:My Shipped Feature[] in
+modules/manage/pages/example.adoc: 'My Shipped Feature' is marked since: 26.3 in
+the enterprise features registry, but this page is version 26.2, which predates
+it. Move the mention to a page whose version is at or after the since version, or
+remove since if the feature covers this version too.
 ----
 
 `since` and `status: unreleased` are independent and can combine: a feature still in an RC carries `status: unreleased` while it is not public at all, then drops that key once it ships and (optionally) gains `since` set to the version it shipped in, so older released versions stop claiming it. Most shipped features need neither key.
@@ -156,12 +157,12 @@ On the prerelease branch this renders with the `unreleased` badge. On released d
 
 [literal]
 ----
-enterprise:My Upcoming Feature[] in modules/manage/pages/example.adoc:
-'My Upcoming Feature' is marked status: unreleased in the enterprise features
-registry, so it is only documented for an upcoming release. This page belongs to
-a released version, so the mention renders as plain text with no enterprise
-styling, tooltip, or link. Move the mention to the prerelease (beta) branch, or
-change the status once the feature ships.
+[HH:MM:SS.mmm] WARN (enterprise-macro): enterprise:My Upcoming Feature[] in
+modules/manage/pages/example.adoc: 'My Upcoming Feature' is marked status:
+unreleased in the enterprise features registry, so it is only documented for an
+upcoming release. This page belongs to a released version, so the mention renders
+as plain text with no enterprise styling, tooltip, or link. Move the mention to
+the prerelease (beta) branch, or change the status once the feature ships.
 ----
 
 The `unreleased` badge cannot be suppressed with `enterprise-beta-badge=false`. "Not in a release yet" is information a reader needs, not decoration.

@@ -14,7 +14,7 @@ This is a hands-on course, not a reference: sections 2 and 4 ask you to edit two
 ./scripts/macro-showcase.sh --serve
 ----
 
-Read the warning names right in the build log after each rebuild -- that log is not a debugging aid you go looking for later, it's the thing telling you what to do next.
+Read `macro-showcase.log` after each rebuild -- that log is not a debugging aid you go looking for later, it's the thing telling you what to do next. Every macro warning is tagged with the macro's name (`WARN (prop-macro): ...`, `WARN (enterprise-macro): ...`), Antora's own logger doing the tagging, not the macro formatting its own output. The excerpts below show `HH:MM:SS.mmm` in place of the real timestamp, which is different every time you rebuild.
 
 == 1. Read the reference first (five minutes)
 
@@ -28,8 +28,9 @@ This paragraph writes `+prop:sandbox_example_property[]+` -- rendered: prop:sand
 
 [literal]
 ----
-prop:sandbox_example_property[]...: 'sandbox_example_property' is not in the property
-data this page validates against (redpanda-properties-v26.2.1.json from
+[HH:MM:SS.mmm] WARN (prop-macro): prop:sandbox_example_property[] in
+modules/ROOT/pages/macros-course.adoc: 'sandbox_example_property' is not in the
+property data this page validates against (redpanda-properties-v26.2.1.json from
 preview@unversioned). Either the name is misspelled or the property does not exist
 in that release.
 ----
@@ -54,7 +55,8 @@ Only `config_scope` and `cloud_supported` change macro behavior (they drive the 
 
 [literal]
 ----
-prop:sandbox_example_property[link=true]...: 'sandbox_example_property' is in
+[HH:MM:SS.mmm] WARN (prop-macro): prop:sandbox_example_property[link=true] in
+modules/ROOT/pages/macros-course.adoc: 'sandbox_example_property' is in
 redpanda-properties-v26.2.1.json from preview@unversioned but no reference page in
 this component renders a heading for it, so it keeps its tooltip and renders
 without a link.
@@ -91,9 +93,10 @@ This paragraph writes `+enterprise:Sandbox Example Feature[]+` -- rendered: ente
 
 [literal]
 ----
-enterprise:Sandbox Example Feature[]...: 'Sandbox Example Feature' does not match
-any feature in the enterprise features registry. Add the feature to
-enterprise-features.yml in the shared component first.
+[HH:MM:SS.mmm] WARN (enterprise-macro): enterprise:Sandbox Example Feature[] does
+not match any feature in the enterprise features registry in
+modules/ROOT/pages/macros-course.adoc. Add the feature to enterprise-features.yml
+in the shared component first.
 ----
 
 A reader can't tell a typo'd feature name from a real one -- only the build log can. Worth remembering next time you're reviewing a PR that adds one.
@@ -124,7 +127,8 @@ Rebuild. The styling is *gone again* -- back to plain text -- and the log explai
 
 [literal]
 ----
-enterprise:Sandbox Example Feature[]...: 'Sandbox Example Feature' is marked
+[HH:MM:SS.mmm] WARN (enterprise-macro): enterprise:Sandbox Example Feature[] in
+modules/ROOT/pages/macros-course.adoc: 'Sandbox Example Feature' is marked
 status: unreleased in the enterprise features registry, so it is only documented
 for an upcoming release. This page belongs to a released version, so the mention
 renders as plain text with no enterprise styling, tooltip, or link. Move the
