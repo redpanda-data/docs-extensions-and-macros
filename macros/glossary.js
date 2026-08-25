@@ -2,7 +2,7 @@
 
 const $glossaryContexts = Symbol('$glossaryContexts')
 const { posix: path } = require('path')
-const chalk = require('chalk')
+const logger = require('@antora/logger')('glossary-macro')
 
 module.exports.register = function (registry, config = {}) {
 
@@ -41,7 +41,7 @@ module.exports.register = function (registry, config = {}) {
         }
 
         if (!attributes['term-name'] || !attributes['hover-text']) {
-          console.warn(`Skipping term ${file.path} due to missing 'term-name' and/or 'hover-text attributes'.`)
+          logger.warn(`Skipping term ${file.path} due to missing 'term-name' and/or 'hover-text attributes'.`)
           return null
         }
 
@@ -114,7 +114,7 @@ module.exports.register = function (registry, config = {}) {
         var tooltip = document.getAttribute('glossary-tooltip')
         if (tooltip === 'true') tooltip = 'data-glossary-tooltip'
         if (tooltip && tooltip !== 'title' && !tooltip.startsWith('data-')) {
-          console.log(`glossary-tooltip attribute '${tooltip}' must be 'true', 'title', or start with 'data-`)
+          logger.warn(`glossary-tooltip attribute '${tooltip}' must be 'true', 'title', or start with 'data-`)
           tooltip = undefined
         }
         const logTerms = document.hasAttribute('glossary-log-terms')
@@ -128,7 +128,7 @@ module.exports.register = function (registry, config = {}) {
           definition = attributes.definition;
         }
         if (definition) {
-          logTerms && console.log(`${term}:: ${definition}`)
+          logTerms && logger.info(`${term}:: ${definition}`)
         } else if (tooltip) {
           definition = `${term} not yet defined`
         }
@@ -171,7 +171,7 @@ module.exports.register = function (registry, config = {}) {
     if (typeof registry.inlineMacro === 'function') {
       registry.inlineMacro(glossaryInlineMacro())
     } else {
-      console.warn('no \'inlineMacro\' method on alleged registry')
+      logger.warn('no \'inlineMacro\' method on alleged registry')
     }
   }
 
