@@ -12,6 +12,7 @@
  */
 
 const yaml = require('js-yaml')
+const semver = require('semver')
 
 const VALID_SCOPES = ['redpanda', 'console', 'connect', 'operator', 'cloud']
 const SOURCE_KINDS = ['core-enum', 'core-property', 'connect-plugin', 'manual']
@@ -57,6 +58,14 @@ function lintRegistry (source) {
       findings.push(finding('error', 'registry-lint', `'${name}' has unknown source kind '${feature.source.kind}'.`))
     } else if (!feature.source.value || !String(feature.source.value).trim()) {
       findings.push(finding('error', 'registry-lint', `'${name}' has an empty source value; manual entries need a justification.`))
+    }
+    if (feature.since !== undefined && feature.since !== null && String(feature.since).trim() !== '') {
+      const since = String(feature.since).trim()
+      // Lenient the same way the enterprise macro's own coerceVersion is:
+      // docs versions are "MAJOR.MINOR", not full semver.
+      if (!semver.coerce(since)) {
+        findings.push(finding('error', 'registry-lint', `'${name}' has since '${since}', which is not a parsable version.`))
+      }
     }
   }
   return { features: data.features, findings }
