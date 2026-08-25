@@ -35,5 +35,8 @@ build/
 # Output of scripts/macro-test.sh
 macro-test-out/
 macro-test.log
+# Output of scripts/macro-showcase.sh
+macro-showcase-out/
+macro-showcase.log
 # Generated when DOCS_DIR/CLOUD_DOCS_DIR are set
 .macro-test-local-playbook.yml

@@ -1,0 +1,140 @@
+= Learn the prop: and enterprise: macros
+:description: A hands-on course for docs writers -- mark a property and an enterprise feature, then edit the data behind them yourself and watch the build react.
+:page-toclevels: 2
+
+By the end of this page you will have:
+
+* Marked a configuration property in prose, watched the build reject a name it can't verify, then made that same name real and linked it -- by editing the actual data, not the macro call.
+* Registered a brand-new enterprise feature, then marked it unreleased and watched this page refuse to publish it -- the exact protection this system exists for.
+
+This is a hands-on course, not a reference: sections 2 and 4 ask you to edit two local files and rebuild. Nothing here can break a real doc set -- everything you'll touch is fixture data in this checkout. Rebuild after every step with:
+
+[,bash]
+----
+./scripts/macro-showcase.sh --serve
+----
+
+Read the warning names right in the build log after each rebuild -- that log is not a debugging aid you go looking for later, it's the thing telling you what to do next.
+
+== 1. Read the reference first (five minutes)
+
+Before touching anything, see everything both macros do: xref:ROOT:macros-showcase.adoc[the macro showcase] walks every call, its rendered output, and why. Skim it now. You'll recognize the mechanisms in the exercises below.
+
+== 2. Exercise: mark a property that doesn't exist yet
+
+This paragraph writes `+prop:sandbox_example_property[]+` -- rendered: prop:sandbox_example_property[]
+
+*Step 1 -- see it fail.* Rebuild if you haven't yet. The name above isn't in any property data, so it renders as plain code, and the build log says exactly that:
+
+[literal]
+----
+prop:sandbox_example_property[]...: 'sandbox_example_property' is not in the property
+data this page validates against (redpanda-properties-v26.2.1.json from
+preview@unversioned). Either the name is misspelled or the property does not exist
+in that release.
+----
+
+*Step 2 -- make the name real.* Open `preview/extensions-and-macros/modules/reference/attachments/redpanda-properties-v26.2.1.json`. Add an entry to `"properties"` (anywhere -- it's a flat object):
+
+[,json]
+----
+"sandbox_example_property": {
+  "name": "sandbox_example_property",
+  "description": "Practice property for the macros course. Not a real Redpanda property.",
+  "config_scope": "cluster",
+  "cloud_supported": true,
+  "type": "boolean",
+  "default": false
+}
+----
+
+Only `config_scope` and `cloud_supported` change macro behavior (they drive the Cloud availability gate -- see xref:ROOT:release-status-test.adoc[] and the cloud fixture below); the rest is schema a real property file always carries. Rebuild. The warning is gone, and the marked-up mention above now shows a hover tooltip -- the same `<code>` element with `data-property-name` that the docs UI decorates.
+
+*Step 3 -- link it.* Add `link=true` to the live mention at the top of this section, so it reads `+prop:sandbox_example_property[link=true]+`, then rebuild. New warning, because a tooltip and a link are different questions: the name validates, but no page documents it, so `link=true` has nowhere to point:
+
+[literal]
+----
+prop:sandbox_example_property[link=true]...: 'sandbox_example_property' is in
+redpanda-properties-v26.2.1.json from preview@unversioned but no reference page in
+this component renders a heading for it, so it keeps its tooltip and renders
+without a link.
+----
+
+Open `preview/extensions-and-macros/modules/reference/partials/properties/preview-properties.adoc`. Inside the `category-cluster` tagged region (anywhere between `write_caching_default` and the `deprecated` block is fine), add:
+
+[,asciidoc]
+----
+=== sandbox_example_property
+
+Practice property for the macros course. Not a real Redpanda property.
+----
+
+Rebuild. The mention above now links to xref:reference:properties/cluster-properties.adoc[the cluster properties page] -- discovered, not hardcoded: nothing you touched named that page.
+
+*Clean up (optional).* `git checkout -- preview/extensions-and-macros/modules/reference/attachments/redpanda-properties-v26.2.1.json preview/extensions-and-macros/modules/reference/partials/properties/preview-properties.adoc` puts both files back so the next person starts from the same failing state you did.
+
+== 3. The beta-workflow gates (reference)
+
+Two more things can go wrong with an enterprise feature besides "does it exist": *is it public yet* (`status`) and *has this specific page's version shipped it* (`since`). Both are already exercising themselves, live, in this build -- no editing needed:
+
+* xref:26.2@macro-fixtures::index.adoc[Released fixtures (26.2)] and xref:26.3@macro-fixtures::index.adoc[beta fixtures (26.3)] are two versions of the *same* component. Flip the version selector between them and watch three identical macro calls render three different ways, purely from where each page's version sits relative to the registry.
+* xref:ROOT:release-status-test.adoc[Release status gating] shows the same unreleased/beta contrast from a third, versionless component.
+* xref:macro-fixtures-cloud:ROOT:index.adoc[Cloud fixtures] shows the separate availability gate: `cloud_supported`, checked regardless of version or branch.
+
+Section 4 has you reproduce the `status: unreleased` gate yourself, on this page.
+
+== 4. Exercise: register a brand-new enterprise feature
+
+This paragraph writes `+enterprise:Sandbox Example Feature[]+` -- rendered: enterprise:Sandbox Example Feature[]
+
+*Step 1 -- see it fail.* Rebuild. The name matches nothing, so it renders as plain text and the log says so:
+
+[literal]
+----
+enterprise:Sandbox Example Feature[]...: 'Sandbox Example Feature' does not match
+any feature in the enterprise features registry. Add the feature to
+enterprise-features.yml in the shared component first.
+----
+
+*Step 2 -- register it.* Open `preview/shared/modules/ROOT/partials/enterprise-features.yml`. Add an entry to the `features` list (indentation matters -- match the entries around it):
+
+[,yaml]
+----
+  - name: Sandbox Example Feature
+    scope: redpanda
+    description: |
+      Practice feature for the macros course. Not a real Redpanda feature.
+    expiration: |
+      The feature is disabled.
+----
+
+Rebuild. The mention above now renders as a styled term with a tooltip -- no `status` key at all means GA, so it's available everywhere, on every version, with no badge.
+
+*Step 3 -- mark it unreleased.* Add one line to the entry you just wrote:
+
+[,yaml]
+----
+    status: unreleased
+----
+
+Rebuild. The styling is *gone again* -- back to plain text -- and the log explains why:
+
+[literal]
+----
+enterprise:Sandbox Example Feature[]...: 'Sandbox Example Feature' is marked
+status: unreleased in the enterprise features registry, so it is only documented
+for an upcoming release. This page belongs to a released version, so the mention
+renders as plain text with no enterprise styling, tooltip, or link. Move the
+mention to the prerelease (beta) branch, or change the status once the feature
+ships.
+----
+
+That is the entire beta-workflow protection, and you just triggered it on purpose: this page is a released version, so an unreleased feature cannot be styled here, no matter what the mention itself says.
+
+*Step 4 (optional) -- see the other side.* Open `preview/macro-fixtures-beta/modules/ROOT/pages/index.adoc` -- a real prerelease fixture (`prerelease: true` in its `antora.yml`) -- and add a line calling the macro on `Sandbox Example Feature` exactly as you did on this page in step 2. Rebuild and look at `/macro-fixtures/26.3/`: it renders styled, with an `unreleased` badge. Same registry entry, same macro call, different result, because that page's version is a prerelease. Revert the fixture file afterward: `git checkout -- preview/macro-fixtures-beta/modules/ROOT/pages/index.adoc`.
+
+*Clean up (optional).* `git checkout -- preview/shared/modules/ROOT/partials/enterprise-features.yml` removes the entry you added.
+
+== 5. What to do with this on a real page
+
+Everything above is the mechanism. For the actual writer-facing procedure -- when to use `status: unreleased` vs `status: beta` vs `since`, what to generate before you can mention an RC-only property, and a pre-PR checklist -- see `macros/DOCUMENTING_UNRELEASED_FEATURES.adoc` in this repo (not part of this build; open it in your checkout or on GitHub).

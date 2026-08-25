@@ -1,0 +1,74 @@
+# A basic, fully local playbook for showcasing and teaching the prop: and
+# enterprise: macros -- including the beta-workflow gates (status: unreleased,
+# status: beta, and since:) -- without pulling the real docs/cloud-docs repos
+# and without a GitHub token.
+#
+# local-macro-test-playbook.yml is the FULL harness: same fixtures, plus the
+# real docs/cloud-docs/redpanda-labs/rp-connect-docs repos, so it also proves
+# the macros against real production content. That takes a token and a few
+# minutes. This playbook only builds the fixtures, in seconds, for when you
+# just want to show or teach the macros themselves.
+#
+#   npx antora --fetch local-macro-showcase-playbook.yml
+#   npx http-server macro-showcase-out -o
+#
+# or:
+#
+#   ./scripts/macro-showcase.sh --serve
+#
+# Start page is /preview/macros-course/ -- a hands-on course, not just a
+# reference: it walks a writer through marking a property and registering an
+# enterprise feature, then has them edit the fixture data themselves (a
+# property JSON, the enterprise registry) and rebuild to watch the macros
+# react. /preview/macros-showcase/ is the reference it points to first.
+site:
+  title: Redpanda Macro Showcase
+  start_page: preview:ROOT:macros-course.adoc
+urls:
+  html_extension_style: indexify
+output:
+  dir: ./macro-showcase-out
+  clean: true
+runtime:
+  log:
+    level: warn
+content:
+  sources:
+  - url: .
+    branches: HEAD
+    start_paths: [preview/extensions-and-macros, preview/shared,
+                 preview/streaming-ga-lender, preview/macro-fixtures-ga,
+                 preview/macro-fixtures-beta, preview/macro-fixtures-cloud]
+ui:
+  bundle:
+    url: https://github.com/redpanda-data/docs-ui/releases/latest/download/ui-bundle.zip
+    snapshot: true
+asciidoc:
+  attributes:
+    # 'error' fails the build instead; 'off' silences these. 'warn' (the
+    # default) is what a writer should build with while learning the macros:
+    # everything still renders, and every problem still gets reported.
+    property-validate: warn
+    enterprise-validate: warn
+    # The real licensing page lives on a real page in the streaming component.
+    # preview/streaming-ga-lender registers that component name (Cloud's GA
+    # data lookup only trusts one literally called streaming or ROOT), but it
+    # is data-only and carries no pages, so the real licensing page still
+    # doesn't exist here. Point at a resolvable stand-in instead, so a feature
+    # mention with no xref of its own still links somewhere. A page that
+    # already sets its own enterprise-licensing-page (test.adoc,
+    # enterprise-kubernetes-test.adoc) keeps pointing at the real target and
+    # stays unresolved here on purpose: build with local-macro-test-playbook.yml
+    # to see those resolve for real.
+    enterprise-licensing-page: shared:ROOT:licensing-placeholder.adoc
+  extensions:
+  - '@asciidoctor/tabs'
+  - './macros/glossary'
+  - './macros/config-ref'
+  - './macros/badge'
+  - './macros/enterprise'
+  - './macros/prop'
+  - './macros/helm-ref'
+antora:
+  extensions:
+  - require: './extensions/property-page-index'
