@@ -36,6 +36,7 @@ display help for command
 * `fetch` - Fetch a file or directory from GitHub and save it locally
 * `setup-mcp` - Configure the Redpanda Docs MCP server for Claude Code/Desktop
 * `validate-mcp` - Validate MCP server configuration (tools, resources)
+* `sync-schemas` - Sync this package's docs-data/*.schema.json into a content repo's docs-data/
 * `mcp-version` - Show MCP server version and configuration information
 * `lint-strings` - Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)
 * `preview-string` - Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish
@@ -465,6 +466,57 @@ display help for command
 ----
 # Validate MCP configuration
 npx doc-tools validate-mcp
+----
+
+*Requirements:*
+
+None.
+
+== sync-schemas
+
+Copy this package's docs-data/*.schema.json files into a content repo's own docs-data/ (the file that documents docs-data/x.json lives alongside x.json itself, so a writer can change both in one PR without waiting on a package release first). Run this after bumping
+
+*Why use it:*
+
+Nothing keeps a content repo's schema copy in sync with this package's copy today, in either direction. A content repo's copy can legitimately be ahead of this package's (confirmed happening in practice: the docs repo's rpk-overrides.schema.json documents a real, working `asPartial` override field that this package's own copy is missing) — overwriting it in that case would delete real, correct documentation, not fix drift. This only overwrites when this package's copy is a strict superset of the destination; otherwise it reports which keys only the destination has and leaves the file alone (status 'diverged') unless --force is passed. --check never writes, for a CI gate.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools sync-schemas [options]
+----
+
+*Options:*
+
+`--dest <path>`::
+Destination docs-data directory (default: "docs-data")
+
+`--check`::
+Report drift without writing; exit 1 if any schema is missing, out of date, or diverged
+
+`--force`::
+Overwrite even a destination that has diverged (has content this package lacks)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Sync into ./docs-data (writes any missing or out-of-date schema)
+npx doc-tools sync-schemas
+
+# Report drift without writing -- exits 1 if anything is out of sync
+npx doc-tools sync-schemas --check
+
+# Sync into a non-default location
+npx doc-tools sync-schemas --dest path/to/docs-data
+
+# Overwrite even a destination that has diverged (rarely correct --
+# read the 'diverged' output first; it names what would be lost)
+npx doc-tools sync-schemas --force
 ----
 
 *Requirements:*
