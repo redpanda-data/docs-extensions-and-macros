@@ -682,7 +682,7 @@ describe('bundleOpenAPI repository resolution and auth', () => {
     expect(execFileSync).not.toHaveBeenCalled();
   });
 
-  test('clones the default repo with an auth header, never embedding the token in the URL', async () => {
+  test('clones the default repo with a credential helper, never exposing the token in argv', async () => {
     process.env.GH_TOKEN = 'test-token-123';
     execFileSync.mockImplementation(() => ''); // no real clone happens, so repoDir is never created
 
@@ -690,18 +690,22 @@ describe('bundleOpenAPI repository resolution and auth', () => {
       .rejects.toThrow('Repository clone failed - directory not found');
 
     expect(execFileSync).toHaveBeenCalledTimes(1);
-    const [cmd, args] = execFileSync.mock.calls[0];
+    const [cmd, args, options] = execFileSync.mock.calls[0];
     expect(cmd).toBe('git');
-    expect(args).toEqual(expect.arrayContaining([
+    expect(args).toEqual([
       'clone', '--depth', '1', '--branch', 'v25.3.1',
       'https://github.com/redpanda-data/streaming-enterprise.git', 'redpanda'
-    ]));
-    expect(args.join(' ')).not.toContain('test-token-123@');
+    ]);
+    // The token must never appear in argv (visible via ps/proc to anything
+    // that can list processes) -- it travels through env-only git config
+    // instead of a -c argument.
+    expect(args.join(' ')).not.toContain('test-token-123');
+    expect(args.some((a) => a.includes('extraheader'))).toBe(false);
 
-    const authArg = args.find((a) => a.startsWith('http.https://github.com/.extraheader='));
-    expect(authArg).toBeDefined();
-    const encoded = authArg.replace('http.https://github.com/.extraheader=AUTHORIZATION: basic ', '');
-    expect(Buffer.from(encoded, 'base64').toString()).toBe('x-access-token:test-token-123');
+    expect(options.env.BUNDLE_OPENAPI_CLONE_TOKEN).toBe('test-token-123');
+    expect(options.env.GIT_CONFIG_COUNT).toBe('2');
+    expect(options.env.GIT_CONFIG_KEY_1).toBe('credential.https://github.com.helper');
+    expect(options.env.GIT_CONFIG_VALUE_1).toContain('$BUNDLE_OPENAPI_CLONE_TOKEN');
   });
 
   test('does not require a token when a custom --repo is given', async () => {

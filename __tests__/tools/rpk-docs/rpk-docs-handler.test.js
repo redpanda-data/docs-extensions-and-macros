@@ -573,32 +573,35 @@ describe('rpk Docs Handler', () => {
       expect(spawnSync).not.toHaveBeenCalled()
     })
 
-    test('sparse-clones streaming-enterprise with the same auth header on the clone and the sparse-checkout set', () => {
+    test('sparse-clones streaming-enterprise with the same credential helper on the clone and the sparse-checkout set', () => {
       process.env.GH_TOKEN = 'test-token-456'
       spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' })
 
       expect(() => prepareSourceFromRef('v26.2.0')).not.toThrow()
       expect(spawnSync).toHaveBeenCalledTimes(2)
 
-      const [cloneCmd, cloneArgs] = spawnSync.mock.calls[0]
+      const [cloneCmd, cloneArgs, cloneOptions] = spawnSync.mock.calls[0]
       expect(cloneCmd).toBe('git')
       expect(cloneArgs).toEqual(expect.arrayContaining([
         'clone', '--branch', 'v26.2.0', 'https://github.com/redpanda-data/streaming-enterprise.git'
       ]))
-      expect(cloneArgs.join(' ')).not.toContain('test-token-456@')
-      const cloneAuthArg = cloneArgs.find((a) => a.startsWith('http.https://github.com/.extraheader='))
-      expect(cloneAuthArg).toBeDefined()
+      // The token must never appear in argv -- it travels through env-only
+      // git config (a credential helper) instead of a -c argument.
+      expect(cloneArgs.join(' ')).not.toContain('test-token-456')
+      expect(cloneArgs.some((a) => a.includes('extraheader'))).toBe(false)
+      expect(cloneOptions.env.RPK_SOURCE_CLONE_TOKEN).toBe('test-token-456')
+      expect(cloneOptions.env.GIT_CONFIG_KEY_1).toBe('credential.https://github.com.helper')
+      expect(cloneOptions.env.GIT_CONFIG_VALUE_1).toContain('$RPK_SOURCE_CLONE_TOKEN')
 
-      const [sparseCmd, sparseArgs] = spawnSync.mock.calls[1]
+      const [sparseCmd, sparseArgs, sparseOptions] = spawnSync.mock.calls[1]
       expect(sparseCmd).toBe('git')
       expect(sparseArgs).toEqual(expect.arrayContaining(['sparse-checkout', 'set', 'src/go/rpk']))
-      // Same auth header on the follow-up invocation: with --filter=blob:none,
-      // the rpk blobs are fetched lazily here, not by the clone above, and
-      // the header was never persisted into .git/config by that first call.
-      expect(sparseArgs.find((a) => a.startsWith('http.https://github.com/.extraheader='))).toBe(cloneAuthArg)
-
-      const decoded = Buffer.from(cloneAuthArg.split('AUTHORIZATION: basic ')[1], 'base64').toString()
-      expect(decoded).toBe('x-access-token:test-token-456')
+      expect(sparseArgs.some((a) => a.includes('extraheader'))).toBe(false)
+      // Same credential helper env on the follow-up invocation: with
+      // --filter=blob:none, the rpk blobs are fetched lazily here, not by
+      // the clone above.
+      expect(sparseOptions.env.GIT_CONFIG_VALUE_1).toBe(cloneOptions.env.GIT_CONFIG_VALUE_1)
+      expect(sparseOptions.env.RPK_SOURCE_CLONE_TOKEN).toBe('test-token-456')
     })
 
     test('surfaces a clear error when the clone itself fails', () => {
@@ -636,20 +639,45 @@ describe('rpk Docs Handler', () => {
       expect(spawnSync).not.toHaveBeenCalled()
     })
 
-    test('sends the token as an Authorization header against streaming-enterprise, never in the URL', () => {
+    test('resolves the asset through the release-by-tag API, never the browser download URL', () => {
       process.env.GH_TOKEN = 'test-token-789'
-      // Asset missing (status 1): downloadRpkRelease returns null cleanly
-      // here, which is enough to inspect the curl invocation it made.
-      spawnSync.mockReturnValue({ status: 1, stdout: '', stderr: 'not found' })
+      // Release lookup succeeds (status 0); the actual asset download can
+      // fail (status 1) without affecting what this test inspects.
+      const osName = { darwin: 'darwin', linux: 'linux', win32: 'windows' }[process.platform]
+      const archName = { arm64: 'arm64', x64: 'amd64' }[process.arch]
+      const assetName = `rpk-${osName}-${archName}.zip`
+      const checksumAsset = 'rpk_26.2.2_checksums.txt'
+      const release = {
+        assets: [
+          { name: assetName, url: 'https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/assets/111' },
+          { name: checksumAsset, url: 'https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/assets/222' }
+        ]
+      }
+      spawnSync
+        .mockReturnValueOnce({ status: 0, stdout: JSON.stringify(release), stderr: '' }) // release lookup
+        .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'not found' }) // asset download
 
       expect(downloadRpkRelease('v26.2.2', tempDir)).toBeNull()
-      expect(spawnSync).toHaveBeenCalledTimes(1)
+      expect(spawnSync).toHaveBeenCalledTimes(2)
 
-      const [cmd, args] = spawnSync.mock.calls[0]
-      expect(cmd).toBe('curl')
-      expect(args).toEqual(expect.arrayContaining(['-H', 'Authorization: token test-token-789']))
-      expect(args.some((a) => typeof a === 'string' && a.includes('streaming-enterprise/releases/download/v26.2.2'))).toBe(true)
-      expect(args.join(' ')).not.toContain('test-token-789@')
+      const [lookupCmd, lookupArgs] = spawnSync.mock.calls[0]
+      expect(lookupCmd).toBe('curl')
+      expect(lookupArgs).toEqual(expect.arrayContaining(['-H', 'Authorization: token test-token-789']))
+      expect(lookupArgs.some((a) => typeof a === 'string' &&
+        a === 'https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/tags/v26.2.2')).toBe(true)
+
+      const [dlCmd, dlArgs] = spawnSync.mock.calls[1]
+      expect(dlCmd).toBe('curl')
+      // The API's per-asset url (not the releases/download/... browser url,
+      // which 404s for a private repo even with a valid token) is what
+      // accepts the Authorization header.
+      expect(dlArgs).toEqual(expect.arrayContaining([
+        '-H', 'Authorization: token test-token-789',
+        '-H', 'Accept: application/octet-stream'
+      ]))
+      expect(dlArgs.some((a) => a === 'https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/assets/111')).toBe(true)
+      expect(dlArgs.some((a) => typeof a === 'string' && a.includes('releases/download/'))).toBe(false)
+      expect(dlArgs.join(' ')).not.toContain('test-token-789@')
     })
   })
 })

@@ -79,11 +79,13 @@ clean:
 # --- Clone or update the Redpanda source (now in streaming-enterprise), checkout TAG or default branch ---
 # Clones are shallow: the extractor only reads source files at a single tag,
 # so full history is wasted time and disk.
-# Auth is passed as a per-invocation HTTP header (git -c before every remote
-# operation, not just the clone), never embedded in the remote URL, so no
-# token is persisted in the clone's .git/config. The clone lives inside the
-# installed package dir, so a persisted token would be readable by anything
-# that can list it.
+# Auth travels via a credential helper registered through GIT_CONFIG_*
+# environment variables, never as a git -c argument (which would put the
+# token in this process's argv, visible to anything that can list processes
+# on the runner) and never embedded in the remote URL. The clone lives
+# inside the installed package dir, so a persisted token would also be
+# readable by anything that can list it -- GIT_CONFIG_* env vars don't get
+# written to disk, so nothing persists in the clone's .git/config either.
 # streaming-enterprise is private, so a token is required -- not just
 # preferred the way it was when this cloned the public redpanda repo. GH_TOKEN
 # is checked first because `doc-tools generate property-docs` pre-resolves it
@@ -99,17 +101,22 @@ redpanda-git:
 	  echo "   Set GH_TOKEN, REDPANDA_GITHUB_TOKEN, or GITHUB_TOKEN to a token with access."; \
 	  exit 1; \
 	fi; \
-	AUTH_HEADER="AUTHORIZATION: basic $$(printf '%s' "x-access-token:$$GH_TOKEN" | base64 | tr -d '\n')"; \
+	export GIT_MAKEFILE_CLONE_TOKEN="$$GH_TOKEN"; \
+	export GIT_CONFIG_COUNT=2; \
+	export GIT_CONFIG_KEY_0=credential.helper; \
+	export GIT_CONFIG_VALUE_0=; \
+	export GIT_CONFIG_KEY_1=credential.https://github.com.helper; \
+	export GIT_CONFIG_VALUE_1='!f() { echo "username=x-access-token"; echo "password=$$GIT_MAKEFILE_CLONE_TOKEN"; }; f'; \
 	REPO_URL="https://github.com/redpanda-data/streaming-enterprise.git"; \
 	echo "🔄 Cloning/updating streaming-enterprise into $(REDPANDA_SRC)…"; \
 	if [ -d "$(REDPANDA_SRC)" ]; then \
-	  git -c http.https://github.com/.extraheader="$$AUTH_HEADER" -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "+refs/tags/$(TAG):refs/tags/$(TAG)" 2>/dev/null || \
-	    git -c http.https://github.com/.extraheader="$$AUTH_HEADER" -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "+refs/heads/$(TAG):refs/remotes/origin/$(TAG)" 2>/dev/null || \
-	    git -c http.https://github.com/.extraheader="$$AUTH_HEADER" -C "$(REDPANDA_SRC)" fetch --all --tags -q; \
+	  git -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "+refs/tags/$(TAG):refs/tags/$(TAG)" 2>/dev/null || \
+	    git -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "+refs/heads/$(TAG):refs/remotes/origin/$(TAG)" 2>/dev/null || \
+	    git -C "$(REDPANDA_SRC)" fetch --all --tags -q; \
 	else \
 	  echo "🔑 Using authenticated clone"; \
-	  git -c http.https://github.com/.extraheader="$$AUTH_HEADER" clone -q --depth 1 --branch "$(TAG)" "$$REPO_URL" "$(REDPANDA_SRC)" 2>/dev/null || \
-	    git -c http.https://github.com/.extraheader="$$AUTH_HEADER" clone -q --depth 1 "$$REPO_URL" "$(REDPANDA_SRC)"; \
+	  git clone -q --depth 1 --branch "$(TAG)" "$$REPO_URL" "$(REDPANDA_SRC)" 2>/dev/null || \
+	    git clone -q --depth 1 "$$REPO_URL" "$(REDPANDA_SRC)"; \
 	fi; \
 	if git -C "$(REDPANDA_SRC)" rev-parse --verify -q "origin/$(TAG)" >/dev/null 2>&1; then \
 	  echo "🔖 Checking out remote branch 'origin/$(TAG)'"; \
@@ -124,13 +131,13 @@ redpanda-git:
 	    echo "⚠️ Tag '$(TAG)' not found; falling back to '$${DEFAULT_BRANCH}'"; \
 	    git -C "$(REDPANDA_SRC)" checkout -q "$${DEFAULT_BRANCH}"; \
 	  else \
-	    DEFAULT_BRANCH=$$(git -c http.https://github.com/.extraheader="$$AUTH_HEADER" -C "$(REDPANDA_SRC)" ls-remote --symref origin HEAD | awk '/^ref:/ {sub(/^refs\/heads\//, "", $$2); print $$2; exit}'); \
+	    DEFAULT_BRANCH=$$(git -C "$(REDPANDA_SRC)" ls-remote --symref origin HEAD | awk '/^ref:/ {sub(/^refs\/heads\//, "", $$2); print $$2; exit}'); \
 	    if [ -z "$$DEFAULT_BRANCH" ]; then \
 	      echo "❌ Tag '$(TAG)' not found and the default branch could not be determined"; \
 	      exit 1; \
 	    fi; \
 	    echo "⚠️ Tag '$(TAG)' not found; falling back to '$${DEFAULT_BRANCH}'"; \
-	    git -c http.https://github.com/.extraheader="$$AUTH_HEADER" -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "$$DEFAULT_BRANCH"; \
+	    git -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "$$DEFAULT_BRANCH"; \
 	    git -C "$(REDPANDA_SRC)" checkout -q FETCH_HEAD; \
 	  fi; \
 	fi

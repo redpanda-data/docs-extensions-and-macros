@@ -662,21 +662,29 @@ async function bundleOpenAPI(options) {
       throw new Error('redpanda-data/streaming-enterprise is a private repository: set GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN so the clone can authenticate.');
     }
 
-    // Auth is passed as a per-invocation HTTP header, never embedded in the
-    // remote URL, so no token is persisted in the clone's .git/config or
-    // visible in the process list.
-    const gitAuthArgs = [];
+    // Auth travels via a credential helper registered through GIT_CONFIG_*
+    // environment variables, never as a git -c argument, so the token
+    // cannot appear in this process's argv (visible to anything that can
+    // list processes) or get embedded in an exec error's command-line
+    // message. It's also never embedded in the remote URL or persisted in
+    // the clone's .git/config.
+    const gitEnv = { ...process.env };
     if (token && repositoryUrl.includes('github.com')) {
       if (!quiet) {
         console.log('🔑 Using authenticated clone (token provided)');
       }
-      const authHeader = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`;
-      gitAuthArgs.push('-c', `http.https://github.com/.extraheader=${authHeader}`);
+      gitEnv.BUNDLE_OPENAPI_CLONE_TOKEN = token;
+      gitEnv.GIT_CONFIG_COUNT = '2';
+      gitEnv.GIT_CONFIG_KEY_0 = 'credential.helper';
+      gitEnv.GIT_CONFIG_VALUE_0 = '';
+      gitEnv.GIT_CONFIG_KEY_1 = 'credential.https://github.com.helper';
+      gitEnv.GIT_CONFIG_VALUE_1 = '!f() { echo "username=x-access-token"; echo "password=$BUNDLE_OPENAPI_CLONE_TOKEN"; }; f';
     }
 
     try {
-      execFileSync('git', [...gitAuthArgs, 'clone', '--depth', '1', '--branch', tag, repositoryUrl, 'redpanda'], {
+      execFileSync('git', ['clone', '--depth', '1', '--branch', tag, repositoryUrl, 'redpanda'], {
         cwd: tempDir,
+        env: gitEnv,
         stdio: quiet ? 'ignore' : 'inherit',
         timeout: 60000 // 1 minute timeout
       });
