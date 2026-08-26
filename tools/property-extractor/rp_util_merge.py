@@ -62,7 +62,7 @@ JSON_SCHEMA_PRIMITIVES = {"string", "integer", "number", "boolean", "object", "a
 def _parse_embedded_json(value, property_name, field_name):
     """rp_util embeds default/bounds/enterprise values as JSON-encoded
     strings (see cluster_config_property_metadata's default_value/minimum/
-    maximum/enterprise_sanctioned_value/enterprise_restricted_value in
+    maximum/enterprise_sanctioned_value/enterprise_restricted_values in
     api-doc/cluster_config.json) -- a string containing valid JSON, not the
     value itself."""
     if value is None:
@@ -93,7 +93,8 @@ def _build_enum_metadata(enum_values, enterprise_enum_values):
 
 def _derive_enterprise_fields(meta, default_value, property_name):
     """Recreate is_enterprise/enterprise_constructor/enterprise_value/
-    enterprise_restricted_value/enterprise_sanctioned_value -- the fields
+    enterprise_restricted_value/enterprise_sanctioned_value (this module's
+    own field names, not rp_util's) -- the fields
     EnterpriseTransformer (transformers.py) infers from C++ constructor call
     shapes -- directly from rp_util's ground truth instead.
 
@@ -114,15 +115,14 @@ def _derive_enterprise_fields(meta, default_value, property_name):
     fields = {"is_enterprise": True}
 
     if meta.get("enterprise_restriction_is_dynamic"):
-        # The restriction is a predicate function (e.g.
-        # is_enterprise_sasl_mechanism), not a static value or list --
-        # nothing to enumerate.
+        # The restriction is a predicate function, not a static value or
+        # list -- nothing to enumerate.
         fields["enterprise_constructor"] = "simple"
         return fields
 
     restricted = _parse_embedded_json(
-        meta.get("enterprise_restricted_value"), property_name,
-        "enterprise_restricted_value",
+        meta.get("enterprise_restricted_values"), property_name,
+        "enterprise_restricted_values",
     )
     sanctioned = _parse_embedded_json(
         meta.get("enterprise_sanctioned_value"), property_name,
@@ -219,7 +219,7 @@ def map_rp_util_property(name, meta, config_scope, defined_in, definitions):
         "visibility": meta.get("visibility"),
         "is_secret": bool(meta.get("is_secret", False)),
         # rp_util's for_each() already excludes is_hidden() properties
-        # (see cluster_config_schema_util.cc), so anything reaching here
+        # (see config_schema_util.cc), so anything reaching here
         # is, by construction, not deprecated-and-hidden.
         "is_deprecated": False,
         "default": display_default,
@@ -348,7 +348,7 @@ def _preserve_validator_derived_enum_data(prop, existing_prop):
 def _carry_forward_gets_restored(prop, existing_prop):
     """FALLBACK, not the primary path: rp_util now exposes gets_restored
     directly (map_rp_util_property sets it from meta["gets_restored"] when
-    present -- see streaming-enterprise's cluster_config_schema_util.cc).
+    present -- see streaming-enterprise's config_schema_util.cc).
     This only fires against an rp_util build from before that field existed
     (confirmed absent by enumerating every key across all five schemas as of
     PR #63's original state), as a stopgap so a stale rp_util binary doesn't
