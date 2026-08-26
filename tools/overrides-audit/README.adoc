@@ -1,0 +1,152 @@
+= Overrides Audit
+:toc:
+
+Field-level classification of docs-side override entries against extracted source strings. This tool powers the override-retirement loop: overrides that patch bad source prose are stopgaps that die once the fixed string ships upstream, while structured docs enrichment stays in the override layer by design.
+
+== Why
+
+`docs-data/property-overrides.json` in the docs repo carries hundreds of hand-patched property entries. Each `description` override masks the string engineers wrote in C++ source. When that source string gets fixed (upstreamed), the override becomes dead weight that silently masks all future source improvements. This audit classifies every override *field* so that:
+
+* redundant fields can be deleted automatically on each release regeneration (retirement workflow),
+* upstreamable prose can be drafted into source PRs against the engineering repo (upstreaming workflow),
+* by-design docs enrichment is left alone.
+
+== Usage
+
+[,bash]
+----
+# Through doc-tools
+npx doc-tools overrides audit \
+  --overrides docs-data/property-overrides.json \
+  --extracted tools/property-extractor/gen/properties-output.json \
+  --format human
+
+# Standalone
+node tools/overrides-audit/index.js --overrides <path> --extracted <path> [--surface properties|rpk|connect] [--format json|human] [--output <file>]
+----
+
+IMPORTANT: `--extracted` must be the property extractor's *raw* output (the `--output` file), never the enhanced output (`--enhanced-output`) or the versioned `redpanda-properties-<tag>.json` attachments: those already have overrides applied, so every override would classify as REDUNDANT. The same trap exists for rpk: the versioned `rpk-v<version>.json` files in docs repos are post-override snapshots.
+
+To produce a raw extraction from a local Redpanda checkout:
+
+[,bash]
+----
+cd tools/property-extractor
+make venv treesitter            # one-time setup
+tmp/redpanda-property-extractor-venv/bin/python -W ignore property_extractor.py \
+  --recursive --path <path-to-redpanda-checkout> \
+  --output gen/source-properties.json
+----
+
+== Classification rules (properties surface)
+
+Each field of each override entry gets one manifest row.
+
+[cols="1,1,3"]
+|===
+|Field |Class |Rule
+
+|`description`
+|`REDUNDANT`
+|Override equals the extracted source description after normalization (whitespace collapsed, lines unwrapped). Safe to delete in the next auto-docs PR.
+
+|`description`
+|`UPSTREAMABLE`
+|Differs from source and is free of docs-only markup. `upstream_candidate_text` carries the override text verbatim.
+
+|`description`
+|`KEEP_UNTIL_UPSTREAMED`
+|Differs from source and contains docs-only markup (the SPLIT case). `upstream_candidate_text` carries the markup-stripped prose; the override keeps masking source until that prose ships upstream.
+
+|`description`
+|`KEEP`
+|Contains markup, but the stripped prose already matches source: markup-only enrichment, nothing to upstream.
+
+|`example`
+|`UPSTREAMABLE_SLOT`
+|Property declarations have a `.example` metadata slot in C++ source; migrate the value there.
+
+|`example_file` / `example_yaml`
+|`KEEP`
+|File- and YAML-rendered examples are docs-only rendering with no source slot.
+
+|`accepted_values`
+|`REDUNDANT_OR_UPSTREAMABLE`
+|The extracted property is an enum. The override may merely restate the enum (redundant) or deliberately hide internal-only values (for example `leader_balancer_mode` hides `greedy`). Always needs a human ruling.
+
+|`accepted_values`
+|`KEEP`
+|The extracted property is not an enum; the values are docs-side enrichment.
+
+|`default` / `type`
+|`REDUNDANT`
+|Equal to the extracted value.
+
+|`default` / `type`
+|`REVIEW`
+|Differs from the extracted value: possible source bug. Never auto-delete.
+
+|`related_topics`, `category`, `config_scope`, `version`, `exclude_from_docs`, `descriptionScope`, page attributes
+|`KEEP`
+|Docs-layer structure by design; source strings cannot carry it.
+
+|`acceptable_values` (typo)
+|`REVIEW`
+|Known typo'd key: the extractor only honors `accepted_values`, so this key is silently ignored. Flagged wherever found.
+|===
+
+Any field on a property that is missing from the extracted JSON classifies `REVIEW` (the override may create a doc-only property, the property may have been removed upstream, or the extractor may not see the declaration -- `advertised_kafka_api` and `advertised_rpc_api` are known extractor blind spots).
+
+=== Docs-only markup
+
+A description counts as markup-laden when it contains any of: `xref:`, `glossterm:`, `include::`, `ifdef::`/`ifndef::`/`endif::`, `pass:`, `config_ref:`/`prop:` property-link macros, `<<anchor>>` cross-references (anchors only exist on the generated page), or unescaped `{attr}` attribute references beyond the product-attr allowlist (`PRODUCT_ATTR_ALLOWLIST` in `classify.js`, empty today; escaped `\{attr}` literals are fine).
+
+The stripper converts markup to plain prose: `xref:page[text]` keeps the text, `glossterm:Term[def]` keeps the term, `<<anchor,text>>` keeps the text, `config_ref:`/`prop:` macros become the backticked property name (or their display text), `pass:q[content]` keeps the content, and `include::`/conditional directive lines are dropped.
+
+== The `upstream_ref` policy field
+
+Description overrides may carry an *optional* `upstream_ref` field: a URL or identifier of the engineering-repo PR or issue that upstreams the fix, so every description override is born with a retirement path.
+
+[,json]
+----
+"my_property": {
+  "description": "The corrected description.",
+  "upstream_ref": "https://github.com/redpanda-data/redpanda/pull/12345"
+}
+----
+
+The audit carries `upstream_ref` from the override entry into the manifest row for the description field. The extractor ignores unknown keys on existing properties, so adding `upstream_ref` is safe today; the docs-repo `validate-docs-data` workflow is the intended home for a warn-only check that new or changed description overrides carry it. This tool never modifies the overrides file.
+
+== Output
+
+JSON (default): `{ surface, overrides_file, extracted_file, manifest, summary, cross_check }`.
+
+* `manifest`: one row per classified field: `{ name, field, class, upstream_candidate_text?, upstream_ref?, content_hash?, source_file?, source_line?, note }`.
+** `content_hash` is a stable 16-hex-char digest of `(name, normalized override description)`. The docs-repo upstreaming workflow keeps a manifest of already-PRed hashes, so re-runs skip candidates whose hash is unchanged and re-draft when the override text moved.
+** `source_line` is populated only when the extracted JSON carries `line_start` (pending the extractor line-span patch); today it is absent.
+* `summary`: total, counts per class, and counts per (field, class).
+* `cross_check` (properties only): reuses `tools/property-extractor/compare-properties.js` -- the override descriptions are overlaid on the extracted properties and diffed. Every raw-equal description must have classified `REDUNDANT`; `violations` lists classifier bugs (expected empty).
+
+`--format human` prints the summary plus per-class listings for the actionable classes.
+
+== Surfaces
+
+* `properties` (complete): `property-overrides.json` vs the property extractor's raw JSON.
+* `rpk` (structural): enumerates `rpk-overrides.json` (see `docs-data/rpk-overrides.schema.json`) -- command/flag `description` fields are the upstreamable prose (classified `REVIEW` with a TODO note until source comparison lands; it needs a raw pre-override `--print-tree` snapshot plus the `formatDescription()` pipeline from `tools/rpk-docs`), everything else (`seeAlso`, `pageAliases`, `content`, platform scoping, ...) is `KEEP` by design.
+* `connect` (structural): enumerates the rp-connect-docs `overrides.json` (`definitions` + per-component arrays with nested `config.children`); prose fields classify `REVIEW` with a TODO note until `$ref` resolution and plugin-JSON comparison land.
+
+== Golden run (local checkouts required)
+
+The class distribution against live data depends on local checkouts of the docs repo and Redpanda source, so it is a documented command rather than a CI jest test:
+
+[,bash]
+----
+# 1. Extract raw source properties (see setup above)
+# 2. Audit the live overrides file
+node tools/overrides-audit/index.js \
+  --overrides <docs-repo>/docs-data/property-overrides.json \
+  --extracted tools/property-extractor/gen/source-properties.json \
+  --format human
+----
+
+Sanity expectations for the live 445-entry file: ~343 description fields classified; tens of REDUNDANT (source already matches); a large UPSTREAMABLE plus KEEP_UNTIL_UPSTREAMED (SPLIT) population; exactly one `acceptable_values` typo flag; `cross_check.violations` empty.
