@@ -25,6 +25,11 @@ const { generateBundleOpenApi } = require('./openapi');
 
 // Review tools
 const { reviewGeneratedDocs, generateReviewReport } = require('./generated-docs-review');
+const { auditOverrides } = require('./overrides-audit');
+
+// Doc-string tools (run in engineering repos)
+const { lintDocStrings } = require('./lint-doc-strings');
+const { previewDocString } = require('./preview-doc-string');
 
 // Job queue
 const { initializeJobQueue, createJob, getJob, listJobs, cleanupOldJobs } = require('./job-queue');
@@ -87,6 +92,18 @@ function executeTool(toolName, args = {}) {
 
       case 'review_generated_docs':
         result = reviewGeneratedDocs(args);
+        break;
+
+      case 'lint_doc_strings':
+        result = lintDocStrings(args);
+        break;
+
+      case 'preview_doc_string':
+        result = previewDocString(args);
+        break;
+
+      case 'audit_overrides':
+        result = auditOverrides(args);
         break;
 
       case 'run_doc_tools_command': {
@@ -250,6 +267,9 @@ module.exports = {
   generateBundleOpenApi,
   reviewGeneratedDocs,
   generateReviewReport,
+  lintDocStrings,
+  previewDocString,
+  auditOverrides,
 
   // Job queue
   initializeJobQueue,

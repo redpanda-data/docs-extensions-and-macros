@@ -7,6 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { maskComments, findBalancedClose } = require('../lint-strings/go-source');
 
 /**
  * Scan a Go file for cobra command definitions with deprecation/hidden status
@@ -17,31 +18,27 @@ function scanGoFile(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
 
   // Look for NewCommand function that returns *cobra.Command
-  const newCommandMatch = content.match(/func NewCommand\([^)]*\)\s*\*cobra\.Command\s*\{/);
+  // Mask comments before any scanning. The hand-rolled brace counter this
+  // replaced was comment- and string-blind, so a `{` inside a comment
+  // unbalanced it and truncated the cobra.Command block early, and the field
+  // regexes then read a `Use:` string out of a commented-out example. Both
+  // helpers are string-aware and already shared by the lint-strings Go
+  // surfaces; the masker preserves offsets and every string literal.
+  const masked = maskComments(content);
+
+  const newCommandMatch = masked.match(/func NewCommand\([^)]*\)\s*\*cobra\.Command\s*\{/);
   if (!newCommandMatch) {
     return null;
   }
 
   // Extract the cobra.Command struct definition
-  // Handle nested braces and multiline strings
-  let cmdBlock = '';
-  let braceCount = 0;
-  let startIndex = content.indexOf('&cobra.Command{');
-
-  if (startIndex === -1) {
+  const structIndex = masked.indexOf('&cobra.Command{');
+  if (structIndex === -1) {
     return null;
   }
-
-  startIndex += '&cobra.Command{'.length;
-  for (let i = startIndex; i < content.length; i++) {
-    const char = content[i];
-    if (char === '{') braceCount++;
-    if (char === '}') {
-      if (braceCount === 0) break;
-      braceCount--;
-    }
-    cmdBlock += char;
-  }
+  const openIndex = structIndex + '&cobra.Command'.length;
+  const closeIndex = findBalancedClose(masked, openIndex, '{', '}');
+  const cmdBlock = masked.slice(openIndex + 1, closeIndex === -1 ? masked.length : closeIndex);
 
   // Extract fields - handle multiline strings with backticks or quotes
   const useMatch = cmdBlock.match(/Use:\s*"([^"]+)"/);

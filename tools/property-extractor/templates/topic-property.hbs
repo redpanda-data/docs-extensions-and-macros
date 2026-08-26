@@ -133,78 +133,66 @@ endif::[]
 |
 {{{example}}}
 {{/if}}
-{{#if related_topics}}
-{{#with (allTopicsConditional related_topics) as |sectionType|}}
+{{#with (seeAlsoView .) as |seeAlso|}}
+{{#if seeAlso.items.length}}
 
-{{#if (eq sectionType "cloud")}}
+{{#if (eq seeAlso.sectionType "cloud")}}
 ifdef::env-cloud[]
 | Related topics
-|{{#if (gt (length ../related_topics) 1)}}{{#each ../related_topics}}
-{{#with (parseRelatedTopic this)}}
-* {{{value}}}
-{{/with}}
+|{{#if (gt seeAlso.items.length 1)}}{{#each seeAlso.items}}
+* {{{content}}}
 {{/each}}
 {{else}}
-{{#each ../related_topics}}
-{{#with (parseRelatedTopic this)}}
-{{{value}}}
-{{/with}}
+{{#each seeAlso.items}}
+{{{content}}}
 {{/each}}
 {{/if}}
 endif::[]
-{{else if (eq sectionType "self-managed")}}
+{{else if (eq seeAlso.sectionType "self-managed")}}
 ifndef::env-cloud[]
 | Related topics
-|{{#if (gt (length ../related_topics) 1)}}{{#each ../related_topics}}
-{{#with (parseRelatedTopic this)}}
-* {{{value}}}
-{{/with}}
+|{{#if (gt seeAlso.items.length 1)}}{{#each seeAlso.items}}
+* {{{content}}}
 {{/each}}
 {{else}}
-{{#each ../related_topics}}
-{{#with (parseRelatedTopic this)}}
-{{{value}}}
-{{/with}}
+{{#each seeAlso.items}}
+{{{content}}}
 {{/each}}
 {{/if}}
 endif::[]
 {{else}}
 | Related topics
-|{{#if (gt (length ../related_topics) 1)}}{{#each ../related_topics}}
-{{#with (parseRelatedTopic this)}}
-{{#if (eq type "cloud")}}
+|{{#if (gt seeAlso.items.length 1)}}{{#each seeAlso.items}}
+{{#if cloudOnly}}
 ifdef::env-cloud[]
-* {{{value}}}
+* {{{content}}}
 endif::[]
-{{else if (eq type "self-managed")}}
+{{else if selfHostedOnly}}
 ifndef::env-cloud[]
-* {{{value}}}
+* {{{content}}}
 endif::[]
 {{else}}
-* {{{value}}}
+* {{{content}}}
 {{/if}}
-{{/with}}
 {{/each}}
 {{else}}
-{{#each ../related_topics}}
-{{#with (parseRelatedTopic this)}}
-{{#if (eq type "cloud")}}
+{{#each seeAlso.items}}
+{{#if cloudOnly}}
 ifdef::env-cloud[]
-{{{value}}}
+{{{content}}}
 endif::[]
-{{else if (eq type "self-managed")}}
+{{else if selfHostedOnly}}
 ifndef::env-cloud[]
-{{{value}}}
+{{{content}}}
 endif::[]
 {{else}}
-{{{value}}}
+{{{content}}}
 {{/if}}
-{{/with}}
 {{/each}}
 {{/if}}
 {{/if}}
-{{/with}}
 {{/if}}
+{{/with}}
 {{#if aliases}}
 
 ifndef::env-cloud[]

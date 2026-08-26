@@ -20,6 +20,11 @@ TOOL_ROOT     := $(MODULE_ROOT)/tools/property-extractor
 TMP_ROOT      := $(TOOL_ROOT)/tmp
 REDPANDA_SRC  := $(TMP_ROOT)/redpanda
 TREESITTER_DIR:= $(TOOL_ROOT)/tree-sitter/tree-sitter-cpp
+# One pin, read from the module that also bootstraps this grammar at run time
+# (tools/lint-strings/surfaces/properties.js ensureTreesitter). Holding the tag
+# in both places meant a bump here would silently leave the linter checking out
+# a different grammar than the generator.
+TREESITTER_TAG:= $(shell node -p "require('$(MODULE_ROOT)/tools/lint-strings/surfaces/properties.js').TREESITTER_TAG")
 VENV          := $(TOOL_ROOT)/tmp/redpanda-property-extractor-venv
 PYTHON        := $(VENV)/bin/python
 TREE_SITTER   := npx tree-sitter
@@ -141,13 +146,13 @@ treesitter:
 	  git clone https://github.com/tree-sitter/tree-sitter-cpp.git "$(TREESITTER_DIR)"; \
 	fi
 	@CURRENT_TAG=$$(git -C "$(TREESITTER_DIR)" describe --tags --exact-match 2>/dev/null || true); \
-	if [ "$$CURRENT_TAG" = "v0.20.5" ] && [ -f "$(TREESITTER_DIR)/src/parser.c" ]; then \
-	  echo "✅ tree-sitter-cpp parser already generated at v0.20.5; skipping regeneration"; \
+	if [ "$$CURRENT_TAG" = "$(TREESITTER_TAG)" ] && [ -f "$(TREESITTER_DIR)/src/parser.c" ]; then \
+	  echo "✅ tree-sitter-cpp parser already generated at $(TREESITTER_TAG); skipping regeneration"; \
 	else \
-	  echo "🔄 Ensuring tree-sitter-cpp is at compatible version v0.20.5…"; \
+	  echo "🔄 Ensuring tree-sitter-cpp is at compatible version $(TREESITTER_TAG)…"; \
 	  cd "$(TREESITTER_DIR)" && \
 	    git fetch --tags -q && \
-	    git checkout -q v0.20.5 && \
+	    git checkout -q $(TREESITTER_TAG) && \
 	    echo "🔧 Generating parser in $(TREESITTER_DIR)…" && \
 	    export CFLAGS="-Wno-unused-but-set-variable" && \
 	    npm install --silent && \
