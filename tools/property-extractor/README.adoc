@@ -142,8 +142,12 @@ Create a `property-overrides.json` file to customize extracted documentation:
       "description": "Network address and port for Kafka API clients to connect to Redpanda brokers.",
       "example": ".Example\n[,yaml]\n----\nredpanda:\n  kafka_api:\n    - name: internal\n      address: 0.0.0.0\n      port: 9092\n    - name: external\n      address: redpanda.example.com\n      port: 19092\n----",
       "version": "v21.4.1",
-      "related_topics": [
-        "xref:manage:kubernetes/networking/k-networking-and-connectivity.adoc[]"
+      "see_also": [
+        "xref:manage:kubernetes/networking/k-networking-and-connectivity.adoc[]",
+        {
+          "content": "xref:manage:cluster-maintenance/config-cluster.adoc[]",
+          "cloud_only": true
+        }
       ]
     }
   }
@@ -156,7 +160,17 @@ Create a `property-overrides.json` file to customize extracted documentation:
 * `example` - Add usage example in AsciiDoc format
 * `example_file` - Load example from external file
 * `version` - Document when property was introduced
-* `related_topics` - Array of AsciiDoc xrefs to related content
+* `see_also` - Array of related links. Each item is either a plain string (shown in every build) or an object `{content, cloud_only}` / `{content, self_hosted_only}` (shown only in that build, wrapped with `ifdef::env-cloud[]`/`ifndef::env-cloud[]` at generation time). Setting both `cloud_only` and `self_hosted_only` on the same item is rejected by the schema — it would wrap the item in both directives at once, so it renders in neither build.
+* `related_topics` - Deprecated predecessor to `see_also`. An array of plain strings, optionally prefixed `cloud-only:` / `self-managed-only:` for the same conditional behavior — that prefix is free text with no validation, which is why `see_also` replaced it. Existing `related_topics` entries keep working; new entries should use `see_also`.
+
+Validate an overrides file against its schema (`docs-data/property-overrides.schema.json`) before generating docs:
+
+[,bash]
+----
+npx doc-tools validate property-overrides --overrides docs-data/property-overrides.json
+----
+
+This catches malformed `see_also` items and unrecognized override keys — including a typo that would otherwise be silently dropped, since applying an override to an *existing* property has no catch-all pass-through (only overrides that create a new property from scratch do).
 
 === Understanding property changes
 

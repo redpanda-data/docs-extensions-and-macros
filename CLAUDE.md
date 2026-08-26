@@ -341,6 +341,18 @@ When the PR merges to `main`, the Action publishes the new version. Consuming re
 
 If two PRs bump to the same version, whichever merges second must rebase and bump again — the publish step is skipped if the version already exists on npm.
 
+### If your change touched a docs-data/*.schema.json file
+
+Schemas that document a `docs-data/*.json` file (`rpk-overrides.schema.json`, `property-overrides.schema.json`, ...) live inside each content repo's own `docs-data/`, next to the file they document — not only in this package — so a writer can change both the data and its schema in one PR without waiting on a release here first. That means this package's copy and a content repo's copy can drift apart silently, with nothing to catch it, if this package's copy changes and nobody remembers to update the other side.
+
+After a content repo updates its `@redpanda-data/docs-extensions-and-macros` dependency, run:
+
+```bash
+npx doc-tools sync-schemas
+```
+
+This copies every `docs-data/*.schema.json` this package ships into the content repo's own `docs-data/`, reporting which files were created, updated, or already current. Use `npx doc-tools sync-schemas --check` in CI (see `docs`'s `validate-docs-data.yml` for the pattern) to fail the build instead of silently accumulating drift.
+
 ## How this repository is organized
 
 ```
