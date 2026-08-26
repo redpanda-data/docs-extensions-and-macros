@@ -7,6 +7,7 @@
  *   prop:cloud_storage_enabled[]
  *   prop:iceberg_enabled[link=true]
  *   prop:retention.ms[link=true,page=properties/topic-properties]
+ *   prop:cloud_storage_enabled[link=true,page=cloud:reference:properties/cluster-properties]
  *   prop:write_caching_default[text=write caching]
  *
  * The property renders as a marked <code> element that the docs UI decorates
@@ -54,11 +55,17 @@
  * a page in this component actually documents it. The page is discovered by
  * indexing which reference-module page documents each property, scanning
  * property headings in the partials each page includes and respecting include
- * tag filters such as tags=redpanda-cloud. Links are therefore
+ * tag filters such as tags=redpanda-cloud. Discovered links are therefore
  * component-relative and stay correct if properties are split across
- * different pages later. Nothing is ever linked across components, and no
- * page target is guessed from a property's scope: a link the build cannot
- * verify would be a broken link. Use page= to set the target explicitly.
+ * different pages later: nothing is ever discovered across components, and no
+ * page target is guessed from a property's scope, because a link the build
+ * cannot verify would be a broken link.
+ *
+ * Use page= to set the target explicitly instead of discovering it -- an
+ * override the build does not verify either way, so it may name any page that
+ * documents the property, in this component or another: a bare name
+ * (properties/topic-properties) stays module-relative within reference here,
+ * while module:page or component:module:page points anywhere else.
  *
  * With helm-path=auto, pages rendered with the env-kubernetes attribute
  * display the property as its Helm values path (storage.tiered.config.*
@@ -816,6 +823,23 @@ function reportUnpublishedProperty ({ name, registry, mode, filePath }) {
 }
 
 /**
+ * Resolve a page= value into the resource ID prefix an xref needs, before the
+ * trailing .adoc. A bare name (no colon) is module-relative within reference
+ * in the page's own component, matching every page= value published today.
+ * Qualifying it with a module (module:page) or a component and module
+ * (component:module:page) points the link anywhere else the property is
+ * documented: page= is never build-verified (buildPageIndex only runs when
+ * page= is absent), so restricting its shape bought no safety, only
+ * inflexibility.
+ *
+ * @param {string} page
+ * @returns {string}
+ */
+function resolvePageTarget (page) {
+  return page.includes(':') ? page : `reference:${page}`
+}
+
+/**
  * Build the AsciiDoc content emitted for one macro instance. Exported for
  * unit testing.
  *
@@ -824,7 +848,10 @@ function reportUnpublishedProperty ({ name, registry, mode, filePath }) {
  * @param {string} [opts.text] - Display text override.
  * @param {boolean} [opts.link] - Whether to link to the reference page. Ignored
  *   without a page: the macro never guesses a target.
- * @param {string} [opts.page] - Reference page (module-relative, no .adoc).
+ * @param {string} [opts.page] - Reference page. A bare name (no colon) is
+ *   module-relative within reference in the current component; qualify it
+ *   with a module (module:page) or a component and module
+ *   (component:module:page) to point elsewhere. No .adoc.
  * @param {string} [opts.scope] - config_scope, used only for the Helm path.
  * @param {string} opts.role - CSS class for the code element.
  * @param {boolean} [opts.plain] - Render unmarked code (no tooltip, no link)
@@ -835,7 +862,7 @@ function buildPropContent ({ name, text, link, page, scope, role, helmPath = fal
   const display = text || (helmPath && helmValuesPath(name, scope)) || name
   if (plain) return `<code>${display}</code>`
   const inner = link && page
-    ? `xref:reference:${page}.adoc#${propertyAnchor(name)}[${display}]`
+    ? `xref:${resolvePageTarget(page)}.adoc#${propertyAnchor(name)}[${display}]`
     : display
   // Escape every interpolated attribute value. role comes from a site
   // attribute, docUrl from a page's published URL, and name from a dataset
@@ -970,6 +997,7 @@ function register (registry, config = {}) {
 
 module.exports.register = register
 module.exports.buildPropContent = buildPropContent
+module.exports.resolvePageTarget = resolvePageTarget
 module.exports.propertyAnchor = propertyAnchor
 module.exports.helmValuesPath = helmValuesPath
 module.exports.loadPropertiesFor = loadPropertiesFor

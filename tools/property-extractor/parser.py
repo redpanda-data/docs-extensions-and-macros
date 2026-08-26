@@ -362,8 +362,29 @@ def parse_cpp_source(treesitter_parser, cpp_language, source_code):
     parameters = PropertyBag()
     current_field = None
     seen_first_argument = False
+    # Line spans (1-indexed, inclusive) of each full member-initializer entry
+    # (`name(arg, arg, ...)`), keyed by field name. Recorded so downstream
+    # consumers (for example, doc-string linting and PR suggestion blocks) can
+    # anchor a property to its exact source lines. Additive: existing
+    # consumers of the output JSON are unaffected.
+    declaration_spans = {}
 
     for node, label in captures:
+        # The SOURCE_QUERY also captures the whole field_initializer node as
+        # @field. Use it to record the declaration's line span; the entry is
+        # keyed by its field_identifier child so this works regardless of the
+        # order tree-sitter returns same-start captures in.
+        if label == "field" and node.type == "field_initializer":
+            name_node = next(
+                (c for c in node.children if c.type == "field_identifier"), None
+            )
+            if name_node is not None:
+                declaration_spans[name_node.text.decode("utf-8")] = (
+                    node.start_point[0] + 1,
+                    node.end_point[0] + 1,
+                )
+            continue
+
         # Start of a new field initializer
         if label == "field" and node.type == "field_identifier":
             current_field = node.text.decode("utf-8")
@@ -390,6 +411,11 @@ def parse_cpp_source(treesitter_parser, cpp_language, source_code):
 
             if normalized_param:
                 parameters[current_field]["params"].append(normalized_param)
+
+    for field_name, (line_start, line_end) in declaration_spans.items():
+        if field_name in parameters:
+            parameters[field_name]["line_start"] = line_start
+            parameters[field_name]["line_end"] = line_end
 
     return parameters
 

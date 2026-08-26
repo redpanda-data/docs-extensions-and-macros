@@ -36,9 +36,13 @@ display help for command
 * `fetch` - Fetch a file or directory from GitHub and save it locally
 * `setup-mcp` - Configure the Redpanda Docs MCP server for Claude Code/Desktop
 * `validate-mcp` - Validate MCP server configuration (tools, resources)
+* `sync-schemas` - Sync this package's docs-data/*.schema.json into a content repo's docs-data/
 * `mcp-version` - Show MCP server version and configuration information
+* `lint-strings` - Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)
+* `preview-string` - Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish
 * `generate` - Run docs automations
 * `validate` - Validate docs data against internal sources of truth
+* `overrides` - Audit docs-side override files against extracted source strings
 * `help` - display help for command
 
 == install-test-dependencies
@@ -182,6 +186,78 @@ echo "image: redpandadata/console:$CONSOLE_VERSION"
 
 - Internet connection to access GitHub API
 - GitHub API rate limits apply (60 requests/hour unauthenticated)
+
+== get-antora-value
+
+Reads a value from antora.yml using a dot-separated key path. Useful for retrieving version attributes and other configuration in CI/CD pipelines.
+
+*Why use it:*
+
+Automation workflows need to read the currently documented versions from antora.yml to determine what version to diff against when generating updated documentation.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools get-antora-value [options] <keyPath>
+----
+
+*Options:*
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Get the latest documented Redpanda version
+npx doc-tools get-antora-value asciidoc.attributes.latest-redpanda-tag
+# Output: v26.1.9
+
+# Get the component name
+npx doc-tools get-antora-value name
+# Output: ROOT
+----
+
+*Requirements:*
+
+- Must run from directory containing antora.yml or antora.yaml
+
+== set-antora-value
+
+Sets a value in antora.yml using a dot-separated key path. Uses surgical text replacement to preserve formatting and comments.
+
+*Why use it:*
+
+Automation workflows need to update version attributes in antora.yml after generating documentation to track the currently documented version.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools set-antora-value [options] <keyPath> <value>
+----
+
+*Options:*
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Update the latest rpk version
+npx doc-tools set-antora-value asciidoc.attributes.latest-rpk-version v26.2.0
+
+# Update the latest Redpanda version
+npx doc-tools set-antora-value asciidoc.attributes.latest-redpanda-tag v26.2.0
+----
+
+*Requirements:*
+
+- Must run from directory containing antora.yml or antora.yaml
 
 == link-readme
 
@@ -396,40 +472,56 @@ npx doc-tools validate-mcp
 
 None.
 
-== preview-prompt
+== sync-schemas
 
-Redpanda Document Automation CLI
+Copy this package's docs-data/*.schema.json files into a content repo's own docs-data/ (the file that documents docs-data/x.json lives alongside x.json itself, so a writer can change both in one PR without waiting on a package release first). Run this after bumping
+
+*Why use it:*
+
+Nothing keeps a content repo's schema copy in sync with this package's copy today, in either direction. A content repo's copy can legitimately be ahead of this package's (confirmed happening in practice: the docs repo's rpk-overrides.schema.json documents a real, working `asPartial` override field that this package's own copy is missing) — overwriting it in that case would delete real, correct documentation, not fix drift. This only overwrites when this package's copy is a strict superset of the destination; otherwise it reports which keys only the destination has and leaves the file alone (status 'diverged') unless --force is passed. --check never writes, for a CI gate.
 
 *Usage:*
 
 [,bash]
 ----
-doc-tools [options] [command]
+doc-tools sync-schemas [options]
 ----
 
 *Options:*
 
-`-V, --version`::
-output the version number
+`--dest <path>`::
+Destination docs-data directory (default: "docs-data")
+
+`--check`::
+Report drift without writing; exit 1 if any schema is missing, out of date, or diverged
+
+`--force`::
+Overwrite even a destination that has diverged (has content this package lacks)
 
 `-h, --help`::
 display help for command
 
-*Commands:*
+*Examples:*
 
-* `install-test-dependencies` - Install packages for doc test workflows
-* `get-redpanda-version` - Print the latest Redpanda version
-* `get-console-version` - Print the latest Console version
-* `get-antora-value` - Read a value from antora.yml by dot-path (e.g., asciidoc.attributes.latest-redpanda-tag)
-* `set-antora-value` - Set a value in antora.yml by dot-path (e.g., asciidoc.attributes.latest-rpk-version)
-* `link-readme` - Symlink a README.adoc into docs/modules/<module>/pages/
-* `fetch` - Fetch a file or directory from GitHub and save it locally
-* `setup-mcp` - Configure the Redpanda Docs MCP server for Claude Code/Desktop
-* `validate-mcp` - Validate MCP server configuration (tools, resources)
-* `mcp-version` - Show MCP server version and configuration information
-* `generate` - Run docs automations
-* `validate` - Validate docs data against internal sources of truth
-* `help` - display help for command
+[,bash]
+----
+# Sync into ./docs-data (writes any missing or out-of-date schema)
+npx doc-tools sync-schemas
+
+# Report drift without writing -- exits 1 if anything is out of sync
+npx doc-tools sync-schemas --check
+
+# Sync into a non-default location
+npx doc-tools sync-schemas --dest path/to/docs-data
+
+# Overwrite even a destination that has diverged (rarely correct --
+# read the 'diverged' output first; it names what would be lost)
+npx doc-tools sync-schemas --force
+----
+
+*Requirements:*
+
+None.
 
 == mcp-version
 
@@ -469,6 +561,107 @@ npx doc-tools mcp-version --stats
 
 None.
 
+== lint-strings
+
+Deterministic lint for user-facing doc strings embedded in engineering source code (property descriptions, metric help strings, ...). These strings ship verbatim to docs.redpanda.com, so this command surfaces quality problems (empty descriptions, broken markup, name-echo tautologies, convention drift) at write time, with exact file:line spans for each declaration.
+
+*Why use it:*
+
+The docs team currently patches bad source strings after the fact via override files. Linting where engineers write the strings - including a declaration-anchored --diff mode for PR reviews - retires that drift debt.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools lint-strings [options]
+----
+
+*Options:*
+
+`--repo <path>`::
+Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned.
+
+`--surface <list>`::
+Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect
+
+`--diff <base>`::
+Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD
+
+`--format <format>`::
+Output format: human or json (default: "human")
+
+`--skip-rules <list>`::
+Comma-separated rule ids to skip
+
+`--only-rules <list>`::
+Comma-separated rule ids to run exclusively
+
+`--strict`::
+Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Lint all supported surfaces in a local redpanda checkout
+npx doc-tools lint-strings --repo ~/redpanda
+
+# Lint only properties, machine-readable
+npx doc-tools lint-strings --repo ~/redpanda --surface properties --format json
+
+# PR mode: only declarations whose span intersects the diff
+npx doc-tools lint-strings --repo ~/redpanda --diff origin/dev
+----
+
+== preview-string
+
+Render ONE doc-string declaration from local engineering source to the final published snippet: properties through the real extractor + Handlebars template (two panes when --overrides shows a docs-repo override masking the source string), rpk through the real formatDescription() transformer, and metrics/helm/crd/connect in their published output shapes.
+
+*Why use it:*
+
+Engineers can see what their embedded string becomes on docs.redpanda.com BEFORE it ships - including whether an override in the docs repo would silently mask their fix.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools preview-string [options]
+----
+
+*Options:*
+
+`--repo <path>`::
+Path to an existing engineering checkout. Nothing is cloned.
+
+`--surface <surface>`::
+One of: properties, rpk, metrics, helm, crd, connect
+
+`--name <name>`::
+Declaration name: property name, rpk command token or --flag, metric name, helm key path, CRD json field (or Struct.field), connect component/field name
+
+`--overrides <path>`::
+Docs-repo overrides JSON (properties only): adds an "as shipped" pane and a MASKED-BY-OVERRIDE notice when the override differs
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# What does this property's docs section look like?
+npx doc-tools preview-string --repo ~/redpanda --surface properties --name log_segment_size
+
+# Is my override masking the source string?
+npx doc-tools preview-string --repo ~/redpanda --surface properties --name log_segment_size --overrides ~/docs/docs-data/property-overrides.json
+
+# What does formatDescription do to my rpk Long text?
+npx doc-tools preview-string --repo ~/redpanda --surface rpk --name health
+----
+
 == generate
 
 Run docs automations
@@ -496,13 +689,300 @@ display help for command
 * `rpk-docs` - Generate rpk CLI documentation from source. Builds rpk and parses source for platform detection.
 * `rpk-env-partial` - Generate the -X -> RPK_* env var mapping partial from rpk -X list output.
 * `rpk-plugin-stubs` - Reconcile single-source stub pages and nav against the docs repo's rpk plugin partials. Run from the consumer repo root.
-* `rpk-overrides` - Validate rpk-overrides.json against schema and check for common issues
 * `helm-spec` - Generate AsciiDoc documentation for Helm charts. Requires either --tag or --branch for GitHub URLs.
 * `cloud-regions` - Generate Markdown table of cloud regions and tiers from GitHub YAML file
 * `crd-spec` - Generate Asciidoc documentation for Kubernetes CRD references. Requires either --tag or --branch.
 * `bundle-openapi` - Bundle Redpanda OpenAPI fragments for admin and connect APIs. Requires either --tag or --branch.
 * `update-connect-version` - Update the Redpanda Connect version in antora.yml
 * `help` - display help for command
+
+=== generate metrics-docs
+
+Generates comprehensive metrics reference documentation by running Redpanda in Docker and scraping the `/public_metrics` Prometheus endpoint. Starts a Redpanda cluster with the specified version, waits for it to be ready, collects all exposed metrics, parses the Prometheus format, and generates categorized AsciiDoc documentation. Optionally compares metrics between versions to identify new, removed, or changed metrics.
+
+*Why use it:*
+
+Redpanda exposes hundreds of metrics for monitoring and observability. Manual documentation of metrics is error-prone and becomes outdated as new metrics are added or existing ones change. This automation ensures metrics documentation accurately reflects what Redpanda actually exports at each version. Running Redpanda in Docker and scraping metrics directly is the only reliable way to capture the complete and accurate metrics set.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate metrics-docs [options]
+----
+
+*Options:*
+
+`-t, --tag <tag>`::
+Git tag for released content (GA/beta)
+
+`-b, --branch <branch>`::
+Branch name for in-progress content
+
+`--docker-repo <repo>`::
+Docker repository to use (default: "redpanda")
+
+`--console-tag <tag>`::
+Redpanda Console version to use (default: "latest")
+
+`--console-docker-repo <repo>`::
+Docker repository for Console (default: "console")
+
+`--diff <oldTag>`::
+Also diff autogenerated metrics from <oldTag> → <tag>
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Basic: Generate metrics docs for a specific version
+npx doc-tools generate metrics-docs --tag v25.3.1
+
+# Compare metrics between versions to see what changed
+npx doc-tools generate metrics-docs \
+  --tag v25.3.1 \
+  --diff v25.2.1
+
+# Use custom Docker repository
+npx doc-tools generate metrics-docs \
+  --tag v25.3.1 \
+  --docker-repo docker.redpanda.com/redpandadata/redpanda
+
+# Full workflow: document new release
+VERSION=$(npx doc-tools get-redpanda-version)
+npx doc-tools generate metrics-docs --tag $VERSION
+----
+
+*Requirements:*
+
+- Docker must be installed and running
+- Port 9644 must be available (Redpanda metrics endpoint)
+- Sufficient disk space for Docker image
+- Internet connection to pull Docker images
+
+=== generate rpcn-connector-docs
+
+Generates complete reference documentation for Redpanda Connect (formerly Benthos) connectors, processors, and components. Parses component templates and configuration schemas, reads connector metadata from CSV, and generates AsciiDoc documentation for each component. Supports diffing changes between versions and automatically updating what's new documentation. Can also generate Bloblang function documentation.
+
+*Why use it:*
+
+Redpanda Connect has hundreds of connectors (inputs, outputs, processors) with complex configuration schemas. Each component's documentation lives in its source code as struct tags and comments. Manual documentation is impossible to maintain. This automation extracts documentation directly from code, ensuring accuracy and completeness. The diff capability automatically identifies new connectors and changed configurations for release notes.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate rpcn-connector-docs [options]
+----
+
+*Options:*
+
+`-d, --data-dir <path>`::
+Directory where versioned connect JSON files live (default: "<repository-root>/docs-data")
+
+`--old-data <path>`::
+Optional override for old data file (for diff)
+
+`--update-whats-new`::
+Update whats-new.adoc with new section from diff JSON
+
+`-f, --fetch-connectors`::
+Fetch latest connector data using rpk
+
+`--connect-version <version>`::
+Connect version to fetch (requires --fetch-connectors)
+
+`-m, --draft-missing`::
+Generate full-doc drafts for connectors missing in output
+
+`--template-main <path>`::
+Main Handlebars template (default: "<repository-root>/tools/redpanda-connect/templates/connector.hbs")
+
+`--template-intro <path>`::
+Intro section partial template (default: "<repository-root>/tools/redpanda-connect/templates/intro.hbs")
+
+`--template-fields <path>`::
+Fields section partial template (default: "<repository-root>/tools/redpanda-connect/templates/fields-partials.hbs")
+
+`--template-examples <path>`::
+Examples section partial template (default: "<repository-root>/tools/redpanda-connect/templates/examples-partials.hbs")
+
+`--template-metadata <path>`::
+Metadata section partial template (default: "<repository-root>/tools/redpanda-connect/templates/metadata-partials.hbs")
+
+`--template-description <path>`::
+Description section partial template (default: "<repository-root>/tools/redpanda-connect/templates/descriptions-partials.hbs")
+
+`--template-bloblang <path>`::
+Custom Handlebars template for bloblang function/method partials
+
+`--overrides <path>`::
+Optional JSON file with overrides (default: "docs-data/overrides.json")
+
+`--include-bloblang`::
+Include Bloblang functions and methods in generation
+
+`--prune-orphaned-descriptions`::
+Allow the description-partial orphan sweep to blank more than 10% of the tree. Only use this when the connector dataset is confirmed complete: an incomplete dataset looks identical to a mass upstream deletion and the sweep blanks published content
+
+`--cloud-version <version>`::
+Cloud binary version (default: auto-detect latest)
+
+`--cgo-version <version>`::
+cgo binary version (default: same as cloud-version)
+
+`--skip-intermediate`::
+Skip intermediate release processing (legacy mode - only compare latest vs last documented)
+
+`--from-version <version>`::
+Override starting version instead of using antora.yml (useful for backfilling)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Basic: Generate all connector docs
+npx doc-tools generate rpcn-connector-docs
+
+# Generate docs and automatically update what's new page
+npx doc-tools generate rpcn-connector-docs --update-whats-new
+
+# Include Bloblang function documentation
+npx doc-tools generate rpcn-connector-docs --include-bloblang
+
+# Fetch latest connector data using rpk
+npx doc-tools generate rpcn-connector-docs --fetch-connectors
+
+# Full workflow with diff and what's new update
+npx doc-tools generate rpcn-connector-docs \
+  --update-whats-new \
+  --include-bloblang
+----
+
+*Requirements:*
+
+- rpk and rpk connect must be installed
+- Internet connection for fetching connector data
+- Node.js for parsing and generation
+
+=== generate migrate-rpcn-descriptions
+
+One-time migration that rewires published connector reference pages onto the regenerated description partial: the header `:description:` becomes `include::...[tag=attrs]` and the frozen intro prose becomes `include::...[tag=body]`. Afterwards `generate rpcn-connector-docs` keeps both fresh on every run.
+
+*Why use it:*
+
+Connector pages are one-time first drafts, so their summary, "Introduced in version" line and description prose never change again even when the connector does. The body rewire is guarded: a page whose intro carries anything the partial does not reproduce is reported and left for a human, because rewriting it would delete published content.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate migrate-rpcn-descriptions [options]
+----
+
+*Options:*
+
+`--write`::
+Apply changes (default is a dry run that only reports)
+
+`--skip-body`::
+Rewire page headers only, leaving the frozen intro prose in the page
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Dry run (default): report the pages that would change
+npx doc-tools generate migrate-rpcn-descriptions
+
+# Apply the migration
+npx doc-tools generate migrate-rpcn-descriptions --write
+
+# Rewire page headers only, leaving the body prose alone
+npx doc-tools generate migrate-rpcn-descriptions --write --skip-body
+----
+
+=== generate migrate-rpcn-metadata
+
+One-time migration that moves inline `== Metadata` blocks out of connector reference pages (modules/components/pages/<type>/<name>.adoc) and into regenerated partials (modules/components/partials/metadata/<type>/<name>.adoc), replacing the inline block in the page with an include directive. Afterwards `generate rpcn-connector-docs` keeps the partial in sync with the connector's upstream description on every run.
+
+*Why use it:*
+
+Metadata documented inline in the main page is never refreshed by normal regeneration, so it drifts from the source. Extracting it into a partial makes it flow through automatically, matching the fields and examples partials.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate migrate-rpcn-metadata [options]
+----
+
+*Options:*
+
+`--write`::
+Apply changes (default is a dry run that only reports)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Dry run (default): report the pages that would change
+npx doc-tools generate migrate-rpcn-metadata
+
+# Apply the migration
+npx doc-tools generate migrate-rpcn-metadata --write
+----
+
+=== generate migrate-property-refs
+
+One-time migration of plain-backtick property mentions to the prop: inline macro, so property tooltips become opt-in. Only names that exist in the published property reference JSON AND contain a separator (_ or .) are converted. Separator-free names such as admin, brokers, rack, retries, and superusers are the ambiguous words that motivated opt-in marking, so they are always left for a human. Dry run unless --write is given.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate migrate-property-refs [options]
+----
+
+*Options:*
+
+`--properties <path>`::
+Path to the published redpanda-properties JSON to validate names against
+
+`--docs-dir <path>`::
+Docs repo root containing modules/ (default: ".")
+
+`--config-refs`::
+Also convert config_ref macro calls to prop macro calls
+
+`--write`::
+Apply changes (default is a dry run that only reports)
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Preview the conversion from a docs repo checkout
+npx doc-tools generate migrate-property-refs --properties modules/reference/attachments/redpanda-properties-v26.2.1.json
+
+# Apply it
+npx doc-tools generate migrate-property-refs --properties modules/reference/attachments/redpanda-properties-v26.2.1.json --write
+----
 
 === generate property-docs
 
@@ -608,73 +1088,6 @@ npx doc-tools generate property-docs \
 - Internet connection to clone Redpanda repository
 - For --cloud-support: GitHub token with repo permissions (GITHUB_TOKEN env var)
 - For --cloud-support: Python packages pyyaml and requests
-
-=== generate metrics-docs
-
-Generates comprehensive metrics reference documentation by running Redpanda in Docker and scraping the `/public_metrics` Prometheus endpoint. Starts a Redpanda cluster with the specified version, waits for it to be ready, collects all exposed metrics, parses the Prometheus format, and generates categorized AsciiDoc documentation. Optionally compares metrics between versions to identify new, removed, or changed metrics.
-
-*Why use it:*
-
-Redpanda exposes hundreds of metrics for monitoring and observability. Manual documentation of metrics is error-prone and becomes outdated as new metrics are added or existing ones change. This automation ensures metrics documentation accurately reflects what Redpanda actually exports at each version. Running Redpanda in Docker and scraping metrics directly is the only reliable way to capture the complete and accurate metrics set.
-
-*Usage:*
-
-[,bash]
-----
-doc-tools generate metrics-docs [options]
-----
-
-*Options:*
-
-`-t, --tag <tag>`::
-Git tag for released content (GA/beta)
-
-`-b, --branch <branch>`::
-Branch name for in-progress content
-
-`--docker-repo <repo>`::
-Docker repository to use (default: "redpanda")
-
-`--console-tag <tag>`::
-Redpanda Console version to use (default: "latest")
-
-`--console-docker-repo <repo>`::
-Docker repository for Console (default: "console")
-
-`--diff <oldTag>`::
-Also diff autogenerated metrics from <oldTag> → <tag>
-
-`-h, --help`::
-display help for command
-
-*Examples:*
-
-[,bash]
-----
-# Basic: Generate metrics docs for a specific version
-npx doc-tools generate metrics-docs --tag v25.3.1
-
-# Compare metrics between versions to see what changed
-npx doc-tools generate metrics-docs \
-  --tag v25.3.1 \
-  --diff v25.2.1
-
-# Use custom Docker repository
-npx doc-tools generate metrics-docs \
-  --tag v25.3.1 \
-  --docker-repo docker.redpanda.com/redpandadata/redpanda
-
-# Full workflow: document new release
-VERSION=$(npx doc-tools get-redpanda-version)
-npx doc-tools generate metrics-docs --tag $VERSION
-----
-
-*Requirements:*
-
-- Docker must be installed and running
-- Port 9644 must be available (Redpanda metrics endpoint)
-- Sufficient disk space for Docker image
-- Internet connection to pull Docker images
 
 === generate rpk-docs
 
@@ -820,113 +1233,54 @@ npx doc-tools generate rpk-env-partial --rpk-bin "$(command -v rpk)" --output mo
 npx doc-tools generate rpk-env-partial --from-json docs-data/rpk-v26.2.1.json --output modules/reference/partials/rpk-env-vars.adoc
 ----
 
-=== generate rpcn-connector-docs
+=== generate rpk-plugin-stubs
 
-Generates complete reference documentation for Redpanda Connect (formerly Benthos) connectors, processors, and components. Parses component templates and configuration schemas, reads connector metadata from CSV, and generates AsciiDoc documentation for each component. Supports diffing changes between versions and automatically updating what's new documentation. Can also generate Bloblang function documentation.
-
-*Why use it:*
-
-Redpanda Connect has hundreds of connectors (inputs, outputs, processors) with complex configuration schemas. Each component's documentation lives in its source code as struct tags and comments. Manual documentation is impossible to maintain. This automation extracts documentation directly from code, ensuring accuracy and completeness. The diff capability automatically identifies new connectors and changed configurations for release notes.
+Reconciles a consumer repo's single-source stub pages and nav section against the rpk plugin partials generated in the docs repo. Run from the consumer repo root (for example, adp-docs for rpk ai). Creates stubs for new partials, deletes managed stubs whose partial is gone, rebuilds the plugin's nav block, and proposes page aliases for likely renames. Full reconcile, so it is idempotent and heals pre-existing drift.
 
 *Usage:*
 
 [,bash]
 ----
-doc-tools generate rpcn-connector-docs [options]
+doc-tools generate rpk-plugin-stubs [options]
 ----
 
 *Options:*
 
-`-d, --data-dir <path>`::
-Directory where versioned connect JSON files live (default: "<repository-root>/docs-data")
+`--plugin <name>`::
+rpk plugin command name (default: "ai")
 
-`--old-data <path>`::
-Optional override for old data file (for diff)
+`--docs-repo <owner/repo>`::
+Docs repo that owns the partials (default: "redpanda-data/docs")
 
-`--update-whats-new`::
-Update whats-new.adoc with new section from diff JSON
+`--docs-ref <ref>`::
+Branch or tag to read partials from (default: "main")
 
-`-f, --fetch-connectors`::
-Fetch latest connector data using rpk
+`--partials-dir <path>`::
+Local partials directory (skips cloning the docs repo)
 
-`--connect-version <version>`::
-Connect version to fetch (requires --fetch-connectors)
+`--source-path <path>`::
+Path in the docs repo to read from (default: modules/reference/partials/rpk-<plugin>; use modules/reference/pages/rpk/rpk-connect for page-family content)
 
-`-m, --draft-missing`::
-Generate full-doc drafts for connectors missing in output
+`--stub-dir <path>`::
+Stub pages directory in the consumer repo (default: modules/reference/pages/rpk/rpk-<plugin>)
 
-`--template-main <path>`::
-Main Handlebars template (default: "<repository-root>/tools/redpanda-connect/templates/connector.hbs")
+`--nav-file <path>`::
+Nav file whose plugin block is rebuilt (default: "modules/ROOT/nav.adoc")
 
-`--template-intro <path>`::
-Intro section partial template (default: "<repository-root>/tools/redpanda-connect/templates/intro.hbs")
+`--include-prefix <prefix>`::
+Antora resource prefix for stub includes. Default: inferred from an existing stub.
 
-`--template-fields <path>`::
-Fields section partial template (default: "<repository-root>/tools/redpanda-connect/templates/fields-partials.hbs")
+`--attribute <line>`::
+Page attribute line added to new stubs (repeatable) (default: [])
 
-`--template-examples <path>`::
-Examples section partial template (default: "<repository-root>/tools/redpanda-connect/templates/examples-partials.hbs")
+`--summary-file <path>`::
+Write a markdown summary (for PR bodies)
 
-`--template-metadata <path>`::
-Metadata section partial template (default: "<repository-root>/tools/redpanda-connect/templates/metadata-partials.hbs")
-
-`--template-description <path>`::
-Description section partial template (default: "<repository-root>/tools/redpanda-connect/templates/descriptions-partials.hbs")
-
-`--template-bloblang <path>`::
-Custom Handlebars template for bloblang function/method partials
-
-`--overrides <path>`::
-Optional JSON file with overrides (default: "docs-data/overrides.json")
-
-`--include-bloblang`::
-Include Bloblang functions and methods in generation
-
-`--prune-orphaned-descriptions`::
-Allow the description-partial orphan sweep to blank more than 10% of the tree. Only use this when the connector dataset is confirmed complete: an incomplete dataset looks identical to a mass upstream deletion and the sweep blanks published content
-
-`--cloud-version <version>`::
-Cloud binary version (default: auto-detect latest)
-
-`--cgo-version <version>`::
-cgo binary version (default: same as cloud-version)
-
-`--skip-intermediate`::
-Skip intermediate release processing (legacy mode - only compare latest vs last documented)
-
-`--from-version <version>`::
-Override starting version instead of using antora.yml (useful for backfilling)
+`--dry-run`::
+Report what would change without writing
 
 `-h, --help`::
 display help for command
-
-*Examples:*
-
-[,bash]
-----
-# Basic: Generate all connector docs
-npx doc-tools generate rpcn-connector-docs
-
-# Generate docs and automatically update what's new page
-npx doc-tools generate rpcn-connector-docs --update-whats-new
-
-# Include Bloblang function documentation
-npx doc-tools generate rpcn-connector-docs --include-bloblang
-
-# Fetch latest connector data using rpk
-npx doc-tools generate rpcn-connector-docs --fetch-connectors
-
-# Full workflow with diff and what's new update
-npx doc-tools generate rpcn-connector-docs \
-  --update-whats-new \
-  --include-bloblang
-----
-
-*Requirements:*
-
-- rpk and rpk connect must be installed
-- Internet connection for fetching connector data
-- Node.js for parsing and generation
 
 === generate helm-spec
 
@@ -1276,80 +1630,6 @@ npx doc-tools generate update-connect-version --connect-version 4.50.0
 
 None (uses GitHub API).
 
-=== generate migrate-rpcn-metadata
-
-One-time migration that moves inline `== Metadata` blocks out of connector reference pages (modules/components/pages/<type>/<name>.adoc) and into regenerated partials (modules/components/partials/metadata/<type>/<name>.adoc), replacing the inline block in the page with an include directive. Afterwards `generate rpcn-connector-docs` keeps the partial in sync with the connector's upstream description on every run.
-
-*Why use it:*
-
-Metadata documented inline in the main page is never refreshed by normal regeneration, so it drifts from the source. Extracting it into a partial makes it flow through automatically, matching the fields and examples partials.
-
-*Usage:*
-
-[,bash]
-----
-doc-tools generate migrate-rpcn-metadata [options]
-----
-
-*Options:*
-
-`--write`::
-Apply changes (default is a dry run that only reports)
-
-`-h, --help`::
-display help for command
-
-*Examples:*
-
-[,bash]
-----
-# Dry run (default): report the pages that would change
-npx doc-tools generate migrate-rpcn-metadata
-
-# Apply the migration
-npx doc-tools generate migrate-rpcn-metadata --write
-----
-
-=== generate migrate-rpcn-descriptions
-
-One-time migration that rewires published connector reference pages onto the regenerated description partial: the header `:description:` becomes `include::...[tag=attrs]` and the frozen intro prose becomes `include::...[tag=body]`. Afterwards `generate rpcn-connector-docs` keeps both fresh on every run.
-
-*Why use it:*
-
-Connector pages are one-time first drafts, so their summary, "Introduced in version" line and description prose never change again even when the connector does. The body rewire is guarded: a page whose intro carries anything the partial does not reproduce is reported and left for a human, because rewriting it would delete published content.
-
-*Usage:*
-
-[,bash]
-----
-doc-tools generate migrate-rpcn-descriptions [options]
-----
-
-*Options:*
-
-`--write`::
-Apply changes (default is a dry run that only reports)
-
-`--skip-body`::
-Rewire page headers only, leaving the frozen intro prose in the page
-
-`-h, --help`::
-display help for command
-
-*Examples:*
-
-[,bash]
-----
-# Dry run (default): report the pages that would change
-npx doc-tools generate migrate-rpcn-descriptions
-
-# Apply the migration
-npx doc-tools generate migrate-rpcn-descriptions --write
-
-# Rewire page headers only, leaving the body prose alone
-npx doc-tools generate migrate-rpcn-descriptions --write --skip-body
-----
-
 == validate
 
 Validate docs data against internal sources of truth
@@ -1368,8 +1648,60 @@ display help for command
 
 *Commands:*
 
+* `rpk-overrides` - Validate rpk-overrides.json against schema and check for common issues
 * `enterprise-features` - Check the enterprise features registry against core, connect, and docs sources of truth
+* `property-overrides` - Validate property-overrides.json against its schema
 * `help` - display help for command
+
+=== validate rpk-overrides
+
+Validates the rpk-overrides.json file against the JSON schema and checks for common issues: - Schema compliance (required fields, valid types) - Valid $ref references (no broken or circular refs) - Valid command paths (compared against actual rpk command tree) - Valid admonition locations (after_flags, after_usage, etc.) - Valid platform values (linux, darwin, windows)
+
+*Why use it:*
+
+Catching override errors early prevents broken documentation. This command lets writers validate their changes before generation, avoiding cryptic errors during the build process.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools validate rpk-overrides [options]
+----
+
+*Options:*
+
+`--overrides <path>`::
+Path to overrides JSON file (default: "docs-data/rpk-overrides.json")
+
+`--tree <path>`::
+Path to rpk tree JSON file for command path validation (e.g., docs-data/rpk-v26.2.0.json)
+
+`--strict`::
+Exit with error code on validation failures
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Validate overrides with default paths
+npx doc-tools validate rpk-overrides
+
+# Validate against a specific rpk tree (for complete command path validation)
+npx doc-tools validate rpk-overrides --tree docs-data/rpk-v26.2.0.json
+
+# Validate a custom overrides file
+npx doc-tools validate rpk-overrides --overrides my-overrides.json
+
+# Strict mode - exit with error code on validation failures
+npx doc-tools validate rpk-overrides --strict
+----
+
+*Requirements:*
+
+- rpk-overrides.schema.json in docs-data/
 
 === validate enterprise-features
 
@@ -1436,4 +1768,103 @@ npx doc-tools validate enterprise-features --write-mapping modules/get-started/p
 
 Network access to raw.githubusercontent.com for any source not supplied
 with a local path option.
+
+=== validate property-overrides
+
+Validates docs-data/property-overrides.json against its JSON Schema: unknown keys (a typo that would otherwise be silently dropped by the extractor), and the see_also shape (a plain string, or an object naming exactly one of cloud_only/self_hosted_only).
+
+*Why use it:*
+
+property-overrides.json has no catch-all pass-through when an override targets an existing property — an unrecognized key like the typo `acceptable_values` (the generated-only field is `acceptable_values`, but the override key the extractor reads is `accepted_values`) is silently ignored rather than erroring. This check catches that class of mistake before generation, the same way `validate rpk-overrides` does for rpk.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools validate property-overrides [options]
+----
+
+*Options:*
+
+`--overrides <path>`::
+Path to overrides JSON file (default: "docs-data/property-overrides.json")
+
+`--strict`::
+Exit with error code on validation failures
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Validate overrides with the default path
+npx doc-tools validate property-overrides
+
+# Validate a custom overrides file
+npx doc-tools validate property-overrides --overrides my-overrides.json
+
+# Strict mode - exit with error code on validation failures
+npx doc-tools validate property-overrides --strict
+----
+
+*Requirements:*
+
+- property-overrides.schema.json in docs-data/
+
+== overrides
+
+Audit docs-side override files against extracted source strings
+
+*Usage:*
+
+[,bash]
+----
+doc-tools overrides [options] [command]
+----
+
+*Options:*
+
+`-h, --help`::
+display help for command
+
+*Commands:*
+
+* `audit` - Classify each override field as redundant, upstreamable, or keep against extracted source strings
+* `help` - display help for command
+
+=== overrides audit
+
+Classify each override field as redundant, upstreamable, or keep against
+
+*Usage:*
+
+[,bash]
+----
+doc-tools overrides audit [options]
+----
+
+*Options:*
+
+`--overrides <path>`::
+Path to the overrides JSON file (for example docs-data/property-overrides.json)
+
+`--extracted <path>`::
+Path to the extracted source JSON (property extractor raw output; required for the properties surface)
+
+`--surface <surface>`::
+Override surface to audit (choices: "properties", "rpk", "connect", default: "properties")
+
+`--format <format>`::
+Output format (choices: "json", "human", default: "json")
+
+`--repo <path>`::
+Redpanda checkout to extract raw source strings from (alternative to --extracted)
+
+`--output <path>`::
+Also write the JSON result to this file
+
+`-h, --help`::
+display help for command
 
