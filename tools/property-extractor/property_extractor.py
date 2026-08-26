@@ -1032,6 +1032,79 @@ def report_phantom_stubs():
     logger.warning("=" * 70)
 
 
+def infer_topic_property_category(name):
+    """Map a topic property's dotted name to a category, for properties with
+    no explicit category override. Every category returned here has a
+    corresponding tag::category-X[] section on the pages that render topic
+    properties -- "other" is a real, included category, not a discard pile.
+    """
+    retention = [
+        "cleanup.policy", "compaction.strategy", "delete.retention.ms", "max.compaction.lag.ms",
+        "min.cleanable.dirty.ratio", "min.compaction.lag.ms", "retention.bytes", "retention.ms"
+    ]
+    segment = [
+        "compression.type", "max.message.bytes", "message.timestamp.type", "segment.bytes", "segment.ms"
+    ]
+    performance = [
+        "flush.bytes", "flush.ms", "redpanda.leaders.preference", "replication.factor", "write.caching"
+    ]
+    tiered = [
+        "initial.retention.local.target.bytes", "initial.retention.local.target.ms", "redpanda.remote.delete",
+        "redpanda.remote.read", "redpanda.remote.recovery", "redpanda.remote.write", "retention.local.target.bytes",
+        "retention.local.target.ms"
+    ]
+    remote_replica = ["redpanda.remote.readreplica"]
+    iceberg = [
+        "redpanda.iceberg.delete", "redpanda.iceberg.invalid.record.action", "redpanda.iceberg.mode",
+        "redpanda.iceberg.partition.spec", "redpanda.iceberg.target.lag.ms"
+    ]
+    schema_registry = [
+        "redpanda.key.schema.id.validation", "redpanda.key.subject.name.strategy", "redpanda.value.schema.id.validation",
+        "redpanda.value.subject.name.strategy", "confluent.key.schema.validation", "confluent.key.subject.name.strategy",
+        "confluent.value.schema.validation", "confluent.value.subject.name.strategy"
+    ]
+    if name in retention:
+        return "retention-compaction"
+    if name in segment:
+        return "segment-message"
+    if name in performance:
+        return "performance-cluster"
+    if name in tiered:
+        return "tiered-storage"
+    if name in remote_replica:
+        return "remote-read-replica"
+    if name in iceberg:
+        return "iceberg-integration"
+    if name in schema_registry:
+        return "schema-registry"
+    return "other"
+
+
+def _ensure_category_fallback(properties):
+    """Guarantee every property has a category, so the property.hbs/
+    topic-property.hbs templates' `{{#if category}}` always wraps it in a
+    tag::category-X[] region. A property with no category at all gets no
+    tag region and is silently excluded by every page that assembles its
+    content from specific category-tag includes -- present in the raw
+    generated partial, invisible everywhere it's actually read from.
+
+    Runs after overrides are applied (including override-created phantom
+    stub properties, which previously never received a category at all)
+    so this covers every property regardless of where it came from.
+    """
+    for prop_name, property_data in properties.items():
+        if not hasattr(property_data, "get") or property_data.get("category"):
+            continue
+        if property_data.get("config_scope") == "topic" or property_data.get("is_topic_property"):
+            property_data["category"] = infer_topic_property_category(property_data.get("name", prop_name))
+        else:
+            # No per-name taxonomy exists for cluster/broker properties today
+            # (unlike topic properties' infer_topic_property_category) --
+            # "other" at least guarantees a real, included tag region
+            # instead of silent exclusion.
+            property_data["category"] = "other"
+
+
 def apply_property_overrides(properties, overrides, overrides_file_path=None):
     """
     Apply overrides from an overrides mapping to the extracted properties, mutating and returning the properties dictionary.
@@ -1114,6 +1187,8 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
     for property_data in properties.values():
         if hasattr(property_data, "get") and property_data.get("description"):
             property_data["description"] = _normalize_config_ref_macros(property_data["description"])
+
+    _ensure_category_fallback(properties)
     return properties
 
 
@@ -2783,49 +2858,6 @@ def extract_topic_properties(source_path, cluster_properties=None):
             if prop_data.get("is_noop", False):
                 continue
 
-            # Assign category based on property name pattern or mapping
-            def infer_category(name):
-                retention = [
-                    "cleanup.policy", "compaction.strategy", "delete.retention.ms", "max.compaction.lag.ms",
-                    "min.cleanable.dirty.ratio", "min.compaction.lag.ms", "retention.bytes", "retention.ms"
-                ]
-                segment = [
-                    "compression.type", "max.message.bytes", "message.timestamp.type", "segment.bytes", "segment.ms"
-                ]
-                performance = [
-                    "flush.bytes", "flush.ms", "redpanda.leaders.preference", "replication.factor", "write.caching"
-                ]
-                tiered = [
-                    "initial.retention.local.target.bytes", "initial.retention.local.target.ms", "redpanda.remote.delete",
-                    "redpanda.remote.read", "redpanda.remote.recovery", "redpanda.remote.write", "retention.local.target.bytes",
-                    "retention.local.target.ms"
-                ]
-                remote_replica = ["redpanda.remote.readreplica"]
-                iceberg = [
-                    "redpanda.iceberg.delete", "redpanda.iceberg.invalid.record.action", "redpanda.iceberg.mode",
-                    "redpanda.iceberg.partition.spec", "redpanda.iceberg.target.lag.ms"
-                ]
-                schema_registry = [
-                    "redpanda.key.schema.id.validation", "redpanda.key.subject.name.strategy", "redpanda.value.schema.id.validation",
-                    "redpanda.value.subject.name.strategy", "confluent.key.schema.validation", "confluent.key.subject.name.strategy",
-                    "confluent.value.schema.validation", "confluent.value.subject.name.strategy"
-                ]
-                if name in retention:
-                    return "retention-compaction"
-                if name in segment:
-                    return "segment-message"
-                if name in performance:
-                    return "performance-cluster"
-                if name in tiered:
-                    return "tiered-storage"
-                if name in remote_replica:
-                    return "remote-read-replica"
-                if name in iceberg:
-                    return "iceberg-integration"
-                if name in schema_registry:
-                    return "schema-registry"
-                return "other"
-
             converted_properties[prop_name] = {
                 "name": prop_name,
                 "description": prop_data.get("description", ""),
@@ -2839,7 +2871,7 @@ def extract_topic_properties(source_path, cluster_properties=None):
                 "acceptable_values": prop_data.get("acceptable_values", ""),
                 "is_deprecated": False,
                 "is_topic_property": True,
-                "category": infer_category(prop_name)
+                "category": infer_topic_property_category(prop_name)
             }
 
             # Add default values if they exist (inherited from cluster properties)
