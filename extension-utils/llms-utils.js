@@ -71,10 +71,36 @@ function stripMarkdownMetadata(content) {
   return text.trim();
 }
 
+/**
+ * Return the subset of `components` that have at least one page in `pages` —
+ * i.e. the components that actually get a generated `<name>-full.txt` export.
+ *
+ * A `<name>-full.txt` file is only written for components that have pages, so
+ * advertising an export for a corpus-less landing/utility component (e.g.
+ * `data-platform`, `self-managed`, `search`) links the AI index to a 404.
+ * Filtering the advertised list through this helper keeps it in sync with the
+ * files that are actually produced. Input order is preserved.
+ *
+ * @param {Array<{name: string}>} components - All components from the content catalog
+ * @param {Array<{src?: {component?: string}}>} pages - Pages that will be exported
+ * @returns {Array<{name: string}>} Components that have at least one page
+ */
+function componentsWithExports(components, pages) {
+  const componentNames = new Set(
+    (pages || [])
+      .map((page) => page && page.src && page.src.component)
+      .filter(Boolean)
+  );
+  return (components || []).filter((component) =>
+    componentNames.has(component.name)
+  );
+}
+
 module.exports = {
   LLMS_DIRECTIVE_BASE,
   LLMS_DIRECTIVE_REGEX,
   SOURCE_COMMENT_REGEX,
   formatLlmsDirective,
   stripMarkdownMetadata,
+  componentsWithExports,
 };
