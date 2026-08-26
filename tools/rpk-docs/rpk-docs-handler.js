@@ -1192,7 +1192,12 @@ function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
     const nextHeading = rest.search(/\n== /)
     const insertAt = nextHeading === -1 ? existingContent.length : sectionStart + nextHeading
     const before = existingContent.slice(0, insertAt).replace(/\s*$/, '\n\n')
-    const after = existingContent.slice(insertAt).replace(/^\n*/, '\n')
+    // A single newline here leaves the appended block's end marker comment
+    // directly above the next `== ` heading with no blank line between them.
+    // AsciiDoc comments don't terminate the preceding list block, so the
+    // heading is swallowed as literal list-item text instead of rendering
+    // as a heading. Needs the same blank-line separator as `before`.
+    const after = existingContent.slice(insertAt).replace(/^\n*/, '\n\n')
     fs.writeFileSync(whatsNewPath, `${before}${block}${after}`, 'utf8')
     console.log(`Appended ${version} block to the "${sectionHeading}" section in: ${whatsNewPath}`)
     return
