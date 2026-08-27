@@ -1,6 +1,6 @@
 == Test term
 :term-name: test term
-:hover-text: This is the description of the term that is used as hover text. More content is available in the glossary.
+:hover-text: Hover text for the term, covering the `rpk` command, the ``segment.bytes`` property, a "quoted" phrase, and a <placeholder>. More content is available in the glossary.
 
 More content here
 
