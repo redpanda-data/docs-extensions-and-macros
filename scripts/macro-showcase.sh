@@ -45,9 +45,9 @@ fi
 
 [[ -d $OUT ]] || { echo "no build output at $OUT; run without --report-only" >&2; exit 1; }
 
-if [[ -f $LOG ]] && grep -q '"level":"fatal"' "$LOG"; then
+if [[ -f $LOG ]] && grep -qE '"level":"fatal"|^\[[0-9:.]+\][[:space:]]+FATAL ' "$LOG"; then
   echo "WARNING: the last build logged a fatal error, so $OUT/ may be stale:" >&2
-  grep -oE '"level":"fatal"[^}]*"msg":"[^"]{0,140}' "$LOG" | tail -2 >&2
+  grep -oE '"level":"fatal"[^}]*"msg":"[^"]{0,140}|^\[[0-9:.]+\][[:space:]]+FATAL .{0,140}' "$LOG" | tail -2 >&2
   echo >&2
 fi
 
@@ -90,7 +90,7 @@ else ok "enterprise: since-gated feature gated on 26.2 (predates its since versi
 if has "$BETA" 'class="enterprise-feature"[^>]*>(<a[^>]*>)?Preview Since-Gated Feature'; then
   ok "enterprise: since-gated feature styled on 26.3 (at its since version)"
 else bad "enterprise: since-gated feature not styled on 26.3"; fi
-if has "$BETA" 'badge--(beta|unreleased)[^>]*>[^<]*Preview Since-Gated'; then
+if has "$BETA" 'enterprise-feature"[^>]*>(<a[^>]*>)?Preview Since-Gated Feature(</a>)?</span> <span class="badge'; then
   bad "enterprise: since-gated feature carries a badge on 26.3 (it is plain GA there)"
 else ok "enterprise: since-gated feature carries no badge on 26.3"; fi
 
@@ -113,6 +113,8 @@ echo
 echo "full log: $LOG      site: $OUT/"
 echo "start here: $OUT/preview/macros-course/index.html"
 echo "then compare: $OUT/macro-fixtures/26.2/ (released) vs $OUT/macro-fixtures/26.3/ (beta)"
+
+[[ $FIXTURE_FAIL -eq 0 ]] || exit 1
 
 if [[ $SERVE -eq 1 ]]; then
   echo "serving $OUT on http://localhost:5300 (ctrl-c to stop)"
