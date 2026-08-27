@@ -250,6 +250,15 @@ describe('rpk Docs Generation', () => {
       expect(formatDescription(input)).toContain('`$HOME/.local/bin`')
     })
 
+    // CodeRabbit caught this on #292: requiring a character after the slash
+    // meant a bare trailing slash ($HOME/, $PWD/ -- both real in the rpk
+    // source) never merged at all, staying split as `$HOME`/.
+    test('merges a bare trailing slash with nothing after it', () => {
+      const input = 'Files live in $HOME/ by default'
+      expect(formatDescription(input)).toContain('`$HOME/`')
+      expect(formatDescription(input)).not.toContain('`$HOME`/')
+    })
+
     test('does not double-backtick already formatted flags', () => {
       const input = 'Use `--verbose` for output'
       // After the regex, we clean up double backticks, result should be same
