@@ -110,6 +110,10 @@
           "type": "string",
           "description": "Override the command description. Replaces only the main description; sections from rpk output are preserved."
         },
+        "upstreamRef": {
+          "type": "string",
+          "description": "The upstream issue or PR (against the engineering repo whose defective rpk help text this description patches, e.g. 'redpanda-data/streaming-enterprise#12345') that will make this description override redundant once merged and released. A description override is a stopgap, not a fix: set this so the override is born with a retirement path, and remove both the override and this field once the fix ships. Only meaningful alongside 'description' — has no effect on generation or rendering."
+        },
         "appendToDescription": {
           "type": "string",
           "description": "Content to append to the auto-generated description instead of replacing it."
