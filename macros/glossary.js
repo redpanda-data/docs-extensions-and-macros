@@ -4,6 +4,21 @@ const $glossaryContexts = Symbol('$glossaryContexts')
 const { posix: path } = require('path')
 const chalk = require('chalk')
 
+// hover-text is raw, unconverted source text. Escape it for the HTML attribute
+// (mirrors enterprise.js's tooltip escaping) and restore backtick-monospace as
+// <code> only where the tooltip attribute renders HTML.
+function formatTooltipDefinition (text, tooltipAttr) {
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  if (tooltipAttr && tooltipAttr.startsWith('data-')) {
+    return escaped.replace(/`([^`]+)`/g, '<code>$1</code>')
+  }
+  return escaped
+}
+
 module.exports.register = function (registry, config = {}) {
 
   const vfs = adaptVfs()
@@ -154,12 +169,13 @@ module.exports.register = function (registry, config = {}) {
           inline = self.createInline(parent, 'quoted', customText, { attributes: attrs })
         }
         if (tooltip) {
+          const formattedDefinition = formatTooltipDefinition(definition, tooltip)
           const a = inline.convert()
           const matches = a.match(TRX)
           if (matches) {
-            return self.createInline(parent, 'quoted', `${matches[1]} ${tooltip}="${definition}"${matches[2]}`)
+            return self.createInline(parent, 'quoted', `${matches[1]} ${tooltip}="${formattedDefinition}"${matches[2]}`)
           } else {
-            return self.createInline(parent, 'quoted', `<span ${tooltip}="${definition}">${a}</span>`)
+            return self.createInline(parent, 'quoted', `<span ${tooltip}="${formattedDefinition}">${a}</span>`)
           }
         }
         return inline
@@ -186,3 +202,5 @@ module.exports.register = function (registry, config = {}) {
   }
   return registry
 }
+
+module.exports.formatTooltipDefinition = formatTooltipDefinition
