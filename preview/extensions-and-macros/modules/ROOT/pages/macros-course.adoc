@@ -35,7 +35,7 @@ preview@unversioned). Either the name is misspelled or the property does not exi
 in that release.
 ----
 
-*Step 2 -- make the name real.* Open `preview/extensions-and-macros/modules/reference/attachments/redpanda-properties-v26.2.1.json`. Add an entry to `"properties"` (anywhere -- it's a flat object):
+*Step 2 -- make the name real.* Open `preview/extensions-and-macros/modules/reference/attachments/redpanda-properties-v26.2.1.json`. `write_caching_default` is the last entry in `"properties"`, so add a comma after its closing `}`, then paste this entry right after it, before the closing `}` of `"properties"` itself:
 
 [,json]
 ----
