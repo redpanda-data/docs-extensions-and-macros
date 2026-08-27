@@ -61,23 +61,26 @@ class TestDeriveEnterpriseFields(unittest.TestCase):
     def test_restricted_only_when_sanctioned_equals_default(self):
         # audit_enabled: default false, restricted to true, no explicit
         # sanctioned value given -> sanctioned defaults to the property's own default.
+        # enterprise_restricted_values is a real JSON array of string-ized
+        # values, not a JSON-encoded string -- "true" here is the stringized
+        # bool, not the JSON literal true.
         meta = {
             "is_enterprise": True,
             "enterprise_restriction_is_dynamic": False,
-            "enterprise_restricted_value": "true",
+            "enterprise_restricted_values": ["true"],
             "enterprise_sanctioned_value": "false",
         }
         result = _derive_enterprise_fields(meta, False, 'audit_enabled')
         self.assertEqual(result["enterprise_constructor"], "restricted_only")
-        self.assertEqual(result["enterprise_restricted_value"], [True])
-        self.assertEqual(result["enterprise_value"], [True])
+        self.assertEqual(result["enterprise_restricted_value"], ["true"])
+        self.assertEqual(result["enterprise_value"], ["true"])
         self.assertNotIn("enterprise_sanctioned_value", result)
 
     def test_restricted_with_sanctioned_when_sanctioned_differs_from_default(self):
         meta = {
             "is_enterprise": True,
             "enterprise_restriction_is_dynamic": False,
-            "enterprise_restricted_value": '"continuous"',
+            "enterprise_restricted_values": ["continuous"],
             "enterprise_sanctioned_value": '"node_wide"',
         }
         # The property's own default (unrelated to the sanctioned value here)
@@ -88,12 +91,13 @@ class TestDeriveEnterpriseFields(unittest.TestCase):
         self.assertEqual(result["enterprise_sanctioned_value"], ["node_wide"])
         self.assertNotIn("enterprise_value", result)
 
-    def test_restricted_value_already_a_list_is_not_double_wrapped(self):
-        # val_container_t case: the restriction was constructed from a vector.
+    def test_restricted_values_list_passes_through_unwrapped(self):
+        # val_container_t case: the restriction was constructed from a
+        # vector, so rp_util reports more than one restricted value.
         meta = {
             "is_enterprise": True,
             "enterprise_restriction_is_dynamic": False,
-            "enterprise_restricted_value": '["GSSAPI", "OAUTHBEARER"]',
+            "enterprise_restricted_values": ["GSSAPI", "OAUTHBEARER"],
             "enterprise_sanctioned_value": '[]',
         }
         result = _derive_enterprise_fields(meta, [], 'sasl_mechanisms')
@@ -295,7 +299,7 @@ class TestMapRpUtilProperty(unittest.TestCase):
         meta = {
             "description": "d", "type": "string", "default_value": '"delete"',
             "enum_values": ["none", "delete", "compact"],
-            "enterprise_enum_values": ["compact"], "is_enterprise": False,
+            "enterprise_restricted_values": ["compact"], "is_enterprise": False,
         }
         prop = map_rp_util_property("x", meta, "cluster", "src/v/config/configuration.cc", {})
         self.assertEqual(prop["enum"], ["none", "delete", "compact"])
@@ -321,14 +325,17 @@ class TestMapRpUtilProperty(unittest.TestCase):
         # Array-element accepted values (e.g. sasl_mechanisms via
         # enum_set_property) belong under items, not the top-level "enum" --
         # they constrain each element, not the whole array value.
+        # enterprise_restricted_values, unlike enum_values, is never nested
+        # under items: it describes the whole property's license gating the
+        # same way is_enterprise does, regardless of scalar vs. array shape.
         meta = {
             "description": "d", "type": "array", "default_value": '["SCRAM"]',
             "items": {
                 "type": "string",
                 "enum_values": ["GSSAPI", "SCRAM", "OAUTHBEARER", "PLAIN"],
-                "enterprise_enum_values": ["GSSAPI", "OAUTHBEARER"],
             },
             "is_enterprise": True,
+            "enterprise_restricted_values": ["GSSAPI", "OAUTHBEARER"],
         }
         prop = map_rp_util_property("sasl_mechanisms", meta, "cluster",
                                      "src/v/config/configuration.cc", {})
@@ -342,7 +349,6 @@ class TestMapRpUtilProperty(unittest.TestCase):
             "PLAIN": {"is_enterprise": False},
         })
         self.assertNotIn("enum_values", prop["items"])
-        self.assertNotIn("enterprise_enum_values", prop["items"])
 
     def test_items_without_enum_values_omits_enum_key(self):
         # Regression guard: an ordinary array property with no accepted-
