@@ -3,9 +3,9 @@
 :type: {{type}}
 {{#if support}}:support: {{support}}{{/if}}
 :categories: [{{join categories ", "}}]
-{{#if hasDescriptionAttrs}}
+{{#if hasDescriptionMeta}}
 // tag::meta[]
-{{{descriptionInclude this "attrs"}}}
+{{{descriptionInclude this "meta"}}}
 // end::meta[]
 {{else if summary}}
 // tag::meta[]
@@ -16,7 +16,7 @@
 :description: {{{summaryAttribute description}}}
 // end::meta[]
 {{/if}}
-{{!-- The attrs include stays inside the meta tag region so single-source
+{{!-- The meta include stays inside the meta tag region so single-source
      stubs keep inheriting :description: as a header attribute, and the
      value now refreshes with the connector instead of being frozen at
      first draft. Component families with no description partial keep the

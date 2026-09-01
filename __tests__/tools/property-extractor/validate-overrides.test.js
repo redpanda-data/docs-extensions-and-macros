@@ -82,6 +82,41 @@ describe('property-extractor validate-overrides', () => {
       })
       expect(result.valid).toBe(true)
     })
+
+    it('accepts a well-formed admonitions entry, with and without a title', () => {
+      const result = validateSchema({
+        properties: {
+          node_id: {
+            admonitions: [
+              { type: 'warning', text: 'Do not set manually.', title: 'Custom title' },
+              { type: 'NOTE', text: 'Case-insensitive type is allowed.' },
+            ],
+          },
+        },
+      })
+      expect(result.valid).toBe(true)
+    })
+
+    it('rejects an admonitions entry with an unrecognized type', () => {
+      const result = validateSchema({
+        properties: { node_id: { admonitions: [{ type: 'bogus', text: 'x' }] } },
+      })
+      expect(result.valid).toBe(false)
+    })
+
+    it('rejects an admonitions entry missing text', () => {
+      const result = validateSchema({
+        properties: { node_id: { admonitions: [{ type: 'note' }] } },
+      })
+      expect(result.valid).toBe(false)
+    })
+
+    it('rejects an admonitions entry with an unknown key', () => {
+      const result = validateSchema({
+        properties: { node_id: { admonitions: [{ type: 'note', text: 'x', icon: 'star' }] } },
+      })
+      expect(result.valid).toBe(false)
+    })
   })
 
   describe('validateOverrides', () => {
