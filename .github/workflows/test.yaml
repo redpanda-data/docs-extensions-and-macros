@@ -315,8 +315,17 @@ jobs:
         working-directory: tools/property-extractor
         env:
           GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
+        # Pin the fixture source to a release tag rather than dev: these
+        # pytest suites verify the extractor's parsing and classification
+        # logic, so they need a deterministic input, and dev drifts under
+        # them (streaming-enterprise#63 converted http_authentication and
+        # sasl_mechanisms to enum_set_property on 2026-08-28, which this
+        # parser cannot read yet). Bump the pin together with any parser
+        # change that adds support for newer source shapes. The tree-sitter
+        # parser is slated to be replaced by rp_util runtime introspection
+        # (#278), which removes this coupling entirely.
         run: |
-          make build
+          make build TAG=v26.2.2
 
       - name: Run property-extractor tests
         run: |
