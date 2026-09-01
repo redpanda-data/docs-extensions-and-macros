@@ -1,5 +1,16 @@
 'use strict'
 
+// The macro logs through @antora/logger rather than console.warn (see
+// macros/prop.js), so tests spy on this stable, mocked logger instead of
+// console -- restored by the afterEach below the same way a console spy
+// would be.
+jest.mock('@antora/logger', () => {
+  const logger = { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} }
+  const getLogger = () => logger
+  getLogger.configure = () => getLogger
+  return getLogger
+})
+
 const {
   register,
   buildPropContent,
@@ -208,14 +219,14 @@ describe('prop macro', () => {
 
     test('validates against the newest published JSON when several exist', () => {
       const catalog = fakeCatalog({ extraTags: ['v25.3.1'] })
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       convert('prop:stale_property[]', { catalog })
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('is not in the property data'))
       warn.mockRestore()
     })
 
     test('warns on unknown property names by default, with the file path', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('prop:cloud_storage_enabbled[]', { catalog: fakeCatalog() })
       expect(html).toContain('cloud_storage_enabbled')
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('modules/manage/pages/example.adoc'))
@@ -231,7 +242,7 @@ describe('prop macro', () => {
     })
 
     test('stays silent in off mode', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       convert('prop:not_a_property[]', {
         catalog: fakeCatalog(),
         attributes: { 'property-validate': 'off' },
@@ -242,7 +253,7 @@ describe('prop macro', () => {
     })
 
     test('link=true renders unlinked when no page documents the property', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('prop:fips_mode[link=true]', { catalog: fakeCatalog() })
       expect(html).toContain('data-property-name="fips_mode"')
       expect(html).not.toContain('href')
@@ -280,7 +291,7 @@ describe('prop macro', () => {
         ],
       })
       // legacy_only_prop exists only in 25.3 data: valid on the 25.3 page...
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       convert('prop:legacy_only_prop[]', { catalog, version: '25.3' })
       const oldPageWarnings = warn.mock.calls.filter(([m]) => String(m).includes('is not in the property data'))
       expect(oldPageWarnings).toHaveLength(0)
@@ -334,7 +345,7 @@ describe('prop macro', () => {
         // the many that never use the macro: the index-warming extension calls
         // this for each one. The gap is recorded and reported on first use.
         const files = [A('streaming', '26.2', 'v26.2.1'), A('streaming', '25.3', 'v25.3.11')]
-        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         expect(load(files, 'streaming', '25.1')).toBeUndefined()
         expect(warn).not.toHaveBeenCalled()
       })
@@ -344,7 +355,7 @@ describe('prop macro', () => {
           version: '26.2',
           files: [propertiesAttachment('streaming', '25.3', 'v25.3.11')],
         })
-        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         const html = convert('prop:cloud_storage_enabled[]', { catalog, version: '25.1' })
         // Unvalidated means unmarked: no tooltip the build could not check.
         expect(html).toContain('<code>cloud_storage_enabled</code>')
@@ -357,7 +368,7 @@ describe('prop macro', () => {
         // Watch mode keeps one process across builds, so the guard is scoped to
         // the content catalog rather than the module: a writer iterating on a
         // page must keep seeing the warning, not just on the first build.
-        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         for (const build of [1, 2]) {
           const catalog = fakeCatalog({ version: '26.2' })
           convert('prop:cloud_storage_enabled[]', { catalog, version: '24.7' })
@@ -367,7 +378,7 @@ describe('prop macro', () => {
 
       test('property-validate=off silences the missing-series warning too', () => {
         const catalog = fakeCatalog({ version: '26.2' })
-        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         convert('prop:cloud_storage_enabled[]', {
           catalog,
           version: '24.8',
@@ -378,7 +389,7 @@ describe('prop macro', () => {
 
       test('the gap is reported once per component version, not once per mention', () => {
         const catalog = fakeCatalog({ version: '26.2' })
-        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         convert('prop:cloud_storage_enabled[] prop:fips_mode[]', { catalog, version: '24.9' })
         convert('prop:iceberg_enabled[]', { catalog, version: '24.9' })
         expect(warn.mock.calls.filter(([m]) => String(m).includes('24.9'))).toHaveLength(1)
@@ -471,7 +482,7 @@ describe('prop macro', () => {
     })
 
     test('Cloud with only prerelease data goes unvalidated, and says why', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const files = [A('streaming', '26.3', 'v26.3.1-rc1')]
       const catalog = cloudCat(files)
       expect(loadPropertiesFor(catalog, 'cloud-data-platform', '')).toBeUndefined()
@@ -495,7 +506,7 @@ describe('prop macro', () => {
     })
 
     test('a cluster property Cloud does not support renders plain and warns', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('prop:cloud_storage_enabled[]', { catalog: cloudCatalog(), component: 'cloud-data-platform', version: '' })
       expect(html).toContain('<code>cloud_storage_enabled</code>')
       expect(html).not.toContain('data-property-name')
@@ -511,7 +522,7 @@ describe('prop macro', () => {
       // sections resolves to a cluster property, and no topic property appears
       // in it at all. A false value on another scope asserted something that
       // source cannot know, and Cloud publishes a topic properties reference.
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert(`prop:${name}[]`, { catalog: cloudCatalog(), component: 'cloud-data-platform', version: '' })
       expect(html).toContain(`data-property-name="${name}"`)
       expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('not available'))
@@ -531,7 +542,7 @@ describe('prop macro', () => {
     })
 
     test('property-validate=off silences the availability warning', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('prop:cloud_storage_enabled[]', {
         catalog: cloudCatalog(), component: 'cloud-data-platform', version: '',
         attributes: { 'property-validate': 'off' },
@@ -541,7 +552,7 @@ describe('prop macro', () => {
     })
 
     test('an unavailable property keeps its display text override', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('prop:cloud_storage_enabled[text=tiered storage]', { catalog: cloudCatalog(), component: 'cloud-data-platform', version: '' })
       expect(html).toContain('<code>tiered storage</code>')
       warn.mockRestore()
@@ -706,7 +717,7 @@ describe('prop macro', () => {
         page('cloud-data-platform', 'properties/cloud-cluster.adoc',
           'include::streaming:reference:partial$properties/all.adoc[]'),
       ], CLOUD)
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('prop:cloud_storage_enabled[link=true]', {
         catalog, component: 'cloud-data-platform', version: '',
         filePath: 'modules/manage/pages/config-cluster.adoc',
@@ -739,7 +750,7 @@ describe('prop macro', () => {
           page('streaming', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/all.adoc[]'),
         ],
       })
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const linked = convert('prop:admin[link=true]', { catalog })
       expect(linked).toContain('data-property-name="admin"')
       expect(linked).not.toContain('href')
@@ -761,7 +772,7 @@ describe('prop macro', () => {
           page('streaming', 'properties/topic-properties.adoc', 'include::reference:partial$properties/topic.adoc[]'),
         ],
       })
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('prop:redpanda.iceberg.mode[]', {
         catalog,
         component: 'cloud-data-platform',
@@ -780,7 +791,7 @@ describe('prop macro', () => {
           page('cloud-data-platform', 'properties/cluster-properties.adoc', 'include::reference:partial$properties/cluster.adoc[]'),
         ],
       })
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       convert('prop:cloud_storage_enabbled[link=true]', { catalog, component: 'cloud-data-platform' })
       expect(warn.mock.calls).toHaveLength(1)
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('is not in the property data'))
@@ -796,7 +807,7 @@ describe('prop macro', () => {
           page('streaming', 'properties/topic-properties.adoc', 'include::reference:partial$properties/topic.adoc[]'),
         ],
       })
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('prop:redpanda.iceberg.mode[text=Iceberg mode]', { catalog, component: 'cloud-data-platform' })
       expect(html).toContain('<code>Iceberg mode</code>')
       warn.mockRestore()
@@ -841,7 +852,7 @@ describe('prop macro', () => {
 
     describe('unusable property data', () => {
       test('invalid JSON is reported, not thrown, and does not fail the build', () => {
-        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         const catalog = catalogOf([raw('streaming', '26.2', 'v26.2.1', '{ oops')])
         expect(() => loadPropertiesFor(catalog, 'streaming', '26.2')).not.toThrow()
         expect(loadPropertiesFor(catalog, 'streaming', '26.2')).toBeUndefined()
@@ -851,7 +862,7 @@ describe('prop macro', () => {
       test('an unusable newest file falls through to the newest usable one', () => {
         // A half-written file used to void the component's whole dataset and
         // then advise publishing a JSON that was already there.
-        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         const catalog = catalogOf([
           A('streaming', '26.2', 'v26.2.1'),
           raw('streaming', '26.2', 'v26.2.2', '{"version":"v26.2.2"}'),
@@ -865,7 +876,7 @@ describe('prop macro', () => {
         ['{"properties":7}'],
         ['{"properties":[{"a":1}]}'],
       ])('a non-object properties payload is rejected: %s', (text) => {
-        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         expect(loadPropertiesFor(catalogOf([raw('streaming', '26.2', 'v26.2.1', text)]), 'streaming', '26.2')).toBeUndefined()
         expect(warn).toHaveBeenCalled()
       })
@@ -896,7 +907,7 @@ describe('prop macro', () => {
       test('a Cloud component keeps its cloud slice even if it ships its own data', () => {
         // The property extractor writes that attachment path into whichever
         // repo it runs in, so own-data must not switch the gate off.
-        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         const catalog = catalogOf([
           A('cloud-data-platform', '', 'v26.2.1'),
           A('streaming', '26.2', 'v26.2.1'),
@@ -908,7 +919,7 @@ describe('prop macro', () => {
       })
 
       test('the prerelease-only diagnostic ignores other components tags', () => {
-        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         const catalog = catalogOf([A('labs', '1.0', 'v9.9.9-rc1')], CLOUD)
         convert('prop:iceberg_enabled[]', { catalog, component: 'cloud-data-platform', version: '' })
         expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('v9.9.9-rc1'))
@@ -917,7 +928,7 @@ describe('prop macro', () => {
 
     describe('lookup and rendering', () => {
       test('inherited Object.prototype keys are not properties', () => {
-        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         for (const name of ['toString', 'constructor', 'valueOf']) {
           const html = convert(`prop:${name}[]`, { catalog: fakeCatalog() })
           expect(html).toContain(`<code>${name}</code>`)
@@ -930,7 +941,7 @@ describe('prop macro', () => {
         // helmValuesPath needs config_scope to pick config.node vs
         // config.cluster, and an unverified property has none: it printed a
         // confident values.yaml path, wrong for every broker property.
-        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         const html = convert('prop:cloud_storage_bogus[helm-path=auto]', {
           catalog: fakeCatalog(), attributes: { 'env-kubernetes': '' },
         })
@@ -1008,7 +1019,7 @@ describe('prop macro', () => {
       })
 
       test('two declared sources for one property are reported, not resolved quietly', () => {
-        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+        const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
         const index = buildPageIndex(catalogOf([
           pg('streaming', 'a-page.adoc', '= A\n:page-property-source: broker-properties\n\n=== admin\n'),
           pg('streaming', 'b-page.adoc', '= B\n:page-property-source: broker-properties\n\n=== admin\n'),
@@ -1068,7 +1079,7 @@ describe('prop macro', () => {
     // data -- accepting properties that release does not have, and flagging the
     // ones it does as typos. Going unvalidated is the documented behaviour.
     test('a corrupt in-series file does not fall back to another release series', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const files = [
         propertiesAttachment('streaming', '25.3', 'v25.3.1', '{"properties": {"in_253": {'),
         propertiesAttachment('streaming', '25.3', 'v25.2.9',
@@ -1082,7 +1093,7 @@ describe('prop macro', () => {
     // fallback diagnostic must not then say no attachment exists anywhere --
     // that contradicts it and sends the writer after a file that is right there.
     test('an unusable dataset is not reported as a missing one', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const files = [propertiesAttachment('streaming', '25.3', 'v25.3.1', '{"properties": {')]
       const html = convert('prop:log_segment_size[]', {
         catalog: catalogOf(files), component: 'streaming', version: '25.3',
@@ -1096,7 +1107,7 @@ describe('prop macro', () => {
     })
 
     test('a genuinely absent dataset is still reported as missing', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       convert('prop:log_segment_size[]', { catalog: catalogOf([]), component: 'streaming', version: '25.3' })
       const messages = warn.mock.calls.map((call) => String(call[0]))
       expect(messages.some((m) => m.includes('no redpanda-properties-<tag>.json attachment found'))).toBe(true)
@@ -1104,7 +1115,7 @@ describe('prop macro', () => {
     })
 
     test('a corrupt file still falls back within the same release series', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const files = [
         propertiesAttachment('streaming', '25.3', 'v25.3.9', '{"properties": {"broken": {'),
         propertiesAttachment('streaming', '25.3', 'v25.3.1',
