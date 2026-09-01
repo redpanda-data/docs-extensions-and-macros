@@ -85,7 +85,7 @@ The macro target is the feature name, which can contain spaces. Named attributes
 xref::
 Optional Antora resource ID of the feature's documentation page. Overrides the registry entry's link. When neither is set, the term links to the licensing page.
 +
-Registry entries can carry environment-specific pages: on pages with the `env-cloud` attribute the entry's `xref-cloud` is used, on pages with `env-kubernetes` the entry's `xref-kubernetes` is used, and otherwise the entry's default `xref` (the Linux or generic self-managed page). This mirrors the `config_ref` macro's environment awareness.
+Registry entries can carry a Kubernetes-specific page: on pages with the `env-kubernetes` attribute the entry's `xref-kubernetes` is used, and otherwise the entry's default `xref` (the Linux or generic self-managed page). This mirrors the `config_ref` macro's environment awareness. There is no Cloud counterpart -- see <<cloud-pages>>.
 
 text::
 Optional display text override. Use it when the sentence needs different casing or phrasing than the feature name.
@@ -112,6 +112,15 @@ Set to `false` to render the term without a link.
 
 enterprise-beta-badge::
 Set to `false` to suppress the beta badge in prose. Generated tables always show it. See <<beta-features>>.
+
+[[cloud-pages]]
+=== Cloud pages
+
+Redpanda Cloud has no Enterprise Edition license -- customers never apply or manage one -- so a page in a Cloud component (recognized by its `env-cloud` attribute) has nothing true to say about a license, its expiration, or its restrictions. On such a page the macro renders the target as plain text with no styling, tooltip, or link, skipping registry validation and the release-status checks below entirely, and reports the mention according to `enterprise-validate`.
+
+This also covers the Cloud rendering of single-sourced self-managed prose: `env-cloud` is read from the document being converted, which reflects the page actually being rendered (the Cloud stub page), regardless of which repo the included `enterprise:` mention was written in. See the `prop` macro's <<prop-availability>> for the same mechanism applied to properties.
+
+The `enterprise_features` block macro is affected too: see <<cloud-pages-block>>.
 
 [[release-status]]
 === Release status
@@ -195,13 +204,16 @@ enterprise_features::connect[]
 enterprise_features::operator[title=Operator features,heading=What stops working]
 ----
 
-The target is the scope: `redpanda`, `console`, `connect`, `operator`, or `cloud`. Rows render alphabetically by feature name with three columns: the feature name (linked to its documentation page when the entry has an `xref` or `url`), the description, and the expiration or restriction behavior. Named attributes:
+The target is the scope: `redpanda`, `console`, `connect`, or `operator`. Rows render alphabetically by feature name with three columns: the feature name (linked to its documentation page when the entry has an `xref` or `url`), the description, and the expiration or restriction behavior. Named attributes:
 
 title::
 Optional table title override. The default is scope-specific, for example `Enterprise features in Redpanda`.
 
 heading::
 Optional third-column heading override. The default is `Behavior Upon Expiration` for the `redpanda` scope and `Restrictions Without Valid License` for the other scopes.
+
+[[cloud-pages-block]]
+There is no `cloud` scope: Redpanda Cloud has no Enterprise Edition license, so there is no licensing table to generate for it (see <<cloud-pages>>). Calling this macro from a page in a Cloud component -- directly or through single-sourced self-managed content -- renders a warning admonition instead of a table, reported according to `enterprise-validate`.
 
 === Registration
 
