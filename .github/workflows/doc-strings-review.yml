@@ -239,6 +239,7 @@ jobs:
       # so a role or region that is wrong still leaves a lint-only review
       # rather than a failed job.
       - name: Assume the AWS role that can read the bot token
+        id: aws_credentials
         if: steps.lint.outputs.count != '0' && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
         continue-on-error: true
         uses: aws-actions/configure-aws-credentials@v6
@@ -247,7 +248,7 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
       - name: Fetch the bot token from Secrets Manager
         id: ghsecrets
-        if: steps.lint.outputs.count != '0' && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
+        if: steps.aws_credentials.outcome == 'success'
         continue-on-error: true
         uses: aws-actions/aws-secretsmanager-get-secrets@v3
         with:
