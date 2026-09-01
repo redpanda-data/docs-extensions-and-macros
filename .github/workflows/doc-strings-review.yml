@@ -386,7 +386,7 @@ jobs:
           # The OIDC path stashes the token in a temp file (see the scrub
           # step above) because it is deliberately blanked from the job env
           # before the review runs.
-          if [ -z "${GH_TOKEN:-}" ] && [ -s "$RUNNER_TEMP/bot-token" ]; then
+          if [ -z "${GH_TOKEN:-}" ] && [ -n "${RUNNER_TEMP:-}" ] && [ -s "$RUNNER_TEMP/bot-token" ]; then
             GH_TOKEN="$(cat "$RUNNER_TEMP/bot-token")"
             export GH_TOKEN
           fi
