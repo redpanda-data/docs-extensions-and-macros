@@ -706,23 +706,7 @@ In this example, the `attributespath` option points to a local YAML file (`./loc
 
 == Produce redirects (customization of core Antora)
 
-This extension replaces the default https://gitlab.com/antora/antora/-/tree/v3.1.x/packages/redirect-producer[`produceRedirects()` function] in Antora to handle redirect loops caused by https://docs.antora.org/antora/latest/page/page-aliases/[page aliases]. Normally, page aliases in Antora are used to resolve outdated links without causing issues. However, with https://docs.antora.org/antora/latest/playbook/urls-html-extension-style/#html-extension-style-key[`indexify`], the same URL may inadvertently be used for both the source and target of a redirect, leading to loops. This problem is https://antora.zulipchat.com/#narrow/stream/282400-users/topic/Redirect.20Loop.20Issue.20with.20Page.20Renaming.20and.20Indexify/near/433691700[recognized as a bug] in core Antora. For example, creating a page alias for `modules/manage/security/authorization.adoc` to point to `modules/manage/security/authorization/index.adoc' can lead to a redirect loop where `manage/security/authorization/` points to `manage/security/authorization/`. Furthermore, omitting the alias would lead to `xref not found` errors because Antora relies on the alias to resolve the old xrefs. This extension is necessary until such behaviors are natively supported or fixed in Antora core.
-
-=== Environment variables
-
-This extension does not require any environment variables.
-
-=== Configuration options
-
-There are no configurable options for this extension.
-
-=== Registration
-
-```yaml
-antora:
-  extensions:
-  - '@redpanda-data/docs-extensions-and-macros/extensions/modify-redirects'
-```
+Antora's built-in `@antora/redirect-producer` already produces redirect rules for https://docs.antora.org/antora/latest/page/page-aliases/[page aliases], including the redirect-loop case caused by https://docs.antora.org/antora/latest/playbook/urls-html-extension-style/#html-extension-style-key[`indexify`] that once required a workaround. Antora runs the real module automatically on every build with no extension required. This project previously shipped a hand-copied override of that module to work around the loop, but the override had drifted from the upstream fix and reintroduced a worse bug (a self-referential alias could overwrite the real page it pointed at). The override has been removed; core Antora handles redirects natively.
 
 == Replace attributes in attachments
 

@@ -64,7 +64,6 @@ IMPORTANT: Extensions must be registered under the `antora.extensions` key in yo
 
 === Navigation
 * **unlisted-pages** - Manage pages that appear in navigation but aren't listed
-* **produce-redirects** - Generate redirect configurations
 * **unpublish-pages** - Mark pages as unpublished
 
 === Integrations
@@ -125,13 +124,16 @@ antora:
       algolia_index_name: YOUR_INDEX
 ----
 
-=== Generate redirects
+=== Redirects
+
+No extension required: core Antora (>= 3.1.8) generates redirects for https://docs.antora.org/antora/latest/page/page-aliases/[page aliases] automatically on every build. Define aliases in your `antora.yml`:
 
 [,yaml]
 ----
-antora:
-  extensions:
-    - '@redpanda-data/docs-extensions-and-macros/extensions/produce-redirects.js'
+name: redpanda
+asciidoc:
+  attributes:
+    page-aliases: old-page.adoc,another-old-page.adoc
 ----
 
 == Support
