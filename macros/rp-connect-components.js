@@ -1,5 +1,6 @@
 'use strict';
 const { posix: path } = require('path')
+const logger = require('@antora/logger')('rp-connect-components-macro')
 
 /**
  * Registers macros for use in Redpanda Connect contexts in the Redpanda documentation.
@@ -602,7 +603,7 @@ module.exports.register = function (registry, context) {
       const showAllInfo = attributes?.all
 
       const csvData = context.config?.attributes?.csvData || null;
-      if (!csvData) return console.error(`CSV data is not available for ${parent.getDocument().getAttributes()['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`)
+      if (!csvData) return logger.error(`CSV data is not available for ${parent.getDocument().getAttributes()['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`)
 
       // Get the enriched commercial names map (includes CSV + AsciiDoc names)
       const commercialNamesMap = context.config?.attributes?.commercialNamesMap || {};
@@ -1022,11 +1023,11 @@ module.exports.register = function (registry, context) {
         return self.createBlock(parent, 'pass', '');
       }
       const csvData = context.config?.attributes?.csvData || null;
-      if (!csvData) return console.error(`CSV data is not available for ${attributes['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`);
+      if (!csvData) return logger.error(`CSV data is not available for ${attributes['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-info extension.`);
       // Filter for the specific connector by name
       const componentRows = csvData.data.filter(row => row.connector.trim().toLowerCase() === name.trim().toLowerCase());
       if (componentRows.length === 0) {
-        console.warn(`No CSV data found for connector: ${name}. The connector may have been removed or renamed.`);
+        logger.warn(`No CSV data found for connector: ${name}. The connector may have been removed or renamed.`);
         // Build link to release notes using content catalog for proper URL resolution
         const isCloud = attributes['env-cloud'] !== undefined;
         let whatsNewUrl = isCloud
@@ -1092,7 +1093,7 @@ module.exports.register = function (registry, context) {
     self.process((parent, target, attrs) => {
       const type = attrs.type;
       const categoriesData = context.config?.attributes?.connectCategoriesData || null
-      if (!categoriesData) return console.error (`Category data is not available for ${parent.getDocument().getAttributes()['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-categories extension.`)
+      if (!categoriesData) return logger.error(`Category data is not available for ${parent.getDocument().getAttributes()['page-relative-src-path']}. Make sure your playbook includes the generate-rp-connect-categories extension.`)
       const categories = categoriesData[type] || null;
       const currentTabsId = `tabs-${tabsCounter++}`; // Unique ID for this set of tabs
       if (!categories) return

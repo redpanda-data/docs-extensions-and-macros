@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "5.22.2",
+  "version": "5.22.3",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -159,6 +159,7 @@
     "jest-junit": "^16.0.0"
   },
   "peerDependencies": {
-    "@antora/asciidoc-loader": "^3.1.0"
+    "@antora/asciidoc-loader": "^3.1.0",
+    "@antora/logger": "^3.1.0"
   }
 }
