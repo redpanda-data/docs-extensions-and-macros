@@ -2,7 +2,62 @@
 
 const $glossaryContexts = Symbol('$glossaryContexts')
 const { posix: path } = require('path')
-const chalk = require('chalk')
+const logger = require('@antora/logger')('glossary-macro')
+
+// Backtick-monospace in hover-text. The unconstrained (double-backtick) form is
+// matched first, otherwise it leaves a stray delimiter on each side.
+const MONOSPACE_RX = /``([^`]+)``|`([^`]+)`/g
+
+// Escape for interpolation into a double-quoted HTML attribute. Same four
+// replacements, in the same order, as badge.js and enterprise.js; `&` has to go
+// first or it re-escapes the entities the later passes introduce.
+function escapeAttr (value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+// Only a data-* tooltip is read by a JS tooltip library that renders it as HTML;
+// the native title attribute is always plain text. Shared with the
+// glossary-tooltip validation below so the two cannot drift apart.
+function tooltipRendersHtml (tooltipAttr) {
+  return typeof tooltipAttr === 'string' && tooltipAttr.startsWith('data-')
+}
+
+// hover-text is raw, unconverted source text, so it has to be escaped before it
+// lands in an HTML attribute. How many passes depends on the consumer:
+//
+//   title   The browser decodes the attribute once and shows the result as
+//           text, so one pass is exactly right.
+//   data-*  docs-ui initializes tippy on these with allowHTML: true
+//           (docs-ui/src/js/12-activate-tooltips.js), which means the value is
+//           decoded once by the HTML parser and then parsed AGAIN as HTML by
+//           innerHTML. A single pass is spent on that first decode and escaped
+//           markup comes back to life -- `<img onerror=...>` in hover-text
+//           became a live element that fired. Escape twice so one level
+//           survives the decode, and add <code> afterwards so it is the only
+//           live markup in the value.
+//
+// Set definitionIsHtml for a definition that Asciidoctor already converted --
+// the inline glossterm:term[definition] form arrives as HTML, unlike a term
+// file's raw :hover-text: value -- so it is escaped once rather than twice and
+// its markup survives to the reader instead of being shown as literal tags.
+function formatTooltipDefinition (text, tooltipAttr, definitionIsHtml) {
+  if (!tooltipRendersHtml(tooltipAttr)) return escapeAttr(text)
+  if (definitionIsHtml) {
+    // Already HTML, so one pass is right: the attribute decode hands the markup
+    // back intact for innerHTML to render, and a quote in the text still cannot
+    // terminate the attribute early.
+    return escapeAttr(text)
+  }
+  return escapeAttr(escapeAttr(text)).replace(
+    MONOSPACE_RX,
+    (match, unconstrained, constrained) =>
+      `<code>${unconstrained !== undefined ? unconstrained : constrained}</code>`
+  )
+}
 
 module.exports.register = function (registry, config = {}) {
 
@@ -41,7 +96,7 @@ module.exports.register = function (registry, config = {}) {
         }
 
         if (!attributes['term-name'] || !attributes['hover-text']) {
-          console.warn(`Skipping term ${file.path} due to missing 'term-name' and/or 'hover-text attributes'.`)
+          logger.warn(`Skipping term ${file.path} due to missing 'term-name' and/or 'hover-text attributes'.`)
           return null
         }
 
@@ -113,22 +168,27 @@ module.exports.register = function (registry, config = {}) {
         }
         var tooltip = document.getAttribute('glossary-tooltip')
         if (tooltip === 'true') tooltip = 'data-glossary-tooltip'
-        if (tooltip && tooltip !== 'title' && !tooltip.startsWith('data-')) {
-          console.log(`glossary-tooltip attribute '${tooltip}' must be 'true', 'title', or start with 'data-`)
+        if (tooltip && tooltip !== 'title' && !tooltipRendersHtml(tooltip)) {
+          logger.warn(`glossary-tooltip attribute '${tooltip}' must be 'true', 'title', or start with 'data-`)
           tooltip = undefined
         }
         const logTerms = document.hasAttribute('glossary-log-terms')
         var definition;
         var pageTitle;
+        // A term file's :hover-text: is raw source text, but the definition
+        // passed inline as glossterm:term[definition] has already been through
+        // Asciidoctor's inline substitutions, so the two need different escaping.
+        var definitionIsHtml = false;
         const index = context.gloss.findIndex((candidate) => candidate.term === term)
         if (index >= 0) {
           definition = context.gloss[index].def
           pageTitle = context.gloss[index].pageTitle
         } else {
           definition = attributes.definition;
+          definitionIsHtml = !!definition;
         }
         if (definition) {
-          logTerms && console.log(`${term}:: ${definition}`)
+          logTerms && logger.info(`${term}:: ${definition}`)
         } else if (tooltip) {
           definition = `${term} not yet defined`
         }
@@ -154,12 +214,13 @@ module.exports.register = function (registry, config = {}) {
           inline = self.createInline(parent, 'quoted', customText, { attributes: attrs })
         }
         if (tooltip) {
+          const formattedDefinition = formatTooltipDefinition(definition, tooltip, definitionIsHtml)
           const a = inline.convert()
           const matches = a.match(TRX)
           if (matches) {
-            return self.createInline(parent, 'quoted', `${matches[1]} ${tooltip}="${definition}"${matches[2]}`)
+            return self.createInline(parent, 'quoted', `${matches[1]} ${tooltip}="${formattedDefinition}"${matches[2]}`)
           } else {
-            return self.createInline(parent, 'quoted', `<span ${tooltip}="${definition}">${a}</span>`)
+            return self.createInline(parent, 'quoted', `<span ${tooltip}="${formattedDefinition}">${a}</span>`)
           }
         }
         return inline
@@ -171,7 +232,7 @@ module.exports.register = function (registry, config = {}) {
     if (typeof registry.inlineMacro === 'function') {
       registry.inlineMacro(glossaryInlineMacro())
     } else {
-      console.warn('no \'inlineMacro\' method on alleged registry')
+      logger.warn('no \'inlineMacro\' method on alleged registry')
     }
   }
 
@@ -186,3 +247,5 @@ module.exports.register = function (registry, config = {}) {
   }
   return registry
 }
+
+module.exports.formatTooltipDefinition = formatTooltipDefinition

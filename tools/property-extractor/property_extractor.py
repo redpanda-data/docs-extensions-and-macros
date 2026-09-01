@@ -1192,6 +1192,49 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
     return properties
 
 
+ADMONITION_TYPES = {"note", "tip", "important", "warning", "caution"}
+
+
+def _normalize_admonitions(admonitions):
+    """Validate an admonitions override and normalize each entry's `type`
+    to the uppercase form AsciiDoc's admonition block syntax expects
+    (`[NOTE]`, not `[note]`). Returns None (logging a warning) if the
+    override isn't shaped as a list of {type, text} entries, so a malformed
+    override doesn't silently render as nothing instead of surfacing the
+    mistake.
+    """
+    if not isinstance(admonitions, list):
+        logger.warning("admonitions for property must be an array")
+        return None
+    normalized = []
+    for entry in admonitions:
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("type"), str)
+            or not isinstance(entry.get("text"), str)
+        ):
+            logger.warning(
+                f"admonitions entry must contain string type and text values, got: {entry!r}"
+            )
+            continue
+        entry_type = str(entry["type"]).strip().lower()
+        if entry_type not in ADMONITION_TYPES:
+            logger.warning(
+                f"admonitions entry has unknown type '{entry['type']}', "
+                f"expected one of {sorted(ADMONITION_TYPES)}"
+            )
+            continue
+        normalized_entry = {"type": entry_type.upper(), "text": entry["text"]}
+        if "title" in entry:
+            if not isinstance(entry["title"], str):
+                logger.warning(f"admonitions entry title must be a string, got: {entry!r}")
+                continue
+            if entry["title"]:
+                normalized_entry["title"] = entry["title"]
+        normalized.append(normalized_entry)
+    return normalized
+
+
 def _apply_override_to_existing_property(property_dict, override, overrides_file_path):
     """Apply overrides to an existing property."""
     # Apply description override
@@ -1253,6 +1296,16 @@ def _apply_override_to_existing_property(property_dict, override, overrides_file
         else:
             logger.warning(f"accepted_values for property must be an array")
 
+    # Apply admonitions override - structured NOTE/TIP/IMPORTANT/WARNING/CAUTION
+    # callouts, rendered as real AsciiDoc admonition blocks by property.hbs/
+    # topic-property.hbs. Exists so a callout never has to be hand-written as
+    # markup mixed into the description text -- see minimize-overrides
+    # guidance: an admonition is structured data, not embedded prose markup.
+    if "admonitions" in override:
+        normalized = _normalize_admonitions(override["admonitions"])
+        if normalized is not None:
+            property_dict["admonitions"] = normalized
+
 
 def _create_property_from_override(prop_name, override, overrides_file_path):
     """Create a new property from override specification."""
@@ -1297,7 +1350,7 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
         if key not in ["description", "type", "default", "config_scope", "version",
                        "example", "example_file", "example_yaml", "related_topics",
                        "see_also", "is_deprecated", "visibility", "exclude_from_docs",
-                       "category", "accepted_values", "_comment"]:
+                       "category", "accepted_values", "admonitions", "_comment"]:
             new_property[key] = value
 
     # Add exclude_from_docs if specified
@@ -1314,6 +1367,14 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
             new_property["enum"] = override["accepted_values"]
         else:
             logger.warning(f"accepted_values for property '{prop_name}' must be an array")
+
+    # Add admonitions if specified - run through the same validation/normalization
+    # as the existing-property path so a malformed entry is dropped with a warning
+    # rather than silently rendering as an unstyled, lowercase-typed block.
+    if "admonitions" in override:
+        normalized = _normalize_admonitions(override["admonitions"])
+        if normalized is not None:
+            new_property["admonitions"] = normalized
 
     return new_property
 
