@@ -66,6 +66,21 @@ describe('updateWhatsNewFile merge semantics', () => {
     expect(content.indexOf('rc2 START')).toBeLessThan(content.indexOf('== Bug fixes'))
   })
 
+  test('leaves a blank line between the appended block and the following heading', () => {
+    // Regression test: a single newline here leaves the block's end-marker
+    // comment directly above the next heading with no blank line between
+    // them. AsciiDoc comments don't terminate a preceding list block, so
+    // the heading was swallowed as literal list-item text instead of
+    // rendering as a heading -- reproduced with a real Asciidoctor render
+    // during review.
+    fs.writeFileSync(whatsNewPath, '= What\'s New\n\n== Bug fixes\n\nStuff.\n')
+    updateWhatsNewFile(rcDiff('rpk topic new'), whatsNewPath, 'v2.0.1-rc1')
+    updateWhatsNewFile(rcDiff('rpk cluster newer'), whatsNewPath, 'v2.0.1-rc2')
+
+    const content = fs.readFileSync(whatsNewPath, 'utf8')
+    expect(content).toMatch(/AUTOGEN-RPK-CHANGES v2\.0\.1-rc2 END\n\n== Bug fixes/)
+  })
+
   test('re-running the same version replaces its block instead of duplicating', () => {
     fs.writeFileSync(whatsNewPath, '= What\'s New\n')
     updateWhatsNewFile(rcDiff('rpk topic old-name'), whatsNewPath, 'v2.0.1-rc1')
