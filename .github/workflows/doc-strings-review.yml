@@ -36,8 +36,17 @@
 #   jobs:
 #     review:
 #       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/doc-strings-review.yml@main
+#       with:
+#         # Engineering repos: the bot token is not a GitHub secret, it lives in
+#         # Secrets Manager behind an OIDC role. Pass these three and the
+#         # workflow fetches it itself. Omit them and it falls back to the
+#         # actions_bot_token secret below.
+#         aws_region: ${{ vars.RP_AWS_CRED_REGION }}
+#         aws_role_name_prefix: ${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}
 #       secrets:
 #         anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+#         aws_cred_account_id: ${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}
+#         # Only needed where the token IS a GitHub secret.
 #         actions_bot_token: ${{ secrets.ACTIONS_BOT_TOKEN }}
 #
 # The ref above is `@main` because this repository publishes NO git tags: `git
@@ -78,11 +87,71 @@ on:
           repos is both a reproducibility and a supply-chain gap.
         type: string
         default: "@redpanda-data/docs-extensions-and-macros@5.23.3"
+      aws_region:
+        description: >-
+          AWS region used to assume the OIDC role that reads the bot token from
+          Secrets Manager. Leave empty to skip the OIDC path entirely and rely
+          on the actions_bot_token secret instead.
+        type: string
+        default: ""
+      aws_role_name_prefix:
+        description: >-
+          Base IAM role name. The calling repository's own name is appended,
+          matching the convention already used by engineering repos (see
+          dispatch-docs-updates.yml in streaming-enterprise). Leave empty to
+          skip the OIDC path.
+        type: string
+        default: ""
+      bot_token_secret_id:
+        description: "Secrets Manager id holding the org bot token."
+        type: string
+        default: "sdlc/prod/github/actions_bot_token"
+      use_adp_gateway:
+        description: >-
+          Route model traffic through the ADP AI Gateway's Bedrock provider
+          (DEVPROD-4735) instead of an Anthropic API key. The sanctioned auth
+          for engineering repos. Requires the aws_* OIDC inputs above and an
+          adp_priv_client grant in devprod-infra for the calling repository.
+        type: boolean
+        default: false
+      adp_gateway_base_url:
+        description: "ADP AI Gateway provider endpoint for Claude Code traffic."
+        type: string
+        default: "https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/llm/v1/providers/claude-code-provider-adp"
+      adp_client_secret_id:
+        description: "Secrets Manager id holding the ADP OAuth client credential."
+        type: string
+        default: "sdlc/prod/github/adp_priv_client"
+      adp_token_url:
+        description: "OAuth token endpoint that mints the gateway bearer."
+        type: string
+        default: "https://auth.prd.cloud.redpanda.com/oauth/token"
+      adp_token_audience:
+        description: "OAuth audience for the gateway token."
+        type: string
+        default: "cloudv2-production.redpanda.cloud"
+      gateway_model:
+        description: >-
+          Bedrock-style model id used when use_adp_gateway is on. Must be in
+          the ADP provider's model allowlist (streaming-enterprise's own
+          review runs us.anthropic.claude-opus-5 through the same provider).
+        type: string
+        default: "us.anthropic.claude-sonnet-5"
     secrets:
       anthropic_api_key:
-        required: true
+        description: >-
+          Anthropic API key. Not needed when use_adp_gateway is on; when it is
+          off and this is empty, the review degrades to the deterministic lint
+          (the review step fails open).
+        required: false
       actions_bot_token:
         description: "Org bot token: reads the private writing standard and fires the doc-impact dispatch. Optional; both uses fail open."
+        required: false
+      aws_cred_account_id:
+        description: >-
+          AWS account id owning the role above. Required only when using the
+          OIDC path; engineering repos already expose this org-wide as
+          RP_AWS_CRED_ACCOUNT_ID.
         required: false
 jobs:
   doc-strings-review:
@@ -197,11 +266,87 @@ jobs:
               ;;
           esac
           echo "count=$count" >> "$GITHUB_OUTPUT"
+      # Engineering repos do not carry the bot token as a GitHub Actions
+      # secret. They assume an OIDC role and read it from Secrets Manager, so
+      # `secrets.actions_bot_token` arrives empty there and both uses below
+      # silently degrade: no writing standard, no doc-impact dispatch. These
+      # two steps reproduce that repo-native path. Both are continue-on-error,
+      # so a role or region that is wrong still leaves a lint-only review
+      # rather than a failed job.
+      - name: Assume the AWS role that can read the bot token
+        id: aws_credentials
+        if: steps.lint.outputs.count != '0' && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: arn:aws:iam::${{ secrets.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+      - name: Fetch the bot token from Secrets Manager
+        id: ghsecrets
+        if: steps.aws_credentials.outcome == 'success'
+        continue-on-error: true
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            ,${{ inputs.bot_token_secret_id }}
+          parse-json-secrets: true
+      - name: Fetch the ADP client credential
+        id: adpsecrets
+        if: steps.aws_credentials.outcome == 'success' && inputs.use_adp_gateway
+        continue-on-error: true
+        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        with:
+          secret-ids: |
+            ,${{ inputs.adp_client_secret_id }}
+          parse-json-secrets: true
+      # Mint the gateway bearer. Ported from streaming-enterprise's
+      # claude-code-review.yml (DEVPROD-4735), which documents the traps: the
+      # secret rides stdin so it never appears in argv; a token containing
+      # whitespace could smuggle extra variables into GITHUB_ENV and
+      # ::add-mask:: covers only the first line; Bedrock mode sends the value
+      # as Authorization: Bearer, which is what the gateway authenticates on.
+      # Suggest-only posture: continue-on-error, so a mint failure means no
+      # review gets posted (the deterministic lint still ran) rather than a
+      # red check.
+      - name: Mint the ADP gateway token
+        if: steps.adpsecrets.outcome == 'success'
+        continue-on-error: true
+        env:
+          TOKEN_URL: ${{ inputs.adp_token_url }}
+          TOKEN_AUDIENCE: ${{ inputs.adp_token_audience }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ADP_PRIV_CLIENT_ID:-}" ] || [ -z "${ADP_PRIV_CLIENT_SECRET:-}" ]; then
+            echo "::warning::ADP client credential missing from env; no review will be posted."
+            exit 1
+          fi
+          status=$(printf '%s' "$ADP_PRIV_CLIENT_SECRET" | curl -sS --request POST \
+            --connect-timeout 10 --max-time 30 \
+            --retry 3 --retry-all-errors --retry-delay 2 \
+            --output "$RUNNER_TEMP/adp_token.json" --write-out '%{http_code}' \
+            --url "$TOKEN_URL" \
+            --header 'content-type: application/x-www-form-urlencoded' \
+            --data grant_type=client_credentials \
+            --data-urlencode client_id="$ADP_PRIV_CLIENT_ID" \
+            --data-urlencode client_secret@- \
+            --data audience="$TOKEN_AUDIENCE") || status=000
+          token=$(jq -r '.access_token // empty' "$RUNNER_TEMP/adp_token.json" 2>/dev/null || true)
+          rm -f "$RUNNER_TEMP/adp_token.json"
+          if [ -z "$token" ]; then
+            echo "::warning::failed to mint ADP gateway token (HTTP $status); no review will be posted."
+            exit 1
+          fi
+          case "$token" in *[[:space:][:cntrl:]]*)
+            echo "::warning::minted token contains whitespace or control characters; no review will be posted."
+            exit 1 ;;
+          esac
+          echo "::add-mask::$token"
+          echo "AWS_BEARER_TOKEN_BEDROCK=$token" >> "$GITHUB_ENV"
       - name: Fetch the writing standard
         if: steps.lint.outputs.count != '0'
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.actions_bot_token }}
+          GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN || secrets.actions_bot_token }}
         run: |
           set -euo pipefail
           # Stage in a temp file and promote only a non-empty result. Writing
@@ -220,19 +365,59 @@ jobs:
             rm -f "$tmp"
             echo "::warning::writing standard unavailable; lint-only review."
           fi
+      # The next step hands untrusted PR content to a model with Bash
+      # access. Nothing it does not need should sit in its process
+      # environment, so stash the OIDC-fetched bot token in a runner-temp
+      # file for the dispatch step (whose allowed tool patterns cannot read
+      # it), then blank the token and the AWS session credentials from the
+      # job env. Callers on the plain-secret path are unaffected: this step
+      # only runs when the OIDC inputs are set.
+      - name: Drop fetched credentials from the review's environment
+        if: steps.lint.outputs.count != '0' && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "${ACTIONS_BOT_TOKEN:-}" > "$RUNNER_TEMP/bot-token"
+          # AWS_BEARER_TOKEN_BEDROCK deliberately survives: it is the model
+          # auth in gateway mode, short-lived, and usable only against the
+          # gateway. The long-lived client credential that can mint fresh
+          # tokens must not be readable from the review's environment.
+          for v in ACTIONS_BOT_TOKEN ADP_PRIV_CLIENT_ID ADP_PRIV_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION AWS_REGION; do
+            echo "$v=" >> "$GITHUB_ENV"
+          done
       - name: Claude review with suggestions
         if: steps.lint.outputs.count != '0'
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
+        env:
+          # Required by the action's env validator in Bedrock mode only.
+          # Claude Code ignores it once ANTHROPIC_BEDROCK_BASE_URL is set, and
+          # in key mode nothing reads it. Step-scoped so it cannot shadow the
+          # region the Secrets Manager fetches above resolved.
+          AWS_REGION: us-west-2
+          # Empty when the gateway is off; Claude Code treats an empty value
+          # as unset.
+          ANTHROPIC_BEDROCK_BASE_URL: ${{ inputs.use_adp_gateway && inputs.adp_gateway_base_url || '' }}
+          # Background tasks (session titles) go to Haiku instead of
+          # inheriting the primary model. Must be in the provider allowlist.
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: ${{ inputs.use_adp_gateway && 'us.anthropic.claude-haiku-4-5-20251001-v1:0' || '' }}
         with:
-          anthropic_api_key: ${{ secrets.anthropic_api_key }}
+          # In gateway mode the key is deliberately withheld: auth is the
+          # short-lived AWS_BEARER_TOKEN_BEDROCK minted above.
+          anthropic_api_key: ${{ !inputs.use_adp_gateway && secrets.anthropic_api_key || '' }}
+          use_bedrock: ${{ inputs.use_adp_gateway }}
+          # CLAUDE_CODE_SKIP_BEDROCK_AUTH is not on the action's
+          # env-forwarding allowlist; a settings env block outranks process
+          # env, so route it here. Without it Claude Code may try client-side
+          # SigV4 signing instead of sending the bearer.
+          settings: ${{ inputs.use_adp_gateway && '{"env":{"CLAUDE_CODE_SKIP_BEDROCK_AUTH":"1"}}' || '' }}
           allowed_bots: ""
           allowed_non_write_users: ""
           show_full_output: false
           track_progress: false
           use_commit_signing: false
           claude_args: >
-            --model sonnet
+            --model ${{ inputs.use_adp_gateway && inputs.gateway_model || 'sonnet' }}
             --max-turns 20
             --disallowed-tools "WebFetch,WebSearch,Edit,MultiEdit,NotebookEdit,Bash(git *)"
             --mcp-config '{"mcpServers":{"redpanda-docs":{"type":"http","url":"https://docs.redpanda.com/mcp"}}}'
@@ -310,6 +495,13 @@ jobs:
           DISPATCH_REPO: ${{ inputs.dispatch_repo }}
         run: |
           set -euo pipefail
+          # The OIDC path stashes the token in a temp file (see the scrub
+          # step above) because it is deliberately blanked from the job env
+          # before the review runs.
+          if [ -z "${GH_TOKEN:-}" ] && [ -n "${RUNNER_TEMP:-}" ] && [ -s "$RUNNER_TEMP/bot-token" ]; then
+            GH_TOKEN="$(cat "$RUNNER_TEMP/bot-token")"
+            export GH_TOKEN
+          fi
           [ -n "${GH_TOKEN:-}" ] || { echo "No bot token; skipping dispatch."; exit 0; }
           [ -s doc-impact.json ] || { echo "No high-impact findings."; exit 0; }
           # doc-impact.json is model-authored from untrusted PR content and a
