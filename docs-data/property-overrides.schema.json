@@ -102,6 +102,32 @@
               }
             ]
           }
+        },
+        "admonitions": {
+          "type": "array",
+          "description": "Structured NOTE/TIP/IMPORTANT/WARNING/CAUTION callouts, rendered as Asciidoctor admonition blocks instead of hand-written markup in description. Each entry needs type and text; title is optional. See property_extractor.py's _normalize_admonitions() -- an entry that doesn't match this shape is dropped with a warning, not rejected here, so the schema stays permissive on casing/whitespace that the generator itself normalizes.",
+          "items": {
+            "type": "object",
+            "required": ["type", "text"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "Case-insensitive; normalized to uppercase. One of note, tip, important, warning, caution.",
+                "enum": ["note", "tip", "important", "warning", "caution",
+                         "NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION",
+                         "Note", "Tip", "Important", "Warning", "Caution"]
+              },
+              "text": {
+                "type": "string",
+                "description": "Admonition body. May itself contain AsciiDoc markup."
+              },
+              "title": {
+                "type": "string",
+                "description": "Optional admonition title, shown in place of the default type label."
+              }
+            },
+            "additionalProperties": false
+          }
         }
       }
     }

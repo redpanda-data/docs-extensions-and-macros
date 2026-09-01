@@ -90,8 +90,8 @@
  *     - '@redpanda-data/docs-extensions-and-macros/macros/prop'
  */
 
-const chalk = require('chalk')
 const semver = require('semver')
+const logger = require('@antora/logger')('prop-macro')
 
 const $propertyRegistry = Symbol('$propertyRegistry')
 // Release series a component version has no property data for, recorded at
@@ -236,7 +236,7 @@ function buildPageIndex (contentCatalog, component, properties, version) {
     return head.startsWith('<') && !head.startsWith('<<') && /^<[a-zA-Z!/]/.test(head)
   }
   if (pages.some(looksConverted)) {
-    console.warn(chalk.yellow(`prop macro: building the property page index for ${component}@${version || 'any'} after conversion started; some pages are already HTML and their properties may not be indexed. Register '@redpanda-data/docs-extensions-and-macros/extensions/property-page-index' under antora.extensions to build the index up front.`))
+    logger.warn(`prop macro: building the property page index for ${component}@${version || 'any'} after conversion started; some pages are already HTML and their properties may not be indexed. Register '@redpanda-data/docs-extensions-and-macros/extensions/property-page-index' under antora.extensions to build the index up front.`)
   }
   // A page can declare that it is the reference for a named collection of
   // properties:
@@ -404,7 +404,7 @@ function warnOnce (contentCatalog, key, message) {
   const seen = contentCatalog[$warned] || (contentCatalog[$warned] = new Set())
   if (seen.has(key)) return false
   seen.add(key)
-  console.warn(chalk.yellow(message))
+  logger.warn(message)
   return true
 }
 
@@ -774,7 +774,7 @@ function reportUnknownProperty ({ name, mode, registry, filePath }) {
   const message = `prop:${name}[]${where}: '${name}' is not in the property data this page validates against (${describeDataset(registry)}). ` +
     `Either the name is misspelled or the property does not exist in that release.${hint}`
   if (mode === 'error') throw new Error(message)
-  console.warn(chalk.yellow(message))
+  logger.warn(message)
 }
 
 /**
@@ -799,11 +799,11 @@ function reportUnavailableProperty ({ name, component, registry, mode, filePath 
   if (mode === 'off') return
   const where = filePath ? ` in ${filePath}` : ''
   const which = component || 'this'
-  console.warn(chalk.yellow(
+  logger.warn(
     `prop:${name}[]${where}: '${name}' is not available in the ${which} component, so it renders as plain code -- no link, and no tooltip. ` +
     `${describeDataset(registry)} marks it cloud_supported: false, meaning Redpanda has the property but this audience cannot set it. ` +
     'If that is wrong, fix cloud_supported in the property extractor; if it is right, reword the sentence and drop the macro.'
-  ))
+  )
 }
 
 /**
@@ -814,11 +814,11 @@ function reportUnavailableProperty ({ name, component, registry, mode, filePath 
 function reportUnpublishedProperty ({ name, registry, mode, filePath }) {
   if (mode === 'off') return
   const where = filePath ? ` in ${filePath}` : ''
-  console.warn(chalk.yellow(
+  logger.warn(
     `prop:${name}[link=true]${where}: '${name}' is in ${describeDataset(registry)} but no reference page in this component renders a heading for it, so it keeps its tooltip and renders without a link. ` +
     'Every property reference page filters out the deprecated and exclude-from-docs include tags, and some include only selected category tags -- check which tags enclose this property in the generated partial. ' +
     'If it is meant to stay unpublished, drop link=true.'
-  ))
+  )
 }
 
 /**
@@ -1000,7 +1000,7 @@ function register (registry, config = {}) {
   } else if (typeof registry.inlineMacro === 'function') {
     registry.inlineMacro(propInlineMacro(config))
   } else {
-    console.warn("no 'inlineMacro' method on alleged registry")
+    logger.warn("no 'inlineMacro' method on alleged registry")
   }
   return registry
 }
