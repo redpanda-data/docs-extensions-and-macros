@@ -77,7 +77,7 @@ on:
           which for a workflow holding pull-requests: write in engineering
           repos is both a reproducibility and a supply-chain gap.
         type: string
-        default: "@redpanda-data/docs-extensions-and-macros@5.22.1"
+        default: "@redpanda-data/docs-extensions-and-macros@5.23.4"
     secrets:
       anthropic_api_key:
         required: true

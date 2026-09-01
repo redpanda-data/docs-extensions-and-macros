@@ -157,7 +157,7 @@ describe('summaryAttribute helper', () => {
   });
 
   test('flattens AsciiDoc markup, matching backfillPageDescriptions exactly', () => {
-    // The attrs region becomes the page's <meta name="description">, so raw
+    // The meta region becomes the page's <meta name="description">, so raw
     // markup here ships into search snippets, link previews and cloud-docs
     // stubs. Verified in a real Antora build before this was flattened.
     const summary = 'The `branch` processor creates a request via a '
@@ -251,20 +251,20 @@ describe('generator writes a regenerated description partial', () => {
     });
   });
 
-  test('emits attrs and body tags so pages can refresh :description: and the body from one file', () => {
+  test('emits meta and body tags so pages can refresh :description: and the body from one file', () => {
     return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
       const dPath = path.join(
         tmpDir, 'modules', 'components', 'partials', 'descriptions', 'outputs', 'sql_raw.adoc'
       );
       const content = fs.readFileSync(dPath, 'utf8');
-      expect(content).toContain('// tag::attrs[]');
+      expect(content).toContain('// tag::meta[]');
       expect(content).toContain(':description: Executes an arbitrary SQL query for each message.');
-      expect(content).toContain('// end::attrs[]');
+      expect(content).toContain('// end::meta[]');
       expect(content).toContain('// tag::body[]');
       expect(content).toContain('// end::body[]');
-      // The attribute line sits inside the attrs tag, before the body tag.
+      // The attribute line sits inside the meta tag, before the body tag.
       const attrLine = content.indexOf(':description: Executes');
-      expect(attrLine).toBeGreaterThan(content.indexOf('// tag::attrs[]'));
+      expect(attrLine).toBeGreaterThan(content.indexOf('// tag::meta[]'));
       expect(attrLine).toBeLessThan(content.indexOf('// tag::body[]'));
     });
   });
@@ -276,7 +276,7 @@ describe('generator writes a regenerated description partial', () => {
       );
       const page = [
         '= sql_raw',
-        `include::${dPath}[tag=attrs]`,
+        `include::${dPath}[tag=meta]`,
         '',
         `include::${dPath}[tag=body]`,
         '',
@@ -433,7 +433,7 @@ describe('summary-only and escapable-summary connectors (CodeRabbit findings)', 
       const content = fs.readFileSync(dPath, 'utf8');
       // Not blanked as "removed upstream"
       expect(content).not.toContain('intentionally empty');
-      expect(content).toContain('// tag::attrs[]');
+      expect(content).toContain('// tag::meta[]');
       // The attribute value is raw text, never HTML-escaped
       expect(content).toContain(":description: Caches messages & forwards them to Bob's <special> queue.");
       expect(content).not.toContain('&amp;');
@@ -720,7 +720,7 @@ describe('summaries are brace-escaped like description bodies', () => {
     return generateRpcnConnectorDocs({ data: dataFile, template: templateFile }).then(() => {
       const page = [
         '= braced_summary',
-        `include::${dPath}[tag=attrs]`,
+        `include::${dPath}[tag=meta]`,
         '',
         `include::${dPath}[tag=body]`,
       ].join('\n');
@@ -961,7 +961,7 @@ describe('a blanked description partial still answers both tags', () => {
     const pagePath = path.join(tmpDir, 'page.adoc');
     fs.writeFileSync(pagePath, [
       '= gone',
-      `include::${dPath}[tag=attrs]`,
+      `include::${dPath}[tag=meta]`,
       '',
       `include::${dPath}[tag=body]`,
       '',
@@ -1004,7 +1004,7 @@ describe('drafted pages are born wired to the description partial', () => {
           config: { children: [{ name: 'dsn', type: 'string', kind: 'scalar', description: 'A field.' }] },
         },
         {
-          // No summary: the attrs region sets nothing, so this page must keep
+          // No summary: the meta region sets nothing, so this page must keep
           // an inline attribute rather than an include that sets no
           // :description: at all.
           name: 'no_summary',
@@ -1038,12 +1038,12 @@ describe('drafted pages are born wired to the description partial', () => {
     });
 
     const page = draft('sql_raw');
-    expect(page).toContain('include::connect:components:partial$descriptions/outputs/sql_raw.adoc[tag=attrs]');
+    expect(page).toContain('include::connect:components:partial$descriptions/outputs/sql_raw.adoc[tag=meta]');
     expect(page).toContain('include::connect:components:partial$descriptions/outputs/sql_raw.adoc[tag=body]');
-    // The attrs include lives inside the meta tag region so single-source
+    // The meta include lives inside the meta tag region so single-source
     // stubs still inherit :description:.
     const lines = page.split('\n');
-    const at = lines.findIndex((l) => l.includes('tag=attrs'));
+    const at = lines.findIndex((l) => l.includes('tag=meta'));
     expect(lines[at - 1]).toBe('// tag::meta[]');
     expect(lines[at + 1]).toBe('// end::meta[]');
     // Nothing is frozen into the page any more: no literal attribute, no
@@ -1064,10 +1064,10 @@ describe('drafted pages are born wired to the description partial', () => {
     expect(partial).toContain('Runs a query with \\{endpoint}.');
 
     // Negative control: a summary-less connector keeps the inline attribute,
-    // flattened, because the attrs region would set nothing.
+    // flattened, because the meta region would set nothing.
     const bare = draft('no_summary');
     expect(bare).toContain(':description: Writes to a thing.');
-    expect(bare).not.toContain('tag=attrs');
+    expect(bare).not.toContain('tag=meta');
     // Its body still comes from the partial, which does have a description.
     expect(bare).toContain('descriptions/outputs/no_summary.adoc[tag=body]');
   });
@@ -1323,10 +1323,10 @@ describe('the description template is overridable and the guard covers version-o
     const partial = partialFor('vonly');
     expect(partial).not.toBeNull();
     expect(partial).toContain('Introduced in version 4.1.0.');
-    // With no summary the attrs region sets nothing, so a page keeps its own
+    // With no summary the meta region sets nothing, so a page keeps its own
     // :description: rather than losing it.
-    const attrs = partial.split('// tag::attrs[]')[1].split('// end::attrs[]')[0];
-    expect(attrs.trim()).toBe('');
+    const meta = partial.split('// tag::meta[]')[1].split('// end::meta[]')[0];
+    expect(meta.trim()).toBe('');
   });
 
   test('--template-description swaps the template that produces the partial', async () => {
