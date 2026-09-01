@@ -172,6 +172,44 @@ ${diff}
 }
 
 /**
+ * Prose-quality prompt (behavior D): the diff-review shape of negativeReview
+ * carrying the PRODUCTION prose-quality contract verbatim. The fragment is
+ * extracted from doc-strings-review.yml by the runner, so the eval always
+ * tests the exact wording the workflow ships: rewording the workflow
+ * automatically retests the new text, and deleting the fragment turns the
+ * case into a HARNESS_ERROR instead of a silent pass.
+ */
+function proseReview ({ diff, workflowFragment }) {
+  return `You are reviewing user-facing doc strings only, in suggest-only posture.
+The unified diff below is a pull request against a redpanda checkout; it
+touches doc strings that are published verbatim to docs.redpanda.com.
+
+The writing standard below is the content of embedded-reference-strings.md
+for this review (it is present and non-empty):
+
+${SURFACE_CONTRACT}
+
+The production review's prose-quality contract, applied to declarations
+whose new string has no mechanical defect:
+
+${workflowFragment}
+
+For each declaration whose NEW string violates the contract, output a line
+"FILE <path> LINES <start>-<end>" followed by one fenced block tagged
+"suggestion" with the corrected declaration span.
+
+OUTPUT CONTRACT (machine-parsed): if there are no violations, reply with
+exactly:
+NO_SUGGESTIONS
+
+The diff:
+\`\`\`diff
+${diff}
+\`\`\`
+`
+}
+
+/**
  * Negative control: findings audit over a fully conforming metrics file.
  * The model must claim zero findings, as a machine-parsed JSON verdict.
  */
@@ -203,4 +241,4 @@ If every string conforms, "findings" must be an empty array.
 `
 }
 
-module.exports = { SURFACE_CONTRACT, rewrite, upstreamPort, negativeReview, negativeAudit }
+module.exports = { SURFACE_CONTRACT, rewrite, upstreamPort, proseReview, negativeReview, negativeAudit }

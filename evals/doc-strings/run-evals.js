@@ -33,6 +33,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
+const YAML = require('yaml')
 const lib = require('./lib')
 const prompts = require('./prompts')
 const { CASES } = require('./cases')
@@ -299,6 +300,24 @@ function runUpstreamCase (spec, io) {
  * substance. Under --sabotage the diff is a fully conforming rewording,
  * the model must stay silent, and this case must FAIL.
  */
+const WORKFLOW_PATH = path.join(__dirname, '..', '..', '.github', 'workflows', 'doc-strings-review.yml')
+
+/**
+ * The production prose-quality contract, extracted from the live workflow so
+ * the eval can never drift from what actually runs. Throws when the fragment
+ * is missing, turning a deleted or renamed contract into a HARNESS_ERROR
+ * rather than a silently weaker eval.
+ */
+function loadWorkflowProseFragment () {
+  const wf = YAML.parse(fs.readFileSync(WORKFLOW_PATH, 'utf8'))
+  const claude = wf.jobs['doc-strings-review'].steps.find((st) => st.name === 'Claude review with suggestions')
+  const prompt = claude && claude.with && claude.with.prompt
+  if (!prompt) throw new Error('Claude step prompt not found in doc-strings-review.yml')
+  const m = prompt.match(/PROSE QUALITY:[\s\S]*?(?=\n\s*\n[A-Z][A-Z -]+:|$)/)
+  if (!m) throw new Error('PROSE QUALITY fragment not found in the workflow prompt; the eval and the workflow have drifted')
+  return m[0].trim()
+}
+
 function runProseReviewCase (spec, io, sabotage) {
   const checks = makeChecks()
   const repo = lib.materializeRepo(spec.layout)
@@ -323,8 +342,17 @@ function runProseReviewCase (spec, io, sabotage) {
     `declarations in diff: ${declarations}`)
 
   const extractionBefore = lib.extractDeclarations(repo.dir, repo.surface)
+  let workflowFragment
+  try {
+    workflowFragment = loadWorkflowProseFragment()
+  } catch (err) {
+    return harnessError(checks, err.message)
+  }
+  checks.add('production PROSE QUALITY fragment extracted from the live workflow', true,
+    `${workflowFragment.length} chars`)
+
   const diff = lib.gitDiff(repo.dir, base)
-  const model = io.callModel(prompts.negativeReview({ diff }))
+  const model = io.callModel(prompts.proseReview({ diff, workflowFragment }))
   if (model.failed) return modelCallFailed(checks, model)
 
   const suggestions = lib.parseFences(model.output, 'suggestion')
