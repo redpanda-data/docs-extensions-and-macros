@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "5.24.0",
+  "version": "5.23.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -77,8 +77,6 @@
     "./extensions/find-related-labs": "./extensions/find-related-labs.js",
     "./extensions/convert-llms-to-txt": "./extensions/convert-llms-to-txt.js",
     "./extensions/convert-sitemap-to-markdown": "./extensions/convert-sitemap-to-markdown.js",
-    "./extensions/modify-redirects": "./extensions/produce-redirects.js",
-    "./extensions/produce-redirects": "./extensions/produce-redirects.js",
     "./extensions/algolia-indexer/index": "./extensions/algolia-indexer/index.js",
     "./extensions/aggregate-terms": "./extensions/aggregate-terms.js",
     "./extensions/resolve-xrefs-in-attachments": "./extensions/resolve-xrefs-in-attachments.js",
@@ -161,6 +159,7 @@
     "jest-junit": "^16.0.0"
   },
   "peerDependencies": {
-    "@antora/asciidoc-loader": "^3.1.0"
+    "@antora/asciidoc-loader": "^3.1.0",
+    "@antora/logger": "^3.1.0"
   }
 }
