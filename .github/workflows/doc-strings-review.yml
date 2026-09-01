@@ -277,6 +277,22 @@ jobs:
             rm -f "$tmp"
             echo "::warning::writing standard unavailable; lint-only review."
           fi
+      # The next step hands untrusted PR content to a model with Bash
+      # access. Nothing it does not need should sit in its process
+      # environment, so stash the OIDC-fetched bot token in a runner-temp
+      # file for the dispatch step (whose allowed tool patterns cannot read
+      # it), then blank the token and the AWS session credentials from the
+      # job env. Callers on the plain-secret path are unaffected: this step
+      # only runs when the OIDC inputs are set.
+      - name: Drop fetched credentials from the review's environment
+        if: steps.lint.outputs.count != '0' && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "${ACTIONS_BOT_TOKEN:-}" > "$RUNNER_TEMP/bot-token"
+          for v in ACTIONS_BOT_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION AWS_REGION; do
+            echo "$v=" >> "$GITHUB_ENV"
+          done
       - name: Claude review with suggestions
         if: steps.lint.outputs.count != '0'
         continue-on-error: true
@@ -363,10 +379,17 @@ jobs:
         if: steps.lint.outputs.count != '0'
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN || secrets.actions_bot_token }}
+          GH_TOKEN: ${{ secrets.actions_bot_token }}
           DISPATCH_REPO: ${{ inputs.dispatch_repo }}
         run: |
           set -euo pipefail
+          # The OIDC path stashes the token in a temp file (see the scrub
+          # step above) because it is deliberately blanked from the job env
+          # before the review runs.
+          if [ -z "${GH_TOKEN:-}" ] && [ -s "$RUNNER_TEMP/bot-token" ]; then
+            GH_TOKEN="$(cat "$RUNNER_TEMP/bot-token")"
+            export GH_TOKEN
+          fi
           [ -n "${GH_TOKEN:-}" ] || { echo "No bot token; skipping dispatch."; exit 0; }
           [ -s doc-impact.json ] || { echo "No high-impact findings."; exit 0; }
           # doc-impact.json is model-authored from untrusted PR content and a
