@@ -51,6 +51,8 @@ describe('property-docs GitHub token passthrough to the Makefile', () => {
       GITHUB_TOKEN: 'test-github-token',
       GIT_CREDENTIALS: '',
       REDPANDA_GITHUB_TOKEN: '',
+      ACTIONS_BOT_TOKEN: '',
+      VBOT_GITHUB_API_TOKEN: '',
       GH_TOKEN: '',
     })
     expect(fs.readFileSync(outFile, 'utf8')).toBe('test-github-token')
@@ -61,6 +63,8 @@ describe('property-docs GitHub token passthrough to the Makefile', () => {
       GIT_CREDENTIALS: 'https://git-credentials-token:@github.com',
       GITHUB_TOKEN: '',
       REDPANDA_GITHUB_TOKEN: '',
+      ACTIONS_BOT_TOKEN: '',
+      VBOT_GITHUB_API_TOKEN: '',
       GH_TOKEN: '',
     })
     expect(fs.readFileSync(outFile, 'utf8')).toBe('git-credentials-token')

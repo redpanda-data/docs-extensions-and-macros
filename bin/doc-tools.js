@@ -1057,10 +1057,10 @@ automation
  * @requirements
  * - Python 3.9 or higher
  * - Git
- * - A GitHub token (GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN) with
+ * - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
  *   access to redpanda-data/streaming-enterprise, which is private
  * - Internet connection to clone the streaming-enterprise repository
- * - For --cloud-support: GitHub token with repo permissions (GITHUB_TOKEN env var)
+ * - For --cloud-support: GitHub token with repo permissions (same resolution chain)
  * - For --cloud-support: Python packages pyyaml and requests
  */
 automation
@@ -1075,7 +1075,7 @@ automation
   .option('--regenerate-old-baseline', 'Re-extract the --diff tag from source instead of using the committed attachments/redpanda-properties-<oldTag>.json baseline')
   .option('--overrides <path>', 'Optional JSON file with property description overrides', 'docs-data/property-overrides.json')
   .option('--output-dir <dir>', 'Where to write all generated files', 'modules/reference')
-  .option('--cloud-support', 'Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. Set the token as an environment variable using GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN', true)
+  .option('--cloud-support', 'Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. The token is resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order', true)
   .option('--no-cloud-support', 'Skip Cloud support tags entirely -- and the GitHub token requirement that comes with them')
   .option('--template-property <path>', 'Custom Handlebars template for individual property sections')
   .option('--template-topic-property <path>', 'Custom Handlebars template for topic property sections')
@@ -1339,7 +1339,7 @@ automation
  * @requirements
  * - Go must be installed (https://go.dev/)
  * - Git must be installed (for cloning source)
- * - A GitHub token (GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN) with
+ * - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
  *   access to redpanda-data/streaming-enterprise, which is private (not
  *   needed when --from-source points at an existing local checkout)
  */
@@ -1892,7 +1892,7 @@ automation
  *
  * @requirements
  * - GitHub token with access to redpanda-data/cloudv2-infra repository
- * - Token must be set via GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN environment variable
+ * - Token is resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order
  * - Internet connection to access GitHub API
  */
 automation
@@ -2187,7 +2187,7 @@ automation
  *
  * @requirements
  * - Git to clone the streaming-enterprise repository
- * - A GitHub token (GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN) with
+ * - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
  *   access to redpanda-data/streaming-enterprise, which is private
  * - Buf tool (automatically installed via npm)
  * - Redocly CLI or vacuum for OpenAPI bundling (automatically detected)
@@ -2199,7 +2199,7 @@ automation
   .description('Bundle Redpanda OpenAPI fragments for admin and connect APIs. Requires either --tag or --branch.')
   .option('-t, --tag <tag>', 'Git tag for released content')
   .option('-b, --branch <branch>', 'Branch name for in-progress content')
-  .option('--repo <url>', 'Repository URL. The default is a private repo, so requires a GitHub token (GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN)', 'https://github.com/redpanda-data/streaming-enterprise.git')
+  .option('--repo <url>', 'Repository URL. The default is a private repo, so requires a GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order)', 'https://github.com/redpanda-data/streaming-enterprise.git')
   .addOption(new Option('-s, --surface <surface>', 'Which API surfaces to bundle').choices(['admin', 'connect', 'both']).makeOptionMandatory())
   .option('--out-admin <path>', 'Output path for admin API', 'admin/redpanda-admin-api.yaml')
   .option('--out-connect <path>', 'Output path for connect API', 'connect/redpanda-connect-api.yaml')

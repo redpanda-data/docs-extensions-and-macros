@@ -660,24 +660,29 @@ describe('rpk Docs Handler', () => {
       expect(downloadRpkRelease('v26.2.2', tempDir)).toBeNull()
       expect(spawnSync).toHaveBeenCalledTimes(2)
 
-      const [lookupCmd, lookupArgs] = spawnSync.mock.calls[0]
+      const [lookupCmd, lookupArgs, lookupOpts] = spawnSync.mock.calls[0]
       expect(lookupCmd).toBe('curl')
-      expect(lookupArgs).toEqual(expect.arrayContaining(['-H', 'Authorization: token test-token-789']))
+      // The token must never appear in curl's argv (readable via ps//proc
+      // while the transfer runs); it travels as a config file on stdin.
+      expect(lookupArgs.join(' ')).not.toContain('test-token-789')
+      expect(lookupArgs).toEqual(expect.arrayContaining(['--config', '-']))
+      expect(lookupOpts.input).toBe('header = "Authorization: token test-token-789"')
       expect(lookupArgs.some((a) => typeof a === 'string' &&
         a === 'https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/tags/v26.2.2')).toBe(true)
 
-      const [dlCmd, dlArgs] = spawnSync.mock.calls[1]
+      const [dlCmd, dlArgs, dlOpts] = spawnSync.mock.calls[1]
       expect(dlCmd).toBe('curl')
       // The API's per-asset url (not the releases/download/... browser url,
       // which 404s for a private repo even with a valid token) is what
       // accepts the Authorization header.
+      expect(dlArgs.join(' ')).not.toContain('test-token-789')
       expect(dlArgs).toEqual(expect.arrayContaining([
-        '-H', 'Authorization: token test-token-789',
+        '--config', '-',
         '-H', 'Accept: application/octet-stream'
       ]))
+      expect(dlOpts.input).toBe('header = "Authorization: token test-token-789"')
       expect(dlArgs.some((a) => a === 'https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/assets/111')).toBe(true)
       expect(dlArgs.some((a) => typeof a === 'string' && a.includes('releases/download/'))).toBe(false)
-      expect(dlArgs.join(' ')).not.toContain('test-token-789@')
     })
   })
 })

@@ -1329,7 +1329,10 @@ function downloadRpkRelease(tag, destDir) {
   const assetName = `rpk-${osName}-${archName}.zip`
   const checksumAsset = `rpk_${tag.replace(/^v/, '')}_checksums.txt`
   const zipPath = path.join(destDir, assetName)
-  const authHeader = `Authorization: token ${token}`
+  // The Authorization header reaches curl through a config file on stdin
+  // (--config -), never as an -H argument: an argv header is readable by
+  // any process on the host (ps, /proc) for as long as the transfer runs.
+  const curlAuthConfig = `header = "Authorization: token ${token}"`
 
   // streaming-enterprise is private, so the release's browser download URL
   // (releases/download/<tag>/<asset>) 404s even with a valid token: it
@@ -1340,10 +1343,10 @@ function downloadRpkRelease(tag, destDir) {
   const releaseResult = spawnSync('curl', [
     '-fsSL', '--retry', '5', '--retry-all-errors',
     '--connect-timeout', '30', '--max-time', '60',
-    '-H', authHeader,
+    '--config', '-',
     '-H', 'Accept: application/vnd.github+json',
     `https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/tags/${tag}`
-  ], { encoding: 'utf8', timeout: 90000 })
+  ], { encoding: 'utf8', input: curlAuthConfig, timeout: 90000 })
 
   if (releaseResult.status !== 0) {
     console.warn(`Could not look up release ${tag} from streaming-enterprise (draft or missing release)`)
@@ -1371,10 +1374,10 @@ function downloadRpkRelease(tag, destDir) {
   const curlResult = spawnSync('curl', [
     '-fL', '--retry', '5', '--retry-all-errors',
     '--connect-timeout', '30', '--max-time', '300',
-    '-H', authHeader,
+    '--config', '-',
     '-H', 'Accept: application/octet-stream',
     '-o', zipPath, assetUrl
-  ], { encoding: 'utf8', timeout: 360000 })
+  ], { encoding: 'utf8', input: curlAuthConfig, timeout: 360000 })
 
   if (curlResult.status !== 0) {
     console.warn(`Could not download rpk release for ${tag} (draft or missing release asset)`)
@@ -1385,10 +1388,10 @@ function downloadRpkRelease(tag, destDir) {
   const checksumPath = path.join(destDir, checksumAsset)
   const checksumResult = checksumUrl ? spawnSync('curl', [
     '-fsSL', '--retry', '3', '--connect-timeout', '30', '--max-time', '60',
-    '-H', authHeader,
+    '--config', '-',
     '-H', 'Accept: application/octet-stream',
     '-o', checksumPath, checksumUrl
-  ], { encoding: 'utf8', timeout: 90000 }) : { status: 1 }
+  ], { encoding: 'utf8', input: curlAuthConfig, timeout: 90000 }) : { status: 1 }
 
   if (checksumResult.status === 0) {
     const expectedLine = fs.readFileSync(checksumPath, 'utf8')

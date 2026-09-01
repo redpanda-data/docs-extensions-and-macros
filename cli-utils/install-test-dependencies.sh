@@ -481,12 +481,18 @@ install_rpk() {
 
     log_info "Detected ${os_name} ${arch_name}, looking up the latest rpk release..."
 
+    # The Authorization header reaches curl through a config file on stdin
+    # (--config -), never as an -H argument: an argv header is readable by
+    # any process on the host (ps, /proc) for as long as the transfer runs.
     local release_json
     if ! release_json=$(curl -fsSL --retry 5 --retry-all-errors \
             --connect-timeout 30 --max-time 60 --retry-max-time 120 \
-            -H "Authorization: token ${gh_token}" \
+            --config - \
             -H "Accept: application/vnd.github+json" \
-            "$releases_api"); then
+            "$releases_api" <<EOF
+header = "Authorization: token ${gh_token}"
+EOF
+    ); then
         log_warn "Failed to query the latest release from streaming-enterprise"
         log_warn "Please install rpk manually:"
         log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
@@ -514,11 +520,15 @@ install_rpk() {
     # caps the whole retry window so CI fails fast on persistent errors.
     # Accept: application/octet-stream is required on the API asset url to
     # receive the binary itself instead of its JSON metadata.
+    # Same as the release lookup above: the token travels on stdin, not argv.
     if curl -fL --retry 5 --retry-all-errors \
             --connect-timeout 30 --max-time 300 --retry-max-time 600 \
-            -H "Authorization: token ${gh_token}" \
+            --config - \
             -H "Accept: application/octet-stream" \
-            -o "$rpk_filename" "$rpk_url"; then
+            -o "$rpk_filename" "$rpk_url" <<EOF
+header = "Authorization: token ${gh_token}"
+EOF
+    then
         if unzip "$rpk_filename" 2>/dev/null; then
             mkdir -p ~/.local/bin
             if mv rpk ~/.local/bin/ 2>/dev/null; then

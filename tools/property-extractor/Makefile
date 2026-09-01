@@ -93,6 +93,11 @@ clean:
 # the token Antora/Netlify builds actually populate) before invoking this
 # Makefile. REDPANDA_GITHUB_TOKEN/GITHUB_TOKEN are the fallback for invoking
 # `make` directly, without going through doc-tools.js.
+# An existing checkout may predate the streaming-enterprise migration and
+# still have origin pointed at the old public redpanda repo, so the
+# existing-directory path pins origin to REPO_URL before fetching; otherwise
+# a fetch could fail on a new tag and fall back to the old repo's default
+# branch, silently generating docs from the wrong source.
 redpanda-git:
 	@mkdir -p "$(TMP_ROOT)"
 	@GH_TOKEN=$${GH_TOKEN:-$${REDPANDA_GITHUB_TOKEN:-$${GITHUB_TOKEN}}}; \
@@ -110,6 +115,8 @@ redpanda-git:
 	REPO_URL="https://github.com/redpanda-data/streaming-enterprise.git"; \
 	echo "🔄 Cloning/updating streaming-enterprise into $(REDPANDA_SRC)…"; \
 	if [ -d "$(REDPANDA_SRC)" ]; then \
+	  git -C "$(REDPANDA_SRC)" remote set-url origin "$$REPO_URL" 2>/dev/null || \
+	    git -C "$(REDPANDA_SRC)" remote add origin "$$REPO_URL"; \
 	  git -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "+refs/tags/$(TAG):refs/tags/$(TAG)" 2>/dev/null || \
 	    git -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "+refs/heads/$(TAG):refs/remotes/origin/$(TAG)" 2>/dev/null || \
 	    git -C "$(REDPANDA_SRC)" fetch --all --tags -q; \
