@@ -85,7 +85,6 @@ antora:
   extensions:
     - '@redpanda-data/docs-extensions-and-macros/extensions/version-fetcher/set-latest-version'
     - '@redpanda-data/docs-extensions-and-macros/extensions/generate-index-data.js'
-    - '@redpanda-data/docs-extensions-and-macros/extensions/produce-redirects.js'
 ----
 
 Extensions run in the order they're listed.
@@ -122,16 +121,7 @@ antora:
 
 === Redirect management
 
-Generate redirects from old URLs to new ones:
-
-[,yaml]
-----
-antora:
-  extensions:
-    - '@redpanda-data/docs-extensions-and-macros/extensions/produce-redirects.js'
-----
-
-Define redirects in your `antora.yml`:
+No extension required: core Antora (>= 3.1.8) generates redirects for old URLs automatically. Define redirects in your `antora.yml`:
 
 [,yaml]
 ----
