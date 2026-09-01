@@ -7,7 +7,7 @@ const { flattenToAttributeValue } = require('../metadata-utils.js');
  * value suitable for the `:description:` page attribute (and therefore for the
  * page's `<meta name="description">`).
  *
- * Delegates to the shared flattener so the description partial's attrs region
+ * Delegates to the shared flattener so the description partial's meta region
  * and `backfillPageDescriptions` publish the same text for the same summary.
  * Collapsing whitespace alone is not enough: summaries carry xrefs, link
  * macros and inline code, and an unflattened value ships raw

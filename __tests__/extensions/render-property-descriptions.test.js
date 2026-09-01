@@ -14,12 +14,13 @@ function dataset (descriptions) {
   return JSON.stringify({ properties })
 }
 
-function catalogWith (json, { pages = true, partialSource } = {}) {
+function catalogWith (json, { pages = true, partialSource, extraFiles = [] } = {}) {
   const files = [
     {
       src: { component: 'streaming', version: '26.2', module: 'reference', family: 'attachment', relative: 'redpanda-properties-v26.2.1.json', path: 'modules/reference/attachments/redpanda-properties-v26.2.1.json' },
       contents: Buffer.from(json),
     },
+    ...extraFiles,
   ]
   if (pages) {
     files.push({
@@ -60,7 +61,7 @@ function catalogWith (json, { pages = true, partialSource } = {}) {
   }
 }
 
-function run (contentCatalog, { extensions = [] } = {}) {
+function run (contentCatalog, { extensions = [], attributes = {} } = {}) {
   const warnings = []
   const context = {
     handlers: {},
@@ -78,7 +79,7 @@ function run (contentCatalog, { extensions = [] } = {}) {
   context.handlers.contentClassified({ contentCatalog })
   context.handlers.documentsConverted({
     contentCatalog,
-    siteAsciiDocConfig: { attributes: { 'attribute-missing': 'drop' }, extensions },
+    siteAsciiDocConfig: { attributes: { 'attribute-missing': 'drop', ...attributes }, extensions },
   })
   const attachment = contentCatalog.files.find((f) => f.src.family === 'attachment')
   const raw = attachment.contents.toString()
@@ -285,5 +286,93 @@ describe('render-property-descriptions extension', () => {
     const catalog = catalogWith(dataset({ plain: 'A description.' }), { pages: false })
     const { data } = run(catalog)
     expect(data.properties.plain.description_html).toBeUndefined()
+  })
+})
+
+// A glossterm: reference in a property description runs through the same
+// macros/glossary.js inline macro as a normal page, with the real site's
+// glossary-tooltip attribute (streaming/shared/modules/ROOT/partials/
+// global-attributes.yml sets glossary-tooltip: 'data-tippy-content'), so a
+// term whose hover-text breaks or injects through a directly-authored
+// glossterm: call (the bug macros/glossary.js's own tests cover, and its fix
+// resolves) breaks or injects through a property tooltip the same way --
+// description_html is embedded directly, unescaped, into the tooltip content
+// docs-ui hands to Tippy with allowHTML: true
+// (docs-ui/src/js/19-property-tooltips.js), same as the standalone case.
+//
+// description_html itself is raw, not-yet-parsed HTML text -- the same state
+// macros/glossary.test.js's convert() output is in before its
+// decodeAttributeOnce simulates the one browser parse a normal page gets
+// before docs-ui's own decode. Reusing that exact helper here asserts the
+// same escaping level reaches a property tooltip as reaches a standalone
+// glossary term: this only proves macros/glossary.js's fix applies here too,
+// not the full docs-ui-side decode chain (truncateDescriptionHtml's own
+// innerHTML probe, then Tippy's), which is a docs-ui-side concern this test
+// suite (docs-extensions-and-macros) cannot exercise.
+function decodeAttributeOnce (value) {
+  return value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+}
+
+function termFile (termName, hoverText) {
+  return {
+    src: { component: 'shared', module: 'terms', family: 'partial', relative: `${termName}.adoc` },
+    contents: Buffer.from(`= ${termName}\n:term-name: ${termName}\n:hover-text: ${hoverText}\n\nBody.\n`),
+  }
+}
+
+describe('glossterm: references inside a description (shared with macros/glossary.js)', () => {
+  const attributes = { 'glossary-tooltip': 'data-tippy-content' }
+
+  it('escapes a malicious hover-text term the same way a directly-authored glossterm: call is escaped', () => {
+    const terms = [termFile('sql-engine', 'Danger `<img src=x onerror=alert(1)>` here. The "engine" runs queries.')]
+    const catalog = catalogWith(
+      dataset({ query_engine: 'Powered by the glossterm:sql-engine[] under the hood.' }),
+      { extraFiles: terms }
+    )
+    const { data } = run(catalog, { extensions: [glossary], attributes })
+
+    const html = data.properties.query_engine.description_html
+    // Not yet live: the raw description_html still has the img text escaped
+    // once, same as macros/glossary.test.js asserts for a directly-authored
+    // glossterm: call -- <code> is the only real tag in the attribute value.
+    expect(html).toContain(
+      '<a data-tippy-content="Danger <code>&amp;lt;img src=x onerror=alert(1)&amp;gt;</code> here. The &amp;quot;engine&amp;quot; runs queries."'
+    )
+    // After the one decode a normal page's own HTML parse would already have
+    // done, <code> is still the only live markup -- the img text is inert.
+    expect(decodeAttributeOnce(html)).toContain(
+      'Danger <code>&lt;img src=x onerror=alert(1)&gt;</code> here. The &quot;engine&quot; runs queries.'
+    )
+  })
+
+  it('does not let a literal quote in hover-text terminate the attribute early', () => {
+    const terms = [termFile('oxla', 'The engine. "Oxla" may appear in logs.')]
+    const catalog = catalogWith(
+      dataset({ query_engine: 'See glossterm:oxla[] for details.' }),
+      { extraFiles: terms }
+    )
+    const { data } = run(catalog, { extensions: [glossary], attributes })
+
+    const html = data.properties.query_engine.description_html
+    // A broken attribute would show a second, bare data-tippy-content
+    // attribute or truncate the link text -- assert the whole anchor and its
+    // attribute parse as one well-formed unit.
+    expect(html).toMatch(/^See <a data-tippy-content="[^"]*" href="[^"]*" class="glossary-term">oxla<\/a> for details\.$/)
+    expect(decodeAttributeOnce(html)).toContain('The engine. &quot;Oxla&quot; may appear in logs.')
+  })
+
+  it('renders a safe hover-text term identically to a directly-authored glossterm: call', () => {
+    const terms = [termFile('wal', 'Uses `fsync` to persist writes.')]
+    const catalog = catalogWith(
+      dataset({ durability: 'Backed by the glossterm:wal[] for crash recovery.' }),
+      { extraFiles: terms }
+    )
+    const { data } = run(catalog, { extensions: [glossary], attributes })
+
+    expect(decodeAttributeOnce(data.properties.durability.description_html)).toContain('<code>fsync</code>')
   })
 })

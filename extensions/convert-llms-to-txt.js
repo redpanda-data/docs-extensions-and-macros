@@ -3,7 +3,7 @@
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 const { toMarkdownUrl } = require('../extension-utils/url-utils');
-const { stripMarkdownMetadata } = require('../extension-utils/llms-utils');
+const { stripMarkdownMetadata, componentsWithExports } = require('../extension-utils/llms-utils');
 
 /**
  * Extracts markdown from llms.adoc page and generates AI-friendly documentation exports.
@@ -167,7 +167,11 @@ module.exports.register = function () {
     fullContent += `- **${siteUrl}/llms.txt**: Curated overview following the llms.txt standard - start here for a quick introduction\n`;
     fullContent += `- **${siteUrl}/llms-full.txt**: Complete documentation export (this file) - comprehensive reference with all pages\n`;
     fullContent += `- **Component-specific exports**: Focused documentation for individual products:\n`;
-    components.forEach(component => {
+    // Only advertise exports for components that actually have pages — a
+    // `<name>-full.txt` is generated per component below, so listing corpus-less
+    // landing/utility components (e.g. data-platform, self-managed, search) would
+    // point the AI index at a 404.
+    componentsWithExports(components, pages).forEach(component => {
       fullContent += `  - \`${siteUrl}/${component.name}-full.txt\`: ${component.title}\n`;
     });
     fullContent += `- **Individual markdown pages**: Each HTML page has a corresponding .md file (e.g., \`/docs/page.html\` → \`/docs/page.md\`)\n\n`;
