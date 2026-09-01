@@ -179,7 +179,7 @@ ${diff}
  * automatically retests the new text, and deleting the fragment turns the
  * case into a HARNESS_ERROR instead of a silent pass.
  */
-function proseReview ({ diff, workflowFragment }) {
+function proseReview ({ diff, workflowFragment, terminology }) {
   return `You are reviewing user-facing doc strings only, in suggest-only posture.
 The unified diff below is a pull request against a redpanda checkout; it
 touches doc strings that are published verbatim to docs.redpanda.com.
@@ -193,6 +193,7 @@ The production review's prose-quality contract, applied to declarations
 whose new string has no mechanical defect:
 
 ${workflowFragment}
+${terminology ? `\nterminology.md is present; its content:\n\n${terminology}\n` : ''}
 
 For each declaration whose NEW string violates the contract, output a line
 "FILE <path> LINES <start>-<end>" followed by one fenced block tagged

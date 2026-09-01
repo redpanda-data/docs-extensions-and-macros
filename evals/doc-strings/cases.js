@@ -144,6 +144,35 @@ const CASES = [
     mustMentionAny: ['batch']
   },
   {
+    id: 'terminology-misuse',
+    kind: 'prose-review',
+    description: 'Lint-clean, substantive description that lowercases the product name; terminology.md names that form incorrect, so the model must suggest the canonical casing',
+    layout: 'properties',
+    target: 'kafka_batch_max_bytes',
+    columnLimit: 80,
+    terminologyFixture: 'terminology.md',
+    diffEdits: [{
+      find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
+            '      "compressed, the limit applies to the compressed batch size. Default "\n' +
+            '      "is 1048576 bytes.",',
+      replace: '      "Maximum size of a batch the redpanda broker accepts. If the batch "\n' +
+               '      "is compressed, the limit applies to the compressed batch size. "\n' +
+               '      "Default is 1048576 bytes.",'
+    }],
+    // Sabotage: identical rewording with the canonical casing; the model
+    // must stay silent there, so this case fails, proving it can fail.
+    sabotageEdits: [{
+      find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
+            '      "compressed, the limit applies to the compressed batch size. Default "\n' +
+            '      "is 1048576 bytes.",',
+      replace: '      "Maximum size of a batch the Redpanda broker accepts. If the batch "\n' +
+               '      "is compressed, the limit applies to the compressed batch size. "\n' +
+               '      "Default is 1048576 bytes.",'
+    }],
+    mustMentionAny: ['Redpanda'],
+    mustNotMention: ['redpanda']
+  },
+  {
     id: 'negative-property-diff',
     kind: 'negative-review',
     description: 'Diff with a fully conforming property rewording; the model must produce zero suggestions and zero doc-impact findings',

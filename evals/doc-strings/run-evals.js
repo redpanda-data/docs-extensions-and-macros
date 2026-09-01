@@ -351,8 +351,12 @@ function runProseReviewCase (spec, io, sabotage) {
   checks.add('production PROSE QUALITY fragment extracted from the live workflow', true,
     `${workflowFragment.length} chars`)
 
+  let terminology = null
+  if (spec.terminologyFixture) {
+    terminology = fs.readFileSync(path.join(__dirname, 'fixtures', spec.terminologyFixture), 'utf8')
+  }
   const diff = lib.gitDiff(repo.dir, base)
-  const model = io.callModel(prompts.proseReview({ diff, workflowFragment }))
+  const model = io.callModel(prompts.proseReview({ diff, workflowFragment, terminology }))
   if (model.failed) return modelCallFailed(checks, model)
 
   const suggestions = lib.parseFences(model.output, 'suggestion')
@@ -421,9 +425,15 @@ function runProseReviewCase (spec, io, sabotage) {
   checks.add('re-extraction: target parses with a non-empty description', desc.trim().length > 0,
     JSON.stringify(desc.slice(0, 120)))
   if (Array.isArray(spec.mustMentionAny) && spec.mustMentionAny.length) {
-    checks.add('rewrite restores substantive content (states the default)',
+    checks.add('rewrite restores substantive content',
       spec.mustMentionAny.some((t) => desc.includes(t)),
       `looked for one of ${JSON.stringify(spec.mustMentionAny)} in ${JSON.stringify(desc.slice(0, 120))}`)
+  }
+  if (Array.isArray(spec.mustNotMention) && spec.mustNotMention.length) {
+    const leaked = spec.mustNotMention.filter((t) => desc.includes(t))
+    checks.add('rewrite drops the non-canonical form (case-sensitive)',
+      leaked.length === 0,
+      leaked.length ? `still contains ${JSON.stringify(leaked)}` : 'clean')
   }
 
   io.cleanup(repo.dir)
