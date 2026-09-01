@@ -13,6 +13,12 @@
  *   candidate goes in; the edit is applied and verified by re-running the
  *   audit (class must flip) and the extractor (text must match, nothing else
  *   may change).
+ * - prose-review: behavior D (the declaration-gated Claude pass). A diff
+ *   that is mechanically CLEAN (zero lint findings) but semantically vacuous
+ *   goes in; the model must produce a suggestion, which is applied and
+ *   verified like a rewrite (re-lint clean, extraction intact, substance
+ *   restored). Its sabotage swaps in a fully conforming rewording, where the
+ *   model must stay silent and the case therefore fails.
  * - negative-review / negative-audit: behavior C. Fully conforming input;
  *   the model FAILS the case by producing any suggestion or claiming any
  *   finding. `sabotageEdits` swaps in a violating fixture to prove the case
@@ -105,6 +111,37 @@ const CASES = [
     },
     expectClassBefore: 'KEEP_UNTIL_UPSTREAMED',
     expectClassAfter: 'KEEP'
+  },
+  {
+    id: 'prose-vacuous-clean',
+    kind: 'prose-review',
+    description: 'Mechanically clean but vacuous property rewording; the model must suggest a rewrite that restores substance, and the applied result must still lint clean',
+    layout: 'properties',
+    target: 'kafka_batch_max_bytes',
+    columnLimit: 80,
+    diffEdits: [{
+      find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
+            '      "compressed, the limit applies to the compressed batch size. Default "\n' +
+            '      "is 1048576 bytes.",',
+      replace: '      "Controls how the server processes large requests. Default is "\n' +
+               '      "1048576 bytes.",'
+    }],
+    // Sabotage: the same fully conforming rewording negative-property-diff
+    // uses. The model must rightly stay silent on it, which makes this
+    // case's must-suggest check fail and proves the case can fail.
+    sabotageEdits: [{
+      find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
+            '      "compressed, the limit applies to the compressed batch size. Default "\n' +
+            '      "is 1048576 bytes.",',
+      replace: '      "Maximum size in bytes of a batch processed by the server. If the "\n' +
+               '      "batch is compressed, this limit applies to the compressed batch "\n' +
+               '      "size. Default is 1048576 bytes.",'
+    }],
+    // The vacuous string dodges every rule (it even states the default, so
+    // default-not-stated stays silent) while saying nothing about WHAT is
+    // limited. The removed diff lines show the model the original, so a
+    // substantive rewrite names the thing: a batch.
+    mustMentionAny: ['batch']
   },
   {
     id: 'negative-property-diff',
