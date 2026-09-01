@@ -14,7 +14,9 @@
 const yaml = require('js-yaml')
 const semver = require('semver')
 
-const VALID_SCOPES = ['redpanda', 'console', 'connect', 'operator', 'cloud']
+// Mirrors macros/enterprise.js: no 'cloud' scope, because Redpanda Cloud has
+// no Enterprise Edition license.
+const VALID_SCOPES = ['redpanda', 'console', 'connect', 'operator']
 const SOURCE_KINDS = ['core-enum', 'core-property', 'connect-plugin', 'manual']
 
 function finding (level, check, message) {
