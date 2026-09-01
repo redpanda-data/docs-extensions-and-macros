@@ -61,9 +61,9 @@
 
 const yaml = require('js-yaml')
 const { escapeHtml } = require('../extension-utils/html-utils')
-const chalk = require('chalk')
 const semver = require('semver')
 const { buildBadgeHtml, DEFAULT_TOOLTIPS } = require('./badge')
+const logger = require('@antora/logger')('enterprise-macro')
 
 const $enterpriseRegistry = Symbol('$enterpriseRegistry')
 const $enterpriseRegistryUnreadable = Symbol('$enterpriseRegistryUnreadable')
@@ -77,7 +77,7 @@ function warnOnce (contentCatalog, key, message) {
   const seen = contentCatalog[$warned] || (contentCatalog[$warned] = new Set())
   if (seen.has(key)) return false
   seen.add(key)
-  console.warn(chalk.yellow(message))
+  logger.warn(message)
   return true
 }
 
@@ -144,7 +144,7 @@ function entryStatus (entry, report) {
       // One registry typo needs one fix, so report it once per build rather
       // than once per mention of the feature.
       if (report.contentCatalog) warnOnce(report.contentCatalog, `status:${entry.name}`, message)
-      else console.warn(chalk.yellow(message))
+      else logger.warn(message)
     }
     return STATUS_UNRELEASED
   }
@@ -168,9 +168,9 @@ function isPrereleasePage (config, document) {
     // Anything else is a typo. Falling through to the catalog is safer than
     // guessing, and silently treating it as "released" produced a warning that
     // told the writer their prerelease page belonged to a released version.
-    console.warn(chalk.yellow(
+    logger.warn(
       `enterprise macro: page-component-version-is-prerelease is '${attribute}', which is neither true nor false, so it is ignored and the component version's own prerelease flag is used instead.`
-    ))
+    )
   }
   const contentCatalog = config && config.contentCatalog
   const src = config && config.file && config.file.src
@@ -216,7 +216,7 @@ function reportUnreleasedFeature ({ feature, mode, filePath }) {
     'This page belongs to a released version, so the mention renders as plain text with no enterprise styling, tooltip, or link. ' +
     'Move the mention to the prerelease (beta) branch, or change the status once the feature ships.'
   if (mode === 'error') throw new Error(message)
-  console.warn(chalk.yellow(message))
+  logger.warn(message)
 }
 
 /**
@@ -269,7 +269,7 @@ function isFeatureShippedOnPage (entry, config, report) {
         `enterprise:${entry.name}[]${where}: registry has since: '${since}', which is not a parsable version, so the since-gating check is skipped and the feature renders as already shipped. ` +
         'Fix the since value in enterprise-features.yml (e.g. "26.3"), or remove the key if the feature has always been available.'
       if (report.contentCatalog) warnOnce(report.contentCatalog, `since:${entry.name}`, message)
-      else console.warn(chalk.yellow(message))
+      else logger.warn(message)
     }
     return true
   }
@@ -291,7 +291,7 @@ function reportFeatureNotYetShipped ({ feature, since, pageVersion, mode, filePa
     'The mention renders as plain text with no enterprise styling, tooltip, or link. ' +
     'Move the mention to a page whose version is at or after the since version, or remove since if the feature covers this version too.'
   if (mode === 'error') throw new Error(message)
-  console.warn(chalk.yellow(message))
+  logger.warn(message)
 }
 
 /**
@@ -419,7 +419,7 @@ function warnNoRegistry (contentCatalog) {
   if (contentCatalog) return warnOnce(contentCatalog, 'noregistry', message)
   if (warnedNoRegistry) return
   warnedNoRegistry = true
-  console.warn(chalk.yellow(message))
+  logger.warn(message)
 }
 
 /**
@@ -435,7 +435,7 @@ function reportUnknownFeature ({ feature, mode, registry, filePath }) {
   const where = filePath ? ` in ${filePath}` : ''
   const message = `enterprise:${feature}[] does not match any feature in the enterprise features registry${where}.${hint} Add the feature to ${REGISTRY_FILENAME} in the shared component first.`
   if (mode === 'error') throw new Error(message)
-  console.warn(chalk.yellow(message))
+  logger.warn(message)
 }
 
 /**
@@ -469,7 +469,7 @@ function resolveTooltipAttribute (raw) {
   if (raw === undefined || raw === 'title') return 'title'
   if (raw === 'true') return 'data-enterprise-tooltip'
   if (raw.startsWith('data-')) return raw
-  console.warn(`enterprise-tooltip attribute '${raw}' must be 'title', 'true', 'false', or start with 'data-'. Falling back to 'title'.`)
+  logger.warn(`enterprise-tooltip attribute '${raw}' must be 'title', 'true', 'false', or start with 'data-'. Falling back to 'title'.`)
   return 'title'
 }
 
@@ -687,7 +687,7 @@ function register (registry, config = {}) {
     registry.inlineMacro(enterpriseInlineMacro(config))
     if (typeof registry.blockMacro === 'function') registry.blockMacro(enterpriseFeaturesBlockMacro(config))
   } else {
-    console.warn("no 'inlineMacro' method on alleged registry")
+    logger.warn("no 'inlineMacro' method on alleged registry")
   }
   return registry
 }
