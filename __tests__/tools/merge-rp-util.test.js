@@ -53,7 +53,16 @@ describe('merge-rp-util main()', () => {
 
   afterEach(() => {
     jest.restoreAllMocks()
+    // Release-mode tests set a nonzero exit code on purpose; reset it so the
+    // jest worker process itself doesn't inherit a failing exit status.
+    process.exitCode = undefined
   })
+
+  // The soft-fallback contract below is branch-ref behavior. Release tags
+  // hard-fail instead -- see the release-mode tests at the end of this suite.
+  const useBranchRef = () => {
+    process.argv = ['node', 'merge-rp-util.js', '--tag', 'dev', '--enhanced', '/gen/dev-properties.json']
+  }
 
   test('writes every schema to the temp dir and merges into a temp output, then renames over the real output', async () => {
     getRpUtilSchema.mockResolvedValue({
@@ -145,7 +154,8 @@ describe('merge-rp-util main()', () => {
     expect(getRpUtilSchema).toHaveBeenCalledWith('v26.2.2', undefined)
   })
 
-  test('never touches the real output when getRpUtilSchema rejects, but marks cluster/broker properties as unavailable', async () => {
+  test('never touches the real output when getRpUtilSchema rejects on a branch ref, but marks cluster/broker properties as unavailable', async () => {
+    useBranchRef()
     getRpUtilSchema.mockRejectedValue(new Error('no token, and Docker is not running'))
     jest.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({
       properties: {
@@ -160,13 +170,14 @@ describe('merge-rp-util main()', () => {
     expect(spawnSync).not.toHaveBeenCalled()
     expect(renamed).toBeNull()
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('no token, and Docker is not running'))
-    const written = JSON.parse(writtenFiles['/gen/v26.2.2-properties.json'])
+    const written = JSON.parse(writtenFiles['/gen/dev-properties.json'])
     expect(written.properties.a.rp_util_merge_status).toBe('unavailable')
     expect(written.properties.b.rp_util_merge_status).toBeUndefined()
     expect(written.properties.c.rp_util_merge_status).toBeUndefined()
   })
 
-  test('skips the merge entirely when rp_util returned no schemas at all, and marks properties as unavailable', async () => {
+  test('skips the merge entirely when rp_util returned no schemas at all on a branch ref, and marks properties as unavailable', async () => {
+    useBranchRef()
     getRpUtilSchema.mockResolvedValue({ sourcePath: null })
     jest.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({
       properties: { a: { config_scope: 'broker' } }
@@ -176,11 +187,12 @@ describe('merge-rp-util main()', () => {
 
     expect(spawnSync).not.toHaveBeenCalled()
     expect(renamed).toBeNull()
-    const written = JSON.parse(writtenFiles['/gen/v26.2.2-properties.json'])
+    const written = JSON.parse(writtenFiles['/gen/dev-properties.json'])
     expect(written.properties.a.rp_util_merge_status).toBe('unavailable')
   })
 
-  test('never renames the temp file over the real output when the merge subprocess fails, and marks properties as unavailable', async () => {
+  test('never renames the temp file over the real output when the merge subprocess fails on a branch ref, and marks properties as unavailable', async () => {
+    useBranchRef()
     getRpUtilSchema.mockResolvedValue({ clusterSchema: { a: 1 }, sourcePath: null })
     spawnSync.mockReturnValue({ status: 1 })
     jest.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({
@@ -191,13 +203,14 @@ describe('merge-rp-util main()', () => {
 
     expect(renamed).toBeNull()
     // The (failed) temp output is cleaned up rather than left behind.
-    expect(removedPaths).toContain('/gen/v26.2.2-properties.json.rp-util-merge-tmp')
+    expect(removedPaths).toContain('/gen/dev-properties.json.rp-util-merge-tmp')
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('rp_util merge failed'))
-    const written = JSON.parse(writtenFiles['/gen/v26.2.2-properties.json'])
+    const written = JSON.parse(writtenFiles['/gen/dev-properties.json'])
     expect(written.properties.a.rp_util_merge_status).toBe('unavailable')
   })
 
-  test('never renames the temp file over the real output when spawnSync itself errors', async () => {
+  test('never renames the temp file over the real output when spawnSync itself errors on a branch ref', async () => {
+    useBranchRef()
     getRpUtilSchema.mockResolvedValue({ clusterSchema: { a: 1 }, sourcePath: null })
     spawnSync.mockReturnValue({ error: new Error('python3 not found'), status: null })
     jest.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({ properties: {} }))
@@ -209,6 +222,7 @@ describe('merge-rp-util main()', () => {
   })
 
   test('never throws when the enhanced file cannot be read while marking unavailable properties', async () => {
+    useBranchRef()
     getRpUtilSchema.mockRejectedValue(new Error('boom'))
     jest.spyOn(fs, 'readFileSync').mockImplementation(() => { throw new Error('ENOENT') })
 
@@ -217,6 +231,7 @@ describe('merge-rp-util main()', () => {
   })
 
   test('still cleans up the schema scratch dir when the merge subprocess fails', async () => {
+    useBranchRef()
     getRpUtilSchema.mockResolvedValue({ clusterSchema: { a: 1 }, sourcePath: null })
     spawnSync.mockReturnValue({ status: 1 })
 
@@ -234,6 +249,56 @@ describe('merge-rp-util main()', () => {
 
     const pythonBin = spawnSync.mock.calls[0][0]
     expect(pythonBin).toBe('python3')
+  })
+
+  test('a branch-ref failure stays a warning: no failing exit code', async () => {
+    useBranchRef()
+    getRpUtilSchema.mockRejectedValue(new Error('no schema anywhere'))
+    jest.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({ properties: {} }))
+
+    await main()
+
+    expect(process.exitCode).toBeUndefined()
+  })
+
+  // Release tags publish the property reference, so a missing rp_util schema
+  // must fail the run instead of silently shipping the Tree-sitter-only
+  // extraction (which drops/misparses enum_set properties post
+  // streaming-enterprise#63).
+  test('fails the run when getRpUtilSchema rejects for a release tag, without touching the enhanced file', async () => {
+    getRpUtilSchema.mockRejectedValue(new Error('no published schema, Bazel unavailable'))
+    jest.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({ properties: { a: { config_scope: 'cluster' } } }))
+
+    await main()
+
+    expect(process.exitCode).toBe(1)
+    expect(spawnSync).not.toHaveBeenCalled()
+    expect(renamed).toBeNull()
+    // No unavailable-marker rewrite: the run is failing, not degrading.
+    expect(writtenFiles['/gen/v26.2.2-properties.json']).toBeUndefined()
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Refusing to publish Tree-sitter-only property data'))
+  })
+
+  test('fails the run when the merge subprocess fails for a release tag, and still cleans up the temp output', async () => {
+    getRpUtilSchema.mockResolvedValue({ clusterSchema: { a: 1 }, sourcePath: null })
+    spawnSync.mockReturnValue({ status: 1 })
+    jest.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({ properties: {} }))
+
+    await main()
+
+    expect(process.exitCode).toBe(1)
+    expect(renamed).toBeNull()
+    expect(removedPaths).toContain('/gen/v26.2.2-properties.json.rp-util-merge-tmp')
+  })
+
+  test('treats an RC tag as a release', async () => {
+    process.argv = ['node', 'merge-rp-util.js', '--tag', 'v26.3.1-rc1', '--enhanced', '/gen/v26.3.1-rc1-properties.json']
+    getRpUtilSchema.mockRejectedValue(new Error('nope'))
+    jest.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({ properties: {} }))
+
+    await main()
+
+    expect(process.exitCode).toBe(1)
   })
 })
 

@@ -10,11 +10,24 @@
  * properties (rp_util has no equivalent) and anything rp_util doesn't cover
  * pass through untouched -- see rp_util_merge.py.
  *
- * Never fails the build: if rp_util's schema can't be obtained (no
- * published release for this ref, no GitHub token, no Docker/Bazel
- * available to build from source) or the merge itself errors, this logs a
- * warning and leaves the Tree-sitter-only extraction as the enhanced file,
- * exactly as it already was before this step ran.
+ * Failure behavior depends on what kind of ref is being built:
+ *
+ *   Branch refs (dev, feature branches): never fails the build. If rp_util's
+ *   schema can't be obtained (no published release for this ref, no GitHub
+ *   token, no Docker/Bazel available to build from source) or the merge
+ *   itself errors, this logs a warning and leaves the Tree-sitter-only
+ *   extraction as the enhanced file, exactly as it already was before this
+ *   step ran. In-progress content tolerates the degraded data; it gets
+ *   regenerated constantly.
+ *
+ *   Release tags (v26.3.0, v26.3.1-rc1, ...): fails the build. A release run
+ *   is the one that publishes the property reference, and shipping the
+ *   Tree-sitter-only extraction there is not a degradation readers can see
+ *   past: post streaming-enterprise#63, it silently drops enum_set
+ *   properties (http_authentication) and misparses others behind a green
+ *   job. The fix is to publish the schema first (the publish-rp-util-schema
+ *   workflow, which also runs on a schedule) and re-run; --skip-rp-util /
+ *   SKIP_RP_UTIL=1 remains the explicit opt-out.
  *
  * Usage:
  *   node merge-rp-util.js --tag <ref> --enhanced <path> [--overrides <path>] [--output <path>]
@@ -30,6 +43,35 @@ const bigIntJson = require('../../cli-utils/big-int-json')
 function getArg(args, flag) {
   const i = args.indexOf(flag)
   return i === -1 ? undefined : args[i + 1]
+}
+
+// A ref this pipeline treats as a release build: vX.Y.Z, with or without an
+// -rcN suffix (RC tags feed the docs beta branch, which publishes too). Same
+// release/RC shape streaming-enterprise's own dispatch-docs-updates.yml keys
+// on. Everything else (dev, feature branches, bare SHAs) is in-progress
+// content where a degraded merge is tolerable.
+const RELEASE_TAG_RX = /^v?\d+\.\d+\.\d+(-rc\d+)?$/
+
+/**
+ * Handle a step of the rp_util merge being unavailable: fatal for a release
+ * tag (see the header comment), a warning plus the Tree-sitter fallback for
+ * everything else.
+ */
+function handleMergeUnavailable(tag, enhanced, reason) {
+  if (RELEASE_TAG_RX.test(tag)) {
+    console.error(`Error: ${reason}`)
+    console.error(
+      `Refusing to publish Tree-sitter-only property data for release ${tag}: ` +
+      'it drops or misparses enum_set properties. Publish the rp_util schema ' +
+      `first (gh workflow run publish-rp-util-schema.yaml -f tag=${tag}, or wait ` +
+      'for its scheduled run) and retry, or pass --skip-rp-util to override.'
+    )
+    process.exitCode = 1
+    return
+  }
+  console.warn(`Warning: ${reason}`)
+  console.warn('Skipping rp_util merge -- keeping the Tree-sitter-only extraction for cluster/broker scope.')
+  markRpUtilMergeUnavailable(enhanced)
 }
 
 // rp_util covers every cluster/broker-scope property (see this file's own
@@ -92,9 +134,7 @@ async function main() {
     // local iteration against a branch that has no published schema yet.
     schemas = await getRpUtilSchema(tag, sourcePath ? { sourcePath } : undefined)
   } catch (err) {
-    console.warn(`Warning: could not get rp_util schema for ${tag}: ${err.message}`)
-    console.warn('Skipping rp_util merge -- keeping the Tree-sitter-only extraction for cluster/broker scope.')
-    markRpUtilMergeUnavailable(enhanced)
+    handleMergeUnavailable(tag, enhanced, `could not get rp_util schema for ${tag}: ${err.message}`)
     return
   }
 
@@ -108,8 +148,7 @@ async function main() {
       }
     }
     if (!anySchema) {
-      console.warn(`Warning: rp_util schema for ${tag} came back empty. Skipping rp_util merge.`)
-      markRpUtilMergeUnavailable(enhanced)
+      handleMergeUnavailable(tag, enhanced, `rp_util schema for ${tag} came back empty.`)
       return
     }
 
@@ -134,12 +173,12 @@ async function main() {
     console.log('Merging rp_util schema into extracted properties...')
     const result = spawnSync(pythonBin, mergeArgs, { cwd: __dirname, stdio: 'inherit' })
     if (result.error || result.status !== 0) {
-      console.warn(
-        `Warning: rp_util merge failed (${result.error ? result.error.message : `exit ${result.status}`}). ` +
-        'Keeping the Tree-sitter-only extraction for cluster/broker scope.'
-      )
       fs.rmSync(tempOutput, { force: true })
-      markRpUtilMergeUnavailable(enhanced)
+      handleMergeUnavailable(
+        tag,
+        enhanced,
+        `rp_util merge failed (${result.error ? result.error.message : `exit ${result.status}`}).`
+      )
     } else {
       fs.renameSync(tempOutput, output)
     }
