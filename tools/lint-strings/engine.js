@@ -99,6 +99,12 @@ function emptySummary () {
   return {
     totalDeclarations: 0,
     flaggedDeclarations: 0,
+    // Deletions on the old side of the diff, in files that route to a
+    // doc-string surface. Only populated in diff mode. See
+    // parseUnifiedDiffRemovals in ./diff.js for why a removed declaration
+    // cannot be counted in totalDeclarations.
+    removedSurfaceLines: 0,
+    removedSurfaceFiles: [],
     errors: 0,
     warnings: 0,
     info: 0,
