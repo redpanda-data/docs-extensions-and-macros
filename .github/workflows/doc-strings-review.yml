@@ -256,6 +256,7 @@ jobs:
             sed -n '1,40p' lint-stderr.txt >&2 || true
             echo "count=0" >> "$GITHUB_OUTPUT"
             echo "declarations=0" >> "$GITHUB_OUTPUT"
+            echo "removals=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if ! count=$(jq '.findings | length' lint-findings.json 2>/dev/null); then
@@ -281,6 +282,19 @@ jobs:
             ''|*[!0-9]*) decls=0 ;;
           esac
           echo "declarations=$decls" >> "$GITHUB_OUTPUT"
+          # Deletions are the blind spot in the declaration gate: declarations
+          # are extracted from HEAD, so a PR that only REMOVES a property,
+          # metric or command reports declarations=0 and skips every step
+          # below, including the published-content check whose prompt treats a
+          # removed surface as high impact. lint-strings reports the old side
+          # of the diff separately for exactly this case.
+          if ! removals=$(jq '.summary.removedSurfaceLines // 0' lint-findings.json 2>/dev/null); then
+            removals=0
+          fi
+          case "${removals:-}" in
+            ''|*[!0-9]*) removals=0 ;;
+          esac
+          echo "removals=$removals" >> "$GITHUB_OUTPUT"
       # Engineering repos do not carry the bot token as a GitHub Actions
       # secret. They assume an OIDC role and read it from Secrets Manager, so
       # `secrets.actions_bot_token` arrives empty there and both uses below
@@ -290,7 +304,7 @@ jobs:
       # rather than a failed job.
       - name: Assume the AWS role that can read the bot token
         id: aws_credentials
-        if: steps.lint.outputs.declarations != '0' && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
         continue-on-error: true
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -358,7 +372,7 @@ jobs:
           echo "::add-mask::$token"
           echo "AWS_BEARER_TOKEN_BEDROCK=$token" >> "$GITHUB_ENV"
       - name: Fetch the writing standard
-        if: steps.lint.outputs.declarations != '0'
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0')
         continue-on-error: true
         env:
           GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN || secrets.actions_bot_token }}
@@ -399,7 +413,7 @@ jobs:
       # job env. Callers on the plain-secret path are unaffected: this step
       # only runs when the OIDC inputs are set.
       - name: Drop fetched credentials from the review's environment
-        if: steps.lint.outputs.declarations != '0' && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
         run: |
           set -euo pipefail
           umask 077
@@ -412,7 +426,7 @@ jobs:
             echo "$v=" >> "$GITHUB_ENV"
           done
       - name: Claude review with suggestions
-        if: steps.lint.outputs.declarations != '0'
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0')
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
         env:
@@ -516,6 +530,15 @@ jobs:
             entry. Skip terminology findings when terminology.md is absent.
             Do not flag subjective polish.
 
+            DELETIONS never appear as findings: declarations are extracted
+            from HEAD, so a removed property, metric, command or field is
+            absent from lint-findings.json by construction. Instead
+            summary.removedSurfaceLines and summary.removedSurfaceFiles record
+            that a doc-string surface lost content. When they are non-zero,
+            read the deleted lines from the diff yourself and treat a removed
+            user-facing surface as high impact below, even though there is no
+            finding and no declaration to comment on.
+
             PUBLISHED-CONTENT IMPACT: for each changed surface in the diff
             (not just lint findings), use the redpanda-docs MCP tools to
             search docs.redpanda.com. HIGH-IMPACT = a changed default/unit/
@@ -534,7 +557,7 @@ jobs:
             Finish with one summary comment listing what was checked and a
             reminder that these suggestions are optional.
       - name: Dispatch doc-impact
-        if: steps.lint.outputs.declarations != '0'
+        if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0')
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.actions_bot_token }}

@@ -4,7 +4,7 @@ const fs = require('fs')
 const path = require('path')
 
 const { runRules, mergeResults } = require('./engine')
-const { getChangedLines, classifyDiff, spanIntersects, SURFACE_ROUTES } = require('./diff')
+const { getDiffLines, classifyDiff, spanIntersects, SURFACE_ROUTES } = require('./diff')
 const { COMMON_RULES } = require('./rules/common')
 const { VERBATIM_ASCIIDOC_RULES } = require('./rules/verbatim-asciidoc')
 
@@ -82,10 +82,12 @@ function lintStrings (options) {
 
   const results = []
   const unsupportedSurfaces = []
+  let removedSurfaceFiles = []
 
   if (diffBase) {
-    const changed = getChangedLines(repoPath, diffBase)
+    const { changed, removed } = getDiffLines(repoPath, diffBase)
     const classified = classifyDiff(changed)
+    removedSurfaceFiles = collectRemovals(removed, surfaces)
 
     for (const [surfaceName, files] of Object.entries(classified)) {
       if (!SURFACES[surfaceName]) {
@@ -119,7 +121,31 @@ function lintStrings (options) {
   merged.findings.sort((a, b) =>
     a.surface.localeCompare(b.surface) || a.file.localeCompare(b.file) || (a.line_start || 0) - (b.line_start || 0))
   merged.unsupported_surfaces = unsupportedSurfaces
+  merged.summary.removedSurfaceFiles = removedSurfaceFiles
+  merged.summary.removedSurfaceLines = removedSurfaceFiles.reduce((sum, entry) => sum + entry.lines, 0)
   return merged
+}
+
+/**
+ * Deletions in files that route to a doc-string surface, so a deletion-only PR
+ * still registers as touching a surface. Reported separately from
+ * totalDeclarations because a removed declaration is absent from HEAD and
+ * therefore cannot be extracted or linted.
+ *
+ * Surfaces routed without a registered extractor are included: the gate cares
+ * that documented content went away, not whether we can lint what replaced it.
+ *
+ * @param {Map<string, Set<number>>} removed - From getDiffLines().removed
+ * @param {string[]|null} surfaces - Explicit --surface narrowing, if any
+ */
+function collectRemovals (removed, surfaces) {
+  const only = surfaces && surfaces.length > 0 ? new Set(surfaces) : null
+  const entries = []
+  for (const [surface, files] of Object.entries(classifyDiff(removed))) {
+    if (only && !only.has(surface)) continue
+    for (const [file, lines] of files) entries.push({ surface, file, lines: lines.size })
+  }
+  return entries.sort((a, b) => a.surface.localeCompare(b.surface) || a.file.localeCompare(b.file))
 }
 
 /**
@@ -148,6 +174,10 @@ function formatHuman (result) {
   lines.push('='.repeat(60))
   lines.push(`Declarations checked: ${summary.totalDeclarations}`)
   lines.push(`Declarations flagged: ${summary.flaggedDeclarations}`)
+  if (summary.removedSurfaceLines) {
+    lines.push(`Lines deleted from doc-string surfaces: ${summary.removedSurfaceLines} ` +
+      `(${summary.removedSurfaceFiles.length} file(s); removed declarations cannot be extracted from HEAD)`)
+  }
   lines.push(`Errors: ${summary.errors}  Warnings: ${summary.warnings}  Info: ${summary.info}`)
   if (Object.keys(summary.byRule).length > 0) {
     lines.push('\nBy rule:')
