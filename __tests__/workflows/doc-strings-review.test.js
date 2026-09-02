@@ -566,13 +566,26 @@ describe('doc-strings-review workflow: package resolution (executed)', () => {
   const step = stepNamed('Resolve the doc-tools package')
   const NAME = '@redpanda-data/docs-extensions-and-macros'
 
+  // Every gh stub below counts its invocations, because the retry loop is
+  // only observable through the call count: a stub that merely succeeds or
+  // fails cannot distinguish "read once" from "read three times".
+  const COUNT = 'n=$(cat "$HOME/gh-calls" 2>/dev/null || echo 0); echo $((n+1)) > "$HOME/gh-calls"\n'
+
   // gh stub emulating `gh api <url> --jq .content`: records argv, prints the
   // base64 content a real contents-API call returns. base64 -d and jq run for
   // real downstream, so the decode path is exercised, not assumed.
-  const ghContents = (version) => {
-    const b64 = Buffer.from(JSON.stringify({ name: NAME, version })).toString('base64')
-    return `#!/bin/bash\nprintf '%s\\n' "$@" >> "$HOME/gh-argv"\nprintf '%s' '${b64}'\n`
-  }
+  const b64Package = (version) =>
+    Buffer.from(JSON.stringify({ name: NAME, version })).toString('base64')
+  const ghContents = (version) =>
+    `#!/bin/bash\n${COUNT}printf '%s\\n' "$@" >> "$HOME/gh-argv"\nprintf '%s' '${b64Package(version)}'\n`
+  // Fails the first attempt with a 500, then serves the real content: the
+  // transient-blip shape the retry exists for.
+  const ghFailThenContents = (version) =>
+    `#!/bin/bash\n${COUNT}if [ "$(cat "$HOME/gh-calls")" -lt 2 ]; then echo "gh: HTTP 500" >&2; exit 1; fi\nprintf '%s' '${b64Package(version)}'\n`
+  const GH_ALWAYS_FAILS = `#!/bin/bash\n${COUNT}echo "gh: HTTP 500" >&2\nexit 1\n`
+  // The backoff is real seconds in the runner; stub it so the suite does not
+  // pay them, and record the delays so the backoff itself stays assertable.
+  const SLEEP_STUB = '#!/bin/bash\nprintf \'%s\\n\' "$@" >> "$HOME/sleep-argv"\n'
   const NPM_OK = '#!/bin/bash\nprintf \'%s\\n\' "$@" >> "$HOME/npm-argv"\necho 5.30.0\n'
   const NPM_MISSING = '#!/bin/bash\necho \'npm error code E404\' >&2\nexit 1\n'
   const baseEnv = { OVERRIDE: '', JOB_WF_SHA: '', WF_SHA: '', GH_TOKEN: 't' }
@@ -609,14 +622,47 @@ describe('doc-strings-review workflow: package resolution (executed)', () => {
     expect(r.read('gh-argv')).toMatch(/ref=beef456/)
   })
 
-  test('a failed contents read falls open to @latest with a warning', () => {
+  test('a failed contents read is retried three times, then falls open to @latest', () => {
     const r = execRun(step, {
       env: { ...baseEnv, JOB_WF_SHA: 'cafe123' },
-      stubs: { gh: '#!/bin/bash\necho "gh: HTTP 500" >&2\nexit 1\n' }
+      stubs: { gh: GH_ALWAYS_FAILS, sleep: SLEEP_STUB }
     })
     expect(r.status).toBe(0)
     expect(r.outputs.pkg).toBe(`${NAME}@latest`)
     expect(r.all).toMatch(/::warning::/)
+    // Retried, not abandoned on the first error, and bounded so a hard 404
+    // cannot spin: exactly three reads with two backoffs between them.
+    expect(r.read('gh-calls').trim()).toBe('3')
+    expect(r.read('sleep-argv').trim().split('\n')).toEqual(['2', '4'])
+  })
+
+  test('a transient read failure is retried and the pinned version still wins', () => {
+    // The defect this guards: one flaky read swapped @latest into a caller
+    // that pinned a ref precisely to freeze what runs inside its PRs, and the
+    // only signal was a ::warning:: in someone else's workflow log.
+    const r = execRun(step, {
+      env: { ...baseEnv, JOB_WF_SHA: 'cafe123' },
+      stubs: { gh: ghFailThenContents('5.30.0'), npm: NPM_OK, sleep: SLEEP_STUB }
+    })
+    expect(r.status).toBe(0)
+    expect(r.outputs.pkg).toBe(`${NAME}@5.30.0`)
+    expect(r.read('gh-calls').trim()).toBe('2')
+    expect(r.all).toMatch(/::notice::.*retrying/)
+    // and it stopped as soon as the read succeeded
+    expect(r.read('sleep-argv').trim().split('\n')).toEqual(['2'])
+  })
+
+  test('a settled answer is not retried', () => {
+    // A package.json that parses to a non-version is not a transient fault,
+    // so retrying it only delays the fall-open. Reading it again would also
+    // mask a genuinely broken ref behind three round trips.
+    const r = execRun(step, {
+      env: { ...baseEnv, JOB_WF_SHA: 'cafe123' },
+      stubs: { gh: ghContents('not-a-version'), npm: NPM_OK, sleep: SLEEP_STUB }
+    })
+    expect(r.outputs.pkg).toBe(`${NAME}@latest`)
+    expect(r.read('gh-calls').trim()).toBe('1')
+    expect(r.exists('sleep-argv')).toBe(false)
   })
 
   test('a non-semver version in package.json falls open to @latest', () => {
