@@ -230,9 +230,10 @@ jobs:
       # so a caller pinned to any ref runs the CLI released from that exact
       # commit: lockstep is structural, not a hand-maintained default that
       # every release bump has to edit. Fail-open order when resolution cannot
-      # complete: @latest with a warning, matching the workflow's posture --
-      # in the publish window right after a merge, the resolved version is not
-      # on npm yet and @latest is simply the previous release.
+      # complete, after three attempts at the read: @latest with a warning,
+      # matching the workflow's posture -- in the publish window right after a
+      # merge, the resolved version is not on npm yet and @latest is simply
+      # the previous release.
       - name: Resolve the doc-tools package
         id: pkg
         env:
@@ -251,8 +252,25 @@ jobs:
             if [ -z "$ref" ]; then
               echo "::warning::No workflow ref available to resolve the doc-tools version; using @latest."
             else
-              version=$(gh api "repos/redpanda-data/docs-extensions-and-macros/contents/package.json?ref=$ref" \
-                --jq .content | base64 -d | jq -r .version) || version=""
+              # Retry the contents read before falling open. A caller that
+              # pinned a ref did so to freeze what runs inside its PRs, and
+              # letting a single transient 500 or a secondary rate limit swap
+              # in @latest defeats exactly that guarantee, with only a
+              # ::warning:: nobody reads as the signal. Only the FETCH is
+              # retried: a package.json that parses to a non-version, and a
+              # version npm has not published yet, are both settled answers
+              # that a second attempt cannot change, so they fall straight
+              # through to the cases below.
+              version=""
+              for attempt in 1 2 3; do
+                version=$(gh api "repos/redpanda-data/docs-extensions-and-macros/contents/package.json?ref=$ref" \
+                  --jq .content | base64 -d | jq -r .version) || version=""
+                [ -n "$version" ] && break
+                if [ "$attempt" -lt 3 ]; then
+                  echo "::notice::Could not read package.json at $ref (attempt $attempt); retrying."
+                  sleep "$((attempt * 2))"
+                fi
+              done
               case "${version:-}" in
                 ''|*[!0-9.]*)
                   echo "::warning::Could not read a version from package.json at $ref; using @latest."
