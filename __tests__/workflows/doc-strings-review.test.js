@@ -31,7 +31,10 @@ const workflow = YAML.parse(fs.readFileSync(WORKFLOW_PATH, 'utf8'))
 const job = workflow.jobs['doc-strings-review']
 const pkgJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8'))
 
-const PKG_DEFAULT = workflow.on.workflow_call.inputs.doc_tools_package.default
+// The doc_tools_package input defaults to empty; the Resolve step derives the
+// real spec from the workflow's own ref. Lint-step tests run with a
+// representative resolved spec, the shape the resolver emits.
+const RESOLVED_PKG = `${pkgJson.name}@${pkgJson.version}`
 
 function stepNamed (name) {
   const step = job.steps.find((s) => s.name === name)
@@ -72,7 +75,8 @@ function execRun (step, { env = {}, stubs = {}, expressions = {}, files = {} } =
     '${{ github.repository }}': env.GITHUB_REPOSITORY || 'redpanda-data/redpanda',
     '${{ github.event.pull_request.number }}': env.PR || '7',
     '${{ github.event.pull_request.html_url }}': 'https://github.com/redpanda-data/redpanda/pull/7',
-    '${{ inputs.doc_tools_package }}': env.PKG || PKG_DEFAULT,
+    '${{ inputs.doc_tools_package }}': env.PKG || RESOLVED_PKG,
+    '${{ steps.pkg.outputs.pkg }}': env.PKG || RESOLVED_PKG,
     '${{ inputs.surfaces }}': env.SURFACES || '',
     '${{ inputs.dispatch_repo }}': env.DISPATCH_REPO || 'redpanda-data/docs-site',
     ...expressions
@@ -190,12 +194,21 @@ describe('doc-strings-review workflow: static contracts', () => {
     for (const ref of refs) expect(ref).not.toMatch(/^v\d/)
   })
 
-  test('doc_tools_package pins a version, and the pin matches this package', () => {
-    // An unpinned spec floats to whatever `latest` is at run time inside
-    // engineering repos. Asserting it equals THIS package's version means a
-    // release bump cannot silently leave the pin behind.
-    expect(PKG_DEFAULT).toBe(`${pkgJson.name}@${pkgJson.version}`)
-    expect(PKG_DEFAULT).toMatch(/@\d+\.\d+\.\d+$/)
+  test('doc_tools_package defaults to empty so the resolver decides', () => {
+    // The version is derived from the workflow's own ref by the Resolve step;
+    // a non-empty default here would silently shadow that and reintroduce the
+    // hand-maintained pin this design removed. The input must still exist as
+    // an explicit override.
+    expect(workflow.on.workflow_call.inputs.doc_tools_package.default).toBe('')
+  })
+
+  test('the lint step consumes the resolver output, not the raw input', () => {
+    // Wiring the input straight into the lint step would bypass the
+    // ref-derived resolution for every caller that leaves the override empty.
+    const lint = stepNamed('Lint doc strings in the diff')
+    expect(lint.env.PKG).toBe('${{ steps.pkg.outputs.pkg }}')
+    const cache = stepNamed('Cache the doc-tools npx install and extractor bootstrap')
+    expect(cache.with.key).toContain('${{ steps.pkg.outputs.pkg }}')
   })
 
   test('the caller contract documents the permissions a caller must grant', () => {
@@ -207,7 +220,7 @@ describe('doc-strings-review workflow: static contracts', () => {
 
 describe('doc-strings-review workflow: lint step (executed)', () => {
   const step = stepNamed('Lint doc strings in the diff')
-  const baseEnv = { BASE: 'deadbeef', SURFACES: '', PKG: PKG_DEFAULT }
+  const baseEnv = { BASE: 'deadbeef', SURFACES: '', PKG: RESOLVED_PKG }
 
   test('invokes the CLI through --package= so npx can resolve the doc-tools bin', () => {
     const r = execRun(step, {
@@ -215,10 +228,10 @@ describe('doc-strings-review workflow: lint step (executed)', () => {
       stubs: { npx: NPX_STUB }
     })
     const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8').split('\n')
-    expect(argv).toContain(`--package=${PKG_DEFAULT}`)
+    expect(argv).toContain(`--package=${RESOLVED_PKG}`)
     // and the spec is NOT handed to npx as a bare positional, which is the
     // form that cannot resolve either declared bin.
-    expect(argv).not.toContain(PKG_DEFAULT)
+    expect(argv).not.toContain(RESOLVED_PKG)
     expect(argv).toContain('lint-strings')
     expect(r.status).toBe(0)
     expect(r.outputs.count).toBe('2')
@@ -546,5 +559,103 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
   test('no report and no token both skip quietly', () => {
     expect(dispatch(null).status).toBe(0)
     expect(dispatch(valid, { GH_TOKEN: '' }).status).toBe(0)
+  })
+})
+
+describe('doc-strings-review workflow: package resolution (executed)', () => {
+  const step = stepNamed('Resolve the doc-tools package')
+  const NAME = '@redpanda-data/docs-extensions-and-macros'
+
+  // gh stub emulating `gh api <url> --jq .content`: records argv, prints the
+  // base64 content a real contents-API call returns. base64 -d and jq run for
+  // real downstream, so the decode path is exercised, not assumed.
+  const ghContents = (version) => {
+    const b64 = Buffer.from(JSON.stringify({ name: NAME, version })).toString('base64')
+    return `#!/bin/bash\nprintf '%s\\n' "$@" >> "$HOME/gh-argv"\nprintf '%s' '${b64}'\n`
+  }
+  const NPM_OK = '#!/bin/bash\nprintf \'%s\\n\' "$@" >> "$HOME/npm-argv"\necho 5.30.0\n'
+  const NPM_MISSING = '#!/bin/bash\necho \'npm error code E404\' >&2\nexit 1\n'
+  const baseEnv = { OVERRIDE: '', JOB_WF_SHA: '', WF_SHA: '', GH_TOKEN: 't' }
+
+  test('an explicit override is used verbatim and nothing is resolved', () => {
+    const r = execRun(step, {
+      env: { ...baseEnv, OVERRIDE: `${NAME}@9.9.9` },
+      stubs: { gh: '#!/bin/bash\ntouch "$HOME/gh-called"\nexit 1\n' }
+    })
+    expect(r.status).toBe(0)
+    expect(r.outputs.pkg).toBe(`${NAME}@9.9.9`)
+    expect(r.exists('gh-called')).toBe(false)
+  })
+
+  test('resolves the version committed at the reusable workflow ref', () => {
+    const r = execRun(step, {
+      env: { ...baseEnv, JOB_WF_SHA: 'cafe123' },
+      stubs: { gh: ghContents('5.30.0'), npm: NPM_OK }
+    })
+    expect(r.status).toBe(0)
+    expect(r.outputs.pkg).toBe(`${NAME}@5.30.0`)
+    const argv = r.read('gh-argv')
+    expect(argv).toMatch(/package\.json\?ref=cafe123/)
+    // and the resolved spec was verified against the registry before use
+    expect(r.read('npm-argv')).toMatch(/@5\.30\.0/)
+  })
+
+  test('falls back to workflow_sha for a same-repo (non-reusable) run', () => {
+    const r = execRun(step, {
+      env: { ...baseEnv, WF_SHA: 'beef456' },
+      stubs: { gh: ghContents('5.30.0'), npm: NPM_OK }
+    })
+    expect(r.outputs.pkg).toBe(`${NAME}@5.30.0`)
+    expect(r.read('gh-argv')).toMatch(/ref=beef456/)
+  })
+
+  test('a failed contents read falls open to @latest with a warning', () => {
+    const r = execRun(step, {
+      env: { ...baseEnv, JOB_WF_SHA: 'cafe123' },
+      stubs: { gh: '#!/bin/bash\necho "gh: HTTP 500" >&2\nexit 1\n' }
+    })
+    expect(r.status).toBe(0)
+    expect(r.outputs.pkg).toBe(`${NAME}@latest`)
+    expect(r.all).toMatch(/::warning::/)
+  })
+
+  test('a non-semver version in package.json falls open to @latest', () => {
+    // jq -r over a malformed document prints null/garbage rather than failing;
+    // the guard has to catch the value, not the exit status.
+    const r = execRun(step, {
+      env: { ...baseEnv, JOB_WF_SHA: 'cafe123' },
+      stubs: { gh: ghContents('not-a-version'), npm: NPM_OK }
+    })
+    expect(r.outputs.pkg).toBe(`${NAME}@latest`)
+    expect(r.all).toMatch(/::warning::/)
+  })
+
+  test('a resolved version missing from npm falls open to @latest', () => {
+    // The publish window: main already carries the new version but the
+    // publish job has not finished. @latest is simply the previous release.
+    const r = execRun(step, {
+      env: { ...baseEnv, JOB_WF_SHA: 'cafe123' },
+      stubs: { gh: ghContents('5.30.0'), npm: NPM_MISSING }
+    })
+    expect(r.outputs.pkg).toBe(`${NAME}@latest`)
+    expect(r.all).toMatch(/publish in flight/)
+  })
+
+  test('no ref at all falls open to @latest without calling gh', () => {
+    const r = execRun(step, {
+      env: baseEnv,
+      stubs: { gh: '#!/bin/bash\ntouch "$HOME/gh-called"\nexit 1\n' }
+    })
+    expect(r.status).toBe(0)
+    expect(r.outputs.pkg).toBe(`${NAME}@latest`)
+    expect(r.exists('gh-called')).toBe(false)
+  })
+
+  test('a hostile override cannot execute a command', () => {
+    const r = execRun(step, {
+      env: { ...baseEnv, OVERRIDE: 'x; touch PWNED; true' },
+      stubs: { gh: '#!/bin/bash\nexit 0\n' }
+    })
+    expect(r.exists('PWNED')).toBe(false)
   })
 })
