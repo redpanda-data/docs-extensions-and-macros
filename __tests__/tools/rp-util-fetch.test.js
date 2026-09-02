@@ -55,10 +55,29 @@ describe('cloneStreamingEnterprise', () => {
     githubToken.getGitHubToken.mockReset()
   })
 
-  // Basic auth header for x-access-token:tok, asserted against directly
-  // rather than recomputed, so a broken encoding in the implementation
-  // can't silently agree with itself.
-  const AUTH_HEADER_TOK = 'http.https://github.com/.extraheader=AUTHORIZATION: basic eC1hY2Nlc3MtdG9rZW46dG9r'
+  // Auth must travel ONLY via the spawn env (GIT_CONFIG_* credential
+  // helper), never in argv: argv is readable by any local process via
+  // ps//proc for the whole multi-minute clone.
+  const expectAuthViaEnvOnly = (call, token) => {
+    const [cmd, args, opts] = call
+    expect(cmd).toBe('git')
+    // No token byte, no header, no -c config in argv.
+    expect(JSON.stringify(args)).not.toContain(token)
+    expect(args).not.toContain('-c')
+    expect(args.some((a) => /extraheader|authorization/i.test(a))).toBe(false)
+    // The env carries the helper config and the token.
+    expect(opts.env.RP_UTIL_FETCH_GIT_TOKEN).toBe(token)
+    expect(opts.env.GIT_CONFIG_COUNT).toBe('2')
+    expect(opts.env.GIT_CONFIG_KEY_0).toBe('credential.helper')
+    expect(opts.env.GIT_CONFIG_VALUE_0).toBe('')
+    expect(opts.env.GIT_CONFIG_KEY_1).toBe('credential.https://github.com.helper')
+    // The helper string is a static, secret-free literal that reads the
+    // token from env at callback time -- asserted exactly, so no token
+    // value could hide in it.
+    expect(opts.env.GIT_CONFIG_VALUE_1).toBe(
+      '!f() { echo "username=x-access-token"; echo "password=$RP_UTIL_FETCH_GIT_TOKEN"; }; f'
+    )
+  }
 
   test('throws when no GitHub token is available -- the repo is private', () => {
     githubToken.getGitHubToken.mockReturnValue(null)
@@ -67,7 +86,7 @@ describe('cloneStreamingEnterprise', () => {
     expect(spawnSync).not.toHaveBeenCalled()
   })
 
-  test('clones shallow by branch/tag name when that succeeds, with the token passed as a per-invocation header, never in the URL', () => {
+  test('clones shallow by branch/tag name when that succeeds, with the token passed only via the spawn env, never in argv or the URL', () => {
     githubToken.getGitHubToken.mockReturnValue('tok')
     spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' })
 
@@ -75,10 +94,11 @@ describe('cloneStreamingEnterprise', () => {
 
     expect(spawnSync).toHaveBeenCalledTimes(1)
     const args = spawnSync.mock.calls[0][1]
-    expect(args).toEqual(['-c', AUTH_HEADER_TOK, 'clone', '-q', '--depth', '1', '--branch', 'v26.2.2',
+    expect(args).toEqual(['clone', '-q', '--depth', '1', '--branch', 'v26.2.2',
       'https://github.com/redpanda-data/streaming-enterprise.git', '/tmp/dest'])
     // The plain repo URL never carries the token in its userinfo.
     expect(args.some((a) => a.includes('@github.com'))).toBe(false)
+    expectAuthViaEnvOnly(spawnSync.mock.calls[0], 'tok')
   })
 
   test('falls back to a full clone + checkout when the ref is not a branch/tag at HEAD', () => {
@@ -94,8 +114,9 @@ describe('cloneStreamingEnterprise', () => {
 
     expect(spawnSync).toHaveBeenCalledTimes(3)
     expect(spawnSync.mock.calls[1][1]).toEqual(
-      ['-c', AUTH_HEADER_TOK, 'clone', '-q', 'https://github.com/redpanda-data/streaming-enterprise.git', '/tmp/dest']
+      ['clone', '-q', 'https://github.com/redpanda-data/streaming-enterprise.git', '/tmp/dest']
     )
+    expectAuthViaEnvOnly(spawnSync.mock.calls[1], 'tok')
     // Checkout runs against the already-cloned local repo -- no auth needed.
     expect(spawnSync.mock.calls[2]).toEqual([
       'git', ['checkout', '-q', '48fb6d6f93d8f16fb08c81a2802dc17f1df1d46d'],
@@ -117,7 +138,7 @@ describe('cloneStreamingEnterprise', () => {
     fs.rmSync.mockRestore()
   })
 
-  test('never embeds the token in the remote URL, for either the shallow or the full-clone fallback', () => {
+  test('never embeds the token in argv or the remote URL, for either the shallow or the full-clone fallback', () => {
     githubToken.getGitHubToken.mockReturnValue('super-secret-token')
 
     jest.spyOn(fs, 'rmSync').mockImplementation(() => {})
@@ -128,8 +149,10 @@ describe('cloneStreamingEnterprise', () => {
 
     cloneStreamingEnterprise('some-ref', '/tmp/dest')
 
-    for (const call of spawnSync.mock.calls) {
-      expect(JSON.stringify(call)).not.toContain('super-secret-token')
+    for (const [cmd, args] of spawnSync.mock.calls) {
+      // argv (the ps-visible surface) must never carry the token; the env
+      // (process-private) is where it travels -- see expectAuthViaEnvOnly.
+      expect(JSON.stringify([cmd, args])).not.toContain('super-secret-token')
     }
     fs.rmSync.mockRestore()
   })
@@ -306,6 +329,18 @@ describe('getRpUtilSchema', () => {
     expect(fs.mkdtempSync).not.toHaveBeenCalled()
     expect(global.fetch).not.toHaveBeenCalled()
     os.platform.mockRestore()
+  })
+
+  test("normalizes a v-less release-shaped ref to its v-prefixed tag for the release lookup", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => ({ assets: [] })
+    })
+
+    await getRpUtilSchema('26.2.2')
+
+    expect(global.fetch.mock.calls[0][0]).toContain('rp-util-schema-v26.2.2')
   })
 
   test('cleans up a clone it made unless keepSource is set', async () => {

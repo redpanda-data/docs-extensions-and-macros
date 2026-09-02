@@ -59,11 +59,16 @@ const RELEASE_TAG_RX = /^v?\d+\.\d+\.\d+(-rc\d+)?$/
  */
 function handleMergeUnavailable(tag, enhanced, reason) {
   if (RELEASE_TAG_RX.test(tag)) {
+    // Print the canonical v-prefixed tag in the remediation command:
+    // streaming-enterprise tags (and therefore schema release names) are
+    // always v-prefixed, so telling the operator to publish a v-less name
+    // would send them to a workflow run that can never help.
+    const releaseTag = tag.startsWith('v') ? tag : `v${tag}`
     console.error(`Error: ${reason}`)
     console.error(
       `Refusing to publish Tree-sitter-only property data for release ${tag}: ` +
       'it drops or misparses enum_set properties. Publish the rp_util schema ' +
-      `first (gh workflow run publish-rp-util-schema.yaml -f tag=${tag}, or wait ` +
+      `first (gh workflow run publish-rp-util-schema.yaml -f tag=${releaseTag}, or wait ` +
       'for its scheduled run) and retry, or pass --skip-rp-util to override.'
     )
     process.exitCode = 1

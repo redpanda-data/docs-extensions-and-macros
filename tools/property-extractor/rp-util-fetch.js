@@ -60,12 +60,12 @@ const SCHEMA_FLAGS = [
  */
 /**
  * Strip a credential out of text before it's surfaced anywhere that gets
- * logged -- an Error message ends up in plain CI logs. Covers both a
- * credential embedded in a Git remote URL's userinfo (e.g.
- * https://<token>@github.com/...), which Git echoes back verbatim in common
- * failures (a private repo it can't access, a bad ref, ...), and the
- * base64-encoded Basic-auth header this module passes via `git -c
- * http.extraheader`, in case Git ever echoes a failing command's config back.
+ * logged -- an Error message ends up in plain CI logs. Covers a credential
+ * embedded in a Git remote URL's userinfo (e.g. https://<token>@github.com/...),
+ * which Git echoes back verbatim in common failures (a private repo it can't
+ * access, a bad ref, ...), and a Basic-auth header in case Git ever echoes
+ * failing config back -- defense in depth: this module keeps the token out
+ * of argv and URLs entirely (see gitAuthEnv).
  */
 function redactCredentials(text) {
   return String(text || '')
@@ -74,18 +74,31 @@ function redactCredentials(text) {
 }
 
 /**
- * Build the `git -c ...` args that authenticate a github.com request via a
- * per-invocation HTTP header, the same pattern this repo's own
- * `tools/property-extractor/Makefile` (`redpanda-git` target) uses -- so the
- * token is only ever passed at process-invocation time and never written
- * into the resulting clone's .git/config, where it would otherwise sit
- * readable on disk for the entire downstream Bazel/Docker build.
+ * Build the environment that authenticates git's github.com requests via a
+ * per-invocation credential helper, injected through GIT_CONFIG_* env vars.
+ * No token byte ever appears in argv (readable by any local process via
+ * `ps`/`/proc/<pid>/cmdline` for the full multi-minute clone) or in a URL
+ * (echoed verbatim by git on common failures), and nothing is written into
+ * the resulting clone's .git/config, where it would otherwise sit readable
+ * on disk for the entire downstream Bazel/Docker build. Same env-only
+ * pattern the property-docs Makefile migration uses.
  * @param {string} token
- * @returns {string[]} args to splice in before the git subcommand (e.g. `clone`)
+ * @returns {object} env for spawnSync
  */
-function gitAuthConfigArgs(token) {
-  const basicAuth = Buffer.from(`x-access-token:${token}`).toString('base64')
-  return ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basicAuth}`]
+function gitAuthEnv(token) {
+  return {
+    ...process.env,
+    RP_UTIL_FETCH_GIT_TOKEN: token,
+    GIT_CONFIG_COUNT: '2',
+    // Clear any inherited helpers first so a system credential manager
+    // can't intercept (or prompt) before ours answers.
+    GIT_CONFIG_KEY_0: 'credential.helper',
+    GIT_CONFIG_VALUE_0: '',
+    GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
+    // The helper reads the token from its own environment at callback time;
+    // argv carries only this static, secret-free string.
+    GIT_CONFIG_VALUE_1: '!f() { echo "username=x-access-token"; echo "password=$RP_UTIL_FETCH_GIT_TOKEN"; }; f'
+  }
 }
 
 function cloneStreamingEnterprise(ref, destDir) {
@@ -97,22 +110,23 @@ function cloneStreamingEnterprise(ref, destDir) {
     )
   }
   // Plain (unauthenticated) URL -- auth travels only via the per-invocation
-  // header below, so it's never written to destDir/.git/config.
+  // credential-helper env below, so it's never in argv and never written to
+  // destDir/.git/config.
   const repoUrl = STREAMING_ENTERPRISE_REPO
-  const authArgs = gitAuthConfigArgs(token)
+  const authEnv = gitAuthEnv(token)
 
   console.log(`Cloning streaming-enterprise@${ref} into ${destDir}...`)
   const shallow = spawnSync('git', [
-    ...authArgs, 'clone', '-q', '--depth', '1', '--branch', ref, repoUrl, destDir
-  ], { encoding: 'utf8', timeout: 300000 })
+    'clone', '-q', '--depth', '1', '--branch', ref, repoUrl, destDir
+  ], { encoding: 'utf8', timeout: 300000, env: authEnv })
 
   if (shallow.status === 0) return
 
   // Not a branch/tag name at HEAD -- full clone, then checkout the ref directly.
   fs.rmSync(destDir, { recursive: true, force: true })
   console.log(`'${ref}' is not a branch/tag at HEAD; cloning full history to resolve it...`)
-  const full = spawnSync('git', [...authArgs, 'clone', '-q', repoUrl, destDir], {
-    encoding: 'utf8', timeout: 600000
+  const full = spawnSync('git', ['clone', '-q', repoUrl, destDir], {
+    encoding: 'utf8', timeout: 600000, env: authEnv
   })
   if (full.status !== 0) {
     throw new Error(`Failed to clone streaming-enterprise: ${redactCredentials(full.stderr)}`)
@@ -328,6 +342,16 @@ async function fetchPublishedSchema(tag) {
  */
 async function getRpUtilSchema(ref, options = {}) {
   const { sourcePath, keepSource = false, preferPublished = true } = options
+
+  // streaming-enterprise release/RC tags are v-prefixed, and schema releases
+  // are named rp-util-schema-<v-prefixed tag>. A v-less release-shaped ref
+  // ("26.2.2") can neither be cloned nor have a schema release under its
+  // verbatim name, so normalize it here -- otherwise every layer downstream
+  // (release lookup, clone, the publish workflow an error message points at)
+  // fails or no-ops on a name that can never exist.
+  if (/^\d+\.\d+\.\d+(-rc\d+)?$/.test(ref)) {
+    ref = `v${ref}`
+  }
 
   if (!sourcePath && preferPublished) {
     const published = await fetchPublishedSchema(ref)
