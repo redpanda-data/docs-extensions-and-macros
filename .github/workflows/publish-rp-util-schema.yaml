@@ -34,8 +34,12 @@ permissions:
   id-token: write
   contents: write
 # One run at a time: concurrent runs would race each other creating the same
-# rp-util-schema-<tag> release. Queued runs still execute (no cancellation),
-# so a dispatch arriving mid-scheduled-run is not lost.
+# rp-util-schema-<tag> release. cancel-in-progress: false keeps the running
+# build alive, but GitHub holds at most ONE pending run per concurrency
+# group -- a second dispatch arriving while a build runs and another run is
+# already pending REPLACES that pending run, so its tag can be dropped from
+# this cycle. That loss is survivable by design: the six-hourly schedule
+# picks up any release/RC tag still missing a schema.
 concurrency:
   group: publish-rp-util-schema
   cancel-in-progress: false
@@ -71,7 +75,13 @@ jobs:
           set -euo pipefail
           # Same release/RC shape merge-rp-util.js's RELEASE_TAG_RX accepts,
           # and the strict -rc[0-9]+$ pattern streaming-enterprise's own
-          # dispatch workflow re-validates with.
+          # dispatch workflow re-validates with. Leading v is mandatory here:
+          # streaming-enterprise tags are v-prefixed and every release this
+          # workflow publishes is named rp-util-schema-<v-prefixed tag>, so
+          # v-less candidates are normalized below rather than skipped -- a
+          # skip would make `gh workflow run ... -f tag=26.2.2` no-op green
+          # while merge-rp-util's remediation message told the operator to
+          # run exactly that.
           TAG_RX='^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$'
 
           candidates=()
@@ -86,25 +96,50 @@ jobs:
             schedule)
               # Newest 6 release/RC tags. RC tags never get a GitHub Release
               # in streaming-enterprise (they're plain tag pushes), so list
-              # tags via git, not the releases API.
+              # git tag refs, not releases. Via gh api so the bot token stays
+              # in env: an ls-remote URL with embedded userinfo puts the
+              # token in argv and in git's verbatim URL echo on failure.
+              # sort -V orders "v26.2.2-rc1" AFTER "v26.2.2", so a burst of
+              # RCs could crowd their own GA tag out of tail -6; mapping -rc
+              # to ~rc for the sort (~ sorts lowest, the same trick
+              # update-property-docs.yaml uses) keeps every GA newer than
+              # all of its RCs.
               while IFS= read -r tag; do
                 candidates+=("$tag")
-              done < <(git ls-remote --tags --refs \
-                  "https://x-access-token:${SE_TOKEN}@github.com/redpanda-data/streaming-enterprise.git" \
-                | awk -F'refs/tags/' '{print $2}' \
+              done < <(GH_TOKEN="$SE_TOKEN" gh api --paginate \
+                  repos/redpanda-data/streaming-enterprise/git/refs/tags \
+                  --jq '.[].ref' \
+                | sed 's|^refs/tags/||' \
                 | grep -E "$TAG_RX" \
-                | sort -V | tail -6)
+                | sed 's/-rc/~rc/' | sort -V | sed 's/~rc/-rc/' \
+                | tail -6)
               ;;
           esac
 
           missing=()
           for tag in "${candidates[@]}"; do
+            # Normalize a v-less release-shaped tag to its canonical
+            # v-prefixed form before validating.
+            if printf '%s' "$tag" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$'; then
+              tag="v${tag}"
+            fi
             if ! printf '%s' "$tag" | grep -qE "$TAG_RX"; then
               echo "Skipping '$tag': not a release or RC tag" >&2
               continue
             fi
-            if gh release view "rp-util-schema-${tag}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              echo "rp-util-schema-${tag} already published; skipping" >&2
+            # Published-and-complete check, not `gh release view`: view also
+            # matches a DRAFT left behind by a mid-upload death of `gh
+            # release create` (which creates as draft, uploads, then
+            # publishes), while the consumers -- rp-util-fetch.js's fast path
+            # and the docs repo's schema wait -- use the published-only
+            # /releases/tags endpoint. Treating a draft or an
+            # incomplete-asset release as "already published" would wedge the
+            # tag forever; here it stays a candidate and the publish step
+            # deletes and recreates it.
+            asset_count=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/rp-util-schema-${tag}" \
+              --jq '.assets | length' 2>/dev/null || echo "missing")
+            if [ "$asset_count" = "5" ]; then
+              echo "rp-util-schema-${tag} already published with all assets; skipping" >&2
               continue
             fi
             missing+=("$tag")
@@ -161,11 +196,19 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -qq -y libatomic1 build-essential \
             perl bison flex python3 pkg-config m4 autoconf automake libtool gawk texinfo
+      # No disk-cache: it would store Bazel BUILD OUTPUTS compiled from the
+      # private streaming-enterprise checkout in this public repo's Actions
+      # cache, where default-branch caches are restorable by fork PR runs --
+      # the same exposure class that got the private-checkout cache removed
+      # from test.yaml. repository-cache is safe to keep: it holds only
+      # Bazel's downloaded external archives, and every external in
+      # streaming-enterprise's MODULE.bazel / bazel/repositories.bzl resolves
+      # to a public host (public GitHub repos, vectorized-public S3, pypi,
+      # dl.grafana.com, ...) -- verified 2026-09-02.
       - uses: bazel-contrib/setup-bazel@0.19.0
         with:
           bazelisk-cache: true
           repository-cache: true
-          disk-cache: true
           module-root: streaming-enterprise
       - name: Build rp_util
         working-directory: streaming-enterprise
@@ -187,13 +230,31 @@ jobs:
           TAG: ${{ matrix.tag }}
         run: |
           # A run queued behind another (see concurrency above) can find its
-          # release already published; skipping is success, not failure.
-          if gh release view "rp-util-schema-${TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "rp-util-schema-${TAG} already exists; nothing to do."
+          # release already published; skipping is success, not failure. The
+          # check is published-and-complete (published-only /releases/tags
+          # endpoint, all 5 assets), NOT `gh release view`: view also matches
+          # a DRAFT left behind when `gh release create` -- which creates as
+          # draft, uploads assets, then publishes -- dies mid-upload. The
+          # consumers (rp-util-fetch.js's fast path and the docs repo's
+          # schema wait) only ever see published releases, so a draft or a
+          # partial release counts as broken here and is deleted and
+          # recreated rather than skipped -- otherwise one mid-upload failure
+          # wedges the tag forever while every retry goes green.
+          asset_count=$(gh api "repos/${{ github.repository }}/releases/tags/rp-util-schema-${TAG}" \
+            --jq '.assets | length' 2>/dev/null || echo "missing")
+          if [ "$asset_count" = "5" ]; then
+            echo "rp-util-schema-${TAG} already published with all assets; nothing to do."
             exit 0
           fi
+          if gh release view "rp-util-schema-${TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "rp-util-schema-${TAG} exists but is a draft or incomplete (assets: ${asset_count}); deleting and recreating."
+            gh release delete "rp-util-schema-${TAG}" --yes --repo "${{ github.repository }}"
+          fi
+          # --latest=false: these snapshots must never become the repo's
+          # "latest release", which belongs to the npm package releases.
           gh release create "rp-util-schema-${TAG}" \
             schema-out/*.json \
             --repo "${{ github.repository }}" \
+            --latest=false \
             --title "rp_util schema for streaming-enterprise ${TAG}" \
             --notes "Cluster and broker (node, Pandaproxy, its Kafka client, Schema Registry) config schema JSON generated by rp_util from redpanda-data/streaming-enterprise@${TAG}. An internal snapshot for this repo's own property-docs generation -- not an official Redpanda release artifact."
