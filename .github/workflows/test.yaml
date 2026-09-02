@@ -327,6 +327,13 @@ jobs:
         working-directory: tools/property-extractor
         env:
           GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
+          # Tree-sitter-only on purpose: these pytest suites verify the
+          # extractor against a deterministic pinned-tag input, not the
+          # rp_util merge (which has its own jest suites). Once the rp_util
+          # merge is wired into `make build` it hard-fails release tags with
+          # no published rp-util-schema-<tag> release, and without this skip
+          # every run of this job would couple to that release existing.
+          SKIP_RP_UTIL: "1"
         run: |
           make build TAG="$PROPERTY_FIXTURE_TAG"
 
