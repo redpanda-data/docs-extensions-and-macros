@@ -112,7 +112,6 @@ describe('scanContentUrls fenced blocks with an info string', () => {
     ['bash', '```bash'],
     ['yml', '```yml'],
     ['json', '```json'],
-    ['more than three backticks', '````bash'],
   ])('skips a fence opened as %s', (_, opening) => {
     const content = [opening, 'curl https://example.com/skip', '```', 'Prose https://example.com/keep'].join('\n')
     expect(scanContentUrls(content).map((m) => m.url)).toEqual(['https://example.com/keep'])
@@ -181,5 +180,49 @@ describe('scanContentUrls attribute references', () => {
     const [match] = scanContentUrls(`See ${url} here`)
     expect(match.url).toBe(url)
     expect(match.hasAttributeReference).toBe(expected)
+  })
+})
+
+describe('scanContentUrls delimiter length', () => {
+  // A block closes only on a delimiter of the same length as the one that
+  // opened it. Every expectation here was checked against @asciidoctor/core.
+  //
+  // Treating any run of four or more dashes as a delimiter inverted the
+  // open/closed state for the rest of the file whenever a listing block held
+  // a row of dashes, which is how command output renders a table rule. That is
+  // why the example URL in cloud-docs' regexp_match reference was reported as
+  // a broken external link: the state flip made the SQL sample look like prose.
+  test('treats a longer run inside a block as content, not a close', () => {
+    const content = [
+      '[source,sql]',
+      '----',
+      "SELECT REGEXP_MATCH('https://www.example.com/skip', '(.+)');",
+      '----------------------',
+      ' one row',
+      '----',
+      'Prose https://example.com/keep',
+    ].join('\n')
+    expect(scanContentUrls(content).map((m) => m.url)).toEqual(['https://example.com/keep'])
+  })
+
+  test('does not close a six-dash block on a four-dash line', () => {
+    const content = ['------', 'https://example.com/skip', '----', 'https://example.com/still-skip'].join('\n')
+    expect(scanContentUrls(content)).toEqual([])
+  })
+
+  test('closes a six-dash block on a six-dash line', () => {
+    const content = ['------', 'https://example.com/skip', '------', 'Prose https://example.com/keep'].join('\n')
+    expect(scanContentUrls(content).map((m) => m.url)).toEqual(['https://example.com/keep'])
+  })
+
+  test('a fence is exactly three backticks, so more is prose', () => {
+    // Asciidoctor reads ````bash as a paragraph, not a fence.
+    const content = ['````bash', 'https://example.com/prose', '````'].join('\n')
+    expect(scanContentUrls(content).map((m) => m.url)).toEqual(['https://example.com/prose'])
+  })
+
+  test('a different delimiter inside a block does not close it', () => {
+    const content = ['----', '....', 'https://example.com/skip', '....', '----', 'https://example.com/keep'].join('\n')
+    expect(scanContentUrls(content).map((m) => m.url)).toEqual(['https://example.com/keep'])
   })
 })
