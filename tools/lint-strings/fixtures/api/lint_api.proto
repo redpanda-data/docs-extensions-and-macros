@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package redpanda.api.fixture.v1;
+
+import "google/protobuf/descriptor.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+// Extension fields are wire metadata, never published schema. The field
+// inside this block must not be extracted.
+extend google.protobuf.MethodOptions {
+  string fixture_extension = 60002;
+}
+
+// FixtureMode selects how the fixture behaves.
+enum FixtureMode {
+  FIXTURE_MODE_UNSPECIFIED = 0;
+  FIXTURE_MODE_FAST = 1;
+}
+
+// A fixture topic.
+message FixtureTopic {
+  // A topic-level config key (e.g. `segment.bytes`).
+  string name = 1;
+
+  // Whether the config is read-only, or is dynamic and can be altered.
+  bool read_only = 2;
+
+  // Wrapped option lists must be covered by the declaration span, so a
+  // suggestion block can replace the whole statement.
+  string wrapped = 3 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).string.max_len = 255
+  ];
+
+  // Sets default_topic_partitions when the topic is created.
+  int32 partitions = 4;
+
+  // A comment can wrap over several lines, and the resolved prose joins them
+  // rather than keeping only the first.
+  string wrapped_comment = 5;
+
+  string undocumented = 6;
+
+  // A oneof moves the brace depth without opening a message. Matching a bare
+  // closing brace here popped FixtureTopic and reported the sibling message
+  // below as nested inside it.
+  oneof selector {
+    // Selects by name.
+    string by_name = 7;
+    // Selects by id.
+    string by_id = 8;
+  }
+
+  // Nested messages are genuinely nested and should report a dotted path.
+  message Nested {
+    // The nested value.
+    string value = 1;
+  }
+}
+
+// A sibling of FixtureTopic, not a child of it.
+message FixtureSibling {
+  // The sibling name.
+  string name = 1;
+}
+
+service FixtureService {
+  rpc CreateFixture(FixtureTopic) returns (FixtureTopic) {
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Create fixture."
+      description: "Create a [fixture](https://docs.redpanda.com/fixture/) with a `{prefix}` path."
+      responses: {
+        key: "200"
+        value: {description: "OK"}
+      }
+      responses: {
+        key: "201"
+        value: {description: "Fixture created"}
+      }
+    };
+  }
+
+  rpc ListFixtures(FixtureTopic) returns (FixtureTopic) {
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List fixtures"
+      description: "Short one"
+    };
+  }
+
+  rpc JoinFixtures(FixtureTopic) returns (FixtureTopic) {
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Join fixtures"
+      // Proto concatenates adjacent string literals like C++, so the resolved
+      // description is both halves, not just the first.
+      description: "Joins two fixtures together "
+                   "and returns the result."
+    };
+  }
+}
