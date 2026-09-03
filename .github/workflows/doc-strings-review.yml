@@ -343,20 +343,35 @@ jobs:
         env:
           TOKEN_URL: ${{ inputs.adp_token_url }}
           TOKEN_AUDIENCE: ${{ inputs.adp_token_audience }}
+          CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
         run: |
           set -euo pipefail
-          if [ -z "${ADP_PRIV_CLIENT_ID:-}" ] || [ -z "${ADP_PRIV_CLIENT_SECRET:-}" ]; then
-            echo "::warning::ADP client credential missing from env; no review will be posted."
+          # parse-json-secrets names the env vars after the secret's JSON keys,
+          # and devprod's convention check (vtools scripts/cicd-secret/secret.py,
+          # _check_secret) requires those keys to start with the secret name's
+          # last path segment upper-cased. So the env names have to follow the
+          # secret id rather than being fixed: adp_priv_client yields
+          # ADP_PRIV_CLIENT_ID, a docs-team secret yields its own prefix. A
+          # caller pointing adp_client_secret_id at a differently-named secret
+          # used to land the credential in env vars this step never read, and
+          # the mint failed open with no clue why.
+          prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}')
+          id_var="${prefix}_ID"
+          secret_var="${prefix}_SECRET"
+          client_id="${!id_var:-}"
+          client_secret="${!secret_var:-}"
+          if [ -z "$client_id" ] || [ -z "$client_secret" ]; then
+            echo "::warning::ADP client credential missing from env ($id_var, $secret_var); no review will be posted."
             exit 1
           fi
-          status=$(printf '%s' "$ADP_PRIV_CLIENT_SECRET" | curl -sS --request POST \
+          status=$(printf '%s' "$client_secret" | curl -sS --request POST \
             --connect-timeout 10 --max-time 30 \
             --retry 3 --retry-all-errors --retry-delay 2 \
             --output "$RUNNER_TEMP/adp_token.json" --write-out '%{http_code}' \
             --url "$TOKEN_URL" \
             --header 'content-type: application/x-www-form-urlencoded' \
             --data grant_type=client_credentials \
-            --data-urlencode client_id="$ADP_PRIV_CLIENT_ID" \
+            --data-urlencode client_id="$client_id" \
             --data-urlencode client_secret@- \
             --data audience="$TOKEN_AUDIENCE") || status=000
           token=$(jq -r '.access_token // empty' "$RUNNER_TEMP/adp_token.json" 2>/dev/null || true)
@@ -414,6 +429,8 @@ jobs:
       # only runs when the OIDC inputs are set.
       - name: Drop fetched credentials from the review's environment
         if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
+        env:
+          CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
         run: |
           set -euo pipefail
           umask 077
@@ -421,8 +438,11 @@ jobs:
           # AWS_BEARER_TOKEN_BEDROCK deliberately survives: it is the model
           # auth in gateway mode, short-lived, and usable only against the
           # gateway. The long-lived client credential that can mint fresh
-          # tokens must not be readable from the review's environment.
-          for v in ACTIONS_BOT_TOKEN ADP_PRIV_CLIENT_ID ADP_PRIV_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION AWS_REGION; do
+          # tokens must not be readable from the review's environment. Its
+          # env names come from the secret id the same way the mint step
+          # derives them, so a renamed secret is still scrubbed.
+          prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}')
+          for v in ACTIONS_BOT_TOKEN "${prefix}_ID" "${prefix}_SECRET" AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION AWS_REGION; do
             echo "$v=" >> "$GITHUB_ENV"
           done
       - name: Claude review with suggestions
