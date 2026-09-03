@@ -1,0 +1,300 @@
+name: claude-skill
+description: >
+  Run a docs-team-standards Claude Code skill headlessly and capture its
+  findings as files. Shared by every Claude job in the docs-pr-review
+  reusable workflow in this repo (canonical host; the skills stay in
+  docs-team-standards and are read at runtime — the same host/skills
+  split the doc-strings review runs in production; twin/review copy:
+  docs-team-standards PR #2912, DOC-2496). Claude runs
+  findings-only: read-only gh allowlist, no posting rights (the workflow
+  posts under its own identity), and the plugin's github-mutation-guard
+  hook backstops any mutating gh call.
+
+  Model auth is the ADP AI Gateway as the docs-team-agents service account
+  (per-account spend attribution on the ADP cost page; DEVPROD-4735
+  pattern). There is no Anthropic API key anywhere in this pipeline.
+
+inputs:
+  prompt:
+    description: Headless prompt, usually a /docs-team-standards:<skill> invocation
+    required: true
+  output_dir:
+    description: Directory (relative to workspace) the skill writes findings/verdict into
+    required: true
+  repo:
+    description: owner/repo of the PR under review
+    required: true
+  pr_number:
+    description: PR number under review (its head is checked out for file reads)
+    required: true
+  plugin_ref:
+    description: >
+      Commit SHA of redpanda-data/docs-team-standards to check out as the
+      plugin. A SHA, not a branch: review behaviour must not change under a
+      running rollout because someone merged to main, and a SHA is the
+      rollback unit. Update deliberately, one pin bump at a time.
+    required: true
+  aws_region:
+    description: AWS region for the OIDC role that reads the ADP client credential (RP_AWS_CRED_REGION)
+    required: true
+  aws_role_name_prefix:
+    description: >
+      Base IAM role name (RP_AWS_CRED_BASE_ROLE_NAME); the calling
+      repository's own name is appended, matching the engineering-repo
+      convention. All nine docs callers were granted the credential in
+      devprod-infra #779.
+    required: true
+  aws_cred_account_id:
+    description: AWS account id owning the role (RP_AWS_CRED_ACCOUNT_ID). Pass from secrets.
+    required: true
+  adp_client_secret_id:
+    description: Secrets Manager id holding the docs-team-agents OAuth client credential
+    required: false
+    default: 'sdlc/prod/github/docs_team_agents_client'
+  adp_gateway_base_url:
+    description: ADP AI Gateway provider endpoint for Claude Code traffic
+    required: false
+    default: 'https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/llm/v1/providers/claude-code-provider-adp'
+  adp_token_url:
+    description: OAuth token endpoint that mints the gateway bearer
+    required: false
+    default: 'https://auth.prd.cloud.redpanda.com/oauth/token'
+  adp_token_audience:
+    description: OAuth audience for the gateway token
+    required: false
+    default: 'cloudv2-production.redpanda.cloud'
+  gateway_model:
+    description: >
+      Bedrock-style model id; must be in the ADP provider's allowlist
+      (streaming-enterprise's review runs us.anthropic.claude-opus-5 through
+      the same provider).
+    required: false
+    default: 'us.anthropic.claude-sonnet-5'
+  cli_version:
+    description: >
+      Claude Code CLI version to install. 2.1.258 is the version the
+      headless verification passed against (2026-09-02); bump only after
+      re-running that verification.
+    required: false
+    default: '2.1.258'
+  timeout_minutes:
+    description: Wall-clock budget for the claude invocation (per attempt)
+    required: false
+    default: '20'
+
+outputs:
+  claude_failed:
+    description: '"true" when Claude could not run (infra failure), never a review verdict'
+    value: ${{ steps.run.outputs.claude_failed }}
+
+runs:
+  using: composite
+  steps:
+    # PR head, so the skill can Read/Grep the changed files. Same-repo
+    # branches only (fork PRs are excluded by the caller workflow).
+    - uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.repo }}
+        ref: refs/pull/${{ inputs.pr_number }}/head
+
+    # The plugin, checked out at a pinned SHA rather than installed via
+    # `claude plugin marketplace add`: the marketplace path clones a private
+    # repo with whatever ambient credential the runner has (none — the
+    # human path in that repo's README is SSH with SSO, which a runner
+    # doesn't have), fails silently, and Claude then reviews WITHOUT the
+    # skills while the job stays green. checkout solves auth (github.token),
+    # pinning (exact SHA), and caching in one move.
+    - uses: actions/checkout@v4
+      with:
+        repository: redpanda-data/docs-team-standards
+        ref: ${{ inputs.plugin_ref }}
+        path: .docs-team-standards-plugin
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Install Claude Code CLI and stage the plugin
+      shell: bash
+      run: |
+        set -euo pipefail
+        npm install -g "@anthropic-ai/claude-code@${{ inputs.cli_version }}"
+        # --plugin-dir trap: the repo root ships .claude-plugin/marketplace.json,
+        # so pointing --plugin-dir at it registers a MARKETPLACE, not a plugin,
+        # and does so silently. Move the marketplace manifest aside so the
+        # checkout loads as the plugin itself.
+        rm -f .docs-team-standards-plugin/.claude-plugin/marketplace.json
+
+    # ── ADP gateway auth (DEVPROD-4735 pattern, docs-team-agents account) ──
+    - name: Assume the OIDC role
+      id: aws_credentials
+      uses: aws-actions/configure-aws-credentials@v6
+      with:
+        aws-region: ${{ inputs.aws_region }}
+        role-to-assume: arn:aws:iam::${{ inputs.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+
+    - name: Fetch the ADP client credential
+      id: adpsecrets
+      uses: aws-actions/aws-secretsmanager-get-secrets@v3
+      with:
+        secret-ids: |
+          ,${{ inputs.adp_client_secret_id }}
+        parse-json-secrets: true
+
+    - name: Mint the ADP gateway token
+      id: mint
+      shell: bash
+      env:
+        TOKEN_URL: ${{ inputs.adp_token_url }}
+        TOKEN_AUDIENCE: ${{ inputs.adp_token_audience }}
+      run: |
+        set -euo pipefail
+        # NAMING TRAP: parse-json-secrets derives env names from the secret's
+        # OWN JSON keys, which devprod's convention check derives from the
+        # secret's name. sdlc/prod/github/docs_team_agents_client yields
+        # DOCS_TEAM_AGENTS_CLIENT_ID / DOCS_TEAM_AGENTS_CLIENT_SECRET.
+        # ADP_PRIV_CLIENT_* belongs to a DIFFERENTLY-NAMED secret; reading
+        # those names here fails open with no review posted and a green
+        # check. Hence: fail LOUD when the expected names are absent.
+        if [ -z "${DOCS_TEAM_AGENTS_CLIENT_ID:-}" ] || [ -z "${DOCS_TEAM_AGENTS_CLIENT_SECRET:-}" ]; then
+          echo "::error::DOCS_TEAM_AGENTS_CLIENT_ID/_SECRET missing from env — wrong secret id, wrong JSON key names, or the caller lacks the devprod-infra #779 grant"
+          exit 1
+        fi
+        # Secret rides stdin so it never appears in argv; a token containing
+        # whitespace could smuggle extra variables into GITHUB_ENV and
+        # ::add-mask:: covers only the first line.
+        status=$(printf '%s' "$DOCS_TEAM_AGENTS_CLIENT_SECRET" | curl -sS --request POST \
+          --connect-timeout 10 --max-time 30 \
+          --retry 3 --retry-all-errors --retry-delay 2 \
+          --output "$RUNNER_TEMP/adp_token.json" --write-out '%{http_code}' \
+          --url "$TOKEN_URL" \
+          --header 'content-type: application/x-www-form-urlencoded' \
+          --data grant_type=client_credentials \
+          --data-urlencode client_id="$DOCS_TEAM_AGENTS_CLIENT_ID" \
+          --data-urlencode client_secret@- \
+          --data audience="$TOKEN_AUDIENCE") || status=000
+        token=$(jq -r '.access_token // empty' "$RUNNER_TEMP/adp_token.json" 2>/dev/null || true)
+        rm -f "$RUNNER_TEMP/adp_token.json"
+        # Transient mint failures soft-fail (exit 0, no bearer exported): the
+        # run step below turns the missing bearer into claude_failed=true and
+        # the aggregate posts "human review required" — never a red X for an
+        # infra blip. Only the naming-trap case above fails the job loudly,
+        # because that one is a permanent config bug that would otherwise
+        # fail open forever.
+        if [ -z "$token" ]; then
+          echo "::warning::failed to mint ADP gateway token (HTTP $status) — soft-failing to 'human review required'"
+          exit 0
+        fi
+        case "$token" in *[[:space:][:cntrl:]]*)
+          echo "::warning::minted token contains whitespace or control characters — soft-failing"
+          exit 0 ;;
+        esac
+        echo "::add-mask::$token"
+        echo "AWS_BEARER_TOKEN_BEDROCK=$token" >> "$GITHUB_ENV"
+
+    - name: Scrub the long-lived client credential
+      if: always()
+      shell: bash
+      run: |
+        # AWS_BEARER_TOKEN_BEDROCK deliberately survives: it is the model
+        # auth, short-lived, and usable only against the gateway. The
+        # long-lived client credential that can mint fresh tokens must not
+        # be readable from the review's environment.
+        for v in DOCS_TEAM_AGENTS_CLIENT_ID DOCS_TEAM_AGENTS_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+          echo "$v=" >> "$GITHUB_ENV"
+        done
+
+    - name: Assert the plugin actually loaded
+      shell: bash
+      env:
+        # `-p "list skills"` is a model call, so it runs after the mint,
+        # under the same gateway env as the review itself.
+        CLAUDE_CODE_USE_BEDROCK: '1'
+        CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1'
+        ANTHROPIC_BEDROCK_BASE_URL: ${{ inputs.adp_gateway_base_url }}
+        ANTHROPIC_MODEL: ${{ inputs.gateway_model }}
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'us.anthropic.claude-haiku-4-5-20251001-v1:0'
+        AWS_REGION: us-west-2
+      run: |
+        set -euo pipefail
+        if [[ -z "${AWS_BEARER_TOKEN_BEDROCK:-}" ]]; then
+          echo "::warning::no gateway bearer — skipping the plugin-load probe (the run step soft-fails next)"
+          exit 0
+        fi
+        # A missing/misloaded plugin is the known silent failure mode: Claude
+        # reviews without the skills, output looks plausible, job goes green.
+        # Make it loud instead: the skill listing must show the plugin. This
+        # also catches the --plugin-dir marketplace trap regressing (the
+        # manifest removal above), because a marketplace load lists nothing.
+        if ! claude --plugin-dir "$PWD/.docs-team-standards-plugin" -p "list skills" \
+            --max-turns 2 --output-format text 2>/dev/null \
+            | grep -q "docs-team-standards:"; then
+          echo "::error::docs-team-standards plugin did not load from the pinned checkout (plugin_ref=${{ inputs.plugin_ref }}) — refusing to review without the skills"
+          exit 1
+        fi
+
+    - name: Run skill (1 retry, findings-only)
+      id: run
+      shell: bash
+      env:
+        # Bedrock mode against the gateway; the bearer minted above is the
+        # only model credential. SKIP_BEDROCK_AUTH stops Claude Code from
+        # attempting client-side SigV4 signing instead of sending the bearer.
+        CLAUDE_CODE_USE_BEDROCK: '1'
+        CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1'
+        ANTHROPIC_BEDROCK_BASE_URL: ${{ inputs.adp_gateway_base_url }}
+        ANTHROPIC_MODEL: ${{ inputs.gateway_model }}
+        # Background tasks go to Haiku instead of inheriting the primary
+        # model. Must be in the provider allowlist.
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'us.anthropic.claude-haiku-4-5-20251001-v1:0'
+        # Required by the env validator in Bedrock mode only; ignored once
+        # ANTHROPIC_BEDROCK_BASE_URL is set.
+        AWS_REGION: us-west-2
+        GH_TOKEN: ${{ github.token }}   # read-only usage enforced by allowlist below
+        PROMPT: ${{ inputs.prompt }}
+        OUTPUT_DIR: ${{ inputs.output_dir }}
+        TIMEOUT_MIN: ${{ inputs.timeout_minutes }}
+      run: |
+        set -u
+        mkdir -p "$OUTPUT_DIR"
+
+        if [[ -z "${AWS_BEARER_TOKEN_BEDROCK:-}" ]]; then
+          echo "::warning::no gateway bearer available — skipping Claude, flagging for human review"
+          echo "claude_failed=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Read-only tool allowlist. Agent/Task included so pr-review can
+        # spawn the content-reviewer agent (itself Read/Grep/Glob only).
+        # Write is needed for the findings/verdict output contract.
+        ALLOWED="Read,Grep,Glob,Write,Agent,Task"
+        ALLOWED="$ALLOWED,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api repos/*),Bash(gh issue view:*)"
+        ALLOWED="$ALLOWED,Bash(git log:*),Bash(git grep:*),Bash(git diff:*),Bash(git show:*),Bash(git fetch:*),Bash(git checkout:*),Bash(git switch:*),Bash(pwd),Bash(ls:*)"
+
+        run_claude() {
+          timeout "${TIMEOUT_MIN}m" claude -p "$PROMPT" \
+            --plugin-dir "$PWD/.docs-team-standards-plugin" \
+            --output-format json \
+            --allowedTools "$ALLOWED" \
+            --max-turns 100 > "$OUTPUT_DIR/claude-run.json"
+        }
+
+        if run_claude; then
+          :
+        else
+          echo "::warning::Claude run failed (exit $?), retrying once"
+          if ! run_claude; then
+            # Soft-fail: the aggregate job turns a missing verdict.json into
+            # "automated review unavailable — human review required". Never
+            # let an infra failure masquerade as a review verdict.
+            echo "claude_failed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+        fi
+
+        if [[ ! -f "$OUTPUT_DIR/verdict.json" ]]; then
+          echo "::warning::Claude ran but wrote no verdict.json — treating as unavailable"
+          echo "claude_failed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "claude_failed=false" >> "$GITHUB_OUTPUT"
+        fi
