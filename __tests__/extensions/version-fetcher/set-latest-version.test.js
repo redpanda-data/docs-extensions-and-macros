@@ -86,6 +86,24 @@ describe('set-latest-version extension', () => {
     expect(versionAttributes['redpanda-beta-commit']).toBe('rc456')
   })
 
+  // Assigning an attribute the value `undefined` is not the same as leaving it
+  // alone: it shadows the fallback in antora.yml, and Asciidoctor then renders
+  // the reference literally. That is how the published operator and helm-chart
+  // release-notes pages ended up linking to
+  // .../blob/{latest-operator-version}/operator/CHANGELOG.md.
+  it.each([
+    ['latest-operator-version', { 'redpanda-operator': { latestStableRelease: null, latestBetaRelease: null } }, {}],
+    ['latest-redpanda-helm-chart-version', undefined, { latestStableRelease: null, latestBetaRelease: null }],
+  ])('leaves %s unset when the fetch resolves without a version', (key, dockerTags, helmChart) => {
+    const scenario = {}
+    if (dockerTags) scenario.dockerTags = { console: { latestStableRelease: 'v3.2.5' }, ...dockerTags }
+    if (helmChart) scenario.helmChart = helmChart
+    const { versionAttributes } = runExtension(scenario)
+
+    expect(Object.keys(versionAttributes)).not.toContain(key)
+    expect(Object.keys(versionAttributes)).not.toContain(`${key}-short`)
+  })
+
   it('emits -version-short for the operator and Helm chart attributes too', () => {
     const { versionAttributes } = runExtension()
 

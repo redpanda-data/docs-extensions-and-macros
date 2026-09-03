@@ -1,17 +1,23 @@
 'use strict'
 
-const checker = require('../../extensions/external-link-checker')
-const { checkUrl, collectExternalUrls } = checker
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
 
-function makeCatalog (pages, partials = []) {
-  return {
+const checker = require('../../extensions/external-link-checker')
+const { checkUrl, collectExternalUrls, repoSlug } = checker
+
+function makeCatalog (pages, partials = [], components) {
+  const catalog = {
     getPages: (filter) => (filter ? pages.filter(filter) : pages),
     findBy: ({ family }) => (family === 'partial' ? partials : []),
   }
+  if (components) catalog.getComponents = () => components
+  return catalog
 }
 
-function makePage (path, contents) {
-  return { out: {}, path, contents: Buffer.from(contents), src: { family: 'page' } }
+function makePage (path, contents, src = {}) {
+  return { out: {}, path, contents: Buffer.from(contents), src: { family: 'page', ...src } }
 }
 
 function response (status) {
@@ -26,21 +32,21 @@ describe('collectExternalUrls', () => {
       makePage('a.adoc', 'See https://example.com/x and https://docs.redpanda.com/internal/'),
       makePage('b.adoc', 'Also https://example.com/x here'),
     ])
-    const refs = collectExternalUrls(catalog, options)
-    expect([...refs.keys()]).toEqual(['https://example.com/x'])
-    expect([...refs.get('https://example.com/x')]).toEqual(['a.adoc', 'b.adoc'])
+    const { urlReferences } = collectExternalUrls(catalog, options)
+    expect([...urlReferences.keys()]).toEqual(['https://example.com/x'])
+    expect([...urlReferences.get('https://example.com/x').keys()]).toEqual(['a.adoc', 'b.adoc'])
   })
 
   test('applies include and exclude filters', () => {
     const catalog = makeCatalog([
       makePage('a.adoc', 'https://one.example/x https://two.example/y https://two.example/skip'),
     ])
-    const refs = collectExternalUrls(catalog, {
+    const { urlReferences } = collectExternalUrls(catalog, {
       internalHostnames: new Set(),
       include: [/two\.example/],
       exclude: [/skip/],
     })
-    expect([...refs.keys()]).toEqual(['https://two.example/y'])
+    expect([...urlReferences.keys()]).toEqual(['https://two.example/y'])
   })
 
   test('scans partials too', () => {
@@ -48,8 +54,132 @@ describe('collectExternalUrls', () => {
       [],
       [{ path: 'p.adoc', contents: Buffer.from('https://example.com/from-partial'), src: { family: 'partial' } }]
     )
-    const refs = collectExternalUrls(catalog, options)
-    expect([...refs.keys()]).toEqual(['https://example.com/from-partial'])
+    const { urlReferences } = collectExternalUrls(catalog, options)
+    expect([...urlReferences.keys()]).toEqual(['https://example.com/from-partial'])
+  })
+
+  // A path alone is ambiguous: an aggregated site builds the same
+  // 'modules/reference/pages/x.adoc' from several repositories and many
+  // version branches, so a report carrying only the path cannot tell anything
+  // downstream which one to open a pull request against.
+  test('attributes a URL to its repository, branch, and start path', () => {
+    const catalog = makeCatalog([
+      makePage('modules/ROOT/pages/how-to.adoc', 'https://example.com/x', {
+        component: 'home',
+        version: '',
+        origin: {
+          url: 'https://github.com/redpanda-data/docs-site.git',
+          refname: 'main',
+          startPath: 'home',
+        },
+      }),
+    ])
+    const { urlReferences } = collectExternalUrls(catalog, options)
+    const refs = urlReferences.get('https://example.com/x')
+    expect([...refs.keys()]).toEqual(['redpanda-data/docs-site@main:home/modules/ROOT/pages/how-to.adoc'])
+    expect([...refs.values()]).toEqual([
+      {
+        repo: 'redpanda-data/docs-site',
+        refname: 'main',
+        component: 'home',
+        version: '',
+        path: 'home/modules/ROOT/pages/how-to.adoc',
+      },
+    ])
+  })
+
+  test.each([
+    ['https://github.com/redpanda-data/docs.git', 'redpanda-data/docs'],
+    ['https://github.com/redpanda-data/docs', 'redpanda-data/docs'],
+    ['git@github.com:redpanda-data/cloud-docs.git', 'redpanda-data/cloud-docs'],
+    ['', ''],
+    [undefined, ''],
+  ])('derives the repository slug from %s', (url, expected) => {
+    expect(repoSlug(url)).toBe(expected)
+  })
+
+  describe('version scoping', () => {
+    const components = [{ name: 'ROOT', latest: { version: '26.2' } }]
+    const pages = [
+      makePage('a.adoc', 'https://example.com/latest-only', { component: 'ROOT', version: '26.2' }),
+      makePage('a.adoc', 'https://example.com/frozen-only', { component: 'ROOT', version: '24.2' }),
+      makePage('u.adoc', 'https://example.com/unversioned', { component: 'labs', version: '' }),
+    ]
+
+    // Frozen version branches republish the same dead link once per branch,
+    // and nobody edits them, so checking them fills the report with findings
+    // that cannot be acted on.
+    test('skips non-latest versions by default', () => {
+      const { urlReferences } = collectExternalUrls(makeCatalog(pages, [], components), {
+        ...options,
+        versions: 'latest',
+      })
+      expect([...urlReferences.keys()].sort()).toEqual([
+        'https://example.com/latest-only',
+        'https://example.com/unversioned',
+      ])
+    })
+
+    test('checks every version with versions: all', () => {
+      const { urlReferences } = collectExternalUrls(makeCatalog(pages, [], components), {
+        ...options,
+        versions: 'all',
+      })
+      expect([...urlReferences.keys()].sort()).toEqual([
+        'https://example.com/frozen-only',
+        'https://example.com/latest-only',
+        'https://example.com/unversioned',
+      ])
+    })
+
+    test('checks everything when the catalog cannot report components', () => {
+      const { urlReferences } = collectExternalUrls(makeCatalog(pages), { ...options, versions: 'latest' })
+      expect([...urlReferences.keys()]).toContain('https://example.com/frozen-only')
+    })
+  })
+
+  // These render fine once Asciidoctor substitutes the attribute; this hook
+  // runs before that, so fetching the literal braces reports a false 404.
+  test('separates URLs holding an unresolved attribute reference', () => {
+    const catalog = makeCatalog([
+      makePage('a.adoc', 'https://github.com/{project-github}/issues/399[Related issue^] and https://example.com/x'),
+    ])
+    const { urlReferences, unresolved } = collectExternalUrls(catalog, options)
+    expect([...urlReferences.keys()]).toEqual(['https://example.com/x'])
+    expect([...unresolved.keys()]).toEqual(['https://github.com/{project-github}/issues/399'])
+  })
+})
+
+// Every string here is a real entry from docs-site#211 that the checker
+// reported as a broken link while the published page carried no such link.
+describe('report noise from the weekly link check', () => {
+  const options = { internalHostnames: new Set(['docs.redpanda.com']), include: [], exclude: [] }
+
+  test.each([
+    [
+      'a shell fence with a language info string',
+      '```bash\ncurl -LO https://github.com/redpanda-data/redpanda/releases/download/v<version>/rpk-darwin-amd64.zip\n```',
+    ],
+    ['a yml fence holding a config default', '```yml\n  base_url: https://api.cohere.com\n```'],
+    [
+      'a generator provenance comment',
+      '// This content is autogenerated. To customize content, see the writer\'s guide: ' +
+        'https://github.com/redpanda-data/docs/blob/main/docs-data/RPK_OVERRIDES_GUIDE.adoc',
+    ],
+    [
+      'a Doc Detective test step in a comment',
+      '// (step {"runShell": {"command": "helm repo add jetstack https://charts.jetstack.io\\nhelm repo update"}})',
+    ],
+    ['an editorial note in a comment block', '////\nSee https://github.com/redpanda-data/adp-docs/pull/227\n////'],
+  ])('reports nothing for %s', (_, contents) => {
+    const { urlReferences } = collectExternalUrls(makeCatalog([makePage('a.adoc', contents)]), options)
+    expect([...urlReferences.keys()]).toEqual([])
+  })
+
+  test('still reports a real link on the line after a fence closes', () => {
+    const contents = '```bash\ncurl https://example.com/in-fence\n```\n\nSee https://example.com/in-prose.'
+    const { urlReferences } = collectExternalUrls(makeCatalog([makePage('a.adoc', contents)]), options)
+    expect([...urlReferences.keys()]).toEqual(['https://example.com/in-prose'])
   })
 })
 

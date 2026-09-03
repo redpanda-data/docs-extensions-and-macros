@@ -103,3 +103,83 @@ describe('scanContentUrls', () => {
     expect(content.slice(matches[1].start, matches[1].end)).toBe('https://two.example/y[Two]')
   })
 })
+
+describe('scanContentUrls fenced blocks with an info string', () => {
+  // Asciidoctor accepts a language on the opening fence, and closes the block
+  // on a bare ``` line. Matching only bare-backtick delimiters meant every
+  // annotated code block was read as prose.
+  test.each([
+    ['bash', '```bash'],
+    ['yml', '```yml'],
+    ['json', '```json'],
+    ['more than three backticks', '````bash'],
+  ])('skips a fence opened as %s', (_, opening) => {
+    const content = [opening, 'curl https://example.com/skip', '```', 'Prose https://example.com/keep'].join('\n')
+    expect(scanContentUrls(content).map((m) => m.url)).toEqual(['https://example.com/keep'])
+  })
+
+  test('a fence with an info string is not treated as a closing delimiter', () => {
+    // Two annotated fences in a row must open then close, not open twice and
+    // swallow the prose between them.
+    const content = [
+      '```bash',
+      'https://example.com/skip-1',
+      '```',
+      'Between https://example.com/keep',
+      '```yml',
+      'https://example.com/skip-2',
+      '```',
+      'After https://example.com/keep-2',
+    ].join('\n')
+    expect(scanContentUrls(content).map((m) => m.url)).toEqual([
+      'https://example.com/keep',
+      'https://example.com/keep-2',
+    ])
+  })
+})
+
+describe('scanContentUrls comments', () => {
+  // Asciidoctor drops comments before rendering, so a URL on one is not a link
+  // on the published page. Generator provenance notes, Doc Detective test
+  // steps, and writers' editorial asides all live in comments.
+  test('skips a line comment', () => {
+    const content = ['// See https://example.com/skip for details', 'Prose https://example.com/keep'].join('\n')
+    expect(scanContentUrls(content).map((m) => m.url)).toEqual(['https://example.com/keep'])
+  })
+
+  test('skips an indented line comment', () => {
+    expect(scanContentUrls('    // https://example.com/skip')).toEqual([])
+  })
+
+  test('skips a comment block and resumes after it', () => {
+    const content = [
+      '////',
+      'https://example.com/skip-1',
+      'https://example.com/skip-2',
+      '////',
+      'After https://example.com/keep',
+    ].join('\n')
+    expect(scanContentUrls(content).map((m) => m.url)).toEqual(['https://example.com/keep'])
+  })
+
+  test('does not mistake a // inside prose for a comment', () => {
+    const content = 'The scheme https://example.com/keep uses // as a separator.'
+    expect(scanContentUrls(content).map((m) => m.url)).toEqual(['https://example.com/keep'])
+  })
+})
+
+describe('scanContentUrls attribute references', () => {
+  // This scanner runs before Asciidoctor substitutes attributes, so the braces
+  // are still literal here even when the published URL is fine. A caller can
+  // neither fetch nor rewrite one.
+  test.each([
+    ['https://github.com/{project-github}/issues/399', true],
+    ['https://github.com/redpanda-data/redpanda-operator/blob/{latest-operator-version}/operator/CHANGELOG.md', true],
+    ['https://github.com/redpanda-data/docs/tree/{page-origin-refname}/tests/', true],
+    ['https://example.com/no-attributes', false],
+  ])('flags %s as hasAttributeReference=%s', (url, expected) => {
+    const [match] = scanContentUrls(`See ${url} here`)
+    expect(match.url).toBe(url)
+    expect(match.hasAttributeReference).toBe(expected)
+  })
+})

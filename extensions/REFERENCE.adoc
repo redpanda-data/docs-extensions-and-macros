@@ -574,11 +574,37 @@ Responses are classified as follows:
 * 401/403/429: unverifiable — logged at info level, because bot-walled or rate-limited sites are not broken
 * Other statuses, network errors, and timeouts (after one retry): unverifiable — logged as a warning
 
+=== What is not checked
+
+The extension runs at `contentClassified`, on raw AsciiDoc, before Asciidoctor converts anything. Three kinds of URL are therefore left alone, because checking them reports a broken link where the published page has no link at all:
+
+Code blocks::
+URLs inside a listing (`----`), literal (`....`), passthrough (`++++`) or fenced (`+```+`) block. A fenced block counts as one even when the opening delimiter carries a language info string, such as `+```bash+` or `+```yml+`.
+
+Comments::
+URLs on a line comment (`//`) or inside a comment block (`////`). Asciidoctor drops these before rendering, so a generator's provenance note, a Doc Detective test step, or a writer's editorial aside never becomes a link.
+
+Unresolved attribute references::
+A URL still holding a literal `{name}` reference, such as `+https://github.com/{project-github}/issues+`. Attributes are substituted after this hook runs, so the real target is unknown here while the published URL is usually fine. These are logged at info level with the pages that reference them, and counted separately, so a genuinely undefined attribute is still visible.
+
+=== Report attribution
+
+Each finding names the repository, branch, and path the URL was found in, for example:
+
+----
+Broken external link https://example.com/gone (HTTP 404) referenced in: redpanda-data/docs@main:modules/manage/pages/x.adoc
+----
+
+An aggregated site builds the same Antora-relative path from several repositories and many version branches, so a path on its own does not identify a file well enough to act on.
+
 === Environment variables
 
 This extension does not require any environment variables.
 
 === Configuration options
+
+enabled (optional)::
+Set to `false` to register the extension without checking anything, so a playbook shared between a scheduled build and a preview build can turn the network requests off. Default: `true`.
 
 internal_hostnames (optional)::
 Hostnames to skip because they are internal documentation URLs. Default: `['docs.redpanda.com']`.
@@ -589,6 +615,11 @@ List of regular expressions. When set, only URLs matching at least one pattern a
 exclude (optional)::
 List of regular expressions. URLs matching any pattern are skipped.
 
+versions (optional)::
+Which component versions to check. `latest` checks only each component's latest version, plus every unversioned component; `all` checks every version in the build. Default: `latest`.
++
+A site that publishes many versions of a component republishes the same dead link once per branch, and those older branches are frozen content that nobody edits, so checking them fills the report with findings that cannot be acted on.
+
 concurrency (optional)::
 Number of simultaneous requests. Default: `10`.
 
@@ -597,6 +628,9 @@ Per-request timeout in milliseconds. Default: `10000`.
 
 fail_on_broken (optional)::
 Log broken links at error level so a build run with `--log-failure-level=error` fails. Default: `false`.
+
+report_file (optional)::
+Path to write a machine-readable JSON report to. Unset by default, in which case no report is written. The report holds `counts`, a `results` array sorted broken-first, and `unresolvedAttributeReferences`; each result carries the URL, its classification and status, and a `refs` array of `{repo, refname, component, version, path}`. Intended for automation that has to act on the findings rather than read them.
 
 === Registration
 
@@ -607,6 +641,9 @@ Register the `external-link-checker` extension in the Antora playbook under the 
 antora:
   extensions:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/external-link-checker'
+      enabled: ${LINK_CHECK}
+      versions: latest
+      report_file: link-check.json
       fail_on_broken: false
 ----
 

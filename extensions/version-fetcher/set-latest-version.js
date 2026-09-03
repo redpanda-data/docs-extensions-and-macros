@@ -218,10 +218,15 @@ module.exports.register = function ({ config }) {
     return version.replace(/^v/, '');
   }
 
-  // Helper function to update multiple attributes based on a list of mappings
+  // Helper function to update multiple attributes based on a list of mappings.
+  // Gated on the value, not just the condition: gating on the enclosing object
+  // alone assigned `undefined` whenever the fetch returned an object without
+  // the field, and that clobbered the antora.yml fallback instead of falling
+  // back to it. The visible symptom was a literal {latest-operator-version} in
+  // the published release-notes pages.
   function updateAttributes(asciidoc, mappings) {
     mappings.forEach(({ condition, key, value }) => {
-      if (condition) {
+      if (condition && value) {
         asciidoc.attributes[key] = value;
         setShortVersionAttribute(asciidoc, key, value);
       }
