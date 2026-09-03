@@ -237,8 +237,12 @@ describe('register', () => {
     checker._fetch = originalFetch
   })
 
-  async function run (catalog, config = {}) {
+  // Every test below drives the extension directly, so it must not depend on
+  // whether LINK_CHECK happens to be set in the shell that runs jest. The
+  // dedicated gate tests manage the variable themselves and pass useAmbientEnv.
+  async function run (catalog, config = {}, { useAmbientEnv = false } = {}) {
     const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() }
+    if (!useAmbientEnv) process.env.LINK_CHECK = 'true'
     let handlerPromise
     const context = {
       getLogger: () => logger,
@@ -280,6 +284,34 @@ describe('register', () => {
     const logger = await run(catalog)
     expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Could not verify external link'))
     expect(logger.warn).not.toHaveBeenCalled()
+  })
+
+  // Registering this extension in a playbook that preview builds also use must
+  // not make those builds hit the network. It is an environment variable and
+  // not a config option because Antora does not interpolate environment
+  // variables into playbook values, and because Antora consumes a playbook
+  // entry's own `enabled` key before the config reaches the extension.
+  describe('the LINK_CHECK gate', () => {
+    const originalEnv = process.env.LINK_CHECK
+
+    afterEach(() => {
+      if (originalEnv === undefined) delete process.env.LINK_CHECK
+      else process.env.LINK_CHECK = originalEnv
+    })
+
+    test.each([
+      ['unset', undefined, false],
+      ['true', 'true', true],
+      ['false', 'false', false],
+      ['1, since only the exact string "true" counts', '1', false],
+    ])('LINK_CHECK=%s checks links: %s', async (_, envValue, expectChecked) => {
+      if (envValue === undefined) delete process.env.LINK_CHECK
+      else process.env.LINK_CHECK = envValue
+      checker._fetch = jest.fn(() => response(200))
+      const catalog = makeCatalog([makePage('a.adoc', 'https://example.com/x')])
+      await run(catalog, {}, { useAmbientEnv: true })
+      expect(checker._fetch.mock.calls.length > 0).toBe(expectChecked)
+    })
   })
 
   test('does nothing when no external URLs exist', async () => {

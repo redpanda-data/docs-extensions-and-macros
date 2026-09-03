@@ -599,12 +599,12 @@ An aggregated site builds the same Antora-relative path from several repositorie
 
 === Environment variables
 
-This extension does not require any environment variables.
+LINK_CHECK::
+Set to `true` to check links. Without it the extension registers and does nothing, so it can live in a playbook that preview builds also use without those builds making network requests.
++
+This is an environment variable rather than a configuration option for two reasons: Antora does not interpolate environment variables into playbook values, and Antora consumes a playbook entry's own `enabled` key itself, before the config reaches the extension, so that name is not available.
 
 === Configuration options
-
-enabled (optional)::
-Set to `false` to register the extension without checking anything, so a playbook shared between a scheduled build and a preview build can turn the network requests off. Default: `true`.
 
 internal_hostnames (optional)::
 Hostnames to skip because they are internal documentation URLs. Default: `['docs.redpanda.com']`.
@@ -641,10 +641,16 @@ Register the `external-link-checker` extension in the Antora playbook under the 
 antora:
   extensions:
     - require: '@redpanda-data/docs-extensions-and-macros/extensions/external-link-checker'
-      enabled: ${LINK_CHECK}
       versions: latest
       report_file: link-check.json
       fail_on_broken: false
+----
+
+That registration is inert on every build except one run with `LINK_CHECK=true`:
+
+[source,bash]
+----
+LINK_CHECK=true npx antora --fetch antora-playbook.yml
 ----
 
 == Validate attributes

@@ -111,7 +111,10 @@ describe('link extensions end-to-end', () => {
     fs.writeFileSync(playbookPath, playbook)
 
     // Run the build in-process so the extensions and the fixture HTTP server
-    // share a process, and capture the structured log via --log-file.
+    // share a process, and capture the structured log via --log-file. The link
+    // checker is inert without LINK_CHECK, which is the point: registering it
+    // in a shared playbook must not make preview builds hit the network.
+    process.env.LINK_CHECK = 'true'
     const logPath = path.join(workDir, 'build-log.json')
     await generateSite([
       '--playbook', playbookPath,
@@ -124,6 +127,7 @@ describe('link extensions end-to-end', () => {
   })
 
   afterAll(() => {
+    delete process.env.LINK_CHECK
     if (server) {
       if (server.closeAllConnections) server.closeAllConnections()
       server.close()

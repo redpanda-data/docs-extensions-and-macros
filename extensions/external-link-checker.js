@@ -20,7 +20,6 @@ const { raiseListenerLimit } = require('./util/raise-listener-limit')
  * antora:
  *   extensions:
  *     - require: '@redpanda-data/docs-extensions-and-macros/extensions/external-link-checker'
- *       # enabled: true        set false to register without checking anything
  *       # internal_hostnames: ['docs.redpanda.com']  hosts to skip (default)
  *       # include: []          regex allowlist; when set, only matching URLs are checked
  *       # exclude: []          regex denylist
@@ -32,6 +31,14 @@ const { raiseListenerLimit } = require('./util/raise-listener-limit')
  *       # fail_on_broken: false  log broken links at error level so a build
  *       #                        run with --log-failure-level=error fails
  *       # report_file: ''      path to write a machine-readable JSON report to
+ *
+ * Checking only happens when LINK_CHECK=true is set in the environment, so one
+ * playbook can serve both a scheduled link-check build and ordinary preview
+ * builds, which must not make network requests. It is an environment variable
+ * rather than a config option because Antora does not interpolate environment
+ * variables into playbook values, and because Antora consumes the playbook's
+ * own `enabled` key itself (generator-context.js strips it before the config
+ * reaches an extension), so that name is not available here.
  *
  * Classification:
  * - 2xx/3xx: ok
@@ -51,7 +58,10 @@ const USER_AGENT = 'redpanda-docs-link-checker'
 module.exports.register = function ({ config = {} }) {
   raiseListenerLimit(this)
   const logger = this.getLogger('external-link-checker-extension')
-  if (config.enabled === false) return
+  // Inert unless asked for, so this can be registered in a playbook that
+  // preview builds also use. See the note above on why this is an environment
+  // variable and not a config option.
+  if (process.env.LINK_CHECK !== 'true') return
   const internalHostnames = new Set(config.internalHostnames || ['docs.redpanda.com'])
   const include = (config.include || []).map((pattern) => new RegExp(pattern))
   const exclude = (config.exclude || []).map((pattern) => new RegExp(pattern))
