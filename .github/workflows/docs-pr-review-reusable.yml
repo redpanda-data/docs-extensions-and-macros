@@ -109,11 +109,6 @@ jobs:
           AUTHOR=$(gh pr view "$PR" --repo "$R" --json author -q .author.login)
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
-          if [[ -z "${DOC_TEAM:-}" ]]; then
-            echo "::error::DOC_TEAM_LOGINS org variable is not set — cannot derive the SME set (see .github/DOCS_REVIEW_ROLLOUT.md)"
-            exit 1
-          fi
-
           # Helpers ---------------------------------------------------------
           derive_smes() {
             # (requested ∪ reviewed) − docs team − author − bots, recomputed
@@ -142,6 +137,20 @@ jobs:
               -f description="$1" \
               -f target_url="${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}" > /dev/null
           }
+
+          # Config guard: a missing DOC_TEAM_LOGINS is environment
+          # misconfiguration, not a review verdict — hold the gate with an
+          # informative pending status instead of a hard fail (the same
+          # posture as every other infra failure in this pipeline: never a
+          # red X for a broken environment). See DOCS_REVIEW_ROLLOUT.md in
+          # docs-team-standards, org-setup, for the variable.
+          if [[ -z "${DOC_TEAM:-}" ]]; then
+            echo "::warning::DOC_TEAM_LOGINS org variable is not set — holding the SME gate (pending), skipping review"
+            set_pending "Waiting for SME approval (DOC_TEAM_LOGINS is not configured)"
+            echo "sme_set=" >> "$GITHUB_OUTPUT"
+            echo "run_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # ── Reviewer-set events (opened / review_requested /
           #    review_request_removed): nothing to persist — the set is
