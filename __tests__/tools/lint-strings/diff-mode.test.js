@@ -5,7 +5,8 @@ const os = require('os')
 const path = require('path')
 const { execSync } = require('child_process')
 
-const { parseUnifiedDiff, routeFile, spanIntersects, classifyDiff } = require('../../../tools/lint-strings/diff')
+const { parseUnifiedDiff, parseUnifiedDiffRemovals, routeFile, spanIntersects, classifyDiff } =
+  require('../../../tools/lint-strings/diff')
 const { lintStrings } = require('../../../tools/lint-strings')
 
 describe('unified diff parsing', () => {
@@ -35,6 +36,53 @@ describe('unified diff parsing', () => {
     const changed = parseUnifiedDiff(diff)
     expect([...changed.keys()]).toEqual(['src/v/config/configuration.cc'])
     expect([...changed.get('src/v/config/configuration.cc')].sort((a, b) => a - b)).toEqual([100, 101, 102, 201])
+  })
+
+  test('maps the pre-image side to deleted line numbers, keyed by old path', () => {
+    const diff = [
+      'diff --git a/src/v/config/configuration.cc b/src/v/config/configuration.cc',
+      '--- a/src/v/config/configuration.cc',
+      '+++ b/src/v/config/configuration.cc',
+      '@@ -100,3 +99,0 @@ ctx',
+      '-line a',
+      '-line b',
+      '-line c',
+      'diff --git a/gone.cc b/gone.cc',
+      '--- a/gone.cc',
+      '+++ /dev/null',
+      '@@ -1,2 +0,0 @@',
+      '-x',
+      '-y',
+      'diff --git a/added.cc b/added.cc',
+      '--- /dev/null',
+      '+++ b/added.cc',
+      '@@ -0,0 +1,2 @@',
+      '+new a',
+      '+new b',
+      ''
+    ].join('\n')
+
+    const removed = parseUnifiedDiffRemovals(diff)
+    // A wholly deleted file counts; a wholly new file contributes nothing.
+    expect([...removed.keys()].sort()).toEqual(['gone.cc', 'src/v/config/configuration.cc'])
+    expect([...removed.get('src/v/config/configuration.cc')].sort((a, b) => a - b)).toEqual([100, 101, 102])
+    expect([...removed.get('gone.cc')].sort((a, b) => a - b)).toEqual([1, 2])
+  })
+
+  test('a deleted source line starting with "-- " is not read as a file header', () => {
+    const diff = [
+      'diff --git a/src/v/config/configuration.cc b/src/v/config/configuration.cc',
+      '--- a/src/v/config/configuration.cc',
+      '+++ b/src/v/config/configuration.cc',
+      '@@ -10,2 +9,0 @@ ctx',
+      '--- a/not/a/header.cc',
+      '-real deleted line',
+      ''
+    ].join('\n')
+
+    const removed = parseUnifiedDiffRemovals(diff)
+    expect([...removed.keys()]).toEqual(['src/v/config/configuration.cc'])
+    expect([...removed.get('src/v/config/configuration.cc')].sort((a, b) => a - b)).toEqual([10, 11])
   })
 })
 
@@ -125,5 +173,101 @@ describe('declaration-anchored diff mode (end-to-end, temp git repo)', () => {
     expect(finding.line_end).toBe(lastLine)
     expect(finding.line_end - finding.line_start).toBe(2)
     expect(finding.declaration_text.split('\n')).toHaveLength(3)
+  })
+})
+
+// Regression: a deletion-only PR used to bypass the whole review gate.
+// Declarations are extracted from HEAD and the post-image parser discards
+// pure-deletion hunks, so removing a metric reported declarations=0 and the
+// workflow skipped every downstream step, including the published-content
+// check that treats a removed surface as high impact.
+describe('deletion-only diff (end-to-end, temp git repo)', () => {
+  const FIXTURE = path.join(__dirname, '../../../tools/lint-strings/fixtures/metrics/lint_probe.cc')
+  const REL = path.join('src', 'v', 'cluster', 'lint_probe.cc')
+  let repo
+
+  function git (args) {
+    execSync(`git ${args}`, { cwd: repo, stdio: 'pipe' })
+  }
+
+  beforeAll(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-deletion-'))
+    const target = path.join(repo, REL)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.copyFileSync(FIXTURE, target)
+
+    git('init --quiet')
+    git('config user.email lint-strings-test@example.invalid')
+    git('config user.name "lint-strings test"')
+    git('add .')
+    git('commit --quiet -m base')
+
+    // Remove the records_produced metric outright, adding nothing back.
+    const content = fs.readFileSync(target, 'utf8')
+    const block = [
+      '        sm::make_counter(',
+      '          "records_produced",',
+      '          [this] { return _records_produced; },',
+      '          sm::description("Total number of records produced"),',
+      '          labels),',
+      ''
+    ].join('\n')
+    expect(content).toContain(block)
+    fs.writeFileSync(target, content.replace(block, ''))
+    git('add .')
+    git('commit --quiet -m "remove the records_produced metric"')
+  })
+
+  afterAll(() => {
+    fs.rmSync(repo, { recursive: true, force: true })
+  })
+
+  test('reports the removal even though nothing can be extracted at HEAD', () => {
+    const result = lintStrings({ repo, diffBase: 'HEAD~1', log: () => {} })
+
+    // The blind spot itself: the removed declaration is gone from HEAD, and a
+    // pure-deletion hunk leaves no post-image line to anchor on.
+    expect(result.summary.totalDeclarations).toBe(0)
+    expect(result.findings).toHaveLength(0)
+
+    // What keeps the gate open.
+    expect(result.summary.removedSurfaceLines).toBe(5)
+    expect(result.summary.removedSurfaceFiles).toEqual([
+      { surface: 'metrics', file: REL, lines: 5 }
+    ])
+  })
+
+  test('a wholly deleted surface file is reported too', () => {
+    const solo = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-deleted-file-'))
+    const run = (args) => execSync(`git ${args}`, { cwd: solo, stdio: 'pipe' })
+    try {
+      const target = path.join(solo, REL)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(FIXTURE, target)
+      run('init --quiet')
+      run('config user.email lint-strings-test@example.invalid')
+      run('config user.name "lint-strings test"')
+      run('add .')
+      run('commit --quiet -m base')
+      fs.rmSync(target)
+      run('add -A')
+      run('commit --quiet -m "drop the probe"')
+
+      const result = lintStrings({ repo: solo, diffBase: 'HEAD~1', log: () => {} })
+      expect(result.summary.totalDeclarations).toBe(0)
+      expect(result.summary.removedSurfaceFiles).toEqual([
+        { surface: 'metrics', file: REL, lines: 41 }
+      ])
+    } finally {
+      fs.rmSync(solo, { recursive: true, force: true })
+    }
+  })
+
+  test('non-diff mode leaves the removal fields at their empty defaults', () => {
+    // Scoped to metrics: whole-repo mode would also run the python properties
+    // extractor, which has no h/cc pairs to find in this fixture repo.
+    const result = lintStrings({ repo, surfaces: ['metrics'], log: () => {} })
+    expect(result.summary.removedSurfaceLines).toBe(0)
+    expect(result.summary.removedSurfaceFiles).toEqual([])
   })
 })
