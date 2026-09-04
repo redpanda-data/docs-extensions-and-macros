@@ -172,7 +172,10 @@ const COMMON_RULES = [
       // list. Match the abbreviation only, so "e.g" inside a longer token such
       // as a URL or an identifier is left alone.
       for (const [abbr, replacement] of [['e.g.', '"for example"'], ['i.e.', '"that is"']]) {
-        const pattern = new RegExp(`(^|[^\\w.])${abbr.replace(/\./g, '\\.')}`, 'i')
+        // Boundaries on both sides: the abbreviation must not be part of a
+        // longer token, so a host or identifier that happens to contain it
+        // (https://e.g.example/path) is left alone.
+        const pattern = new RegExp(`(^|[^\\w.])${abbr.replace(/\./g, '\\.')}(?=$|[^\\w])`, 'i')
         if (pattern.test(text)) {
           issues.push({
             message: `Uses "${abbr}". Write ${replacement} instead: "${excerpt(text, abbr)}"`
