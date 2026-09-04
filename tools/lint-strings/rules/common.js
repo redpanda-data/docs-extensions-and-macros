@@ -54,6 +54,18 @@ function isNameEcho (name, description) {
   return true
 }
 
+/**
+ * A short window of `text` around the first occurrence of `needle`, for use in
+ * rule messages so the writer can see the offending phrase in context.
+ */
+function excerpt (text, needle, width = 60) {
+  const at = text.toLowerCase().indexOf(needle.toLowerCase())
+  if (at === -1) return text.slice(0, width)
+  const start = Math.max(0, at - Math.floor(width / 2))
+  const slice = text.slice(start, start + width)
+  return `${start > 0 ? '...' : ''}${slice}${start + width < text.length ? '...' : ''}`
+}
+
 const COMMON_RULES = [
   {
     name: 'empty-description',
@@ -125,6 +137,46 @@ const COMMON_RULES = [
         const pattern = new RegExp(`\\b${term}\\b`, 'i')
         if (pattern.test(text)) {
           issues.push({ message: `Contains internal jargon "${term}". Expand or replace it; users do not know this term.` })
+        }
+      }
+      return issues
+    }
+  },
+  {
+    name: 'em-dash',
+    description: 'Em dash in prose that ships to docs.redpanda.com',
+    severity: 'warning',
+    check: (decl) => {
+      const text = decl.string || ''
+      if (!text.includes('\u2014')) return []
+      // The docs style guide takes commas, parentheses or a sentence break
+      // instead of em dashes. Reference docs generated from these strings pass
+      // prose through unchanged, so an em dash here is published verbatim, and
+      // correcting it in the generated partial is undone by the next
+      // regeneration.
+      const count = (text.match(/\u2014/g) || []).length
+      return [{
+        message: `Contains ${count} em dash${count === 1 ? '' : 'es'}. Use a comma, parentheses, or a separate sentence: "${excerpt(text, '\u2014')}"`
+      }]
+    }
+  },
+  {
+    name: 'latin-abbreviation',
+    description: 'Latin abbreviation instead of plain English',
+    severity: 'warning',
+    check: (decl) => {
+      const text = decl.string || ''
+      if (!text) return []
+      const issues = []
+      // "e.g." and "i.e." are both ruled out by the style guide's terminology
+      // list. Match the abbreviation only, so "e.g" inside a longer token such
+      // as a URL or an identifier is left alone.
+      for (const [abbr, replacement] of [['e.g.', '"for example"'], ['i.e.', '"that is"']]) {
+        const pattern = new RegExp(`(^|[^\\w.])${abbr.replace(/\./g, '\\.')}`, 'i')
+        if (pattern.test(text)) {
+          issues.push({
+            message: `Uses "${abbr}". Write ${replacement} instead: "${excerpt(text, abbr)}"`
+          })
         }
       }
       return issues
