@@ -33,6 +33,10 @@ const fs = require('fs')
 const path = require('path')
 
 const ATTRIBUTE_NAME = 'kapa-source-groups'
+// Sits beside assets/widgets/, which proxy-api-docs.js already fetches from the
+// site origin, so the /api/ path needs no new hostname or auth.
+const ASSET_DIR = 'assets/data'
+const ASSET_FILENAME = 'kapa-source-groups.json'
 const DEFAULT_MAPPING_PATH = path.join(__dirname, '..', 'docs-data', 'kapa-source-groups.json')
 
 /**
@@ -103,6 +107,23 @@ module.exports.register = function ({ config = {} } = {}) {
     }
   })
 
+  // The /api/ reference is Bump.sh HTML assembled by docs-site's proxy-api-docs
+  // edge function, which has no Antora page context and cannot import from
+  // node_modules. Publishing the mapping as a site asset lets that function read
+  // the default group at request time, in parallel with the widget fetches it
+  // already does. The alternative -- a UUID pasted into docs-ui's static widget
+  // context or a Netlify env var -- is a second copy of the mapping that drifts
+  // silently the first time a group is recreated.
+  this.on('beforePublish', ({ siteCatalog }) => {
+    const mapping = load()
+    if (!mapping) return
+    siteCatalog.addFile({
+      contents: Buffer.from(JSON.stringify(mapping, null, 2) + '\n', 'utf8'),
+      out: { path: path.join(ASSET_DIR, ASSET_FILENAME) },
+    })
+    logger.info(`Kapa source groups: published ${ASSET_DIR}/${ASSET_FILENAME} for the /api/ proxy.`)
+  })
+
   this.on('contentClassified', async ({ contentCatalog }) => {
     const mapping = load()
     if (!mapping) return
@@ -138,3 +159,5 @@ module.exports.register = function ({ config = {} } = {}) {
 module.exports.validateMapping = validateMapping
 module.exports.ATTRIBUTE_NAME = ATTRIBUTE_NAME
 module.exports.DEFAULT_MAPPING_PATH = DEFAULT_MAPPING_PATH
+module.exports.ASSET_DIR = ASSET_DIR
+module.exports.ASSET_FILENAME = ASSET_FILENAME

@@ -92,7 +92,9 @@
     "./macros/enterprise": "./macros/enterprise.js",
     "./macros/prop": "./macros/prop.js",
     "./extensions/property-page-index": "./extensions/property-page-index.js",
-    "./extensions/render-property-descriptions": "./extensions/render-property-descriptions.js"
+    "./extensions/render-property-descriptions": "./extensions/render-property-descriptions.js",
+    "./extensions/kapa-source-groups": "./extensions/kapa-source-groups.js",
+    "./docs-data/kapa-source-groups.json": "./docs-data/kapa-source-groups.json"
   },
   "files": [
     "extensions",
@@ -104,7 +106,9 @@
     "tools",
     "docker-compose",
     "mcp",
-    "docs-data/rpk-overrides.schema.json"
+    "docs-data/rpk-overrides.schema.json",
+    "docs-data/kapa-source-groups.json",
+    "docs-data/kapa-source-groups.schema.json"
   ],
   "license": "ISC",
   "engines": {
