@@ -136,9 +136,14 @@ jobs:
             # incomplete-asset release as "already published" would wedge the
             # tag forever; here it stays a candidate and the publish step
             # deletes and recreates it.
-            asset_count=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/rp-util-schema-${tag}" \
-              --jq '.assets | length' 2>/dev/null || echo "missing")
-            if [ "$asset_count" = "5" ]; then
+            # Asset NAMES, not just a count of 5: five uploads of the
+            # wrong or duplicated names satisfy a count check while leaving
+            # a scope the consumer can never resolve. rp-util-fetch.js
+            # validates the same five names on its side.
+            missing_assets=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/rp-util-schema-${tag}" \
+              --jq '["cluster-config-schema.json","node-config-schema.json","pandaproxy-config-schema.json","kafka-client-config-schema.json","schema-registry-config-schema.json"]
+                    - [.assets[].name] | join(",")' 2>/dev/null || echo "missing")
+            if [ -z "$missing_assets" ]; then
               echo "rp-util-schema-${tag} already published with all assets; skipping" >&2
               continue
             fi
@@ -184,6 +189,25 @@ jobs:
           token: ${{ env.ACTIONS_BOT_TOKEN }}
           path: streaming-enterprise
           persist-credentials: false
+      # persist-credentials: false above keeps the bot token out of the
+      # checkout's .git/config, but not out of the job's environment:
+      # aws-secretsmanager-get-secrets publishes ACTIONS_BOT_TOKEN through
+      # GITHUB_ENV, and configure-aws-credentials does the same for the
+      # assumed role's keys, so both stay readable by every later step --
+      # including the Bazel build and the rp_util binary it produces, which
+      # run build logic and code from the streaming-enterprise checkout
+      # rather than from this repo. Nothing past this point needs either
+      # (checkout was the bot token's only consumer, and the release upload
+      # below uses github.token), so blank them out before any
+      # cross-repository code runs. Assigning an empty value is the only way
+      # to drop a variable another step exported via GITHUB_ENV.
+      - name: Drop credentials before building cross-repository code
+        run: |
+          set -euo pipefail
+          for var in ACTIONS_BOT_TOKEN \
+                     AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+            echo "$var=" >> "$GITHUB_ENV"
+          done
       - name: Install build dependencies
         # libatomic1: the hermetic LLVM toolchain's clang binary is linked
         # against libatomic.so.1. build-essential + the autotools set below:
@@ -240,14 +264,16 @@ jobs:
           # partial release counts as broken here and is deleted and
           # recreated rather than skipped -- otherwise one mid-upload failure
           # wedges the tag forever while every retry goes green.
-          asset_count=$(gh api "repos/${{ github.repository }}/releases/tags/rp-util-schema-${TAG}" \
-            --jq '.assets | length' 2>/dev/null || echo "missing")
-          if [ "$asset_count" = "5" ]; then
+          # Asset NAMES, not just a count of 5 -- see the resolve job.
+          missing_assets=$(gh api "repos/${{ github.repository }}/releases/tags/rp-util-schema-${TAG}" \
+            --jq '["cluster-config-schema.json","node-config-schema.json","pandaproxy-config-schema.json","kafka-client-config-schema.json","schema-registry-config-schema.json"]
+                  - [.assets[].name] | join(",")' 2>/dev/null || echo "missing")
+          if [ -z "$missing_assets" ]; then
             echo "rp-util-schema-${TAG} already published with all assets; nothing to do."
             exit 0
           fi
           if gh release view "rp-util-schema-${TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "rp-util-schema-${TAG} exists but is a draft or incomplete (assets: ${asset_count}); deleting and recreating."
+            echo "rp-util-schema-${TAG} exists but is a draft or incomplete (missing: ${missing_assets}); deleting and recreating."
             gh release delete "rp-util-schema-${TAG}" --yes --repo "${{ github.repository }}"
           fi
           # --latest=false: these snapshots must never become the repo's
