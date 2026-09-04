@@ -204,6 +204,33 @@ function mergeOverrides(target, overrides) {
  * @param {Object} root - The root object containing definitions
  * @returns {Object} The object with references resolved
  */
+
+/**
+ * House-style regressions that a regeneration would reintroduce.
+ *
+ * Generated prose passes through unchanged by design (see
+ * helpers/renderConnectDescription.js), so when a writer corrects an em dash or
+ * an "e.g." in a published partial instead of upstream, the next regeneration
+ * silently puts it back. Comparing the published text with the incoming text
+ * catches exactly that case: a style issue the published file does not have and
+ * the new one does. Same rules the doc-strings lint applies at the source, so
+ * the two agree on what counts as a regression.
+ *
+ * @param {string} published current on-disk partial
+ * @param {string} incoming regenerated partial
+ * @returns {string[]} rule names whose hit count increases
+ */
+function styleRegressions (published, incoming) {
+  return STYLE_REGRESSION_RULES
+    .filter(({ count }) => count(incoming) > count(published))
+    .map(({ label }) => label);
+}
+
+const STYLE_REGRESSION_RULES = [
+  { label: 'em dash', count: (text) => (text.match(/\u2014/g) || []).length },
+  { label: '"e.g."', count: (text) => (text.match(/(^|[^\w.])e\.g\./gi) || []).length },
+  { label: '"i.e."', count: (text) => (text.match(/(^|[^\w.])i\.e\./gi) || []).length }
+];
 function resolveReferences(obj, root) {
   if (!obj || typeof obj !== 'object') {
     return obj;
@@ -448,6 +475,7 @@ async function generateRpcnConnectorDocs(options) {
   let partialsWritten = 0;
   const descriptionReports = [];
   const lostSectionWarnings = [];
+  const styleRegressionWarnings = [];
   // typeDir/name keys handled this run; used after the loop to blank
   // description partials orphaned by a connector deleted upstream.
   const visitedDescriptionPartials = new Set();
@@ -487,6 +515,12 @@ async function generateRpcnConnectorDocs(options) {
       if (fieldsOut.trim()) {
         const fPath = path.join(fieldsOutRoot, type, `${name}.adoc`);
         fs.mkdirSync(path.dirname(fPath), { recursive: true });
+        if (fs.existsSync(fPath)) {
+          const regressions = styleRegressions(fs.readFileSync(fPath, 'utf8'), fieldsOut);
+          if (regressions.length) {
+            styleRegressionWarnings.push({ partial: path.relative(process.cwd(), fPath), issues: regressions });
+          }
+        }
         fs.writeFileSync(fPath, fieldsOut);
         if (!writeFullDrafts) {
           partialsWritten++;
@@ -587,7 +621,12 @@ async function generateRpcnConnectorDocs(options) {
             // because it left the upstream description or because a human
             // added it here -- so warn before overwriting instead of
             // dropping it without a trace.
-            const lost = lostMetadataSections(fs.readFileSync(dPath, 'utf8'), descriptionOut);
+            const publishedDescription = fs.readFileSync(dPath, 'utf8');
+            const regressions = styleRegressions(publishedDescription, descriptionOut);
+            if (regressions.length) {
+              styleRegressionWarnings.push({ partial: path.relative(process.cwd(), dPath), issues: regressions });
+            }
+            const lost = lostMetadataSections(publishedDescription, descriptionOut);
             if (lost.length) {
               lostSectionWarnings.push({ partial: path.relative(process.cwd(), dPath), sections: lost });
               console.warn(
@@ -938,6 +977,7 @@ async function generateRpcnConnectorDocs(options) {
     draftFiles,
     descriptionReports,
     lostSectionWarnings,
+    styleRegressionWarnings,
     orphanSweepSkipped,
     descriptionBackfill
   };

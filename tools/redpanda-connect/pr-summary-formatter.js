@@ -164,6 +164,29 @@ function renderLostSectionWarnings(warnings) {
   return lines;
 }
 
+/**
+ * Render the house-style regression block.
+ *
+ * A regeneration reintroducing an em dash or an "e.g." that the published
+ * partial does not have means the correction was made in the generated file
+ * instead of upstream, so every release undoes it again. Surfacing it in the
+ * summary is what tells the reviewer the diff contains reverted copy, which
+ * the schema delta above never shows.
+ * @param {Array<{partial: string, issues: string[]}>} warnings
+ * @returns {string[]} lines (empty when there is nothing to warn about)
+ */
+function renderStyleRegressionWarnings(warnings) {
+  if (!Array.isArray(warnings) || warnings.length === 0) return [];
+  const lines = [];
+  lines.push('> [!WARNING]');
+  lines.push('> **This update reintroduces house-style issues that the published docs do not have.** The fix belongs upstream in the Connect source, or in `docs-data/overrides.json`: correcting the generated partial is undone by the next regeneration.');
+  for (const w of warnings) {
+    lines.push(`> - \`${w.partial}\` reintroduces: ${w.issues.join(', ')}`);
+  }
+  lines.push('');
+  return lines;
+}
+
 function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, draftedConnectors = null) {
   const lines = [];
 
@@ -176,6 +199,7 @@ function generateMultiVersionPRSummary(masterDiff, binaryAnalysis = null, drafte
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
   lines.push(...renderLostSectionWarnings(masterDiff?.lostSectionWarnings));
+  lines.push(...renderStyleRegressionWarnings(masterDiff?.styleRegressionWarnings));
   lines.push(...renderDescriptionReports(masterDiff?.descriptionReports));
   lines.push('## Redpanda Connect Documentation Update');
   lines.push('');
@@ -583,6 +607,7 @@ function generatePRSummary(diffData, binaryAnalysis = null, draftedConnectors = 
   lines.push('<!-- PR_SUMMARY_START -->');
   lines.push('');
   lines.push(...renderLostSectionWarnings(diffData.lostSectionWarnings));
+  lines.push(...renderStyleRegressionWarnings(diffData.styleRegressionWarnings));
   lines.push(...renderDescriptionReports(diffData.descriptionReports));
 
   // Detect if this is a master diff
@@ -1364,13 +1389,17 @@ function printPRSummary(diffData, binaryAnalysis = null, draftedConnectors = nul
  * something each call site has to remember.
  *
  * @param {object} result generator result
- * @param {{descriptionReports: Array, lostSectionWarnings: Array}} into accumulators, mutated in place
- * @returns {{descriptionReports: Array, lostSectionWarnings: Array}} the same accumulators
+ * @param {{descriptionReports: Array, lostSectionWarnings: Array, styleRegressionWarnings?: Array}} into accumulators, mutated in place
+ * @returns {{descriptionReports: Array, lostSectionWarnings: Array, styleRegressionWarnings: Array}} the same accumulators
  */
 function collectGeneratorReports (result, into) {
   if (!result) return into;
   into.descriptionReports.push(...(result.descriptionReports || []));
   into.lostSectionWarnings.push(...(result.lostSectionWarnings || []));
+  // Tolerate an accumulator created before this key existed, so an older call
+  // site collects what it knows about instead of throwing.
+  if (!into.styleRegressionWarnings) into.styleRegressionWarnings = [];
+  into.styleRegressionWarnings.push(...(result.styleRegressionWarnings || []));
   return into;
 }
 
@@ -1381,5 +1410,6 @@ module.exports = {
   printPRSummary,
   renderDescriptionReports,
   renderLostSectionWarnings,
+  renderStyleRegressionWarnings,
   truncateToSentence
 };
