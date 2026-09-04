@@ -500,7 +500,18 @@ function updateWhatsNew ({ dataDir, oldVersion, newVersion, binaryAnalysis }) {
     const firstMatch = versionHeading.exec(contentWithoutOldSection)
     const insertIdx = firstMatch ? firstMatch.index : contentWithoutOldSection.length
 
-    const updated = contentWithoutOldSection.slice(0, insertIdx) + section + '\n' + contentWithoutOldSection.slice(insertIdx)
+    // Entries in this file are separated by two blank lines. Normalize both
+    // boundaries instead of appending a newline to whatever is already there:
+    // the insertion point already carries the separator that preceded the
+    // previous first entry, so adding to it gave every new entry one more blank
+    // line than the entries below it, which then had to be corrected by hand
+    // after each release. Mirrors the rpk what's-new fix in #285.
+    const before = contentWithoutOldSection.slice(0, insertIdx).replace(/\n*$/, '')
+    const after = contentWithoutOldSection.slice(insertIdx).replace(/^\n*/, '')
+    const entry = section.replace(/^\n*/, '').replace(/\n*$/, '')
+    const updated = after
+      ? `${before}\n\n\n${entry}\n\n\n${after}`
+      : `${before}\n\n\n${entry}\n`
 
     if (startIdx !== -1) {
       console.log(`♻️  whats-new.adoc: replaced section for Version ${diff.comparison.newVersion}`)
@@ -1236,13 +1247,14 @@ async function handleRpcnConnectorDocs (options) {
   let partialsWritten, partialFiles
   const descriptionReports = []
   const lostSectionWarnings = []
+  const styleRegressionWarnings = []
   // Both generator call sites (partials and drafts) feed the same PR summary,
   // so they collect through one function. Pushed inline, the draft call site
   // silently dropped descriptionReports for months: the structure reports for
   // newly drafted connectors, the ones most likely to need an upstream fix,
   // never reached the summary.
   const { collectGeneratorReports } = require('./pr-summary-formatter.js')
-  const collect = (result) => collectGeneratorReports(result, { descriptionReports, lostSectionWarnings })
+  const collect = (result) => collectGeneratorReports(result, { descriptionReports, lostSectionWarnings, styleRegressionWarnings })
 
   try {
     const result = await generateRpcnConnectorDocs({
@@ -2109,22 +2121,24 @@ async function handleRpcnConnectorDocs (options) {
 
   // Generate PR summary
   try {
-    const { printPRSummary, renderLostSectionWarnings, renderDescriptionReports } = require('./pr-summary-formatter.js')
+    const { printPRSummary, renderLostSectionWarnings, renderStyleRegressionWarnings, renderDescriptionReports } = require('./pr-summary-formatter.js')
     // Use master diff if available, otherwise use single diff. Content-loss
     // warnings and structure reports ride the diff object so they land in the
     // PR summary body instead of dying in the collapsed workflow log.
     const summaryDiff = masterDiff || diffJson
     if (summaryDiff) {
       if (lostSectionWarnings.length) summaryDiff.lostSectionWarnings = lostSectionWarnings
+      if (styleRegressionWarnings.length) summaryDiff.styleRegressionWarnings = styleRegressionWarnings
       if (descriptionReports.length) summaryDiff.descriptionReports = descriptionReports
       printPRSummary(summaryDiff, binaryAnalysis, draftFiles, masterDiff ? true : false)
-    } else if (lostSectionWarnings.length || descriptionReports.length) {
+    } else if (lostSectionWarnings.length || styleRegressionWarnings.length || descriptionReports.length) {
       // No diff to summarize (no prior version, or versions match), but this
       // run still produced content-loss warnings or description-structure
       // reports that a reviewer needs to see -- print them on their own
       // instead of losing them because there was nothing to diff against.
       const lines = [
         ...renderLostSectionWarnings(lostSectionWarnings),
+        ...renderStyleRegressionWarnings(styleRegressionWarnings),
         ...renderDescriptionReports(descriptionReports)
       ]
       console.log('\n' + lines.join('\n') + '\n')
