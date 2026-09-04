@@ -103,6 +103,9 @@ describe('common rules', () => {
     // Not a Latin abbreviation: part of a longer token.
     expect(rule.check(decl({ string: 'Fetch from https://example.g.co/path for the manifest.' }))).toHaveLength(0)
     expect(rule.check(decl({ string: 'The page.g.field selector is resolved at startup.' }))).toHaveLength(0)
+    // A host or identifier that contains the abbreviation is not one.
+    expect(rule.check(decl({ string: 'Point the endpoint at https://e.g.example/path for the manifest.' }))).toHaveLength(0)
+    expect(rule.check(decl({ string: 'Set `i.e.identifier` to the resolved name.' }))).toHaveLength(0)
   })
 
   test('unbalanced-backticks flags odd counts', () => {
