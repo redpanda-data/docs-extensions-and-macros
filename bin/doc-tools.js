@@ -2277,6 +2277,107 @@ automation
     }
   })
 
+/**
+ * generate kapa-source-groups
+ *
+ * @description
+ * Reads the source-group tree and the per-source group assignments from Kapa's ingestion API
+ * and writes a mapping from each docs URL version segment to the Kapa source group that scopes
+ * retrieval to that version. Consumers pass the group id as `sourceGroupIdsInclude` (Agent SDK),
+ * `sourceGroupIDsInclude` (Chat SDK, note the capital ID) or `_meta.source_group_ids_include`
+ * (hosted MCP server).
+ *
+ * The mapping is keyed on the URL segment, not Antora's page.version, because the two disagree
+ * for the latest release: latest_version_segment: 'current' publishes 26.2 at
+ * /streaming/current/ while page.version reads 26.2.
+ *
+ * This command only ever reads from Kapa. Kapa publishes no write API ("we do not provide an API
+ * endpoint for uploading or managing sources"), so the groups and their source assignments are
+ * created by hand in the Kapa dashboard under Sources > Manage groups. Run this afterwards to
+ * record what is there.
+ *
+ * Refuses rather than writing a misleading mapping when: no groups exist, no group has children,
+ * any version group has no sources assigned, or --default-segment is not one of the groups. An
+ * empty version group is worse than no group, because scoping a query to it returns only the
+ * global sources and the reader silently gets no version-specific content.
+ *
+ * @why
+ * Kapa indexes one separately crawled source per published docs version. Without retrieval
+ * scoping a reader gets answers drawn from any of them: a measured call for "What is a Redpanda
+ * topic partition?" returned 12 sections, six of which were the same get-started/architecture
+ * page at six different versions. Source groups fix that at retrieval time, but the group UUIDs
+ * live in Kapa while the version list lives in Antora, so something has to join the two. Because
+ * a new docs version appears with no file change in docs-site (the playbook globs branches: v/*),
+ * a hand-maintained mapping goes stale silently; generating it and diff-checking the result in CI
+ * is what makes drift loud.
+ *
+ * @example
+ * # Write the mapping to its default location
+ * export KAPA_API_KEY=... KAPA_PROJECT_ID=...
+ * npx doc-tools generate kapa-source-groups
+ *
+ * # Preview without writing
+ * npx doc-tools generate kapa-source-groups --dry-run
+ *
+ * # Scope unversioned pages to something other than "current"
+ * npx doc-tools generate kapa-source-groups --default-segment 26.1
+ *
+ * # Disambiguate when more than one group has children
+ * npx doc-tools generate kapa-source-groups --parent-group Streaming
+ *
+ * @requirements
+ * - Kapa API key and project ID, set via KAPA_API_KEY and KAPA_PROJECT_ID
+ * - Create the key in the Kapa platform under Configuration > API Keys; the project ID is the
+ *   UUID in the dashboard URL (https://app.kapa.ai/<project-id>)
+ * - The parent group and its version sub groups must already exist in Kapa, with each version
+ *   group holding at least one source
+ * - Internet connection to reach https://api.kapa.ai
+ */
+automation
+  .command('kapa-source-groups')
+  .description('Generate the docs version segment to Kapa source group mapping from Kapa\'s ingestion API')
+  .option('--output <file>', 'Output file (relative to repo root, must stay inside the repository)', 'docs-data/kapa-source-groups.json')
+  .option('--default-segment <segment>', 'Segment used for pages with no version of their own', 'current')
+  .option('--parent-group <name>', 'Restrict to one parent group by name (default: the only group that has children)')
+  .option('--dry-run', 'Print output to stdout instead of writing file')
+  .action(async (options) => {
+    const { generateKapaSourceGroups } = require('../tools/kapa-source-groups/generate-kapa-source-groups.js')
+    const { requireKapaCredentials } = require('../cli-utils/kapa-credentials')
+
+    try {
+      const repoRoot = findRepoRoot()
+      // resolveInsideRepo for the same reason every other generator uses it: this
+      // command is reachable from the MCP server, where a write option that escapes
+      // the repo is a write-anywhere primitive.
+      const absOutput = options.dryRun ? undefined : resolveInsideRepo(repoRoot, options.output, '--output')
+
+      // Fail loud on a missing credential rather than emitting an empty mapping:
+      // unauthenticated would look identical to "Kapa has no source groups", and the
+      // drift check would then report false drift forever.
+      const { apiKey, projectId } = requireKapaCredentials()
+
+      const out = await generateKapaSourceGroups({
+        apiKey,
+        projectId,
+        defaultSegment: options.defaultSegment,
+        parentGroupName: options.parentGroup,
+      })
+
+      if (options.dryRun) {
+        process.stdout.write(out)
+        return
+      }
+
+      fs.mkdirSync(path.dirname(absOutput), { recursive: true })
+      fs.writeFileSync(absOutput, out, 'utf8')
+      const segments = Object.keys(JSON.parse(out).segments)
+      console.log(`Done: Wrote ${absOutput} (${segments.length} version segments: ${segments.join(', ')})`)
+    } catch (err) {
+      console.error(`Error: Failed to generate Kapa source groups: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
 const validation = new Command('validate').description('Validate docs data against internal sources of truth')
 
 /**
@@ -2697,6 +2798,122 @@ overridesGroup
   })
 
 programCli.addCommand(automation)
+/**
+ * validate kapa-source-groups
+ *
+ * @description
+ * Compares the committed docs-data/kapa-source-groups.json against what Kapa's ingestion API
+ * reports right now, and reports drift without writing anything. Exit status is meaningful:
+ * 0 in sync, 1 drift found, 2 the command itself failed.
+ *
+ * Drift means one of: a version group gained or lost its source, a group id changed, a segment
+ * appeared or disappeared in Kapa, or the committed file no longer parses. Any of those leaves
+ * the docs surfaces scoping to a group that does not hold what the mapping claims.
+ *
+ * @why
+ * A new docs version appears with no file change in docs-site at all: the playbook globs
+ * branches: v/*, so cutting a v/X.Y branch in redpanda-data/docs publishes a new version segment
+ * that nothing in this repo or docs-ui would notice. Kapa also has no write API, so the matching
+ * source and group are created by hand and are easy to forget. Without this check the mapping
+ * goes stale silently and readers on the new version quietly fall back to the default segment.
+ * Run it on a schedule so drift opens an issue rather than waiting for a bug report.
+ *
+ * @example
+ * # Check the committed mapping against Kapa
+ * export KAPA_API_KEY=... KAPA_PROJECT_ID=...
+ * npx doc-tools validate kapa-source-groups
+ *
+ * # Check a mapping at a non-default path
+ * npx doc-tools validate kapa-source-groups --file docs-data/kapa-source-groups.json
+ *
+ * @requirements
+ * - Kapa API key and project ID, set via KAPA_API_KEY and KAPA_PROJECT_ID
+ * - The mapping file must already exist; generate it with `doc-tools generate kapa-source-groups`
+ * - Internet connection to reach https://api.kapa.ai
+ */
+validation
+  .command('kapa-source-groups')
+  .description('Check the committed Kapa source-group mapping against Kapa (exit 0 in sync, 1 drift, 2 error)')
+  .option('--file <file>', 'Mapping file to check (relative to repo root, must stay inside the repository)', 'docs-data/kapa-source-groups.json')
+  .action(async (options) => {
+    const { generateKapaSourceGroups } = require('../tools/kapa-source-groups/generate-kapa-source-groups.js')
+    const { requireKapaCredentials } = require('../cli-utils/kapa-credentials')
+
+    // Exit 2 is reserved for "the tool broke", so that a scheduled run can tell
+    // "the mapping is stale" apart from "we could not find out". Only the drift
+    // branch below exits 1.
+    let committed, live, absFile
+    try {
+      const repoRoot = findRepoRoot()
+      absFile = resolveInsideRepo(repoRoot, options.file, '--file')
+      if (!fs.existsSync(absFile)) {
+        throw new Error(`${absFile} does not exist. Generate it with: doc-tools generate kapa-source-groups`)
+      }
+      committed = fs.readFileSync(absFile, 'utf8')
+      const { apiKey, projectId } = requireKapaCredentials()
+      live = await generateKapaSourceGroups({
+        apiKey,
+        projectId,
+        defaultSegment: JSON.parse(committed).default_segment,
+      })
+    } catch (err) {
+      console.error(`Error: Could not check Kapa source groups: ${err.message}`)
+      process.exit(2)
+    }
+
+    if (live === committed) {
+      console.log(`✓ ${path.relative(process.cwd(), absFile)} is in sync with Kapa.`)
+      process.exit(0)
+    }
+
+    // Report what moved rather than dumping two blobs: a scheduled run pastes this
+    // into an issue, and "24.1 lost its source" is actionable where a diff is not.
+    const a = JSON.parse(committed)
+    const b = JSON.parse(live)
+    const segs = [...new Set([...Object.keys(a.segments), ...Object.keys(b.segments)])].sort()
+    console.log(`✗ ${path.relative(process.cwd(), absFile)} is out of date with Kapa.`)
+
+    // Track whether anything was itemised. A report that says "out of date" and
+    // then lists nothing is worse than useless in a CI issue: it tells the reader
+    // to regenerate without saying what moved. The catch-all at the end covers
+    // any field added to the mapping later that this loop does not know about.
+    let explained = 0
+    const note = (line) => { explained++; console.log(line) }
+
+    if (a.project_id !== b.project_id) {
+      note(`  ~ project_id: ${a.project_id} -> ${b.project_id} (the mapping was generated against a different Kapa project)`)
+    }
+    for (const field of ['id', 'name', 'type']) {
+      if (a.parent_group?.[field] !== b.parent_group?.[field]) {
+        note(`  ~ parent_group.${field}: ${a.parent_group?.[field]} -> ${b.parent_group?.[field]}`)
+      }
+    }
+    for (const seg of segs) {
+      const x = a.segments[seg]
+      const y = b.segments[seg]
+      if (!x) note(`  + ${seg}: new in Kapa (group ${y.group_id}) — add it to the mapping`)
+      else if (!y) note(`  - ${seg}: no longer in Kapa — a group was renamed or deleted`)
+      else if (x.group_id !== y.group_id) note(`  ~ ${seg}: group id changed ${x.group_id} -> ${y.group_id}`)
+      else if (JSON.stringify(x.source_ids) !== JSON.stringify(y.source_ids)) {
+        note(`  ~ ${seg}: sources changed ${JSON.stringify(x.source_names)} -> ${JSON.stringify(y.source_names)}`)
+      }
+    }
+    if (a.default_segment !== b.default_segment) {
+      note(`  ~ default_segment: ${a.default_segment} -> ${b.default_segment}`)
+    }
+    if (JSON.stringify(a.global_sources) !== JSON.stringify(b.global_sources)) {
+      const added = b.global_sources.filter((n) => !a.global_sources.includes(n))
+      const removed = a.global_sources.filter((n) => !b.global_sources.includes(n))
+      if (added.length) note(`  ~ now global (reachable from every page): ${added.join(', ')}`)
+      if (removed.length) note(`  ~ no longer global (now scoped to a group): ${removed.join(', ')}`)
+    }
+    if (!explained) {
+      note('  ~ the files differ but no known field changed, so the mapping shape itself has changed')
+    }
+    console.log('\nRegenerate with: doc-tools generate kapa-source-groups')
+    process.exit(1)
+  })
+
 programCli.addCommand(validation)
 programCli.addCommand(overridesGroup)
 programCli.parse(process.argv)
