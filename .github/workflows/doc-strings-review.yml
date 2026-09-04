@@ -66,9 +66,13 @@
 # `github.event.pull_request.head.repo.full_name == github.repository`.
 #
 # This workflow reviews OTHER repos' PRs, so treat changes to it as review
-# infrastructure: callers should pin a release tag, not @main. The same
-# applies to the tool it runs inside those repos, which is why
-# doc_tools_package carries an explicit version by default.
+# infrastructure: callers should pin a release tag, not @main. The doc-tools
+# CLI version is resolved at run time from the workflow's OWN ref (the
+# package.json committed alongside this file), so the workflow and the CLI it
+# runs always come from the same commit: a caller pinned to a ref gets that
+# ref's CLI, and a reviewed change to this repo is the only way to change
+# what executes inside engineering repos. doc_tools_package remains as an
+# explicit override for callers that need a different version.
 name: doc-strings-review (reusable)
 on:
   workflow_call:
@@ -83,12 +87,15 @@ on:
         default: "redpanda-data/docs-site"
       doc_tools_package:
         description: >-
-          npm package spec providing the doc-tools CLI. Keep the version
-          pinned: an unpinned spec floats to whatever `latest` is at run time,
-          which for a workflow holding pull-requests: write in engineering
-          repos is both a reproducibility and a supply-chain gap.
+          Explicit npm package spec providing the doc-tools CLI. Leave empty
+          (the default) to resolve the version from the workflow's own ref:
+          the package.json committed next to this file names the version this
+          ref was released as, so the workflow and the CLI stay in lockstep
+          with no hand-maintained pin. Set this only to force a different
+          version; a floating spec (@latest) trades away reproducibility and
+          the reviewed-change gate on what executes inside engineering repos.
         type: string
-        default: "@redpanda-data/docs-extensions-and-macros@5.29.0"
+        default: ""
       aws_region:
         description: >-
           AWS region used to assume the OIDC role that reads the bot token from
@@ -219,6 +226,70 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      # Resolve which doc-tools version to run. The version is read from the
+      # package.json at this workflow's OWN ref (github.job_workflow_sha names
+      # the reusable workflow's commit; workflow_sha covers a same-repo run),
+      # so a caller pinned to any ref runs the CLI released from that exact
+      # commit: lockstep is structural, not a hand-maintained default that
+      # every release bump has to edit. Fail-open order when resolution cannot
+      # complete, after three attempts at the read: @latest with a warning,
+      # matching the workflow's posture -- in the publish window right after a
+      # merge, the resolved version is not on npm yet and @latest is simply
+      # the previous release.
+      - name: Resolve the doc-tools package
+        id: pkg
+        env:
+          OVERRIDE: ${{ inputs.doc_tools_package }}
+          JOB_WF_SHA: ${{ github.job_workflow_sha }}
+          WF_SHA: ${{ github.workflow_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          NAME="@redpanda-data/docs-extensions-and-macros"
+          pkg=""
+          if [ -n "$OVERRIDE" ]; then
+            pkg="$OVERRIDE"
+          else
+            ref="${JOB_WF_SHA:-$WF_SHA}"
+            if [ -z "$ref" ]; then
+              echo "::warning::No workflow ref available to resolve the doc-tools version; using @latest."
+            else
+              # Retry the contents read before falling open. A caller that
+              # pinned a ref did so to freeze what runs inside its PRs, and
+              # letting a single transient 500 or a secondary rate limit swap
+              # in @latest defeats exactly that guarantee, with only a
+              # ::warning:: nobody reads as the signal. Only the FETCH is
+              # retried: a package.json that parses to a non-version, and a
+              # version npm has not published yet, are both settled answers
+              # that a second attempt cannot change, so they fall straight
+              # through to the cases below.
+              version=""
+              for attempt in 1 2 3; do
+                version=$(gh api "repos/redpanda-data/docs-extensions-and-macros/contents/package.json?ref=$ref" \
+                  --jq .content | base64 -d | jq -r .version) || version=""
+                [ -n "$version" ] && break
+                if [ "$attempt" -lt 3 ]; then
+                  echo "::notice::Could not read package.json at $ref (attempt $attempt); retrying."
+                  sleep "$((attempt * 2))"
+                fi
+              done
+              case "${version:-}" in
+                ''|*[!0-9.]*)
+                  echo "::warning::Could not read a version from package.json at $ref; using @latest."
+                  ;;
+                *)
+                  if npm view "$NAME@$version" version > /dev/null 2>&1; then
+                    pkg="$NAME@$version"
+                  else
+                    echo "::warning::$NAME@$version is not on npm (publish in flight?); using @latest."
+                  fi
+                  ;;
+              esac
+            fi
+            [ -n "$pkg" ] || pkg="$NAME@latest"
+          fi
+          echo "Resolved doc-tools package: $pkg"
+          echo "pkg=$pkg" >> "$GITHUB_OUTPUT"
       # That bootstrap (pip install + grammar clone) lands under the npx cache,
       # so cache it. Without this every PR re-clones and recompiles a C grammar
       # over the network on the critical path of the lint step.
@@ -226,13 +297,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.npm/_npx
-          key: doc-tools-npx-${{ runner.os }}-${{ inputs.doc_tools_package }}
+          key: doc-tools-npx-${{ runner.os }}-${{ steps.pkg.outputs.pkg }}
       - name: Lint doc strings in the diff
         id: lint
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           SURFACES: ${{ inputs.surfaces }}
-          PKG: ${{ inputs.doc_tools_package }}
+          PKG: ${{ steps.pkg.outputs.pkg }}
         run: |
           set -uo pipefail
           ARGS=(--repo . --diff "$BASE" --format json)
