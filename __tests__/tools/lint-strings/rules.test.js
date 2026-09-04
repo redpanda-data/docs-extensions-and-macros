@@ -81,6 +81,30 @@ describe('common rules', () => {
     expect(rule.check(decl({ string: 'A stable stream of records.' }))).toHaveLength(0)
   })
 
+  test('em-dash flags em dashes and counts them, and leaves hyphens alone', () => {
+    const rule = ruleByName(COMMON_RULES, 'em-dash')
+    expect(rule.severity).toBe('warning')
+    expect(rule.check(decl({ string: 'Upgraded on first write \u2014 irreversibly \u2014 unless copy-on-write is set.' }))).toHaveLength(1)
+    expect(rule.check(decl({ string: 'Upgraded on first write \u2014 irreversibly \u2014 unless set.' }))[0].message)
+      .toMatch(/2 em dashes/)
+    expect(rule.check(decl({ string: 'Upgraded on first write, irreversibly, unless copy-on-write is set.' }))).toHaveLength(0)
+    expect(rule.check(decl({ string: 'Use the copy-on-write merge strategy for version 1 tables.' }))).toHaveLength(0)
+    expect(rule.check(decl({ string: null }))).toHaveLength(0)
+  })
+
+  test('latin-abbreviation flags e.g. and i.e. but not words that merely contain them', () => {
+    const rule = ruleByName(COMMON_RULES, 'latin-abbreviation')
+    expect(rule.severity).toBe('warning')
+    expect(rule.check(decl({ string: 'Set a prefix (e.g. `s3://my-bucket/`) since Glue assigns no location.' }))).toHaveLength(1)
+    expect(rule.check(decl({ string: 'Set a prefix (E.g., `s3://my-bucket/`).' }))).toHaveLength(1)
+    expect(rule.check(decl({ string: 'The signal table, i.e. the table used for signals.' }))).toHaveLength(1)
+    expect(rule.check(decl({ string: 'Both forms, e.g. this and i.e. that, are flagged.' }))).toHaveLength(2)
+    expect(rule.check(decl({ string: 'Set a prefix, for example `s3://my-bucket/`.' }))).toHaveLength(0)
+    // Not a Latin abbreviation: part of a longer token.
+    expect(rule.check(decl({ string: 'Fetch from https://example.g.co/path for the manifest.' }))).toHaveLength(0)
+    expect(rule.check(decl({ string: 'The page.g.field selector is resolved at startup.' }))).toHaveLength(0)
+  })
+
   test('unbalanced-backticks flags odd counts', () => {
     const rule = ruleByName(COMMON_RULES, 'unbalanced-backticks')
     expect(rule.check(decl({ string: 'Accepted values: `config_file`, `sts, `other`.' }))).toHaveLength(1)
