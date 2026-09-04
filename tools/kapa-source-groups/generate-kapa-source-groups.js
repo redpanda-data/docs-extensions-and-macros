@@ -46,6 +46,28 @@
 
 const { KAPA_API_BASE, kapaAuthHeaders } = require('../../cli-utils/kapa-credentials')
 
+/**
+ * Raised when Kapa's group tree itself is unusable: no groups, no version
+ * sub-groups, a duplicated group name, a group with no sources, or the default
+ * segment's group missing.
+ *
+ * Distinguished from an ordinary Error on purpose. `generate` treats all of
+ * these as fatal, but `validate` must not: every one of them describes a change
+ * SOMEONE MADE IN THE DASHBOARD, which is drift, and drift has to be reported
+ * (exit 1, file an issue) rather than swallowed as "could not find out"
+ * (exit 2, file nothing). Reporting a deleted or renamed group as inconclusive
+ * is the worst outcome available, because Kapa answers an unknown-group query
+ * from its global sources with no error: production silently loses every
+ * versioned page while the drift job stays quiet.
+ */
+class KapaGroupTreeError extends Error {
+  constructor (message) {
+    super(message)
+    this.name = 'KapaGroupTreeError'
+    this.code = 'KAPA_GROUP_TREE'
+  }
+}
+
 const REQUEST_TIMEOUT_MS = 15000
 
 /**
@@ -175,7 +197,7 @@ async function generateKapaSourceGroups ({
     // An empty list looks identical to "the dashboard work has not been done
     // yet". Refuse rather than writing an empty mapping that would make every
     // consumer silently fall back to unscoped retrieval.
-    throw new Error(
+    throw new KapaGroupTreeError(
       'Kapa returned no source groups. Create the parent group and its version sub groups in the ' +
       'Kapa dashboard (Sources > Manage groups) before running this generator.'
     )
@@ -189,7 +211,7 @@ async function generateKapaSourceGroups ({
 
   if (candidates.length === 0) {
     const names = parents.map((p) => `"${p.name}"`).join(', ')
-    throw new Error(
+    throw new KapaGroupTreeError(
       parentGroupName
         ? `No source group named "${parentGroupName}". Groups present: ${names}.`
         : 'No source group has any sub groups, so there are no version groups to map. ' +
@@ -198,7 +220,7 @@ async function generateKapaSourceGroups ({
   }
   if (candidates.length > 1) {
     const names = candidates.map((p) => `"${p.name}"`).join(', ')
-    throw new Error(
+    throw new KapaGroupTreeError(
       `Ambiguous parent group: ${names} all have sub groups. Pass --parent-group to choose one.`
     )
   }
@@ -226,6 +248,20 @@ async function generateKapaSourceGroups ({
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
     if (assigned.length === 0) empty.push(child.name)
+    if (Object.prototype.hasOwnProperty.call(segments, child.name)) {
+      // Silently overwriting makes half that version's sources unreachable at
+      // retrieval, and which group_id survives depends on the order Kapa
+      // returns sub_groups in, which it does not guarantee. So the committed
+      // file flaps between runs and the drift issue reads only "group id
+      // changed", with no hint that two groups share a name. Duplicating a name
+      // is an easy dashboard slip: re-creating a group instead of editing it.
+      throw new KapaGroupTreeError(
+        `Two sub groups under "${parent.name}" are both named "${child.name}" ` +
+        `(${segments[child.name].group_id} and ${child.id}). Rename or delete one in the Kapa ` +
+        'dashboard: a segment can map to only one group, and which one won here would depend on ' +
+        'the order Kapa happens to return them in.'
+      )
+    }
     segments[child.name] = {
       group_id: child.id,
       group_name: child.name,
@@ -236,7 +272,7 @@ async function generateKapaSourceGroups ({
   }
 
   if (!segments[defaultSegment]) {
-    throw new Error(
+    throw new KapaGroupTreeError(
       `Default segment "${defaultSegment}" is not one of the version groups ` +
       `(${Object.keys(segments).sort().join(', ') || 'none'}). Pages with no version would have ` +
       'nothing to scope to, so this must be fixed before the mapping is usable.'
@@ -244,7 +280,7 @@ async function generateKapaSourceGroups ({
   }
 
   if (empty.length) {
-    throw new Error(
+    throw new KapaGroupTreeError(
       `These version groups have no sources assigned: ${empty.sort().join(', ')}. ` +
       'Scoping a query to an empty group returns only global sources, so the reader would get no ' +
       'version-specific content at all. Assign each Documentation (X) source to its group in the ' +
@@ -279,6 +315,7 @@ async function generateKapaSourceGroups ({
 }
 
 module.exports = {
+  KapaGroupTreeError,
   generateKapaSourceGroups,
   // Exported for unit tests.
   toList,

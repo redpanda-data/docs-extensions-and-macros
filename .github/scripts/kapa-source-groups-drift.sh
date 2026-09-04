@@ -54,6 +54,16 @@ if [ "$STATUS" -ne 1 ]; then
   exit 2
 fi
 
+# Exit 1 alone does not mean drift. Commander exits 1 on a usage error, and an
+# uncaught throw in the command's async action also exits 1, so a typo'd flag or
+# a crash would otherwise file a drift issue quoting a Node stack trace as the
+# drift report. The command prints this sentinel only on paths where it has
+# actually established drift.
+if ! printf '%s\n' "$OUTPUT" | grep -qx 'KAPA_DRIFT_CONFIRMED'; then
+  echo "::error::validate exited 1 without confirming drift, so it failed rather than found drift. No issue filed." >&2
+  exit 2
+fi
+
 # Drift confirmed from here on.
 if [ "$EVENT_NAME" = "pull_request" ]; then
   # A failing check on the PR is already the notification; an issue would be noise.
@@ -66,7 +76,7 @@ BODY="$(
     'The committed Kapa source-group mapping no longer matches reality.' \
     '' \
     '```' \
-    "$OUTPUT" \
+    "$(printf '%s\n' "$OUTPUT" | grep -vx 'KAPA_DRIFT_CONFIRMED')" \
     '```' \
     '' \
     '## What to do' \

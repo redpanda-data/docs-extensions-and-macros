@@ -1,0 +1,8 @@
+{
+  "project_id": "p1",
+  "parent_group": { "id": "parent-1", "name": "Streaming", "type": "product" },
+  "default_segment": "current",
+  "segments": {
+    "current": { "group_id": "g-current", "group_name": "current", "source_ids": ["s1"], "source_names": ["Documentation (current)"] }
+  }
+}

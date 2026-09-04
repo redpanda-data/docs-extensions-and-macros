@@ -2838,14 +2838,30 @@ validation
   .option('--site-url <url>', 'Docs site whose sitemap says which versions are published', 'https://docs.redpanda.com')
   .option('--skip-site-check', 'Only compare against Kapa, not against the published version list')
   .action(async (options) => {
-    const { generateKapaSourceGroups } = require('../tools/kapa-source-groups/generate-kapa-source-groups.js')
+    const {
+      generateKapaSourceGroups,
+      KapaGroupTreeError,
+    } = require('../tools/kapa-source-groups/generate-kapa-source-groups.js')
     const { fetchPublishedSegments, compareSegments } = require('../tools/kapa-source-groups/published-segments.js')
     const { requireKapaCredentials } = require('../cli-utils/kapa-credentials')
+
+    // Printed on the drift path and required by kapa-source-groups-drift.sh
+    // before it will file an issue. Exit 1 alone is not trustworthy as "drift":
+    // Commander exits 1 on a usage error and an uncaught throw in an async
+    // action also exits 1, so without this a typo'd flag or a crash would file
+    // a drift issue quoting a stack trace as the drift report.
+    const DRIFT_SENTINEL = 'KAPA_DRIFT_CONFIRMED'
+    const reportDrift = (lines) => {
+      for (const l of lines) console.log(l)
+      console.log(`\n${DRIFT_SENTINEL}`)
+      process.exit(1)
+    }
 
     // Exit 2 is reserved for "the tool broke", so that a scheduled run can tell
     // "the mapping is stale" apart from "we could not find out". Only the drift
     // branch below exits 1.
-    let committed, live, absFile, published
+    let committed, live, absFile, published, parsedCommitted
+    let committedUnusable = null
     try {
       const repoRoot = findRepoRoot()
       absFile = resolveInsideRepo(repoRoot, options.file, '--file')
@@ -2853,20 +2869,65 @@ validation
         throw new Error(`${absFile} does not exist. Generate it with: doc-tools generate kapa-source-groups`)
       }
       committed = fs.readFileSync(absFile, 'utf8')
+
+      // Parsed and shape-checked before anything else, so a broken committed
+      // file is reported as drift with a readable reason instead of crashing
+      // the itemiser further down with a TypeError (which exits 1 and would
+      // read as confirmed drift).
+      try {
+        parsedCommitted = JSON.parse(committed)
+      } catch (err) {
+        parsedCommitted = null
+      }
+      if (!parsedCommitted || typeof parsedCommitted !== 'object' ||
+          !parsedCommitted.segments || typeof parsedCommitted.segments !== 'object' ||
+          !parsedCommitted.default_segment) {
+        committedUnusable = `${path.relative(process.cwd(), absFile)} is not a usable mapping ` +
+          '(needs at least an object with `segments` and `default_segment`). ' +
+          'Regenerate it rather than editing it by hand.'
+      }
+
       const { apiKey, projectId } = requireKapaCredentials()
-      live = await generateKapaSourceGroups({
-        apiKey,
-        projectId,
-        defaultSegment: JSON.parse(committed).default_segment,
-      })
+      if (!committedUnusable) {
+        live = await generateKapaSourceGroups({
+          apiKey,
+          projectId,
+          defaultSegment: parsedCommitted.default_segment,
+          // Pass the parent the mapping was generated against. Without it, the
+          // generator auto-detects by "which parent has children", so a second
+          // parent gaining a child makes every future run ambiguous and the
+          // check permanently inconclusive.
+          parentGroupName: parsedCommitted.parent_group && parsedCommitted.parent_group.name,
+        })
+      }
       // Inside the exit-2 block on purpose: an unreachable sitemap is "could not
       // find out", not "the mapping is stale".
       if (!options.skipSiteCheck) {
         published = await fetchPublishedSegments({ siteUrl: options.siteUrl })
       }
     } catch (err) {
+      // A group-tree fault is not "we could not find out". It means someone
+      // changed the groups in the dashboard: renamed or deleted one, unassigned
+      // a source, duplicated a name. That is precisely the drift this check
+      // exists to catch, and the generator refuses on it because it will not
+      // WRITE a misleading mapping. Reporting it as inconclusive filed no issue
+      // for the changes that break the most pages.
+      if (err instanceof KapaGroupTreeError || err.code === 'KAPA_GROUP_TREE') {
+        reportDrift([
+          'Kapa source groups no longer match the committed mapping.',
+          '',
+          `  ${err.message}`,
+          '',
+          'Fix the groups in the Kapa dashboard (Sources > Manage groups), then regenerate:',
+          '  doc-tools generate kapa-source-groups',
+        ])
+      }
       console.error(`Error: Could not check Kapa source groups: ${err.message}`)
       process.exit(2)
+    }
+
+    if (committedUnusable) {
+      reportDrift(['The committed mapping is unusable.', '', `  ${committedUnusable}`])
     }
 
     // The site comparison is a THIRD input, and it catches what the byte compare
@@ -2938,14 +2999,26 @@ validation
       else if (x.group_id !== y.group_id) note(`  ~ ${seg}: group id changed ${x.group_id} -> ${y.group_id}`)
       else if (JSON.stringify(x.source_ids) !== JSON.stringify(y.source_ids)) {
         note(`  ~ ${seg}: sources changed ${JSON.stringify(x.source_names)} -> ${JSON.stringify(y.source_names)}`)
+      } else if (JSON.stringify(x.source_names) !== JSON.stringify(y.source_names)) {
+        // Same source ids, different names: a source was renamed in place in
+        // the dashboard. Without this the diff was real but nothing explained
+        // it, so the report fell through to "no known field changed, so the
+        // mapping shape itself has changed", which sends the reader looking for
+        // a schema problem that does not exist.
+        note(`  ~ ${seg}: source renamed ${JSON.stringify(x.source_names)} -> ${JSON.stringify(y.source_names)}`)
       }
     }
     if (a.default_segment !== b.default_segment) {
       note(`  ~ default_segment: ${a.default_segment} -> ${b.default_segment}`)
     }
     if (JSON.stringify(a.global_sources) !== JSON.stringify(b.global_sources)) {
-      const added = b.global_sources.filter((n) => !a.global_sources.includes(n))
-      const removed = a.global_sources.filter((n) => !b.global_sources.includes(n))
+      // Defaulted: global_sources is optional in older committed files, and an
+      // unguarded .includes() here threw a TypeError that exited 1, which the
+      // drift script then filed as confirmed drift quoting the stack trace.
+      const ag = Array.isArray(a.global_sources) ? a.global_sources : []
+      const bg = Array.isArray(b.global_sources) ? b.global_sources : []
+      const added = bg.filter((n) => !ag.includes(n))
+      const removed = ag.filter((n) => !bg.includes(n))
       if (added.length) note(`  ~ now global (reachable from every page): ${added.join(', ')}`)
       if (removed.length) note(`  ~ no longer global (now scoped to a group): ${removed.join(', ')}`)
     }
@@ -2953,6 +3026,7 @@ validation
       note('  ~ the files differ but no known field changed, so the mapping shape itself has changed')
     }
     console.log('\nRegenerate with: doc-tools generate kapa-source-groups')
+    console.log(`\n${DRIFT_SENTINEL}`)
     process.exit(1)
   })
 
