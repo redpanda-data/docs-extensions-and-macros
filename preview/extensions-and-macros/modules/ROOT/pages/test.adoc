@@ -66,7 +66,9 @@ An unknown feature name renders as written but logs a build warning with did-you
 
 === Environment-specific feature links
 
-Registry entries can carry `xref-kubernetes` and `xref-cloud` for features with separate Kubernetes, Linux, and Cloud documentation. Resolution follows the page's `env-kubernetes`/`env-cloud` attributes, so it applies page-wide: see the xref:preview:ROOT:enterprise-kubernetes-test.adoc[Kubernetes environment test page], where the same `enterprise:Tiered Storage[]` call links to the Kubernetes feature page instead.
+Registry entries can carry `xref-kubernetes` for features with separate Kubernetes and Linux documentation. Resolution follows the page's `env-kubernetes` attribute, so it applies page-wide: see the xref:preview:ROOT:enterprise-kubernetes-test.adoc[Kubernetes environment test page], where the same `+enterprise:Tiered Storage[]+` call links to the Kubernetes feature page instead.
+
+There is no Cloud counterpart: Redpanda Cloud has no Enterprise Edition license, so `+enterprise:+` renders as plain text with no styling, tooltip, or link on any page in a Cloud component, regardless of the registry. See the xref:macro-fixtures-cloud::index.adoc[Cloud fixtures^].
 
 === Generated feature tables
 

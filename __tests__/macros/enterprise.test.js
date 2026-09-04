@@ -27,7 +27,6 @@ features:
     scope: redpanda
     xref: manage:tiered-storage.adoc
     xref-kubernetes: manage:kubernetes/tiered-storage/k-tiered-storage.adoc
-    xref-cloud: cloud-data-platform:manage:tiered-storage.adoc
     description: |
       Enables data storage in cloud object storage.
     expiration: |
@@ -782,18 +781,9 @@ features:
       expect(html).toContain('k-tiered-storage')
     })
 
-    test('uses the Cloud feature page when env-cloud is set', () => {
-      const html = convert('enterprise:Tiered Storage[]', {
-        catalog: fakeCatalog(),
-        attributes: { 'env-cloud': '' },
-      })
-      expect(html).toContain('cloud-data-platform')
-    })
-
     test('falls back to the default xref without env attributes', () => {
       const html = convert('enterprise:Tiered Storage[]', { catalog: fakeCatalog() })
       expect(html).not.toContain('k-tiered-storage')
-      expect(html).not.toContain('cloud-data-platform')
       expect(html).toContain('tiered-storage')
     })
 
@@ -813,6 +803,88 @@ features:
       const emptyCatalog = { findBy: jest.fn(() => []) }
       const html = convert('enterprise_features::redpanda[]', { catalog: emptyCatalog })
       expect(html).toContain('cannot be rendered')
+    })
+  })
+
+  describe('Cloud pages', () => {
+    // Redpanda Cloud has no Enterprise Edition license, so both macros treat
+    // a page with env-cloud set as having no enterprise feature to mark or
+    // list at all -- regardless of what the registry says, and regardless of
+    // whether the mention was written directly on a Cloud page or arrives
+    // there via single-sourced self-managed prose (which convert()'s
+    // attributes option stands in for: env-cloud on the document is exactly
+    // what a Cloud stub page sets, whichever file the content came from).
+    test('renders plain text for a registered feature, with no styling, tooltip, or link', () => {
+      const html = convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '' },
+      })
+      expect(html).toContain('Tiered Storage')
+      expect(html).not.toContain('class="enterprise-feature"')
+      expect(html).not.toContain('Enterprise Edition license')
+      expect(html).not.toContain('tiered-storage.adoc')
+    })
+
+    test('warns by default, naming the page', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '' },
+        filePath: 'modules/cloud/pages/stub.adoc',
+      })
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('modules/cloud/pages/stub.adoc'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('no Enterprise Edition license'))
+    })
+
+    test('fails the conversion in error mode', () => {
+      expect(() => convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '', 'enterprise-validate': 'error' },
+      })).toThrow(/no Enterprise Edition license/)
+    })
+
+    test('stays silent in off mode', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '', 'enterprise-validate': 'off' },
+      })
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('never validates the target against the registry', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Not A Real Feature[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '' },
+      })
+      expect(html).toContain('Not A Real Feature')
+      const registryWarnings = warn.mock.calls.filter(([msg]) => String(msg).includes('does not match'))
+      expect(registryWarnings).toHaveLength(0)
+    })
+
+    test('env-cloud: false is not treated as Cloud', () => {
+      const html = convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': 'false' },
+      })
+      expect(html).toContain('class="enterprise-feature"')
+    })
+
+    test('renders a warning instead of a licensing table for the block macro', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const html = convert('enterprise_features::redpanda[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '' },
+      })
+      expect(html).toContain('no Enterprise Edition license')
+      expect(html).not.toContain('Tiered Storage')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('enterprise_features::redpanda[]'))
+    })
+
+    test('rejects cloud as a scope on the block macro', () => {
+      expect(() => convert('enterprise_features::cloud[]', { catalog: fakeCatalog() }))
+        .toThrow(/needs a scope/)
     })
   })
 

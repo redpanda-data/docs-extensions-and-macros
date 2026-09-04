@@ -18,3 +18,15 @@ The build also contains `redpanda-properties-v26.3.1-rc1.json` from the beta
 fixtures, which outranks the GA file by version number. Cloud must still use
 the GA data, so prop:iceberg_delete_orphans_enabled[] -- which exists only in
 the release candidate -- must NOT validate here.
+
+== Enterprise features have no license concept here
+
+Redpanda Cloud has no Enterprise Edition license, so `+enterprise:+` renders
+as plain text on this page, even for a feature the registry recognizes:
+enterprise:Tiered Storage[] must NOT carry the enterprise styling, tooltip,
+or link it gets on a non-Cloud page (compare with the
+xref:preview:ROOT:macros-showcase.adoc[macro showcase^]).
+
+The block macro renders a warning instead of a table:
+
+enterprise_features::redpanda[]

@@ -98,7 +98,9 @@ Two more things come from the same registry:
 * The licensing feature tables on the licensing pages are *generated* from it (`enterprise_features::redpanda[]` and friends), so the tables can never disagree with the registry.
 * `doc-tools validate enterprise-features` compares the registry against the actual license gates in Redpanda's source code and Connect's plugin list. When engineering ships a new license-gated feature, CI fails until someone decides its documented name -- naming stays a human decision, but forgetting is no longer possible.
 
-Like properties, feature links adapt to context: registry entries can carry Kubernetes- and Cloud-specific pages, chosen by the page's environment attributes.
+Like properties, feature links adapt to context: registry entries can carry a Kubernetes-specific page, chosen by the page's environment attributes.
+
+Cloud is different from Kubernetes here, not just another context to adapt to. Redpanda Cloud has no Enterprise Edition license, so `enterprise:` and `enterprise_features::[]` both render as plain text -- no styling, tooltip, link, or table -- on a page in a Cloud component, the same way `prop:` renders a non-`cloud_supported` property as plain code there. That includes the Cloud rendering of single-sourced self-managed prose: the check reads the page actually being converted, regardless of which repo the mention was written in. See link:REFERENCE.adoc#cloud-pages[Cloud pages] in the macros reference.
 
 == Where to see all of this working
 
