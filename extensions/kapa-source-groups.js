@@ -63,7 +63,8 @@ module.exports.register = function ({ config = {} } = {}) {
   const logger = this.getLogger('kapa-source-groups-extension')
   const mappingPath = config.mapping_file ? path.resolve(config.mapping_file) : DEFAULT_MAPPING_PATH
 
-  this.on('contentClassified', async ({ contentCatalog }) => {
+  /** Load + validate once, or return null having warned with the consequence. */
+  function load () {
     let mapping
     try {
       if (!fs.existsSync(mappingPath)) {
@@ -71,19 +72,40 @@ module.exports.register = function ({ config = {} } = {}) {
           `Kapa source-group mapping not found at ${mappingPath}. Ask AI will search every docs version. ` +
           'Generate it with: doc-tools generate kapa-source-groups'
         )
-        return
+        return null
       }
       mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'))
     } catch (err) {
       logger.warn(`Could not read the Kapa source-group mapping at ${mappingPath}: ${err.message}. Ask AI will search every docs version.`)
-      return
+      return null
     }
-
     const problem = validateMapping(mapping)
     if (problem) {
       logger.warn(`Kapa source-group mapping at ${mappingPath} is unusable (${problem}). Ask AI will search every docs version.`)
-      return
+      return null
     }
+    return mapping
+  }
+
+  // site.keys reaches EVERY page, including ones with no component: the 404 page
+  // renders the Ask AI panel but has no page.component or page.componentVersion,
+  // so a component-version attribute alone leaves it unscoped. Its layout pulls
+  // in head and header, both of which already read site.keys, so this is the one
+  // channel that covers it. Set in playbookBuilt because the site UI model is
+  // derived from the playbook.
+  this.on('playbookBuilt', ({ playbook }) => {
+    const mapping = load()
+    if (!mapping) return
+    playbook.site = playbook.site || {}
+    playbook.site.keys = playbook.site.keys || {}
+    if (playbook.site.keys[ATTRIBUTE_NAME] === undefined) {
+      playbook.site.keys[ATTRIBUTE_NAME] = JSON.stringify(mapping)
+    }
+  })
+
+  this.on('contentClassified', async ({ contentCatalog }) => {
+    const mapping = load()
+    if (!mapping) return
 
     // Serialised once. The helper accepts a string or an object, but a string is
     // what survives Antora's attribute handling unchanged, and it keeps the
