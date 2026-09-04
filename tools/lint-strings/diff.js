@@ -26,7 +26,13 @@ const SURFACE_ROUTES = [
   // console) and charts/<name>/values.yaml (connectors).
   { surface: 'helm', pattern: /^charts\/[^/]+\/(chart\/)?values\.yaml$/ },
   { surface: 'crd', pattern: /^operator\/api\// },
-  { surface: 'connect', pattern: /^internal\/impl\// }
+  { surface: 'connect', pattern: /^internal\/impl\// },
+  // API protos, whose comments and openapiv2 option strings reach readers as
+  // OpenAPI descriptions. console holds the data plane and Console APIs under
+  // proto/redpanda/api/; cloudv2's control plane lives under proto/public/.
+  // Anchored on the api/ segment so cloudv2's proto/descriptors/ tree (private
+  // and internal) and every vendored proto/public/**/wellknown/ path stay out.
+  { surface: 'api', pattern: /^proto\/(?:redpanda\/api|public\/[^/]+\/redpanda\/api)\/.*\.proto$/ }
 ]
 
 /**

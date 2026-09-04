@@ -28,7 +28,7 @@ This fixture exercises the ` + "`raw` + interpreted + `raw`" + ` concatenation i
 This heading and the table below are legitimate AsciiDoc:
 
 |===
-| kafka_key | The record key
+| `+"`kafka_key`"+` | The record key
 |===
 `).
 		Fields(fixtureConfigFields()...)
