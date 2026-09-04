@@ -33,6 +33,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
+const YAML = require('yaml')
 const lib = require('./lib')
 const prompts = require('./prompts')
 const { CASES } = require('./cases')
@@ -289,6 +290,156 @@ function runUpstreamCase (spec, io) {
   return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
 }
 
+/**
+ * Behavior D: the declaration-gated Claude pass. The diff is mechanically
+ * CLEAN (the lint gate would not have fired under the old findings-based
+ * gate) but the new string is vacuous, so the model must produce a
+ * suggestion, and that suggestion is executed like a rewrite: applied to
+ * the span the model names, re-linted (must stay clean), re-extracted
+ * (nothing but the description may change), and checked for restored
+ * substance. Under --sabotage the diff is a fully conforming rewording,
+ * the model must stay silent, and this case must FAIL.
+ */
+const WORKFLOW_PATH = path.join(__dirname, '..', '..', '.github', 'workflows', 'doc-strings-review.yml')
+
+/**
+ * The production prose-quality contract, extracted from the live workflow so
+ * the eval can never drift from what actually runs. Throws when the fragment
+ * is missing, turning a deleted or renamed contract into a HARNESS_ERROR
+ * rather than a silently weaker eval.
+ */
+function loadWorkflowProseFragment () {
+  const wf = YAML.parse(fs.readFileSync(WORKFLOW_PATH, 'utf8'))
+  const claude = wf.jobs['doc-strings-review'].steps.find((st) => st.name === 'Claude review with suggestions')
+  const prompt = claude && claude.with && claude.with.prompt
+  if (!prompt) throw new Error('Claude step prompt not found in doc-strings-review.yml')
+  const m = prompt.match(/PROSE QUALITY:[\s\S]*?(?=\n\s*\n[A-Z][A-Z -]+:|$)/)
+  if (!m) throw new Error('PROSE QUALITY fragment not found in the workflow prompt; the eval and the workflow have drifted')
+  return m[0].trim()
+}
+
+function runProseReviewCase (spec, io, sabotage) {
+  const checks = makeChecks()
+  const repo = lib.materializeRepo(spec.layout)
+  const base = lib.gitInit(repo.dir)
+  lib.applyEdits(repo.targetAbs, sabotage ? spec.sabotageEdits : spec.diffEdits)
+  lib.gitCommitAll(repo.dir, 'reword property description')
+  io.saveFixture('after', repo)
+
+  // Precondition: lint-clean either way. The whole point of the case is
+  // that the deterministic lint has nothing to say about this diff.
+  const lintDiff = lib.runLint(repo.dir, repo.surface, ['--diff', base])
+  if (lintDiff.findings.length !== 0) {
+    return harnessError(checks, `Precondition: diff must be lint-clean, got ${lintDiff.findings.length} findings`)
+  }
+  checks.add('precondition: real lint-strings --diff reports zero findings on this diff', true,
+    `lint findings in diff: ${lintDiff.findings.length}`)
+  const declarations = (lintDiff.summary && lintDiff.summary.totalDeclarations) || 0
+  if (declarations === 0) {
+    return harnessError(checks, 'Precondition: diff touches no doc-string declaration')
+  }
+  checks.add('precondition: the diff touches a doc-string declaration (the workflow gate)', true,
+    `declarations in diff: ${declarations}`)
+
+  const extractionBefore = lib.extractDeclarations(repo.dir, repo.surface)
+  let workflowFragment
+  try {
+    workflowFragment = loadWorkflowProseFragment()
+  } catch (err) {
+    return harnessError(checks, err.message)
+  }
+  checks.add('production PROSE QUALITY fragment extracted from the live workflow', true,
+    `${workflowFragment.length} chars`)
+
+  let terminology = null
+  if (spec.terminologyFixture) {
+    terminology = fs.readFileSync(path.join(__dirname, 'fixtures', spec.terminologyFixture), 'utf8')
+  }
+  const diff = lib.gitDiff(repo.dir, base)
+  const model = io.callModel(prompts.proseReview({ diff, workflowFragment, terminology }))
+  if (model.failed) return modelCallFailed(checks, model)
+
+  const suggestions = lib.parseFences(model.output, 'suggestion')
+  if (!checks.add('at least one ```suggestion block (a vacuous string must draw one)',
+    suggestions.length >= 1, `found ${suggestions.length}`)) {
+    return finish('FAIL', checks, model)
+  }
+  const replacement = suggestions[0]
+  if (spec.columnLimit) {
+    const overlong = lib.overlongLines(replacement, spec.columnLimit)
+    checks.add(`every suggestion line within ${spec.columnLimit} columns`, overlong.length === 0,
+      overlong.length ? `overlong lines (line,len): ${JSON.stringify(overlong)}` : 'ok')
+  }
+
+  // Application is CONTENT-anchored, not line-anchored: the model derives
+  // line numbers from diff hunk math and is reliably off by one or two, and
+  // its suggestion uses GitHub semantics (replace the cited lines), so
+  // trusting either corrupts the fixture. The harness instead pulls the
+  // description literals out of the suggestion and swaps them in for the
+  // vacuous block it inserted itself, which it knows byte-exactly. The span
+  // marker is still asserted for presence, since production inline comments
+  // need it.
+  checks.add('model names a declaration span (FILE ... LINES a-b)',
+    /LINES\s+\d+\s*-\s*\d+/.test(model.output), 'marker scan')
+
+  const literalLine = /^\s*"(?:[^"\\]|\\.)*",?\s*$/
+  const nameLiteral = `"${spec.target}",`
+  const descLines = replacement.split('\n')
+    .filter((l) => literalLine.test(l))
+    .filter((l) => l.trim() !== nameLiteral)
+  if (!checks.add('suggestion carries description string literals',
+    descLines.length >= 1, `literal lines found: ${descLines.length}`)) {
+    return finish('FAIL', checks, model)
+  }
+  // The description argument ends with a comma; normalize so the swap-in
+  // preserves the declaration's structure regardless of how the model
+  // terminated its last line.
+  const lastIdx = descLines.length - 1
+  if (!/,\s*$/.test(descLines[lastIdx])) descLines[lastIdx] = descLines[lastIdx].replace(/\s*$/, ',')
+  for (let i = 0; i < lastIdx; i++) descLines[i] = descLines[i].replace(/,\s*$/, '')
+
+  const vacuousBlock = spec.diffEdits[0].replace
+  const originalText = fs.readFileSync(repo.targetAbs, 'utf8')
+  if (!checks.add('the vacuous block is still uniquely present to swap',
+    originalText.split(vacuousBlock).length === 2, 'unique-occurrence check')) {
+    return finish('FAIL', checks, model)
+  }
+  fs.writeFileSync(repo.targetAbs, originalText.replace(vacuousBlock, descLines.join('\n')))
+  io.saveFixture('applied', repo)
+
+  // Execute the output: the rewrite must not trade vacuousness for lint
+  // findings, and must not disturb anything but the description.
+  const lintAfter = lib.runLint(repo.dir, repo.surface)
+  checks.add('re-lint: the file still parses to the same number of declarations',
+    lintAfter.summary.totalDeclarations === Object.keys(extractionBefore).length,
+    `declarations after: ${lintAfter.summary.totalDeclarations}, properties before: ${Object.keys(extractionBefore).length}`)
+  const targetRulesAfter = lib.findingsFor(lintAfter, spec.target)
+  checks.add('re-lint: zero findings on the rewritten declaration', targetRulesAfter.length === 0,
+    targetRulesAfter.length === 0 ? 'clean' : `remaining: ${JSON.stringify(targetRulesAfter)}`)
+
+  const extractionAfter = lib.extractDeclarations(repo.dir, repo.surface)
+  const problems = lib.comparePropertyExtraction(extractionBefore, extractionAfter, spec.target)
+  checks.add('re-extraction: every non-description field of every property unchanged', problems.length === 0,
+    problems.join('; ') || 'ok')
+  const desc = (extractionAfter[spec.target] || {}).description || ''
+  checks.add('re-extraction: target parses with a non-empty description', desc.trim().length > 0,
+    JSON.stringify(desc.slice(0, 120)))
+  if (Array.isArray(spec.mustMentionAny) && spec.mustMentionAny.length) {
+    checks.add('rewrite restores substantive content',
+      spec.mustMentionAny.some((t) => desc.includes(t)),
+      `looked for one of ${JSON.stringify(spec.mustMentionAny)} in ${JSON.stringify(desc.slice(0, 120))}`)
+  }
+  if (Array.isArray(spec.mustNotMention) && spec.mustNotMention.length) {
+    const leaked = spec.mustNotMention.filter((t) => desc.includes(t))
+    checks.add('rewrite drops the non-canonical form (case-sensitive)',
+      leaked.length === 0,
+      leaked.length ? `still contains ${JSON.stringify(leaked)}` : 'clean')
+  }
+
+  io.cleanup(repo.dir)
+  return finish(checks.allPass() ? 'PASS' : 'FAIL', checks, model)
+}
+
 function runNegativeReviewCase (spec, io, sabotage) {
   const checks = makeChecks()
   const repo = lib.materializeRepo(spec.layout)
@@ -377,6 +528,7 @@ function finish (status, checks, model) {
 const EXECUTORS = {
   rewrite: runRewriteCase,
   upstream: runUpstreamCase,
+  'prose-review': runProseReviewCase,
   'negative-review': runNegativeReviewCase,
   'negative-audit': runNegativeAuditCase
 }
@@ -416,8 +568,8 @@ function main () {
   let selected = CASES
   if (options.sabotage) {
     selected = CASES.filter((c) => c.id === options.sabotage)
-    if (selected.length === 0 || !selected[0].kind.startsWith('negative')) {
-      console.error(`--sabotage requires the id of a negative-control case. Available: ${CASES.filter((c) => c.kind.startsWith('negative')).map((c) => c.id).join(', ')}`)
+    if (selected.length === 0 || !Array.isArray(selected[0].sabotageEdits)) {
+      console.error(`--sabotage requires the id of a case with sabotageEdits. Available: ${CASES.filter((c) => Array.isArray(c.sabotageEdits)).map((c) => c.id).join(', ')}`)
       process.exit(2)
     }
   } else if (options.cases) {

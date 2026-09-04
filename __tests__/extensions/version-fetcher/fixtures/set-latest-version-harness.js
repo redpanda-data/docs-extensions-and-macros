@@ -76,7 +76,7 @@ const extensionContext = {
 
 require(path.join(extDir, 'set-latest-version.js')).register.call(extensionContext, { config: {} });
 
-const versionEntry = { name: 'ROOT', version: '26.2', asciidoc: { attributes: {} } };
+const versionEntry = { name: 'ROOT', version: '26.2', asciidoc: { attributes: { ...config.versionAttributes } } };
 const component = {
   latestPrerelease: null,
   versions: [versionEntry],
