@@ -2,11 +2,25 @@
 
 /**
  * Scans AsciiDoc content for http(s) URLs that appear in prose, skipping
- * URLs inside code contexts where rewriting or checking them would be wrong:
+ * URLs that never reach a rendered page, or that live in a code context where
+ * rewriting or checking them would be wrong:
  *
- * - delimited listing (----), literal (....), fenced (```), and passthrough
- *   (++++) blocks
+ * - delimited listing (----), literal (....), passthrough (++++) and comment
+ *   (////) blocks
+ * - fenced blocks (```), including a language info string (```bash, ```yml).
+ *   Asciidoctor treats the info string as part of the delimiter, so a fence
+ *   opened as ```bash still closes on a bare ``` line
+ *
+ * A block closes only on a delimiter of the same length as the one that opened
+ * it; a longer run, such as the row of dashes in a rendered table, is content.
+ * - line comments (//), which Asciidoctor drops entirely
  * - inline code spans (`...`)
+ *
+ * URLs holding an unresolved attribute reference (https://github.com/{project-github}/...)
+ * are returned with hasAttributeReference set, because a caller cannot check
+ * or rewrite one: this scanner runs at contentClassified, before Asciidoctor
+ * substitutes attributes, so the braces are still literal here even though the
+ * published URL is fine.
  *
  * Each match records enough position information for a caller to splice a
  * replacement into the original content.
@@ -26,6 +40,8 @@
  *   example image:d.png[alt,link=https://...]); rewriting one of these to an
  *   xref macro would corrupt the surrounding macro, but the URL is still a
  *   real link target worth checking
+ * - hasAttributeReference: true when the URL contains a {name} attribute
+ *   reference that has not been substituted yet
  */
 
 const URL_RX = /(link:)?(https?:\/\/[^\s\][)"'<>]+)(\[[^\]]*\])?/g
@@ -34,16 +50,62 @@ const URL_RX = /(link:)?(https?:\/\/[^\s\][)"'<>]+)(\[[^\]]*\])?/g
 // is not part of the URL.
 const TRAILING_PUNCT_RX = /[.,;:!?*_]+$/
 const ATTRIBUTE_ENTRY_RX = /^:!?[a-zA-Z0-9_][a-zA-Z0-9_-]*!?:(?:\s|$)/
+// A line comment. Asciidoctor drops these before rendering, so any URL on one
+// is not a link on the published page: generator provenance notes, Doc
+// Detective test steps, and writers' editorial asides all live here.
+const LINE_COMMENT_RX = /^\s*\/\//
+// An attribute reference that substitution has not resolved yet.
+const ATTRIBUTE_REFERENCE_RX = /\{[a-zA-Z0-9_][a-zA-Z0-9_-]*\}/
 // Cap on how far a wrapped label may run, so an unmatched bracket somewhere in
 // prose cannot swallow the rest of the document.
 const MAX_WRAPPED_LABEL_LENGTH = 500
 
+// A delimiter run, plus the info string a fence may carry. Comment blocks
+// (////) come first in the alternation so a //// line is not mistaken for the
+// start of a line comment.
+// A markdown-style fence is exactly three backticks: Asciidoctor does not
+// recognise four or more, it reads them as a paragraph. The other
+// delimiters take four or more.
+const BLOCK_DELIMITER_RX = /^(\/{4,}|-{4,}|\.{4,}|`{3}(?!`)|\+{4,})(\S*)$/
+
+/**
+ * Parses a block delimiter line, or returns null when the line is not one.
+ *
+ * Two details of Asciidoctor's rules matter here, and both were verified
+ * against @asciidoctor/core rather than assumed:
+ *
+ * - A fenced block may carry a language info string (```bash, ```yml) on its
+ *   opening line. Matching only bare backticks meant every annotated code
+ *   block was scanned as prose, which is where the config defaults
+ *   (https://api.openai.com/v1) and the truncated shell examples
+ *   (.../releases/download/v, cut at its <version> placeholder) in the weekly
+ *   report came from. No other delimiter takes an info string.
+ * - A block closes only on a delimiter of the SAME LENGTH. A longer run is
+ *   content. Treating any run of four or more as a delimiter inverted the
+ *   open/closed state for the rest of the file whenever a listing block held
+ *   a line of dashes, which is how command output renders a table rule:
+ *
+ *     [source,sql]
+ *     ----
+ *     SELECT ...
+ *     ----------------------   <- content, not a close
+ *      row
+ *     ----                     <- the actual close
+ *
+ *   Everything after such a block was then read with the state flipped, so
+ *   prose was skipped and code was scanned. That is why the example URL in
+ *   cloud-docs' regexp_match reference was reported as a broken link.
+ */
 function blockDelimiter (line) {
-  if (/^-{4,}$/.test(line)) return '-'
-  if (/^\.{4,}$/.test(line)) return '.'
-  if (/^`{3,}$/.test(line)) return '`'
-  if (/^\+{4,}$/.test(line)) return '+'
-  return null
+  const match = BLOCK_DELIMITER_RX.exec(line)
+  if (!match) return null
+  const [, run, info] = match
+  if (info && run[0] !== '`') return null
+  return { char: run[0], length: run.length, info }
+}
+
+function closesBlock (delimiter, open) {
+  return delimiter.char === open.char && delimiter.length === open.length && !delimiter.info
 }
 
 function scanContentUrls (content) {
@@ -54,10 +116,13 @@ function scanContentUrls (content) {
   for (const rawLine of lines) {
     const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
     const delimiter = blockDelimiter(line)
-    if (delimiter) {
-      if (openDelimiter === delimiter) openDelimiter = null
-      else if (!openDelimiter) openDelimiter = delimiter
-    } else if (!openDelimiter) {
+    if (openDelimiter) {
+      // Inside a block, only its own matching delimiter gets out. Anything
+      // else on this line is content and is never scanned.
+      if (delimiter && closesBlock(delimiter, openDelimiter)) openDelimiter = null
+    } else if (delimiter) {
+      openDelimiter = delimiter
+    } else if (!LINE_COMMENT_RX.test(line)) {
       scanLine(line, offset, matches, content)
     }
     offset += rawLine.length + 1
@@ -114,6 +179,7 @@ function scanLine (line, offset, matches, content) {
       hasLinkPrefix: Boolean(linkPrefix),
       inAttributeEntry,
       inAttributeValue: /[\w-]=["']?$/.test(before),
+      hasAttributeReference: ATTRIBUTE_REFERENCE_RX.test(url),
     })
   }
 }
