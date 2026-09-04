@@ -1633,11 +1633,11 @@ None (uses GitHub API).
 
 === generate kapa-source-groups
 
-Compares the committed docs-data/kapa-source-groups.json against what Kapa's ingestion API reports right now, and reports drift without writing anything. Exit status is meaningful: 0 in sync, 1 drift found, 2 the command itself failed. Drift means one of: a version group gained or lost its source, a group id changed, a segment appeared or disappeared in Kapa, or the committed file no longer parses. Any of those leaves the docs surfaces scoping to a group that does not hold what the mapping claims.
+Reads the source-group tree and the per-source group assignments from Kapa's ingestion API and writes a mapping from each docs URL version segment to the Kapa source group that scopes retrieval to that version. Consumers pass the group id as `sourceGroupIdsInclude` (Agent SDK), `sourceGroupIDsInclude` (Chat SDK, note the capital ID) or `_meta.source_group_ids_include` (hosted MCP server). The mapping is keyed on the URL segment, not Antora's page.version, because the two disagree for the latest release: latest_version_segment: 'current' publishes 26.2 at /streaming/current/ while page.version reads 26.2. This command only ever reads from Kapa. Kapa publishes no write API ("we do not provide an API endpoint for uploading or managing sources"), so the groups and their source assignments are created by hand in the Kapa dashboard under Sources > Manage groups. Run this afterwards to record what is there. Refuses rather than writing a misleading mapping when: no groups exist, no group has children, any version group has no sources assigned, or --default-segment is not one of the groups. An empty version group is worse than no group, because scoping a query to it returns only the global sources and the reader silently gets no version-specific content.
 
 *Why use it:*
 
-A new docs version appears with no file change in docs-site at all: the playbook globs branches: v/*, so cutting a v/X.Y branch in redpanda-data/docs publishes a new version segment that nothing in this repo or docs-ui would notice. Kapa also has no write API, so the matching source and group are created by hand and are easy to forget. Without this check the mapping goes stale silently and readers on the new version quietly fall back to the default segment. Run it on a schedule so drift opens an issue rather than waiting for a bug report.
+Kapa indexes one separately crawled source per published docs version. Without retrieval scoping a reader gets answers drawn from any of them: a measured call for "What is a Redpanda topic partition?" returned 12 sections, six of which were the same get-started/architecture page at six different versions. Source groups fix that at retrieval time, but the group UUIDs live in Kapa while the version list lives in Antora, so something has to join the two. Because a new docs version appears with no file change in docs-site (the playbook globs branches: v/*), a hand-maintained mapping goes stale silently; generating it and diff-checking the result in CI is what makes drift loud.
 
 *Usage:*
 
@@ -1667,18 +1667,27 @@ display help for command
 
 [,bash]
 ----
-# Check the committed mapping against Kapa
+# Write the mapping to its default location
 export KAPA_API_KEY=... KAPA_PROJECT_ID=...
-npx doc-tools validate kapa-source-groups
+npx doc-tools generate kapa-source-groups
 
-# Check a mapping at a non-default path
-npx doc-tools validate kapa-source-groups --file docs-data/kapa-source-groups.json
+# Preview without writing
+npx doc-tools generate kapa-source-groups --dry-run
+
+# Scope unversioned pages to something other than "current"
+npx doc-tools generate kapa-source-groups --default-segment 26.1
+
+# Disambiguate when more than one group has children
+npx doc-tools generate kapa-source-groups --parent-group Streaming
 ----
 
 *Requirements:*
 
 - Kapa API key and project ID, set via KAPA_API_KEY and KAPA_PROJECT_ID
-- The mapping file must already exist; generate it with `doc-tools generate kapa-source-groups`
+- Create the key in the Kapa platform under Configuration > API Keys; the project ID is the
+  UUID in the dashboard URL (https://app.kapa.ai/<project-id>)
+- The parent group and its version sub groups must already exist in Kapa, with each version
+  group holding at least one source
 - Internet connection to reach https://api.kapa.ai
 
 == validate

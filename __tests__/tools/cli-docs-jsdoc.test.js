@@ -19,6 +19,13 @@ const path = require('path')
  *     call. The generator associates a comment with the NEXT .command() it
  *     finds, so inserting a block between an existing comment and its command
  *     silently reassigns the prose to the wrong command.
+ *
+ *  3. The same command NAME is registered under two groups. Comments used to be
+ *     keyed by bare name, so `validation.command('kapa-source-groups')`
+ *     overwrote `automation.command('kapa-source-groups')` and the
+ *     `generate kapa-source-groups` section shipped describing the validate
+ *     command, with validate examples under a generate usage line. Keyed by the
+ *     full command path now.
  */
 const repoRoot = path.join(__dirname, '..', '..')
 const cliSource = fs.readFileSync(path.join(repoRoot, 'bin', 'doc-tools.js'), 'utf8')
@@ -51,4 +58,58 @@ describe('generated CLI reference cannot silently lose a command', () => {
       expect(next[1]).toBe(h[1])
     }
   })
+})
+
+describe('a command name used by two groups keeps two distinct sections', () => {
+  const validationCommands = [
+    ...cliSource.matchAll(/\bvalidation\s*\n?\s*\.command\(['"]([^'"]+)['"]\)/g),
+  ].map((m) => m[1])
+
+  // Found by intersection rather than hardcoded, so the next name registered
+  // under both groups is covered without anyone remembering to add it.
+  const shared = registered.filter((name) => validationCommands.includes(name))
+
+  test('the generator captures the group, not just the command name', () => {
+    // Keying on the bare name is what let one section overwrite the other.
+    expect(generator).toMatch(/\(programCli\|automation\|validation\)/)
+    expect(generator).toMatch(/comments\[`\$\{groupPrefix\}\$\{commandName\}`\]/)
+  })
+
+  test('the lookup prefers the full command path', () => {
+    expect(generator).toMatch(/jsdocs\[label\]/)
+  })
+
+  if (shared.length) {
+    const reference = fs.readFileSync(path.join(repoRoot, 'CLI_REFERENCE.adoc'), 'utf8')
+
+    // The paragraph immediately after the heading is the command's description.
+    const descriptionOf = (heading) => {
+      const i = reference.indexOf(`\n=== ${heading}\n`)
+      if (i === -1) return null
+      return reference.slice(i).split('\n').filter(Boolean)[1] || null
+    }
+
+    test.each(shared)('generate %s and validate %s describe different commands', (name) => {
+      const gen = descriptionOf(`generate ${name}`)
+      const val = descriptionOf(`validate ${name}`)
+      expect(gen).toBeTruthy()
+      expect(val).toBeTruthy()
+      expect(gen).not.toBe(val)
+    })
+
+    test.each(shared)('the generate %s examples do not invoke validate', (name) => {
+      // The clearest symptom of the collision: a generate section whose
+      // examples all read `doc-tools validate ...`.
+      const i = reference.indexOf(`\n=== generate ${name}\n`)
+      // Bounded by the next heading of ANY level. Terminating on '=== ' alone
+      // ran past the end of the section into the '== validate' group heading,
+      // whose own usage line made this test fail on correct output.
+      const rest = reference.slice(i + 1)
+      const next = rest.search(/\n={2,} /)
+      const section = next === -1 ? rest : rest.slice(0, next)
+      const invocations = [...section.matchAll(/doc-tools (generate|validate) /g)].map((m) => m[1])
+      expect(invocations.length).toBeGreaterThan(0)
+      expect(invocations).not.toContain('validate')
+    })
+  }
 })
