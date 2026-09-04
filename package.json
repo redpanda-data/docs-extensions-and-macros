@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "5.23.4",
+  "version": "5.29.4",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -104,7 +104,7 @@
     "tools",
     "docker-compose",
     "mcp",
-    "docs-data/*.schema.json"
+    "docs-data/rpk-overrides.schema.json"
   ],
   "license": "ISC",
   "engines": {
