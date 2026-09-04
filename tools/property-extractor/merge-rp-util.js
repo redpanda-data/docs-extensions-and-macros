@@ -121,11 +121,17 @@ async function main() {
   const overrides = getArg(args, '--overrides')
   const output = getArg(args, '--output') || enhanced
   const sourcePath = getArg(args, '--source-path')
+  // Cluster properties rp_util reports but the Tree-sitter pass never saw
+  // have no existing entry to carry cloud metadata forward from, so the
+  // merge needs its own CloudConfig to annotate them -- see rp_util_merge.py.
+  // Honours CLOUD_SUPPORT=1 as well because that is how doc-tools passes the
+  // request down to `make` in the first place.
+  const cloudSupport = args.includes('--cloud-support') || process.env.CLOUD_SUPPORT === '1'
 
   if (!tag || !enhanced) {
     console.error(
       'Usage: node merge-rp-util.js --tag <ref> --enhanced <path> ' +
-      '[--overrides <path>] [--output <path>] [--source-path <dir>]'
+      '[--overrides <path>] [--output <path>] [--source-path <dir>] [--cloud-support]'
     )
     process.exit(1)
   }
@@ -173,6 +179,9 @@ async function main() {
     ]
     if (overrides && fs.existsSync(overrides)) {
       mergeArgs.push('--overrides', overrides)
+    }
+    if (cloudSupport) {
+      mergeArgs.push('--cloud-support')
     }
 
     console.log('Merging rp_util schema into extracted properties...')

@@ -492,14 +492,29 @@ def merge_with_existing_output(
         _carry_forward_example(prop, existing_properties.get(name))
         _carry_forward_cloud_metadata(prop, existing_properties.get(name))
 
-    if cloud_config is not None:
-        from cloud_config import add_cloud_support_metadata
-        add_cloud_support_metadata(enhanced, cloud_config)
-
     merged_properties = dict(existing_properties)
     replaced = sum(1 for name in enhanced if name in merged_properties)
     added = len(enhanced) - replaced
     merged_properties.update(enhanced)
+
+    # Annotated after the merge, over the whole property map rather than over
+    # the rp_util slice alone, so that every cluster property in the output
+    # has been through the same CloudConfig no matter which pass produced it.
+    # add_cloud_support_metadata touches cluster-scope entries only and
+    # always sets all four fields, so re-running it over the properties
+    # property_extractor.py already annotated is idempotent.
+    #
+    # What actually gets this metadata onto a property rp_util reports but
+    # the Tree-sitter pass never saw (real case: post-#63 Tree-sitter drops
+    # http_authentication and rp_util restores it) is main() building a
+    # CloudConfig for --cloud-support/CLOUD_SUPPORT=1. Without one there is
+    # nothing to annotate with, and such a property has no existing entry for
+    # _carry_forward_cloud_metadata to copy from either, so it lands with no
+    # cloud_supported at all -- which drops it from the Cloud reference's
+    # redpanda-cloud tagged include.
+    if cloud_config is not None:
+        from cloud_config import add_cloud_support_metadata
+        add_cloud_support_metadata(merged_properties, cloud_config)
 
     _resync_topic_properties_inherited_from_cluster(merged_properties)
 
@@ -533,6 +548,12 @@ def main():
                               "one per rp-util-fetch.js SCHEMA_FLAGS key")
     parser.add_argument("--overrides", help="Path to property-overrides.json")
     parser.add_argument("--output", required=True, help="Where to write the merged JSON")
+    parser.add_argument("--cloud-support", action="store_true",
+                         help="Fetch Cloud metadata from the cloudv2 install pack and annotate "
+                              "cluster properties with it (requires GITHUB_TOKEN). Mirrors "
+                              "property_extractor.py's flag of the same name; without it, a "
+                              "property rp_util adds that the Tree-sitter pass missed gets no "
+                              "cloud metadata at all.")
     args = parser.parse_args()
 
     existing = _load_json(args.enhanced)
@@ -548,7 +569,26 @@ def main():
 
     overrides = _load_json(args.overrides) if args.overrides and os.path.exists(args.overrides) else {}
 
-    merged = merge_with_existing_output(existing, schemas, overrides, args.overrides)
+    # Flag or CLOUD_SUPPORT=1, the same pair property_extractor.py honors
+    # (see its own --cloud-support handling), so a doc-tools run that asked
+    # for cloud metadata still gets it here even when the flag itself isn't
+    # threaded all the way through merge-rp-util.js.
+    cloud_config = None
+    if args.cloud_support or os.environ.get("CLOUD_SUPPORT") == "1":
+        from cloud_config import fetch_cloud_config
+        # Deliberately allowed to raise, exactly as property_extractor.py's
+        # own --cloud-support path does: writing cluster properties with no
+        # cloud metadata is the outcome this flag exists to prevent, so it
+        # must not degrade quietly into a run that looks successful.
+        cloud_config = fetch_cloud_config()
+        logger.info(
+            "Cloud support enabled; annotating with install-pack configuration version %s",
+            cloud_config.version,
+        )
+
+    merged = merge_with_existing_output(
+        existing, schemas, overrides, args.overrides, cloud_config
+    )
 
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(merged, f, indent=4, sort_keys=True)

@@ -63,7 +63,8 @@ build: venv redpanda-git treesitter
 	    --tag $(TAG) \
 	    --enhanced gen/$(TAG)-properties.json \
 	    --output gen/$(TAG)-properties.json \
-	    $(if $(OVERRIDES),$(if $(shell [ -f "$(OVERRIDES)" ] && echo exists),--overrides $(OVERRIDES),),); \
+	    $(if $(OVERRIDES),$(if $(shell [ -f "$(OVERRIDES)" ] && echo exists),--overrides $(OVERRIDES),),) \
+	    $(if $(CLOUD_SUPPORT),--cloud-support,); \
 	else \
 	  echo "⏭️  Skipping rp_util merge (SKIP_RP_UTIL set) -- cluster/broker scope stays Tree-sitter-only"; \
 	fi

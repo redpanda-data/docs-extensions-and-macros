@@ -8,9 +8,11 @@ existing --enhanced-output file.
 """
 
 import json
+import shutil
 import sys
 import os
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../tools/property-extractor'))
 
@@ -654,6 +656,90 @@ class TestMergeWithExistingOutput(unittest.TestCase):
         self.assertTrue(prop["cloud_supported"])
         self.assertFalse(prop["cloud_byoc_only"])
 
+    def test_cloud_metadata_reaches_a_property_only_rp_util_knows_about(self):
+        # Regression guard for the case carrying metadata forward cannot
+        # cover: a cluster property rp_util reports that the Tree-sitter pass
+        # missed entirely (real -- post-#63 Tree-sitter drops
+        # http_authentication and rp_util restores it) has no existing entry
+        # to copy cloud metadata from. Annotating only the rp_util slice left
+        # it with no cloud_supported at all, which drops it from the Cloud
+        # reference's redpanda-cloud tagged include; annotating the merged map
+        # gives it the same treatment every other cluster property gets.
+        from cloud_config import CloudConfig
+
+        cloud_config = CloudConfig(
+            version="test-1.2.3",
+            customer_managed_configs=[
+                {"name": "http_authentication", "cluster_types": ["byoc", "dedicated"]},
+                {"name": "byoc_only_prop", "cluster_types": ["byoc"]},
+            ],
+            readonly_cluster_config=["audit_enabled"],
+        )
+        existing = {
+            "properties": {
+                # Known to both passes, and already annotated by
+                # property_extractor.py's own --cloud-support run.
+                "audit_enabled": {
+                    "name": "audit_enabled", "config_scope": "cluster",
+                    "cloud_editable": False, "cloud_readonly": True,
+                    "cloud_supported": True, "cloud_byoc_only": False,
+                },
+                # Not a cluster property: must keep its no-opinion absence of
+                # cloud fields (see add_cloud_support_metadata's scope guard).
+                "cleanup.policy": {
+                    "name": "cleanup.policy", "config_scope": "topic",
+                },
+            },
+            "definitions": {},
+        }
+        rp_util_schemas = {
+            "clusterSchema": {"properties": {
+                "audit_enabled": {
+                    "description": "d", "type": "boolean",
+                    "default_value": "false", "is_enterprise": False,
+                },
+                "http_authentication": {
+                    "description": "d", "type": "array",
+                    "default_value": '["BASIC"]', "is_enterprise": False,
+                },
+                "byoc_only_prop": {
+                    "description": "d", "type": "boolean",
+                    "default_value": "false", "is_enterprise": False,
+                },
+                "self_managed_only_prop": {
+                    "description": "d", "type": "boolean",
+                    "default_value": "false", "is_enterprise": False,
+                },
+            }},
+        }
+
+        merged = merge_with_existing_output(
+            existing, rp_util_schemas, overrides={}, cloud_config=cloud_config,
+        )
+        props = merged["properties"]
+
+        # The property only rp_util knows about: fully annotated, not absent.
+        self.assertTrue(props["http_authentication"]["cloud_supported"])
+        self.assertTrue(props["http_authentication"]["cloud_editable"])
+        self.assertFalse(props["http_authentication"]["cloud_readonly"])
+        self.assertFalse(props["http_authentication"]["cloud_byoc_only"])
+
+        self.assertTrue(props["byoc_only_prop"]["cloud_byoc_only"])
+
+        # A cluster property the cloud configuration says nothing about still
+        # gets an explicit false, the same as any other self-managed-only one.
+        self.assertFalse(props["self_managed_only_prop"]["cloud_supported"])
+
+        # Re-annotating one property_extractor.py already handled is
+        # idempotent, not a flip.
+        self.assertTrue(props["audit_enabled"]["cloud_readonly"])
+        self.assertTrue(props["audit_enabled"]["cloud_supported"])
+        self.assertFalse(props["audit_enabled"]["cloud_editable"])
+
+        # Topic scope stays untouched: absent means "no opinion".
+        for field in ("cloud_editable", "cloud_readonly", "cloud_supported", "cloud_byoc_only"):
+            self.assertNotIn(field, props["cleanup.policy"])
+
     def test_topic_property_inherits_the_rp_util_corrected_cluster_default(self):
         # Regression guard for a real bug: log_segment_ms's default used to
         # be the human string "2 weeks" from the old Tree-sitter extractor;
@@ -833,6 +919,104 @@ class TestMergeWithExistingOutput(unittest.TestCase):
         # Should not raise even though cloud_config is None (the default).
         merged = merge_with_existing_output(existing, rp_util_schemas, overrides={})
         self.assertIn("x", merged["properties"])
+
+
+
+
+class TestMainCloudSupport(unittest.TestCase):
+    """The CLI's own --cloud-support wiring.
+
+    The library merge only annotates when its caller hands it a CloudConfig,
+    and merge-rp-util.js drives this module through main(), so a main() that
+    never builds one leaves every cluster property in a merged run with
+    whatever cloud metadata could be carried forward -- and nothing at all
+    for a property rp_util reports that the Tree-sitter pass never saw.
+    """
+
+    def setUp(self):
+        import tempfile
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, True)
+
+        self.enhanced_path = os.path.join(self.tmpdir, "enhanced.json")
+        self.output_path = os.path.join(self.tmpdir, "merged.json")
+        self.schema_dir = os.path.join(self.tmpdir, "schemas")
+        os.makedirs(self.schema_dir)
+
+        with open(self.enhanced_path, "w", encoding="utf-8") as f:
+            json.dump({"properties": {}, "definitions": {}}, f)
+        with open(os.path.join(self.schema_dir, "clusterSchema.json"), "w", encoding="utf-8") as f:
+            json.dump({"properties": {
+                # Reported by rp_util, absent from the enhanced input: the
+                # shape of a property Tree-sitter missed.
+                "http_authentication": {
+                    "description": "d", "type": "array",
+                    "default_value": '["BASIC"]', "is_enterprise": False,
+                },
+            }}, f)
+
+    def _run_main(self, argv_extra):
+        from cloud_config import CloudConfig
+        import cloud_config as cloud_config_module
+        import rp_util_merge
+
+        fake = CloudConfig(
+            version="test-1.2.3",
+            customer_managed_configs=[
+                {"name": "http_authentication", "cluster_types": ["byoc", "dedicated"]},
+            ],
+            readonly_cluster_config=[],
+        )
+        calls = []
+
+        def fake_fetch(*args, **kwargs):
+            calls.append(True)
+            return fake
+
+        argv = [
+            "rp_util_merge.py",
+            "--enhanced", self.enhanced_path,
+            "--rp-util-dir", self.schema_dir,
+            "--output", self.output_path,
+        ] + argv_extra
+
+        with mock.patch.object(cloud_config_module, "fetch_cloud_config", fake_fetch), \
+             mock.patch.object(sys, "argv", argv):
+            rp_util_merge.main()
+
+        with open(self.output_path, encoding="utf-8") as f:
+            merged = json.load(f)
+        return merged, len(calls)
+
+    def test_cloud_support_flag_annotates_a_property_only_rp_util_reports(self):
+        merged, fetches = self._run_main(["--cloud-support"])
+
+        self.assertEqual(fetches, 1)
+        prop = merged["properties"]["http_authentication"]
+        self.assertTrue(prop["cloud_supported"])
+        self.assertTrue(prop["cloud_editable"])
+        self.assertFalse(prop["cloud_readonly"])
+        self.assertFalse(prop["cloud_byoc_only"])
+
+    def test_cloud_support_env_var_is_honoured_like_the_flag(self):
+        # doc-tools passes the request down as CLOUD_SUPPORT=1 in the
+        # environment (bin/doc-tools.js), the same pair property_extractor.py
+        # accepts, so the env var alone has to be enough.
+        with mock.patch.dict(os.environ, {"CLOUD_SUPPORT": "1"}):
+            merged, fetches = self._run_main([])
+
+        self.assertEqual(fetches, 1)
+        self.assertTrue(merged["properties"]["http_authentication"]["cloud_supported"])
+
+    def test_no_cloud_support_requested_fetches_nothing(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CLOUD_SUPPORT", None)
+            merged, fetches = self._run_main([])
+
+        self.assertEqual(fetches, 0)
+        # No CloudConfig, no annotation, and nothing to carry forward either.
+        for field in ("cloud_editable", "cloud_readonly", "cloud_supported", "cloud_byoc_only"):
+            self.assertNotIn(field, merged["properties"]["http_authentication"])
 
 
 if __name__ == "__main__":
