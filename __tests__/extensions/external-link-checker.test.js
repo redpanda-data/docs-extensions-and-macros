@@ -321,4 +321,49 @@ describe('register', () => {
     expect(checker._fetch).not.toHaveBeenCalled()
     expect(logger.info).not.toHaveBeenCalled()
   })
+
+  // Regression: a catalog holding only unresolved-attribute references (no
+  // fetchable URLs at all) used to return before writeReport, so report_file
+  // was never created. link-check-fix.yml downloads that file as an artifact
+  // and treats its absence as a failed run, which made a perfectly clean
+  // build look like a broken checker.
+  describe('writing the report with nothing to fetch', () => {
+    let reportFile
+
+    beforeEach(() => {
+      reportFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'link-check-report-')), 'link-check.json')
+    })
+
+    afterEach(() => {
+      fs.rmSync(path.dirname(reportFile), { recursive: true, force: true })
+    })
+
+    test('writes the report when every URL is an unresolved attribute reference', async () => {
+      checker._fetch = jest.fn()
+      const catalog = makeCatalog([
+        makePage('a.adoc', 'https://github.com/{project-github}/issues[Related issue^]'),
+      ])
+      await run(catalog, { reportFile })
+
+      expect(checker._fetch).not.toHaveBeenCalled()
+      expect(fs.existsSync(reportFile)).toBe(true)
+      const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'))
+      expect(report.counts).toEqual({ ok: 0, broken: 0, unverifiable: 0 })
+      expect(report.results).toEqual([])
+      expect(report.unresolvedAttributeReferences).toHaveLength(1)
+      expect(report.unresolvedAttributeReferences[0].url).toBe('https://github.com/{project-github}/issues')
+    })
+
+    test('writes an empty report when there is nothing to say at all', async () => {
+      checker._fetch = jest.fn()
+      const catalog = makeCatalog([makePage('a.adoc', 'Only https://docs.redpanda.com/internal/ links')])
+      await run(catalog, { reportFile })
+
+      expect(fs.existsSync(reportFile)).toBe(true)
+      const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'))
+      expect(report.counts).toEqual({ ok: 0, broken: 0, unverifiable: 0 })
+      expect(report.results).toEqual([])
+      expect(report.unresolvedAttributeReferences).toEqual([])
+    })
+  })
 })

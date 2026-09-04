@@ -630,7 +630,7 @@ fail_on_broken (optional)::
 Log broken links at error level so a build run with `--log-failure-level=error` fails. Default: `false`.
 
 report_file (optional)::
-Path to write a machine-readable JSON report to. Unset by default, in which case no report is written. The report holds `counts`, a `results` array sorted broken-first, and `unresolvedAttributeReferences`; each result carries the URL, its classification and status, and a `refs` array of `{repo, refname, component, version, path}`. Intended for automation that has to act on the findings rather than read them.
+Path to write a machine-readable JSON report to. Unset by default, in which case no report is written. Written every time the checker runs, including when there is nothing to say, so a consumer polling for this file can tell a clean run apart from one where the checker never ran at all. The report holds `counts`, a `results` array sorted broken-first, and `unresolvedAttributeReferences`; each result carries the URL, its classification and status, and a `refs` array of `{repo, refname, component, version, path}`. Intended for automation that has to act on the findings rather than read them.
 
 === Registration
 

@@ -91,34 +91,40 @@ module.exports.register = function ({ config = {} }) {
         logger.info(`Unchecked external link ${url} (unresolved attribute) referenced in: ${formatRefs(refs)}`)
       }
     }
-    if (!urlReferences.size) return
     const counts = { ok: 0, broken: 0, unverifiable: 0 }
     const results = []
-    await runWithConcurrency([...urlReferences.keys()], concurrency, async (url) => {
-      const verdict = await checkUrl(url, { timeout })
-      counts[verdict.classification]++
-      const refs = urlReferences.get(url)
-      results.push({
-        url,
-        classification: verdict.classification,
-        status: verdict.status ?? null,
-        reason: verdict.reason ?? null,
-        refs: [...refs.values()],
+    // Nothing to fetch when every URL was internal, excluded, or an
+    // unresolved attribute reference. Still fall through to writeReport
+    // below: a consumer polling for report_file (the fixer workflow) cannot
+    // tell a clean, nothing-to-check build apart from one where the checker
+    // never ran unless the file always exists when configured.
+    if (urlReferences.size) {
+      await runWithConcurrency([...urlReferences.keys()], concurrency, async (url) => {
+        const verdict = await checkUrl(url, { timeout })
+        counts[verdict.classification]++
+        const refs = urlReferences.get(url)
+        results.push({
+          url,
+          classification: verdict.classification,
+          status: verdict.status ?? null,
+          reason: verdict.reason ?? null,
+          refs: [...refs.values()],
+        })
+        const pages = formatRefs(refs)
+        if (verdict.classification === 'broken') {
+          const message = `Broken external link ${url} (HTTP ${verdict.status}) referenced in: ${pages}`
+          failOnBroken ? logger.error(message) : logger.warn(message)
+        } else if (verdict.classification === 'unverifiable') {
+          const reason = verdict.status ? `HTTP ${verdict.status}` : verdict.reason
+          const log = verdict.status && [401, 403, 429].includes(verdict.status) ? 'info' : 'warn'
+          logger[log](`Could not verify external link ${url} (${reason}) referenced in: ${pages}`)
+        }
       })
-      const pages = formatRefs(refs)
-      if (verdict.classification === 'broken') {
-        const message = `Broken external link ${url} (HTTP ${verdict.status}) referenced in: ${pages}`
-        failOnBroken ? logger.error(message) : logger.warn(message)
-      } else if (verdict.classification === 'unverifiable') {
-        const reason = verdict.status ? `HTTP ${verdict.status}` : verdict.reason
-        const log = verdict.status && [401, 403, 429].includes(verdict.status) ? 'info' : 'warn'
-        logger[log](`Could not verify external link ${url} (${reason}) referenced in: ${pages}`)
-      }
-    })
-    logger.info(
-      `Checked ${urlReferences.size} external links: ${counts.ok} ok, ${counts.broken} broken, ` +
-        `${counts.unverifiable} unverifiable`
-    )
+      logger.info(
+        `Checked ${urlReferences.size} external links: ${counts.ok} ok, ${counts.broken} broken, ` +
+          `${counts.unverifiable} unverifiable`
+      )
+    }
     if (reportFile) writeReport(reportFile, { results, unresolved, counts, logger })
   })
 }

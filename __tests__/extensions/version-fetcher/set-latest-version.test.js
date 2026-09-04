@@ -104,6 +104,31 @@ describe('set-latest-version extension', () => {
     expect(Object.keys(versionAttributes)).not.toContain(`${key}-short`)
   })
 
+  // The empty-object cases above prove only that a null release never ADDS
+  // the key. They can't catch the actual regression, which was overwriting a
+  // real fallback: antora.yml seeds latest-operator-version so the attribute
+  // still resolves when the GitHub fetch fails, and the bug assigned it
+  // `undefined` anyway, shadowing that seed. Seed a representative fallback
+  // here and assert it survives byte-for-byte.
+  it.each([
+    [
+      'latest-operator-version', 'v2.3.8-24.3.6', '2.3',
+      { dockerTags: { console: { latestStableRelease: 'v3.2.5' }, 'redpanda-operator': { latestStableRelease: null, latestBetaRelease: null } } },
+    ],
+    [
+      'latest-redpanda-helm-chart-version', '5.9.0', '5.9',
+      { helmChart: { latestStableRelease: null, latestBetaRelease: null } },
+    ],
+  ])('preserves an existing %s fallback when the fetch resolves without a version', (key, seededValue, seededShort, scenario) => {
+    const { versionAttributes } = runExtension({
+      ...scenario,
+      versionAttributes: { [key]: seededValue, [`${key}-short`]: seededShort },
+    })
+
+    expect(versionAttributes[key]).toBe(seededValue)
+    expect(versionAttributes[`${key}-short`]).toBe(seededShort)
+  })
+
   it('emits -version-short for the operator and Helm chart attributes too', () => {
     const { versionAttributes } = runExtension()
 
