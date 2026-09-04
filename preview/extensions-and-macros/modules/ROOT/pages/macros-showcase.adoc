@@ -84,6 +84,22 @@ prop:cloud_storage_cache_size[link=true,page=properties/object-storage-propertie
 supplies no tooltip documentation link, because the build has not verified the
 target -- discovery would have provided one.
 
+A bare name like that one stays module-relative within this component's own
+`reference` module. Qualify it with a module (`module:page`) or a component
+and module (`component:module:page`) to point anywhere else the property is
+documented:
+
+[,asciidoc]
+----
+prop:cloud_storage_enabled[link=true,page=cloud:reference:properties/cluster-properties]
+----
+
+That target doesn't exist in this sandbox, so it isn't rendered live here --
+but the override is never build-verified either way, so a qualified target
+behaves exactly like the bare one above: nothing checks that
+`cloud:reference:properties/cluster-properties.adoc` actually exists or
+documents the property, until a reader clicks it.
+
 == A name the build cannot verify
 
 [,asciidoc]

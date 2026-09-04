@@ -7,6 +7,7 @@
 * xref:preview:ROOT:iceberg-explorer-test.adoc[]
 * xref:preview:reference:glossary.adoc[]
 * Macro showcase
+** xref:ROOT:macros-course.adoc[Learn the macros (start here)]
 ** xref:ROOT:macros-showcase.adoc[Property and enterprise macros]
 ** xref:ROOT:macros-showcase-kubernetes.adoc[On Kubernetes pages]
 ** xref:ROOT:release-status-test.adoc[Release status gating]
