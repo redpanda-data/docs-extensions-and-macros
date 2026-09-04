@@ -31,3 +31,19 @@ External missing: @EXTERNAL_BASE@/missing[Gone resource]
 ----
 curl https://docs.redpanda.com/connect/configuration/secrets/
 ----
+
+// A URL on a comment line never renders, so the checker must not fetch it:
+// @EXTERNAL_BASE@/in-line-comment
+
+////
+A comment block, same reasoning:
+@EXTERNAL_BASE@/in-comment-block
+////
+
+External in an annotated fence, which Asciidoctor still treats as a code block:
+
+```bash
+curl @EXTERNAL_BASE@/in-annotated-fence
+```
+
+Unresolved attribute reference: @EXTERNAL_BASE@/{undefined-attribute}/page[Attribute link]
