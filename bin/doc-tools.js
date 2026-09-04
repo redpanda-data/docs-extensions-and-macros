@@ -2835,14 +2835,17 @@ validation
   .command('kapa-source-groups')
   .description('Check the committed Kapa source-group mapping against Kapa (exit 0 in sync, 1 drift, 2 error)')
   .option('--file <file>', 'Mapping file to check (relative to repo root, must stay inside the repository)', 'docs-data/kapa-source-groups.json')
+  .option('--site-url <url>', 'Docs site whose sitemap says which versions are published', 'https://docs.redpanda.com')
+  .option('--skip-site-check', 'Only compare against Kapa, not against the published version list')
   .action(async (options) => {
     const { generateKapaSourceGroups } = require('../tools/kapa-source-groups/generate-kapa-source-groups.js')
+    const { fetchPublishedSegments, compareSegments } = require('../tools/kapa-source-groups/published-segments.js')
     const { requireKapaCredentials } = require('../cli-utils/kapa-credentials')
 
     // Exit 2 is reserved for "the tool broke", so that a scheduled run can tell
     // "the mapping is stale" apart from "we could not find out". Only the drift
     // branch below exits 1.
-    let committed, live, absFile
+    let committed, live, absFile, published
     try {
       const repoRoot = findRepoRoot()
       absFile = resolveInsideRepo(repoRoot, options.file, '--file')
@@ -2856,14 +2859,53 @@ validation
         projectId,
         defaultSegment: JSON.parse(committed).default_segment,
       })
+      // Inside the exit-2 block on purpose: an unreachable sitemap is "could not
+      // find out", not "the mapping is stale".
+      if (!options.skipSiteCheck) {
+        published = await fetchPublishedSegments({ siteUrl: options.siteUrl })
+      }
     } catch (err) {
       console.error(`Error: Could not check Kapa source groups: ${err.message}`)
       process.exit(2)
     }
 
-    if (live === committed) {
-      console.log(`✓ ${path.relative(process.cwd(), absFile)} is in sync with Kapa.`)
+    // The site comparison is a THIRD input, and it catches what the byte compare
+    // structurally cannot: a new docs version publishes with no Kapa group, which
+    // changes neither the committed file nor live Kapa. Both sides stay identical,
+    // the byte compare says "in sync", and readers on the new version silently get
+    // the default segment instead.
+    let siteDrift = false
+    if (published) {
+      const rel = path.relative(process.cwd(), absFile)
+      const { missing, stale, prerelease } = compareSegments(published, Object.keys(JSON.parse(live).segments))
+      const defaultSegment = JSON.parse(live).default_segment
+      if (missing.length || stale.length) {
+        siteDrift = true
+        console.log(`✗ ${rel} does not cover every published docs version.`)
+        for (const seg of missing) {
+          console.log(`  + ${seg}: published at /streaming/${seg}/ but has no Kapa source group.`)
+          console.log(`      Readers there silently fall back to "${defaultSegment}". Create the source and group in`)
+          console.log('      Kapa (Sources > Add source, then Manage groups), then regenerate.')
+        }
+        for (const seg of stale) {
+          console.log(`  - ${seg}: has a Kapa source group but is no longer published.`)
+          console.log('      Answers can cite pages that 404. Remove the source in Kapa, then regenerate.')
+        }
+      }
+      for (const seg of prerelease) {
+        console.log(`  i ${seg}: published prerelease with no group of its own, which is expected. Readers get "${defaultSegment}".`)
+      }
+    }
+
+    if (live === committed && !siteDrift) {
+      const scope = published ? 'Kapa and the published version list' : 'Kapa'
+      console.log(`✓ ${path.relative(process.cwd(), absFile)} is in sync with ${scope}.`)
       process.exit(0)
+    }
+    if (live === committed) {
+      // Mapping matches Kapa exactly; the only problem is coverage of the site.
+      console.log('\nThe mapping matches Kapa, so regenerating alone will not fix this.')
+      process.exit(1)
     }
 
     // Report what moved rather than dumping two blobs: a scheduled run pastes this

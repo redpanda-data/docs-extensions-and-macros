@@ -257,3 +257,110 @@ describe('generateKapaSourceGroups: transport behaviour', () => {
     expect(m.segments.current.source_ids).toEqual(['s-cur']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Published-segment comparison. This is the third input to the drift check and
+// it exists because the mapping-vs-Kapa byte compare is structurally blind to
+// the failure that matters: a new docs version publishing with no Kapa group
+// changes NEITHER side, so the byte compare reports "in sync" while readers on
+// that version silently get the default segment.
+// ---------------------------------------------------------------------------
+const {
+  parsePublishedSegments,
+  fetchPublishedSegments,
+  compareSegments,
+} = require('../../tools/kapa-source-groups/published-segments');
+
+const sitemap = (segs) =>
+  `<urlset>${segs.map((s) => `<url><loc>https://docs.redpanda.com/streaming/${s}/get-started/</loc></url>`).join('')}</urlset>`;
+
+describe('parsePublishedSegments', () => {
+  it('extracts distinct segments and sorts them numerically', () => {
+    // 25.10 must sort after 25.2, which a plain string sort gets wrong.
+    expect(parsePublishedSegments(sitemap(['25.10', '25.2', 'current', '25.2'])))
+      .toEqual(['25.2', '25.10', 'current']);
+  });
+
+  it('ignores URLs outside /streaming/', () => {
+    const xml = '<urlset><url><loc>https://docs.redpanda.com/cloud-data-platform/x/</loc></url>' +
+      '<url><loc>https://docs.redpanda.com/streaming/26.1/x/</loc></url></urlset>';
+    expect(parsePublishedSegments(xml)).toEqual(['26.1']);
+  });
+
+  it('returns empty rather than throwing on junk or empty input', () => {
+    for (const v of ['', null, undefined, 'not xml at all', '<urlset></urlset>']) {
+      expect(parsePublishedSegments(v)).toEqual([]);
+    }
+  });
+});
+
+describe('fetchPublishedSegments', () => {
+  const ok = (body) => async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => body });
+
+  it('fetches and parses the streaming sitemap', async () => {
+    const segs = await fetchPublishedSegments({ siteUrl: 'https://docs.redpanda.com', fetchImpl: ok(sitemap(['26.1', 'current'])) });
+    expect(segs).toEqual(['26.1', 'current']);
+  });
+
+  it('strips a trailing slash from siteUrl so the URL is not doubled', async () => {
+    let seen;
+    await fetchPublishedSegments({
+      siteUrl: 'https://docs.redpanda.com/',
+      fetchImpl: async (u) => { seen = u; return { ok: true, status: 200, statusText: 'OK', text: async () => sitemap(['current']) }; },
+    });
+    expect(seen).toBe('https://docs.redpanda.com/sitemap-streaming.xml');
+  });
+
+  it('throws on a non-OK response', async () => {
+    await expect(fetchPublishedSegments({
+      siteUrl: 'https://docs.redpanda.com',
+      fetchImpl: async () => ({ ok: false, status: 404, statusText: 'Not Found' }),
+    })).rejects.toThrow(/404 Not Found/);
+  });
+
+  it('throws on a network failure, so the caller can exit 2 rather than report drift', async () => {
+    await expect(fetchPublishedSegments({
+      siteUrl: 'https://docs.redpanda.com',
+      fetchImpl: async () => { throw new Error('ECONNREFUSED'); },
+    })).rejects.toThrow(/Could not fetch.*ECONNREFUSED/s);
+  });
+
+  it('throws when the sitemap yields no segments, rather than reporting everything stale', async () => {
+    // An empty sitemap and a moved sitemap look identical. Treating either as
+    // "nothing is published" would flag every mapped segment for deletion.
+    await expect(fetchPublishedSegments({ siteUrl: 'https://docs.redpanda.com', fetchImpl: ok('<urlset></urlset>') }))
+      .rejects.toThrow(/No \/streaming\/<version>\/ URLs found/);
+  });
+});
+
+describe('compareSegments', () => {
+  const mapped = ['24.2', '25.2', 'current'];
+
+  it('flags a published version with no group: the silent-fallback case', () => {
+    const r = compareSegments(['24.2', '25.2', '26.3', 'current'], mapped);
+    expect(r.missing).toEqual(['26.3']);
+    expect(r.stale).toEqual([]);
+  });
+
+  it('flags a mapped version that is no longer published', () => {
+    const r = compareSegments(['25.2', 'current'], mapped);
+    expect(r.stale).toEqual(['24.2']);
+    expect(r.missing).toEqual([]);
+  });
+
+  it('treats beta as expected prerelease noise, not drift', () => {
+    const r = compareSegments([...mapped, 'beta'], mapped);
+    expect(r.missing).toEqual([]);
+    expect(r.prerelease).toEqual(['beta']);
+  });
+
+  it('reports both directions at once', () => {
+    const r = compareSegments(['25.2', '26.3', 'current'], mapped);
+    expect(r.missing).toEqual(['26.3']);
+    expect(r.stale).toEqual(['24.2']);
+  });
+
+  it('is clean when they match', () => {
+    expect(compareSegments(mapped, mapped)).toEqual({ missing: [], stale: [], prerelease: [] });
+  });
+});
