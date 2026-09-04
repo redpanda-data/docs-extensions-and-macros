@@ -92,7 +92,9 @@
     "./macros/enterprise": "./macros/enterprise.js",
     "./macros/prop": "./macros/prop.js",
     "./extensions/property-page-index": "./extensions/property-page-index.js",
-    "./extensions/render-property-descriptions": "./extensions/render-property-descriptions.js"
+    "./extensions/render-property-descriptions": "./extensions/render-property-descriptions.js",
+    "./macros/iceberg-explorer": "./macros/iceberg-explorer.js",
+    "./macros/iceberg-explorer.js": "./macros/iceberg-explorer.js"
   },
   "files": [
     "extensions",
