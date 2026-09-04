@@ -418,6 +418,105 @@ asciidoc:
     - '@redpanda-data/docs-extensions-and-macros/macros/helm-ref'
 ----
 
+== iceberg-explorer
+
+This macro registers an `[iceberg-explorer]` block that emits a version-aware mount point for the interactive Iceberg Mode Explorer:
+
+[,html]
+----
+<div class="iceberg-explorer-mount" data-iceberg-explorer="1" data-version="26.2">
+  <p class="iceberg-explorer-fallback">Interactive Iceberg Mode Explorer. If this text is still here...</p>
+</div>
+----
+
+The block renders the container only. The explorer UI and its translation engine live in the docs-ui bundle, which hydrates the mount point, so the block is inert unless the site uses a docs-ui build that includes the explorer. This is the same "macro emits container, docs-ui hydrates it" handshake used by the Redpanda Connect component metadata block.
+
+Until the explorer module replaces the container's contents, the fallback paragraph is visible. It is ordinary markup rather than `<noscript>` on purpose: the failure readers are most likely to hit is JavaScript running normally on a site whose UI bundle has no explorer module, and a browser hides `<noscript>` in that case, leaving a zero-height blank space with no explanation.
+
+The page's component version (`page-version`, falling back to `page-component-version`) is stamped onto the mount point as `data-version` so the UI can load the engine build that matches the doc version. If neither attribute is set, `data-version` is omitted.
+
+Antora derives both attributes from the component version and locks them, so a page header cannot set them: an unversioned component (`version: ~`, which is what this repo's preview site uses) emits no `data-version`, and docs-ui falls back to its own version detection.
+
+=== Mount contract
+
+docs-ui must hydrate on the `data-iceberg-explorer` attribute (`[data-iceberg-explorer]`), never on a class name that matches the block name.
+
+Asciidoctor turns an unrecognized block style into a CSS class. A site that uses `[iceberg-explorer]` but whose playbook does not register this macro still publishes `<div class="openblock iceberg-explorer">`, with the author's JSON body dumped onto the page as a code listing. If the explorer module hydrated on `.iceberg-explorer`, that accident would render as a working-looking explorer filled with built-in sample data, the author's defaults silently discarded, and no error anywhere to trace it back to the missing playbook entry.
+
+Only this macro can emit a data attribute, so:
+
+* `data-iceberg-explorer` is the mount contract, and its value is the contract version (`1` today). Bump it only if the emitted attributes change shape.
+* `iceberg-explorer-mount` is a styling hook, not a mount signal.
+
+The constants are exported (`MOUNT_ATTRIBUTE`, `MOUNT_CONTRACT_VERSION`, `MOUNT_CLASS`, `MOUNT_SELECTOR`) so docs-ui and the tests can assert against one definition.
+
+=== Usage
+
+```asciidoc
+[iceberg-explorer]
+--
+--
+```
+
+Set the initial configuration with the `config` attribute:
+
+```asciidoc
+[iceberg-explorer,config="key:mode=binary;value:mode=binary"]
+--
+--
+```
+
+Or pass a JSON object as the block body to supply author-defined defaults:
+
+```asciidoc
+[iceberg-explorer]
+----
+{
+  "config": "value:mode=schema_latest"
+}
+----
+```
+
+The explorer module reads only the `config` key and renders its own sample schema and record. Other keys are forwarded verbatim in `data-defaults` and ignored, so do not document author-supplied schemas or records as supported until docs-ui reads them.
+
+The JSON is attribute-escaped and emitted as `data-defaults`. The body must be a JSON *object*: `JSON.parse()` also accepts scalars and arrays, and docs-ui reads keys off the parsed value, so a bare `123` is as unusable as a syntax error. If the body is not a JSON object, the macro logs a warning that names the page, omits `data-defaults`, and still renders the mount point.
+
+The block accepts an open (`--`), listing (`----`), literal, or pass body. It is not registered for the paragraph context, because the processor replaces the block with the mount point: registering paragraphs would delete the prose under a stray `[iceberg-explorer]` line from the published page.
+
+|===
+| Attribute | Description
+
+| `config`
+| Initial configuration string. Emitted as `data-config`. Falls back to the `config` key of the JSON body.
+
+| `height`
+| Minimum height for the container, emitted as an inline `min-height` style. A bare number is treated as pixels (`height=400` becomes `min-height:400px`). Otherwise the value must be a CSS length in `px`, `rem`, `em`, `vh`, `vw`, or `%`; any other value is rejected with a warning rather than interpolated into the style attribute.
+
+| `engine-base`
+| Optional base location for the translation engine build, emitted as `data-engine-base`. docs-ui falls back to its own default when this is absent, so set it only to pin a specific engine build.
+|===
+
+=== Registration
+
+[,yaml]
+----
+asciidoc:
+  extensions:
+    - '@redpanda-data/docs-extensions-and-macros/macros/iceberg-explorer'
+----
+
+=== docs-ui dependency
+
+This block is half of a two-repo handshake and does nothing on its own. The explorer UI and its translation engine ship in docs-ui, and no released docs-ui bundle contains them yet: the explorer module is still open in `redpanda-data/docs-ui` (PR #404, `jake/iceberg-mode-explorer`), so on a site built with the current bundle the block renders the container and its fallback paragraph, nothing more.
+
+Order of operations before an author uses the block on a published page:
+
+. Merge and publish this package, so consumers can resolve the macro.
+. Merge and release docs-ui #404, with hydration keyed on `[data-iceberg-explorer]` (see <<Mount contract>>).
+. Add the macro to each consuming playbook's `asciidoc.extensions` (`redpanda-data/docs`, `cloud-docs`). Registering it in this repo's `local-antora-playbook.yml` covers only this repo's preview site.
+
+Until step 2 lands, a page that uses the block shows the fallback paragraph rather than an explorer. That is deliberate: it is visible, so a missing or outdated UI bundle looks broken rather than looking like a page with nothing on it.
+
 == components_by_category
 
 This macro generates a tabbed interface to display Redpanda Connect components by category.

@@ -465,6 +465,16 @@ features:
       expect(html).toContain('title="Requires a &quot;valid&quot; license."')
     })
 
+    test('escapes markup and ampersands in tooltip text', () => {
+      const html = buildEnterpriseContent({
+        ...defaults,
+        feature: 'X',
+        tooltip: 'Needs <b>a license</b> & object storage.',
+      })
+      expect(html).toContain('title="Needs &lt;b&gt;a license&lt;/b&gt; &amp; object storage."')
+      expect(html).not.toContain('<b>')
+    })
+
     test('renders plain text without a link when links are disabled', () => {
       const html = buildEnterpriseContent({ ...defaults, feature: 'Shadowing', links: false })
       expect(html).not.toContain('xref:')
