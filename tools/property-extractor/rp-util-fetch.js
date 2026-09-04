@@ -303,10 +303,32 @@ async function fetchPublishedSchema(tag) {
   }
   const release = await releaseResp.json()
 
-  const schemas = {}
+  // A published release must carry all five assets, each a real schema
+  // payload, or it is not usable. Accepting whatever subset happens to be
+  // there looks like success while every missing scope silently keeps its
+  // Tree-sitter data -- the exact class of quiet wrong answer this whole
+  // rp_util path exists to remove. The publisher itself cannot produce a
+  // partial published release (`gh release create` uploads to a draft and
+  // publishes only once every asset is up, and the /releases/tags endpoint
+  // used above never returns drafts), but a hand-made backfill release, a
+  // manually deleted asset, or a future change to the publisher all can, so
+  // validate here rather than trusting the producer.
+  const assetsByName = new Map()
   for (const asset of release.assets || []) {
-    const key = RELEASE_ASSET_TO_SCHEMA_KEY[asset.name]
-    if (!key) continue
+    assetsByName.set(asset.name, asset)
+  }
+  const missing = Object.keys(RELEASE_ASSET_TO_SCHEMA_KEY).filter(name => !assetsByName.has(name))
+  if (missing.length) {
+    console.warn(
+      `Published rp_util schema release rp-util-schema-${tag} is incomplete ` +
+      `(missing: ${missing.join(', ')}); ignoring it.`
+    )
+    return null
+  }
+
+  const schemas = {}
+  for (const [name, key] of Object.entries(RELEASE_ASSET_TO_SCHEMA_KEY)) {
+    const asset = assetsByName.get(name)
     const assetResp = await fetch(asset.url, {
       headers: { ...headers, Accept: 'application/octet-stream' }
     })
@@ -315,7 +337,27 @@ async function fetchPublishedSchema(tag) {
         `Failed to download published rp_util schema asset ${asset.name}: ${assetResp.status}`
       )
     }
-    schemas[key] = await assetResp.json()
+    let payload
+    try {
+      payload = await assetResp.json()
+    } catch (err) {
+      console.warn(
+        `Published rp_util schema asset ${name} in rp-util-schema-${tag} is not valid JSON ` +
+        `(${err.message}); ignoring the release.`
+      )
+      return null
+    }
+    // Every rp_util schema flag dumps a {"properties": {...}} object; an
+    // asset without one is a truncated or wrong-shaped upload, not a schema
+    // the merge can map.
+    if (!payload || typeof payload.properties !== 'object' || payload.properties === null) {
+      console.warn(
+        `Published rp_util schema asset ${name} in rp-util-schema-${tag} has no properties ` +
+        `object; ignoring the release.`
+      )
+      return null
+    }
+    schemas[key] = payload
   }
   return schemas
 }

@@ -247,20 +247,20 @@ describe('fetchPublishedSchema', () => {
           ]
         })
       })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ a: 1 }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ b: 2 }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ c: 3 }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ d: 4 }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ e: 5 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ properties: { a: 1 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ properties: { b: 2 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ properties: { c: 3 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ properties: { d: 4 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ properties: { e: 5 } }) })
 
     const result = await fetchPublishedSchema('v26.2.2')
 
     expect(result).toEqual({
-      clusterSchema: { a: 1 },
-      nodeSchema: { b: 2 },
-      pandaproxySchema: { c: 3 },
-      kafkaClientSchema: { d: 4 },
-      schemaRegistrySchema: { e: 5 }
+      clusterSchema: { properties: { a: 1 } },
+      nodeSchema: { properties: { b: 2 } },
+      pandaproxySchema: { properties: { c: 3 } },
+      kafkaClientSchema: { properties: { d: 4 } },
+      schemaRegistrySchema: { properties: { e: 5 } }
     })
     // The unrecognized README.md asset must not trigger a 6th download.
     expect(global.fetch).toHaveBeenCalledTimes(6)
@@ -283,7 +283,115 @@ describe('fetchPublishedSchema', () => {
 
     await expect(fetchPublishedSchema('v26.2.2')).rejects.toThrow(/500/)
   })
+
+  // A partial release must be ignored rather than half-accepted: every scope
+  // whose asset is absent would otherwise silently keep its Tree-sitter data
+  // while the run reported success.
+  test('returns null when the release is missing one of the five assets', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    global.fetch = jest.fn().mockResolvedValueOnce({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        assets: [
+          { name: 'cluster-config-schema.json', url: 'https://api.github.com/asset/1' }
+        ]
+      })
+    })
+
+    const result = await fetchPublishedSchema('v26.2.2')
+
+    expect(result).toBeNull()
+    // Rejected on the release listing alone -- no asset is downloaded.
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/incomplete/))
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/node-config-schema\.json/)
+    )
+    warn.mockRestore()
+  })
+
+  test('returns null when an asset payload has no properties object', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          assets: [
+            { name: 'cluster-config-schema.json', url: 'https://api.github.com/asset/1' },
+            { name: 'node-config-schema.json', url: 'https://api.github.com/asset/2' },
+            { name: 'pandaproxy-config-schema.json', url: 'https://api.github.com/asset/3' },
+            { name: 'kafka-client-config-schema.json', url: 'https://api.github.com/asset/4' },
+            { name: 'schema-registry-config-schema.json', url: 'https://api.github.com/asset/5' }
+          ]
+        })
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ properties: { a: 1 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ error: 'truncated upload' }) })
+
+    const result = await fetchPublishedSchema('v26.2.2')
+
+    expect(result).toBeNull()
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/node-config-schema\.json.*no properties object/)
+    )
+    warn.mockRestore()
+  })
+
+  test('returns null when an asset is not valid JSON', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          assets: Object.keys({
+            'cluster-config-schema.json': 1,
+            'node-config-schema.json': 1,
+            'pandaproxy-config-schema.json': 1,
+            'kafka-client-config-schema.json': 1,
+            'schema-registry-config-schema.json': 1
+          }).map((name, i) => ({ name, url: `https://api.github.com/asset/${i + 1}` }))
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => { throw new Error('Unexpected end of JSON input') }
+      })
+
+    const result = await fetchPublishedSchema('v26.2.2')
+
+    expect(result).toBeNull()
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/not valid JSON/))
+    warn.mockRestore()
+  })
 })
+
+// A complete, valid published release: all five named assets, each payload a
+// real {"properties": ...} schema. fetchPublishedSchema now rejects anything
+// less (see its own describe block), so a test that only needs to reach the
+// published path has to mock the whole set.
+function mockCompleteRelease() {
+  const names = [
+    'cluster-config-schema.json',
+    'node-config-schema.json',
+    'pandaproxy-config-schema.json',
+    'kafka-client-config-schema.json',
+    'schema-registry-config-schema.json'
+  ]
+  const fetchMock = jest.fn().mockResolvedValueOnce({
+    status: 200,
+    ok: true,
+    json: async () => ({
+      assets: names.map((name, i) => ({ name, url: `https://api.github.com/asset/${i + 1}` }))
+    })
+  })
+  for (const name of names) {
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ properties: { [name]: true } }) })
+  }
+  return fetchMock
+}
 
 describe('getRpUtilSchema', () => {
   let tmpDirs
@@ -332,11 +440,7 @@ describe('getRpUtilSchema', () => {
   })
 
   test("normalizes a v-less release-shaped ref to its v-prefixed tag for the release lookup", async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      status: 200,
-      ok: true,
-      json: async () => ({ assets: [] })
-    })
+    global.fetch = mockCompleteRelease()
 
     await getRpUtilSchema('26.2.2')
 
@@ -366,26 +470,39 @@ describe('getRpUtilSchema', () => {
   })
 
   test('uses a published release instead of building when one exists', async () => {
-    global.fetch = jest.fn()
-      .mockResolvedValueOnce({
-        status: 200,
-        ok: true,
-        json: async () => ({
-          assets: [
-            { name: 'cluster-config-schema.json', url: 'https://api.github.com/asset/1' },
-            { name: 'node-config-schema.json', url: 'https://api.github.com/asset/2' }
-          ]
-        })
-      })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ cluster: true }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ node: true }) })
+    global.fetch = mockCompleteRelease()
 
     const result = await getRpUtilSchema('v26.2.2')
 
-    expect(result.clusterSchema).toEqual({ cluster: true })
-    expect(result.nodeSchema).toEqual({ node: true })
+    expect(result.clusterSchema).toEqual({ properties: { 'cluster-config-schema.json': true } })
+    expect(result.nodeSchema).toEqual({ properties: { 'node-config-schema.json': true } })
     expect(result.sourcePath).toBeNull()
     expect(spawnSync).not.toHaveBeenCalled()
+  })
+
+  // The counterpart of the above: an incomplete release must not be treated
+  // as a usable fast path. Building from source is the only correct answer
+  // there, and on a consumer with no Bazel that surfaces as a loud failure
+  // rather than as cluster properties quietly keeping Tree-sitter data.
+  test('falls back to building from source when the published release is incomplete', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {})
+    jest.spyOn(os, 'platform').mockReturnValue('linux')
+    githubToken.getGitHubToken.mockReturnValue('tok')
+    githubToken.getAuthenticatedGitHubUrl.mockReturnValue('https://tok@github.com/redpanda-data/streaming-enterprise.git')
+    spawnSync.mockReturnValue({ status: 0, stdout: '{}', stderr: '' })
+    global.fetch = jest.fn().mockResolvedValueOnce({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        assets: [{ name: 'cluster-config-schema.json', url: 'https://api.github.com/asset/1' }]
+      })
+    })
+
+    await getRpUtilSchema('v26.2.2')
+
+    expect(spawnSync).toHaveBeenCalled()
+    os.platform.mockRestore()
+    console.warn.mockRestore()
   })
 
   test('preferPublished: false always builds from source, even if a release exists', async () => {
