@@ -50,6 +50,13 @@ function routeFile (file) {
  * @returns {Map<string, Set<number>>}
  */
 function getChangedLines (repo, base) {
+  return parseUnifiedDiff(runGitDiff(repo, base))
+}
+
+/**
+ * Run `git diff <base>...HEAD` and return the raw text.
+ */
+function runGitDiff (repo, base) {
   const result = spawnSync(
     'git',
     ['diff', '--unified=0', '--no-color', `${base}...HEAD`],
@@ -59,7 +66,17 @@ function getChangedLines (repo, base) {
   if (result.status !== 0) {
     throw new Error(`git diff ${base}...HEAD failed in ${repo}: ${result.stderr || result.stdout}`)
   }
-  return parseUnifiedDiff(result.stdout)
+  return result.stdout
+}
+
+/**
+ * Both sides of the diff from a single git invocation.
+ *
+ * @returns {{ changed: Map<string, Set<number>>, removed: Map<string, Set<number>> }}
+ */
+function getDiffLines (repo, base) {
+  const diffText = runGitDiff(repo, base)
+  return { changed: parseUnifiedDiff(diffText), removed: parseUnifiedDiffRemovals(diffText) }
 }
 
 /**
@@ -99,6 +116,53 @@ function parseUnifiedDiff (diffText) {
 }
 
 /**
+ * Parse unified diff text into file -> Set(deleted PRE-image line numbers),
+ * keyed by the old path. This is the half parseUnifiedDiff deliberately throws
+ * away, and on its own it is what keeps a deletion-only PR visible.
+ *
+ * Why it is needed: declarations are extracted from HEAD, so a removed
+ * property, metric or command cannot be extracted at all, and a pure-deletion
+ * hunk contributes no post-image lines to anchor on. Without the old side, a
+ * PR that only deletes doc-string declarations reports zero declarations and
+ * every downstream review step skips, precisely when a removed public surface
+ * is the most doc-relevant change a PR can make.
+ *
+ * These line numbers are a signal that a doc-string surface lost content, not
+ * an extraction: naming them as declarations would overstate what a diff alone
+ * can tell us.
+ */
+function parseUnifiedDiffRemovals (diffText) {
+  const removed = new Map()
+  const lines = diffText.split('\n')
+  let oldFile = null
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // git always emits the ---/+++ header pair on consecutive lines, so
+    // requiring the partner keeps a deleted source line that happens to start
+    // with "-- " from being misread as a header (the mirror of the "++ "
+    // hazard noted in parseUnifiedDiff).
+    if (line.startsWith('--- ') && (lines[i + 1] || '').startsWith('+++ ')) {
+      oldFile = line.startsWith('--- a/') ? line.slice(6).trim() : null
+      continue
+    }
+    if (!line.startsWith('@@') || oldFile === null) continue
+
+    const hunk = line.match(/^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@/)
+    if (!hunk) continue
+    const start = parseInt(hunk[1], 10)
+    const count = hunk[2] === undefined ? 1 : parseInt(hunk[2], 10)
+    if (count === 0) continue // pure addition: nothing removed
+
+    if (!removed.has(oldFile)) removed.set(oldFile, new Set())
+    const lineSet = removed.get(oldFile)
+    for (let i2 = 0; i2 < count; i2++) lineSet.add(start + i2)
+  }
+
+  return removed
+}
+
+/**
  * Group changed files by surface.
  *
  * @param {Map<string, Set<number>>} changedLines - From getChangedLines
@@ -131,7 +195,9 @@ module.exports = {
   SURFACE_ROUTES,
   routeFile,
   getChangedLines,
+  getDiffLines,
   parseUnifiedDiff,
+  parseUnifiedDiffRemovals,
   classifyDiff,
   spanIntersects
 }
