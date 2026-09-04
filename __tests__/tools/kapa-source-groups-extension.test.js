@@ -16,7 +16,7 @@ const os = require('os');
 const path = require('path');
 
 const ext = require('../../extensions/kapa-source-groups.js');
-const { validateMapping, ATTRIBUTE_NAME } = ext;
+const { validateMapping, ATTRIBUTE_NAME, ASSET_DIR, ASSET_FILENAME } = ext;
 
 const GOOD = {
   project_id: '97f44223-f930-4fb9-ae1e-ecd436a4d85c',
@@ -65,6 +65,8 @@ function harness ({ mapping = GOOD, raw = null, components, missingFile = false 
     // model from the playbook, so site.keys set here reaches every page whether
     // or not it belongs to a component.
     runPlaybook: (playbook = {}) => { listeners.playbookBuilt({ playbook }); return playbook; },
+    // beforePublish publishes the mapping as a site asset for the /api/ proxy.
+    runPublish: () => { const added = []; listeners.beforePublish({ siteCatalog: { addFile: (f) => added.push(f) } }); return added; },
     catalog,
     logs,
     attrsOf: async () => componentList.flatMap((c) => c.versions.filter((v) => v.asciidoc).map((v) => v.asciidoc.attributes)),
@@ -218,6 +220,39 @@ describe('the extension also publishes via site.keys, for pages with no componen
       const h = harness(opts);
       const playbook = h.runPlaybook();
       expect(playbook.site && playbook.site.keys && playbook.site.keys[ATTRIBUTE_NAME]).toBeUndefined();
+    }
+  });
+});
+
+describe('the extension publishes a site asset for the /api/ proxy', () => {
+  // /api/ is Bump.sh HTML assembled by docs-site's proxy-api-docs edge function.
+  // It has no Antora page context and cannot import from node_modules, so it
+  // reads the default group from this asset at request time. Hardcoding the UUID
+  // into docs-ui's static widget context instead would be a second copy of the
+  // mapping that drifts the first time a Kapa group is recreated.
+
+  it('writes the mapping next to assets/widgets, which the proxy already fetches', () => {
+    const h = harness();
+    const [file] = h.runPublish();
+    expect(file.out.path).toBe(`${ASSET_DIR}/${ASSET_FILENAME}`);
+    expect(JSON.parse(file.contents.toString('utf8'))).toEqual(GOOD);
+  });
+
+  it('publishes exactly one file', () => {
+    expect(harness().runPublish()).toHaveLength(1);
+  });
+
+  it('publishes nothing when the mapping is unusable', () => {
+    // The proxy treats a missing asset as "send no filter", so failing closed
+    // here degrades /api/ to today's behaviour rather than to a wrong group.
+    for (const opts of [{ missingFile: true }, { raw: '{' }, { mapping: { segments: {} } }]) {
+      expect(harness(opts).runPublish()).toHaveLength(0);
+    }
+  });
+
+  it('never throws out of beforePublish, which would fail the build at the last step', () => {
+    for (const opts of [{ missingFile: true }, { raw: '{' }, { mapping: null }]) {
+      expect(() => harness(opts).runPublish()).not.toThrow();
     }
   });
 });
