@@ -77,11 +77,12 @@ describe('metrics surface end-to-end (fixture file)', () => {
     expect(startOffsetRules).toEqual(expect.arrayContaining(['name-echo', 'starts-lowercase', 'too-short']))
 
     // "commited" typo string is FINE (typo detection is not a rule), but the
-    // terminal period violates the metrics convention.
+    // terminal period violates the metrics convention, and the description
+    // spells the aside as "i.e." where the style guide takes "that is".
     const committed = byName.get('committed_offset')
     expect(committed).toBeDefined()
-    expect(committed.rules.map((r) => r.id)).toEqual(['trailing-period'])
-    expect(committed.rules[0].severity).toBe('warning')
+    expect(committed.rules.map((r) => r.id).sort()).toEqual(['latin-abbreviation', 'trailing-period'])
+    expect(committed.rules.every((r) => r.severity === 'warning')).toBe(true)
 
     // Unverifiable stays info-level, never error
     const buffer = byName.get('buffer_size')
