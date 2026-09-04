@@ -61,6 +61,10 @@ function harness ({ mapping = GOOD, raw = null, components, missingFile = false 
   ext.register.call(ctx, { config: { mapping_file: file } });
   return {
     run: () => listeners.contentClassified({ contentCatalog: catalog }),
+    // playbookBuilt is the 404 page's only channel. Antora derives the site UI
+    // model from the playbook, so site.keys set here reaches every page whether
+    // or not it belongs to a component.
+    runPlaybook: (playbook = {}) => { listeners.playbookBuilt({ playbook }); return playbook; },
     catalog,
     logs,
     attrsOf: async () => componentList.flatMap((c) => c.versions.filter((v) => v.asciidoc).map((v) => v.asciidoc.attributes)),
@@ -167,6 +171,53 @@ describe('the extension degrades rather than setting something wrong', () => {
       const h = harness(opts);
       await h.run();
       expect(h.logs.warn.join()).toMatch(/Ask AI will search every docs version/);
+    }
+  });
+});
+
+describe('the extension also publishes via site.keys, for pages with no component', () => {
+  // 404.hbs renders the Ask AI panel but has no page.component and no
+  // page.componentVersion, so the component-version attribute never reaches it.
+  // Its layout pulls in head and header, both of which already read site.keys.
+  // Verified in a real Antora build: before this hook 404.html emitted
+  // window.KAPA_SOURCE_GROUP_IDS = [], meaning Ask AI searched all nine versions
+  // from the one page where a reader is most likely to ask where something went.
+
+  it('sets site.keys on the playbook', () => {
+    const h = harness();
+    const playbook = h.runPlaybook();
+    expect(JSON.parse(playbook.site.keys[ATTRIBUTE_NAME])).toEqual(GOOD);
+  });
+
+  it('creates site and site.keys when the playbook has neither', () => {
+    // A minimal playbook has no site.keys at all, and throwing here would fail
+    // the whole build before a single page rendered.
+    const h = harness();
+    expect(() => h.runPlaybook({})).not.toThrow();
+    const playbook = h.runPlaybook({ site: {} });
+    expect(playbook.site.keys[ATTRIBUTE_NAME]).toBeDefined();
+  });
+
+  it('preserves other site.keys rather than replacing the object', () => {
+    // header-scripts, announcement-bar and head-meta all read site.keys.
+    // Clobbering it would silently disable them.
+    const h = harness();
+    const playbook = h.runPlaybook({ site: { keys: { google_analytics: 'G-XYZ' } } });
+    expect(playbook.site.keys.google_analytics).toBe('G-XYZ');
+    expect(playbook.site.keys[ATTRIBUTE_NAME]).toBeDefined();
+  });
+
+  it('does not clobber an explicit playbook override', () => {
+    const h = harness();
+    const playbook = h.runPlaybook({ site: { keys: { [ATTRIBUTE_NAME]: 'preset' } } });
+    expect(playbook.site.keys[ATTRIBUTE_NAME]).toBe('preset');
+  });
+
+  it('sets nothing when the mapping is unusable, matching the other hook', () => {
+    for (const opts of [{ missingFile: true }, { raw: '{' }, { mapping: { segments: {} } }]) {
+      const h = harness(opts);
+      const playbook = h.runPlaybook();
+      expect(playbook.site && playbook.site.keys && playbook.site.keys[ATTRIBUTE_NAME]).toBeUndefined();
     }
   });
 });
