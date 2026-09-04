@@ -118,7 +118,13 @@ describe('kapa drift: in sync', () => {
 });
 
 describe('kapa drift: genuine drift files exactly one issue', () => {
-  const drift = { VALIDATE_STATUS: '1', VALIDATE_OUTPUT: '✗ 26.3: published but has no Kapa source group.' };
+  // The sentinel is what distinguishes "validate established drift" from
+  // "validate exited 1 because it crashed or got a bad flag". The script
+  // requires it, so every drift fixture carries it.
+  const drift = {
+    VALIDATE_STATUS: '1',
+    VALIDATE_OUTPUT: '✗ 26.3: published but has no Kapa source group.\nKAPA_DRIFT_CONFIRMED',
+  };
 
   test('creates an issue when none is open', () => {
     const r = run({ ...drift, GH_LIST_MODE: 'none' });
@@ -171,7 +177,7 @@ describe('kapa drift: inconclusive runs fail loudly and file nothing', () => {
   test('drift found but the issue write fails exits 2 rather than claiming success', () => {
     // Reporting exit 1 here would say "issue filed" when nothing was filed.
     const r = run({
-      VALIDATE_STATUS: '1', VALIDATE_OUTPUT: '✗ drift',
+      VALIDATE_STATUS: '1', VALIDATE_OUTPUT: '✗ drift\nKAPA_DRIFT_CONFIRMED',
       GH_LIST_MODE: 'none', GH_WRITE_MODE: 'fail',
     });
     expect(r.status).toBe(2);
@@ -180,7 +186,7 @@ describe('kapa drift: inconclusive runs fail loudly and file nothing', () => {
 
   test('drift found but the comment write fails exits 2', () => {
     const r = run({
-      VALIDATE_STATUS: '1', VALIDATE_OUTPUT: '✗ drift',
+      VALIDATE_STATUS: '1', VALIDATE_OUTPUT: '✗ drift\nKAPA_DRIFT_CONFIRMED',
       GH_LIST_MODE: 'existing', GH_EXISTING_NUMBER: '9', GH_WRITE_MODE: 'fail',
     });
     expect(r.status).toBe(2);
@@ -190,7 +196,7 @@ describe('kapa drift: inconclusive runs fail loudly and file nothing', () => {
   test('an unreadable issue list still files a new issue rather than dying', () => {
     // gh issue list failing is not proof no issue exists, but filing a possible
     // duplicate beats dropping the drift report entirely.
-    const r = run({ VALIDATE_STATUS: '1', VALIDATE_OUTPUT: '✗ drift', GH_LIST_MODE: 'error' });
+    const r = run({ VALIDATE_STATUS: '1', VALIDATE_OUTPUT: '✗ drift\nKAPA_DRIFT_CONFIRMED', GH_LIST_MODE: 'error' });
     expect(r.status).toBe(1);
     expect(r.ghCalls).toMatch(/issue create/);
   });
@@ -209,5 +215,76 @@ describe('kapa drift: it runs the pinned doc-tools', () => {
   test('uses npx --no-install so CI cannot silently pull a different release', () => {
     const r = run({ VALIDATE_STATUS: '0', VALIDATE_OUTPUT: 'ok' });
     expect(r.npxCalls).toMatch(/--no-install doc-tools validate kapa-source-groups/);
+  });
+});
+
+describe('kapa drift: exit 1 without the sentinel is a tool failure, not drift', () => {
+  // Exit 1 used to be taken as proof of drift. But Commander exits 1 on a usage
+  // error, and an uncaught throw in validate's async action also exits 1, so a
+  // typo'd flag or a TypeError filed a weekly issue announcing that the mapping
+  // was out of date and quoting a Node stack trace as the drift report.
+
+  test('a Commander usage error files nothing and exits 2', () => {
+    const r = run({
+      VALIDATE_STATUS: '1',
+      VALIDATE_OUTPUT: "error: unknown option '--nope'",
+    });
+    expect(r.status).toBe(2);
+    expect(r.ghCalls.trim()).toBe('');
+    expect(r.stderr).toMatch(/exited 1 without confirming drift/);
+  });
+
+  test('a crash files nothing and exits 2', () => {
+    const r = run({
+      VALIDATE_STATUS: '1',
+      VALIDATE_OUTPUT: "TypeError: Cannot read properties of undefined (reading 'includes')\n    at Object.<anonymous>",
+    });
+    expect(r.status).toBe(2);
+    expect(r.ghCalls.trim()).toBe('');
+  });
+
+  test('a sentinel appearing mid-line does not count', () => {
+    // Matched as a whole line, so prose mentioning the token cannot fake it.
+    const r = run({
+      VALIDATE_STATUS: '1',
+      VALIDATE_OUTPUT: 'the script greps for KAPA_DRIFT_CONFIRMED before filing',
+    });
+    expect(r.status).toBe(2);
+    expect(r.ghCalls.trim()).toBe('');
+  });
+
+  test('the sentinel is stripped from the issue body', () => {
+    // It is machine plumbing; a reader opening the issue should not see it.
+    const r = run({
+      VALIDATE_STATUS: '1',
+      VALIDATE_OUTPUT: '✗ 26.3: published but has no Kapa source group.\nKAPA_DRIFT_CONFIRMED',
+    });
+    expect(r.status).toBe(1);
+    expect(r.ghCalls).toMatch(/issue create/);
+    expect(r.ghCalls).toMatch(/26\.3: published but has no Kapa source group/);
+    expect(r.ghCalls).not.toMatch(/KAPA_DRIFT_CONFIRMED/);
+  });
+});
+
+describe('kapa drift: the workflow cannot go permanently red on a fork PR', () => {
+  const workflow = fs.readFileSync(WORKFLOW_PATH, 'utf8');
+  const yaml = require('js-yaml');
+  const parsed = yaml.load(workflow);
+
+  test('the job is skipped for a pull_request from a fork', () => {
+    // A fork PR gets no secrets and a read-only token, so the OIDC step cannot
+    // assume the role: RP_AWS_CRED_ACCOUNT_ID expands to empty and
+    // role-to-assume becomes arn:aws:iam:::role/..., which errors. An external
+    // contributor would get a red check with no way to fix it.
+    const cond = String(parsed.jobs.drift.if || '');
+    expect(cond).toMatch(/pull_request/);
+    expect(cond).toMatch(/head\.repo\.full_name == github\.repository/);
+  });
+
+  test('schedule and workflow_dispatch are not blocked by that guard', () => {
+    // head.repo is unset for those events, so the first clause must carry them.
+    const cond = String(parsed.jobs.drift.if || '');
+    expect(cond).toMatch(/github\.event_name != 'pull_request'/);
+    expect(Object.keys(parsed.on)).toEqual(expect.arrayContaining(['schedule', 'workflow_dispatch']));
   });
 });
