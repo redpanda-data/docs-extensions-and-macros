@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redpanda.com/schemas/kapa-source-groups.schema.json",
+  "title": "Kapa source groups",
+  "description": "Generated mapping from a docs URL version segment to the Kapa source group that scopes retrieval to that version. Produced by `doc-tools generate kapa-source-groups` from Kapa's ingestion API; do not hand-edit. Kapa publishes no write API, so the groups and their source assignments are created in the Kapa dashboard and this file only records what is there. See tools/kapa-source-groups/generate-kapa-source-groups.js.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["project_id", "parent_group", "default_segment", "segments", "global_sources"],
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Kapa project the groups belong to. Matches KAPA_PROJECT_ID. Recorded so a mapping generated against the wrong project is obvious rather than silently wrong."
+    },
+    "parent_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "type"],
+      "description": "The product-level group the version groups hang off. Kapa's hierarchy is two levels and is expressed top-down via sub_groups; there is no parent_id field anywhere in its schema, so the generator finds this by 'the group that has children' rather than by name. Renaming it in the dashboard is therefore safe.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "name": { "type": "string" },
+        "type": {
+          "type": ["string", "null"],
+          "enum": ["product", "version", null],
+          "description": "Kapa requires every group to be typed. The enum appears only in Kapa's API schema, not in any prose doc. Nothing in Kapa's documented retrieval semantics reads it, so it is recorded for humans rather than relied on."
+        }
+      }
+    },
+    "default_segment": {
+      "type": "string",
+      "description": "Segment used for any page with no version of its own: Cloud, Connect, Agentic Data Plane, labs, home, search, the 404 page, and the Bump-rendered /api/ pages. Must be a key of `segments`. Deliberately set rather than left unset: sending no group filter makes Kapa search every version at once, which is the DOC-2450 failure (a reader on an unversioned page was answered from 25.2 instead of current)."
+    },
+    "segments": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Keyed by the docs URL version segment, not by the Antora `page.version` attribute. The two disagree for the latest release: `latest_version_segment: 'current'` publishes 26.2 at /streaming/current/ while page.version reads 26.2. Kapa source_url values and the URL prefixes in docs-site's lib/platform-filter.mjs both use the segment, so that is what this keys on.",
+      "additionalProperties": { "$ref": "#/$defs/segment" }
+    },
+    "global_sources": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Names of the Kapa sources deliberately assigned to no group. These are the 'global' set: always returned alongside whichever group a query scopes to. Recorded because the design depends on it — Agentic Data Plane, Cloud and Connect content must stay reachable from every page, whatever version the reader is on. Note 'Global' is NOT a real Kapa group despite the dashboard showing a Global row: the API returns no such object and an unassigned source reports source_groups: []."
+    }
+  },
+  "$defs": {
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group_id", "group_name", "source_ids", "source_names"],
+      "properties": {
+        "group_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The value to pass as sourceGroupIdsInclude (Agent SDK), sourceGroupIDsInclude (Chat SDK, note the capital ID), or _meta.source_group_ids_include (hosted MCP server). Kapa group IDs are stable across renames."
+        },
+        "group_name": { "type": "string" },
+        "source_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "format": "uuid" },
+          "description": "Sources assigned to this group. minItems is 1 on purpose: a version group with no sources is worse than no group at all, because scoping to it returns only the global set and the reader silently gets nothing version-specific. The generator refuses to emit such a mapping."
+        },
+        "source_names": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Human-readable counterpart to source_ids, so a reviewer can sanity-check the mapping without opening the Kapa dashboard."
+        }
+      }
+    }
+  }
+}
