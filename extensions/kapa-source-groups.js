@@ -31,6 +31,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 const ATTRIBUTE_NAME = 'kapa-source-groups'
 // Sits beside assets/widgets/, which proxy-api-docs.js already fetches from the
@@ -65,6 +66,11 @@ function validateMapping (mapping) {
 
 module.exports.register = function ({ config = {} } = {}) {
   const logger = this.getLogger('kapa-source-groups-extension')
+
+  // Three listeners on a generator context that already carries 30+ extensions,
+  // which trips Node's default max-listeners warning. Raised before subscribing,
+  // per __tests__/extensions/raise-listener-limit.test.js.
+  raiseListenerLimit(this)
   const mappingPath = config.mapping_file ? path.resolve(config.mapping_file) : DEFAULT_MAPPING_PATH
 
   /** Load + validate once, or return null having warned with the consequence. */
