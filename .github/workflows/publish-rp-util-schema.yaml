@@ -1,0 +1,286 @@
+---
+# Builds rp_util (redpanda-data/streaming-enterprise) at a given tag and
+# publishes its cluster/node config schema JSON as a release on this repo.
+#
+# rp_util's own source comment says it "may not be shipped as a part of
+# official release artifacts" -- that's about streaming-enterprise's/redpanda's
+# release process, not this one. This workflow never ships the rp_util binary
+# itself, only its JSON schema output, as an internal snapshot this repo's own
+# property-docs generation consumes. See tools/property-extractor/rp-util-fetch.js
+# and rp_util_merge.py for how that consumption works.
+#
+# Why three triggers: release-day property-docs generation HARD-FAILS when no
+# rp_util schema exists for the release tag (merge-rp-util.js refuses to ship
+# the Tree-sitter-only misparse), so the schema has to exist before that run.
+#   - repository_dispatch lets streaming-enterprise's dispatch-docs-updates.yml
+#     fire this the moment a GA release or RC tag lands (one extra dispatch
+#     step there, event-type publish-rp-util-schema, payload {"tag": ...}).
+#   - schedule is the self-maintaining backstop: every six hours it publishes
+#     a schema for any recent release/RC tag that doesn't have one, so a
+#     missed or failed dispatch heals without anyone remembering to run it.
+#   - workflow_dispatch stays for backfills and one-offs.
+name: publish-rp-util-schema
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'streaming-enterprise tag to build rp_util from (e.g. v26.2.2)'
+        required: true
+  repository_dispatch:
+    types: [publish-rp-util-schema]
+  schedule:
+    - cron: '17 */6 * * *'
+permissions:
+  id-token: write
+  contents: write
+# One run at a time: concurrent runs would race each other creating the same
+# rp-util-schema-<tag> release. cancel-in-progress: false keeps the running
+# build alive, but GitHub holds at most ONE pending run per concurrency
+# group -- a second dispatch arriving while a build runs and another run is
+# already pending REPLACES that pending run, so its tag can be dropped from
+# this cycle. That loss is survivable by design: the six-hourly schedule
+# picks up any release/RC tag still missing a schema.
+concurrency:
+  group: publish-rp-util-schema
+  cancel-in-progress: false
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tags: ${{ steps.missing.outputs.tags }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+      - uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/actions_bot_token
+          parse-json-secrets: true
+      - name: Resolve tags that still need a schema release
+        id: missing
+        env:
+          # Tag values are read as "$VAR", never spliced into the script via
+          # ${{ }}: a repository_dispatch payload (or a hostile ref name)
+          # must not be able to inject shell into a job holding a bot token.
+          # toJSON() keeps a value containing quotes from breaking the env
+          # assignment itself.
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
+          DISPATCH_TAG: ${{ github.event_name == 'repository_dispatch' && toJSON(github.event.client_payload.tag) || '""' }}
+          GH_TOKEN: ${{ github.token }}
+          SE_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Same release/RC shape merge-rp-util.js's RELEASE_TAG_RX accepts,
+          # and the strict -rc[0-9]+$ pattern streaming-enterprise's own
+          # dispatch workflow re-validates with. Leading v is mandatory here:
+          # streaming-enterprise tags are v-prefixed and every release this
+          # workflow publishes is named rp-util-schema-<v-prefixed tag>, so
+          # v-less candidates are normalized below rather than skipped -- a
+          # skip would make `gh workflow run ... -f tag=26.2.2` no-op green
+          # while merge-rp-util's remediation message told the operator to
+          # run exactly that.
+          TAG_RX='^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$'
+
+          candidates=()
+          case "$EVENT_NAME" in
+            workflow_dispatch)
+              candidates+=("$INPUT_TAG")
+              ;;
+            repository_dispatch)
+              tag=$(printf '%s' "$DISPATCH_TAG" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v if isinstance(v, str) else "")')
+              candidates+=("$tag")
+              ;;
+            schedule)
+              # Newest 6 release/RC tags. RC tags never get a GitHub Release
+              # in streaming-enterprise (they're plain tag pushes), so list
+              # git tag refs, not releases. Via gh api so the bot token stays
+              # in env: an ls-remote URL with embedded userinfo puts the
+              # token in argv and in git's verbatim URL echo on failure.
+              # sort -V orders "v26.2.2-rc1" AFTER "v26.2.2", so a burst of
+              # RCs could crowd their own GA tag out of tail -6; mapping -rc
+              # to ~rc for the sort (~ sorts lowest, the same trick
+              # update-property-docs.yaml uses) keeps every GA newer than
+              # all of its RCs.
+              while IFS= read -r tag; do
+                candidates+=("$tag")
+              done < <(GH_TOKEN="$SE_TOKEN" gh api --paginate \
+                  repos/redpanda-data/streaming-enterprise/git/refs/tags \
+                  --jq '.[].ref' \
+                | sed 's|^refs/tags/||' \
+                | grep -E "$TAG_RX" \
+                | sed 's/-rc/~rc/' | sort -V | sed 's/~rc/-rc/' \
+                | tail -6)
+              ;;
+          esac
+
+          missing=()
+          for tag in "${candidates[@]}"; do
+            # Normalize a v-less release-shaped tag to its canonical
+            # v-prefixed form before validating.
+            if printf '%s' "$tag" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$'; then
+              tag="v${tag}"
+            fi
+            if ! printf '%s' "$tag" | grep -qE "$TAG_RX"; then
+              echo "Skipping '$tag': not a release or RC tag" >&2
+              continue
+            fi
+            # Published-and-complete check, not `gh release view`: view also
+            # matches a DRAFT left behind by a mid-upload death of `gh
+            # release create` (which creates as draft, uploads, then
+            # publishes), while the consumers -- rp-util-fetch.js's fast path
+            # and the docs repo's schema wait -- use the published-only
+            # /releases/tags endpoint. Treating a draft or an
+            # incomplete-asset release as "already published" would wedge the
+            # tag forever; here it stays a candidate and the publish step
+            # deletes and recreates it.
+            # Asset NAMES, not just a count of 5: five uploads of the
+            # wrong or duplicated names satisfy a count check while leaving
+            # a scope the consumer can never resolve. rp-util-fetch.js
+            # validates the same five names on its side.
+            missing_assets=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/rp-util-schema-${tag}" \
+              --jq '["cluster-config-schema.json","node-config-schema.json","pandaproxy-config-schema.json","kafka-client-config-schema.json","schema-registry-config-schema.json"]
+                    - [.assets[].name] | join(",")' 2>/dev/null || echo "missing")
+            if [ -z "$missing_assets" ]; then
+              echo "rp-util-schema-${tag} already published with all assets; skipping" >&2
+              continue
+            fi
+            missing+=("$tag")
+          done
+
+          tags=$(printf '%s\n' "${missing[@]+"${missing[@]}"}" | python3 -c 'import json,sys; print(json.dumps([l for l in sys.stdin.read().splitlines() if l]))')
+          echo "Tags to build: $tags"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+  build-and-publish:
+    needs: resolve
+    if: needs.resolve.outputs.tags != '[]'
+    # Pinned, not ubuntu-latest: Bazel's rules_foreign_cc bundles a prebuilt
+    # ninja binary requiring glibc >= 2.38, which Ubuntu 22.04 (glibc 2.35)
+    # doesn't have. Confirmed locally via CMake's own "GLIBC_2.38 not found"
+    # failure. ubuntu-latest is migrating to 24.04 but isn't there on every
+    # runner yet, so pin explicitly rather than depend on the rollout.
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      # Serial: each build is a full Bazel run; two at once just thrash the
+      # runner pool for a task with no deadline tighter than "before the next
+      # release's docs generation".
+      max-parallel: 1
+      matrix:
+        tag: ${{ fromJSON(needs.resolve.outputs.tags) }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+      - uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/actions_bot_token
+          parse-json-secrets: true
+      - name: Checkout streaming-enterprise
+        uses: actions/checkout@v6
+        with:
+          repository: redpanda-data/streaming-enterprise
+          ref: ${{ matrix.tag }}
+          token: ${{ env.ACTIONS_BOT_TOKEN }}
+          path: streaming-enterprise
+          persist-credentials: false
+      # persist-credentials: false above keeps the bot token out of the
+      # checkout's .git/config, but not out of the job's environment:
+      # aws-secretsmanager-get-secrets publishes ACTIONS_BOT_TOKEN through
+      # GITHUB_ENV, and configure-aws-credentials does the same for the
+      # assumed role's keys, so both stay readable by every later step --
+      # including the Bazel build and the rp_util binary it produces, which
+      # run build logic and code from the streaming-enterprise checkout
+      # rather than from this repo. Nothing past this point needs either
+      # (checkout was the bot token's only consumer, and the release upload
+      # below uses github.token), so blank them out before any
+      # cross-repository code runs. Assigning an empty value is the only way
+      # to drop a variable another step exported via GITHUB_ENV.
+      - name: Drop credentials before building cross-repository code
+        run: |
+          set -euo pipefail
+          for var in ACTIONS_BOT_TOKEN \
+                     AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+            echo "$var=" >> "$GITHUB_ENV"
+          done
+      - name: Install build dependencies
+        # libatomic1: the hermetic LLVM toolchain's clang binary is linked
+        # against libatomic.so.1. build-essential + the autotools set below:
+        # several rules_foreign_cc genrules (liburing, krb5, ...) shell out
+        # straight to configure+make on PATH rather than through Bazel's own
+        # toolchain resolution. Usually already present on ubuntu-latest, but
+        # installed explicitly rather than assumed -- see rp-util-fetch.js's
+        # Docker path for how this list was arrived at.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq -y libatomic1 build-essential \
+            perl bison flex python3 pkg-config m4 autoconf automake libtool gawk texinfo
+      # No disk-cache: it would store Bazel BUILD OUTPUTS compiled from the
+      # private streaming-enterprise checkout in this public repo's Actions
+      # cache, where default-branch caches are restorable by fork PR runs --
+      # the same exposure class that got the private-checkout cache removed
+      # from test.yaml. repository-cache is safe to keep: it holds only
+      # Bazel's downloaded external archives, and every external in
+      # streaming-enterprise's MODULE.bazel / bazel/repositories.bzl resolves
+      # to a public host (public GitHub repos, vectorized-public S3, pypi,
+      # dl.grafana.com, ...) -- verified 2026-09-02.
+      - uses: bazel-contrib/setup-bazel@0.19.0
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+          module-root: streaming-enterprise
+      - name: Build rp_util
+        working-directory: streaming-enterprise
+        env:
+          CI: false
+        run: bazel build --lockfile_mode=off //src/v/rp_util:rp_util
+      - name: Generate schema JSON
+        run: |
+          mkdir -p schema-out
+          BIN=streaming-enterprise/bazel-bin/src/v/rp_util/rp_util
+          "$BIN" --config_schema_json > schema-out/cluster-config-schema.json
+          "$BIN" --node_config_schema_json > schema-out/node-config-schema.json
+          "$BIN" --pandaproxy_config_schema_json > schema-out/pandaproxy-config-schema.json
+          "$BIN" --kafka_client_config_schema_json > schema-out/kafka-client-config-schema.json
+          "$BIN" --schema_registry_config_schema_json > schema-out/schema-registry-config-schema.json
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ matrix.tag }}
+        run: |
+          # A run queued behind another (see concurrency above) can find its
+          # release already published; skipping is success, not failure. The
+          # check is published-and-complete (published-only /releases/tags
+          # endpoint, all 5 assets), NOT `gh release view`: view also matches
+          # a DRAFT left behind when `gh release create` -- which creates as
+          # draft, uploads assets, then publishes -- dies mid-upload. The
+          # consumers (rp-util-fetch.js's fast path and the docs repo's
+          # schema wait) only ever see published releases, so a draft or a
+          # partial release counts as broken here and is deleted and
+          # recreated rather than skipped -- otherwise one mid-upload failure
+          # wedges the tag forever while every retry goes green.
+          # Asset NAMES, not just a count of 5 -- see the resolve job.
+          missing_assets=$(gh api "repos/${{ github.repository }}/releases/tags/rp-util-schema-${TAG}" \
+            --jq '["cluster-config-schema.json","node-config-schema.json","pandaproxy-config-schema.json","kafka-client-config-schema.json","schema-registry-config-schema.json"]
+                  - [.assets[].name] | join(",")' 2>/dev/null || echo "missing")
+          if [ -z "$missing_assets" ]; then
+            echo "rp-util-schema-${TAG} already published with all assets; nothing to do."
+            exit 0
+          fi
+          if gh release view "rp-util-schema-${TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "rp-util-schema-${TAG} exists but is a draft or incomplete (missing: ${missing_assets}); deleting and recreating."
+            gh release delete "rp-util-schema-${TAG}" --yes --repo "${{ github.repository }}"
+          fi
+          # --latest=false: these snapshots must never become the repo's
+          # "latest release", which belongs to the npm package releases.
+          gh release create "rp-util-schema-${TAG}" \
+            schema-out/*.json \
+            --repo "${{ github.repository }}" \
+            --latest=false \
+            --title "rp_util schema for streaming-enterprise ${TAG}" \
+            --notes "Cluster and broker (node, Pandaproxy, its Kafka client, Schema Registry) config schema JSON generated by rp_util from redpanda-data/streaming-enterprise@${TAG}. An internal snapshot for this repo's own property-docs generation -- not an official Redpanda release artifact."
