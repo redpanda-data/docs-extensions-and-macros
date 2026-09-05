@@ -133,7 +133,12 @@ npx doc-tools generate property-docs --tag $VERSION
 *Requirements:*
 
 - Internet connection to access GitHub API
-- GitHub API rate limits apply (60 requests/hour unauthenticated)
+- A GitHub token with access to redpanda-data/streaming-enterprise, which is
+  private. Redpanda releases are published there now, and the old public repo
+  is frozen, so this command exits rather than report a stale version when it
+  has no token. Resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN,
+  ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in
+  that priority order
 
 == get-console-version
 
@@ -1020,7 +1025,10 @@ Optional JSON file with property description overrides (default: "docs-data/prop
 Where to write all generated files (default: "modules/reference")
 
 `--cloud-support`::
-Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. Set the token as an environment variable using GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN (default: true)
+Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. The token is resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order (default: true)
+
+`--no-cloud-support`::
+Skip Cloud support tags, and the cloudv2 repository access they need. A GitHub token is still required either way: the extractor clones the private streaming-enterprise repo to read the source
 
 `--template-property <path>`::
 Custom Handlebars template for individual property sections
@@ -1085,13 +1093,15 @@ npx doc-tools generate property-docs \
 
 - Python 3.9 or higher
 - Git
-- Internet connection to clone Redpanda repository
-- For --cloud-support: GitHub token with repo permissions (GITHUB_TOKEN env var)
+- A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
+  access to redpanda-data/streaming-enterprise, which is private
+- Internet connection to clone the streaming-enterprise repository
+- For --cloud-support: GitHub token with repo permissions (same resolution chain)
 - For --cloud-support: Python packages pyyaml and requests
 
 === generate rpk-docs
 
-Generates comprehensive CLI reference documentation for rpk (Redpanda Keeper). Clones the Redpanda source, builds rpk with Go, and parses `rpk --print-tree` JSON output. Detects Linux-only commands by analyzing Go build tags in the source code. Key features: - Clones source from GitHub (sparse checkout for speed) - Builds rpk from source using Go - Parses Go build tags to detect Linux-only commands - Automatically includes rpk plugins (connect, ai, check, etc.) - Supports overrides.json for description improvements - Generates versioned JSON files for downstream consumers (tooltips, etc.) - Generates diffs between versions for release notes
+Generates comprehensive CLI reference documentation for rpk (Redpanda Keeper). Clones the Redpanda source from streaming-enterprise (private), builds rpk with Go, and parses `rpk --print-tree` JSON output. Detects Linux-only commands by analyzing Go build tags in the source code. Key features: - Clones source from GitHub (sparse checkout for speed) - Builds rpk from source using Go - Parses Go build tags to detect Linux-only commands - Automatically includes rpk plugins (connect, ai, check, etc.) - Supports overrides.json for description improvements - Generates versioned JSON files for downstream consumers (tooltips, etc.) - Generates diffs between versions for release notes
 
 *Why use it:*
 
@@ -1187,6 +1197,9 @@ npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
 
 - Go must be installed (https://go.dev/)
 - Git must be installed (for cloning source)
+- A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
+  access to redpanda-data/streaming-enterprise, which is private (not
+  needed when --from-source points at an existing local checkout)
 
 === generate rpk-env-partial
 
@@ -1432,7 +1445,7 @@ npx doc-tools generate cloud-regions --ref staging
 *Requirements:*
 
 - GitHub token with access to redpanda-data/cloudv2-infra repository
-- Token must be set via GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN environment variable
+- Token is resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order
 - Internet connection to access GitHub API
 
 === generate crd-spec
@@ -1529,7 +1542,7 @@ Git tag for released content
 Branch name for in-progress content
 
 `--repo <url>`::
-Repository URL (default: "https://github.com/redpanda-data/redpanda.git")
+Repository URL. The default is a private repo, so requires a GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) (default: "https://github.com/redpanda-data/streaming-enterprise.git")
 
 `-s, --surface <surface>`::
 Which API surfaces to bundle (choices: "admin", "connect", "both")
@@ -1586,7 +1599,9 @@ npx doc-tools generate bundle-openapi --tag $VERSION --surface both
 
 *Requirements:*
 
-- Git to clone Redpanda repository
+- Git to clone the streaming-enterprise repository
+- A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
+  access to redpanda-data/streaming-enterprise, which is private
 - Buf tool (automatically installed via npm)
 - Redocly CLI or vacuum for OpenAPI bundling (automatically detected)
 - Internet connection to clone repository

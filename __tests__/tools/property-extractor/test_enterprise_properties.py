@@ -15,6 +15,7 @@ The tests also ensure that defaults are correctly extracted:
 These tests help prevent regressions in enterprise property detection logic.
 """
 
+import os
 import unittest
 import json
 from pathlib import Path
@@ -25,8 +26,14 @@ class EnterprisePropertyDetectionTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Load the generated properties JSON once for all tests"""
-        json_path = Path(__file__).parent.parent.parent.parent / "tools" / "property-extractor" / "gen" / "dev-properties.json"
+        """Load the generated properties JSON once for all tests.
+
+        PROPERTY_FIXTURE_TAG selects which generator output to read; it must
+        match the TAG the fixture step built (CI pins a release tag there so
+        these suites test the extractor against a deterministic input).
+        """
+        tag = os.environ.get("PROPERTY_FIXTURE_TAG", "dev")
+        json_path = Path(__file__).parent.parent.parent.parent / "tools" / "property-extractor" / "gen" / f"{tag}-properties.json"
         with open(json_path, "r") as f:
             data = json.load(f)
             cls.properties = data.get("properties", {})

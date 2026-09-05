@@ -4,6 +4,16 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 
+// Only prepareSourceFromRef's and downloadRpkRelease's tests below use this;
+// every other spawnSync call in this module (docker-based builds) is
+// exercised by no test here, so auto-mocking child_process at the module
+// boundary doesn't change behavior for the rest of the suite. Must be
+// mocked before the handler module below is required: it destructures
+// spawnSync from child_process at load time, so a later jest.spyOn on the
+// child_process export would not reach that already-bound local reference.
+jest.mock('child_process')
+const { spawnSync } = require('child_process')
+
 const {
   updateOverridesWithIntroducedVersions,
   isPluginStampAttributable,
@@ -12,7 +22,9 @@ const {
   detectLinuxOnlyFromSource,
   addPlatformMarkersFromSource,
   countCommands,
-  getRequiredGoVersion
+  getRequiredGoVersion,
+  prepareSourceFromRef,
+  downloadRpkRelease
 } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
 
 describe('rpk Docs Handler', () => {
@@ -534,6 +546,143 @@ describe('rpk Docs Handler', () => {
     test('handles two-part go version (no patch)', () => {
       fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module example.com/rpk\n\ngo 1.26\n')
       expect(getRequiredGoVersion(tempDir)).toBe('1.26')
+    })
+  })
+
+  describe('prepareSourceFromRef (sparse-clone of the private streaming-enterprise repo)', () => {
+    const TOKEN_VARS = ['GIT_CREDENTIALS', 'REDPANDA_GITHUB_TOKEN', 'ACTIONS_BOT_TOKEN', 'GITHUB_TOKEN', 'VBOT_GITHUB_API_TOKEN', 'GH_TOKEN']
+    const savedEnv = {}
+
+    beforeEach(() => {
+      spawnSync.mockReset()
+      for (const name of TOKEN_VARS) {
+        savedEnv[name] = process.env[name]
+        delete process.env[name]
+      }
+    })
+
+    afterEach(() => {
+      for (const name of TOKEN_VARS) {
+        if (savedEnv[name] === undefined) delete process.env[name]
+        else process.env[name] = savedEnv[name]
+      }
+    })
+
+    test('throws a clear error when there is no token, without spawning git', () => {
+      expect(() => prepareSourceFromRef('dev')).toThrow(/streaming-enterprise is a private repository/)
+      expect(spawnSync).not.toHaveBeenCalled()
+    })
+
+    test('sparse-clones streaming-enterprise with the same credential helper on the clone and the sparse-checkout set', () => {
+      process.env.GH_TOKEN = 'test-token-456'
+      spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' })
+
+      expect(() => prepareSourceFromRef('v26.2.0')).not.toThrow()
+      expect(spawnSync).toHaveBeenCalledTimes(2)
+
+      const [cloneCmd, cloneArgs, cloneOptions] = spawnSync.mock.calls[0]
+      expect(cloneCmd).toBe('git')
+      expect(cloneArgs).toEqual(expect.arrayContaining([
+        'clone', '--branch', 'v26.2.0', 'https://github.com/redpanda-data/streaming-enterprise.git'
+      ]))
+      // The token must never appear in argv -- it travels through env-only
+      // git config (a credential helper) instead of a -c argument.
+      expect(cloneArgs.join(' ')).not.toContain('test-token-456')
+      expect(cloneArgs.some((a) => a.includes('extraheader'))).toBe(false)
+      expect(cloneOptions.env.RPK_SOURCE_CLONE_TOKEN).toBe('test-token-456')
+      expect(cloneOptions.env.GIT_CONFIG_KEY_1).toBe('credential.https://github.com.helper')
+      expect(cloneOptions.env.GIT_CONFIG_VALUE_1).toContain('$RPK_SOURCE_CLONE_TOKEN')
+
+      const [sparseCmd, sparseArgs, sparseOptions] = spawnSync.mock.calls[1]
+      expect(sparseCmd).toBe('git')
+      expect(sparseArgs).toEqual(expect.arrayContaining(['sparse-checkout', 'set', 'src/go/rpk']))
+      expect(sparseArgs.some((a) => a.includes('extraheader'))).toBe(false)
+      // Same credential helper env on the follow-up invocation: with
+      // --filter=blob:none, the rpk blobs are fetched lazily here, not by
+      // the clone above.
+      expect(sparseOptions.env.GIT_CONFIG_VALUE_1).toBe(cloneOptions.env.GIT_CONFIG_VALUE_1)
+      expect(sparseOptions.env.RPK_SOURCE_CLONE_TOKEN).toBe('test-token-456')
+    })
+
+    test('surfaces a clear error when the clone itself fails', () => {
+      process.env.GH_TOKEN = 'test-token-456'
+      spawnSync.mockReturnValue({ status: 1, stdout: '', stderr: 'fatal: repository not found' })
+
+      expect(() => prepareSourceFromRef('nonexistent-ref')).toThrow(/Failed to clone streaming-enterprise repo/)
+    })
+  })
+
+  describe('downloadRpkRelease (private streaming-enterprise release assets)', () => {
+    const TOKEN_VARS = ['GIT_CREDENTIALS', 'REDPANDA_GITHUB_TOKEN', 'ACTIONS_BOT_TOKEN', 'GITHUB_TOKEN', 'VBOT_GITHUB_API_TOKEN', 'GH_TOKEN']
+    const savedEnv = {}
+    let tempDir
+
+    beforeEach(() => {
+      spawnSync.mockReset()
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-release-test-'))
+      for (const name of TOKEN_VARS) {
+        savedEnv[name] = process.env[name]
+        delete process.env[name]
+      }
+    })
+
+    afterEach(() => {
+      fs.rmSync(tempDir, { recursive: true, force: true })
+      for (const name of TOKEN_VARS) {
+        if (savedEnv[name] === undefined) delete process.env[name]
+        else process.env[name] = savedEnv[name]
+      }
+    })
+
+    test('returns null without spawning curl when there is no token', () => {
+      expect(downloadRpkRelease('v26.2.2', tempDir)).toBeNull()
+      expect(spawnSync).not.toHaveBeenCalled()
+    })
+
+    test('resolves the asset through the release-by-tag API, never the browser download URL', () => {
+      process.env.GH_TOKEN = 'test-token-789'
+      // Release lookup succeeds (status 0); the actual asset download can
+      // fail (status 1) without affecting what this test inspects.
+      const osName = { darwin: 'darwin', linux: 'linux', win32: 'windows' }[process.platform]
+      const archName = { arm64: 'arm64', x64: 'amd64' }[process.arch]
+      const assetName = `rpk-${osName}-${archName}.zip`
+      const checksumAsset = 'rpk_26.2.2_checksums.txt'
+      const release = {
+        assets: [
+          { name: assetName, url: 'https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/assets/111' },
+          { name: checksumAsset, url: 'https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/assets/222' }
+        ]
+      }
+      spawnSync
+        .mockReturnValueOnce({ status: 0, stdout: JSON.stringify(release), stderr: '' }) // release lookup
+        .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'not found' }) // asset download
+
+      expect(downloadRpkRelease('v26.2.2', tempDir)).toBeNull()
+      expect(spawnSync).toHaveBeenCalledTimes(2)
+
+      const [lookupCmd, lookupArgs, lookupOpts] = spawnSync.mock.calls[0]
+      expect(lookupCmd).toBe('curl')
+      // The token must never appear in curl's argv (readable via ps//proc
+      // while the transfer runs); it travels as a config file on stdin.
+      expect(lookupArgs.join(' ')).not.toContain('test-token-789')
+      expect(lookupArgs).toEqual(expect.arrayContaining(['--config', '-']))
+      expect(lookupOpts.input).toBe('header = "Authorization: token test-token-789"')
+      expect(lookupArgs.some((a) => typeof a === 'string' &&
+        a === 'https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/tags/v26.2.2')).toBe(true)
+
+      const [dlCmd, dlArgs, dlOpts] = spawnSync.mock.calls[1]
+      expect(dlCmd).toBe('curl')
+      // The API's per-asset url (not the releases/download/... browser url,
+      // which 404s for a private repo even with a valid token) is what
+      // accepts the Authorization header.
+      expect(dlArgs.join(' ')).not.toContain('test-token-789')
+      expect(dlArgs).toEqual(expect.arrayContaining([
+        '--config', '-',
+        '-H', 'Accept: application/octet-stream'
+      ]))
+      expect(dlOpts.input).toBe('header = "Authorization: token test-token-789"')
+      expect(dlArgs.some((a) => a === 'https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/assets/111')).toBe(true)
+      expect(dlArgs.some((a) => typeof a === 'string' && a.includes('releases/download/'))).toBe(false)
     })
   })
 })

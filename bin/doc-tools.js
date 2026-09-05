@@ -119,7 +119,12 @@ programCli
  *
  * @requirements
  * - Internet connection to access GitHub API
- * - GitHub API rate limits apply (60 requests/hour unauthenticated)
+ * - A GitHub token with access to redpanda-data/streaming-enterprise, which is
+ *   private. Redpanda releases are published there now, and the old public repo
+ *   is frozen, so this command exits rather than report a stale version when it
+ *   has no token. Resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN,
+ *   ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in
+ *   that priority order
  */
 programCli
   .command('get-redpanda-version')
@@ -1057,8 +1062,10 @@ automation
  * @requirements
  * - Python 3.9 or higher
  * - Git
- * - Internet connection to clone Redpanda repository
- * - For --cloud-support: GitHub token with repo permissions (GITHUB_TOKEN env var)
+ * - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
+ *   access to redpanda-data/streaming-enterprise, which is private
+ * - Internet connection to clone the streaming-enterprise repository
+ * - For --cloud-support: GitHub token with repo permissions (same resolution chain)
  * - For --cloud-support: Python packages pyyaml and requests
  */
 automation
@@ -1073,7 +1080,8 @@ automation
   .option('--regenerate-old-baseline', 'Re-extract the --diff tag from source instead of using the committed attachments/redpanda-properties-<oldTag>.json baseline')
   .option('--overrides <path>', 'Optional JSON file with property description overrides', 'docs-data/property-overrides.json')
   .option('--output-dir <dir>', 'Where to write all generated files', 'modules/reference')
-  .option('--cloud-support', 'Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. Set the token as an environment variable using GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN', true)
+  .option('--cloud-support', 'Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. The token is resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order', true)
+  .option('--no-cloud-support', 'Skip Cloud support tags, and the cloudv2 repository access they need. A GitHub token is still required either way: the extractor clones the private streaming-enterprise repo to read the source')
   .option('--template-property <path>', 'Custom Handlebars template for individual property sections')
   .option('--template-topic-property <path>', 'Custom Handlebars template for topic property sections')
   .option('--template-topic-property-mappings <path>', 'Custom Handlebars template for topic property mappings table')
@@ -1091,17 +1099,35 @@ automation
 
     const newTag = options.tag || options.branch || 'dev'
 
-    if (options.cloudSupport) {
-      console.log('Validating cloud support dependencies...')
-      const { getGitHubToken } = require('../cli-utils/github-token')
-      const token = getGitHubToken()
-      if (!token) {
-        console.error('Error: Cloud support requires a GitHub token')
-        console.error('   Set: export GITHUB_TOKEN=your_token_here')
-        console.error('   Or disable cloud support with: --no-cloud-support')
-        process.exit(1)
+    // Resolved once, via the same priority chain every other GitHub-fetching
+    // command in this CLI already uses (cli-utils/github-token.js) --
+    // notably GIT_CREDENTIALS, which is the token Antora/Netlify builds
+    // actually populate, and which the Makefile's own narrower shell
+    // fallback (REDPANDA_GITHUB_TOKEN/GITHUB_TOKEN/GH_TOKEN only) can't see.
+    // Passed through as GH_TOKEN so the Makefile's clone step picks up
+    // whatever this resolved, private-repo access included, without having
+    // to duplicate the GIT_CREDENTIALS parsing logic in shell.
+    const { getGitHubToken } = require('../cli-utils/github-token')
+    const githubToken = getGitHubToken()
+
+    // A token is required whether or not Cloud metadata is: the extractor
+    // clones the private streaming-enterprise repo to read the source either
+    // way. --no-cloud-support only drops the extra cloudv2 read, so it is not
+    // a remedy for having no token, and pointing at it as one sent people
+    // into a run that got as far as the Makefile's clone step and died there.
+    if (!githubToken) {
+      console.error('Error: Generating property docs requires a GitHub token')
+      console.error('   The extractor reads Redpanda source from the private')
+      console.error('   redpanda-data/streaming-enterprise repository.')
+      console.error('   Set GH_TOKEN, REDPANDA_GITHUB_TOKEN, or GITHUB_TOKEN to a token with access.')
+      if (options.cloudSupport) {
+        console.error('   Cloud support tags (on by default) additionally read the cloudv2 repository;')
+        console.error('   --no-cloud-support skips those, but not the token requirement above.')
       }
-      console.log('Done: GitHub token validated')
+      process.exit(1)
+    }
+    if (options.cloudSupport) {
+      console.log('Done: GitHub token validated for source and cloudv2 access')
     }
 
     let oldTag = options.diff
@@ -1127,6 +1153,7 @@ automation
       console.log(`Building property docs for ${tag}…`)
       const args = ['build', `TAG=${tag}`]
       const env = { ...process.env }
+      if (githubToken) env.GH_TOKEN = githubToken
       if (overrides) env.OVERRIDES = path.resolve(overrides)
       if (options.cloudSupport) env.CLOUD_SUPPORT = '1'
       if (templates.property) env.TEMPLATE_PROPERTY = path.resolve(templates.property)
@@ -1290,8 +1317,9 @@ automation
  *
  * @description
  * Generates comprehensive CLI reference documentation for rpk (Redpanda Keeper).
- * Clones the Redpanda source, builds rpk with Go, and parses `rpk --print-tree` JSON output.
- * Detects Linux-only commands by analyzing Go build tags in the source code.
+ * Clones the Redpanda source from streaming-enterprise (private), builds rpk
+ * with Go, and parses `rpk --print-tree` JSON output. Detects Linux-only
+ * commands by analyzing Go build tags in the source code.
  *
  * Key features:
  * - Clones source from GitHub (sparse checkout for speed)
@@ -1325,6 +1353,9 @@ automation
  * @requirements
  * - Go must be installed (https://go.dev/)
  * - Git must be installed (for cloning source)
+ * - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
+ *   access to redpanda-data/streaming-enterprise, which is private (not
+ *   needed when --from-source points at an existing local checkout)
  */
 automation
   .command('rpk-docs')
@@ -1875,7 +1906,7 @@ automation
  *
  * @requirements
  * - GitHub token with access to redpanda-data/cloudv2-infra repository
- * - Token must be set via GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN environment variable
+ * - Token is resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order
  * - Internet connection to access GitHub API
  */
 automation
@@ -2169,7 +2200,9 @@ automation
  * npx doc-tools generate bundle-openapi --tag $VERSION --surface both
  *
  * @requirements
- * - Git to clone Redpanda repository
+ * - Git to clone the streaming-enterprise repository
+ * - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
+ *   access to redpanda-data/streaming-enterprise, which is private
  * - Buf tool (automatically installed via npm)
  * - Redocly CLI or vacuum for OpenAPI bundling (automatically detected)
  * - Internet connection to clone repository
@@ -2180,7 +2213,7 @@ automation
   .description('Bundle Redpanda OpenAPI fragments for admin and connect APIs. Requires either --tag or --branch.')
   .option('-t, --tag <tag>', 'Git tag for released content')
   .option('-b, --branch <branch>', 'Branch name for in-progress content')
-  .option('--repo <url>', 'Repository URL', 'https://github.com/redpanda-data/redpanda.git')
+  .option('--repo <url>', 'Repository URL. The default is a private repo, so requires a GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order)', 'https://github.com/redpanda-data/streaming-enterprise.git')
   .addOption(new Option('-s, --surface <surface>', 'Which API surfaces to bundle').choices(['admin', 'connect', 'both']).makeOptionMandatory())
   .option('--out-admin <path>', 'Output path for admin API', 'admin/redpanda-admin-api.yaml')
   .option('--out-connect <path>', 'Output path for connect API', 'connect/redpanda-connect-api.yaml')

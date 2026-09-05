@@ -250,13 +250,46 @@ jobs:
 
   test-property-extractor:
     needs: detect-changes
-    if: needs.detect-changes.outputs.property_extractor == 'true' || needs.detect-changes.outputs.all_tests == 'true' || github.event_name == 'schedule'
+    # Skip on pull_request runs from a fork: forked PRs get neither the
+    # OIDC id-token nor repo secrets this job's AWS auth step below needs,
+    # so it would fail before "make build" ever runs. Same-repo PRs, pushes,
+    # and the weekly schedule run are unaffected.
+    if: (needs.detect-changes.outputs.property_extractor == 'true' || needs.detect-changes.outputs.all_tests == 'true' || github.event_name == 'schedule') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
+    env:
+      # Release tag the fixture step extracts from and the pytest suites read
+      # back (PROPERTY_FIXTURE_TAG in test_enterprise_properties.py). Pinned
+      # rather than dev: these suites verify the extractor's parsing and
+      # classification logic, so they need a deterministic input, and dev
+      # drifts under them (streaming-enterprise#63 converted two properties
+      # to enum_set_property on 2026-08-28, which this parser cannot read
+      # yet). Bump the pin together with any parser change that adds support
+      # for newer source shapes. The tree-sitter parser is slated to be
+      # replaced by rp_util runtime introspection (#278), which removes this
+      # coupling entirely.
+      PROPERTY_FIXTURE_TAG: v26.2.2
+    # Needed to assume the AWS role below, which fetches the bot token that
+    # authenticates the clone of streaming-enterprise (private) in the
+    # "Generate test fixtures" step.
+    permissions:
+      id-token: write
+      contents: read
     strategy:
       matrix:
         python-version: ['3.9', '3.11']
     steps:
       - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+
+      - uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/actions_bot_token
+          parse-json-secrets: true
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -270,17 +303,10 @@ jobs:
         with:
           node-version: 20
 
-      - name: Get current date
-        id: date
-        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-
-      - name: Cache Redpanda repository
-        uses: actions/cache@v4
-        with:
-          path: tools/property-extractor/tmp/redpanda
-          key: redpanda-repo-dev-${{ steps.date.outputs.date }}
-          restore-keys: |
-            redpanda-repo-dev-
+      # The streaming-enterprise checkout is deliberately NOT cached: caches
+      # created on the default branch are restorable by anyone who can open a
+      # PR (including from a fork), which would expose the private source
+      # tree. The Makefile's clone is shallow, so each run re-clones cheaply.
 
       - name: Cache tree-sitter build
         uses: actions/cache@v4
@@ -299,8 +325,17 @@ jobs:
 
       - name: Generate test fixtures
         working-directory: tools/property-extractor
+        env:
+          GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
+          # Tree-sitter-only on purpose: these pytest suites verify the
+          # extractor against a deterministic pinned-tag input, not the
+          # rp_util merge (which has its own jest suites). Once the rp_util
+          # merge is wired into `make build` it hard-fails release tags with
+          # no published rp-util-schema-<tag> release, and without this skip
+          # every run of this job would couple to that release existing.
+          SKIP_RP_UTIL: "1"
         run: |
-          make build
+          make build TAG="$PROPERTY_FIXTURE_TAG"
 
       - name: Run property-extractor tests
         run: |
