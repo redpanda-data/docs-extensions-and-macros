@@ -2806,9 +2806,16 @@ programCli.addCommand(automation)
  * can scope answers to it. Exit status is meaningful: 0 every version is covered, 1 a version
  * is missing, 2 the command itself failed (Kapa or the sitemap unreachable, bad credentials).
  *
- * A version counts as covered when Kapa has a source named `Documentation (X)` for it AND that
- * source is assigned to a source group. A source left unassigned is global in Kapa, which means
- * it is returned for EVERY query on every version, so it is reported here as well.
+ * A version counts as covered when Kapa has a source named `Documentation (X)` for it, that
+ * source is assigned to a source group, AND the committed mapping (docs-data/kapa-source-groups.json)
+ * has a segment for it. A source left unassigned is global in Kapa, which means it is returned for
+ * EVERY query on every version, so it is reported here as well. A version that Kapa covers but the
+ * committed mapping lacks is reported too: every deployed surface reads the mapping, not Kapa, so
+ * readers on that version silently get the default segment until the mapping is regenerated and
+ * released.
+ *
+ * The prerelease segment (/streaming/beta/) is ignored: a beta publishes there for the whole
+ * pre-GA cycle and is not expected to have a Kapa group of its own.
  *
  * @why
  * The latest release always publishes at /streaming/current/, and the `Documentation (current)`
@@ -2835,9 +2842,10 @@ validation
   .command('kapa-source-groups')
   .description('Check every published streaming version has a Kapa source (exit 0 covered, 1 missing, 2 error)')
   .option('--site-url <url>', 'Docs site whose sitemap says which versions are published', 'https://docs.redpanda.com')
+  .option('--mapping <file>', 'Committed mapping every surface reads', 'docs-data/kapa-source-groups.json')
   .action(async (options) => {
     const { fetchKapaSourceVersions } = require('../tools/kapa-source-groups/kapa-source-versions.js')
-    const { fetchPublishedSegments } = require('../tools/kapa-source-groups/published-segments.js')
+    const { fetchPublishedSegments, isPrereleaseSegment } = require('../tools/kapa-source-groups/published-segments.js')
     const { requireKapaCredentials } = require('../cli-utils/kapa-credentials')
 
     // Printed only where a gap has actually been established, and required by
@@ -2861,11 +2869,41 @@ validation
       process.exit(2)
     }
 
-    const missing = published.filter((v) => !kapa.covered.has(v))
-    const unassigned = published.filter((v) => kapa.unassigned.has(v))
+    // The committed mapping is what every surface actually reads (the Antora
+    // extension, docs-ui, the /api/ proxy, the MCP server). Kapa having a
+    // grouped source is necessary but not sufficient: if nobody regenerated and
+    // released the mapping, readers on that version still get the default
+    // segment and nothing else would ever say so.
+    let mappedSegments
+    try {
+      const mappingPath = path.resolve(options.mapping)
+      const mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'))
+      if (!mapping || typeof mapping.segments !== 'object' || mapping.segments === null) {
+        throw new Error('no segments object')
+      }
+      mappedSegments = new Set(Object.keys(mapping.segments))
+    } catch (err) {
+      console.error(`Error: Could not read the committed mapping at ${options.mapping}: ${err.message}`)
+      process.exit(2)
+    }
 
-    if (missing.length === 0 && unassigned.length === 0) {
-      console.log(`✓ Every published streaming version (${published.join(', ')}) has a Kapa source in a group.`)
+    // A beta publishes at /streaming/beta/ for the whole pre-GA cycle and has no
+    // group of its own by design. Reporting it would file a false issue weekly.
+    const prerelease = published.filter(isPrereleaseSegment)
+    const versions = published.filter((v) => !isPrereleaseSegment(v))
+
+    const missing = versions.filter((v) => !kapa.covered.has(v) && !kapa.unassigned.has(v))
+    const unassigned = versions.filter((v) => kapa.unassigned.has(v))
+    const unmapped = versions.filter((v) => kapa.covered.has(v) && !mappedSegments.has(v))
+
+    if (prerelease.length) {
+      console.log(`  (ignoring prerelease segment${prerelease.length > 1 ? 's' : ''} ${prerelease.join(', ')}, ` +
+        'which publishes for the pre-GA cycle and is not expected to have a Kapa group)')
+    }
+
+    if (missing.length === 0 && unassigned.length === 0 && unmapped.length === 0) {
+      console.log(`✓ Every published streaming version (${versions.join(', ')}) has a Kapa source in a group ` +
+        `and a segment in ${options.mapping}.`)
       process.exit(0)
     }
 
@@ -2878,8 +2916,17 @@ validation
       console.log(`  - ${v}: "Documentation (${v})" exists but is not in a source group, so it is global ` +
         'and returned for every query on every version.')
     }
-    console.log('\nIn the Kapa dashboard: Sources > Add source for the crawl, then assign it to the version ' +
-      'group under Sources > Manage groups. Then regenerate the mapping:\n  doc-tools generate kapa-source-groups')
+    for (const v of unmapped) {
+      console.log(`  - ${v}: Kapa has a grouped "Documentation (${v})" source, but ${options.mapping} has no ` +
+        `"${v}" segment. Readers on this version fall back to the default segment until the mapping is ` +
+        'regenerated and released.')
+    }
+    if (missing.length || unassigned.length) {
+      console.log('\nIn the Kapa dashboard: Sources > Add source for the crawl, then assign it to the version ' +
+        'group under Sources > Manage groups. Then regenerate the mapping:\n  doc-tools generate kapa-source-groups')
+    } else {
+      console.log('\nRegenerate the mapping and release docs-extensions-and-macros:\n  doc-tools generate kapa-source-groups')
+    }
     console.log(`\n${SENTINEL}`)
     process.exit(1)
   })

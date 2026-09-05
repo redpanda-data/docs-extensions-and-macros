@@ -1876,7 +1876,7 @@ npx doc-tools validate property-overrides --strict
 
 === validate kapa-source-groups
 
-Checks that every streaming docs version currently published has a Kapa source, so Ask AI can scope answers to it. Exit status is meaningful: 0 every version is covered, 1 a version is missing, 2 the command itself failed (Kapa or the sitemap unreachable, bad credentials). A version counts as covered when Kapa has a source named `Documentation (X)` for it AND that source is assigned to a source group. A source left unassigned is global in Kapa, which means it is returned for EVERY query on every version, so it is reported here as well.
+Checks that every streaming docs version currently published has a Kapa source, so Ask AI can scope answers to it. Exit status is meaningful: 0 every version is covered, 1 a version is missing, 2 the command itself failed (Kapa or the sitemap unreachable, bad credentials). A version counts as covered when Kapa has a source named `Documentation (X)` for it, that source is assigned to a source group, AND the committed mapping (docs-data/kapa-source-groups.json) has a segment for it. A source left unassigned is global in Kapa, which means it is returned for EVERY query on every version, so it is reported here as well. A version that Kapa covers but the committed mapping lacks is reported too: every deployed surface reads the mapping, not Kapa, so readers on that version silently get the default segment until the mapping is regenerated and released. The prerelease segment (/streaming/beta/) is ignored: a beta publishes there for the whole pre-GA cycle and is not expected to have a Kapa group of its own.
 
 *Why use it:*
 
@@ -1893,6 +1893,9 @@ doc-tools validate kapa-source-groups [options]
 
 `--site-url <url>`::
 Docs site whose sitemap says which versions are published (default: "https://docs.redpanda.com")
+
+`--mapping <file>`::
+Committed mapping every surface reads (default: "docs-data/kapa-source-groups.json")
 
 `-h, --help`::
 display help for command
