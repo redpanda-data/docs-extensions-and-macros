@@ -2802,231 +2802,85 @@ programCli.addCommand(automation)
  * validate kapa-source-groups
  *
  * @description
- * Compares the committed docs-data/kapa-source-groups.json against what Kapa's ingestion API
- * reports right now, and reports drift without writing anything. Exit status is meaningful:
- * 0 in sync, 1 drift found, 2 the command itself failed.
+ * Checks that every streaming docs version currently published has a Kapa source, so Ask AI
+ * can scope answers to it. Exit status is meaningful: 0 every version is covered, 1 a version
+ * is missing, 2 the command itself failed (Kapa or the sitemap unreachable, bad credentials).
  *
- * Drift means one of: a version group gained or lost its source, a group id changed, a segment
- * appeared or disappeared in Kapa, or the committed file no longer parses. Any of those leaves
- * the docs surfaces scoping to a group that does not hold what the mapping claims.
+ * A version counts as covered when Kapa has a source named `Documentation (X)` for it AND that
+ * source is assigned to a source group. A source left unassigned is global in Kapa, which means
+ * it is returned for EVERY query on every version, so it is reported here as well.
  *
  * @why
- * A new docs version appears with no file change in docs-site at all: the playbook globs
- * branches: v/*, so cutting a v/X.Y branch in redpanda-data/docs publishes a new version segment
- * that nothing in this repo or docs-ui would notice. Kapa also has no write API, so the matching
- * source and group are created by hand and are easy to forget. Without this check the mapping
- * goes stale silently and readers on the new version quietly fall back to the default segment.
- * Run it on a schedule so drift opens an issue rather than waiting for a bug report.
+ * The latest release always publishes at /streaming/current/, and the `Documentation (current)`
+ * crawl follows it, so latest is never the version that goes missing. The one that goes missing
+ * is the version that just got archived: when 26.3 ships, 26.2 moves to /streaming/26.2/ and
+ * needs a crawl of its own that nobody has made yet. Kapa has no write API, so that crawl is
+ * created by hand in the dashboard, and nothing else notices when it is forgotten. Readers on the
+ * archived version then silently fall back to the default segment.
+ *
+ * Run it on a schedule so the gap opens an issue rather than waiting for a bug report.
  *
  * @example
- * # Check the committed mapping against Kapa
  * export KAPA_API_KEY=... KAPA_PROJECT_ID=...
  * npx doc-tools validate kapa-source-groups
  *
- * # Check a mapping at a non-default path
- * npx doc-tools validate kapa-source-groups --file docs-data/kapa-source-groups.json
+ * # Check a preview or staging site instead of production
+ * npx doc-tools validate kapa-source-groups --site-url https://deploy-preview-123--redpanda-documentation.netlify.app
  *
  * @requirements
  * - Kapa API key and project ID, set via KAPA_API_KEY and KAPA_PROJECT_ID
- * - The mapping file must already exist; generate it with `doc-tools generate kapa-source-groups`
- * - Internet connection to reach https://api.kapa.ai
+ * - Internet connection to reach https://api.kapa.ai and the docs site's sitemap
  */
 validation
   .command('kapa-source-groups')
-  .description('Check the committed Kapa source-group mapping against Kapa (exit 0 in sync, 1 drift, 2 error)')
-  .option('--file <file>', 'Mapping file to check (relative to repo root, must stay inside the repository)', 'docs-data/kapa-source-groups.json')
+  .description('Check every published streaming version has a Kapa source (exit 0 covered, 1 missing, 2 error)')
   .option('--site-url <url>', 'Docs site whose sitemap says which versions are published', 'https://docs.redpanda.com')
-  .option('--skip-site-check', 'Only compare against Kapa, not against the published version list')
   .action(async (options) => {
-    const {
-      generateKapaSourceGroups,
-      KapaGroupTreeError,
-    } = require('../tools/kapa-source-groups/generate-kapa-source-groups.js')
-    const { fetchPublishedSegments, compareSegments } = require('../tools/kapa-source-groups/published-segments.js')
+    const { fetchKapaSourceVersions } = require('../tools/kapa-source-groups/kapa-source-versions.js')
+    const { fetchPublishedSegments } = require('../tools/kapa-source-groups/published-segments.js')
     const { requireKapaCredentials } = require('../cli-utils/kapa-credentials')
 
-    // Printed on the drift path and required by kapa-source-groups-drift.sh
-    // before it will file an issue. Exit 1 alone is not trustworthy as "drift":
-    // Commander exits 1 on a usage error and an uncaught throw in an async
-    // action also exits 1, so without this a typo'd flag or a crash would file
-    // a drift issue quoting a stack trace as the drift report.
-    const DRIFT_SENTINEL = 'KAPA_DRIFT_CONFIRMED'
-    const reportDrift = (lines) => {
-      for (const l of lines) console.log(l)
-      console.log(`\n${DRIFT_SENTINEL}`)
-      process.exit(1)
-    }
+    // Printed only where a gap has actually been established, and required by
+    // kapa-source-groups-drift.sh before it files an issue. Exit 1 alone is not
+    // trustworthy: Commander exits 1 on a usage error and an uncaught throw
+    // exits 1 too, so without this a typo'd flag would file an issue quoting a
+    // stack trace as the report.
+    const SENTINEL = 'KAPA_DRIFT_CONFIRMED'
 
-    // Exit 2 is reserved for "the tool broke", so that a scheduled run can tell
-    // "the mapping is stale" apart from "we could not find out". Only the drift
-    // branch below exits 1.
-    let committed, live, absFile, published, parsedCommitted
-    let committedUnusable = null
+    // Exit 2 is reserved for "could not find out", so the scheduled job can tell
+    // "a version is missing" apart from "Kapa was down" and not file a false issue.
+    let published, kapa
     try {
-      const repoRoot = findRepoRoot()
-      absFile = resolveInsideRepo(repoRoot, options.file, '--file')
-      if (!fs.existsSync(absFile)) {
-        throw new Error(`${absFile} does not exist. Generate it with: doc-tools generate kapa-source-groups`)
-      }
-      committed = fs.readFileSync(absFile, 'utf8')
-
-      // Parsed and shape-checked before anything else, so a broken committed
-      // file is reported as drift with a readable reason instead of crashing
-      // the itemiser further down with a TypeError (which exits 1 and would
-      // read as confirmed drift).
-      try {
-        parsedCommitted = JSON.parse(committed)
-      } catch (err) {
-        parsedCommitted = null
-      }
-      if (!parsedCommitted || typeof parsedCommitted !== 'object' ||
-          !parsedCommitted.segments || typeof parsedCommitted.segments !== 'object' ||
-          !parsedCommitted.default_segment) {
-        committedUnusable = `${path.relative(process.cwd(), absFile)} is not a usable mapping ` +
-          '(needs at least an object with `segments` and `default_segment`). ' +
-          'Regenerate it rather than editing it by hand.'
-      }
-
       const { apiKey, projectId } = requireKapaCredentials()
-      if (!committedUnusable) {
-        live = await generateKapaSourceGroups({
-          apiKey,
-          projectId,
-          defaultSegment: parsedCommitted.default_segment,
-          // Pass the parent the mapping was generated against. Without it, the
-          // generator auto-detects by "which parent has children", so a second
-          // parent gaining a child makes every future run ambiguous and the
-          // check permanently inconclusive.
-          parentGroupName: parsedCommitted.parent_group && parsedCommitted.parent_group.name,
-        })
-      }
-      // Inside the exit-2 block on purpose: an unreachable sitemap is "could not
-      // find out", not "the mapping is stale".
-      if (!options.skipSiteCheck) {
-        published = await fetchPublishedSegments({ siteUrl: options.siteUrl })
-      }
+      ;[published, kapa] = await Promise.all([
+        fetchPublishedSegments({ siteUrl: options.siteUrl }),
+        fetchKapaSourceVersions({ apiKey, projectId }),
+      ])
     } catch (err) {
-      // A group-tree fault is not "we could not find out". It means someone
-      // changed the groups in the dashboard: renamed or deleted one, unassigned
-      // a source, duplicated a name. That is precisely the drift this check
-      // exists to catch, and the generator refuses on it because it will not
-      // WRITE a misleading mapping. Reporting it as inconclusive filed no issue
-      // for the changes that break the most pages.
-      if (err instanceof KapaGroupTreeError || err.code === 'KAPA_GROUP_TREE') {
-        reportDrift([
-          'Kapa source groups no longer match the committed mapping.',
-          '',
-          `  ${err.message}`,
-          '',
-          'Fix the groups in the Kapa dashboard (Sources > Manage groups), then regenerate:',
-          '  doc-tools generate kapa-source-groups',
-        ])
-      }
-      console.error(`Error: Could not check Kapa source groups: ${err.message}`)
+      console.error(`Error: Could not check Kapa sources: ${err.message}`)
       process.exit(2)
     }
 
-    if (committedUnusable) {
-      reportDrift(['The committed mapping is unusable.', '', `  ${committedUnusable}`])
-    }
+    const missing = published.filter((v) => !kapa.covered.has(v))
+    const unassigned = published.filter((v) => kapa.unassigned.has(v))
 
-    // The site comparison is a THIRD input, and it catches what the byte compare
-    // structurally cannot: a new docs version publishes with no Kapa group, which
-    // changes neither the committed file nor live Kapa. Both sides stay identical,
-    // the byte compare says "in sync", and readers on the new version silently get
-    // the default segment instead.
-    let siteDrift = false
-    if (published) {
-      const rel = path.relative(process.cwd(), absFile)
-      const { missing, stale, prerelease } = compareSegments(published, Object.keys(JSON.parse(live).segments))
-      const defaultSegment = JSON.parse(live).default_segment
-      if (missing.length || stale.length) {
-        siteDrift = true
-        console.log(`✗ ${rel} does not cover every published docs version.`)
-        for (const seg of missing) {
-          console.log(`  + ${seg}: published at /streaming/${seg}/ but has no Kapa source group.`)
-          console.log(`      Readers there silently fall back to "${defaultSegment}". Create the source and group in`)
-          console.log('      Kapa (Sources > Add source, then Manage groups), then regenerate.')
-        }
-        for (const seg of stale) {
-          console.log(`  - ${seg}: has a Kapa source group but is no longer published.`)
-          console.log('      Answers can cite pages that 404. Remove the source in Kapa, then regenerate.')
-        }
-      }
-      for (const seg of prerelease) {
-        console.log(`  i ${seg}: published prerelease with no group of its own, which is expected. Readers get "${defaultSegment}".`)
-      }
-    }
-
-    if (live === committed && !siteDrift) {
-      const scope = published ? 'Kapa and the published version list' : 'Kapa'
-      console.log(`✓ ${path.relative(process.cwd(), absFile)} is in sync with ${scope}.`)
+    if (missing.length === 0 && unassigned.length === 0) {
+      console.log(`✓ Every published streaming version (${published.join(', ')}) has a Kapa source in a group.`)
       process.exit(0)
     }
-    if (live === committed) {
-      // Mapping matches Kapa exactly; the only problem is coverage of the site.
-      console.log('\nThe mapping matches Kapa, so regenerating alone will not fix this.')
-      process.exit(1)
-    }
 
-    // Report what moved rather than dumping two blobs: a scheduled run pastes this
-    // into an issue, and "24.1 lost its source" is actionable where a diff is not.
-    const a = JSON.parse(committed)
-    const b = JSON.parse(live)
-    const segs = [...new Set([...Object.keys(a.segments), ...Object.keys(b.segments)])].sort()
-    console.log(`✗ ${path.relative(process.cwd(), absFile)} is out of date with Kapa.`)
-
-    // Track whether anything was itemised. A report that says "out of date" and
-    // then lists nothing is worse than useless in a CI issue: it tells the reader
-    // to regenerate without saying what moved. The catch-all at the end covers
-    // any field added to the mapping later that this loop does not know about.
-    let explained = 0
-    const note = (line) => { explained++; console.log(line) }
-
-    if (a.project_id !== b.project_id) {
-      note(`  ~ project_id: ${a.project_id} -> ${b.project_id} (the mapping was generated against a different Kapa project)`)
+    console.log('✗ Kapa is missing coverage for published streaming docs versions.\n')
+    for (const v of missing) {
+      console.log(`  - ${v}: published at /streaming/${v}/ but Kapa has no "Documentation (${v})" source. ` +
+        'Readers on this version fall back to the default segment.')
     }
-    for (const field of ['id', 'name', 'type']) {
-      if (a.parent_group?.[field] !== b.parent_group?.[field]) {
-        note(`  ~ parent_group.${field}: ${a.parent_group?.[field]} -> ${b.parent_group?.[field]}`)
-      }
+    for (const v of unassigned) {
+      console.log(`  - ${v}: "Documentation (${v})" exists but is not in a source group, so it is global ` +
+        'and returned for every query on every version.')
     }
-    for (const seg of segs) {
-      const x = a.segments[seg]
-      const y = b.segments[seg]
-      if (!x) note(`  + ${seg}: new in Kapa (group ${y.group_id}) — add it to the mapping`)
-      else if (!y) note(`  - ${seg}: no longer in Kapa — a group was renamed or deleted`)
-      else if (x.group_id !== y.group_id) note(`  ~ ${seg}: group id changed ${x.group_id} -> ${y.group_id}`)
-      else if (JSON.stringify(x.source_ids) !== JSON.stringify(y.source_ids)) {
-        note(`  ~ ${seg}: sources changed ${JSON.stringify(x.source_names)} -> ${JSON.stringify(y.source_names)}`)
-      } else if (JSON.stringify(x.source_names) !== JSON.stringify(y.source_names)) {
-        // Same source ids, different names: a source was renamed in place in
-        // the dashboard. Without this the diff was real but nothing explained
-        // it, so the report fell through to "no known field changed, so the
-        // mapping shape itself has changed", which sends the reader looking for
-        // a schema problem that does not exist.
-        note(`  ~ ${seg}: source renamed ${JSON.stringify(x.source_names)} -> ${JSON.stringify(y.source_names)}`)
-      }
-    }
-    if (a.default_segment !== b.default_segment) {
-      note(`  ~ default_segment: ${a.default_segment} -> ${b.default_segment}`)
-    }
-    if (JSON.stringify(a.global_sources) !== JSON.stringify(b.global_sources)) {
-      // Defaulted: global_sources is optional in older committed files, and an
-      // unguarded .includes() here threw a TypeError that exited 1, which the
-      // drift script then filed as confirmed drift quoting the stack trace.
-      const ag = Array.isArray(a.global_sources) ? a.global_sources : []
-      const bg = Array.isArray(b.global_sources) ? b.global_sources : []
-      const added = bg.filter((n) => !ag.includes(n))
-      const removed = ag.filter((n) => !bg.includes(n))
-      if (added.length) note(`  ~ now global (reachable from every page): ${added.join(', ')}`)
-      if (removed.length) note(`  ~ no longer global (now scoped to a group): ${removed.join(', ')}`)
-    }
-    if (!explained) {
-      note('  ~ the files differ but no known field changed, so the mapping shape itself has changed')
-    }
-    console.log('\nRegenerate with: doc-tools generate kapa-source-groups')
-    console.log(`\n${DRIFT_SENTINEL}`)
+    console.log('\nIn the Kapa dashboard: Sources > Add source for the crawl, then assign it to the version ' +
+      'group under Sources > Manage groups. Then regenerate the mapping:\n  doc-tools generate kapa-source-groups')
+    console.log(`\n${SENTINEL}`)
     process.exit(1)
   })
 

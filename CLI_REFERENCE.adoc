@@ -1711,7 +1711,7 @@ display help for command
 * `rpk-overrides` - Validate rpk-overrides.json against schema and check for common issues
 * `enterprise-features` - Check the enterprise features registry against core, connect, and docs sources of truth
 * `property-overrides` - Validate property-overrides.json against its schema
-* `kapa-source-groups` - Check the committed Kapa source-group mapping against Kapa (exit 0 in sync, 1 drift, 2 error)
+* `kapa-source-groups` - Check every published streaming version has a Kapa source (exit 0 covered, 1 missing, 2 error)
 * `help` - display help for command
 
 === validate rpk-overrides
@@ -1876,11 +1876,11 @@ npx doc-tools validate property-overrides --strict
 
 === validate kapa-source-groups
 
-Compares the committed docs-data/kapa-source-groups.json against what Kapa's ingestion API reports right now, and reports drift without writing anything. Exit status is meaningful: 0 in sync, 1 drift found, 2 the command itself failed. Drift means one of: a version group gained or lost its source, a group id changed, a segment appeared or disappeared in Kapa, or the committed file no longer parses. Any of those leaves the docs surfaces scoping to a group that does not hold what the mapping claims.
+Checks that every streaming docs version currently published has a Kapa source, so Ask AI can scope answers to it. Exit status is meaningful: 0 every version is covered, 1 a version is missing, 2 the command itself failed (Kapa or the sitemap unreachable, bad credentials). A version counts as covered when Kapa has a source named `Documentation (X)` for it AND that source is assigned to a source group. A source left unassigned is global in Kapa, which means it is returned for EVERY query on every version, so it is reported here as well.
 
 *Why use it:*
 
-A new docs version appears with no file change in docs-site at all: the playbook globs branches: v/*, so cutting a v/X.Y branch in redpanda-data/docs publishes a new version segment that nothing in this repo or docs-ui would notice. Kapa also has no write API, so the matching source and group are created by hand and are easy to forget. Without this check the mapping goes stale silently and readers on the new version quietly fall back to the default segment. Run it on a schedule so drift opens an issue rather than waiting for a bug report.
+The latest release always publishes at /streaming/current/, and the `Documentation (current)` crawl follows it, so latest is never the version that goes missing. The one that goes missing is the version that just got archived: when 26.3 ships, 26.2 moves to /streaming/26.2/ and needs a crawl of its own that nobody has made yet. Kapa has no write API, so that crawl is created by hand in the dashboard, and nothing else notices when it is forgotten. Readers on the archived version then silently fall back to the default segment. Run it on a schedule so the gap opens an issue rather than waiting for a bug report.
 
 *Usage:*
 
@@ -1891,14 +1891,8 @@ doc-tools validate kapa-source-groups [options]
 
 *Options:*
 
-`--file <file>`::
-Mapping file to check (relative to repo root, must stay inside the repository) (default: "docs-data/kapa-source-groups.json")
-
 `--site-url <url>`::
 Docs site whose sitemap says which versions are published (default: "https://docs.redpanda.com")
-
-`--skip-site-check`::
-Only compare against Kapa, not against the published version list
 
 `-h, --help`::
 display help for command
@@ -1907,19 +1901,17 @@ display help for command
 
 [,bash]
 ----
-# Check the committed mapping against Kapa
 export KAPA_API_KEY=... KAPA_PROJECT_ID=...
 npx doc-tools validate kapa-source-groups
 
-# Check a mapping at a non-default path
-npx doc-tools validate kapa-source-groups --file docs-data/kapa-source-groups.json
+# Check a preview or staging site instead of production
+npx doc-tools validate kapa-source-groups --site-url https://deploy-preview-123--redpanda-documentation.netlify.app
 ----
 
 *Requirements:*
 
 - Kapa API key and project ID, set via KAPA_API_KEY and KAPA_PROJECT_ID
-- The mapping file must already exist; generate it with `doc-tools generate kapa-source-groups`
-- Internet connection to reach https://api.kapa.ai
+- Internet connection to reach https://api.kapa.ai and the docs site's sitemap
 
 == overrides
 
