@@ -53,23 +53,24 @@ async function fetchPublishedSegments ({ siteUrl, fetchImpl = globalThis.fetch }
   if (!siteUrl) throw new Error('fetchPublishedSegments requires a siteUrl')
   const url = `${String(siteUrl).replace(/\/+$/, '')}/sitemap-streaming.xml`
 
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), SITEMAP_TIMEOUT_MS)
-  let res
+  let res, body
   try {
-    res = await fetchImpl(url, { signal: controller.signal })
+    // The deadline covers the body read too; see fetch-with-deadline.js for
+    // why clearing the timer after headers alone is not a timeout.
+    ;({ res, body } = await fetchWithDeadline(
+      fetchImpl, url, {}, SITEMAP_TIMEOUT_MS,
+      (r) => (r.ok ? r.text() : null)
+    ))
   } catch (err) {
     // A network failure means "could not find out", which the caller must keep
-    // distinct from "the mapping is stale" so a scheduled run does not file a
-    // drift issue every time the site is briefly unreachable.
+    // distinct from "a version is missing" so a scheduled run does not file an
+    // issue every time the site is briefly unreachable.
     throw new Error(`Could not fetch ${url}: ${err.message}`)
-  } finally {
-    clearTimeout(timer)
   }
 
   if (!res.ok) throw new Error(`Could not fetch ${url}: ${res.status} ${res.statusText}`)
 
-  const segments = parsePublishedSegments(await res.text())
+  const segments = parsePublishedSegments(body)
   if (segments.length === 0) {
     // An empty sitemap and a moved sitemap look identical, and treating either as
     // "nothing is published" would report every mapped segment as stale.
