@@ -19,6 +19,8 @@
 // right source because it reflects what is actually live, rather than what a
 // playbook or a branch list intends.
 
+const { fetchWithDeadline } = require('./fetch-with-deadline')
+
 const SITEMAP_TIMEOUT_MS = 15000
 
 /**
