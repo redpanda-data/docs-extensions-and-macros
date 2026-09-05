@@ -45,6 +45,7 @@
 // to. That is what keeps Agentic Data Plane content reachable from every page.
 
 const { KAPA_API_BASE, kapaAuthHeaders } = require('../../cli-utils/kapa-credentials')
+const { fetchWithDeadline } = require('./fetch-with-deadline')
 
 /**
  * Raised when Kapa's group tree itself is unusable: no groups, no version
@@ -114,14 +115,12 @@ async function fetchAllPages (url, apiKey, fetchImpl = globalThis.fetch) {
   while (next) {
     if (++guard > 50) throw new Error(`Kapa pagination did not terminate after ${guard - 1} pages: ${url}`)
 
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-    let res
-    try {
-      res = await fetchImpl(next, { headers: kapaAuthHeaders(apiKey), signal: controller.signal })
-    } finally {
-      clearTimeout(timer)
-    }
+    // The deadline covers the body read too; see fetch-with-deadline.js for
+    // why clearing the timer after headers alone is not a timeout.
+    const { res, body } = await fetchWithDeadline(
+      fetchImpl, next, { headers: kapaAuthHeaders(apiKey) }, REQUEST_TIMEOUT_MS,
+      (r) => (r.ok ? r.json() : null)
+    )
 
     if (!res.ok) {
       // 401/403 is the overwhelmingly likely failure and deserves its own hint:
@@ -132,7 +131,6 @@ async function fetchAllPages (url, apiKey, fetchImpl = globalThis.fetch) {
       throw new Error(`Kapa API request failed: ${res.status} ${res.statusText} for ${next}.${hint}`)
     }
 
-    const body = await res.json()
     if (!Array.isArray(body?.results)) {
       throw new Error(`Kapa API returned an unexpected shape for ${next}: no results array.`)
     }
