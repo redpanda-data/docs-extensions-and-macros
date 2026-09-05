@@ -78,7 +78,7 @@ function run (env = {}) {
     encoding: 'utf8',
     env: {
       PATH: hermeticPath,
-      GITHUB_REPOSITORY: 'redpanda-data/docs-extensions-and-macros',
+      ISSUE_REPO: 'redpanda-data/docs-ui',
       RUN_URL: 'https://github.com/x/y/actions/runs/1',
       GH_STUB_CALL: ghCallLog,
       NPX_STUB_CALL: npxCallLog,
@@ -131,7 +131,7 @@ describe('kapa drift: genuine drift files exactly one issue', () => {
     expect(r.status).toBe(1);
     expect(r.ghCalls).toMatch(/issue create/);
     expect(r.ghCalls).not.toMatch(/issue comment/);
-    expect(r.stdout).toMatch(/Opened a new drift issue/);
+    expect(r.stdout).toMatch(/Opened a new issue in redpanda-data\/docs-ui/);
   });
 
   test('comments on the existing issue rather than opening a second', () => {
@@ -201,13 +201,20 @@ describe('kapa drift: inconclusive runs fail loudly and file nothing', () => {
     expect(r.ghCalls).toMatch(/issue create/);
   });
 
-  test('a missing GITHUB_REPOSITORY fails before calling gh', () => {
-    const res = spawnSync('bash', [SCRIPT_PATH], {
-      encoding: 'utf8',
-      env: { PATH: hermeticPath, GH_STUB_CALL: ghCallLog, NPX_STUB_CALL: npxCallLog },
-    });
-    expect(res.status).not.toBe(0);
-    expect(fs.readFileSync(ghCallLog, 'utf8').trim()).toBe('');
+  test('files the issue in ISSUE_REPO, not the repo running the check', () => {
+    // The docs team watches docs-ui; nobody watches this repo's issues for a
+    // Kapa dashboard task. github.token cannot write there, which is why the
+    // workflow hands the script the org bot token.
+    const r = run({ VALIDATE_STATUS: '1', VALIDATE_OUTPUT: '✗ gap\nKAPA_DRIFT_CONFIRMED' });
+    expect(r.status).toBe(1);
+    expect(r.ghCalls).toMatch(/issue list[^\n]*--repo redpanda-data\/docs-ui/);
+    expect(r.ghCalls).toMatch(/issue create[^\n]*--repo redpanda-data\/docs-ui/);
+    expect(r.ghCalls).not.toMatch(/--repo redpanda-data\/docs-extensions-and-macros/);
+  });
+
+  test('ISSUE_REPO defaults to docs-ui when the workflow does not set it', () => {
+    const r = run({ VALIDATE_STATUS: '1', VALIDATE_OUTPUT: '✗ gap\nKAPA_DRIFT_CONFIRMED', ISSUE_REPO: '' });
+    expect(r.ghCalls).toMatch(/--repo redpanda-data\/docs-ui/);
   });
 });
 
@@ -231,7 +238,7 @@ describe('kapa drift: exit 1 without the sentinel is a tool failure, not drift',
     });
     expect(r.status).toBe(2);
     expect(r.ghCalls.trim()).toBe('');
-    expect(r.stderr).toMatch(/exited 1 without confirming drift/);
+    expect(r.stderr).toMatch(/exited 1 without confirming a gap/);
   });
 
   test('a crash files nothing and exits 2', () => {
