@@ -100,8 +100,24 @@ async function fetchPublishedSegments ({ siteUrl, fetchImpl = globalThis.fetch }
  * @param {string[]} mapped
  * @returns {{missing: string[], stale: string[], prerelease: string[]}}
  */
+/**
+ * URL segments that publish without a durable version behind them.
+ *
+ * docs-site sets `latest_prerelease_version_segment: 'beta'`, so a branch with
+ * `prerelease: true` publishes at /streaming/beta/ for the whole pre-GA cycle
+ * (26.2's ran 2026-06-11 to 2026-07-28). No Kapa group is expected for it, and
+ * a check that reported it as missing would file the same false issue every
+ * Monday of every beta.
+ */
+const PRERELEASE_SEGMENTS = new Set(['beta'])
+
+/** @param {string} segment */
+function isPrereleaseSegment (segment) {
+  return PRERELEASE_SEGMENTS.has(segment)
+}
+
 function compareSegments (published, mapped) {
-  const PRERELEASE = new Set(['beta'])
+  const PRERELEASE = PRERELEASE_SEGMENTS
   const mappedSet = new Set(mapped)
   const publishedSet = new Set(published)
 
@@ -117,4 +133,4 @@ function compareSegments (published, mapped) {
   return { missing, stale, prerelease }
 }
 
-module.exports = { parsePublishedSegments, fetchPublishedSegments, compareSegments, SITEMAP_TIMEOUT_MS }
+module.exports = { parsePublishedSegments, fetchPublishedSegments, compareSegments, isPrereleaseSegment, PRERELEASE_SEGMENTS, SITEMAP_TIMEOUT_MS }
