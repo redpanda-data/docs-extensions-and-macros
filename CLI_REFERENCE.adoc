@@ -582,7 +582,7 @@ doc-tools lint-strings [options]
 Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned.
 
 `--surface <list>`::
-Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect
+Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect, api
 
 `--diff <base>`::
 Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD

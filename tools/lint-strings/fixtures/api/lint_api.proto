@@ -41,6 +41,30 @@ message FixtureTopic {
 
   string undocumented = 6;
 
+  // An openapiv2_field description OVERRIDES this comment, so the comment is
+  // dead text and the option's string is what must be linted.
+  string option_documented = 9 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "The string the generator actually publishes."
+      example: "\"ignored\""
+    }
+  ];
+
+  /*
+   * A field documented ONLY by an openapiv2_field option is not an
+   * undocumented field. 73 of console's fields are this shape and every one
+   * of them used to be reported as having no description.
+   *
+   * This note is a detached block comment, separated by a blank line, so that
+   * option_only genuinely has no leading comment of its own.
+   */
+
+  string option_only = 10 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Documented by the option alone."
+    }
+  ];
+
   // A oneof moves the brace depth without opening a message. Matching a bare
   // closing brace here popped FixtureTopic and reported the sibling message
   // below as nested inside it.

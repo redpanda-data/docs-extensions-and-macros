@@ -2587,7 +2587,9 @@ programCli
   .command('lint-strings')
   .description('Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)')
   .requiredOption('--repo <path>', 'Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned.')
-  .option('--surface <list>', 'Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect')
+  // Read off the registry rather than restated here: a hardcoded list silently
+  // went stale the moment a surface was added.
+  .option('--surface <list>', `Comma-separated surfaces to lint (default: all registered). Registered: ${Object.keys(require('../tools/lint-strings').SURFACES).join(', ')}`)
   .option('--diff <base>', 'Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD')
   .option('--format <format>', 'Output format: human or json', 'human')
   .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
