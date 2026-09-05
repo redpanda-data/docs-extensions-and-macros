@@ -95,9 +95,17 @@ clean:
 # `make` directly, without going through doc-tools.js.
 # An existing checkout may predate the streaming-enterprise migration and
 # still have origin pointed at the old public redpanda repo, so the
-# existing-directory path pins origin to REPO_URL before fetching; otherwise
-# a fetch could fail on a new tag and fall back to the old repo's default
-# branch, silently generating docs from the wrong source.
+# existing-directory path pins origin to REPO_URL before fetching. Pinning
+# origin is not enough by itself: the old repo's cached remote-tracking refs
+# and tags stay behind it, and a fetch that fails (expired token, outage,
+# ref that does not exist) used to fall straight through to checking one of
+# those out -- generating docs from stale public source under a tag that
+# source never contained, with nothing in the log to say so. So a fetch has
+# to succeed before any ref is resolved, the catch-all fetch prunes refs and
+# tags the new origin does not have, the ref that gets checked out is the
+# one the successful fetch actually wrote, and a TAG that is neither a tag
+# nor a branch there is an error rather than a quiet swap to the default
+# branch.
 redpanda-git:
 	@mkdir -p "$(TMP_ROOT)"
 	@GH_TOKEN=$${GH_TOKEN:-$${REDPANDA_GITHUB_TOKEN:-$${GITHUB_TOKEN}}}; \
@@ -114,40 +122,55 @@ redpanda-git:
 	export GIT_CONFIG_VALUE_1='!f() { echo "username=x-access-token"; echo "password=$$GIT_MAKEFILE_CLONE_TOKEN"; }; f'; \
 	REPO_URL="https://github.com/redpanda-data/streaming-enterprise.git"; \
 	echo "🔄 Cloning/updating streaming-enterprise into $(REDPANDA_SRC)…"; \
+	FETCH_LOG="$$(mktemp)"; \
+	FETCHED=""; \
 	if [ -d "$(REDPANDA_SRC)" ]; then \
 	  git -C "$(REDPANDA_SRC)" remote set-url origin "$$REPO_URL" 2>/dev/null || \
 	    git -C "$(REDPANDA_SRC)" remote add origin "$$REPO_URL"; \
-	  git -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "+refs/tags/$(TAG):refs/tags/$(TAG)" 2>/dev/null || \
-	    git -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "+refs/heads/$(TAG):refs/remotes/origin/$(TAG)" 2>/dev/null || \
-	    git -C "$(REDPANDA_SRC)" fetch --all --tags -q; \
+	  if git -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "+refs/tags/$(TAG):refs/tags/$(TAG)" >>"$$FETCH_LOG" 2>&1; then \
+	    FETCHED=tag; \
+	  elif git -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "+refs/heads/$(TAG):refs/remotes/origin/$(TAG)" >>"$$FETCH_LOG" 2>&1; then \
+	    FETCHED=branch; \
+	  elif git -C "$(REDPANDA_SRC)" fetch --all --tags --prune --prune-tags -q >>"$$FETCH_LOG" 2>&1; then \
+	    FETCHED=probe; \
+	  fi; \
 	else \
 	  echo "🔑 Using authenticated clone"; \
-	  git clone -q --depth 1 --branch "$(TAG)" "$$REPO_URL" "$(REDPANDA_SRC)" 2>/dev/null || \
-	    git clone -q --depth 1 "$$REPO_URL" "$(REDPANDA_SRC)"; \
-	fi; \
-	if git -C "$(REDPANDA_SRC)" rev-parse --verify -q "origin/$(TAG)" >/dev/null 2>&1; then \
-	  echo "🔖 Checking out remote branch 'origin/$(TAG)'"; \
-	  git -C "$(REDPANDA_SRC)" checkout -q "$(TAG)" 2>/dev/null || git -C "$(REDPANDA_SRC)" checkout -q -b "$(TAG)" "origin/$(TAG)"; \
-	  git -C "$(REDPANDA_SRC)" reset --hard "origin/$(TAG)" -q; \
-	elif git -C "$(REDPANDA_SRC)" rev-parse --verify -q "$(TAG)" >/dev/null 2>&1; then \
-	  echo "🔖 Checking out '$(TAG)'"; \
-	  git -C "$(REDPANDA_SRC)" checkout -q "$(TAG)"; \
-	else \
-	  DEFAULT_BRANCH=$$(git -C "$(REDPANDA_SRC)" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true); \
-	  if [ -n "$$DEFAULT_BRANCH" ]; then \
-	    echo "⚠️ Tag '$(TAG)' not found; falling back to '$${DEFAULT_BRANCH}'"; \
-	    git -C "$(REDPANDA_SRC)" checkout -q "$${DEFAULT_BRANCH}"; \
-	  else \
-	    DEFAULT_BRANCH=$$(git -C "$(REDPANDA_SRC)" ls-remote --symref origin HEAD | awk '/^ref:/ {sub(/^refs\/heads\//, "", $$2); print $$2; exit}'); \
-	    if [ -z "$$DEFAULT_BRANCH" ]; then \
-	      echo "❌ Tag '$(TAG)' not found and the default branch could not be determined"; \
-	      exit 1; \
-	    fi; \
-	    echo "⚠️ Tag '$(TAG)' not found; falling back to '$${DEFAULT_BRANCH}'"; \
-	    git -C "$(REDPANDA_SRC)" fetch --depth 1 -q origin "$$DEFAULT_BRANCH"; \
-	    git -C "$(REDPANDA_SRC)" checkout -q FETCH_HEAD; \
+	  if git clone -q --depth 1 --branch "$(TAG)" "$$REPO_URL" "$(REDPANDA_SRC)" >>"$$FETCH_LOG" 2>&1; then \
+	    FETCHED=probe; \
 	  fi; \
-	fi
+	fi; \
+	if [ -z "$$FETCHED" ]; then \
+	  echo "❌ Could not fetch '$(TAG)' from redpanda-data/streaming-enterprise:"; \
+	  sed 's/^/   /' "$$FETCH_LOG"; \
+	  echo "   Not continuing: anything already in $(REDPANDA_SRC) can predate the"; \
+	  echo "   streaming-enterprise migration, and generating docs from it would"; \
+	  echo "   publish stale public source under this tag. Check that the token is"; \
+	  echo "   valid and has access to the repository, and that '$(TAG)' exists there."; \
+	  rm -f "$$FETCH_LOG"; \
+	  exit 1; \
+	fi; \
+	rm -f "$$FETCH_LOG"; \
+	case "$$FETCHED" in \
+	  tag) REF="refs/tags/$(TAG)";; \
+	  branch) REF="refs/remotes/origin/$(TAG)";; \
+	  *) REF=""; \
+	     for candidate in "refs/tags/$(TAG)" "refs/remotes/origin/$(TAG)"; do \
+	       if git -C "$(REDPANDA_SRC)" rev-parse --verify -q "$$candidate" >/dev/null 2>&1; then \
+	         REF="$$candidate"; \
+	         break; \
+	       fi; \
+	     done;; \
+	esac; \
+	if [ -z "$$REF" ]; then \
+	  echo "❌ '$(TAG)' is neither a tag nor a branch in redpanda-data/streaming-enterprise."; \
+	  echo "   Not falling back to the default branch: that would publish docs labelled"; \
+	  echo "   '$(TAG)' built from entirely different source."; \
+	  exit 1; \
+	fi; \
+	echo "🔖 Checking out '$$REF'"; \
+	git -C "$(REDPANDA_SRC)" checkout -q --detach "$$REF"; \
+	git -C "$(REDPANDA_SRC)" reset --hard -q "$$REF"
 
 # --- Clone Tree-sitter grammar & generate parser ---
 # Skips npm install and parser generation when the generated output already
