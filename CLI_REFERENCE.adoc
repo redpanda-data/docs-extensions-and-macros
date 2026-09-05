@@ -133,7 +133,12 @@ npx doc-tools generate property-docs --tag $VERSION
 *Requirements:*
 
 - Internet connection to access GitHub API
-- GitHub API rate limits apply (60 requests/hour unauthenticated)
+- A GitHub token with access to redpanda-data/streaming-enterprise, which is
+  private. Redpanda releases are published there now, and the old public repo
+  is frozen, so this command exits rather than report a stale version when it
+  has no token. Resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN,
+  ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in
+  that priority order
 
 == get-console-version
 
@@ -1023,7 +1028,7 @@ Where to write all generated files (default: "modules/reference")
 Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. The token is resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order (default: true)
 
 `--no-cloud-support`::
-Skip Cloud support tags entirely -- and the GitHub token requirement that comes with them
+Skip Cloud support tags, and the cloudv2 repository access they need. A GitHub token is still required either way: the extractor clones the private streaming-enterprise repo to read the source
 
 `--template-property <path>`::
 Custom Handlebars template for individual property sections

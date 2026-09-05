@@ -119,7 +119,12 @@ programCli
  *
  * @requirements
  * - Internet connection to access GitHub API
- * - GitHub API rate limits apply (60 requests/hour unauthenticated)
+ * - A GitHub token with access to redpanda-data/streaming-enterprise, which is
+ *   private. Redpanda releases are published there now, and the old public repo
+ *   is frozen, so this command exits rather than report a stale version when it
+ *   has no token. Resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN,
+ *   ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in
+ *   that priority order
  */
 programCli
   .command('get-redpanda-version')
@@ -1076,7 +1081,7 @@ automation
   .option('--overrides <path>', 'Optional JSON file with property description overrides', 'docs-data/property-overrides.json')
   .option('--output-dir <dir>', 'Where to write all generated files', 'modules/reference')
   .option('--cloud-support', 'Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. The token is resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order', true)
-  .option('--no-cloud-support', 'Skip Cloud support tags entirely -- and the GitHub token requirement that comes with them')
+  .option('--no-cloud-support', 'Skip Cloud support tags, and the cloudv2 repository access they need. A GitHub token is still required either way: the extractor clones the private streaming-enterprise repo to read the source')
   .option('--template-property <path>', 'Custom Handlebars template for individual property sections')
   .option('--template-topic-property <path>', 'Custom Handlebars template for topic property sections')
   .option('--template-topic-property-mappings <path>', 'Custom Handlebars template for topic property mappings table')
@@ -1105,15 +1110,24 @@ automation
     const { getGitHubToken } = require('../cli-utils/github-token')
     const githubToken = getGitHubToken()
 
-    if (options.cloudSupport) {
-      console.log('Validating cloud support dependencies...')
-      if (!githubToken) {
-        console.error('Error: Cloud support requires a GitHub token')
-        console.error('   Set: export GITHUB_TOKEN=your_token_here')
-        console.error('   Or disable cloud support with: --no-cloud-support')
-        process.exit(1)
+    // A token is required whether or not Cloud metadata is: the extractor
+    // clones the private streaming-enterprise repo to read the source either
+    // way. --no-cloud-support only drops the extra cloudv2 read, so it is not
+    // a remedy for having no token, and pointing at it as one sent people
+    // into a run that got as far as the Makefile's clone step and died there.
+    if (!githubToken) {
+      console.error('Error: Generating property docs requires a GitHub token')
+      console.error('   The extractor reads Redpanda source from the private')
+      console.error('   redpanda-data/streaming-enterprise repository.')
+      console.error('   Set GH_TOKEN, REDPANDA_GITHUB_TOKEN, or GITHUB_TOKEN to a token with access.')
+      if (options.cloudSupport) {
+        console.error('   Cloud support tags (on by default) additionally read the cloudv2 repository;')
+        console.error('   --no-cloud-support skips those, but not the token requirement above.')
       }
-      console.log('Done: GitHub token validated')
+      process.exit(1)
+    }
+    if (options.cloudSupport) {
+      console.log('Done: GitHub token validated for source and cloudv2 access')
     }
 
     let oldTag = options.diff
