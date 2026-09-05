@@ -694,6 +694,7 @@ display help for command
 * `crd-spec` - Generate Asciidoc documentation for Kubernetes CRD references. Requires either --tag or --branch.
 * `bundle-openapi` - Bundle Redpanda OpenAPI fragments for admin and connect APIs. Requires either --tag or --branch.
 * `update-connect-version` - Update the Redpanda Connect version in antora.yml
+* `kapa-source-groups` - Generate the docs version segment to Kapa source group mapping from Kapa's ingestion API
 * `help` - display help for command
 
 === generate metrics-docs
@@ -1630,6 +1631,65 @@ npx doc-tools generate update-connect-version --connect-version 4.50.0
 
 None (uses GitHub API).
 
+=== generate kapa-source-groups
+
+Reads the source-group tree and the per-source group assignments from Kapa's ingestion API and writes a mapping from each docs URL version segment to the Kapa source group that scopes retrieval to that version. Consumers pass the group id as `sourceGroupIdsInclude` (Agent SDK), `sourceGroupIDsInclude` (Chat SDK, note the capital ID) or `_meta.source_group_ids_include` (hosted MCP server). The mapping is keyed on the URL segment, not Antora's page.version, because the two disagree for the latest release: latest_version_segment: 'current' publishes 26.2 at /streaming/current/ while page.version reads 26.2. This command only ever reads from Kapa. Kapa publishes no write API ("we do not provide an API endpoint for uploading or managing sources"), so the groups and their source assignments are created by hand in the Kapa dashboard under Sources > Manage groups. Run this afterwards to record what is there. Refuses rather than writing a misleading mapping when: no groups exist, no group has children, any version group has no sources assigned, or --default-segment is not one of the groups. An empty version group is worse than no group, because scoping a query to it returns only the global sources and the reader silently gets no version-specific content.
+
+*Why use it:*
+
+Kapa indexes one separately crawled source per published docs version. Without retrieval scoping a reader gets answers drawn from any of them: a measured call for "What is a Redpanda topic partition?" returned 12 sections, six of which were the same get-started/architecture page at six different versions. Source groups fix that at retrieval time, but the group UUIDs live in Kapa while the version list lives in Antora, so something has to join the two. Because a new docs version appears with no file change in docs-site (the playbook globs branches: v/*), a hand-maintained mapping goes stale silently; generating it and diff-checking the result in CI is what makes drift loud.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate kapa-source-groups [options]
+----
+
+*Options:*
+
+`--output <file>`::
+Output file (relative to repo root, must stay inside the repository) (default: "docs-data/kapa-source-groups.json")
+
+`--default-segment <segment>`::
+Segment used for pages with no version of their own (default: "current")
+
+`--parent-group <name>`::
+Restrict to one parent group by name (default: the only group that has children)
+
+`--dry-run`::
+Print output to stdout instead of writing file
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Write the mapping to its default location
+export KAPA_API_KEY=... KAPA_PROJECT_ID=...
+npx doc-tools generate kapa-source-groups
+
+# Preview without writing
+npx doc-tools generate kapa-source-groups --dry-run
+
+# Scope unversioned pages to something other than "current"
+npx doc-tools generate kapa-source-groups --default-segment 26.1
+
+# Disambiguate when more than one group has children
+npx doc-tools generate kapa-source-groups --parent-group Streaming
+----
+
+*Requirements:*
+
+- Kapa API key and project ID, set via KAPA_API_KEY and KAPA_PROJECT_ID
+- Create the key in the Kapa platform under Configuration > API Keys; the project ID is the
+  UUID in the dashboard URL (https://app.kapa.ai/<project-id>)
+- The parent group and its version sub groups must already exist in Kapa, with each version
+  group holding at least one source
+- Internet connection to reach https://api.kapa.ai
+
 == validate
 
 Validate docs data against internal sources of truth
@@ -1651,6 +1711,7 @@ display help for command
 * `rpk-overrides` - Validate rpk-overrides.json against schema and check for common issues
 * `enterprise-features` - Check the enterprise features registry against core, connect, and docs sources of truth
 * `property-overrides` - Validate property-overrides.json against its schema
+* `kapa-source-groups` - Check every published streaming version has a Kapa source (exit 0 covered, 1 missing, 2 error)
 * `help` - display help for command
 
 === validate rpk-overrides
@@ -1812,6 +1873,48 @@ npx doc-tools validate property-overrides --strict
 *Requirements:*
 
 - property-overrides.schema.json in docs-data/
+
+=== validate kapa-source-groups
+
+Checks that every streaming docs version currently published has a Kapa source, so Ask AI can scope answers to it. Exit status is meaningful: 0 every version is covered, 1 a version is missing, 2 the command itself failed (Kapa or the sitemap unreachable, bad credentials). A version counts as covered when Kapa has a source named `Documentation (X)` for it, that source is assigned to a source group, AND the committed mapping (docs-data/kapa-source-groups.json) has a segment for it. A source left unassigned is global in Kapa, which means it is returned for EVERY query on every version, so it is reported here as well. A version that Kapa covers but the committed mapping lacks is reported too: every deployed surface reads the mapping, not Kapa, so readers on that version silently get the default segment until the mapping is regenerated and released. The prerelease segment (/streaming/beta/) is ignored: a beta publishes there for the whole pre-GA cycle and is not expected to have a Kapa group of its own.
+
+*Why use it:*
+
+The latest release always publishes at /streaming/current/, and the `Documentation (current)` crawl follows it, so latest is never the version that goes missing. The one that goes missing is the version that just got archived: when 26.3 ships, 26.2 moves to /streaming/26.2/ and needs a crawl of its own that nobody has made yet. Kapa has no write API, so that crawl is created by hand in the dashboard, and nothing else notices when it is forgotten. Readers on the archived version then silently fall back to the default segment. Run it on a schedule so the gap opens an issue rather than waiting for a bug report.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools validate kapa-source-groups [options]
+----
+
+*Options:*
+
+`--site-url <url>`::
+Docs site whose sitemap says which versions are published (default: "https://docs.redpanda.com")
+
+`--mapping <file>`::
+Committed mapping every surface reads (default: "docs-data/kapa-source-groups.json")
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+export KAPA_API_KEY=... KAPA_PROJECT_ID=...
+npx doc-tools validate kapa-source-groups
+
+# Check a preview or staging site instead of production
+npx doc-tools validate kapa-source-groups --site-url https://deploy-preview-123--redpanda-documentation.netlify.app
+----
+
+*Requirements:*
+
+- Kapa API key and project ID, set via KAPA_API_KEY and KAPA_PROJECT_ID
+- Internet connection to reach https://api.kapa.ai and the docs site's sitemap
 
 == overrides
 

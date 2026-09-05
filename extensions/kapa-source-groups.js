@@ -1,0 +1,169 @@
+/* Publishes the Kapa source-group mapping to the UI as an AsciiDoc attribute.
+ *
+ * Example use in the playbook:
+ *   antora:
+ *     extensions:
+ *       - require: '@redpanda-data/docs-extensions-and-macros/extensions/kapa-source-groups'
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * docs-ui's get-kapa-source-groups helper needs to turn the page's version
+ * segment into a Kapa source group id, so Ask AI retrieval is scoped to the docs
+ * version the reader is actually on (DOC-1807, DOC-2450). docs-ui does not depend
+ * on this package and must not carry a second copy of the mapping, which would
+ * drift silently. So the mapping travels as an attribute: generated here by
+ * `doc-tools generate kapa-source-groups`, committed to docs-data, and merged
+ * onto every component version at build time.
+ *
+ * Set on every component version rather than only the versioned ones, because the
+ * helper needs the mapping on unversioned pages too. Those resolve to the
+ * mapping's default_segment, and sending no filter there is exactly what caused
+ * DOC-2450: the reporter was on a page with no version of its own.
+ *
+ * DEGRADATION
+ * -----------
+ * Every failure sets nothing and warns. The helper treats a missing attribute as
+ * "send no source group", which is the pre-DOC-2450 behaviour of searching every
+ * version. That is the right way to fail: a wrong group is worse than no group,
+ * because scoping to a group that does not hold the reader's version returns only
+ * Kapa's global sources, silently and with no error.
+ */
+
+const fs = require('fs')
+const path = require('path')
+const { raiseListenerLimit } = require('./util/raise-listener-limit')
+
+const ATTRIBUTE_NAME = 'kapa-source-groups'
+// Sits beside assets/widgets/, which proxy-api-docs.js already fetches from the
+// site origin, so the /api/ path needs no new hostname or auth.
+const ASSET_DIR = 'assets/data'
+const ASSET_FILENAME = 'kapa-source-groups.json'
+const DEFAULT_MAPPING_PATH = path.join(__dirname, '..', 'docs-data', 'kapa-source-groups.json')
+
+/**
+ * Validate the shape the helper depends on, so a malformed mapping is caught at
+ * build time with a named reason rather than producing pages that quietly lose
+ * version scoping.
+ *
+ * @param {*} mapping
+ * @returns {string|null} Reason it is unusable, or null when it is fine
+ */
+function validateMapping (mapping) {
+  if (!mapping || typeof mapping !== 'object') return 'not an object'
+  if (!mapping.segments || typeof mapping.segments !== 'object') return 'no segments object'
+  const segments = Object.keys(mapping.segments)
+  if (segments.length === 0) return 'segments is empty'
+  if (!mapping.default_segment) return 'no default_segment'
+  if (!mapping.segments[mapping.default_segment]) {
+    // The helper falls back to default_segment for every unversioned page, so a
+    // dangling default silently disables scoping across most of the site.
+    return `default_segment "${mapping.default_segment}" is not one of the segments (${segments.join(', ')})`
+  }
+  const missing = segments.filter((s) => !mapping.segments[s] || !mapping.segments[s].group_id)
+  if (missing.length) return `segments missing group_id: ${missing.join(', ')}`
+  return null
+}
+
+module.exports.register = function ({ config = {} } = {}) {
+  const logger = this.getLogger('kapa-source-groups-extension')
+
+  // Three listeners on a generator context that already carries 30+ extensions,
+  // which trips Node's default max-listeners warning. Raised before subscribing,
+  // per __tests__/extensions/raise-listener-limit.test.js.
+  raiseListenerLimit(this)
+  const mappingPath = config.mapping_file ? path.resolve(config.mapping_file) : DEFAULT_MAPPING_PATH
+
+  /** Load + validate once, or return null having warned with the consequence. */
+  function load () {
+    let mapping
+    try {
+      if (!fs.existsSync(mappingPath)) {
+        logger.warn(
+          `Kapa source-group mapping not found at ${mappingPath}. Ask AI will search every docs version. ` +
+          'Generate it with: doc-tools generate kapa-source-groups'
+        )
+        return null
+      }
+      mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'))
+    } catch (err) {
+      logger.warn(`Could not read the Kapa source-group mapping at ${mappingPath}: ${err.message}. Ask AI will search every docs version.`)
+      return null
+    }
+    const problem = validateMapping(mapping)
+    if (problem) {
+      logger.warn(`Kapa source-group mapping at ${mappingPath} is unusable (${problem}). Ask AI will search every docs version.`)
+      return null
+    }
+    return mapping
+  }
+
+  // site.keys reaches EVERY page, including ones with no component: the 404 page
+  // renders the Ask AI panel but has no page.component or page.componentVersion,
+  // so a component-version attribute alone leaves it unscoped. Its layout pulls
+  // in head and header, both of which already read site.keys, so this is the one
+  // channel that covers it. Set in playbookBuilt because the site UI model is
+  // derived from the playbook.
+  this.on('playbookBuilt', ({ playbook }) => {
+    const mapping = load()
+    if (!mapping) return
+    playbook.site = playbook.site || {}
+    playbook.site.keys = playbook.site.keys || {}
+    if (playbook.site.keys[ATTRIBUTE_NAME] === undefined) {
+      playbook.site.keys[ATTRIBUTE_NAME] = JSON.stringify(mapping)
+    }
+  })
+
+  // The /api/ reference is Bump.sh HTML assembled by docs-site's proxy-api-docs
+  // edge function, which has no Antora page context and cannot import from
+  // node_modules. Publishing the mapping as a site asset lets that function read
+  // the default group at request time, in parallel with the widget fetches it
+  // already does. The alternative -- a UUID pasted into docs-ui's static widget
+  // context or a Netlify env var -- is a second copy of the mapping that drifts
+  // silently the first time a group is recreated.
+  this.on('beforePublish', ({ siteCatalog }) => {
+    const mapping = load()
+    if (!mapping) return
+    siteCatalog.addFile({
+      contents: Buffer.from(JSON.stringify(mapping, null, 2) + '\n', 'utf8'),
+      out: { path: path.join(ASSET_DIR, ASSET_FILENAME) },
+    })
+    logger.info(`Kapa source groups: published ${ASSET_DIR}/${ASSET_FILENAME} for the /api/ proxy.`)
+  })
+
+  this.on('contentClassified', async ({ contentCatalog }) => {
+    const mapping = load()
+    if (!mapping) return
+
+    // Serialised once. The helper accepts a string or an object, but a string is
+    // what survives Antora's attribute handling unchanged, and it keeps the
+    // attribute value comparable between builds.
+    const serialised = JSON.stringify(mapping)
+
+    let versions = 0
+    const components = await contentCatalog.getComponents()
+    for (const component of components) {
+      component.versions.forEach(({ asciidoc }) => {
+        if (!asciidoc) return
+        asciidoc.attributes = asciidoc.attributes || {}
+        // Do not clobber an explicit override: a playbook or antora.yml that
+        // already sets this wins, matching how add-global-attributes.js lets
+        // component attributes beat the shared file.
+        if (asciidoc.attributes[ATTRIBUTE_NAME] === undefined) {
+          asciidoc.attributes[ATTRIBUTE_NAME] = serialised
+        }
+        versions += 1
+      })
+    }
+
+    logger.info(
+      `Kapa source groups: set ${ATTRIBUTE_NAME} on ${versions} component version(s); ` +
+      `${Object.keys(mapping.segments).length} version segments, default "${mapping.default_segment}".`
+    )
+  })
+}
+
+module.exports.validateMapping = validateMapping
+module.exports.ATTRIBUTE_NAME = ATTRIBUTE_NAME
+module.exports.DEFAULT_MAPPING_PATH = DEFAULT_MAPPING_PATH
+module.exports.ASSET_DIR = ASSET_DIR
+module.exports.ASSET_FILENAME = ASSET_FILENAME
