@@ -54,9 +54,71 @@ describe('helm values.yaml parser (parseValuesFile)', () => {
     expect(declarations.some((d) => (d.string || '').includes('inside a block scalar'))).toBe(false)
   })
 
-  test('undocumented top-level keys are surfaced as declarations', () => {
-    expect(byName.get('undocumentedTopLevel').meta.undocumented).toBe(true)
+  test('the undocumented key reported is the LEAF helm-docs publishes, not its parent', () => {
+    // helm-docs renders no row for an unmarked parent, so reporting
+    // `undocumentedTopLevel` told the author to document a key that never
+    // appears. The row that does appear, blank, is its leaf.
+    expect(byName.get('undocumentedTopLevel.child').meta.undocumented).toBe(true)
+    expect(byName.has('undocumentedTopLevel')).toBe(false)
+    // A key whose only content is a commented-out child is a null leaf, so it
+    // does get published blank.
+    expect(byName.get('resources').meta.undocumented).toBe(true)
     expect(byName.get('config').meta.undocumented).toBe(true)
+  })
+
+  test('an unmarked child of a MARKED key is not reported', () => {
+    // A `# --` marker documents its whole subtree: helm-docs drops the
+    // unmarked children rather than rendering them blank, so `image.tag` is
+    // not a missing description.
+    expect(byName.has('image.tag')).toBe(false)
+  })
+})
+
+describe('publishableBlankKeys models helm-docs leaf selection', () => {
+  const blanks = (yamlText, marked = [], ignored = []) =>
+    helm.publishableBlankKeys(yamlText, new Set(marked), new Set(ignored)).sort()
+
+  test('an array of scalars is one row; an array of objects is descended by index', () => {
+    // Verified against helm-docs 1.14.2: `controllers.run` (scalars) renders
+    // as a single row, while `ingress.hosts` renders as hosts[0].host etc.
+    expect(blanks('run:\n  - all\n')).toEqual(['run'])
+    expect(blanks('hosts:\n  - host: a\n    port: 1\n')).toEqual(['hosts[0].host', 'hosts[0].port'])
+  })
+
+  test('an empty array or map is a leaf', () => {
+    expect(blanks('annotations: {}\ntls: []\n')).toEqual(['annotations', 'tls'])
+  })
+
+  test('a marked ancestor removes the whole subtree', () => {
+    expect(blanks('console:\n  enabled: true\n', ['console'])).toEqual([])
+  })
+
+  test('@ignored removes the key and its subtree', () => {
+    expect(blanks('a:\n  b: 1\n', [], ['a'])).toEqual([])
+  })
+
+  test('unparsable YAML reports nothing rather than guessing', () => {
+    expect(blanks('a:\n\tb: 1\n')).toEqual([])
+  })
+
+  test('a marker inside a block scalar is content, not structure', () => {
+    // `config: |` followed by indented `some: content` is a string body. A
+    // key scan that walked into it would invent paths that do not exist.
+    expect(blanks('config: |\n  some: content\n  other: thing\n')).toEqual(['config'])
+  })
+})
+
+describe('undocumented-key findings point at the key in the file', () => {
+  test('every reported key is on the line the finding names', () => {
+    const declarations = helm.parseValuesFile(fixture, 'charts/fixture/values.yaml')
+    const rows = fixture.split('\n')
+    const reported = declarations.filter((d) => d.meta.undocumented)
+    expect(reported.length).toBeGreaterThan(0)
+    for (const decl of reported) {
+      const leaf = decl.name.replace(/\[\d+\]/g, '').split('.').pop()
+      // line_start is 1-indexed into the file.
+      expect(rows[decl.line_start - 1]).toContain(leaf)
+    }
   })
 })
 
@@ -74,7 +136,7 @@ describe('helm surface end-to-end (fixture file)', () => {
     fs.rmSync(repo, { recursive: true, force: true })
   })
 
-  test('dead markers are errors, undocumented top-level keys info; documented keys stay clean', () => {
+  test('dead markers are errors, undocumented keys info; documented keys stay clean', () => {
     const declarations = helm.extract({ repo })
     const { findings, summary } = runRules(declarations, rulesFor(helm))
 
@@ -85,10 +147,10 @@ describe('helm surface end-to-end (fixture file)', () => {
     }
 
     const undocumented = findings
-      .filter((f) => f.rules.some((r) => r.id === 'undocumented-top-level-key'))
+      .filter((f) => f.rules.some((r) => r.id === 'undocumented-key'))
       .map((f) => f.name)
       .sort()
-    expect(undocumented).toEqual(['config', 'resources', 'undocumentedTopLevel'])
+    expect(undocumented).toEqual(['config', 'resources', 'undocumentedTopLevel.child'])
 
     // Conforming counterparts: zero findings (false-positive guard).
     // Terminal periods are optional prose style on this surface, so the

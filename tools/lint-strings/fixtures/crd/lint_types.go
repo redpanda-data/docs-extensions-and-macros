@@ -35,6 +35,43 @@ type WidgetReference struct {
 	Version int    `json:"version"`
 }
 
+// EmptyOnOneLine opens and closes on a single line. Assuming it opened a
+// struct body left the parser inside a type that had already ended, which
+// dropped every declaration below it in the file.
+type EmptyOnOneLine struct{}
+
+// ValueSource represents where a value can be pulled from.
+type ValueSource struct {
+	// The literal value.
+	Value string `json:"value,omitempty"`
+}
+
+// UndocumentedType has no doc comment of its own, so a field referencing it
+// has nothing to inherit and genuinely ships blank.
+type undocumentedTypeMarker int
+
+type UndocumentedTarget struct {
+	// The only field.
+	Only string `json:"only,omitempty"`
+}
+
+// FallbackSpec covers what an uncommented field actually publishes.
+type FallbackSpec struct {
+	// +optional
+	Inherited *ValueSource `json:"inherited,omitempty"`
+	// +optional
+	FromUndocumented *UndocumentedTarget `json:"fromUndocumented,omitempty"`
+	// +optional
+	Primitive string `json:"primitive,omitempty"`
+	// +optional
+	SliceOfDocumented []ValueSource `json:"sliceOfDocumented,omitempty"`
+	// +optional
+	External *metav1.Duration `json:"external,omitempty"`
+	// How long to wait before giving up on the widget.
+	// +optional
+	Both *ValueSource `json:"both,omitempty"`
+}
+
 // WidgetList is ignored via the config's ignoreTypes ('List$').
 type WidgetList struct {
 	metav1.TypeMeta `json:",inline"`
