@@ -1030,6 +1030,9 @@ Add AsciiDoc tags to generated property docs to indicate which ones are supporte
 `--no-cloud-support`::
 Skip Cloud support tags, and the cloudv2 repository access they need. A GitHub token is still required either way: the extractor clones the private streaming-enterprise repo to read the source
 
+`--skip-rp-util`::
+Keep cluster/broker scope Tree-sitter-only, skipping the rp_util merge step (default: use rp_util when available, falling back to Tree-sitter-only data if its schema cannot be obtained)
+
 `--template-property <path>`::
 Custom Handlebars template for individual property sections
 

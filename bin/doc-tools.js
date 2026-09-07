@@ -1082,6 +1082,7 @@ automation
   .option('--output-dir <dir>', 'Where to write all generated files', 'modules/reference')
   .option('--cloud-support', 'Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. The token is resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order', true)
   .option('--no-cloud-support', 'Skip Cloud support tags, and the cloudv2 repository access they need. A GitHub token is still required either way: the extractor clones the private streaming-enterprise repo to read the source')
+  .option('--skip-rp-util', 'Keep cluster/broker scope Tree-sitter-only, skipping the rp_util merge step (default: use rp_util when available, falling back to Tree-sitter-only data if its schema cannot be obtained)')
   .option('--template-property <path>', 'Custom Handlebars template for individual property sections')
   .option('--template-topic-property <path>', 'Custom Handlebars template for topic property sections')
   .option('--template-topic-property-mappings <path>', 'Custom Handlebars template for topic property mappings table')
@@ -1156,6 +1157,7 @@ automation
       if (githubToken) env.GH_TOKEN = githubToken
       if (overrides) env.OVERRIDES = path.resolve(overrides)
       if (options.cloudSupport) env.CLOUD_SUPPORT = '1'
+      if (options.skipRpUtil) env.SKIP_RP_UTIL = '1'
       if (templates.property) env.TEMPLATE_PROPERTY = path.resolve(templates.property)
       if (templates.topicProperty) env.TEMPLATE_TOPIC_PROPERTY = path.resolve(templates.topicProperty)
       if (templates.topicPropertyMappings) env.TEMPLATE_TOPIC_PROPERTY_MAPPINGS = path.resolve(templates.topicPropertyMappings)
