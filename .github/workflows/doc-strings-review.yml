@@ -51,11 +51,12 @@
 #         # Only needed where the token IS a GitHub secret.
 #         actions_bot_token: ${{ secrets.ACTIONS_BOT_TOKEN }}
 #
-# The ref above is `@main` because this repository publishes NO git tags: `git
-# ls-remote --tags` is empty and publish-to-npm.yaml only publishes to npm, it
-# creates no tag or release. A caller copying `@v<version>` would get an
-# unresolvable ref and a failing workflow. Pin to a tag once the release
-# pipeline creates one, or to a commit SHA for immutability today.
+# The ref above is a placeholder. Do NOT copy `@main` into a caller: this
+# workflow runs inside the caller's job with the caller's OIDC role and
+# pull-requests: write, so a merge here would change what runs there with no
+# review there. publish-to-npm.yaml creates a `v<version>` tag and GitHub
+# release for every version that reaches npm; pin to one of those tags, or to
+# the commit SHA it points at for full immutability.
 #
 # Use `pull_request`, not `pull_request_target`. On `pull_request_target`,
 # actions/checkout without an explicit ref checks out the BASE commit, so the

@@ -10,6 +10,12 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # contents: write is for the release step at the end of this job only:
+    # `gh release create` pushes the v<version> tag. Nothing else here writes
+    # to the repository. The dispatch job below keeps the workflow default.
+    permissions:
+      id-token: write
+      contents: write
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -26,6 +32,35 @@ jobs:
       - name: Check published version
         if: ${{ steps.publish.outputs.type }}
         run: echo "Version changed!"
+      # Every version that reaches npm also gets a git tag and a GitHub
+      # release, so other repositories can pin reusable workflows and actions
+      # from here to `@v<version>` (or to the SHA that tag points at) instead
+      # of `@main`. Keyed on the registry, not on npm-publish's `type` output:
+      # a rerun of this workflow, or a push that did not change the version,
+      # reports no type, and the tag should still be created if it is missing.
+      # Idempotent: an existing release is left alone.
+      - name: Tag and release the published version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pkg=$(jq -r .name package.json)
+          version=$(jq -r .version package.json)
+          tag="v${version}"
+          if ! npm view "${pkg}@${version}" version >/dev/null 2>&1; then
+            echo "::notice::${pkg}@${version} is not on npm; nothing to tag."
+            exit 0
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release ${tag} already exists; nothing to do."
+            exit 0
+          fi
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --generate-notes \
+            --notes "Published to npm as \`${pkg}@${version}\`. Pin reusable workflows and actions from this repository to this tag, or to the commit it points at, rather than to \`@main\`."
+          echo "::notice::Created release ${tag} at ${GITHUB_SHA}"
   dispatch:
     needs: publish
     strategy:
