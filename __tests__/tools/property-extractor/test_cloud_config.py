@@ -9,11 +9,20 @@ that old name. Membership checks must match on the current name or any alias.
 import unittest
 import sys
 import os
+from unittest import mock
 
 # Add property-extractor directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../tools/property-extractor'))
 
-from cloud_config import CloudConfig, add_cloud_support_metadata
+from cloud_config import (
+    CloudConfig,
+    GitHubAuthError,
+    NetworkError,
+    add_cloud_support_metadata,
+    fetch_cloud_config,
+)
+
+TOKEN_ENV_VARS = ('GH_TOKEN', 'GITHUB_TOKEN', 'REDPANDA_GITHUB_TOKEN')
 
 
 def make_cloud_config(editable=None, readonly=None):
@@ -130,6 +139,76 @@ class TestAliasAwareCloudMatching(unittest.TestCase):
 
         output = "\n".join(captured.output)
         self.assertIn("via alias 'delete_retention_ms'", output)
+
+
+class TestFetchCloudConfigTokenResolution(unittest.TestCase):
+    """`fetch_cloud_config` must see GH_TOKEN -- the name
+    `doc-tools generate property-docs` pre-resolves a token to (via
+    cli-utils/github-token.js's full priority chain, GIT_CREDENTIALS
+    included) before invoking the Makefile that runs this script -- not
+    just the two names a directly-invoked `make` sets.
+    """
+
+    def setUp(self):
+        # Isolate from whatever token env vars happen to be set on the
+        # machine running the suite.
+        patcher = mock.patch.dict(os.environ, {}, clear=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for var in TOKEN_ENV_VARS:
+            os.environ.pop(var, None)
+
+    def _mock_response(self, status_code=404):
+        response = mock.Mock()
+        response.status_code = status_code
+        response.headers = {}
+        return response
+
+    def test_prefers_gh_token_over_other_env_vars(self):
+        os.environ['GH_TOKEN'] = 'gh-token'
+        os.environ['GITHUB_TOKEN'] = 'github-actions-token'
+        os.environ['REDPANDA_GITHUB_TOKEN'] = 'redpanda-token'
+
+        with mock.patch('cloud_config.requests.get', return_value=self._mock_response()) as mock_get:
+            with self.assertRaises(NetworkError):
+                fetch_cloud_config()
+
+        self.assertEqual(mock_get.call_args.kwargs['headers']['Authorization'], 'token gh-token')
+
+    def test_falls_back_to_github_token_when_gh_token_unset(self):
+        os.environ['GITHUB_TOKEN'] = 'github-actions-token'
+        os.environ['REDPANDA_GITHUB_TOKEN'] = 'redpanda-token'
+
+        with mock.patch('cloud_config.requests.get', return_value=self._mock_response()) as mock_get:
+            with self.assertRaises(NetworkError):
+                fetch_cloud_config()
+
+        self.assertEqual(mock_get.call_args.kwargs['headers']['Authorization'], 'token github-actions-token')
+
+    def test_falls_back_to_redpanda_github_token_last(self):
+        os.environ['REDPANDA_GITHUB_TOKEN'] = 'redpanda-token'
+
+        with mock.patch('cloud_config.requests.get', return_value=self._mock_response()) as mock_get:
+            with self.assertRaises(NetworkError):
+                fetch_cloud_config()
+
+        self.assertEqual(mock_get.call_args.kwargs['headers']['Authorization'], 'token redpanda-token')
+
+    def test_explicit_token_argument_overrides_environment(self):
+        os.environ['GH_TOKEN'] = 'env-token'
+
+        with mock.patch('cloud_config.requests.get', return_value=self._mock_response()) as mock_get:
+            with self.assertRaises(NetworkError):
+                fetch_cloud_config(github_token='explicit-token')
+
+        self.assertEqual(mock_get.call_args.kwargs['headers']['Authorization'], 'token explicit-token')
+
+    def test_raises_without_calling_api_when_no_token_available(self):
+        with mock.patch('cloud_config.requests.get') as mock_get:
+            with self.assertRaises(GitHubAuthError):
+                fetch_cloud_config()
+
+        mock_get.assert_not_called()
 
 
 if __name__ == "__main__":

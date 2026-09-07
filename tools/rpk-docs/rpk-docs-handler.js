@@ -241,7 +241,31 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-source-'))
   const repoDir = path.join(tmpDir, 'redpanda')
 
-  console.log(`Sparse-cloning redpanda repo (ref: ${sourceRef}) to ${repoDir}...`)
+  // streaming-enterprise is private, so a token is required. Auth travels
+  // via a credential helper registered through GIT_CONFIG_* environment
+  // variables, never as a git -c argument, so the token cannot appear in
+  // this process's argv (visible to anything that can list processes) and
+  // never embedded in the remote URL, so no token is persisted in the
+  // clone's .git/config either.
+  const { getGitHubToken } = require('../../cli-utils/github-token')
+  const token = getGitHubToken()
+  if (!token) {
+    throw new Error(
+      'redpanda-data/streaming-enterprise is a private repository.\n' +
+      'Set GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN so the clone can authenticate.'
+    )
+  }
+  const gitEnv = {
+    ...process.env,
+    RPK_SOURCE_CLONE_TOKEN: token,
+    GIT_CONFIG_COUNT: '2',
+    GIT_CONFIG_KEY_0: 'credential.helper',
+    GIT_CONFIG_VALUE_0: '',
+    GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
+    GIT_CONFIG_VALUE_1: '!f() { echo "username=x-access-token"; echo "password=$RPK_SOURCE_CLONE_TOKEN"; }; f'
+  }
+
+  console.log(`Sparse-cloning streaming-enterprise repo (ref: ${sourceRef}) to ${repoDir}...`)
 
   // Clone with sparse checkout
   const cloneResult = spawnSync('git', [
@@ -250,27 +274,31 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
     '--filter=blob:none',
     '--sparse',
     '--branch', sourceRef,
-    'https://github.com/redpanda-data/redpanda.git',
+    'https://github.com/redpanda-data/streaming-enterprise.git',
     repoDir
   ], {
     encoding: 'utf8',
     timeout: 120000,
+    env: gitEnv,
     stdio: ['pipe', 'pipe', 'pipe']
   })
 
   if (cloneResult.status !== 0) {
     throw new Error(
-      `Failed to clone redpanda repo with ref '${sourceRef}'.\n` +
+      `Failed to clone streaming-enterprise repo with ref '${sourceRef}'.\n` +
       `Make sure the branch or tag exists.\n` +
       `Error: ${cloneResult.stderr}`
     )
   }
 
-  // Set sparse checkout to only get rpk
+  // Set sparse checkout to only get rpk. With --filter=blob:none, the blobs
+  // for src/go/rpk were not fetched by the clone above and are pulled lazily
+  // here, so this invocation needs the same credential helper.
   const sparseResult = spawnSync('git', ['sparse-checkout', 'set', 'src/go/rpk'], {
     cwd: repoDir,
     encoding: 'utf8',
-    timeout: 60000
+    timeout: 60000,
+    env: gitEnv
   })
 
   if (sparseResult.status !== 0) {
@@ -292,8 +320,8 @@ function fetchRpkTreeFromSource(sourcePath) {
   if (!fs.existsSync(sourcePath)) {
     throw new Error(
       `rpk source directory not found: ${sourcePath}\n` +
-      'To use --from-source, you need a local checkout of the redpanda repository.\n' +
-      'Clone it with: git clone https://github.com/redpanda-data/redpanda.git\n' +
+      'To use --from-source, you need a local checkout of the streaming-enterprise repository (private).\n' +
+      'Clone it with: git clone https://github.com/redpanda-data/streaming-enterprise.git\n' +
       'Then point to: <repo>/src/go/rpk'
     )
   }
@@ -393,8 +421,8 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
   if (!fs.existsSync(absoluteSourcePath)) {
     throw new Error(
       `rpk source directory not found: ${absoluteSourcePath}\n` +
-      'Expected a checkout of the redpanda repository.\n' +
-      'Clone it with: git clone https://github.com/redpanda-data/redpanda.git'
+      'Expected a checkout of the streaming-enterprise repository (private).\n' +
+      'Clone it with: git clone https://github.com/redpanda-data/streaming-enterprise.git'
     )
   }
 
@@ -1292,16 +1320,69 @@ function downloadRpkRelease(tag, destDir) {
     return null
   }
 
+  // Releases now publish to streaming-enterprise (private), not the public
+  // redpanda-data/redpanda. This function already has a fallback (the
+  // caller builds from source instead), so a missing token warns and
+  // returns null here rather than throwing the way the clone-only paths do.
+  const { getGitHubToken } = require('../../cli-utils/github-token')
+  const token = getGitHubToken()
+  if (!token) {
+    console.warn('No GitHub token available for the private streaming-enterprise release download; falling back to a source build.')
+    return null
+  }
+
   const assetName = `rpk-${osName}-${archName}.zip`
-  const baseUrl = `https://github.com/redpanda-data/redpanda/releases/download/${tag}`
+  const checksumAsset = `rpk_${tag.replace(/^v/, '')}_checksums.txt`
   const zipPath = path.join(destDir, assetName)
+  // The Authorization header reaches curl through a config file on stdin
+  // (--config -), never as an -H argument: an argv header is readable by
+  // any process on the host (ps, /proc) for as long as the transfer runs.
+  const curlAuthConfig = `header = "Authorization: token ${token}"`
+
+  // streaming-enterprise is private, so the release's browser download URL
+  // (releases/download/<tag>/<asset>) 404s even with a valid token: it
+  // redirects to a signed storage URL that requires an authenticated
+  // browser session, not a bearer token. Only the API's per-asset url
+  // (asset.url, not asset.browser_download_url) accepts this Authorization
+  // header, so resolve assets through the release-by-tag API first.
+  const releaseResult = spawnSync('curl', [
+    '-fsSL', '--retry', '5', '--retry-all-errors',
+    '--connect-timeout', '30', '--max-time', '60',
+    '--config', '-',
+    '-H', 'Accept: application/vnd.github+json',
+    `https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/tags/${tag}`
+  ], { encoding: 'utf8', input: curlAuthConfig, timeout: 90000 })
+
+  if (releaseResult.status !== 0) {
+    console.warn(`Could not look up release ${tag} from streaming-enterprise (draft or missing release)`)
+    return null
+  }
+
+  let release
+  try {
+    release = JSON.parse(releaseResult.stdout)
+  } catch {
+    console.warn(`Could not parse release metadata for ${tag}`)
+    return null
+  }
+
+  const assetUrl = (release.assets || []).find(a => a.name === assetName)?.url
+  if (!assetUrl) {
+    console.warn(`Release ${tag} has no asset named ${assetName} (draft or missing release asset)`)
+    return null
+  }
+  const checksumUrl = (release.assets || []).find(a => a.name === checksumAsset)?.url
 
   console.log(`Downloading ${assetName} for ${tag}...`)
+  // Accept: application/octet-stream is required on the API asset url to
+  // receive the binary itself instead of its JSON metadata.
   const curlResult = spawnSync('curl', [
     '-fL', '--retry', '5', '--retry-all-errors',
     '--connect-timeout', '30', '--max-time', '300',
-    '-o', zipPath, `${baseUrl}/${assetName}`
-  ], { encoding: 'utf8', timeout: 360000 })
+    '--config', '-',
+    '-H', 'Accept: application/octet-stream',
+    '-o', zipPath, assetUrl
+  ], { encoding: 'utf8', input: curlAuthConfig, timeout: 360000 })
 
   if (curlResult.status !== 0) {
     console.warn(`Could not download rpk release for ${tag} (draft or missing release asset)`)
@@ -1309,12 +1390,13 @@ function downloadRpkRelease(tag, destDir) {
   }
 
   // Verify against the release checksum file when it exists
-  const checksumAsset = `rpk_${tag.replace(/^v/, '')}_checksums.txt`
   const checksumPath = path.join(destDir, checksumAsset)
-  const checksumResult = spawnSync('curl', [
+  const checksumResult = checksumUrl ? spawnSync('curl', [
     '-fsSL', '--retry', '3', '--connect-timeout', '30', '--max-time', '60',
-    '-o', checksumPath, `${baseUrl}/${checksumAsset}`
-  ], { encoding: 'utf8', timeout: 90000 })
+    '--config', '-',
+    '-H', 'Accept: application/octet-stream',
+    '-o', checksumPath, checksumUrl
+  ], { encoding: 'utf8', input: curlAuthConfig, timeout: 90000 }) : { status: 1 }
 
   if (checksumResult.status === 0) {
     const expectedLine = fs.readFileSync(checksumPath, 'utf8')

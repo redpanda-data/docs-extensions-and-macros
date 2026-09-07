@@ -17,13 +17,13 @@ const { getGitHubToken } = require('./github-token')
 const RAW = 'https://raw.githubusercontent.com'
 
 // Repos known to be private, so a 404 can legitimately mean "needs auth".
-// Public sources (redpanda core headers, connect info.csv) 404 only when the
-// file is genuinely missing, and suggesting credentials there sends the
-// reader after a problem that does not exist (e.g. during a transient
-// GitHub blip).
+// Public sources (connect info.csv) 404 only when the file is genuinely
+// missing, and suggesting credentials there sends the reader after a
+// problem that does not exist (e.g. during a transient GitHub blip).
 const PRIVATE_REPO_PREFIXES = [
   `${RAW}/redpanda-data/docs/`,
   `${RAW}/redpanda-data/rp-connect-docs/`,
+  `${RAW}/redpanda-data/streaming-enterprise/`,
 ]
 
 const TOKEN_HINT = ' This source is in a private repository: set GIT_CREDENTIALS (or GITHUB_TOKEN / REDPANDA_GITHUB_TOKEN / ACTIONS_BOT_TOKEN) so the fetch can authenticate.'
@@ -220,8 +220,8 @@ async function loadEnterpriseSources (options, deps = {}) {
   const registryYaml = options.registry
     ? readLocal(options.registry)
     : await fetchText(`${RAW}/redpanda-data/docs/${options.docsRef}/shared/modules/ROOT/partials/enterprise-features.yml`)
-  const coreHeader = await fetchText(`${RAW}/redpanda-data/redpanda/${options.tag}/src/v/features/enterprise_features.h`, 'core enterprise_features.h')
-  const configurationHeader = await fetchText(`${RAW}/redpanda-data/redpanda/${options.tag}/src/v/config/configuration.h`, 'core configuration.h')
+  const coreHeader = await fetchText(`${RAW}/redpanda-data/streaming-enterprise/${options.tag}/src/v/features/enterprise_features.h`, 'core enterprise_features.h')
+  const configurationHeader = await fetchText(`${RAW}/redpanda-data/streaming-enterprise/${options.tag}/src/v/config/configuration.h`, 'core configuration.h')
 
   let connectRef = options.connectRef
   let infoCsv
