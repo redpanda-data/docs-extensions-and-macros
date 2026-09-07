@@ -16,7 +16,12 @@ module.exports.register = function ({ config }) {
   const token = getGitHubToken();
 
   if (!token) {
-    logger.warn('GitHub token not set (REDPANDA_GITHUB_TOKEN, GITHUB_TOKEN, or GH_TOKEN). Attempting unauthenticated request.');
+    // Unauthenticated requests still work for the public repos this
+    // extension queries (connect, redpanda-operator), but the Redpanda
+    // version now comes from the private streaming-enterprise repo, whose
+    // API 404s without a token -- the latest-redpanda-* attributes are then
+    // left unset and pages fall back to their antora.yml values.
+    logger.warn('GitHub token not set (GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, GITHUB_TOKEN, or GH_TOKEN). The Redpanda version lookup against the private streaming-enterprise repo will fail and leave latest-redpanda-* attributes unset; other lookups proceed unauthenticated.');
   }
 
   this.on('contentClassified', async ({ contentCatalog }) => {
@@ -41,7 +46,11 @@ module.exports.register = function ({ config }) {
         latestOperatorResult,
         latestConnectResult,
       ] = await Promise.allSettled([
-        GetLatestRedpandaVersion(github, owner, 'redpanda', logger),
+        // streaming-enterprise, not the frozen public 'redpanda' repo: the public
+        // repo still answers API calls but stopped receiving releases on
+        // 2026-08-20, so resolving from it silently pins the docs to the last
+        // pre-freeze version forever.
+        GetLatestRedpandaVersion(github, owner, 'streaming-enterprise', logger),
         GetLatestDockerTag(dockerNamespace, 'console', logger),
         GetLatestDockerTag(dockerNamespace, 'redpanda-operator', logger),
         GetLatestConnectVersion(github, owner, 'connect', logger),

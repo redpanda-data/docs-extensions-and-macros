@@ -101,17 +101,17 @@ ifndef::env-cloud[]
 xref:reference:properties/{{#if cluster_property_doc_file}}{{cluster_property_doc_file}}{{else}}cluster-properties.adoc{{/if}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`]
 endif::[]
 {{/if}}
-{{#if (and minimum maximum)}}
+{{#if (and (ne minimum undefined) (ne maximum undefined))}}
 
 | Range
 | [`{{minimum}}`, `{{maximum}}`]
 {{else}}
-{{#if minimum}}
+{{#if (ne minimum undefined)}}
 
 | Minimum
 | `{{minimum}}`
 {{/if}}
-{{#if maximum}}
+{{#if (ne maximum undefined)}}
 
 | Maximum
 | `{{maximum}}`
@@ -133,8 +133,11 @@ endif::[]
 | {{#if nullable}}Yes{{else}}No{{/if}}
 
 ifndef::env-cloud[]
+{{#if (ne gets_restored undefined)}}
+
 | Restored on xref:manage:whole-cluster-restore.adoc[Whole Cluster Restore]
-| {{#if (ne gets_restored false)}}Yes{{else}}No{{/if}}
+| {{#if gets_restored}}Yes{{else}}No{{/if}}
+{{/if}}
 endif::[]
 {{#if example}}
 

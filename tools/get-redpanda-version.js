@@ -2,6 +2,7 @@
 
 const GetLatestRedpandaVersion = require('../extensions/version-fetcher/get-latest-redpanda-version.js');
 const { getPrereleaseFromAntora } = require('../cli-utils/antora-utils.js');
+const { getGitHubToken } = require('../cli-utils/github-token');
 
 /**
  * Fetches and prints the latest Redpanda version and Docker repository.
@@ -10,8 +11,20 @@ const { getPrereleaseFromAntora } = require('../cli-utils/antora-utils.js');
  * @param {boolean} options.fromAntora - Whether to derive beta flag from antora.yml
  */
 module.exports = async function getRedpandaVersion({ beta = false, fromAntora = false }) {
+  // streaming-enterprise, not the old public redpanda repo: the public repo
+  // still answers API requests but froze at its 2026-08-20 state when the
+  // source moved, so resolving "latest" from it silently pins to the last
+  // pre-freeze release forever. streaming-enterprise is private, and
+  // unauthenticated release listings 404 rather than fail loudly, so refuse
+  // to guess without a token instead of quietly resolving nothing.
   const owner = 'redpanda-data';
-  const repo = 'redpanda';
+  const repo = 'streaming-enterprise';
+
+  if (!getGitHubToken()) {
+    console.error(`❌ redpanda-data/${repo} is a private repository.`);
+    console.error('   Set GH_TOKEN, REDPANDA_GITHUB_TOKEN, or GITHUB_TOKEN to a token with access.');
+    process.exit(1);
+  }
 
   // Determine whether to treat this as a beta (RC) release
   let useBeta = beta;

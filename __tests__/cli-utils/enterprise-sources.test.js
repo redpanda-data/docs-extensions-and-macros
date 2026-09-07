@@ -12,7 +12,7 @@ const TOKEN_VARS = [
 // A URL inside a repo the fetcher knows to be private, and one it treats as
 // public. Credential hints must only ever be attached to the former.
 const PRIVATE_URL = `${RAW}/redpanda-data/docs/main/shared/modules/ROOT/partials/enterprise-features.yml`;
-const PUBLIC_URL = `${RAW}/redpanda-data/redpanda/dev/src/v/config/configuration.h`;
+const PUBLIC_URL = `${RAW}/redpanda-data/connect/main/internal/plugins/info.csv`;
 
 // Tests inject a no-op sleep so transient-retry paths run instantly.
 const noSleep = jest.fn().mockResolvedValue(undefined);
@@ -121,14 +121,14 @@ describe('enterprise-sources', () => {
       // With a token: 404 -> tokenless retry -> still 404 -> plain 404, no hint.
       let fetchImpl = jest.fn().mockResolvedValue(errorResponse(404));
       let fetcher = createSourceFetcher({ fetchImpl, token: 'ghp_stale', sleep: noSleep });
-      await expect(fetcher.fetchText(PUBLIC_URL, 'core configuration.h')).resolves.toBeUndefined();
+      await expect(fetcher.fetchText(PUBLIC_URL, 'connect info.csv')).resolves.toBeUndefined();
       expect(fetcher.failedSources[0].message).toMatch(/404 Not Found\. The related checks did not run\.$/);
 
       // Without a token: same plain 404 — a public file that 404s is missing,
       // not unauthenticated, and suggesting credentials would mislead.
       fetchImpl = jest.fn().mockResolvedValue(errorResponse(404));
       fetcher = createSourceFetcher({ fetchImpl, token: null, sleep: noSleep });
-      await expect(fetcher.fetchText(PUBLIC_URL, 'core configuration.h')).resolves.toBeUndefined();
+      await expect(fetcher.fetchText(PUBLIC_URL, 'connect info.csv')).resolves.toBeUndefined();
       expect(fetchImpl).toHaveBeenCalledTimes(1);
       expect(fetcher.failedSources[0].message).not.toMatch(/token|credential|GIT_CREDENTIALS/i);
     });
@@ -151,6 +151,21 @@ describe('enterprise-sources', () => {
       expect(failedSources[0].message).toMatch(/set GIT_CREDENTIALS \(or GITHUB_TOKEN \/ REDPANDA_GITHUB_TOKEN \/ ACTIONS_BOT_TOKEN\)/);
     });
 
+    it('treats streaming-enterprise as private: includes the token hint on a tokenless 404', async () => {
+      // The core headers (enterprise_features.h, configuration.h) moved from
+      // the public redpanda repo into streaming-enterprise, which is
+      // private -- a tokenless 404 there must get the same credential hint
+      // as any other private source, not the "file is genuinely missing"
+      // treatment public sources get.
+      const streamingEnterpriseUrl = `${RAW}/redpanda-data/streaming-enterprise/dev/src/v/config/configuration.h`;
+      const fetchImpl = jest.fn().mockResolvedValue(errorResponse(404));
+      const { fetchText, failedSources } = createSourceFetcher({ fetchImpl, token: null, sleep: noSleep });
+
+      await expect(fetchText(streamingEnterpriseUrl, 'core configuration.h')).resolves.toBeUndefined();
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(failedSources[0].message).toMatch(/set GIT_CREDENTIALS \(or GITHUB_TOKEN \/ REDPANDA_GITHUB_TOKEN \/ ACTIONS_BOT_TOKEN\)/);
+    });
+
     it('retries transient 429/5xx responses and succeeds when the blip clears', async () => {
       const throttled = errorResponse(429, 'Too Many Requests');
       const fetchImpl = jest.fn()
@@ -158,7 +173,7 @@ describe('enterprise-sources', () => {
         .mockResolvedValueOnce(okResponse('recovered'));
       const { fetchText, failedSources } = createSourceFetcher({ fetchImpl, token: null, sleep: noSleep });
 
-      await expect(fetchText(PUBLIC_URL, 'core configuration.h')).resolves.toBe('recovered');
+      await expect(fetchText(PUBLIC_URL, 'connect info.csv')).resolves.toBe('recovered');
       expect(fetchImpl).toHaveBeenCalledTimes(2);
       expect(noSleep).toHaveBeenCalledWith(2000);
       expect(throttled.body.cancel).toHaveBeenCalled();
@@ -171,7 +186,7 @@ describe('enterprise-sources', () => {
         .mockResolvedValueOnce(okResponse('recovered'));
       const { fetchText, failedSources } = createSourceFetcher({ fetchImpl, token: null, sleep: noSleep });
 
-      await expect(fetchText(PUBLIC_URL, 'core configuration.h')).resolves.toBe('recovered');
+      await expect(fetchText(PUBLIC_URL, 'connect info.csv')).resolves.toBe('recovered');
       expect(fetchImpl).toHaveBeenCalledTimes(2);
       expect(failedSources).toHaveLength(0);
     });
@@ -233,8 +248,8 @@ describe('enterprise-sources', () => {
       const urls = fetchImpl.mock.calls.map(([url]) => url);
       expect(urls).toEqual([
         `${RAW}/redpanda-data/docs/main/shared/modules/ROOT/partials/enterprise-features.yml`,
-        `${RAW}/redpanda-data/redpanda/dev/src/v/features/enterprise_features.h`,
-        `${RAW}/redpanda-data/redpanda/dev/src/v/config/configuration.h`,
+        `${RAW}/redpanda-data/streaming-enterprise/dev/src/v/features/enterprise_features.h`,
+        `${RAW}/redpanda-data/streaming-enterprise/dev/src/v/config/configuration.h`,
         `${RAW}/redpanda-data/connect/main/internal/plugins/info.csv`,
         `${RAW}/redpanda-data/docs/main/modules/get-started/pages/licensing/disable-enterprise-features.adoc`
       ]);
