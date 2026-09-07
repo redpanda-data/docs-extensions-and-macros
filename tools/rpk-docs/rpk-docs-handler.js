@@ -1324,8 +1324,8 @@ function downloadRpkRelease(tag, destDir) {
   // redpanda-data/redpanda. This function already has a fallback (the
   // caller builds from source instead), so a missing token warns and
   // returns null here rather than throwing the way the clone-only paths do.
-  const { getGitHubToken } = require('../../cli-utils/github-token')
-  const token = getGitHubToken()
+  const { getGitHubApiToken } = require('../../cli-utils/github-token')
+  const token = getGitHubApiToken()
   if (!token) {
     console.warn('No GitHub token available for the private streaming-enterprise release download; falling back to a source build.')
     return null

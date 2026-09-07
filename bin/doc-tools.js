@@ -1908,7 +1908,7 @@ automation
  *
  * @requirements
  * - GitHub token with access to redpanda-data/cloudv2-infra repository
- * - Token is resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order
+ * - Token is resolved from REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, GH_TOKEN, or GIT_CREDENTIALS, in that priority order (an API call, so the git credential is the last resort)
  * - Internet connection to access GitHub API
  */
 automation
@@ -1925,7 +1925,7 @@ automation
   .option('--dry-run', 'Print output to stdout instead of writing file')
   .action(async (options, command) => {
     const { generateCloudRegions } = require('../tools/cloud-regions/generate-cloud-regions.js')
-    const { getGitHubToken } = require('../cli-utils/github-token')
+    const { getGitHubApiToken } = require('../cli-utils/github-token')
 
     try {
       // The default output path holds the unfiltered table, so a filtered run
@@ -1947,7 +1947,7 @@ automation
       const absOutput = options.dryRun
         ? undefined
         : resolveInsideRepo(repoRoot, options.output, '--output')
-      const token = getGitHubToken()
+      const token = getGitHubApiToken()
       if (!token) {
         throw new Error('GitHub token is required to fetch from private cloudv2-infra repo.')
       }

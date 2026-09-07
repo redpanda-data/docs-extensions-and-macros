@@ -216,7 +216,7 @@ describe('buildNative', () => {
 
 describe('fetchPublishedSchema', () => {
   beforeEach(() => {
-    githubToken.getGitHubToken.mockReset()
+    githubToken.getGitHubApiToken.mockReset()
   })
 
   afterEach(() => {
@@ -267,7 +267,7 @@ describe('fetchPublishedSchema', () => {
   })
 
   test('sends the GitHub token as a bearer header when available', async () => {
-    githubToken.getGitHubToken.mockReturnValue('tok')
+    githubToken.getGitHubApiToken.mockReturnValue('tok')
     global.fetch = jest.fn().mockResolvedValue({ status: 404, ok: false })
 
     await fetchPublishedSchema('v26.2.2')
@@ -398,7 +398,7 @@ describe('getRpUtilSchema', () => {
 
   beforeEach(() => {
     spawnSync.mockReset()
-    githubToken.getGitHubToken.mockReset()
+    githubToken.getGitHubApiToken.mockReset()
     githubToken.getAuthenticatedGitHubUrl.mockReset()
     tmpDirs = []
     jest.spyOn(fs, 'mkdtempSync').mockImplementation(prefix => {
@@ -449,7 +449,7 @@ describe('getRpUtilSchema', () => {
 
   test('cleans up a clone it made unless keepSource is set', async () => {
     jest.spyOn(os, 'platform').mockReturnValue('linux')
-    githubToken.getGitHubToken.mockReturnValue('tok')
+    githubToken.getGitHubApiToken.mockReturnValue('tok')
     githubToken.getAuthenticatedGitHubUrl.mockReturnValue('https://tok@github.com/redpanda-data/streaming-enterprise.git')
     spawnSync.mockReturnValue({ status: 0, stdout: '{}', stderr: '' })
 
@@ -487,7 +487,7 @@ describe('getRpUtilSchema', () => {
   test('falls back to building from source when the published release is incomplete', async () => {
     jest.spyOn(console, 'warn').mockImplementation(() => {})
     jest.spyOn(os, 'platform').mockReturnValue('linux')
-    githubToken.getGitHubToken.mockReturnValue('tok')
+    githubToken.getGitHubApiToken.mockReturnValue('tok')
     githubToken.getAuthenticatedGitHubUrl.mockReturnValue('https://tok@github.com/redpanda-data/streaming-enterprise.git')
     spawnSync.mockReturnValue({ status: 0, stdout: '{}', stderr: '' })
     global.fetch = jest.fn().mockResolvedValueOnce({
@@ -507,7 +507,7 @@ describe('getRpUtilSchema', () => {
 
   test('preferPublished: false always builds from source, even if a release exists', async () => {
     jest.spyOn(os, 'platform').mockReturnValue('linux')
-    githubToken.getGitHubToken.mockReturnValue('tok')
+    githubToken.getGitHubApiToken.mockReturnValue('tok')
     githubToken.getAuthenticatedGitHubUrl.mockReturnValue('https://tok@github.com/redpanda-data/streaming-enterprise.git')
     spawnSync.mockReturnValue({ status: 0, stdout: '{}', stderr: '' })
 

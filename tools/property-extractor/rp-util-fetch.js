@@ -4,7 +4,7 @@ const { spawnSync } = require('child_process')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { getGitHubToken } = require('../../cli-utils/github-token')
+const { getGitHubToken, getGitHubApiToken } = require('../../cli-utils/github-token')
 
 /**
  * rp_util's config schema JSON, for any streaming-enterprise ref (tag,
@@ -287,7 +287,7 @@ const RELEASE_ASSET_TO_SCHEMA_KEY = {
  *   no release exists for this tag (caller should fall back to building)
  */
 async function fetchPublishedSchema(tag) {
-  const token = getGitHubToken()
+  const token = getGitHubApiToken()
   const headers = token ? { Authorization: `Bearer ${token}` } : {}
 
   const releaseResp = await fetch(
