@@ -59,14 +59,45 @@ const { parseValuesFile: parseSharedValuesFile, PATTERNS } = require('../../../c
  * index (`ingress.hosts[0].host`), while an array of scalars and an empty
  * array are single rows. `# @ignored` drops a key and its subtree.
  *
- * Known divergence, console chart: a `# --` block written for a
- * commented-out key is ALSO attached by helm-docs to the next real key, so
- * `service.annotations` publishes the description written for
- * `service.targetPort`. This surface attributes that marker to the
- * commented-out key (the doc-tools convention), so it reports
- * `service.annotations` as having no description of its own - which is true,
- * and is a real defect in that chart, so it is left reported rather than
- * modelled away.
+ * The two pipelines can also attach ONE marker to TWO different keys, which
+ * is its own defect and needs its own rule. helm-docs uses the nearest `# --`
+ * above a real key and does not care that the marker was written for a
+ * commented-out key in between, so
+ *
+ *     # -- Override the value in `console.config.server.listenPort`
+ *     # targetPort:
+ *     annotations: {}
+ *
+ * publishes that text as `service.annotations`' description, while the
+ * helm-spec pass injects the same text under `service.targetPort`. The text
+ * ships twice, once under a key it does not describe. `misattached-marker`
+ * reports it on the marker itself and names both keys.
+ *
+ * Two things about helm-docs' attachment are easy to get wrong, and both were
+ * wrong here until helm-docs 1.14.2 was run on isolated fixtures to settle
+ * them:
+ *
+ *   * A BLANK LINE DOES NOT BREAK ATTACHMENT. A `# --` attaches to the next
+ *     real key in document order however many blank lines intervene; only a
+ *     later `# --` supersedes it. (A marker at the very top of a file, before
+ *     any key, attaches to nothing.) Predicting attachment this way agrees
+ *     with helm-docs on 227 of the 228 markers in the three charts, the
+ *     single difference being an `@raw` annotation line it strips.
+ *   * helm-docs' MARKER FORM IS STRICTER than this repo's. It needs exactly
+ *     one space, `# -- text`; an indented `#   -- text` is invisible to it,
+ *     while `DESC_MARKER_RE` here accepts both. That gap is the whole reason
+ *     the walk can attribute a marker helm-docs never sees, and it is why the
+ *     markers buried in a commented-out subtree really are dead: they are all
+ *     written in the indented form.
+ *
+ * So a marker the walk calls dead is only dead when helm-docs cannot see it
+ * or no key follows it; a visible one separated by blank lines is not dead,
+ * it is misattached, and `misattached-marker` says so instead.
+ *
+ * Modelling all of this is also what makes the blank-key set exact: a
+ * misattached target is NOT blank, so it must not be reported as
+ * undocumented. With it, the predicted blank set equals helm-docs' own output
+ * on all three charts (20/20, 36/36, 30/30).
  *
  * helm-docs output is markdown converted via pandoc, not verbatim AsciiDoc,
  * so the verbatim escaping rules do not apply. Terminal periods are
@@ -84,6 +115,17 @@ const CONVENTION = {
 // patterns rather than a second copy here; a divergence between the two is
 // exactly the drift this surface's guard test forbids.
 const { BLOCK_SCALAR_RE, REAL_KEY_RE } = PATTERNS
+
+/**
+ * The marker form helm-docs itself recognizes: exactly one space between the
+ * hash and the dashes. Verified against helm-docs 1.14.2 - `# -- text`
+ * attaches, `#   -- text` produces no description at all.
+ *
+ * Deliberately stricter than the shared `DESC_MARKER_RE`, which this repo's
+ * own pass uses. A marker only the loose pattern matches is attributed by
+ * doc-tools and ignored by helm-docs.
+ */
+const HELM_DOCS_MARKER_RE = /^\s*#\s--\s/
 
 /**
  * Walk the raw text for every real key's dotted path, its line, and whether
@@ -132,6 +174,61 @@ function scanKeyLines (content) {
   return { lines, ignored }
 }
 
+/**
+ * Markers that helm-docs will attach to a different key than the helm-spec
+ * pass does: `commentedOutPath -> realKeyPath`.
+ *
+ * The walk decides what documents a commented-out key, so this only has to
+ * answer what helm-docs does with the same marker. Walking down from the
+ * commented-out key line: a blank line ends the comment block (helm-docs then
+ * sees no marker), a further `# --` gives the real key its own description,
+ * and anything else lands on the next real key.
+ *
+ * @param {string} content - values.yaml text
+ * @param {Array} records - shared-walk records
+ * @param {Map<number, string>} pathByLine - 0-indexed line -> dotted path
+ * @param {Set<string>} ignored - paths carrying `# @ignored`
+ * @returns {Map<string, string>}
+ */
+function misattachedMarkers (content, records, pathByLine, ignored = new Set()) {
+  const rows = content.split('\n')
+  const out = new Map()
+  for (const record of records) {
+    // Both shapes go wrong the same way: a marker this repo attributes to a
+    // commented-out key, and one it calls dead, are each handed by helm-docs
+    // to the next real key below.
+    const isCommentedOut = record.commentedOut && record.path
+    const isDead = record.kind === 'dead-marker'
+    if (!isCommentedOut && !isDead) continue
+    // helm-docs has to be able to see the marker in the first place.
+    if (!HELM_DOCS_MARKER_RE.test(rows[record.lineStart] || '')) continue
+
+    let i = record.lineEnd + 1
+    let superseded = false
+    while (i < rows.length) {
+      const row = rows[i]
+      // A blank line does NOT end attachment; only a later visible marker
+      // does, by taking the real key for itself.
+      if (row.trim() === '') { i++; continue }
+      if (/^\s*#/.test(row)) {
+        if (HELM_DOCS_MARKER_RE.test(row)) { superseded = true; break }
+        i++
+        continue
+      }
+      break
+    }
+    if (superseded || i >= rows.length) continue
+    if (!REAL_KEY_RE.test(rows[i])) continue
+    const target = pathByLine.get(i)
+    if (!target) continue
+    // An `@ignored` key is not published at all, so a marker landing there
+    // still ships nowhere: that is dead-marker's finding, not this one.
+    if (ignored.has(target) || ancestorIn(target, ignored)) continue
+    out.set(isCommentedOut ? record.path : `@marker:${record.lineStart}`, target)
+  }
+  return out
+}
+
 /** True when any strict ancestor of `dotted` is in `set`. */
 function ancestorIn (dotted, set) {
   const parts = dotted.replace(/\[\d+\]/g, '').split('.')
@@ -150,7 +247,7 @@ function ancestorIn (dotted, set) {
  * @param {Set<string>} ignored - paths carrying `# @ignored`
  * @returns {string[]} dotted paths, array elements indexed
  */
-function publishableBlankKeys (content, marked, ignored) {
+function publishableBlankKeys (content, marked, ignored, misattachedTo = new Set()) {
   let tree
   try {
     tree = yaml.load(content)
@@ -184,6 +281,9 @@ function publishableBlankKeys (content, marked, ignored) {
   return leaves.filter((leaf) => {
     const plain = leaf.replace(/\[\d+\]/g, '')
     if (marked.has(plain) || ignored.has(plain)) return false
+    // A key helm-docs hands a misattached marker to is not blank - it ships
+    // the wrong description, which misattached-marker reports instead.
+    if (misattachedTo.has(plain)) return false
     return !ancestorIn(leaf, marked) && !ancestorIn(leaf, ignored)
   })
 }
@@ -206,6 +306,9 @@ function parseValuesFile (content, file) {
       .filter((r) => r.kind !== 'dead-marker' && !r.undocumented && r.path)
       .map((r) => r.path)
   )
+  const pathByLine = new Map([...keyLines].map(([dotted, line]) => [line, dotted]))
+  const misattached = misattachedMarkers(content, records, pathByLine, ignored)
+  const misattachedTo = new Set(misattached.values())
 
   const declarations = records
     // The walk's own undocumented records are top-level parents, which
@@ -218,9 +321,22 @@ function parseValuesFile (content, file) {
     const string = r.descLines.map((l) => l.trim()).filter(Boolean).join(' ') || null
     let meta
     if (r.kind === 'dead-marker') {
-      meta = { kind: 'dead-marker', unverifiable: true }
+      meta = {
+        kind: 'dead-marker',
+        unverifiable: true,
+        // A marker helm-docs CAN see is not dead: it lands on the next real
+        // key rather than nowhere.
+        misattached_to: misattached.get(`@marker:${r.lineStart}`) || null
+      }
     } else if (r.commentedOut) {
-      meta = { kind: 'key', commented_out: true, top_level: r.topLevel, default_annotation: r.default || null }
+      meta = {
+        kind: 'key',
+        commented_out: true,
+        top_level: r.topLevel,
+        default_annotation: r.default || null,
+        // Set when helm-docs hands this same marker to a real key below.
+        misattached_to: misattached.get(r.path) || null
+      }
     } else {
       meta = { kind: 'key', top_level: r.topLevel, raw: Boolean(r.annotations.raw), default_annotation: r.default || null }
     }
@@ -238,7 +354,7 @@ function parseValuesFile (content, file) {
   })
 
   // One declaration per key helm-docs will render with an empty description.
-  for (const key of publishableBlankKeys(content, marked, ignored)) {
+  for (const key of publishableBlankKeys(content, marked, ignored, misattachedTo)) {
     // An indexed path has no key line of its own; anchor on the nearest
     // ancestor that does, so the finding still points into the file.
     let anchor = keyLines.get(key.replace(/\[\d+\]/g, ''))
@@ -321,7 +437,27 @@ const RULES = [
     runOnUnverifiable: true,
     check: (decl) => {
       if (decl.meta.kind !== 'dead-marker') return []
-      return [{ message: 'This "# --" description is buried where neither helm-docs nor the helm-spec commented-values pass can attach it (inside another commented-out key\'s subtree, or separated from any key), so it silently never ships. Move it directly above the key it documents, use "# @doc full.path -- ...", or delete it.' }]
+      // Only dead if helm-docs cannot see it either. A visible marker
+      // separated from its key still lands somewhere, which is
+      // misattached-marker's finding, not this one.
+      if (decl.meta.misattached_to) return []
+      return [{ message: 'This "# --" description is buried where neither helm-docs nor the helm-spec commented-values pass can attach it: it sits inside another commented-out key\'s subtree, in the indented `#   -- ` form that helm-docs does not recognize as a marker at all. It silently never ships. Move it directly above the key it documents, use "# @doc full.path -- ...", or delete it.' }]
+    }
+  },
+  {
+    name: 'misattached-marker',
+    description: 'One # -- marker is published under two different keys',
+    severity: 'error',
+    runOnUnverifiable: true,
+    check: (decl) => {
+      if (!decl.meta.misattached_to) return []
+      const target = decl.meta.misattached_to
+      const written = decl.meta.kind === 'dead-marker'
+        ? 'is not attached to any key of its own'
+        : `documents the commented-out key "${decl.name}"`
+      return [{
+        message: `This "# --" ${written}, but helm-docs attaches a marker to the next REAL key below it - blank lines and commented-out keys in between make no difference - so it publishes this text as "${target}"'s description. Give "${target}" its own "# --" description, which supersedes this one, or delete this marker.`
+      }]
     }
   },
   {
@@ -343,5 +479,7 @@ module.exports = {
   parseValuesFile,
   publishableBlankKeys,
   scanKeyLines,
+  misattachedMarkers,
+  HELM_DOCS_MARKER_RE,
   rules: RULES
 }
