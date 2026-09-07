@@ -17,6 +17,14 @@ const { collectGoFiles } = require('../go-source')
  * the processor ignoreTypes/ignoreFields regexes, so fields the generator
  * never documents are never linted.
  *
+ * `+hidefromdoc` suppresses the TYPE's own section, not its fields. A hidden
+ * type embedded with `json:\",inline\"` still has every one of its fields
+ * published, flattened into the parent's table. Treating the marker as hiding
+ * the fields too made this surface blind to exactly the fields the Console CRD
+ * reference is missing: `ConsoleValues` is `+hidefromdoc` and inlined into
+ * `ConsoleSpec`, so 27 of the consoles CRD's 38 top-level `spec` properties
+ * ship blank while the linter reported none of them (DOC-2455).
+ *
  * Marker lines (+kubebuilder:..., +optional, +required, +genclient, and any
  * other +directive) are stripped before the prose is judged.
  *
@@ -24,6 +32,30 @@ const { collectGoFiles } = require('../go-source')
  * field identifier ("ClusterSource is a reference to...") when users type
  * the json key ("cluster") - the docs and kubectl explain both show the
  * json name, so the Go name means nothing to readers.
+ *
+ * A field with NO doc comment does not necessarily ship blank.
+ * controller-gen falls back to the doc comment of the field's TYPE, so
+ *
+ *   // +optional
+ *   OAUth *KafkaSASLOAuthBearer `json:"oauth,omitempty"`
+ *
+ * publishes "KafkaSASLOAuthBearer is the config struct for the SASL
+ * OAuthBearer mechanism" - the Go type's comment, under the key `oauth`.
+ * Verified by running controller-gen v0.20.1 over a fixture covering every
+ * shape:
+ *
+ *   field comment present          -> the field's comment (beats the type's)
+ *   no comment, ref to typed X     -> X's doc comment, INHERITED
+ *   no comment, ref to undocumented X -> blank
+ *   no comment, primitive          -> blank
+ *   no comment, []X or map[K]X     -> BLANK on the field itself; X's comment
+ *                                     lands on items/additionalProperties
+ *
+ * So `undocumented-field` must only fire where the description genuinely
+ * ships blank. Of 208 findings on operator main it was wrong on 37: 19
+ * inheriting a local type's comment and 18 an external one's. The inherited
+ * case is still a defect - 18 of those 19 lead with the Go type name - but
+ * it is a different one, so it gets its own rule and its own message.
  */
 
 const CONVENTION = {
@@ -72,6 +104,110 @@ function matchesAny (patterns, ...candidates) {
 }
 
 /**
+ * Go predeclared types. A field of one of these has nothing to inherit a
+ * description from, so no comment means it genuinely ships blank.
+ */
+/**
+ * External types that controller-gen maps structurally and publishes with NO
+ * description, so a field referencing one inherits nothing and does ship blank.
+ *
+ * Kept as an explicit short list rather than guessed, because an external
+ * type's doc comment is not in this checkout: for every other external type in
+ * the operator API the inherited description is real prose. To check whether a
+ * type belongs here, look the field up in
+ * `operator/config/crd/bases/*.yaml` - `runtime.RawExtension` becomes
+ * `x-kubernetes-preserve-unknown-fields` and `metav1.Time` a bare
+ * date-time string, both with no `description`.
+ */
+const UNDESCRIBED_EXTERNAL_TYPES = new Set([
+  'runtime.RawExtension',
+  'metav1.Time'
+])
+
+const GO_BUILTINS = new Set([
+  'bool', 'string', 'byte', 'rune', 'error', 'any',
+  'int', 'int8', 'int16', 'int32', 'int64',
+  'uint', 'uint8', 'uint16', 'uint32', 'uint64', 'uintptr',
+  'float32', 'float64', 'complex64', 'complex128'
+])
+
+/**
+ * Doc comments on the `type` declarations in one file, as
+ * `name -> prose`. Marker lines are stripped, matching what controller-gen
+ * publishes.
+ *
+ * Collected per file and merged across the tree by `extract`, because a
+ * field's type is usually declared in a different file from the field
+ * (`ValueSource` lives in common.go and is referenced from four others).
+ */
+/**
+ * Type names embedded with `json:\",inline\"` in this file. Their fields are
+ * flattened into the embedding type, so they are published even when the type
+ * itself is `+hidefromdoc`. Only unqualified names are collected: a qualified
+ * one (`metav1.TypeMeta`) is declared in another module and is not ours.
+ */
+function collectInlinedTypes (content) {
+  const inlined = new Set()
+  const re = /^\s*([A-Z][A-Za-z0-9_]*)\s+`json:\",inline\"`/gm
+  let match
+  while ((match = re.exec(content)) !== null) inlined.add(match[1])
+  return inlined
+}
+
+function collectTypeDocs (content) {
+  const docs = new Map()
+  const lines = content.split('\n')
+  let comment = []
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('//')) {
+      comment.push(trimmed.replace(/^\/\/\s?/, ''))
+      continue
+    }
+    const match = /^type\s+([A-Za-z0-9_]+)\s+/.exec(line)
+    if (match) {
+      const prose = comment.filter((c) => !c.trim().startsWith('+')).join('\n').trim()
+      if (prose) docs.set(match[1], prose)
+      comment = []
+      continue
+    }
+    if (trimmed !== '') comment = []
+  }
+  return docs
+}
+
+/**
+ * Where an uncommented field's published description will come from.
+ *
+ * @param {string} line - The field's source line
+ * @param {Map} typeDocs - name -> doc comment, from collectTypeDocs
+ * @returns {{blank: true}|{blank: false, from: string, external: boolean}}
+ */
+function describeFallback (line, typeDocs) {
+  const match = /^\s*[A-Z][A-Za-z0-9_]*\s+([^`]+?)\s*(?:`|$)/.exec(line)
+  if (!match) return { blank: true }
+  const typeExpr = match[1].trim()
+  // A slice or map inherits onto items/additionalProperties, never onto the
+  // field, so the field's own description is blank either way.
+  if (/^\[\]|^map\[/.test(typeExpr)) return { blank: true }
+  const bare = typeExpr.replace(/^[*&]+/, '')
+  if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(bare)) return { blank: true }
+  if (GO_BUILTINS.has(bare)) return { blank: true }
+  // A qualified name is declared in another package (corev1.ResourceRequirements),
+  // whose doc comment is not in this checkout. Every such field in the operator
+  // API inherits real prose apart from the structural types listed in
+  // UNDESCRIBED_EXTERNAL_TYPES, so claiming the rest ship blank would be wrong
+  // far more often than right; report nothing rather than guess.
+  if (bare.includes('.')) {
+    if (UNDESCRIBED_EXTERNAL_TYPES.has(bare)) return { blank: true }
+    return { blank: false, from: bare, external: true }
+  }
+  const doc = typeDocs.get(bare)
+  if (!doc) return { blank: true }
+  return { blank: false, from: bare, external: false, doc }
+}
+
+/**
  * Parse one Go file's struct fields. Exported for tests.
  *
  * @param {string} content - File content
@@ -82,6 +218,10 @@ function matchesAny (patterns, ...candidates) {
 function scanFile (content, file, config = { ignoreTypes: [], ignoreFields: [], hiddenMarker: 'hidefromdoc' }) {
   const declarations = []
   const lines = content.split('\n')
+  // Repo-wide when extract supplies it; this file's own types otherwise, so a
+  // standalone scanFile still resolves same-file inheritance.
+  const typeDocs = config.typeDocs || collectTypeDocs(content)
+  const inlinedTypes = config.inlinedTypes || collectInlinedTypes(content)
   const packageMatch = content.match(/^package\s+(\w+)/m)
   const pkg = packageMatch ? packageMatch[1] : ''
 
@@ -101,11 +241,23 @@ function scanFile (content, file, config = { ignoreTypes: [], ignoreFields: [], 
       const typeMatch = line.match(/^type\s+([A-Za-z0-9_]+)\s+struct\s*\{/)
       if (typeMatch) {
         const name = typeMatch[1]
-        const hidden = comment.some((c) => c.text.trim().startsWith(`+${config.hiddenMarker}`)) ||
+        // `+hidefromdoc` removes the type's own section; an inlined type's
+        // fields are published in the parent regardless, so the marker must
+        // not silence them.
+        const markedHidden = comment.some((c) => c.text.trim().startsWith(`+${config.hiddenMarker}`))
+        const hidden = (markedHidden && !inlinedTypes.has(name)) ||
           matchesAny(config.ignoreTypes, name, `${pkg}.${name}`)
-        struct = { name, hidden, exported: /^[A-Z]/.test(name) }
-        depth = 1
+        // Count the closing brace on this same line. `type X struct{}` opens
+        // and closes at once; assuming depth 1 left the parser inside a
+        // struct that had already ended, so every following `type ... struct
+        // {` was read as a field line and its fields sat at depth 2, where
+        // the depth === 1 gate drops them. One such declaration silently
+        // blanked the rest of the file.
+        const netDepth = (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length
         comment = []
+        if (netDepth <= 0) continue
+        struct = { name, hidden, exported: /^[A-Z]/.test(name) }
+        depth = netDepth
         continue
       }
       if (trimmed !== '') comment = []
@@ -139,6 +291,10 @@ function scanFile (content, file, config = { ignoreTypes: [], ignoreFields: [], 
           .map((c) => c.text)
           .join('\n')
           .trim()
+        // With no comment of its own, the field publishes its TYPE's comment
+        // if that type has one. Resolve which, so the rules can tell a blank
+        // description from an inherited one.
+        const fallback = prose ? null : describeFallback(lines[i], typeDocs)
         declarations.push({
           surface: 'crd',
           name: jsonName,
@@ -152,7 +308,12 @@ function scanFile (content, file, config = { ignoreTypes: [], ignoreFields: [], 
             kind: 'field',
             struct: struct.name,
             go_name: goName,
-            json_name: jsonName
+            json_name: jsonName,
+            // Set only when the field has no comment: the type whose comment
+            // ships in its place, or null when nothing does.
+            inherited_from: fallback && !fallback.blank ? fallback.from : null,
+            inherited_external: Boolean(fallback && !fallback.blank && fallback.external),
+            inherited_doc: fallback && !fallback.blank ? (fallback.doc || null) : null
           }
         })
       }
@@ -182,14 +343,28 @@ function extract ({ repo, files = null }) {
       .map((f) => path.join(API_ROOT, f))
   }
 
-  const cache = new SourceCache(repo)
-  const declarations = []
+  // First pass: every type doc comment in the tree, because a field's type is
+  // usually declared in another file.
+  const typeDocs = new Map()
+  const inlinedTypes = new Set()
+  const contents = new Map()
   for (const file of fileList) {
     const absPath = path.isAbsolute(file) ? file : path.join(repo, file)
     if (!fs.existsSync(absPath)) continue
     const content = fs.readFileSync(absPath, 'utf8')
+    contents.set(file, content)
+    for (const [name, doc] of collectTypeDocs(content)) typeDocs.set(name, doc)
+    for (const name of collectInlinedTypes(content)) inlinedTypes.add(name)
+  }
+  const scanConfig = { ...config, typeDocs, inlinedTypes }
+
+  const cache = new SourceCache(repo)
+  const declarations = []
+  for (const file of fileList) {
+    const content = contents.get(file)
+    if (content === undefined) continue
     if (!content.includes('struct')) continue
-    for (const decl of scanFile(content, file, config)) {
+    for (const decl of scanFile(content, file, scanConfig)) {
       decl.declaration_text = cache.span(file, decl.line_start, decl.line_end)
       declarations.push(decl)
     }
@@ -205,7 +380,27 @@ const RULES = [
     severity: 'warning',
     check: (decl) => {
       if (decl.string !== null) return []
+      // controller-gen falls back to the field type's own comment, so a
+      // missing comment only ships blank when there is nothing to inherit.
+      if (decl.meta.inherited_from) return []
       return [{ message: `Field "${decl.meta.go_name}" (json: "${decl.name}") in ${decl.meta.struct} has no doc comment. It ships blank in the CRD reference and in kubectl explain.` }]
+    }
+  },
+  {
+    name: 'inherited-type-description',
+    description: 'Field with no comment publishes its Go type\'s comment instead',
+    severity: 'warning',
+    check: (decl) => {
+      if (decl.string !== null || !decl.meta.inherited_from) return []
+      // An external type's comment is upstream prose we do not own and cannot
+      // see from this checkout; k8s' own field docs are generally good, so
+      // there is nothing here to act on.
+      if (decl.meta.inherited_external) return []
+      const doc = (decl.meta.inherited_doc || '').split('\n')[0]
+      const leadsWithTypeName = doc.startsWith(decl.meta.inherited_from)
+      return [{
+        message: `"${decl.name}" has no doc comment of its own, so the CRD reference and kubectl explain publish type \`${decl.meta.inherited_from}\`'s comment under it: "${doc.slice(0, 90)}"${leadsWithTypeName ? `. That opens with the Go type name, which users never type - they type "${decl.name}"` : ''}. Add a comment on the field; it takes precedence over the type's.`
+      }]
     }
   },
   {
@@ -232,6 +427,8 @@ module.exports = {
   extract,
   scanFile,
   loadConfig,
+  collectInlinedTypes,
+  UNDESCRIBED_EXTERNAL_TYPES,
   rules: RULES,
   // Missing prose is surfaced by the crd-specific undocumented-field rule
   // (warning, per the docs contract) instead of the generic error.
