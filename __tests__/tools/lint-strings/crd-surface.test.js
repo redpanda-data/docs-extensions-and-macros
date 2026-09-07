@@ -53,8 +53,11 @@ describe('crd surface end-to-end (fixture repo with crd-ref-docs config)', () =>
   test('declarations are named by json tag, span comment through field, and strip +markers', () => {
     const byName = new Map(declarations.map((d) => [`${d.meta.struct}.${d.name}`, d]))
     expect([...byName.keys()].sort()).toEqual([
+      'EmbeddingSpec.name',
       'FallbackSpec.both', 'FallbackSpec.external', 'FallbackSpec.fromUndocumented',
       'FallbackSpec.inherited', 'FallbackSpec.primitive', 'FallbackSpec.sliceOfDocumented',
+      'InlinedValues.replicaCount',
+      'StructuralSpec.config', 'StructuralSpec.expiration',
       'UndocumentedTarget.only', 'ValueSource.value',
       'WidgetReference.name', 'WidgetReference.subject', 'WidgetReference.version',
       'WidgetSpec.cluster', 'WidgetSpec.replicas', 'WidgetSpec.text'
@@ -101,7 +104,8 @@ describe('crd surface end-to-end (fixture repo with crd-ref-docs config)', () =>
     // that genuinely ship blank; `inherited` and `external` publish their
     // type's comment and so are deliberately absent.
     expect(undocumented).toEqual([
-      'fromUndocumented', 'name', 'primitive', 'sliceOfDocumented', 'subject', 'version'
+      'config', 'expiration', 'fromUndocumented', 'name', 'primitive',
+      'replicaCount', 'sliceOfDocumented', 'subject', 'version'
     ])
     // undocumented-field is the warning-level owner of missing prose: the
     // generic empty-description error must never double-report it.
@@ -222,5 +226,59 @@ describe('crd rules: blank versus inherited', () => {
     ['a plain undocumented string field', 'WidgetReference.name']
   ])('%s does ship blank and is still reported', (_label, key) => {
     expect(idsFor(key)).toContain('undocumented-field')
+  })
+})
+
+describe('crd scanner: +hidefromdoc hides a type, not an inlined type\'s fields', () => {
+  const config = { ignoreTypes: [], ignoreFields: [], hiddenMarker: 'hidefromdoc' }
+  const declared = crd.scanFile(fixture, 'operator/api/redpanda/v1alpha2/lint_types.go', config)
+  const names = new Set(declared.map((d) => `${d.meta.struct}.${d.name}`))
+
+  test('a hidden type embedded with json:",inline" still has its fields linted', () => {
+    // ConsoleValues is exactly this shape, and treating the marker as hiding
+    // its fields left 27 of the consoles CRD's 38 top-level spec properties
+    // shipping blank with nothing reporting them (DOC-2455).
+    expect(names.has('InlinedValues.replicaCount')).toBe(true)
+  })
+
+  test('a hidden type embedded nowhere keeps its fields out of the lint', () => {
+    expect(names.has('HiddenNotInlined.neverPublished')).toBe(false)
+  })
+
+  test('collectInlinedTypes finds only unqualified embedded names', () => {
+    const inlined = crd.collectInlinedTypes([
+      '\tInlinedValues `json:",inline"`',
+      '\tmetav1.TypeMeta `json:",inline"`',
+      '\tNotInlined Other `json:"other,omitempty"`'
+    ].join('\n'))
+    // metav1.TypeMeta is declared in another module, so it is not ours to lint.
+    expect([...inlined]).toEqual(['InlinedValues'])
+  })
+})
+
+describe('crd scanner: external types that publish no description', () => {
+  const config = { ignoreTypes: [], ignoreFields: [], hiddenMarker: 'hidefromdoc' }
+  const declared = crd.scanFile(fixture, 'operator/api/redpanda/v1alpha2/lint_types.go', config)
+  const byName = new Map(declared.map((d) => [`${d.meta.struct}.${d.name}`, d]))
+  const rules = rulesFor(crd)
+  const idsFor = (key) => {
+    const { findings } = runRules([byName.get(key)], rules)
+    return findings.length === 0 ? [] : findings[0].rules.map((r) => r.id)
+  }
+
+  test.each([
+    ['runtime.RawExtension', 'StructuralSpec.config'],
+    ['metav1.Time', 'StructuralSpec.expiration']
+  ])('a %s field inherits nothing and is reported blank', (_type, key) => {
+    // controller-gen maps these structurally: RawExtension becomes
+    // x-kubernetes-preserve-unknown-fields and Time a bare date-time string,
+    // neither with a description. Verified in the generated CRD yaml.
+    expect(byName.get(key).meta.inherited_from).toBeNull()
+    expect(idsFor(key)).toContain('undocumented-field')
+  })
+
+  test('every other external type is still assumed to inherit real prose', () => {
+    expect(byName.get('FallbackSpec.external').meta.inherited_external).toBe(true)
+    expect(idsFor('FallbackSpec.external')).toEqual([])
   })
 })

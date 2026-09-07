@@ -4,6 +4,7 @@ package v1alpha2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // WidgetSpec defines the configuration of a fixture widget.
@@ -53,6 +54,38 @@ type undocumentedTypeMarker int
 type UndocumentedTarget struct {
 	// The only field.
 	Only string `json:"only,omitempty"`
+}
+
+// InlinedValues is +hidefromdoc, but it is embedded with `json:",inline"`
+// below, so crd-ref-docs flattens its fields into the embedding type and
+// publishes every one of them. The marker suppresses this type's own section,
+// not its fields.
+// +hidefromdoc
+type InlinedValues struct {
+	ReplicaCount *int32 `json:"replicaCount,omitempty"`
+}
+
+// HiddenNotInlined is +hidefromdoc and embedded nowhere, so nothing it
+// declares is ever published.
+// +hidefromdoc
+type HiddenNotInlined struct {
+	NeverPublished string `json:"neverPublished,omitempty"`
+}
+
+// EmbeddingSpec inlines a hidden type.
+type EmbeddingSpec struct {
+	InlinedValues `json:",inline"`
+	// The name of the thing.
+	Name string `json:"name,omitempty"`
+}
+
+// StructuralSpec covers external types that controller-gen publishes with no
+// description of their own.
+type StructuralSpec struct {
+	// +optional
+	Config *runtime.RawExtension `json:"config,omitempty"`
+	// +optional
+	Expiration *metav1.Time `json:"expiration,omitempty"`
 }
 
 // FallbackSpec covers what an uncommented field actually publishes.

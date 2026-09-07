@@ -17,6 +17,14 @@ const { collectGoFiles } = require('../go-source')
  * the processor ignoreTypes/ignoreFields regexes, so fields the generator
  * never documents are never linted.
  *
+ * `+hidefromdoc` suppresses the TYPE's own section, not its fields. A hidden
+ * type embedded with `json:\",inline\"` still has every one of its fields
+ * published, flattened into the parent's table. Treating the marker as hiding
+ * the fields too made this surface blind to exactly the fields the Console CRD
+ * reference is missing: `ConsoleValues` is `+hidefromdoc` and inlined into
+ * `ConsoleSpec`, so 27 of the consoles CRD's 38 top-level `spec` properties
+ * ship blank while the linter reported none of them (DOC-2455).
+ *
  * Marker lines (+kubebuilder:..., +optional, +required, +genclient, and any
  * other +directive) are stripped before the prose is judged.
  *
@@ -99,6 +107,23 @@ function matchesAny (patterns, ...candidates) {
  * Go predeclared types. A field of one of these has nothing to inherit a
  * description from, so no comment means it genuinely ships blank.
  */
+/**
+ * External types that controller-gen maps structurally and publishes with NO
+ * description, so a field referencing one inherits nothing and does ship blank.
+ *
+ * Kept as an explicit short list rather than guessed, because an external
+ * type's doc comment is not in this checkout: for every other external type in
+ * the operator API the inherited description is real prose. To check whether a
+ * type belongs here, look the field up in
+ * `operator/config/crd/bases/*.yaml` - `runtime.RawExtension` becomes
+ * `x-kubernetes-preserve-unknown-fields` and `metav1.Time` a bare
+ * date-time string, both with no `description`.
+ */
+const UNDESCRIBED_EXTERNAL_TYPES = new Set([
+  'runtime.RawExtension',
+  'metav1.Time'
+])
+
 const GO_BUILTINS = new Set([
   'bool', 'string', 'byte', 'rune', 'error', 'any',
   'int', 'int8', 'int16', 'int32', 'int64',
@@ -115,6 +140,20 @@ const GO_BUILTINS = new Set([
  * field's type is usually declared in a different file from the field
  * (`ValueSource` lives in common.go and is referenced from four others).
  */
+/**
+ * Type names embedded with `json:\",inline\"` in this file. Their fields are
+ * flattened into the embedding type, so they are published even when the type
+ * itself is `+hidefromdoc`. Only unqualified names are collected: a qualified
+ * one (`metav1.TypeMeta`) is declared in another module and is not ours.
+ */
+function collectInlinedTypes (content) {
+  const inlined = new Set()
+  const re = /^\s*([A-Z][A-Za-z0-9_]*)\s+`json:\",inline\"`/gm
+  let match
+  while ((match = re.exec(content)) !== null) inlined.add(match[1])
+  return inlined
+}
+
 function collectTypeDocs (content) {
   const docs = new Map()
   const lines = content.split('\n')
@@ -155,10 +194,14 @@ function describeFallback (line, typeDocs) {
   if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(bare)) return { blank: true }
   if (GO_BUILTINS.has(bare)) return { blank: true }
   // A qualified name is declared in another package (corev1.ResourceRequirements),
-  // whose doc comment is not in this checkout. Empirically all 18 such fields
-  // in the operator API inherit real prose, so claiming they ship blank would
-  // be wrong 18 times out of 18; report nothing rather than guess.
-  if (bare.includes('.')) return { blank: false, from: bare, external: true }
+  // whose doc comment is not in this checkout. Every such field in the operator
+  // API inherits real prose apart from the structural types listed in
+  // UNDESCRIBED_EXTERNAL_TYPES, so claiming the rest ship blank would be wrong
+  // far more often than right; report nothing rather than guess.
+  if (bare.includes('.')) {
+    if (UNDESCRIBED_EXTERNAL_TYPES.has(bare)) return { blank: true }
+    return { blank: false, from: bare, external: true }
+  }
   const doc = typeDocs.get(bare)
   if (!doc) return { blank: true }
   return { blank: false, from: bare, external: false, doc }
@@ -178,6 +221,7 @@ function scanFile (content, file, config = { ignoreTypes: [], ignoreFields: [], 
   // Repo-wide when extract supplies it; this file's own types otherwise, so a
   // standalone scanFile still resolves same-file inheritance.
   const typeDocs = config.typeDocs || collectTypeDocs(content)
+  const inlinedTypes = config.inlinedTypes || collectInlinedTypes(content)
   const packageMatch = content.match(/^package\s+(\w+)/m)
   const pkg = packageMatch ? packageMatch[1] : ''
 
@@ -197,7 +241,11 @@ function scanFile (content, file, config = { ignoreTypes: [], ignoreFields: [], 
       const typeMatch = line.match(/^type\s+([A-Za-z0-9_]+)\s+struct\s*\{/)
       if (typeMatch) {
         const name = typeMatch[1]
-        const hidden = comment.some((c) => c.text.trim().startsWith(`+${config.hiddenMarker}`)) ||
+        // `+hidefromdoc` removes the type's own section; an inlined type's
+        // fields are published in the parent regardless, so the marker must
+        // not silence them.
+        const markedHidden = comment.some((c) => c.text.trim().startsWith(`+${config.hiddenMarker}`))
+        const hidden = (markedHidden && !inlinedTypes.has(name)) ||
           matchesAny(config.ignoreTypes, name, `${pkg}.${name}`)
         // Count the closing brace on this same line. `type X struct{}` opens
         // and closes at once; assuming depth 1 left the parser inside a
@@ -298,6 +346,7 @@ function extract ({ repo, files = null }) {
   // First pass: every type doc comment in the tree, because a field's type is
   // usually declared in another file.
   const typeDocs = new Map()
+  const inlinedTypes = new Set()
   const contents = new Map()
   for (const file of fileList) {
     const absPath = path.isAbsolute(file) ? file : path.join(repo, file)
@@ -305,8 +354,9 @@ function extract ({ repo, files = null }) {
     const content = fs.readFileSync(absPath, 'utf8')
     contents.set(file, content)
     for (const [name, doc] of collectTypeDocs(content)) typeDocs.set(name, doc)
+    for (const name of collectInlinedTypes(content)) inlinedTypes.add(name)
   }
-  const scanConfig = { ...config, typeDocs }
+  const scanConfig = { ...config, typeDocs, inlinedTypes }
 
   const cache = new SourceCache(repo)
   const declarations = []
@@ -377,6 +427,8 @@ module.exports = {
   extract,
   scanFile,
   loadConfig,
+  collectInlinedTypes,
+  UNDESCRIBED_EXTERNAL_TYPES,
   rules: RULES,
   // Missing prose is surfaced by the crd-specific undocumented-field rule
   // (warning, per the docs contract) instead of the generic error.
