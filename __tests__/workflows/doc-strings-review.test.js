@@ -548,3 +548,114 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
     expect(dispatch(valid, { GH_TOKEN: '' }).status).toBe(0)
   })
 })
+
+describe('doc-strings-review workflow: ADP mint (executed)', () => {
+  // A curl stub that records its own argv and writes a token file, so the
+  // assertions are about what the mint ACTUALLY sends rather than about the
+  // YAML's text.
+  const CURL_STUB = `#!/bin/bash
+printf '%s\\n' "$@" > "$HOME/curl-argv"
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--output" ]; then out="$a"; fi
+  prev="$a"
+done
+[ -n "$out" ] && printf '{"access_token":"tok-abc"}' > "$out"
+printf '200'
+exit 0
+`
+  const JQ_STUB = `#!/bin/bash
+# Only the one query this step makes.
+f="\${!#}"
+grep -o '"access_token":"[^"]*"' "$f" 2>/dev/null | sed 's/.*:"//;s/"$//'
+exit 0
+`
+
+  function mint ({ secretId, tokenUrl, audience, credEnv }) {
+    const step = stepNamed('Mint the ADP gateway token')
+    // RUNNER_TEMP and GITHUB_ENV are runner-provided; without them
+    // `set -u` aborts the step before curl is ever reached. Pointing
+    // RUNNER_TEMP at the cwd keeps the token file inside the temp dir.
+    const dirEnv = {
+      CLIENT_SECRET_ID: secretId,
+      TOKEN_URL: tokenUrl,
+      TOKEN_AUDIENCE: audience,
+      RUNNER_TEMP: '.',
+      GITHUB_ENV: 'github_env',
+      ...credEnv
+    }
+    return execRun(step, {
+      env: dirEnv,
+      stubs: { curl: CURL_STUB, jq: JQ_STUB }
+    })
+  }
+
+  const IDP = 'https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/oauth/idp/token'
+  const CLOUD = 'https://auth.prd.cloud.redpanda.com/oauth/token'
+
+  test('the agent path sends NO audience parameter', () => {
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs_doc_strings_client',
+      tokenUrl: IDP,
+      audience: '',
+      credEnv: {
+        DOCS_DOC_STRINGS_CLIENT_ID: 'serviceaccounts/doc-strings-review',
+        DOCS_DOC_STRINGS_CLIENT_SECRET: 's3cret'
+      }
+    })
+    const argv = r.read('curl-argv') || ''
+    expect(r.status).toBe(0)
+    expect(argv).toContain(IDP)
+    // The whole point: not `audience=` either, which satisfies neither endpoint.
+    expect(argv).not.toMatch(/audience/)
+  })
+
+  test('a standalone service account can still send an audience', () => {
+    const r = mint({
+      secretId: 'sdlc/prod/github/adp_priv_client',
+      tokenUrl: CLOUD,
+      audience: 'cloudv2-production.redpanda.cloud',
+      credEnv: { ADP_PRIV_CLIENT_ID: 'opaque', ADP_PRIV_CLIENT_SECRET: 's3cret' }
+    })
+    const argv = r.read('curl-argv') || ''
+    expect(r.status).toBe(0)
+    expect(argv).toContain(CLOUD)
+    expect(argv).toContain('audience=cloudv2-production.redpanda.cloud')
+  })
+
+  test('the credential env names follow the secret id, not a fixed prefix', () => {
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs_doc_strings_client',
+      tokenUrl: IDP,
+      audience: '',
+      credEnv: {
+        DOCS_DOC_STRINGS_CLIENT_ID: 'serviceaccounts/doc-strings-review',
+        DOCS_DOC_STRINGS_CLIENT_SECRET: 's3cret'
+      }
+    })
+    expect(r.read('curl-argv') || '').toContain('client_id=serviceaccounts/doc-strings-review')
+  })
+
+  test('the OLD fixed names no longer satisfy the new default secret', () => {
+    // The regression #302 fixed, asserted from the other side: a caller that
+    // supplies adp_priv_client's env names while pointing at the docs secret
+    // gets a warning and no mint, not a silent fail-open.
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs_doc_strings_client',
+      tokenUrl: IDP,
+      audience: '',
+      credEnv: { ADP_PRIV_CLIENT_ID: 'opaque', ADP_PRIV_CLIENT_SECRET: 's3cret' }
+    })
+    expect(r.status).not.toBe(0)
+    expect(r.all).toContain('DOCS_DOC_STRINGS_CLIENT_ID')
+    expect(r.exists('curl-argv')).toBe(false)
+  })
+
+  test('the workflow defaults are the agent path', () => {
+    const inputs = workflow.on.workflow_call.inputs
+    expect(inputs.adp_client_secret_id.default).toBe('sdlc/prod/github/docs_doc_strings_client')
+    expect(inputs.adp_token_url.default).toBe(IDP)
+    expect(inputs.adp_token_audience.default).toBe('')
+  })
+})
