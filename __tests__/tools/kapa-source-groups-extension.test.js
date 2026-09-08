@@ -161,6 +161,16 @@ describe('the extension degrades rather than setting something wrong', () => {
     expect(h.logs.warn.join()).toMatch(/unusable \(default_segment "gone"/);
   });
 
+  it('warns once per build, not once per event, when the mapping is missing', async () => {
+    // All three listeners need the mapping. Three identical warnings for one
+    // missing file bury the one line that says what to do.
+    const h = harness({ missingFile: true });
+    h.runPlaybook();
+    h.runPublish();
+    await h.run();
+    expect(h.logs.warn).toHaveLength(1);
+  });
+
   it('never throws out of contentClassified, since that would fail the whole build', async () => {
     for (const opts of [{ missingFile: true }, { raw: '{' }, { mapping: {} }, { mapping: null }]) {
       const h = harness(opts);

@@ -73,8 +73,19 @@ module.exports.register = function ({ config = {} } = {}) {
   raiseListenerLimit(this)
   const mappingPath = config.mapping_file ? path.resolve(config.mapping_file) : DEFAULT_MAPPING_PATH
 
-  /** Load + validate once, or return null having warned with the consequence. */
+  // Loaded on first use and reused by all three listeners, so a missing or
+  // broken mapping warns once per build rather than once per event.
+  let loaded = false
+  let cached = null
   function load () {
+    if (loaded) return cached
+    loaded = true
+    cached = readMapping()
+    return cached
+  }
+
+  /** Read + validate, or return null having warned with the consequence. */
+  function readMapping () {
     let mapping
     try {
       if (!fs.existsSync(mappingPath)) {

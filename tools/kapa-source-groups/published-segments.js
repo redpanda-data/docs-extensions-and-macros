@@ -3,17 +3,15 @@
 //
 // WHY THIS EXISTS
 // ---------------
-// The Kapa mapping is checked for drift by regenerating it and comparing against
-// the committed file. That catches every Kapa-side change, but it is blind to the
-// failure that actually matters: a new docs version being published with no Kapa
-// source group behind it.
+// `validate kapa-source-groups` compares Kapa's sources and the committed
+// mapping, but both of those are blind to the failure that actually matters: a
+// new docs version being published with no Kapa source group behind it.
 //
-// A new version changes neither side of that comparison. Cutting a v/X.Y branch
-// in redpanda-data/docs publishes /streaming/X.Y/ because the playbook globs
-// `branches: v/*`, and no file changes in this repo or docs-site. Kapa has no
-// write API, so no source or group appears either. Live Kapa and the committed
-// mapping stay identical, the drift check says "in sync", and every reader on the
-// new version silently falls back to the default segment.
+// Cutting a v/X.Y branch in redpanda-data/docs publishes /streaming/X.Y/ because
+// the playbook globs `branches: v/*`, and no file changes in this repo or
+// docs-site. Kapa has no write API, so no source or group appears either. The
+// mapping and Kapa still agree with each other, and every reader on the new
+// version silently falls back to the default segment.
 //
 // So the check needs a third input: what the site publishes. The sitemap is the
 // right source because it reflects what is actually live, rather than what a
@@ -82,25 +80,6 @@ async function fetchPublishedSegments ({ siteUrl, fetchImpl = globalThis.fetch }
 }
 
 /**
- * Compare published segments against the mapping's segments.
- *
- * Direction matters, because the two mismatches need different actions:
- *
- * - published but unmapped: readers on that version are silently getting the
- *   default segment's content. Someone must create the Kapa source and group.
- * - mapped but unpublished: a version was EOL'd or unpublished and its Kapa
- *   source is still being retrieved. Nobody can read those docs, so answers can
- *   cite pages that 404.
- *
- * `beta` is called out separately rather than treated as missing: a prerelease
- * publishes at /streaming/beta/ during a pre-GA cycle and is expected to have no
- * durable group of its own.
- *
- * @param {string[]} published
- * @param {string[]} mapped
- * @returns {{missing: string[], stale: string[], prerelease: string[]}}
- */
-/**
  * URL segments that publish without a durable version behind them.
  *
  * docs-site sets `latest_prerelease_version_segment: 'beta'`, so a branch with
@@ -116,21 +95,4 @@ function isPrereleaseSegment (segment) {
   return PRERELEASE_SEGMENTS.has(segment)
 }
 
-function compareSegments (published, mapped) {
-  const PRERELEASE = PRERELEASE_SEGMENTS
-  const mappedSet = new Set(mapped)
-  const publishedSet = new Set(published)
-
-  const missing = []
-  const prerelease = []
-  for (const seg of published) {
-    if (mappedSet.has(seg)) continue
-    if (PRERELEASE.has(seg)) prerelease.push(seg)
-    else missing.push(seg)
-  }
-  const stale = mapped.filter((seg) => !publishedSet.has(seg))
-
-  return { missing, stale, prerelease }
-}
-
-module.exports = { parsePublishedSegments, fetchPublishedSegments, compareSegments, isPrereleaseSegment, PRERELEASE_SEGMENTS, SITEMAP_TIMEOUT_MS }
+module.exports = { parsePublishedSegments, fetchPublishedSegments, isPrereleaseSegment, PRERELEASE_SEGMENTS, SITEMAP_TIMEOUT_MS }

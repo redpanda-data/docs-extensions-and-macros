@@ -40,7 +40,7 @@
     "global_sources": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Names of the Kapa sources deliberately assigned to no group. These are the 'global' set: always returned alongside whichever group a query scopes to. Recorded because the design depends on it — Agentic Data Plane, Cloud and Connect content must stay reachable from every page, whatever version the reader is on. Note 'Global' is NOT a real Kapa group despite the dashboard showing a Global row: the API returns no such object and an unassigned source reports source_groups: []."
+      "description": "Names of the Kapa sources deliberately assigned to no group. These are the 'global' set: always returned alongside whichever group a query scopes to. Recorded because the design depends on it: Agentic Data Plane, Cloud and Connect content must stay reachable from every page, whatever version the reader is on. Note 'Global' is NOT a real Kapa group despite the dashboard showing a Global row: the API returns no such object and an unassigned source reports source_groups: []."
     }
   },
   "$defs": {

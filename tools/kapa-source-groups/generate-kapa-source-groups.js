@@ -52,14 +52,10 @@ const { fetchWithDeadline } = require('./fetch-with-deadline')
  * sub-groups, a duplicated group name, a group with no sources, or the default
  * segment's group missing.
  *
- * Distinguished from an ordinary Error on purpose. `generate` treats all of
- * these as fatal, but `validate` must not: every one of them describes a change
- * SOMEONE MADE IN THE DASHBOARD, which is drift, and drift has to be reported
- * (exit 1, file an issue) rather than swallowed as "could not find out"
- * (exit 2, file nothing). Reporting a deleted or renamed group as inconclusive
- * is the worst outcome available, because Kapa answers an unknown-group query
- * from its global sources with no error: production silently loses every
- * versioned page while the drift job stays quiet.
+ * `generate` treats all of these as fatal and names the reason, because every
+ * one of them describes a change someone made in the dashboard that the mapping
+ * cannot represent. The scheduled `validate` command does not call `generate`;
+ * it reads the sources endpoint directly and reports its own four gaps.
  */
 class KapaGroupTreeError extends Error {
   constructor (message) {

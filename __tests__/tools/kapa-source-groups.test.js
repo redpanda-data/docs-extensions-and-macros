@@ -259,16 +259,15 @@ describe('generateKapaSourceGroups: transport behaviour', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Published-segment comparison. This is the third input to the drift check and
-// it exists because the mapping-vs-Kapa byte compare is structurally blind to
+// Published segments. This is the third input to `validate kapa-source-groups`
+// and it exists because comparing Kapa with the committed mapping is blind to
 // the failure that matters: a new docs version publishing with no Kapa group
-// changes NEITHER side, so the byte compare reports "in sync" while readers on
+// changes NEITHER side, so Kapa and the mapping still agree while readers on
 // that version silently get the default segment.
 // ---------------------------------------------------------------------------
 const {
   parsePublishedSegments,
   fetchPublishedSegments,
-  compareSegments,
 } = require('../../tools/kapa-source-groups/published-segments');
 
 const sitemap = (segs) =>
@@ -333,34 +332,3 @@ describe('fetchPublishedSegments', () => {
   });
 });
 
-describe('compareSegments', () => {
-  const mapped = ['24.2', '25.2', 'current'];
-
-  it('flags a published version with no group: the silent-fallback case', () => {
-    const r = compareSegments(['24.2', '25.2', '26.3', 'current'], mapped);
-    expect(r.missing).toEqual(['26.3']);
-    expect(r.stale).toEqual([]);
-  });
-
-  it('flags a mapped version that is no longer published', () => {
-    const r = compareSegments(['25.2', 'current'], mapped);
-    expect(r.stale).toEqual(['24.2']);
-    expect(r.missing).toEqual([]);
-  });
-
-  it('treats beta as expected prerelease noise, not drift', () => {
-    const r = compareSegments([...mapped, 'beta'], mapped);
-    expect(r.missing).toEqual([]);
-    expect(r.prerelease).toEqual(['beta']);
-  });
-
-  it('reports both directions at once', () => {
-    const r = compareSegments(['25.2', '26.3', 'current'], mapped);
-    expect(r.missing).toEqual(['26.3']);
-    expect(r.stale).toEqual(['24.2']);
-  });
-
-  it('is clean when they match', () => {
-    expect(compareSegments(mapped, mapped)).toEqual({ missing: [], stale: [], prerelease: [] });
-  });
-});
