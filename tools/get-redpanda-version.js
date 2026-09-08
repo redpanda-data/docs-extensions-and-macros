@@ -2,7 +2,7 @@
 
 const GetLatestRedpandaVersion = require('../extensions/version-fetcher/get-latest-redpanda-version.js');
 const { getPrereleaseFromAntora } = require('../cli-utils/antora-utils.js');
-const { getGitHubToken } = require('../cli-utils/github-token');
+const { getGitHubApiToken } = require('../cli-utils/github-token');
 
 /**
  * Fetches and prints the latest Redpanda version and Docker repository.
@@ -20,7 +20,7 @@ module.exports = async function getRedpandaVersion({ beta = false, fromAntora = 
   const owner = 'redpanda-data';
   const repo = 'streaming-enterprise';
 
-  if (!getGitHubToken()) {
+  if (!getGitHubApiToken()) {
     console.error(`❌ redpanda-data/${repo} is a private repository.`);
     console.error('   Set GH_TOKEN, REDPANDA_GITHUB_TOKEN, or GITHUB_TOKEN to a token with access.');
     process.exit(1);
