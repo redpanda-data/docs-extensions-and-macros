@@ -1,19 +1,23 @@
 name: Kapa source-group drift
 
-# Detects three kinds of drift in docs-data/kapa-source-groups.json: a Kapa-side
-# edit (a group renamed, a source unassigned), a docs version published with no
-# Kapa source group, and a mapped version that is no longer published.
+# Runs `doc-tools validate kapa-source-groups` on a schedule and files one issue
+# in docs-ui when it finds a gap. The command reports four kinds of gap for the
+# streaming versions the docs site currently publishes: a version with no Kapa
+# source, a source left in no group (global in Kapa), a grouped source that the
+# committed docs-data/kapa-source-groups.json has no segment for, and a segment
+# whose group_id is not a group that version's source sits in (a group deleted
+# and recreated in the dashboard, or a source moved to another version's group).
 #
-# The middle one is the reason this runs on a schedule rather than only on PRs.
+# The first is the reason this runs on a schedule rather than only on PRs.
 # Cutting a v/X.Y branch in redpanda-data/docs publishes a new version segment
 # with no file change in THIS repo at all, so no PR-triggered check would ever
 # see it. Kapa also has no write API, so the matching source and group are
 # created by hand and are easy to forget. Left alone, readers on the new version
 # silently fall back to the default segment, which is the DOC-2450 failure.
 #
-# The bash lives in .github/scripts/kapa-source-groups-drift.sh and is embedded
-# below verbatim; __tests__/workflows/kapa-source-groups-drift.test.js asserts
-# the two cannot diverge and exercises every exit path against a stubbed gh.
+# The bash lives in .github/scripts/kapa-source-groups-drift.sh, which the last
+# step runs from the checkout; __tests__/workflows/kapa-source-groups-drift.test.js
+# asserts that and exercises every exit path against a stubbed gh.
 
 on:
   schedule:
@@ -24,6 +28,7 @@ on:
     paths:
       - 'docs-data/kapa-source-groups.json'
       - 'docs-data/kapa-source-groups.schema.json'
+      - 'bin/doc-tools.js'
       - 'tools/kapa-source-groups/**'
       - 'cli-utils/kapa-credentials.js'
       - '.github/scripts/kapa-source-groups-drift.sh'
@@ -57,11 +62,22 @@ jobs:
           aws-region: ${{ vars.RP_AWS_CRED_REGION }}
           role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
 
-      - name: Get secrets from AWS Secrets Manager
+      - name: Get the Kapa credentials
         uses: aws-actions/aws-secretsmanager-get-secrets@v2
         with:
           secret-ids: |
             ,sdlc/prod/github/kapa
+          parse-json-secrets: true
+
+      # The org bot token can write issues in docs-ui. A pull_request run never
+      # files an issue (the failing check is the notification), and same-repo
+      # PRs run the workflow file from the PR branch, so the token is only
+      # fetched for the events that need it.
+      - name: Get the bot token for filing issues
+        if: github.event_name != 'pull_request'
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
             ,sdlc/prod/github/actions_bot_token
           parse-json-secrets: true
 
@@ -87,100 +103,8 @@ jobs:
           GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
           ISSUE_REPO: redpanda-data/docs-ui
           EVENT_NAME: ${{ github.event_name }}
+          # Only a run against main may file an issue. A workflow_dispatch from
+          # a work-in-progress branch reports and fails, but files nothing.
+          GITHUB_REF: ${{ github.ref }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          #!/usr/bin/env bash
-          # Checks that every published streaming docs version has a Kapa source, and
-          # opens or updates one issue in ISSUE_REPO when any is missing.
-          #
-          # Embedded verbatim into .github/workflows/kapa-source-groups-drift.yml.
-          # __tests__/workflows/kapa-source-groups-drift.test.js asserts the two stay
-          # byte-identical and executes this script against a stubbed gh.
-          #
-          # EXIT STATUS
-          #   0  every version covered
-          #   1  a version is missing (issue opened or updated)
-          #   2  could not find out (Kapa or the sitemap unreachable, bad credentials)
-          #
-          # The 1 vs 2 split is the whole design. A job that reads "Kapa was down" as
-          # "a version is missing" files a false issue on every blip and people stop
-          # reading them. So an inconclusive run fails the job loudly but files nothing.
-          set -uo pipefail
-
-          # The issue lands in the repo the docs team watches, not the one running the
-          # check. Needs a token with issues:write there; github.token is scoped to this
-          # repo only, so the workflow supplies the org bot token as GH_TOKEN.
-          ISSUE_REPO="${ISSUE_REPO:-redpanda-data/docs-ui}"
-          ISSUE_TITLE="${ISSUE_TITLE:-Kapa has no source for a published docs version}"
-          ISSUE_LABEL="${ISSUE_LABEL:-documentation}"
-          RUN_URL="${RUN_URL:-}"
-          # Set by the workflow so a PR run annotates the check instead of filing an issue.
-          EVENT_NAME="${EVENT_NAME:-schedule}"
-
-          # -e stays OFF: a non-zero exit from the check is the signal, not a reason to
-          # abort before it can be reported, and every failure below is checked explicitly.
-          set +e
-          OUTPUT="$(npx --no-install doc-tools validate kapa-source-groups 2>&1)"
-          STATUS=$?
-
-          printf '%s\n' "$OUTPUT"
-
-          if [ "$STATUS" -eq 0 ]; then
-            echo "Every published version is covered. Nothing to report."
-            exit 0
-          fi
-
-          if [ "$STATUS" -ne 1 ]; then
-            echo "::error::Could not determine whether Kapa covers every published version (exit ${STATUS}). No issue filed." >&2
-            exit 2
-          fi
-
-          # Exit 1 alone does not mean a gap. Commander exits 1 on a usage error and an
-          # uncaught throw exits 1 too, so a typo'd flag or a crash would otherwise file
-          # an issue quoting a stack trace as the report. The command prints this sentinel
-          # only where it has actually established a gap.
-          if ! printf '%s\n' "$OUTPUT" | grep -qx 'KAPA_DRIFT_CONFIRMED'; then
-            echo "::error::validate exited 1 without confirming a gap, so it failed rather than found one. No issue filed." >&2
-            exit 2
-          fi
-
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            # A failing check on the PR is already the notification; an issue would be noise.
-            echo "::error::A published docs version has no Kapa source. See the check output above." >&2
-            exit 1
-          fi
-
-          BODY="$(
-            printf '%s\n' \
-              'A streaming docs version is published but Kapa cannot scope Ask AI answers to it, so readers on that version get answers from the default segment instead.' \
-              '' \
-              '```' \
-              "$(printf '%s\n' "$OUTPUT" | grep -vx 'KAPA_DRIFT_CONFIRMED')" \
-              '```' \
-              '' \
-              'Kapa has no write API, so this is a dashboard task: Sources > Add source for the crawl, then assign it to its version group under Sources > Manage groups. Then regenerate the mapping in docs-extensions-and-macros with `doc-tools generate kapa-source-groups` and release it.' \
-              '' \
-              "Run: ${RUN_URL:-(not available)}"
-          )"
-
-          # --search restricted to the title, so an unrelated open issue mentioning Kapa
-          # can never be mistaken for this one and commented on.
-          EXISTING="$(gh issue list \
-            --repo "$ISSUE_REPO" \
-            --state open \
-            --search "\"${ISSUE_TITLE}\" in:title" \
-            --json number \
-            --jq '.[0].number' 2>/dev/null || true)"
-
-          if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
-            gh issue comment "$EXISTING" --repo "$ISSUE_REPO" --body "$BODY" \
-              || { echo "::error::Gap found but could not comment on ${ISSUE_REPO}#${EXISTING}." >&2; exit 2; }
-            echo "Commented on existing issue ${ISSUE_REPO}#${EXISTING}."
-          else
-            gh issue create --repo "$ISSUE_REPO" \
-              --title "$ISSUE_TITLE" --label "$ISSUE_LABEL" --body "$BODY" \
-              || { echo "::error::Gap found but could not create an issue in ${ISSUE_REPO}." >&2; exit 2; }
-            echo "Opened a new issue in ${ISSUE_REPO}."
-          fi
-
-          exit 1
+        run: bash .github/scripts/kapa-source-groups-drift.sh

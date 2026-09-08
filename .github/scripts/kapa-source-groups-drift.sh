@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Checks that every published streaming docs version has a Kapa source, and
-# opens or updates one issue in ISSUE_REPO when any is missing.
+# Runs `doc-tools validate kapa-source-groups`, which checks that every
+# published streaming docs version has a grouped Kapa source and that the
+# committed mapping points at that group, and opens or updates one issue in
+# ISSUE_REPO when it reports a gap.
 #
-# Embedded verbatim into .github/workflows/kapa-source-groups-drift.yml.
-# __tests__/workflows/kapa-source-groups-drift.test.js asserts the two stay
-# byte-identical and executes this script against a stubbed gh.
+# Run by .github/workflows/kapa-source-groups-drift.yml from the checkout.
+# __tests__/workflows/kapa-source-groups-drift.test.js executes this script
+# against a stubbed gh and asserts the workflow invokes it.
 #
 # EXIT STATUS
-#   0  every version covered
-#   1  a version is missing (issue opened or updated)
+#   0  everything in sync
+#   1  a gap was found (issue opened or updated, unless this is a PR or a
+#      dispatch from a branch other than main)
 #   2  could not find out (Kapa or the sitemap unreachable, bad credentials)
 #
 # The 1 vs 2 split is the whole design. A job that reads "Kapa was down" as
@@ -20,11 +23,14 @@ set -uo pipefail
 # check. Needs a token with issues:write there; github.token is scoped to this
 # repo only, so the workflow supplies the org bot token as GH_TOKEN.
 ISSUE_REPO="${ISSUE_REPO:-redpanda-data/docs-ui}"
-ISSUE_TITLE="${ISSUE_TITLE:-Kapa has no source for a published docs version}"
+ISSUE_TITLE="${ISSUE_TITLE:-Kapa source groups are out of sync with the published docs versions}"
 ISSUE_LABEL="${ISSUE_LABEL:-documentation}"
 RUN_URL="${RUN_URL:-}"
 # Set by the workflow so a PR run annotates the check instead of filing an issue.
 EVENT_NAME="${EVENT_NAME:-schedule}"
+# Set by Actions. Only a run against main files an issue; a workflow_dispatch
+# from any other branch is someone testing and must not page the docs team.
+GITHUB_REF="${GITHUB_REF:-refs/heads/main}"
 
 # -e stays OFF: a non-zero exit from the check is the signal, not a reason to
 # abort before it can be reported, and every failure below is checked explicitly.
@@ -35,7 +41,7 @@ STATUS=$?
 printf '%s\n' "$OUTPUT"
 
 if [ "$STATUS" -eq 0 ]; then
-  echo "Every published version is covered. Nothing to report."
+  echo "Kapa and the committed mapping are in sync. Nothing to report."
   exit 0
 fi
 
@@ -55,19 +61,24 @@ fi
 
 if [ "$EVENT_NAME" = "pull_request" ]; then
   # A failing check on the PR is already the notification; an issue would be noise.
-  echo "::error::A published docs version has no Kapa source. See the check output above." >&2
+  echo "::error::Kapa and the committed mapping are out of sync. See the check output above." >&2
+  exit 1
+fi
+
+if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+  echo "::error::Kapa and the committed mapping are out of sync. Not filing an issue from ${GITHUB_REF}; only runs against main do." >&2
   exit 1
 fi
 
 BODY="$(
   printf '%s\n' \
-    'A streaming docs version is published but Kapa cannot scope Ask AI answers to it, so readers on that version get answers from the default segment instead.' \
+    'Kapa and the committed source-group mapping are out of sync for a published streaming docs version, so Ask AI cannot scope answers to it correctly. The check output says which version and why.' \
     '' \
     '```' \
     "$(printf '%s\n' "$OUTPUT" | grep -vx 'KAPA_DRIFT_CONFIRMED')" \
     '```' \
     '' \
-    'Kapa has no write API, so this is a dashboard task: Sources > Add source for the crawl, then assign it to its version group under Sources > Manage groups. Then regenerate the mapping in docs-extensions-and-macros with `doc-tools generate kapa-source-groups` and release it.' \
+    'Kapa has no write API, so any dashboard work is by hand: Sources > Add source for a missing crawl, then assign it to its version group under Sources > Manage groups. Then regenerate the mapping in docs-extensions-and-macros with `doc-tools generate kapa-source-groups` and release it.' \
     '' \
     "Run: ${RUN_URL:-(not available)}"
 )"

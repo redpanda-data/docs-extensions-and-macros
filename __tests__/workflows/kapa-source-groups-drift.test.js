@@ -94,17 +94,39 @@ function run (env = {}) {
   };
 }
 
-describe('kapa drift: the script and the workflow cannot diverge', () => {
-  test('the workflow embeds the script verbatim', () => {
-    const script = fs.readFileSync(SCRIPT_PATH, 'utf8');
-    const workflow = fs.readFileSync(WORKFLOW_PATH, 'utf8');
-    // Every non-blank script line must appear in the workflow, so an edit to one
-    // without the other is caught here rather than at 6am on a Monday.
-    const missing = script.split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l && !l.startsWith('#!'))
-      .filter((l) => !workflow.includes(l));
-    expect(missing).toEqual([]);
+describe('kapa drift: the workflow runs the script file', () => {
+  const yaml = require('js-yaml');
+  const parsed = yaml.load(fs.readFileSync(WORKFLOW_PATH, 'utf8'));
+  const steps = parsed.jobs.drift.steps;
+
+  test('the check step invokes .github/scripts/kapa-source-groups-drift.sh rather than an inline copy', () => {
+    // One copy of the bash, so an edit to the script is what CI runs.
+    const check = steps.find((st) => st.name === 'Check for drift');
+    expect(check.run.trim()).toBe('bash .github/scripts/kapa-source-groups-drift.sh');
+    expect(steps.findIndex((st) => st.uses && st.uses.startsWith('actions/checkout')))
+      .toBeLessThan(steps.indexOf(check));
+    expect(check.env.GITHUB_REF).toBe('${{ github.ref }}');
+    expect(check.env.EVENT_NAME).toBe('${{ github.event_name }}');
+  });
+
+  test('the bot token is fetched only for events that can file an issue', () => {
+    // A pull_request run exits before any gh call, and same-repo PRs execute
+    // the PR branch's workflow file, so the org token must not be in that job.
+    const kapa = steps.find((st) => st.with && /sdlc\/prod\/github\/kapa/.test(st.with['secret-ids']));
+    const bot = steps.find((st) => st.with && /actions_bot_token/.test(st.with['secret-ids']));
+    expect(kapa).toBeDefined();
+    expect(bot).toBeDefined();
+    expect(kapa).not.toBe(bot);
+    expect(kapa.if).toBeUndefined();
+    expect(String(bot.if)).toMatch(/github\.event_name != 'pull_request'/);
+    expect(kapa.with['secret-ids']).not.toMatch(/actions_bot_token/);
+  });
+
+  test('a PR that edits the validate command itself runs the live check', () => {
+    expect(parsed.on.pull_request.paths).toEqual(expect.arrayContaining([
+      'bin/doc-tools.js', 'tools/kapa-source-groups/**', 'cli-utils/kapa-credentials.js',
+      '.github/scripts/kapa-source-groups-drift.sh', '.github/workflows/kapa-source-groups-drift.yml',
+    ]));
   });
 });
 
@@ -157,6 +179,26 @@ describe('kapa drift: genuine drift files exactly one issue', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/::error::/);
     expect(r.ghCalls.trim()).toBe('');
+  });
+
+  test('a workflow_dispatch from a branch other than main reports and files nothing', () => {
+    // Someone testing the workflow on a WIP branch must not page the docs team.
+    const r = run({ ...drift, EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/DOC-1807-wip' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/Not filing an issue from refs\/heads\/DOC-1807-wip/);
+    expect(r.ghCalls.trim()).toBe('');
+  });
+
+  test('a workflow_dispatch on main files like a scheduled run', () => {
+    const r = run({ ...drift, EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main', GH_LIST_MODE: 'none' });
+    expect(r.status).toBe(1);
+    expect(r.ghCalls).toMatch(/issue create/);
+  });
+
+  test('a scheduled run on main files', () => {
+    const r = run({ ...drift, EVENT_NAME: 'schedule', GITHUB_REF: 'refs/heads/main', GH_LIST_MODE: 'none' });
+    expect(r.status).toBe(1);
+    expect(r.ghCalls).toMatch(/issue create/);
   });
 });
 
