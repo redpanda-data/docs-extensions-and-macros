@@ -39,6 +39,7 @@ display help for command
 * `sync-schemas` - Sync this package's docs-data/*.schema.json into a content repo's docs-data/
 * `mcp-version` - Show MCP server version and configuration information
 * `lint-strings` - Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)
+* `lint-screenshots` - Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)
 * `preview-string` - Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish
 * `generate` - Run docs automations
 * `validate` - Validate docs data against internal sources of truth
@@ -619,6 +620,68 @@ npx doc-tools lint-strings --repo ~/redpanda --surface properties --format json
 
 # PR mode: only declarations whose span intersects the diff
 npx doc-tools lint-strings --repo ~/redpanda --diff origin/dev
+----
+
+== lint-screenshots
+
+Deterministic checks from the docs screenshot standard, run against the .adoc pages under modules/ in a docs repo: every image macro (block and inline) has alt text, the alt text is at most 125 characters, does not start with "screenshot of" / "image of" / "picture of", and has no unquoted comma (Asciidoctor would split it into width/height); the referenced image file exists and is at most 100KB. Those are errors and exit 1. Warnings (exit 0 unless --warnings-as-errors) cover the rest of the standard: images above the 50KB target, JPEG/WebP where PNG or SVG belongs, captures wider than 1920px, and - in --files mode - changed images nothing references. Commented-out macros are skipped.
+
+*Why use it:*
+
+cloud-docs enforced these rules on every PR and its daily screenshot cron with a repo-local script; the other docs repos had nothing. One command in doc-tools lets every docs repo and the shared PR review pipeline run the same checks, so no two jobs disagree about the same 100KB limit.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools lint-screenshots [options]
+----
+
+*Options:*
+
+`--root <path>`::
+Docs repo root, the directory that holds modules/ (default: current directory)
+
+`--files <path>`::
+Changed-files list (one repo-relative path per line, for example from `gh pr diff --name-only`): lint only listed .adoc files and pages that reference a listed image
+
+`--format <format>`::
+Output format: human or json (default: "human")
+
+`--output <path>`::
+Also write the JSON result to this file
+
+`--max-alt-length <n>`::
+Alt text character limit (default: "125")
+
+`--max-bytes <n>`::
+Image size ceiling in bytes (error above this) (default: "102400")
+
+`--target-bytes <n>`::
+Image size target in bytes (warning above this) (default: "51200")
+
+`--max-width <n>`::
+Intrinsic image width limit in pixels (warning above this) (default: "1920")
+
+`--warnings-as-errors`::
+Exit 1 on warnings too
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Whole repo (from the docs repo root): what the cloud-docs PR check runs
+npx doc-tools lint-screenshots
+
+# PR mode: only pages changed in the PR, plus pages that use a changed image
+gh pr diff 123 --name-only > changed.txt
+npx doc-tools lint-screenshots --files changed.txt --format json --output review-output/screenshot-lint.json
+
+# Adopt the stricter items as blocking
+npx doc-tools lint-screenshots --warnings-as-errors
 ----
 
 == preview-string
