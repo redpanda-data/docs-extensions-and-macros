@@ -226,3 +226,84 @@ describe('scanContentUrls delimiter length', () => {
     expect(scanContentUrls(content).map((m) => m.url)).toEqual(['https://example.com/keep'])
   })
 })
+
+// Asciidoctor renders an indented line that opens a block as a literal
+// paragraph, so a URL there is text. Every case below was checked against
+// @asciidoctor/core first: the "keeps" cases render a real <a href>, the
+// "skips" cases render inside <pre>.
+describe('scanContentUrls indented literal paragraphs', () => {
+  test('skips a URL in an indented literal paragraph', () => {
+    const content = [
+      'Prose https://example.com/keep-1',
+      '',
+      '\tcurl https://example.com/skip-literal',
+      '',
+      'After https://example.com/keep-2',
+    ].join('\n')
+    expect(scanContentUrls(content).map((match) => match.url)).toEqual([
+      'https://example.com/keep-1',
+      'https://example.com/keep-2',
+    ])
+  })
+
+  test('carries an unindented continuation line into the literal paragraph', () => {
+    const content = [
+      'Prose.',
+      '',
+      '  indented opener',
+      'still literal https://example.com/skip',
+      '',
+      'After https://example.com/keep',
+    ].join('\n')
+    expect(scanContentUrls(content).map((match) => match.url)).toEqual(['https://example.com/keep'])
+  })
+
+  // The real report: three comma-separated gcloud scopes on a tab-indented
+  // line, read as one URL and checked as a broken link.
+  test('skips the gcloud scope string in a generated connector description', () => {
+    const content = [
+      'To use this mechanism locally, the following gcloud commands can be used:',
+      '',
+      "\tgcloud auth application-default login --scopes='openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform'",
+    ].join('\n')
+    expect(scanContentUrls(content)).toHaveLength(0)
+  })
+
+  test.each([
+    ['dash bullet', '  - see https://example.com/page[Page]'],
+    ['star bullet', '  * see https://example.com/page[Page]'],
+    ['nested star bullet', '  ** see https://example.com/page[Page]'],
+    ['ordered marker', '  . see https://example.com/page[Page]'],
+    ['nested ordered marker', '  .. see https://example.com/page[Page]'],
+    ['numbered marker', '  1. see https://example.com/page[Page]'],
+    ['lettered marker', '  a. see https://example.com/page[Page]'],
+    ['table cell', '  | see https://example.com/page[Page]'],
+    ['description list', '  Term:: see https://example.com/page[Page]'],
+  ])('keeps a URL in an indented %s', (_, line) => {
+    const content = ['Prose.', '', line].join('\n')
+    expect(scanContentUrls(content).map((match) => match.url)).toEqual(['https://example.com/page'])
+  })
+
+  test('keeps a URL on an indented line that wraps a paragraph', () => {
+    const content = ['Prose text', '  continues https://example.com/page[Page]'].join('\n')
+    expect(scanContentUrls(content).map((match) => match.url)).toEqual(['https://example.com/page'])
+  })
+
+  test.each([
+    ['a list continuation', '+'],
+    ['a block attribute list', '[source,bash]'],
+    ['a block title', '.Run this'],
+  ])('opens a literal paragraph after %s', (_, opener) => {
+    const content = ['. Step', opener, '  curl https://example.com/skip'].join('\n')
+    expect(scanContentUrls(content)).toHaveLength(0)
+  })
+
+  test('opens a literal paragraph after a delimited block closes', () => {
+    const content = ['----', 'code', '----', '  curl https://example.com/skip'].join('\n')
+    expect(scanContentUrls(content)).toHaveLength(0)
+  })
+
+  test('scans an indented first line of a file as a literal paragraph', () => {
+    expect(scanContentUrls('  curl https://example.com/skip')).toHaveLength(0)
+  })
+})
