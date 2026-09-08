@@ -1729,7 +1729,7 @@ display help for command
 * `rpk-overrides` - Validate rpk-overrides.json against schema and check for common issues
 * `enterprise-features` - Check the enterprise features registry against core, connect, and docs sources of truth
 * `property-overrides` - Validate property-overrides.json against its schema
-* `kapa-source-groups` - Check every published streaming version has a Kapa source (exit 0 covered, 1 missing, 2 error)
+* `kapa-source-groups` - Check every published streaming version has a grouped Kapa source and the committed mapping points at that group (exit 0 in sync, 1 gap, 2 error)
 * `help` - display help for command
 
 === validate rpk-overrides
@@ -1894,7 +1894,7 @@ npx doc-tools validate property-overrides --strict
 
 === validate kapa-source-groups
 
-Checks that every streaming docs version currently published has a Kapa source, so Ask AI can scope answers to it. Exit status is meaningful: 0 every version is covered, 1 a version is missing, 2 the command itself failed (Kapa or the sitemap unreachable, bad credentials). A version counts as covered when Kapa has a source named `Documentation (X)` for it, that source is assigned to a source group, AND the committed mapping (docs-data/kapa-source-groups.json) has a segment for it. A source left unassigned is global in Kapa, which means it is returned for EVERY query on every version, so it is reported here as well. A version that Kapa covers but the committed mapping lacks is reported too: every deployed surface reads the mapping, not Kapa, so readers on that version silently get the default segment until the mapping is regenerated and released. The prerelease segment (/streaming/beta/) is ignored: a beta publishes there for the whole pre-GA cycle and is not expected to have a Kapa group of its own.
+Checks that every streaming docs version currently published has a Kapa source, so Ask AI can scope answers to it. Exit status is meaningful: 0 every version is covered, 1 a version is missing, 2 the command itself failed (Kapa or the sitemap unreachable, bad credentials). A version counts as covered when Kapa has a source named `Documentation (X)` for it, that source is assigned to a source group, AND the committed mapping (docs-data/kapa-source-groups.json) has a segment for it whose group_id is a group that source actually sits in. Four gaps are reported, each with its own line: - missing: the version is published but Kapa has no `Documentation (X)` source. - unassigned: the source exists but is in no group, so it is global in Kapa and returned for EVERY query on every version. - unmapped: Kapa has the grouped source but the committed mapping has no segment for it. Every deployed surface reads the mapping, not Kapa, so readers on that version silently get the default segment until the mapping is regenerated and released. - mismatched: the mapping has the segment but its group_id is not a group the version's source sits in, which is what a group deleted and recreated in the dashboard, or a source moved into another version's group, looks like. Every Ask AI query on that version is then scoped to a group that no longer holds its docs, until the mapping is regenerated and released. The prerelease segment (/streaming/beta/) is ignored: a beta publishes there for the whole pre-GA cycle and is not expected to have a Kapa group of its own.
 
 *Why use it:*
 

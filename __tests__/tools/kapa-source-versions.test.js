@@ -61,6 +61,16 @@ describe('classifySources', () => {
     expect(r.unassigned.size).toBe(0);
   });
 
+  it('returns the group ids each covered version sits in, as strings', () => {
+    const r = classifySources([
+      { name: 'Documentation (24.2)', source_groups: [{ id: 'g1' }, { id: 'g2' }] },
+      { name: 'Documentation (24.2)', source_groups: [{ id: 'g3' }] },
+      { name: 'Documentation (26.2)', source_groups: [] },
+    ]);
+    expect([...r.groups.get('24.2')].sort()).toEqual(['g1', 'g2', 'g3']);
+    expect(r.groups.has('26.2')).toBe(false);
+  });
+
   it('tolerates the spec bug where source_groups is a string, a null, or absent', () => {
     // Kapa declares source_groups as "type":"string" but returns arrays. toList
     // handles all shapes; here we only need it not to throw and not to invent
@@ -80,7 +90,9 @@ describe('validate kapa-source-groups, executed', () => {
   beforeAll(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kapa-cov-')); });
   afterAll(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
-  const source = (v, grouped = true) => ({ name: `Documentation (${v})`, source_groups: grouped ? [{ id: `g-${v}` }] : [] });
+  // The mapping written by `run` scopes each version to `g-${v}`; pass groupId
+  // to put Kapa's source somewhere else.
+  const source = (v, grouped = true, groupId = `g-${v}`) => ({ name: `Documentation (${v})`, source_groups: grouped ? [{ id: groupId }] : [] });
 
   // `mapped` is the committed mapping's segment list. It defaults to every
   // grouped source, which is the in-sync state; tests that want the mapping to
@@ -152,6 +164,46 @@ describe('validate kapa-source-groups, executed', () => {
     expect(r.out).toMatch(/doc-tools generate kapa-source-groups/);
     // Nothing is wrong in the dashboard, so do not send the reader there.
     expect(r.out).not.toMatch(/Sources > Add source/);
+  });
+
+  it('exits 1 with the sentinel when a group was deleted and recreated, so the mapping holds a stale id', () => {
+    // Recreating a group in the dashboard keeps its name and gives it a new id.
+    // The source is grouped, the mapping has the segment, and every query on
+    // 25.2 goes out with an id Kapa no longer has.
+    const r = run({
+      sources: [source('24.2'), source('25.2', true, 'g-25.2-recreated'), source('current')],
+      sitemapVersions: ['24.2', '25.2', 'current'],
+    });
+    expect(r.status).toBe(1);
+    expect(r.out).toMatch(SENTINEL);
+    expect(r.out).toMatch(/25\.2: .* scopes this version to group g-25\.2, but Kapa has "Documentation \(25\.2\)" in group g-25\.2-recreated/);
+    expect(r.out).not.toMatch(/24\.2:/);
+    expect(r.out).not.toMatch(/current:/);
+    expect(r.out).toMatch(/doc-tools generate kapa-source-groups/);
+    expect(r.out).not.toMatch(/Sources > Add source/);
+  });
+
+  it('exits 1 with the sentinel when a source was moved into another version\'s group', () => {
+    // 26.2's crawl now sits in the current group. Its own group still exists
+    // and is empty, so the mapping's id is valid but scopes 26.2 readers to
+    // nothing.
+    const r = run({
+      sources: [source('25.2'), source('26.2', true, 'g-current'), source('current')],
+      sitemapVersions: ['25.2', '26.2', 'current'],
+    });
+    expect(r.status).toBe(1);
+    expect(r.out).toMatch(SENTINEL);
+    expect(r.out).toMatch(/26\.2: .* scopes this version to group g-26\.2, but Kapa has "Documentation \(26\.2\)" in group g-current/);
+    expect(r.out).not.toMatch(/25\.2:/);
+  });
+
+  it('accepts a source in several groups as long as the mapped one is among them', () => {
+    const r = run({
+      sources: [{ name: 'Documentation (25.2)', source_groups: [{ id: 'g-all' }, { id: 'g-25.2' }] }, source('current')],
+      sitemapVersions: ['25.2', 'current'],
+    });
+    expect(r.status).toBe(0);
+    expect(r.out).not.toMatch(SENTINEL);
   });
 
   it('ignores the prerelease segment, which publishes at /streaming/beta/ with no group by design', () => {

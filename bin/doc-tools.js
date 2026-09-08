@@ -2845,11 +2845,19 @@ programCli.addCommand(automation)
  *
  * A version counts as covered when Kapa has a source named `Documentation (X)` for it, that
  * source is assigned to a source group, AND the committed mapping (docs-data/kapa-source-groups.json)
- * has a segment for it. A source left unassigned is global in Kapa, which means it is returned for
- * EVERY query on every version, so it is reported here as well. A version that Kapa covers but the
- * committed mapping lacks is reported too: every deployed surface reads the mapping, not Kapa, so
- * readers on that version silently get the default segment until the mapping is regenerated and
- * released.
+ * has a segment for it whose group_id is a group that source actually sits in. Four gaps are
+ * reported, each with its own line:
+ *
+ * - missing: the version is published but Kapa has no `Documentation (X)` source.
+ * - unassigned: the source exists but is in no group, so it is global in Kapa and returned for
+ *   EVERY query on every version.
+ * - unmapped: Kapa has the grouped source but the committed mapping has no segment for it. Every
+ *   deployed surface reads the mapping, not Kapa, so readers on that version silently get the
+ *   default segment until the mapping is regenerated and released.
+ * - mismatched: the mapping has the segment but its group_id is not a group the version's source
+ *   sits in, which is what a group deleted and recreated in the dashboard, or a source moved into
+ *   another version's group, looks like. Every Ask AI query on that version is then scoped to a
+ *   group that no longer holds its docs, until the mapping is regenerated and released.
  *
  * The prerelease segment (/streaming/beta/) is ignored: a beta publishes there for the whole
  * pre-GA cycle and is not expected to have a Kapa group of its own.
@@ -2877,7 +2885,7 @@ programCli.addCommand(automation)
  */
 validation
   .command('kapa-source-groups')
-  .description('Check every published streaming version has a Kapa source (exit 0 covered, 1 missing, 2 error)')
+  .description('Check every published streaming version has a grouped Kapa source and the committed mapping points at that group (exit 0 in sync, 1 gap, 2 error)')
   .option('--site-url <url>', 'Docs site whose sitemap says which versions are published', 'https://docs.redpanda.com')
   .option('--mapping <file>', 'Committed mapping every surface reads', 'docs-data/kapa-source-groups.json')
   .action(async (options) => {
@@ -2911,7 +2919,7 @@ validation
     // grouped source is necessary but not sufficient: if nobody regenerated and
     // released the mapping, readers on that version still get the default
     // segment and nothing else would ever say so.
-    let mappedSegments
+    let mappedSegments, mappedGroupIds
     try {
       const mappingPath = path.resolve(options.mapping)
       const mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'))
@@ -2919,6 +2927,8 @@ validation
         throw new Error('no segments object')
       }
       mappedSegments = new Set(Object.keys(mapping.segments))
+      mappedGroupIds = new Map(Object.entries(mapping.segments)
+        .map(([seg, entry]) => [seg, entry && entry.group_id != null ? String(entry.group_id) : null]))
     } catch (err) {
       console.error(`Error: Could not read the committed mapping at ${options.mapping}: ${err.message}`)
       process.exit(2)
@@ -2932,19 +2942,30 @@ validation
     const missing = versions.filter((v) => !kapa.covered.has(v) && !kapa.unassigned.has(v))
     const unassigned = versions.filter((v) => kapa.unassigned.has(v))
     const unmapped = versions.filter((v) => kapa.covered.has(v) && !mappedSegments.has(v))
+    // The mapping is what gets sent with every query, so its group_id has to be a
+    // group the version's source is in right now. A group deleted and recreated
+    // keeps its name and gets a new id; a source moved to another version's
+    // group leaves the old id pointing at a group without these docs. Kapa
+    // reports neither, and the three checks above pass in both cases.
+    const mismatched = versions.filter((v) => {
+      if (!kapa.covered.has(v) || !mappedSegments.has(v)) return false
+      const want = mappedGroupIds.get(v)
+      const have = kapa.groups.get(v) || new Set()
+      return !want || !have.has(want)
+    })
 
     if (prerelease.length) {
       console.log(`  (ignoring prerelease segment${prerelease.length > 1 ? 's' : ''} ${prerelease.join(', ')}, ` +
         'which publishes for the pre-GA cycle and is not expected to have a Kapa group)')
     }
 
-    if (missing.length === 0 && unassigned.length === 0 && unmapped.length === 0) {
-      console.log(`✓ Every published streaming version (${versions.join(', ')}) has a Kapa source in a group ` +
-        `and a segment in ${options.mapping}.`)
+    if (missing.length === 0 && unassigned.length === 0 && unmapped.length === 0 && mismatched.length === 0) {
+      console.log(`✓ Every published streaming version (${versions.join(', ')}) has a Kapa source in a group, ` +
+        `and ${options.mapping} points each one at that group.`)
       process.exit(0)
     }
 
-    console.log('✗ Kapa is missing coverage for published streaming docs versions.\n')
+    console.log('✗ Kapa and the committed mapping are out of sync for published streaming docs versions.\n')
     for (const v of missing) {
       console.log(`  - ${v}: published at /streaming/${v}/ but Kapa has no "Documentation (${v})" source. ` +
         'Readers on this version fall back to the default segment.')
@@ -2957,6 +2978,13 @@ validation
       console.log(`  - ${v}: Kapa has a grouped "Documentation (${v})" source, but ${options.mapping} has no ` +
         `"${v}" segment. Readers on this version fall back to the default segment until the mapping is ` +
         'regenerated and released.')
+    }
+    for (const v of mismatched) {
+      const want = mappedGroupIds.get(v)
+      const have = [...(kapa.groups.get(v) || [])]
+      console.log(`  - ${v}: ${options.mapping} scopes this version to group ${want || '(no group_id)'}, but Kapa has ` +
+        `"Documentation (${v})" in ${have.length === 1 ? 'group' : 'groups'} ${have.join(', ')}. Every Ask AI query on ` +
+        'this version is sent with a group that no longer holds its docs until the mapping is regenerated and released.')
     }
     if (missing.length || unassigned.length) {
       console.log('\nIn the Kapa dashboard: Sources > Add source for the crawl, then assign it to the version ' +

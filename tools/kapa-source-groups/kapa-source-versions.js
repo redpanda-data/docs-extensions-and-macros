@@ -11,6 +11,12 @@
  * sources are GLOBAL in Kapa, returned for every query on every version, so a
  * `Documentation (26.2)` left unassigned would leak 26.2 content into 24.2
  * readers' answers with no error anywhere.
+ *
+ * The group ids each version's sources sit in are returned too, so the caller
+ * can compare them with the committed mapping. Every deployed surface scopes a
+ * query by the mapping's group_id, not by Kapa's current state, so a group that
+ * was deleted and recreated, or a source moved into another version's group,
+ * leaves the mapping pointing at a group that no longer holds that version.
  */
 
 const { KAPA_API_BASE } = require('../../cli-utils/kapa-credentials')
@@ -34,35 +40,42 @@ function versionFromSourceName (name) {
  * Classify a list of Kapa source objects.
  *
  * @param {Array<{name: string, source_groups?: unknown}>} sources
- * @returns {{covered: Set<string>, unassigned: Set<string>}}
+ * @returns {{covered: Set<string>, unassigned: Set<string>, groups: Map<string, Set<string>>}}
  *   covered: versions with a source that is in at least one group
  *   unassigned: versions with a source that is in no group (global)
+ *   groups: for each covered version, the ids of every group its sources sit in
  */
 function classifySources (sources) {
   const covered = new Set()
   const unassigned = new Set()
+  const groups = new Map()
   for (const s of sources || []) {
     const v = versionFromSourceName(s && s.name)
     if (!v) continue
-    const inGroup = toList(s.source_groups).some((g) => Boolean(idOf(g)))
-    if (inGroup) covered.add(v)
-    else unassigned.add(v)
+    const ids = toList(s.source_groups).map(idOf).filter(Boolean)
+    if (ids.length) {
+      covered.add(v)
+      if (!groups.has(v)) groups.set(v, new Set())
+      for (const id of ids) groups.get(v).add(String(id))
+    } else {
+      unassigned.add(v)
+    }
   }
   // A version with two sources, one grouped and one not, is covered: the
   // grouped one scopes correctly. The stray global is still worth a report,
   // but it is a generator concern (it lists global_sources), not a gap here.
   for (const v of covered) unassigned.delete(v)
-  return { covered, unassigned }
+  return { covered, unassigned, groups }
 }
 
 /**
  * @param {{apiKey: string, projectId: string, fetchImpl?: typeof fetch}} opts
- * @returns {Promise<{covered: Set<string>, unassigned: Set<string>}>}
+ * @returns {Promise<{covered: Set<string>, unassigned: Set<string>, groups: Map<string, Set<string>>}>}
  */
 async function fetchKapaSourceVersions ({ apiKey, projectId, fetchImpl }) {
   if (!apiKey) throw new Error('fetchKapaSourceVersions requires an apiKey')
   if (!projectId) throw new Error('fetchKapaSourceVersions requires a projectId')
-  const url = `${KAPA_API_BASE}/ingestion/v1/projects/${projectId}/sources/`
+  const url = `${KAPA_API_BASE}/ingestion/v1/projects/${encodeURIComponent(projectId)}/sources/`
   const sources = await fetchAllPages(url, apiKey, fetchImpl)
   return classifySources(sources)
 }
