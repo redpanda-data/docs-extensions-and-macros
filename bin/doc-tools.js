@@ -122,9 +122,9 @@ programCli
  * - A GitHub token with access to redpanda-data/streaming-enterprise, which is
  *   private. Redpanda releases are published there now, and the old public repo
  *   is frozen, so this command exits rather than report a stale version when it
- *   has no token. Resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN,
- *   ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in
- *   that priority order
+ *   has no token. Resolved from REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN,
+ *   GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, GH_TOKEN, or GIT_CREDENTIALS, in that
+ *   priority order (an API call, so the git credential is the last resort)
  */
 programCli
   .command('get-redpanda-version')
