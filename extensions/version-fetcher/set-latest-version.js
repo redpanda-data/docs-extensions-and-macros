@@ -10,10 +10,13 @@ module.exports.register = function ({ config }) {
   const GetLatestConnectVersion = require('./get-latest-connect');
   const logger = this.getLogger('set-latest-version-extension');
 
-  const { getGitHubToken } = require('../../cli-utils/github-token');
+  const { getGitHubApiToken } = require('../../cli-utils/github-token');
   // Shared with tools/bundle-openapi.js so there is one major.minor derivation.
   const { toShortVersion } = require('../../cli-utils/version');
-  const token = getGitHubToken();
+  // API token, not the git one: GIT_CREDENTIALS (Antora's clone credential)
+  // is only a last resort here, because on Netlify it is scoped to the docs
+  // content repos and cannot see streaming-enterprise.
+  const token = getGitHubApiToken();
 
   if (!token) {
     // Unauthenticated requests still work for the public repos this
@@ -21,7 +24,7 @@ module.exports.register = function ({ config }) {
     // version now comes from the private streaming-enterprise repo, whose
     // API 404s without a token -- the latest-redpanda-* attributes are then
     // left unset and pages fall back to their antora.yml values.
-    logger.warn('GitHub token not set (GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, GITHUB_TOKEN, or GH_TOKEN). The Redpanda version lookup against the private streaming-enterprise repo will fail and leave latest-redpanda-* attributes unset; other lookups proceed unauthenticated.');
+    logger.warn('GitHub token not set (REDPANDA_GITHUB_TOKEN, GITHUB_TOKEN, GH_TOKEN, or GIT_CREDENTIALS). The Redpanda version lookup against the private streaming-enterprise repo will fail and leave latest-redpanda-* attributes unset; other lookups proceed unauthenticated.');
   }
 
   this.on('contentClassified', async ({ contentCatalog }) => {

@@ -46,7 +46,7 @@ mock(path.join(extDir, 'get-latest-redpanda-version.js'), async () => config.red
 mock(path.join(extDir, 'fetch-latest-docker-tag.js'), async (namespace, repo) => config.dockerTags[repo] || null);
 mock(path.join(extDir, 'get-latest-redpanda-helm-version-from-operator.js'), async () => config.helmChart);
 mock(path.join(extDir, 'get-latest-connect.js'), async () => config.connect);
-mock(path.join(repoRoot, 'cli-utils/github-token.js'), { getGitHubToken: () => 'fake-token' });
+mock(path.join(repoRoot, 'cli-utils/github-token.js'), { getGitHubToken: () => 'fake-token', getGitHubApiToken: () => 'fake-token' });
 
 // Record what the extension actually requires, so a dead dependency cannot be
 // reintroduced without a test noticing.

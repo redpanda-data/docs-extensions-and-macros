@@ -12,7 +12,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const { getGitHubToken } = require('./github-token')
+const { getGitHubApiToken } = require('./github-token')
 
 const RAW = 'https://raw.githubusercontent.com'
 
@@ -62,7 +62,7 @@ async function discardBody (resp) {
  * check runs on a weekly cron where nobody is watching live.
  *
  * @param {object} [deps]
- * @param {string|null} [deps.token] - GitHub token (defaults to getGitHubToken())
+ * @param {string|null} [deps.token] - GitHub token (defaults to getGitHubApiToken())
  * @param {Function} [deps.fetchImpl] - fetch implementation (defaults to global fetch)
  * @param {Function} [deps.warn] - warning sink (defaults to console.warn)
  * @param {Function} [deps.sleep] - delay implementation, for tests
@@ -72,7 +72,7 @@ async function discardBody (resp) {
  *   check that never ran. Failures without a sourceName throw instead.
  */
 function createSourceFetcher (deps = {}) {
-  const ghToken = deps.token !== undefined ? deps.token : getGitHubToken()
+  const ghToken = deps.token !== undefined ? deps.token : getGitHubApiToken()
   const fetchImpl = deps.fetchImpl || ((...args) => fetch(...args))
   const warn = deps.warn || ((msg) => console.warn(msg))
   const sleep = deps.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
