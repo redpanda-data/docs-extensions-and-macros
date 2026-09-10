@@ -60,11 +60,12 @@
 #
 # Prefer the commit SHA. publish-to-npm.yaml creates a `v<version>` tag and
 # GitHub release for every version that reaches npm, and `@v<version>` is
-# easier to read, but a tag is a movable pointer: this repository has no tag
-# ruleset yet, so anyone with push access can re-point or delete a `v*` tag
-# with no review, which makes a tag pin weaker than it looks. Until a ruleset
-# restricting `v*` updates and deletions is in place (it needs a repo admin),
-# security-sensitive callers should pin the SHA that the tag points at.
+# easier to read. But a tag is a movable pointer and no ruleset restricts `v*`
+# in this repository, so anyone with push access can re-point or delete one
+# with no review, where `main` requires a reviewed PR. That makes a tag pin
+# weaker than it looks, so pin the SHA the tag points at. Deliberate, not a
+# gap waiting on someone: the SHA is the recommendation, and `@v<version>` is
+# for callers who would rather read a version than a hash.
 #
 # Use `pull_request`, not `pull_request_target`. On `pull_request_target`,
 # actions/checkout without an explicit ref checks out the BASE commit, so the
