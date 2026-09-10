@@ -287,6 +287,25 @@ describe('render-property-descriptions extension', () => {
     const { data } = run(catalog)
     expect(data.properties.plain.description_html).toBeUndefined()
   })
+
+  it('renders only the newest dataset when a branch ships a retained baseline', () => {
+    // doc-tools keeps the 2 newest property JSONs on purpose: the next
+    // generation run needs the older one as its --diff baseline. Converting a
+    // baseline rewrites the descriptions that diff reads, and reports every
+    // dead anchor in a superseded dataset a second time.
+    const baseline = dataset({ stale: 'See <<redpandastoragemode,the storage mode>>.' })
+    const catalog = catalogWith(baseline, {
+      extraFiles: [{
+        src: { component: 'streaming', version: '26.2', module: 'reference', family: 'attachment', relative: 'redpanda-properties-v26.2.2.json', path: 'modules/reference/attachments/redpanda-properties-v26.2.2.json' },
+        contents: Buffer.from(dataset({ current: 'A current description.' })),
+      }],
+    })
+    const { warnings } = run(catalog)
+    const [older, newer] = catalog.files
+    expect(JSON.parse(newer.contents.toString()).properties.current.description_html).toBe('A current description.')
+    expect(older.contents.toString()).toBe(baseline)
+    expect(warnings.some((w) => w.includes('redpandastoragemode'))).toBe(false)
+  })
 })
 
 // A glossterm: reference in a property description runs through the same
