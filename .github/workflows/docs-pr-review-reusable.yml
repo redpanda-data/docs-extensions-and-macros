@@ -89,7 +89,7 @@ on:
           checks — the same command cloud-docs runs on every PR and in its
           daily screenshot cron. Exact version, never a range or a tag.
         type: string
-        default: '5.36.0'
+        default: '5.38.0'
       docs_app_id:
         description: >-
           DOCS_APP_ID — the redpanda-docs-automation GitHub App. Used only to
