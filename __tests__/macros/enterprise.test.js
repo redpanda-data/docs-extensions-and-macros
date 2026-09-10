@@ -826,7 +826,7 @@ features:
     })
 
     test('warns by default, naming the page', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       convert('enterprise:Tiered Storage[]', {
         catalog: fakeCatalog(),
         attributes: { 'env-cloud': '' },
@@ -844,7 +844,7 @@ features:
     })
 
     test('stays silent in off mode', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       convert('enterprise:Tiered Storage[]', {
         catalog: fakeCatalog(),
         attributes: { 'env-cloud': '', 'enterprise-validate': 'off' },
@@ -853,7 +853,7 @@ features:
     })
 
     test('never validates the target against the registry', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('enterprise:Not A Real Feature[]', {
         catalog: fakeCatalog(),
         attributes: { 'env-cloud': '' },
@@ -871,15 +871,31 @@ features:
       expect(html).toContain('class="enterprise-feature"')
     })
 
-    test('renders a warning instead of a licensing table for the block macro', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    test('renders NOTHING for the block macro, with the diagnostic in the log', () => {
+      // Not an admonition. enterprise-validate defaults to warn in all three
+      // docs-site playbooks, so an admonition would ship to
+      // docs.redpanda.com and explain an internal macro to a reader. The
+      // writer gets the message in the build log instead, and this keeps the
+      // inline and block macros behaving the same way on Cloud, which is what
+      // PROPERTY_AND_ENTERPRISE_REFERENCES.adoc claims.
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('enterprise_features::redpanda[]', {
         catalog: fakeCatalog(),
         attributes: { 'env-cloud': '' },
       })
-      expect(html).toContain('no Enterprise Edition license')
       expect(html).not.toContain('Tiered Storage')
+      expect(html).not.toContain('no Enterprise Edition license')
+      expect(html).not.toMatch(/admonitionblock|WARNING/)
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('enterprise_features::redpanda[]'))
+    })
+
+    test('still throws on the block macro when enterprise-validate is error', () => {
+      // Rendering nothing must not soften the strict mode: a Cloud page that
+      // calls the block macro under enterprise-validate: error still fails.
+      expect(() => convert('enterprise_features::redpanda[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '', 'enterprise-validate': 'error' },
+      })).toThrow(/no Enterprise Edition license/)
     })
 
     test('rejects cloud as a scope on the block macro', () => {

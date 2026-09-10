@@ -199,8 +199,15 @@ function isPrereleasePage (config, document) {
  * resolveEntryXref already relied on for env-cloud.
  *
  * A bare `!== undefined` test would read `env-cloud: false` as Cloud, so
- * falsy strings are treated as unset, matching every other env-cloud reader
- * in this codebase.
+ * falsy strings are treated as unset. That matches prop.js's isAttributeSet,
+ * which is the same three-line test, but this is NOT the same reader and the
+ * two are not interchangeable: prop.js asks the CATALOG about the page's
+ * component, while this asks the DOCUMENT being converted, which is the whole
+ * point above. It is also not the codebase-wide convention, despite what an
+ * earlier version of this comment claimed:
+ * rp-connect-components.js still uses a bare `!== undefined` for env-cloud,
+ * so `env-cloud: false` reads as Cloud there. Worth aligning separately, but
+ * not from here.
  */
 function isCloudPage (document) {
   const raw = document && document.getAttribute('env-cloud')
@@ -221,7 +228,7 @@ function reportNoLicenseOnCloud ({ call, mode, filePath }) {
     `${call}${where}: this page belongs to a Cloud component, and Redpanda Cloud has no Enterprise Edition license. ` +
     'Reword the content for Cloud instead of relying on this macro, or wrap it in ifndef::env-cloud[] if the same prose is single-sourced to a non-Cloud page too.'
   if (mode === 'error') throw new Error(message)
-  console.warn(chalk.yellow(message))
+  logger.warn(message)
 }
 
 /**
@@ -716,8 +723,14 @@ function enterpriseFeaturesBlockMacro (config) {
           mode: document.getAttribute('enterprise-validate', 'warn'),
           filePath: config && config.file && config.file.src && config.file.src.path,
         })
-        return self.parseContent(parent,
-          `WARNING: This page belongs to a Cloud component, and Redpanda Cloud has no Enterprise Edition license, so the ${scope} licensing table is not rendered here.`)
+        // Render NOTHING, not an admonition. The message is internal tooling
+        // language aimed at a writer, and all three docs-site playbooks run
+        // with enterprise-validate: warn, so an admonition here would ship to
+        // docs.redpanda.com and tell a reader about a macro. The diagnostic
+        // belongs in the build log, which reportNoLicenseOnCloud just wrote,
+        // and it names the page. This also makes the inline and block macros
+        // behave the same way on Cloud, which the docs claim.
+        return undefined
       }
       const registry = config && config.contentCatalog ? loadRegistry(config) : undefined
       if (!registry) {
