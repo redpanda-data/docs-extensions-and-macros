@@ -1,7 +1,7 @@
 {{- define "gvDetails" -}}
 {{- $gv := . -}}
 
-{{ $gv.Doc }}
+{{ $gv.Doc | replace "${" "$\\{" }}
 
 {{- if $gv.Kinds  }}
 .Resource Types

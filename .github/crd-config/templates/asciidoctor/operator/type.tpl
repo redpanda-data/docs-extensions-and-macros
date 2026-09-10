@@ -5,7 +5,7 @@
 [id="{{ asciidocTypeID $type | asciidocRenderAnchorID }}"]
 == {{ $type.Name  }} {{ if $type.IsAlias }}({{ asciidocRenderTypeLink $type.UnderlyingType  }}) {{ end }}
 
-{{ $type.Doc }}
+{{ $type.Doc | replace "${" "$\\{" }}
 
 {{ if eq $type.Name "RedpandaClusterSpec" }}
 For descriptions and default values, see xref:k-redpanda-helm-spec.adoc[].
