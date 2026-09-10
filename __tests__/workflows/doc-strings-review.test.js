@@ -181,13 +181,39 @@ describe('doc-strings-review workflow: static contracts', () => {
     }
   })
 
-  test('the caller contract does not point at a ref that cannot resolve', () => {
-    // The repo publishes no git tags, so a @v<version> example in the shim
-    // hands every caller an unresolvable ref.
+  test('the caller contract never shows a ref that would silently float', () => {
+    // This used to assert the opposite end of the same problem: with no tags in
+    // the repo, a `@v<version>` example handed callers an unresolvable ref, so
+    // the example said `@main`. publish-to-npm.yaml now tags every published
+    // version, but `@main` was always the worse failure: an unresolvable ref
+    // fails the caller's job loudly, while `@main` runs whatever landed here
+    // last, inside the caller's job, with their OIDC role and pull-requests:
+    // write, and with no review in their repository.
+    //
+    // So the contract is: the example must be an obvious placeholder, never a
+    // ref that resolves to moving code. People copy the block and skip the
+    // prose, which is exactly how the old example contradicted the paragraph
+    // beneath it.
     const shim = fs.readFileSync(WORKFLOW_PATH, 'utf8')
-    const refs = [...shim.matchAll(/doc-strings-review\.yml@([\w.\-/]+)/g)].map((m) => m[1])
+    const refs = [...shim.matchAll(/doc-strings-review\.yml@(\S+)/g)].map((m) => m[1])
     expect(refs.length).toBeGreaterThan(0)
-    for (const ref of refs) expect(ref).not.toMatch(/^v\d/)
+    for (const ref of refs) {
+      expect(ref).not.toBe('main')
+      expect(ref).not.toMatch(/^(main|master|HEAD)$/)
+      // A placeholder, i.e. not something git could resolve as-is.
+      expect(ref).toMatch(/[<>]/)
+    }
+  })
+
+  test('the caller contract tells security-sensitive callers to pin the SHA', () => {
+    // A tag is a movable pointer and this repo has no `v*` tag ruleset yet, so
+    // anyone with push access can re-point or delete a tag with no review.
+    // Until that ruleset exists the SHA is the only real pin, and the header
+    // has to say so rather than merely offer it as an alternative.
+    const header = fs.readFileSync(WORKFLOW_PATH, 'utf8')
+      .split('\n').filter((l) => l.startsWith('#')).join('\n')
+    expect(header).toMatch(/Prefer the commit SHA/i)
+    expect(header).toMatch(/ruleset/i)
   })
 
   test('doc_tools_package pins a version, and the pin matches this package', () => {

@@ -7,21 +7,34 @@ on:
 permissions:
   id-token: write
   contents: read
+# One publish at a time. Two runs for the same version could both find no
+# release and both try to create it; the loser's `gh release create` fails and
+# takes its job down. cancel-in-progress is false because cancelling a run
+# mid-`npm publish` is worse than making the next one wait.
+concurrency:
+  group: publish-to-npm
+  cancel-in-progress: false
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # contents: write is for the release step at the end of this job only:
-    # `gh release create` pushes the v<version> tag. Nothing else here writes
-    # to the repository. The dispatch job below keeps the workflow default.
+    # Stays at the workflow default of contents: read. The tag is created by
+    # the `release` job below, which is the only place that holds write.
     permissions:
       id-token: write
-      contents: write
+      contents: read
+    outputs:
+      pkg: ${{ steps.meta.outputs.pkg }}
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ vars.RP_AWS_CRED_REGION }}
           role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
       - uses: actions/checkout@v5
+        with:
+          # Don't leave the token in .git/config for later steps to find.
+          # OIDC publishing does not need it and nothing here pushes.
+          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -32,36 +45,108 @@ jobs:
       - name: Check published version
         if: ${{ steps.publish.outputs.type }}
         run: echo "Version changed!"
-      # Every version that reaches npm also gets a git tag and a GitHub
-      # release, so other repositories can pin reusable workflows and actions
-      # from here to `@v<version>` (or to the SHA that tag points at) instead
-      # of `@main`. Keyed on the registry, not on npm-publish's `type` output:
-      # a rerun of this workflow, or a push that did not change the version,
-      # reports no type, and the tag should still be created if it is missing.
-      # Idempotent: an existing release is left alone.
+      # Read the manifest here, where the checkout is, and hand the two values
+      # to the release job as outputs so that job needs no checkout at all.
+      - name: Read package name and version
+        id: meta
+        run: |
+          set -euo pipefail
+          {
+            echo "pkg=$(jq -r .name package.json)"
+            echo "version=$(jq -r .version package.json)"
+          } >> "$GITHUB_OUTPUT"
+
+  # Separate job purely to contain `contents: write`.
+  #
+  # When the tag step lived at the end of `publish`, job-level permissions gave
+  # that token to EVERY step in the job: actions/checkout, `npm install` (which
+  # runs dependency lifecycle scripts), and a third-party publish action. Any
+  # of those could have moved or deleted a `v*` tag, which is the exact artifact
+  # this workflow asks other repositories to trust. This job holds the write
+  # scope, runs no third-party code, and needs no checkout: `gh` is on the
+  # runner, the package name and version arrive as outputs, and GITHUB_SHA
+  # already names the commit to tag.
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Keyed on the registry, not on npm-publish's `type` output: a rerun of
+      # this workflow, or a push that did not change the version, reports no
+      # type, and the tag should still be created if it is missing. Idempotent:
+      # an existing release is left alone.
       - name: Tag and release the published version
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PKG: ${{ needs.publish.outputs.pkg }}
+          VERSION: ${{ needs.publish.outputs.version }}
         run: |
           set -euo pipefail
-          pkg=$(jq -r .name package.json)
-          version=$(jq -r .version package.json)
-          tag="v${version}"
-          if ! npm view "${pkg}@${version}" version >/dev/null 2>&1; then
-            echo "::notice::${pkg}@${version} is not on npm; nothing to tag."
+          tag="v${VERSION}"
+
+          # Only a confirmed 404 means "not published". Treating every non-zero
+          # exit as absent turned a registry blip or a network error into a
+          # silent skip: no tag, no release, and a green run, while `dispatch`
+          # went ahead and told four repositories to pull the new version. A
+          # missing pin is exactly the thing this workflow exists to prevent, so
+          # it has to be loud. Retry first, since 5xx from the registry is real.
+          on_npm=""
+          for attempt in 1 2 3; do
+            if out=$(npm view "${PKG}@${VERSION}" version 2>&1); then
+              on_npm="yes"
+              echo "Found ${PKG}@${VERSION} on npm (${out})."
+              break
+            fi
+            if printf '%s' "$out" | grep -q 'E404'; then
+              on_npm="no"
+              break
+            fi
+            echo "::warning::npm view attempt ${attempt} failed (not a 404); retrying."
+            printf '%s\n' "$out" >&2
+            sleep $((attempt * 5))
+          done
+
+          if [ -z "$on_npm" ]; then
+            echo "::error::Could not determine whether ${PKG}@${VERSION} is on npm."
+            echo "Refusing to guess: a skipped tag looks identical to a healthy run,"
+            echo "and callers pinning to v<version> would have nothing to pin to."
+            exit 1
+          fi
+          if [ "$on_npm" = "no" ]; then
+            echo "::notice::${PKG}@${VERSION} is not on npm; nothing to tag."
             exit 0
           fi
+
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "Release ${tag} already exists; nothing to do."
             exit 0
           fi
-          gh release create "$tag" \
-            --target "$GITHUB_SHA" \
-            --title "$tag" \
-            --generate-notes \
-            --notes "Published to npm as \`${pkg}@${version}\`. Pin reusable workflows and actions from this repository to this tag, or to the commit it points at, rather than to \`@main\`."
+
+          # The workflow-level concurrency group already serializes runs. This
+          # also tolerates a tag created some other way between the check above
+          # and here, rather than failing the job over a race whose outcome we
+          # wanted anyway.
+          if ! err=$(gh release create "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "$tag" \
+              --generate-notes \
+              --notes "Published to npm as \`${PKG}@${VERSION}\`. Pin reusable workflows and actions from this repository to the commit this tag points at, or to the tag itself." 2>&1); then
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "::notice::Release ${tag} already existed by the time we created it; treating as success."
+              exit 0
+            fi
+            echo "::error::Failed to create release ${tag}."
+            printf '%s\n' "$err" >&2
+            exit 1
+          fi
           echo "::notice::Created release ${tag} at ${GITHUB_SHA}"
+
   dispatch:
+    # Deliberately `needs: publish`, not `needs: release`: the npm package is
+    # what these repositories consume, so a tagging problem should not hold up
+    # their dependency update. The release job failing is loud on its own.
     needs: publish
     strategy:
       matrix:

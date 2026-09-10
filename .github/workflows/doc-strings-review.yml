@@ -37,7 +37,7 @@
 #     id-token: write
 #   jobs:
 #     review:
-#       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/doc-strings-review.yml@main
+#       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/doc-strings-review.yml@<commit-sha>  # or @v<version>
 #       with:
 #         # Engineering repos: the bot token is not a GitHub secret, it lives in
 #         # Secrets Manager behind an OIDC role. Pass these three and the
@@ -51,12 +51,20 @@
 #         # Only needed where the token IS a GitHub secret.
 #         actions_bot_token: ${{ secrets.ACTIONS_BOT_TOKEN }}
 #
-# The ref above is a placeholder. Do NOT copy `@main` into a caller: this
+# The ref above is a placeholder, and deliberately not a working one: this
 # workflow runs inside the caller's job with the caller's OIDC role and
-# pull-requests: write, so a merge here would change what runs there with no
-# review there. publish-to-npm.yaml creates a `v<version>` tag and GitHub
-# release for every version that reaches npm; pin to one of those tags, or to
-# the commit SHA it points at for full immutability.
+# pull-requests: write, so whatever ref a caller pins decides what runs in
+# their repository. An unresolvable placeholder fails loudly; `@main` would
+# have silently floated, and a merge here would change what runs there with no
+# review there.
+#
+# Prefer the commit SHA. publish-to-npm.yaml creates a `v<version>` tag and
+# GitHub release for every version that reaches npm, and `@v<version>` is
+# easier to read, but a tag is a movable pointer: this repository has no tag
+# ruleset yet, so anyone with push access can re-point or delete a `v*` tag
+# with no review, which makes a tag pin weaker than it looks. Until a ruleset
+# restricting `v*` updates and deletions is in place (it needs a repo admin),
+# security-sensitive callers should pin the SHA that the tag points at.
 #
 # Use `pull_request`, not `pull_request_target`. On `pull_request_target`,
 # actions/checkout without an explicit ref checks out the BASE commit, so the
