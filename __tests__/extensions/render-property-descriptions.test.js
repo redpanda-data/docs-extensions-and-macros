@@ -288,6 +288,21 @@ describe('render-property-descriptions extension', () => {
     expect(data.properties.plain.description_html).toBeUndefined()
   })
 
+  it('orders prerelease counters numerically when picking the newest dataset', () => {
+    // rc10 is newer than rc9. A string comparison says otherwise, and a branch
+    // retaining its two newest datasets can hold exactly that pair.
+    const mk = (tag, desc) => ({
+      src: { component: 'streaming', version: '26.2', module: 'reference', family: 'attachment', relative: `redpanda-properties-${tag}.json`, path: `modules/reference/attachments/redpanda-properties-${tag}.json` },
+      contents: Buffer.from(dataset({ p: desc })),
+    })
+    const older = dataset({ p: 'From rc9.' })
+    const catalog = catalogWith(older, { extraFiles: [mk('v26.2.2-rc10', 'From rc10.')] })
+    catalog.files[0].src.relative = 'redpanda-properties-v26.2.2-rc9.json'
+    run(catalog)
+    expect(JSON.parse(catalog.files[1].contents.toString()).properties.p.description_html).toBe('From rc10.')
+    expect(catalog.files[0].contents.toString()).toBe(older)
+  })
+
   it('renders only the newest dataset when a branch ships a retained baseline', () => {
     // doc-tools keeps the 2 newest property JSONs on purpose: the next
     // generation run needs the older one as its --diff baseline. Converting a
