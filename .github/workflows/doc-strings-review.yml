@@ -240,7 +240,11 @@ jobs:
         id: pkg
         env:
           OVERRIDE: ${{ inputs.doc_tools_package }}
-          JOB_WF_SHA: ${{ github.job_workflow_sha }}
+          # job.workflow_sha is the commit of the workflow file defining THIS job,
+          # which for a reusable workflow is this repository, not the caller.
+          # github.job_workflow_sha is an OIDC token claim, not a context property;
+          # as an expression it evaluates to empty.
+          JOB_WF_SHA: ${{ job.workflow_sha }}
           WF_SHA: ${{ github.workflow_sha }}
           GH_TOKEN: ${{ github.token }}
         run: |

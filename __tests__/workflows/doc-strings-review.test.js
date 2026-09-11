@@ -211,6 +211,17 @@ describe('doc-strings-review workflow: static contracts', () => {
     expect(cache.with.key).toContain('${{ steps.pkg.outputs.pkg }}')
   })
 
+  test('the resolver reads its own commit from job.workflow_sha, not an OIDC claim', () => {
+    // github.job_workflow_sha is a claim in the OIDC token, not a property of
+    // the github context; as a ${{ }} expression it evaluates to the empty
+    // string, so the resolver would silently fall through on every reusable
+    // call. job.workflow_sha names the commit of the workflow file defining
+    // the current job, which is this repository's.
+    const step = stepNamed('Resolve the doc-tools package')
+    expect(step.env.JOB_WF_SHA).toBe('${{ job.workflow_sha }}')
+    expect(JSON.stringify(step.env)).not.toMatch(/github\.job_workflow_sha/)
+  })
+
   test('the caller contract documents the permissions a caller must grant', () => {
     const header = fs.readFileSync(WORKFLOW_PATH, 'utf8').split('name: doc-strings-review')[0]
     expect(header).toMatch(/pull-requests:\s*write/)
