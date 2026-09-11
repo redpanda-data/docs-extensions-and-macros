@@ -106,6 +106,14 @@ else bad "cloud: cloud_supported cluster property was not marked"; fi
 if has "$CLOUD" '<code>log_segment_size</code>'; then
   ok "cloud: a non-cloud_supported cluster property renders plain"
 else bad "cloud: non-cloud_supported cluster property was not gated"; fi
+# The Cloud page must resolve against the GA dataset, never the RC one. The
+# RC-only property is the tell: marked means Cloud picked up 26.3's data.
+if has "$CLOUD" 'data-property-name="iceberg_delete_orphans_enabled"'; then
+  bad "cloud: RC-only property is marked, so Cloud selected the prerelease dataset"
+else ok "cloud: RC-only property is not marked (GA dataset selected)"; fi
+if has "$CLOUD" '<code>iceberg_delete_orphans_enabled</code>'; then
+  ok "cloud: RC-only property renders plain"
+else bad "cloud: RC-only property rendered neither marked nor plain"; fi
 
 [[ $FIXTURE_FAIL -eq 0 ]] && echo "  all fixture assertions passed" || echo "  SOME FIXTURE ASSERTIONS FAILED"
 
