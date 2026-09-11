@@ -25,10 +25,15 @@
 # starting a build that must fail. Without that check every scheduled run built
 # six tags for ~27 minutes each and died on the first unsupported flag: the
 # broker-scope dumps (node/pandaproxy/kafka_client/schema_registry) landed on
-# streaming-enterprise's dev branch on 2026-08-26 and 2026-08-27 and are not on
-# any release branch yet, so every released tag has only --config_schema_json.
-# The check is a file read, not a build, and it needs no maintenance: once a tag
-# carries all five flags it stops being skipped on its own.
+# streaming-enterprise's dev on 2026-08-26 and 2026-08-27, so every tag cut
+# before they reached a release branch carries only --config_schema_json.
+#
+# The flags are on v26.2.x now, but a tag is immutable: the six tags in the
+# window when this was written (v26.2.1 through v26.2.3-rc1) each still have
+# one of five, so they stay skipped forever and the first tag to publish a
+# schema is the next one cut from that branch. That is the intended shape
+# rather than a gap to close, which is why the check needs no skip list: a tag
+# carrying all five flags stops being skipped on its own.
 name: publish-rp-util-schema
 on:
   workflow_dispatch:
