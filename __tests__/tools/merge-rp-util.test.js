@@ -32,7 +32,10 @@ const {
   main,
   markRpUtilMergeUnavailable,
   waitForPublishedSchema,
-  handleMergeUnavailable
+  handleMergeUnavailable,
+  parseEnvMs,
+  classifyWithRetry,
+  isPermanentLookupError
 } = require('../../tools/property-extractor/merge-rp-util')
 
 describe('merge-rp-util main()', () => {
@@ -460,5 +463,92 @@ describe('handleMergeUnavailable classification', () => {
     await handleMergeUnavailable('dev', enhancedFile(), 'no published release')
     expect(process.exitCode).toBeUndefined()
     expect(schemaExpectation).not.toHaveBeenCalled()
+  })
+})
+
+describe('parseEnvMs', () => {
+  // Number('0') and Number('abc') collapsed Math.min(pollMs, remaining) to
+  // an effectively zero sleep, so the wait loop hammered the GitHub API for
+  // the whole budget instead of once a minute.
+  afterEach(() => { delete process.env.X_MS })
+  it.each([['0'], ['-5'], ['abc'], ['1.5']])('falls back for %s where zero is not allowed', (v) => {
+    process.env.X_MS = v
+    expect(parseEnvMs('X_MS', 60000)).toBe(60000)
+  })
+  it('keeps a positive integer, and an empty value falls back', () => {
+    process.env.X_MS = '250'; expect(parseEnvMs('X_MS', 60000)).toBe(250)
+    process.env.X_MS = ''; expect(parseEnvMs('X_MS', 60000)).toBe(60000)
+  })
+  it('lets 0 through only where it means disabled', () => {
+    process.env.X_MS = '0'
+    expect(parseEnvMs('X_MS', 1000, { allowZero: true })).toBe(0)
+  })
+})
+
+describe('classifyWithRetry', () => {
+  // One flaky response on the first classification used to leave the
+  // expectation at 'unknown', skip the wait, and lose the exact race this
+  // module exists to win.
+  const noSleep = async () => {}
+  afterEach(() => schemaExpectation.mockReset())
+  it('returns the classification after a transient failure', async () => {
+    schemaExpectation.mockRejectedValueOnce(new Error('502 from api.github.com'))
+    schemaExpectation.mockResolvedValueOnce({ expectation: 'required', reason: 'dumps every scope' })
+    const got = await classifyWithRetry('v26.3.0-rc1', { sleepFn: noSleep })
+    expect(got.expectation).toBe('required')
+    expect(schemaExpectation).toHaveBeenCalledTimes(2)
+  })
+  it('gives up as unknown after the attempts are spent, naming the last error', async () => {
+    schemaExpectation.mockRejectedValue(new Error('boom'))
+    const got = await classifyWithRetry('v26.3.0-rc1', { attempts: 3, sleepFn: noSleep })
+    expect(got.expectation).toBe('unknown')
+    expect(got.reason).toMatch(/after 3 attempts: boom/)
+    expect(schemaExpectation).toHaveBeenCalledTimes(3)
+  })
+  it('does not retry a real classification, including unknown from the classifier', async () => {
+    schemaExpectation.mockResolvedValue({ expectation: 'unknown', reason: 'could not tell' })
+    const got = await classifyWithRetry('v26.3.0-rc1', { sleepFn: noSleep })
+    expect(got.reason).toBe('could not tell')
+    expect(schemaExpectation).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('permanent lookup errors end the wait', () => {
+  afterEach(() => fetchPublishedSchema.mockReset())
+  it('classifies 401/403 as permanent and 404/429/5xx/network as transient', () => {
+    const e = (status) => Object.assign(new Error('x'), { status })
+    expect(isPermanentLookupError(e(401))).toBe(true)
+    expect(isPermanentLookupError(e(403))).toBe(true)
+    expect(isPermanentLookupError(e(404))).toBe(false)
+    expect(isPermanentLookupError(e(429))).toBe(false)
+    expect(isPermanentLookupError(e(502))).toBe(false)
+    expect(isPermanentLookupError(new Error('ECONNRESET'))).toBe(false)
+  })
+  it('a 401 stops waiting on the first attempt instead of burning the budget', async () => {
+    fetchPublishedSchema.mockRejectedValue(Object.assign(new Error('401 Unauthorized'), { status: 401 }))
+    await expect(waitForPublishedSchema('v26.3.0-rc1', 10_000, 1)).rejects.toThrow(/Cannot look up the rp_util schema.*401/)
+    expect(fetchPublishedSchema).toHaveBeenCalledTimes(1)
+  })
+  it('a 502 keeps waiting', async () => {
+    fetchPublishedSchema.mockRejectedValueOnce(Object.assign(new Error('502'), { status: 502 }))
+    fetchPublishedSchema.mockResolvedValueOnce({ clusterSchema: { properties: {} } })
+    const got = await waitForPublishedSchema('v26.3.0-rc1', 10_000, 1)
+    expect(got).toBeTruthy()
+    expect(fetchPublishedSchema).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('degrade path writes --output when it differs from --enhanced', () => {
+  it('copies the marked enhanced file to the distinct output path', async () => {
+    schemaExpectation.mockResolvedValue({ expectation: 'unavailable', reason: 'predates the dumps' })
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mru-'))
+    const enhanced = path.join(dir, 'enhanced.json'); const output = path.join(dir, 'out.json')
+    fs.writeFileSync(enhanced, JSON.stringify({ properties: { a: { name: 'a' } } }))
+    process.exitCode = undefined
+    await handleMergeUnavailable('v26.2.2', enhanced, 'no published release', output)
+    expect(fs.existsSync(output)).toBe(true)
+    expect(fs.readFileSync(output, 'utf8')).toBe(fs.readFileSync(enhanced, 'utf8'))
+    expect(process.exitCode).toBeUndefined()
+    schemaExpectation.mockReset()
   })
 })

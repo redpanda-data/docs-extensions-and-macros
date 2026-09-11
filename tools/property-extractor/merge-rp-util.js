@@ -65,8 +65,26 @@ const RELEASE_TAG_RX = /^v?\d+\.\d+\.\d+(-rc\d+)?$/
 // bazel nor docker, so the from-source fallback cannot cover the gap: without
 // waiting, every RC and GA regeneration fails on a race it is guaranteed to
 // lose. Overridable so a one-off backfill need not sit through it.
-const SCHEMA_WAIT_MS = Number(process.env.RP_UTIL_SCHEMA_WAIT_MS ?? 45 * 60 * 1000)
-const SCHEMA_POLL_MS = Number(process.env.RP_UTIL_SCHEMA_POLL_MS ?? 60 * 1000)
+/**
+ * Read a millisecond knob from the environment, or fall back. Number('') is 0
+ * and Number('abc') is NaN, and a 0 or NaN poll interval turns the wait loop
+ * into a busy-poll of the GitHub API for the whole budget. `allowZero` is for
+ * the wait budget, where 0 is the documented way to disable waiting.
+ */
+function parseEnvMs(name, fallback, { allowZero = false } = {}) {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return fallback
+  const n = Number(raw)
+  if (Number.isInteger(n) && (n > 0 || (allowZero && n === 0))) return n
+  // Quoted by hand: this file is held to bigIntJson.stringify by a repo-wide
+  // guard test, and a plain string needs no BigInt-aware serializer anyway.
+  console.warn(`Warning: ${name}='${raw}' is not a ${allowZero ? 'non-negative' : 'positive'} integer; using ${fallback}.`)
+  return fallback
+}
+
+const SCHEMA_WAIT_MS = parseEnvMs('RP_UTIL_SCHEMA_WAIT_MS', 45 * 60 * 1000, { allowZero: true })
+const SCHEMA_POLL_MS = parseEnvMs('RP_UTIL_SCHEMA_POLL_MS', 60 * 1000)
+const CLASSIFY_BACKOFF_MS = parseEnvMs('RP_UTIL_CLASSIFY_BACKOFF_MS', 5 * 1000)
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -74,6 +92,32 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
  * Poll for a published schema release until it appears or the budget runs out.
  * @returns {Promise<object|null>} The schemas, or null if none appeared
  */
+function isPermanentLookupError(err) {
+  const s = Number(err && err.status)
+  return s >= 400 && s < 500 && s !== 404 && s !== 429
+}
+
+/**
+ * schemaExpectation() with a few retries. It is one GitHub contents call, and
+ * a single flaky response used to leave the classification at 'unknown', which
+ * skipped the wait entirely and dropped a release straight into the race this
+ * module exists to avoid. Only exceptions are retried; a real classification,
+ * including 'unknown' from the classifier itself, is returned as-is.
+ */
+async function classifyWithRetry(releaseTag, { attempts = 3, backoffMs = CLASSIFY_BACKOFF_MS, sleepFn = sleep } = {}) {
+  let lastErr
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await schemaExpectation(releaseTag)
+    } catch (err) {
+      lastErr = err
+      console.warn(`Warning: could not classify ${releaseTag} (attempt ${i} of ${attempts}): ${err.message}`)
+      if (i < attempts) await sleepFn(backoffMs * i)
+    }
+  }
+  return { expectation: 'unknown', reason: `could not classify ${releaseTag} after ${attempts} attempts: ${lastErr.message}` }
+}
+
 async function waitForPublishedSchema(releaseTag, budgetMs, pollMs, now = Date.now) {
   const deadline = now() + budgetMs
   let attempt = 0
@@ -83,8 +127,13 @@ async function waitForPublishedSchema(releaseTag, budgetMs, pollMs, now = Date.n
     try {
       published = await fetchPublishedSchema(releaseTag)
     } catch (err) {
-      // A lookup failure is not the same as "not published": log and keep
-      // waiting, since a transient API error should not fail a release.
+      // A transient failure is not the same as "not published": log and
+      // keep waiting. A 4xx other than 404 (which fetchPublishedSchema maps
+      // to null) or 429 is permanent: a bad or under-scoped token will not
+      // heal in 45 minutes, so surface it now instead of after the budget.
+      if (isPermanentLookupError(err)) {
+        throw new Error(`Cannot look up the rp_util schema for ${releaseTag}: ${err.message}`)
+      }
       console.warn(`Warning: schema lookup for ${releaseTag} failed (attempt ${attempt}): ${err.message}`)
     }
     if (published) {
@@ -102,7 +151,7 @@ async function waitForPublishedSchema(releaseTag, budgetMs, pollMs, now = Date.n
   }
 }
 
-async function handleMergeUnavailable(tag, enhanced, reason) {
+async function handleMergeUnavailable(tag, enhanced, reason, output = enhanced) {
   if (RELEASE_TAG_RX.test(tag)) {
     // Print the canonical v-prefixed tag in the remediation command:
     // streaming-enterprise tags (and therefore schema release names) are
@@ -117,20 +166,17 @@ async function handleMergeUnavailable(tag, enhanced, reason) {
     // misparse. Failing those releases forever would block every regeneration
     // of a v26.2.x or older line on a schema that can never be published.
     // See schemaExpectation() for the evidence.
-    let expectation = { expectation: 'unknown', reason: '' }
-    try {
-      expectation = await schemaExpectation(releaseTag)
-    } catch (err) {
-      // Classification is best-effort. If it cannot be determined, fall
-      // through to refusing, which is the safe direction.
-      expectation = { expectation: 'unknown', reason: `could not classify ${releaseTag}: ${err.message}` }
-    }
+    const expectation = await classifyWithRetry(releaseTag)
 
     if (expectation.expectation === 'unavailable') {
       console.warn(`Warning: ${reason}`)
       console.warn(`No rp_util schema can exist for ${releaseTag}: ${expectation.reason}`)
       console.warn('Keeping the Tree-sitter-only extraction, which is accurate for this release.')
       markRpUtilMergeUnavailable(enhanced)
+      // generate-docs reads --output right after this returns. When it is
+      // not the same file as --enhanced, the degraded result has to land
+      // there too, or the run exits 0 having left the output stale.
+      if (output && output !== enhanced) fs.copyFileSync(enhanced, output)
       return
     }
 
@@ -226,14 +272,18 @@ async function main() {
   // falls through to the classification in handleMergeUnavailable.
   if (!sourcePath && RELEASE_TAG_RX.test(tag) && SCHEMA_WAIT_MS > 0) {
     const releaseTag = tag.startsWith('v') ? tag : `v${tag}`
-    let expectation = { expectation: 'unknown' }
-    try {
-      expectation = await schemaExpectation(releaseTag)
-    } catch (err) {
-      console.warn(`Warning: could not classify ${releaseTag}: ${err.message}`)
-    }
+    const expectation = await classifyWithRetry(releaseTag)
     if (expectation.expectation === 'required') {
-      const waited = await waitForPublishedSchema(releaseTag, SCHEMA_WAIT_MS, SCHEMA_POLL_MS)
+      let waited
+      try {
+        waited = await waitForPublishedSchema(releaseTag, SCHEMA_WAIT_MS, SCHEMA_POLL_MS)
+      } catch (err) {
+        // 'required' means degrading is not an option, so a permanent
+        // lookup failure is the run's failure.
+        console.error(`Error: ${err.message}`)
+        process.exitCode = 1
+        return
+      }
       if (waited) {
         schemas = { ...waited, sourcePath: null }
       } else {
@@ -254,7 +304,7 @@ async function main() {
       schemas = await getRpUtilSchema(tag, sourcePath ? { sourcePath } : undefined)
     }
   } catch (err) {
-    await handleMergeUnavailable(tag, enhanced, `could not get rp_util schema for ${tag}: ${err.message}`)
+    await handleMergeUnavailable(tag, enhanced, `could not get rp_util schema for ${tag}: ${err.message}`, output)
     return
   }
 
@@ -268,7 +318,7 @@ async function main() {
       }
     }
     if (!anySchema) {
-      await handleMergeUnavailable(tag, enhanced, `rp_util schema for ${tag} came back empty.`)
+      await handleMergeUnavailable(tag, enhanced, `rp_util schema for ${tag} came back empty.`, output)
       return
     }
 
@@ -300,7 +350,8 @@ async function main() {
       await handleMergeUnavailable(
         tag,
         enhanced,
-        `rp_util merge failed (${result.error ? result.error.message : `exit ${result.status}`}).`
+        `rp_util merge failed (${result.error ? result.error.message : `exit ${result.status}`}).`,
+        output
       )
     } else {
       fs.renameSync(tempOutput, output)
@@ -312,6 +363,9 @@ async function main() {
 
 module.exports = {
   main,
+  parseEnvMs,
+  classifyWithRetry,
+  isPermanentLookupError,
   markRpUtilMergeUnavailable,
   // exported for testing
   waitForPublishedSchema,

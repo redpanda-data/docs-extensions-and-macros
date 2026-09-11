@@ -384,10 +384,10 @@ async function fetchPublishedSchema(tag) {
   )
   if (releaseResp.status === 404) return null
   if (!releaseResp.ok) {
-    throw new Error(
+    throw Object.assign(new Error(
       `Failed to look up published rp_util schema release for ${tag}: ` +
       `${releaseResp.status} ${releaseResp.statusText}`
-    )
+    ), { status: releaseResp.status })
   }
   const release = await releaseResp.json()
 
@@ -421,9 +421,9 @@ async function fetchPublishedSchema(tag) {
       headers: { ...headers, Accept: 'application/octet-stream' }
     })
     if (!assetResp.ok) {
-      throw new Error(
+      throw Object.assign(new Error(
         `Failed to download published rp_util schema asset ${asset.name}: ${assetResp.status}`
-      )
+      ), { status: assetResp.status })
     }
     let payload
     try {
