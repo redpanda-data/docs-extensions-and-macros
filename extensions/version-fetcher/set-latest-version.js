@@ -10,13 +10,21 @@ module.exports.register = function ({ config }) {
   const GetLatestConnectVersion = require('./get-latest-connect');
   const logger = this.getLogger('set-latest-version-extension');
 
-  const { getGitHubToken } = require('../../cli-utils/github-token');
+  const { getGitHubApiToken } = require('../../cli-utils/github-token');
   // Shared with tools/bundle-openapi.js so there is one major.minor derivation.
   const { toShortVersion } = require('../../cli-utils/version');
-  const token = getGitHubToken();
+  // API token, not the git one: GIT_CREDENTIALS (Antora's clone credential)
+  // is only a last resort here, because on Netlify it is scoped to the docs
+  // content repos and cannot see streaming-enterprise.
+  const token = getGitHubApiToken();
 
   if (!token) {
-    logger.warn('GitHub token not set (REDPANDA_GITHUB_TOKEN, GITHUB_TOKEN, or GH_TOKEN). Attempting unauthenticated request.');
+    // Unauthenticated requests still work for the public repos this
+    // extension queries (connect, redpanda-operator), but the Redpanda
+    // version now comes from the private streaming-enterprise repo, whose
+    // API 404s without a token -- the latest-redpanda-* attributes are then
+    // left unset and pages fall back to their antora.yml values.
+    logger.warn('GitHub token not set (REDPANDA_GITHUB_TOKEN, GITHUB_TOKEN, GH_TOKEN, or GIT_CREDENTIALS). The Redpanda version lookup against the private streaming-enterprise repo will fail and leave latest-redpanda-* attributes unset; other lookups proceed unauthenticated.');
   }
 
   this.on('contentClassified', async ({ contentCatalog }) => {
@@ -41,7 +49,11 @@ module.exports.register = function ({ config }) {
         latestOperatorResult,
         latestConnectResult,
       ] = await Promise.allSettled([
-        GetLatestRedpandaVersion(github, owner, 'redpanda', logger),
+        // streaming-enterprise, not the frozen public 'redpanda' repo: the public
+        // repo still answers API calls but stopped receiving releases on
+        // 2026-08-20, so resolving from it silently pins the docs to the last
+        // pre-freeze version forever.
+        GetLatestRedpandaVersion(github, owner, 'streaming-enterprise', logger),
         GetLatestDockerTag(dockerNamespace, 'console', logger),
         GetLatestDockerTag(dockerNamespace, 'redpanda-operator', logger),
         GetLatestConnectVersion(github, owner, 'connect', logger),

@@ -133,7 +133,12 @@ npx doc-tools generate property-docs --tag $VERSION
 *Requirements:*
 
 - Internet connection to access GitHub API
-- GitHub API rate limits apply (60 requests/hour unauthenticated)
+- A GitHub token with access to redpanda-data/streaming-enterprise, which is
+  private. Redpanda releases are published there now, and the old public repo
+  is frozen, so this command exits rather than report a stale version when it
+  has no token. Resolved from REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN,
+  GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, GH_TOKEN, or GIT_CREDENTIALS, in that
+  priority order (an API call, so the git credential is the last resort)
 
 == get-console-version
 
@@ -582,7 +587,7 @@ doc-tools lint-strings [options]
 Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned.
 
 `--surface <list>`::
-Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect
+Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect, api
 
 `--diff <base>`::
 Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD
@@ -694,6 +699,7 @@ display help for command
 * `crd-spec` - Generate Asciidoc documentation for Kubernetes CRD references. Requires either --tag or --branch.
 * `bundle-openapi` - Bundle Redpanda OpenAPI fragments for admin and connect APIs. Requires either --tag or --branch.
 * `update-connect-version` - Update the Redpanda Connect version in antora.yml
+* `kapa-source-groups` - Generate the docs version segment to Kapa source group mapping from Kapa's ingestion API
 * `help` - display help for command
 
 === generate metrics-docs
@@ -1020,7 +1026,13 @@ Optional JSON file with property description overrides (default: "docs-data/prop
 Where to write all generated files (default: "modules/reference")
 
 `--cloud-support`::
-Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. Set the token as an environment variable using GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN (default: true)
+Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. The token is resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order (default: true)
+
+`--no-cloud-support`::
+Skip Cloud support tags, and the cloudv2 repository access they need. A GitHub token is still required either way: the extractor clones the private streaming-enterprise repo to read the source
+
+`--skip-rp-util`::
+Keep cluster/broker scope Tree-sitter-only, skipping the rp_util merge step (default: use rp_util when available, falling back to Tree-sitter-only data if its schema cannot be obtained)
 
 `--template-property <path>`::
 Custom Handlebars template for individual property sections
@@ -1085,13 +1097,15 @@ npx doc-tools generate property-docs \
 
 - Python 3.9 or higher
 - Git
-- Internet connection to clone Redpanda repository
-- For --cloud-support: GitHub token with repo permissions (GITHUB_TOKEN env var)
+- A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
+  access to redpanda-data/streaming-enterprise, which is private
+- Internet connection to clone the streaming-enterprise repository
+- For --cloud-support: GitHub token with repo permissions (same resolution chain)
 - For --cloud-support: Python packages pyyaml and requests
 
 === generate rpk-docs
 
-Generates comprehensive CLI reference documentation for rpk (Redpanda Keeper). Clones the Redpanda source, builds rpk with Go, and parses `rpk --print-tree` JSON output. Detects Linux-only commands by analyzing Go build tags in the source code. Key features: - Clones source from GitHub (sparse checkout for speed) - Builds rpk from source using Go - Parses Go build tags to detect Linux-only commands - Automatically includes rpk plugins (connect, ai, check, etc.) - Supports overrides.json for description improvements - Generates versioned JSON files for downstream consumers (tooltips, etc.) - Generates diffs between versions for release notes
+Generates comprehensive CLI reference documentation for rpk (Redpanda Keeper). Clones the Redpanda source from streaming-enterprise (private), builds rpk with Go, and parses `rpk --print-tree` JSON output. Detects Linux-only commands by analyzing Go build tags in the source code. Key features: - Clones source from GitHub (sparse checkout for speed) - Builds rpk from source using Go - Parses Go build tags to detect Linux-only commands - Automatically includes rpk plugins (connect, ai, check, etc.) - Supports overrides.json for description improvements - Generates versioned JSON files for downstream consumers (tooltips, etc.) - Generates diffs between versions for release notes
 
 *Why use it:*
 
@@ -1187,6 +1201,9 @@ npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
 
 - Go must be installed (https://go.dev/)
 - Git must be installed (for cloning source)
+- A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
+  access to redpanda-data/streaming-enterprise, which is private (not
+  needed when --from-source points at an existing local checkout)
 
 === generate rpk-env-partial
 
@@ -1432,7 +1449,7 @@ npx doc-tools generate cloud-regions --ref staging
 *Requirements:*
 
 - GitHub token with access to redpanda-data/cloudv2-infra repository
-- Token must be set via GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN environment variable
+- Token is resolved from REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, GH_TOKEN, or GIT_CREDENTIALS, in that priority order (an API call, so the git credential is the last resort)
 - Internet connection to access GitHub API
 
 === generate crd-spec
@@ -1529,7 +1546,7 @@ Git tag for released content
 Branch name for in-progress content
 
 `--repo <url>`::
-Repository URL (default: "https://github.com/redpanda-data/redpanda.git")
+Repository URL. The default is a private repo, so requires a GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) (default: "https://github.com/redpanda-data/streaming-enterprise.git")
 
 `-s, --surface <surface>`::
 Which API surfaces to bundle (choices: "admin", "connect", "both")
@@ -1586,7 +1603,9 @@ npx doc-tools generate bundle-openapi --tag $VERSION --surface both
 
 *Requirements:*
 
-- Git to clone Redpanda repository
+- Git to clone the streaming-enterprise repository
+- A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
+  access to redpanda-data/streaming-enterprise, which is private
 - Buf tool (automatically installed via npm)
 - Redocly CLI or vacuum for OpenAPI bundling (automatically detected)
 - Internet connection to clone repository
@@ -1630,6 +1649,65 @@ npx doc-tools generate update-connect-version --connect-version 4.50.0
 
 None (uses GitHub API).
 
+=== generate kapa-source-groups
+
+Reads the source-group tree and the per-source group assignments from Kapa's ingestion API and writes a mapping from each docs URL version segment to the Kapa source group that scopes retrieval to that version. Consumers pass the group id as `sourceGroupIdsInclude` (Agent SDK), `sourceGroupIDsInclude` (Chat SDK, note the capital ID) or `_meta.source_group_ids_include` (hosted MCP server). The mapping is keyed on the URL segment, not Antora's page.version, because the two disagree for the latest release: latest_version_segment: 'current' publishes 26.2 at /streaming/current/ while page.version reads 26.2. This command only ever reads from Kapa. Kapa publishes no write API ("we do not provide an API endpoint for uploading or managing sources"), so the groups and their source assignments are created by hand in the Kapa dashboard under Sources > Manage groups. Run this afterwards to record what is there. Refuses rather than writing a misleading mapping when: no groups exist, no group has children, any version group has no sources assigned, or --default-segment is not one of the groups. An empty version group is worse than no group, because scoping a query to it returns only the global sources and the reader silently gets no version-specific content.
+
+*Why use it:*
+
+Kapa indexes one separately crawled source per published docs version. Without retrieval scoping a reader gets answers drawn from any of them: a measured call for "What is a Redpanda topic partition?" returned 12 sections, six of which were the same get-started/architecture page at six different versions. Source groups fix that at retrieval time, but the group UUIDs live in Kapa while the version list lives in Antora, so something has to join the two. Because a new docs version appears with no file change in docs-site (the playbook globs branches: v/*), a hand-maintained mapping goes stale silently; generating it and diff-checking the result in CI is what makes drift loud.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate kapa-source-groups [options]
+----
+
+*Options:*
+
+`--output <file>`::
+Output file (relative to repo root, must stay inside the repository) (default: "docs-data/kapa-source-groups.json")
+
+`--default-segment <segment>`::
+Segment used for pages with no version of their own (default: "current")
+
+`--parent-group <name>`::
+Restrict to one parent group by name (default: the only group that has children)
+
+`--dry-run`::
+Print output to stdout instead of writing file
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Write the mapping to its default location
+export KAPA_API_KEY=... KAPA_PROJECT_ID=...
+npx doc-tools generate kapa-source-groups
+
+# Preview without writing
+npx doc-tools generate kapa-source-groups --dry-run
+
+# Scope unversioned pages to something other than "current"
+npx doc-tools generate kapa-source-groups --default-segment 26.1
+
+# Disambiguate when more than one group has children
+npx doc-tools generate kapa-source-groups --parent-group Streaming
+----
+
+*Requirements:*
+
+- Kapa API key and project ID, set via KAPA_API_KEY and KAPA_PROJECT_ID
+- Create the key in the Kapa platform under Configuration > API Keys; the project ID is the
+  UUID in the dashboard URL (https://app.kapa.ai/<project-id>)
+- The parent group and its version sub groups must already exist in Kapa, with each version
+  group holding at least one source
+- Internet connection to reach https://api.kapa.ai
+
 == validate
 
 Validate docs data against internal sources of truth
@@ -1651,6 +1729,7 @@ display help for command
 * `rpk-overrides` - Validate rpk-overrides.json against schema and check for common issues
 * `enterprise-features` - Check the enterprise features registry against core, connect, and docs sources of truth
 * `property-overrides` - Validate property-overrides.json against its schema
+* `kapa-source-groups` - Check every published streaming version has a grouped Kapa source and the committed mapping points at that group (exit 0 in sync, 1 gap, 2 error)
 * `help` - display help for command
 
 === validate rpk-overrides
@@ -1812,6 +1891,48 @@ npx doc-tools validate property-overrides --strict
 *Requirements:*
 
 - property-overrides.schema.json in docs-data/
+
+=== validate kapa-source-groups
+
+Checks that every streaming docs version currently published has a Kapa source, so Ask AI can scope answers to it. Exit status is meaningful: 0 every version is covered, 1 a version is missing, 2 the command itself failed (Kapa or the sitemap unreachable, bad credentials). A version counts as covered when Kapa has a source named `Documentation (X)` for it, that source is assigned to a source group, AND the committed mapping (docs-data/kapa-source-groups.json) has a segment for it whose group_id is a group that source actually sits in. Four gaps are reported, each with its own line: - missing: the version is published but Kapa has no `Documentation (X)` source. - unassigned: the source exists but is in no group, so it is global in Kapa and returned for EVERY query on every version. - unmapped: Kapa has the grouped source but the committed mapping has no segment for it. Every deployed surface reads the mapping, not Kapa, so readers on that version silently get the default segment until the mapping is regenerated and released. - mismatched: the mapping has the segment but its group_id is not a group the version's source sits in, which is what a group deleted and recreated in the dashboard, or a source moved into another version's group, looks like. Every Ask AI query on that version is then scoped to a group that no longer holds its docs, until the mapping is regenerated and released. The prerelease segment (/streaming/beta/) is ignored: a beta publishes there for the whole pre-GA cycle and is not expected to have a Kapa group of its own.
+
+*Why use it:*
+
+The latest release always publishes at /streaming/current/, and the `Documentation (current)` crawl follows it, so latest is never the version that goes missing. The one that goes missing is the version that just got archived: when 26.3 ships, 26.2 moves to /streaming/26.2/ and needs a crawl of its own that nobody has made yet. Kapa has no write API, so that crawl is created by hand in the dashboard, and nothing else notices when it is forgotten. Readers on the archived version then silently fall back to the default segment. Run it on a schedule so the gap opens an issue rather than waiting for a bug report.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools validate kapa-source-groups [options]
+----
+
+*Options:*
+
+`--site-url <url>`::
+Docs site whose sitemap says which versions are published (default: "https://docs.redpanda.com")
+
+`--mapping <file>`::
+Committed mapping every surface reads (default: "docs-data/kapa-source-groups.json")
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+export KAPA_API_KEY=... KAPA_PROJECT_ID=...
+npx doc-tools validate kapa-source-groups
+
+# Check a preview or staging site instead of production
+npx doc-tools validate kapa-source-groups --site-url https://deploy-preview-123--redpanda-documentation.netlify.app
+----
+
+*Requirements:*
+
+- Kapa API key and project ID, set via KAPA_API_KEY and KAPA_PROJECT_ID
+- Internet connection to reach https://api.kapa.ai and the docs site's sitemap
 
 == overrides
 
