@@ -1,0 +1,460 @@
+name: claude-skill
+description: >
+  Run a docs-team-standards Claude Code skill headlessly and capture its
+  findings as files. Shared by every Claude job in the docs-pr-review
+  reusable workflow in this repo (canonical host; the skills stay in
+  docs-team-standards and are read at runtime — the same host/skills
+  split the doc-strings review runs in production; twin/review copy:
+  docs-team-standards PR #2912, DOC-2496). Claude runs
+  findings-only: read-only gh allowlist, no posting rights (the workflow
+  posts under its own identity), and the plugin's github-mutation-guard
+  hook backstops any mutating gh call.
+
+  Model auth is the ADP AI Gateway as the docs-team-agents service account
+  (per-account spend attribution on the ADP cost page; DEVPROD-4735
+  pattern). There is no Anthropic API key anywhere in this pipeline.
+
+inputs:
+  prompt:
+    description: Headless prompt, usually a /docs-team-standards:<skill> invocation
+    required: true
+  output_dir:
+    description: Directory (relative to workspace) the skill writes findings/verdict into
+    required: true
+  repo:
+    description: owner/repo of the PR under review
+    required: true
+  pr_number:
+    description: PR number under review (its head is checked out for file reads)
+    required: true
+  plugin_ref:
+    description: >
+      Commit SHA of redpanda-data/docs-team-standards to check out as the
+      plugin. A SHA, not a branch: review behaviour must not change under a
+      running rollout because someone merged to main, and a SHA is the
+      rollback unit. Update deliberately, one pin bump at a time.
+    required: true
+  plugin_app_id:
+    description: >
+      GitHub App id (DOCS_APP_ID) used to mint a read-only token for the
+      plugin checkout. docs-team-standards is PRIVATE: github.token is scoped
+      to the calling repository, so in every caller other than
+      docs-team-standards itself actions/checkout of the plugin 404s without
+      this. Leave empty only when the caller IS docs-team-standards.
+    required: false
+    default: ''
+  plugin_app_private_key:
+    description: Private key for plugin_app_id (DOCS_APP_PRIVATE_KEY). Pass from secrets.
+    required: false
+    default: ''
+  aws_region:
+    description: AWS region for the OIDC role that reads the ADP client credential (RP_AWS_CRED_REGION)
+    required: true
+  aws_role_name_prefix:
+    description: >
+      Base IAM role name (RP_AWS_CRED_BASE_ROLE_NAME); the calling
+      repository's own name is appended, matching the engineering-repo
+      convention. Nine of the twelve docs callers were granted the
+      credential in devprod-infra #779; adp-cloud-docs, oxla-docs, and
+      docs-template need a follow-up grant.
+    required: true
+  aws_cred_account_id:
+    description: AWS account id owning the role (RP_AWS_CRED_ACCOUNT_ID). Pass from secrets.
+    required: true
+  adp_client_secret_id:
+    description: Secrets Manager id holding the docs-team-agents OAuth client credential
+    required: false
+    default: 'sdlc/prod/github/docs_team_agents_client'
+  adp_gateway_base_url:
+    description: ADP AI Gateway provider endpoint for Claude Code traffic
+    required: false
+    default: 'https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/llm/v1/providers/claude-code-provider-adp'
+  adp_token_url:
+    description: OAuth token endpoint that mints the gateway bearer
+    required: false
+    default: 'https://auth.prd.cloud.redpanda.com/oauth/token'
+  adp_token_audience:
+    description: OAuth audience for the gateway token
+    required: false
+    default: 'cloudv2-production.redpanda.cloud'
+  gateway_model:
+    description: >
+      Bedrock-style model id; must be in the ADP provider's allowlist
+      (streaming-enterprise's review runs us.anthropic.claude-opus-5 through
+      the same provider).
+    required: false
+    default: 'us.anthropic.claude-sonnet-5'
+  cli_version:
+    description: >
+      Claude Code CLI version to install. 2.1.258 is the version the
+      headless verification passed against (2026-09-02); bump only after
+      re-running that verification.
+    required: false
+    default: '2.1.258'
+  timeout_minutes:
+    description: >
+      TOTAL wall-clock budget for the claude invocation across both attempts
+      (first run + the single retry). The retry only starts if at least five
+      minutes remain. Size it so setup (~3–5 min: CLI install, OIDC, mint,
+      plugin probe) plus this budget fits inside the calling job's
+      timeout-minutes; a job that hits its own timeout cannot write
+      claude_failed=true and the aggregate sees no verdict at all.
+    required: false
+    default: '20'
+
+outputs:
+  claude_failed:
+    description: '"true" when Claude could not run (infra failure), never a review verdict'
+    value: ${{ steps.run.outputs.claude_failed }}
+
+runs:
+  using: composite
+  steps:
+    # An empty plugin_ref makes actions/checkout fall back to the repo's
+    # default branch — an UNPINNED skills revision reviewing under a
+    # "pinned" rollout. Refuse before the checkout, and refuse anything
+    # that is not a full commit SHA (a branch name floats the same way).
+    - name: Assert plugin_ref is a pinned commit SHA
+      shell: bash
+      env:
+        PLUGIN_REF: ${{ inputs.plugin_ref }}
+      run: |
+        if [[ ! "$PLUGIN_REF" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::plugin_ref must be a full 40-hex commit SHA of redpanda-data/docs-team-standards (got '${PLUGIN_REF}') — an empty or branch ref would load unpinned skills"
+          exit 1
+        fi
+
+    # PR head, so the skill can Read/Grep the changed files. Same-repo
+    # branches only (fork PRs are excluded by the caller workflow).
+    # persist-credentials: false — github.token must not be left in the
+    # checkout's git config, where Claude's allowlisted git commands and any
+    # script in the PR head could use it as an authenticated Git path.
+    - uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.repo }}
+        ref: refs/pull/${{ inputs.pr_number }}/head
+        persist-credentials: false
+
+    # The PR head is untrusted content. Claude Code in headless mode still
+    # loads PROJECT settings from the working directory — .claude/settings.json
+    # hooks run shell commands outside --allowedTools, and .mcp.json can
+    # register MCP servers — so a same-repo PR could add a hook that reads
+    # GH_TOKEN or the gateway bearer from this step's environment. Remove
+    # them from the workspace before any claude invocation; the skills
+    # come from the pinned plugin checkout, not from the PR.
+    - name: Remove project-level Claude config from the PR head
+      shell: bash
+      run: |
+        set -euo pipefail
+        for p in .claude .mcp.json; do
+          if [[ -e "$p" ]]; then
+            echo "::notice::removing untrusted $p from the PR head before running Claude"
+            rm -rf "$p"
+          fi
+        done
+
+    # The plugin, checked out at a pinned SHA rather than installed via
+    # `claude plugin marketplace add`: the marketplace path clones a private
+    # repo with whatever ambient credential the runner has (none — the
+    # human path in that repo's README is SSH with SSO, which a runner
+    # doesn't have), fails silently, and Claude then reviews WITHOUT the
+    # skills while the job stays green. checkout solves auth, pinning (exact
+    # SHA), and caching in one move.
+    #
+    # Auth: docs-team-standards is private and github.token only reaches the
+    # calling repo, so the checkout uses a per-run App installation token
+    # scoped to that one repo with Contents: read — the narrowest credential
+    # that can clone it. Minted here, consumed only by the checkout step,
+    # never exported to the environment Claude runs in.
+    - name: Mint a read-only token for the plugin checkout
+      id: plugin_token
+      if: inputs.plugin_app_id != ''
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.plugin_app_id }}
+        private-key: ${{ inputs.plugin_app_private_key }}
+        owner: redpanda-data
+        repositories: docs-team-standards
+        permission-contents: read
+
+    - uses: actions/checkout@v4
+      with:
+        repository: redpanda-data/docs-team-standards
+        ref: ${{ inputs.plugin_ref }}
+        path: .docs-team-standards-plugin
+        token: ${{ steps.plugin_token.outputs.token || github.token }}
+        persist-credentials: false
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Install Claude Code CLI and stage the plugin
+      shell: bash
+      run: |
+        set -euo pipefail
+        npm install -g "@anthropic-ai/claude-code@${{ inputs.cli_version }}"
+        # --plugin-dir trap: the repo root ships .claude-plugin/marketplace.json,
+        # so pointing --plugin-dir at it registers a MARKETPLACE, not a plugin,
+        # and does so silently. Move the marketplace manifest aside so the
+        # checkout loads as the plugin itself.
+        rm -f .docs-team-standards-plugin/.claude-plugin/marketplace.json
+        # Clean-room user config: nothing on the runner's home dir can add
+        # settings, hooks, or MCP servers to the review.
+        mkdir -p "$RUNNER_TEMP/claude-config"
+        echo "CLAUDE_CONFIG_DIR=$RUNNER_TEMP/claude-config" >> "$GITHUB_ENV"
+
+    # Read-only `gh`: a shim ahead of the real binary on PATH for the claude
+    # steps. --allowedTools patterns are PREFIX matches, so
+    # `Bash(gh api repos/*)` also admits `gh api repos/o/r/issues/1/comments
+    # -f body=...` (a POST). The job token is read-only today, but that
+    # protection lives in the caller; this shim makes the action itself
+    # unable to mutate GitHub regardless of the token it is handed. Allowed:
+    # pr view/diff/list/checks, issue view/list, repo view, run view/list,
+    # search, and `gh api` with GET only (no -X/--method other than GET, no
+    # -f/-F/--field/--raw-field/--input, no graphql — mutations ride the
+    # query body). Everything else is refused with a clear stderr message so
+    # a skill that hits it fails fast instead of silently doing nothing.
+    - name: Install the read-only gh shim
+      shell: bash
+      run: |
+        set -euo pipefail
+        SHIM_DIR="$RUNNER_TEMP/gh-readonly"
+        mkdir -p "$SHIM_DIR"
+        REAL_GH="$(command -v gh)"
+        cat > "$SHIM_DIR/gh" <<EOF
+        #!/usr/bin/env bash
+        # Read-only gh shim installed by the claude-skill action.
+        REAL_GH="$REAL_GH"
+        EOF
+        cat >> "$SHIM_DIR/gh" <<'EOF'
+        deny() { echo "gh (read-only shim): refused: gh $*" >&2; exit 1; }
+        sub="${1:-}"; [[ $# -gt 0 ]] && shift
+        case "$sub" in
+          --version|--help|-h|help) exec "$REAL_GH" "$sub" "$@" ;;
+          pr)     case "${1:-}" in view|diff|list|checks|status) ;; *) deny pr "$@" ;; esac ;;
+          issue)  case "${1:-}" in view|list) ;; *) deny issue "$@" ;; esac ;;
+          repo)   case "${1:-}" in view) ;; *) deny repo "$@" ;; esac ;;
+          run)    case "${1:-}" in view|list) ;; *) deny run "$@" ;; esac ;;
+          search) ;;
+          api)
+            args=("$@"); i=0
+            while (( i < ${#args[@]} )); do
+              a="${args[$i]}"
+              case "$a" in
+                graphql) deny api "$@" ;;
+                -X|--method)
+                  m="${args[$((i+1))]:-}"; [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@"; i=$((i+1)) ;;
+                -X*|--method=*)
+                  m="${a#-X}"; m="${m#--method=}"; [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@" ;;
+                -f|-F|--field|--raw-field|--input|-f=*|-F=*|--field=*|--raw-field=*|--input=*) deny api "$@" ;;
+              esac
+              i=$((i+1))
+            done ;;
+          *) deny "$sub" "$@" ;;
+        esac
+        exec "$REAL_GH" "$sub" "$@"
+        EOF
+        chmod +x "$SHIM_DIR/gh"
+        echo "GH_READONLY_SHIM=$SHIM_DIR" >> "$GITHUB_ENV"
+        # Self-test: a refused mutation must not reach the real binary.
+        PATH="$SHIM_DIR:$PATH" gh api repos/x/y/issues/1/comments -f body=hi 2>/dev/null && { echo "::error::gh shim failed to refuse a POST"; exit 1; }
+        PATH="$SHIM_DIR:$PATH" gh pr comment 1 --body hi 2>/dev/null && { echo "::error::gh shim failed to refuse pr comment"; exit 1; }
+        echo "gh read-only shim installed at $SHIM_DIR"
+
+    # ── ADP gateway auth (DEVPROD-4735 pattern, docs-team-agents account) ──
+    - name: Assume the OIDC role
+      id: aws_credentials
+      uses: aws-actions/configure-aws-credentials@v6
+      with:
+        aws-region: ${{ inputs.aws_region }}
+        role-to-assume: arn:aws:iam::${{ inputs.aws_cred_account_id }}:role/${{ inputs.aws_role_name_prefix }}${{ github.event.repository.name }}
+
+    - name: Fetch the ADP client credential
+      id: adpsecrets
+      uses: aws-actions/aws-secretsmanager-get-secrets@v3
+      with:
+        secret-ids: |
+          ,${{ inputs.adp_client_secret_id }}
+        parse-json-secrets: true
+
+    - name: Mint the ADP gateway token
+      id: mint
+      shell: bash
+      env:
+        TOKEN_URL: ${{ inputs.adp_token_url }}
+        TOKEN_AUDIENCE: ${{ inputs.adp_token_audience }}
+      run: |
+        set -euo pipefail
+        # NAMING TRAP: parse-json-secrets derives env names from the secret's
+        # OWN JSON keys, which devprod's convention check derives from the
+        # secret's name. sdlc/prod/github/docs_team_agents_client yields
+        # DOCS_TEAM_AGENTS_CLIENT_ID / DOCS_TEAM_AGENTS_CLIENT_SECRET.
+        # ADP_PRIV_CLIENT_* belongs to a DIFFERENTLY-NAMED secret; reading
+        # those names here fails open with no review posted and a green
+        # check. Hence: fail LOUD when the expected names are absent.
+        if [ -z "${DOCS_TEAM_AGENTS_CLIENT_ID:-}" ] || [ -z "${DOCS_TEAM_AGENTS_CLIENT_SECRET:-}" ]; then
+          echo "::error::DOCS_TEAM_AGENTS_CLIENT_ID/_SECRET missing from env — wrong secret id, wrong JSON key names, or the caller lacks the devprod-infra #779 grant"
+          exit 1
+        fi
+        # Secret rides stdin so it never appears in argv; a token containing
+        # whitespace could smuggle extra variables into GITHUB_ENV and
+        # ::add-mask:: covers only the first line.
+        status=$(printf '%s' "$DOCS_TEAM_AGENTS_CLIENT_SECRET" | curl -sS --request POST \
+          --connect-timeout 10 --max-time 30 \
+          --retry 3 --retry-all-errors --retry-delay 2 \
+          --output "$RUNNER_TEMP/adp_token.json" --write-out '%{http_code}' \
+          --url "$TOKEN_URL" \
+          --header 'content-type: application/x-www-form-urlencoded' \
+          --data grant_type=client_credentials \
+          --data-urlencode client_id="$DOCS_TEAM_AGENTS_CLIENT_ID" \
+          --data-urlencode client_secret@- \
+          --data audience="$TOKEN_AUDIENCE") || status=000
+        token=$(jq -r '.access_token // empty' "$RUNNER_TEMP/adp_token.json" 2>/dev/null || true)
+        rm -f "$RUNNER_TEMP/adp_token.json"
+        # Transient mint failures soft-fail (exit 0, no bearer exported): the
+        # run step below turns the missing bearer into claude_failed=true and
+        # the aggregate posts "human review required" — never a red X for an
+        # infra blip. Only the naming-trap case above fails the job loudly,
+        # because that one is a permanent config bug that would otherwise
+        # fail open forever.
+        if [ -z "$token" ]; then
+          echo "::warning::failed to mint ADP gateway token (HTTP $status) — soft-failing to 'human review required'"
+          exit 0
+        fi
+        case "$token" in *[[:space:][:cntrl:]]*)
+          echo "::warning::minted token contains whitespace or control characters — soft-failing"
+          exit 0 ;;
+        esac
+        echo "::add-mask::$token"
+        echo "AWS_BEARER_TOKEN_BEDROCK=$token" >> "$GITHUB_ENV"
+
+    - name: Scrub the long-lived client credential
+      if: always()
+      shell: bash
+      run: |
+        # AWS_BEARER_TOKEN_BEDROCK deliberately survives: it is the model
+        # auth, short-lived, and usable only against the gateway. The
+        # long-lived client credential that can mint fresh tokens must not
+        # be readable from the review's environment.
+        for v in DOCS_TEAM_AGENTS_CLIENT_ID DOCS_TEAM_AGENTS_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+          echo "$v=" >> "$GITHUB_ENV"
+        done
+
+    - name: Assert the plugin actually loaded
+      shell: bash
+      env:
+        # `-p "list skills"` is a model call, so it runs after the mint,
+        # under the same gateway env as the review itself.
+        CLAUDE_CODE_USE_BEDROCK: '1'
+        CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1'
+        ANTHROPIC_BEDROCK_BASE_URL: ${{ inputs.adp_gateway_base_url }}
+        ANTHROPIC_MODEL: ${{ inputs.gateway_model }}
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'us.anthropic.claude-haiku-4-5-20251001-v1:0'
+        AWS_REGION: us-west-2
+      run: |
+        set -euo pipefail
+        export PATH="$GH_READONLY_SHIM:$PATH"
+        if [[ -z "${AWS_BEARER_TOKEN_BEDROCK:-}" ]]; then
+          echo "::warning::no gateway bearer — skipping the plugin-load probe (the run step soft-fails next)"
+          exit 0
+        fi
+        # A missing/misloaded plugin is the known silent failure mode: Claude
+        # reviews without the skills, output looks plausible, job goes green.
+        # Make it loud instead: the skill listing must show the plugin. This
+        # also catches the --plugin-dir marketplace trap regressing (the
+        # manifest removal above), because a marketplace load lists nothing.
+        if ! claude --plugin-dir "$PWD/.docs-team-standards-plugin" -p "list skills" \
+            --max-turns 2 --output-format text 2>/dev/null \
+            | grep -q "docs-team-standards:"; then
+          echo "::error::docs-team-standards plugin did not load from the pinned checkout (plugin_ref=${{ inputs.plugin_ref }}) — refusing to review without the skills"
+          exit 1
+        fi
+
+    - name: Run skill (1 retry, findings-only)
+      id: run
+      shell: bash
+      env:
+        # Bedrock mode against the gateway; the bearer minted above is the
+        # only model credential. SKIP_BEDROCK_AUTH stops Claude Code from
+        # attempting client-side SigV4 signing instead of sending the bearer.
+        CLAUDE_CODE_USE_BEDROCK: '1'
+        CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1'
+        ANTHROPIC_BEDROCK_BASE_URL: ${{ inputs.adp_gateway_base_url }}
+        ANTHROPIC_MODEL: ${{ inputs.gateway_model }}
+        # Background tasks go to Haiku instead of inheriting the primary
+        # model. Must be in the provider allowlist.
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'us.anthropic.claude-haiku-4-5-20251001-v1:0'
+        # Required by the env validator in Bedrock mode only; ignored once
+        # ANTHROPIC_BEDROCK_BASE_URL is set.
+        AWS_REGION: us-west-2
+        GH_TOKEN: ${{ github.token }}   # read-only: job-level permissions + the gh shim on PATH
+        PROMPT: ${{ inputs.prompt }}
+        OUTPUT_DIR: ${{ inputs.output_dir }}
+        TIMEOUT_MIN: ${{ inputs.timeout_minutes }}
+      run: |
+        set -u
+        export PATH="$GH_READONLY_SHIM:$PATH"
+        mkdir -p "$OUTPUT_DIR"
+
+        if [[ -z "${AWS_BEARER_TOKEN_BEDROCK:-}" ]]; then
+          echo "::warning::no gateway bearer available — skipping Claude, flagging for human review"
+          echo "claude_failed=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Tool allowlist. Agent/Task included so pr-review can spawn the
+        # content-reviewer agent (itself Read/Grep/Glob only). Write is
+        # needed for the findings/verdict output contract. The gh patterns
+        # are PREFIX matches and cannot express "GET only", so read-only gh
+        # is enforced by the shim on PATH (installed above), not by this
+        # list. No tree-mutating git verbs (fetch/checkout/switch): the
+        # review must stay on the PR head that was checked out.
+        ALLOWED="Read,Grep,Glob,Write,Agent,Task"
+        ALLOWED="$ALLOWED,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh issue view:*),Bash(gh api:*)"
+        ALLOWED="$ALLOWED,Bash(git log:*),Bash(git grep:*),Bash(git diff:*),Bash(git show:*),Bash(git status),Bash(pwd),Bash(ls:*)"
+
+        # ONE end-to-end budget across both attempts. A per-attempt timeout
+        # let two attempts exceed the calling job's own timeout, and a job
+        # killed by its timeout cannot write claude_failed=true — the
+        # aggregate then sees no verdict at all instead of "unavailable".
+        DEADLINE=$(( $(date +%s) + TIMEOUT_MIN * 60 ))
+        MIN_RETRY_SECS=300
+        remaining() { echo $(( DEADLINE - $(date +%s) )); }
+
+        run_claude() {
+          local budget; budget=$(remaining)
+          (( budget > 0 )) || return 124
+          timeout "${budget}s" claude -p "$PROMPT" \
+            --plugin-dir "$PWD/.docs-team-standards-plugin" \
+            --output-format json \
+            --allowedTools "$ALLOWED" \
+            --max-turns 100 > "$OUTPUT_DIR/claude-run.json"
+        }
+
+        if run_claude; then
+          :
+        else
+          rc=$?
+          if (( $(remaining) >= MIN_RETRY_SECS )); then
+            echo "::warning::Claude run failed (exit $rc), retrying once with $(remaining)s left"
+            if ! run_claude; then
+              # Soft-fail: the aggregate job turns a missing verdict.json into
+              # "automated review unavailable — human review required". Never
+              # let an infra failure masquerade as a review verdict.
+              echo "claude_failed=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            echo "::warning::Claude run failed (exit $rc) and under ${MIN_RETRY_SECS}s of the ${TIMEOUT_MIN}m budget remain — not retrying"
+            echo "claude_failed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+        fi
+
+        if [[ ! -f "$OUTPUT_DIR/verdict.json" ]]; then
+          echo "::warning::Claude ran but wrote no verdict.json — treating as unavailable"
+          echo "claude_failed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "claude_failed=false" >> "$GITHUB_OUTPUT"
+        fi
