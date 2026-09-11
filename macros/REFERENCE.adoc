@@ -213,7 +213,7 @@ heading::
 Optional third-column heading override. The default is `Behavior Upon Expiration` for the `redpanda` scope and `Restrictions Without Valid License` for the other scopes.
 
 [[cloud-pages-block]]
-There is no `cloud` scope: Redpanda Cloud has no Enterprise Edition license, so there is no licensing table to generate for it (see <<cloud-pages>>). Calling this macro from a page in a Cloud component -- directly or through single-sourced self-managed content -- renders a warning admonition instead of a table, reported according to `enterprise-validate`.
+There is no `cloud` scope: Redpanda Cloud has no Enterprise Edition license, so there is no licensing table to generate for it (see <<cloud-pages>>). Calling this macro from a page in a Cloud component -- directly or through single-sourced self-managed content -- renders nothing: no table and no admonition. The diagnostic goes to the build log, reported according to `enterprise-validate` and naming the page, so it reaches the writer and never the reader.
 
 === Registration
 

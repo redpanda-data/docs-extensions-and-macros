@@ -100,7 +100,7 @@ Two more things come from the same registry:
 
 Like properties, feature links adapt to context: registry entries can carry a Kubernetes-specific page, chosen by the page's environment attributes.
 
-Cloud is different from Kubernetes here, not just another context to adapt to. Redpanda Cloud has no Enterprise Edition license, so on a page in a Cloud component `enterprise:` renders as plain text -- no styling, tooltip, or link -- the same way `prop:` renders a non-`cloud_supported` property as plain code there, and `enterprise_features::[]` renders a warning admonition instead of a table, reported according to `enterprise-validate`. That includes the Cloud rendering of single-sourced self-managed prose: the check reads the page actually being converted, regardless of which repo the mention was written in. See link:REFERENCE.adoc#cloud-pages[Cloud pages] in the macros reference.
+Cloud is different from Kubernetes here, not just another context to adapt to. Redpanda Cloud has no Enterprise Edition license, so on a page in a Cloud component `enterprise:` renders as plain text -- no styling, tooltip, or link -- the same way `prop:` renders a non-`cloud_supported` property as plain code there, and `enterprise_features::[]` renders nothing at all: no table and no admonition, because a note about a macro belongs to the writer, not the reader. Both macros report the Cloud page to the build log according to `enterprise-validate`, naming the page. That includes the Cloud rendering of single-sourced self-managed prose: the check reads the page actually being converted, regardless of which repo the mention was written in. See link:REFERENCE.adoc#cloud-pages[Cloud pages] in the macros reference.
 
 == Where to see all of this working
 
