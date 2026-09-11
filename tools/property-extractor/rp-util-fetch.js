@@ -276,6 +276,94 @@ const RELEASE_ASSET_TO_SCHEMA_KEY = {
   'schema-registry-config-schema.json': 'schemaRegistrySchema'
 }
 
+// Files schemaExpectation() reads to decide whether a ref can have a schema.
+// Both were changed by the same PR (streaming-enterprise#63), which is what
+// makes the pairing in schemaExpectation() a property of the source rather
+// than a guess.
+const SE_SOURCE_REPO = 'redpanda-data/streaming-enterprise'
+const RP_UTIL_MAIN_PATH = 'src/v/rp_util/main.cc'
+const CONFIGURATION_H_PATH = 'src/v/config/configuration.h'
+
+/**
+ * Read one file from streaming-enterprise at a ref.
+ * @returns {Promise<string|null>} Contents, or null if it cannot be read
+ */
+async function fetchSourceFile(ref, filePath) {
+  const token = getGitHubApiToken()
+  const headers = { Accept: 'application/vnd.github.raw' }
+  if (token) headers.Authorization = `Bearer ${token}`
+  const resp = await fetch(
+    `https://api.github.com/repos/${SE_SOURCE_REPO}/contents/${filePath}?ref=${encodeURIComponent(ref)}`,
+    { headers }
+  )
+  if (!resp.ok) return null
+  return resp.text()
+}
+
+/**
+ * Whether a ref can produce an rp_util schema, and whether it needs one.
+ *
+ * These two are the same question, because they arrived in the same commit.
+ * streaming-enterprise#63 added both the four broker-scope dump flags to
+ * rp_util and the `enum_set_property` conversions that the Tree-sitter
+ * extractor misparses. So a ref either has both or neither:
+ *
+ *   ref             enum_set_property   broker-scope flags
+ *   v26.2.1                         0                  0/4
+ *   v26.2.2                         0                  0/4
+ *   v26.2.3-rc1                     0                  0/4
+ *   v26.2.x (branch)                3                  4/4
+ *   dev                             3                  4/4
+ *
+ * That is what makes degrading safe for an old tag: a tag with no flags can
+ * never have a schema, and equally has no enum_set properties to misparse, so
+ * the Tree-sitter extraction is correct for it rather than merely tolerable.
+ *
+ * The flags are matched QUOTED. `"config_schema_json"` must not match inside
+ * `"node_config_schema_json"`, and the leading quote is what prevents it.
+ *
+ * @param {string} ref - Tag, branch, or SHA
+ * @returns {Promise<{expectation: string, reason: string}>} expectation is one
+ *   of 'required' (schema needed and obtainable), 'unavailable' (this ref can
+ *   never have one, and does not need one), 'inconsistent' (needs one but
+ *   cannot have one, which must never ship), or 'unknown' (could not tell)
+ */
+async function schemaExpectation(ref) {
+  const mainCc = await fetchSourceFile(ref, RP_UTIL_MAIN_PATH)
+  if (mainCc === null) {
+    return { expectation: 'unknown', reason: `could not read ${RP_UTIL_MAIN_PATH} at ${ref}` }
+  }
+  const missingFlags = SCHEMA_FLAGS
+    .map(({ flag }) => flag.replace(/^--/, ''))
+    .filter((name) => !mainCc.includes(`"${name}"`))
+
+  if (missingFlags.length === 0) {
+    return { expectation: 'required', reason: `rp_util at ${ref} dumps every scope` }
+  }
+
+  // No flags. Confirm the other half of the pairing rather than assuming it:
+  // if this ref somehow carries enum_set properties without the dump flags,
+  // the Tree-sitter fallback would silently drop them and degrading would be
+  // the wrong call.
+  const configurationH = await fetchSourceFile(ref, CONFIGURATION_H_PATH)
+  if (configurationH === null) {
+    return {
+      expectation: 'unknown',
+      reason: `rp_util at ${ref} cannot dump ${missingFlags.join(', ')}, and ${CONFIGURATION_H_PATH} could not be read to confirm it has no enum_set properties`
+    }
+  }
+  if (configurationH.includes('enum_set_property')) {
+    return {
+      expectation: 'inconsistent',
+      reason: `${ref} declares enum_set properties but its rp_util cannot dump ${missingFlags.join(', ')}, so neither the schema nor the Tree-sitter extraction can describe them correctly`
+    }
+  }
+  return {
+    expectation: 'unavailable',
+    reason: `rp_util at ${ref} predates the broker-scope dumps (${missingFlags.join(', ')}) and ${ref} declares no enum_set properties, so the Tree-sitter extraction is correct for it`
+  }
+}
+
 /**
  * Fetch rp_util's schema from a previously published GitHub release
  * (publish-rp-util-schema.yaml's rp-util-schema-<tag> release in this repo)
@@ -437,6 +525,7 @@ async function getRpUtilSchema(ref, options = {}) {
 
 module.exports = {
   getRpUtilSchema,
+  schemaExpectation,
   SCHEMA_FLAGS,
   // exported for testing
   cloneStreamingEnterprise,

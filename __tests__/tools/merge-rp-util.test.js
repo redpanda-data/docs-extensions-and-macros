@@ -16,15 +16,24 @@ jest.mock('child_process')
 // logic iterates over the real shape.
 jest.mock('../../tools/property-extractor/rp-util-fetch', () => ({
   ...jest.requireActual('../../tools/property-extractor/rp-util-fetch'),
-  getRpUtilSchema: jest.fn()
+  getRpUtilSchema: jest.fn(),
+  // Default to 'unknown' so no test reaches the network to classify a ref,
+  // and so a release tag still refuses by default (the safe direction).
+  schemaExpectation: jest.fn(async () => ({ expectation: 'unknown', reason: 'mocked' })),
+  fetchPublishedSchema: jest.fn(async () => null)
 }))
 
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
-const { getRpUtilSchema } = require('../../tools/property-extractor/rp-util-fetch')
-const { main, markRpUtilMergeUnavailable } = require('../../tools/property-extractor/merge-rp-util')
+const { getRpUtilSchema, schemaExpectation, fetchPublishedSchema } = require('../../tools/property-extractor/rp-util-fetch')
+const {
+  main,
+  markRpUtilMergeUnavailable,
+  waitForPublishedSchema,
+  handleMergeUnavailable
+} = require('../../tools/property-extractor/merge-rp-util')
 
 describe('merge-rp-util main()', () => {
   let tmpDir
@@ -351,5 +360,105 @@ describe('markRpUtilMergeUnavailable', () => {
     expect(() => markRpUtilMergeUnavailable(path.join(path.dirname(tmpFile), 'missing.json'))).not.toThrow()
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not mark rp_util merge as unavailable'))
     warn.mockRestore()
+  })
+})
+
+describe('waitForPublishedSchema', () => {
+  beforeEach(() => fetchPublishedSchema.mockReset())
+
+  test('returns immediately when the schema is already published', async () => {
+    fetchPublishedSchema.mockResolvedValue({ clusterSchema: {} })
+    const got = await waitForPublishedSchema('v26.3.0-rc1', 10_000, 1)
+    expect(got).toEqual({ clusterSchema: {} })
+    expect(fetchPublishedSchema).toHaveBeenCalledTimes(1)
+  })
+
+  test('polls until the publisher finishes, which is the release-day case', async () => {
+    fetchPublishedSchema
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ clusterSchema: {} })
+    const got = await waitForPublishedSchema('v26.3.0-rc1', 10_000, 1)
+    expect(got).toEqual({ clusterSchema: {} })
+    expect(fetchPublishedSchema).toHaveBeenCalledTimes(3)
+  })
+
+  test('gives up and returns null once the budget is spent', async () => {
+    fetchPublishedSchema.mockResolvedValue(null)
+    // now() advances past the deadline on the second read, so this asserts the
+    // budget is honoured rather than sleeping for real.
+    let t = 0
+    const now = () => (t += 5_000)
+    const got = await waitForPublishedSchema('v26.3.0-rc1', 1_000, 1, now)
+    expect(got).toBeNull()
+  })
+
+  test('a transient lookup error keeps waiting rather than failing a release', async () => {
+    fetchPublishedSchema
+      .mockRejectedValueOnce(new Error('502 from the API'))
+      .mockResolvedValueOnce({ clusterSchema: {} })
+    const got = await waitForPublishedSchema('v26.3.0-rc1', 10_000, 1)
+    expect(got).toEqual({ clusterSchema: {} })
+  })
+})
+
+describe('handleMergeUnavailable classification', () => {
+  let tmp
+  beforeEach(() => {
+    schemaExpectation.mockReset()
+    process.exitCode = undefined
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mru-class-'))
+  })
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true })
+    process.exitCode = undefined
+  })
+
+  const enhancedFile = () => {
+    const f = path.join(tmp, 'enhanced.json')
+    fs.writeFileSync(f, JSON.stringify({ properties: { a: { description: 'x' } } }))
+    return f
+  }
+
+  test('a release that can never have a schema degrades instead of failing', async () => {
+    schemaExpectation.mockResolvedValue({
+      expectation: 'unavailable',
+      reason: 'predates the broker-scope dumps and declares no enum_set properties'
+    })
+    await handleMergeUnavailable('v26.2.2', enhancedFile(), 'no published release')
+    expect(process.exitCode).toBeUndefined()
+  })
+
+  test('a release that needs a schema and has none still fails', async () => {
+    schemaExpectation.mockResolvedValue({ expectation: 'required', reason: 'dumps every scope' })
+    await handleMergeUnavailable('v26.3.0-rc1', enhancedFile(), 'no published release')
+    expect(process.exitCode).toBe(1)
+  })
+
+  test('enum_set without the dumps fails, and is never degraded', async () => {
+    schemaExpectation.mockResolvedValue({
+      expectation: 'inconsistent',
+      reason: 'declares enum_set properties but cannot dump them'
+    })
+    await handleMergeUnavailable('v26.9.9', enhancedFile(), 'no published release')
+    expect(process.exitCode).toBe(1)
+  })
+
+  test('an unclassifiable release fails, so the safe direction is the default', async () => {
+    schemaExpectation.mockResolvedValue({ expectation: 'unknown', reason: 'could not read main.cc' })
+    await handleMergeUnavailable('v26.3.0', enhancedFile(), 'no published release')
+    expect(process.exitCode).toBe(1)
+  })
+
+  test('a classification error is treated as unknown, not as permission to degrade', async () => {
+    schemaExpectation.mockRejectedValue(new Error('network down'))
+    await handleMergeUnavailable('v26.3.0', enhancedFile(), 'no published release')
+    expect(process.exitCode).toBe(1)
+  })
+
+  test('a branch ref degrades without consulting the classifier at all', async () => {
+    await handleMergeUnavailable('dev', enhancedFile(), 'no published release')
+    expect(process.exitCode).toBeUndefined()
+    expect(schemaExpectation).not.toHaveBeenCalled()
   })
 })
