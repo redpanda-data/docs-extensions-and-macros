@@ -137,8 +137,8 @@ const CASES = [
                '      "batch is compressed, this limit applies to the compressed batch "\n' +
                '      "size. Default is 1048576 bytes.",'
     }],
-    // The vacuous string dodges every rule (it even states the default, so
-    // default-not-stated stays silent) while saying nothing about WHAT is
+    // The vacuous string dodges every rule (its default is concrete, so
+    // sentinel-default-unexplained stays silent) while saying nothing about WHAT is
     // limited. The removed diff lines show the model the original, so a
     // substantive rewrite names the thing: a batch.
     mustMentionAny: ['batch']

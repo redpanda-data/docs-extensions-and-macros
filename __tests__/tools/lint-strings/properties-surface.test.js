@@ -112,13 +112,33 @@ describe('properties convention rules', () => {
     expect(rule.check(decl({ string: null }))).toHaveLength(0)
   })
 
-  test('default-not-stated fires at info level only when a default exists and is unmentioned', () => {
-    const rule = properties.rules.find((r) => r.name === 'default-not-stated')
+  test('sentinel-default-unexplained ignores concrete defaults, which the page already renders', () => {
+    // The rendered page builds a "Default:" row from the extractor's own
+    // field, so a concrete default needs no prose. Asking for it duplicated
+    // structured data and the duplicate went stale: tombstone_retention_ms
+    // claimed "a typical default setting is 86400000" against a real default
+    // of null.
+    const rule = properties.rules.find((r) => r.name === 'sentinel-default-unexplained')
     expect(rule.severity).toBe('info')
-    expect(rule.check(decl({ string: 'Does things.', meta: { has_default: true, default: 30 } }))).toHaveLength(1)
-    expect(rule.check(decl({ string: 'Does things. Default is 30.', meta: { has_default: true, default: 30 } }))).toHaveLength(0)
-    expect(rule.check(decl({ string: 'Does things for 30 seconds.', meta: { has_default: true, default: 30 } }))).toHaveLength(0)
+    for (const value of [30, 'gzip', true, false, 1048576]) {
+      expect(rule.check(decl({ string: 'Does things.', meta: { has_default: true, default: value } }))).toHaveLength(0)
+    }
     expect(rule.check(decl({ string: 'Does things.', meta: { has_default: false, default: null } }))).toHaveLength(0)
+  })
+
+  test('sentinel-default-unexplained fires when a sentinel default carries unstated behavior', () => {
+    const rule = properties.rules.find((r) => r.name === 'sentinel-default-unexplained')
+    for (const value of [null, 0, -1, '']) {
+      expect(rule.check(decl({ string: 'Does things.', meta: { has_default: true, default: value } }))).toHaveLength(1)
+    }
+    // Satisfied by naming the sentinel or by saying what it does.
+    expect(rule.check(decl({ string: 'If null, the property is disabled.', meta: { has_default: true, default: null } }))).toHaveLength(0)
+    expect(rule.check(decl({ string: 'Leaves the target unset.', meta: { has_default: true, default: null } }))).toHaveLength(0)
+    expect(rule.check(decl({ string: 'Set to 0 to disable.', meta: { has_default: true, default: 0 } }))).toHaveLength(0)
+    expect(rule.check(decl({ string: 'Uses -1 for no limit.', meta: { has_default: true, default: -1 } }))).toHaveLength(0)
+    // An unrelated digit must not count as an explanation. The old rule's
+    // substring match let "Waits 30 seconds" satisfy a default of 30.
+    expect(rule.check(decl({ string: 'Waits 30 seconds.', meta: { has_default: true, default: null } }))).toHaveLength(1)
   })
 })
 
