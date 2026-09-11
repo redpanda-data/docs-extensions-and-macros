@@ -20,7 +20,8 @@ const {
   isNotPublished,
   curlToFile,
   parseChecksums,
-  resolveLatestRpkTag
+  resolveLatestRpkTag,
+  downloadRpkBinary
 } = require(MODULE_PATH)
 
 // The real v26.2.2 checksums file as served on 2026-09-11
@@ -177,6 +178,60 @@ describe('rpk-cdn', () => {
 
       expect(curlToFile('https://rpk.redpanda.com/v26.2.2/x', dest).ok).toBe(false)
       expect(fs.existsSync(dest)).toBe(false)
+    })
+  })
+
+  describe('downloadRpkBinary failure handling', () => {
+    // curl is driven through the mocked spawnSync. Each scenario scripts the
+    // checksums fetch, the zip fetch and unzip in order.
+    const quiet = { log: () => {}, warn: () => {} }
+    let dir
+    beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-cdn-')); spawnSync.mockReset() })
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+    const curl = (httpCode, status = httpCode === 200 ? 0 : 22, body = null) => (cmd, args) => {
+      const dest = args[args.indexOf('-o') + 1]
+      if (body !== null) fs.writeFileSync(dest, body)
+      return { status, stdout: String(httpCode), stderr: status ? `curl: (${status}) failed` : '' }
+    }
+    const script = (...impls) => { let i = 0; spawnSync.mockImplementation((cmd, args, opts) => impls[i++](cmd, args, opts)) }
+
+    test('a 404 on the checksums file means not published: null, no throw', () => {
+      script(curl(404))
+      expect(downloadRpkBinary('v26.2.2', dir, { platform: 'linux', arch: 'x64', log: quiet })).toBeNull()
+    })
+
+    test('a 403 on the zip with checksums present is also not published', () => {
+      script(curl(200, 0, REAL_CHECKSUMS), curl(403))
+      expect(downloadRpkBinary('v26.2.2', dir, { platform: 'linux', arch: 'x64', log: quiet })).toBeNull()
+    })
+
+    test('an HTTP 500 on the checksums file throws instead of falling back', () => {
+      // Returning null here sent acquireRpkBinary into a private source build
+      // over a registry blip, and the installer exited 0 having installed
+      // something other than what was asked for.
+      script(curl(500))
+      expect(() => downloadRpkBinary('v26.2.2', dir, { platform: 'linux', arch: 'x64', log: quiet })).toThrow(/HTTP 500/)
+    })
+
+    test('a transport failure (httpCode 0) on the zip throws', () => {
+      script(curl(200, 0, REAL_CHECKSUMS), curl(0, 7))
+      expect(() => downloadRpkBinary('v26.2.2', dir, { platform: 'linux', arch: 'x64', log: quiet })).toThrow(/HTTP 0, curl exit 7/)
+    })
+
+    test('a missing unzip executable falls back to the source build with the spawn error as the reason', () => {
+      // Build a zip whose checksum matches by writing the bytes the checksums
+      // file expects is impractical, so hand parseChecksums a real entry and
+      // make the download body hash to it: use an empty-body override.
+      const crypto = require('crypto')
+      const body = 'not-really-a-zip'
+      const sha = crypto.createHash('sha256').update(body).digest('hex')
+      const checksums = `${sha}  rpk-linux-amd64.zip\n`
+      const warnings = []
+      const unzipMissing = () => ({ status: null, stdout: '', stderr: '', error: Object.assign(new Error('spawnSync unzip ENOENT'), { code: 'ENOENT' }) })
+      script(curl(200, 0, checksums), curl(200, 0, body), unzipMissing)
+      const out = downloadRpkBinary('v26.2.2', dir, { platform: 'linux', arch: 'x64', log: { log: () => {}, warn: (m) => warnings.push(m) } })
+      expect(out).toBeNull()
+      expect(warnings.some((w) => /Could not run unzip/.test(w) && /ENOENT/.test(w))).toBe(true)
     })
   })
 

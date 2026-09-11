@@ -217,10 +217,13 @@ function downloadRpkBinary(version, destDir, { platform = process.platform, arch
   if (!checksumsResult.ok) {
     if (isNotPublished(checksumsResult.httpCode)) {
       log.warn(`rpk ${tag} is not published on ${RPK_CDN_BASE} (HTTP ${checksumsResult.httpCode} for ${urls.checksums})`)
-    } else {
-      log.warn(`Could not fetch ${urls.checksums} (HTTP ${checksumsResult.httpCode}, curl exit ${checksumsResult.status}${checksumsResult.stderr ? `: ${checksumsResult.stderr}` : ''})`)
+      return null
     }
-    return null
+    // Anything other than 403/404 is the CDN or the network failing, not a
+    // tag with no build. Returning null here would send the caller into a
+    // private source build over a registry blip, and the installer would exit
+    // 0 having installed something other than what was asked for.
+    throw new Error(`Could not fetch ${urls.checksums} (HTTP ${checksumsResult.httpCode}, curl exit ${checksumsResult.status}${checksumsResult.stderr ? `: ${checksumsResult.stderr}` : ''})`)
   }
 
   log.log(`Downloading ${urls.assetName} for ${tag} from ${RPK_CDN_BASE}...`)
@@ -231,10 +234,9 @@ function downloadRpkBinary(version, destDir, { platform = process.platform, arch
       // Checksums present but zip missing: an upload in progress or a
       // platform the release skipped. Fall back rather than fail.
       log.warn(`rpk ${tag} has a checksums file but no ${urls.assetName} on ${RPK_CDN_BASE} (HTTP ${zipResult.httpCode} for ${urls.zip})`)
-    } else {
-      log.warn(`Could not download ${urls.zip} (HTTP ${zipResult.httpCode}, curl exit ${zipResult.status}${zipResult.stderr ? `: ${zipResult.stderr}` : ''})`)
+      return null
     }
-    return null
+    throw new Error(`Could not download ${urls.zip} (HTTP ${zipResult.httpCode}, curl exit ${zipResult.status}${zipResult.stderr ? `: ${zipResult.stderr}` : ''})`)
   }
 
   const expected = parseChecksums(fs.readFileSync(checksumsPath, 'utf8'), urls.assetName)
@@ -254,6 +256,13 @@ function downloadRpkBinary(version, destDir, { platform = process.platform, arch
     encoding: 'utf8',
     timeout: 60000
   })
+  if (unzipResult.error) {
+    // spawnSync could not start unzip at all (typically ENOENT). That is a
+    // gap in this environment, not a bad archive, so leave the caller its
+    // source-build fallback and say why.
+    log.warn(`Could not run unzip to extract ${urls.assetName}: ${unzipResult.error.message}`)
+    return null
+  }
   if (unzipResult.status !== 0) {
     throw new Error(`Failed to extract ${urls.assetName}: ${unzipResult.stderr}`)
   }
@@ -479,12 +488,15 @@ async function main(argv) {
 }
 
 if (require.main === module) {
+  // process.exitCode rather than process.exit(): install-test-dependencies.sh
+  // captures the binary path from stdout through a pipe, and exit() can end
+  // the process before that write drains, handing the shell a truncated path.
   main(process.argv.slice(2)).then(
-    code => process.exit(code),
+    code => { process.exitCode = code },
     err => {
       console.error(err.message)
       // Unresolvable "latest" is a not-published condition, not a bug
-      process.exit(/Could not resolve the latest rpk release/.test(err.message) ? EXIT_NOT_PUBLISHED : 1)
+      process.exitCode = /Could not resolve the latest rpk release/.test(err.message) ? EXIT_NOT_PUBLISHED : 1
     }
   )
 }
