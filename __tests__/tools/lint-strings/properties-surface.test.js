@@ -27,7 +27,8 @@ describe('mapExtractorJson', () => {
         defined_in: 'src/v/config/configuration.cc',
         line_start: 10,
         line_end: 15,
-        default: 10
+        default: 10,
+        type: 'integer'
       },
       empty_property: {
         description: null,
@@ -72,7 +73,31 @@ describe('mapExtractorJson', () => {
 
     const empty = declarations.find((d) => d.name === 'empty_property')
     expect(empty.string).toBeNull()
-    expect(empty.meta.has_default).toBe(false)
+    // null IS a default: the extractor writes it for every std::nullopt, and
+    // the sentinel rule exists for exactly that value.
+    expect(empty.meta.has_default).toBe(true)
+    expect(empty.meta.default).toBeNull()
+    expect(good.meta.type).toBe('integer')
+  })
+
+  test('a null default reaches the sentinel rule through mapExtractorJson', () => {
+    // Guards the path the hand-built decl() tests below cannot: the mapper
+    // used to drop null and "" as "no default", so no std::optional property
+    // could ever produce this finding.
+    const rule = properties.rules.find((r) => r.name === 'sentinel-default-unexplained')
+    const declarations = properties.mapExtractorJson({
+      properties: {
+        opt_ms: { description: 'Waits before compacting.', type: 'integer', default: null, defined_in: 'src/v/config/configuration.cc', line_start: 1, line_end: 1 },
+        bucket: { description: 'Bucket to upload to.', type: 'string', default: null, defined_in: 'src/v/config/configuration.cc', line_start: 2, line_end: 2 },
+        region: { description: 'Region of the bucket.', type: 'string', default: '', defined_in: 'src/v/config/configuration.cc', line_start: 3, line_end: 3 }
+      }
+    }, '/nonexistent-repo')
+    const byName = Object.fromEntries(declarations.map((d) => [d.name, d]))
+    expect(rule.check(byName.opt_ms)).toHaveLength(1)
+    // A string that is null or "" plainly means "not configured"; the
+    // "Default:" row says that on its own.
+    expect(rule.check(byName.bucket)).toHaveLength(0)
+    expect(rule.check(byName.region)).toHaveLength(0)
   })
 
   test('skips deprecated and topic properties (no user-facing description contract)', () => {
@@ -136,6 +161,13 @@ describe('properties convention rules', () => {
     expect(rule.check(decl({ string: 'Leaves the target unset.', meta: { has_default: true, default: null } }))).toHaveLength(0)
     expect(rule.check(decl({ string: 'Set to 0 to disable.', meta: { has_default: true, default: 0 } }))).toHaveLength(0)
     expect(rule.check(decl({ string: 'Uses -1 for no limit.', meta: { has_default: true, default: -1 } }))).toHaveLength(0)
+    // Naming what is used instead is the explanation being asked for.
+    expect(rule.check(decl({ string: 'Maximum memory for recovery, by default 15% of total memory.', meta: { has_default: true, default: null } }))).toHaveLength(0)
+    expect(rule.check(decl({ string: 'Smallest segment size. Default: `segment_size_target`/2.', meta: { has_default: true, default: null } }))).toHaveLength(0)
+    expect(rule.check(decl({ string: 'When blank, this is generated from the region.', meta: { has_default: true, default: null } }))).toHaveLength(0)
+    expect(rule.check(decl({ string: 'Falls back to the cluster setting.', meta: { has_default: true, default: null } }))).toHaveLength(0)
+    // "zero" counts as naming 0.
+    expect(rule.check(decl({ string: 'Names are unchanged when the value is set to zero.', meta: { has_default: true, default: 0 } }))).toHaveLength(0)
     // An unrelated digit must not count as an explanation. The old rule's
     // substring match let "Waits 30 seconds" satisfy a default of 30.
     expect(rule.check(decl({ string: 'Waits 30 seconds.', meta: { has_default: true, default: null } }))).toHaveLength(1)

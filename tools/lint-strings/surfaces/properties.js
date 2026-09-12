@@ -137,8 +137,9 @@ function mapExtractorJson (json, repo, options = {}) {
 
     const lineStart = prop.line_start != null ? prop.line_start : null
     const lineEnd = prop.line_end != null ? prop.line_end : lineStart
-    const hasDefault = Object.prototype.hasOwnProperty.call(prop, 'default') &&
-      prop.default !== null && prop.default !== ''
+    // null and "" are defaults too: the extractor emits null for every
+    // std::nullopt, and those are exactly the sentinels the rule below is for.
+    const hasDefault = Object.prototype.hasOwnProperty.call(prop, 'default')
 
     declarations.push({
       surface: 'properties',
@@ -152,6 +153,7 @@ function mapExtractorJson (json, repo, options = {}) {
       meta: {
         has_default: hasDefault,
         default: hasDefault ? prop.default : null,
+        type: typeof prop.type === 'string' ? prop.type : null,
         is_enum: Boolean(prop.is_enum),
         nullable: Boolean(prop.nullable)
       }
@@ -209,23 +211,30 @@ const RULES = [
       // Booleans are never sentinels: `false` is a real setting, not a
       // stand-in for "off".
       if (typeof value === 'boolean') return []
+      // A string-typed property defaulting to null or "" is plainly "not
+      // configured" (credentials, bucket names, endpoints); the "Default:" row
+      // says that on its own, so only non-string sentinels are ambiguous.
+      if (decl.meta.type === 'string' && (value === null || value === '')) return []
       const sentinels = [
         { match: (v) => v === null || v === 'null', token: /\bnull\b/i, label: 'null' },
-        { match: (v) => v === '' , token: /\bempty\b/i, label: 'an empty string' },
-        { match: (v) => v === 0 || v === '0', token: /\b0\b/, label: '0' },
+        { match: (v) => v === '' , token: /\b(empty|blank)\b/i, label: 'an empty string' },
+        { match: (v) => v === 0 || v === '0', token: /\b(0|zero)\b/i, label: '0' },
         { match: (v) => v === -1 || v === '-1', token: /-1\b/, label: '-1' }
       ]
       const sentinel = sentinels.find((s) => s.match(value))
       if (!sentinel) return []
       // Either name the sentinel, or say what it does. Both forms explain it;
       // neither is satisfied by an unrelated digit elsewhere in the sentence.
-      const MEANING = /\b(disabl\w*|unlimited|no limit|unbounded|infinite|unset|not set|never|off|ignored|no maximum|no minimum)\b/i
+      // "default"/"falls back"/"inherits"/"omitted" cover descriptions that
+      // explain the null case by naming what is used instead, which is the
+      // explanation being asked for.
+      const MEANING = /\b(disabl\w*|unlimited|no limit|unbounded|infinite|unset|not set|never|off|ignored|no maximum|no minimum|defaults?|inherit\w*|blank|omitted|not specified|falls? back)\b/i
       if (sentinel.token.test(text) || MEANING.test(text)) return []
       return [{
         message: `Property defaults to ${sentinel.label}, and the description does not say what that means. `
           + 'A sentinel default carries behavior the rendered "Default:" row cannot: say whether it disables '
-          + 'the property, means unlimited, or leaves it unset. Do not restate a concrete default value; the '
-          + 'page already renders it from structured data.'
+          + 'the property, means unlimited, or leaves it unset. There is no need to restate a concrete '
+          + 'default value; the page already renders it from structured data.'
       }]
     }
   }
