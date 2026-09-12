@@ -1187,13 +1187,13 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
                 else:
                     # Create new property from override
                     logger.info(f"Creating new property from override: {prop}")
-                    new_property = _create_property_from_override(prop, override, overrides_file_path)
+                    new_property, scope_inferred = _create_property_from_override(prop, override, overrides_file_path)
                     properties[prop] = new_property
                     # Record the phantom stub so the run summary can flag it loudly
                     phantom_stub_entries.append({
                         "name": prop,
                         "config_scope": new_property.get("config_scope"),
-                        "scope_inferred": new_property.pop("_scope_inferred", False),
+                        "scope_inferred": scope_inferred,
                     })
 
     for property_data in properties.values():
@@ -1337,7 +1337,13 @@ def _infer_config_scope_from_name(prop_name):
 
 
 def _create_property_from_override(prop_name, override, overrides_file_path):
-    """Create a new property from override specification."""
+    """Create a new property from override specification.
+
+    Returns ``(new_property, scope_inferred)``. The flag is True when the
+    override named no config_scope and the scope came from the name shape, so
+    the caller can say so in the run summary without a marker on the property
+    that would otherwise have to be stripped before output.
+    """
     # An override that names its own scope is authoritative. Otherwise infer it
     # from the name, because there is no defined_in to classify a fabricated
     # property and a wrong guess lands it on the wrong reference page.
@@ -1359,9 +1365,6 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
         "is_topic_property": scope == "topic",
         "is_deprecated": override.get("is_deprecated", False),
         "visibility": override.get("visibility", "user"),
-        # Popped by apply_property_overrides into phantom_stub_entries; never
-        # reaches the generated output.
-        "_scope_inferred": scope_inferred,
     }
     
     # Add version if specified
@@ -1418,7 +1421,7 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
         if normalized is not None:
             new_property["admonitions"] = normalized
 
-    return new_property
+    return new_property, scope_inferred
 
 
 def _process_example_override(override, overrides_file_path=None):

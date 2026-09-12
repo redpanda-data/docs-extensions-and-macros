@@ -81,8 +81,8 @@ class TestPhantomStubTracking(unittest.TestCase):
         self.assertEqual(result["ghost.dotted.name"]["config_scope"], "cluster")
         self.assertFalse(result["ghost.dotted.name"]["is_topic_property"])
 
-    def test_scope_inference_marker_never_reaches_the_output(self):
-        """The internal _scope_inferred flag is popped, not published."""
+    def test_scope_inference_never_reaches_the_output(self):
+        """Whether the scope was inferred is reported beside the stub, never on it."""
         result = apply_property_overrides({}, {"properties": {"ghost_property": {}}})
 
         self.assertNotIn("_scope_inferred", result["ghost_property"])
