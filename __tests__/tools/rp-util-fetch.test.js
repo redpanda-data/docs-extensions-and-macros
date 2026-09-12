@@ -517,3 +517,77 @@ describe('getRpUtilSchema', () => {
     os.platform.mockRestore()
   })
 })
+
+describe('schemaExpectation', () => {
+  const { schemaExpectation } = require('../../tools/property-extractor/rp-util-fetch')
+
+  // The pairing this relies on, from the real refs at the time of writing:
+  //
+  //   ref               enum_set_property   broker-scope flags
+  //   v26.2.2                           0                  0/4
+  //   v26.2.x                           3                  4/4
+  //
+  // Both arrived in streaming-enterprise#63, so "cannot dump the scopes" and
+  // "has nothing the Tree-sitter pass misparses" are the same condition.
+  const ALL_FLAGS = `
+    ("config_schema_json", "dump")
+    ("node_config_schema_json", "dump")
+    ("pandaproxy_config_schema_json", "dump")
+    ("kafka_client_config_schema_json", "dump")
+    ("schema_registry_config_schema_json", "dump")
+  `
+  const CLUSTER_ONLY = '("config_schema_json", "dump")'
+
+  const raw = (text) => ({ ok: true, text: async () => text })
+  const notFound = { ok: false, status: 404, text: async () => '' }
+
+  afterEach(() => { delete global.fetch })
+
+  test('a ref that dumps every scope needs the schema', async () => {
+    global.fetch = jest.fn().mockResolvedValue(raw(ALL_FLAGS))
+    const got = await schemaExpectation('v26.3.0-rc1')
+    expect(got.expectation).toBe('required')
+  })
+
+  test('a ref that predates the dumps, with no enum_set, can be degraded', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce(raw(CLUSTER_ONLY))
+      .mockResolvedValueOnce(raw('bounded_property<int> x;'))
+    const got = await schemaExpectation('v26.2.2')
+    expect(got.expectation).toBe('unavailable')
+    expect(got.reason).toMatch(/no enum_set properties/)
+  })
+
+  test('enum_set without the dumps is inconsistent, never degradable', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce(raw(CLUSTER_ONLY))
+      .mockResolvedValueOnce(raw('enum_set_property<ss::sstring> http_authentication;'))
+    const got = await schemaExpectation('v26.9.9')
+    expect(got.expectation).toBe('inconsistent')
+  })
+
+  test('an unreadable main.cc is unknown, not a free pass', async () => {
+    global.fetch = jest.fn().mockResolvedValue(notFound)
+    const got = await schemaExpectation('v1.2.3')
+    expect(got.expectation).toBe('unknown')
+  })
+
+  test('an unreadable configuration.h is unknown, not degradable', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce(raw(CLUSTER_ONLY))
+      .mockResolvedValueOnce(notFound)
+    const got = await schemaExpectation('v26.2.2')
+    expect(got.expectation).toBe('unknown')
+  })
+
+  test('the cluster flag does not satisfy the broker-scope flags by substring', async () => {
+    // "config_schema_json" appears inside "node_config_schema_json"; only the
+    // quoted match keeps these apart.
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce(raw('("node_config_schema_json", "dump")'))
+      .mockResolvedValueOnce(raw('nothing here'))
+    const got = await schemaExpectation('v26.2.2')
+    expect(got.expectation).toBe('unavailable')
+    expect(got.reason).toMatch(/config_schema_json/)
+  })
+})
