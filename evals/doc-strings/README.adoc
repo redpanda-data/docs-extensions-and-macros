@@ -2,7 +2,7 @@
 :toc:
 :toc-placement!:
 
-Evals for the three MODEL-DRIVEN behaviors that the doc-strings GitHub
+Evals for the four MODEL-DRIVEN behaviors that the doc-strings GitHub
 workflows delegate to Claude. The deterministic tools themselves
 (`tools/lint-strings`, `tools/preview-string`, `tools/overrides-audit`) are
 covered by the jest suite and are NOT re-tested here - they are the
@@ -51,7 +51,7 @@ No check ever asks "does the model's answer *sound* right". The only prose
 inspection anywhere is fence parsing and the literal `NO_SUGGESTIONS`
 sentinel in a negative control - both structural.
 
-== The three behaviors under test
+== The four behaviors under test
 
 [cols="1,2,3"]
 |===
@@ -78,6 +78,19 @@ The evals are the contract the workflow will have to meet.
 |`negative-property-diff` (conforming rewording diff -> zero suggestions,
 zero doc-impact claims), `negative-metrics-file` (conforming probe file ->
 the model must claim `{"findings": []}`). *Any* invention fails the case.
+
+|D. Prose quality
+|`doc-strings-review.yml`'s prose-quality pass (added in #297): the Claude
+pass is gated on declarations the PR TOUCHED, not on lint findings, because
+a string can satisfy every mechanical rule and still tell an operator
+nothing.
+|`prose-vacuous-clean` (a lint-clean but vacuous rewording: the model must
+suggest a rewrite that restores substance, and the applied result must still
+lint clean), `terminology-misuse` (a lint-clean, substantive description that
+lowercases the product name, which `terminology.md` names as incorrect: the
+model must suggest the canonical casing). Both sabotage against the fully
+conforming rewording `negative-property-diff` uses, where staying silent is
+correct and so fails the must-suggest check.
 |===
 
 == Negative controls that provably can fail
@@ -105,7 +118,7 @@ controls demonstrably fail on violating input.
 
 [source,bash]
 ----
-npm run eval:doc-strings                     # full suite (8 cases)
+npm run eval:doc-strings                     # full suite (10 cases)
 node evals/doc-strings/run-evals.js --case metric-name-echo
 node evals/doc-strings/run-evals.js --model opus
 node evals/doc-strings/run-evals.js --keep-temp   # keep fixture repos
@@ -122,7 +135,7 @@ Requirements:
 Exit codes: `0` all pass (or sabotage proven), `1` failures, `2` harness
 error, `3` skipped.
 
-Deliberately **not wired into CI**: a full run makes eight real model calls
+Deliberately **not wired into CI**: a full run makes ten real model calls
 (a few minutes of wall time and real tokens). Run it when the workflow
 prompts, the lint rules, or the extraction change.
 
