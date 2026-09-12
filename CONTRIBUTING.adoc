@@ -297,3 +297,13 @@ npm test
 * https://docs.asciidoctor.org/[AsciiDoc Documentation]
 * https://modelcontextprotocol.io/[MCP Specification]
 * {url-project}[Project Repository]
+
+== Releases
+
+Every pull request that changes published code bumps `version` in `package.json`. When it merges, `.github/workflows/publish-to-npm.yaml` publishes that version to npm and then creates a matching `v<version>` git tag and GitHub release, with generated notes. The tag exists so that other repositories can pin the reusable workflows and actions in this repository to a version instead of to `main`; a workflow that runs inside another repository's job must not float.
+
+This applies to changes in `.github/workflows/` too, not only to code that ships in the npm package. A workflow-only change with no version bump publishes nothing, so no new tag is created, so no tag contains that change and callers pinning a tag never receive it. If you edit a reusable workflow, bump the version in the same pull request.
+
+There is nothing to do by hand. If the tag for a published version is ever missing, rerun the publish workflow: the release step checks npm for the version and creates the tag if it is absent, and leaves an existing release alone.
+
+Tags are created by a dedicated `release` job that holds `contents: write` on its own. The `publish` job stays read-only, so the token that can move a `v*` tag is never available to `npm install` lifecycle scripts or to the third-party publish action.
