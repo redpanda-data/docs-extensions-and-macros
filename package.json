@@ -106,9 +106,8 @@
     "tools",
     "docker-compose",
     "mcp",
-    "docs-data/rpk-overrides.schema.json",
-    "docs-data/kapa-source-groups.json",
-    "docs-data/kapa-source-groups.schema.json"
+    "docs-data/*.schema.json",
+    "docs-data/kapa-source-groups.json"
   ],
   "license": "ISC",
   "engines": {

@@ -58,3 +58,33 @@ describe('package version', () => {
     expect(lock.packages[''].version).toBe(pkg.version)
   })
 })
+
+/**
+ * `files` is an allowlist, so a schema that is committed and documented can
+ * still be missing from the tarball with every test green. That happened to
+ * property-overrides.schema.json twice: consumers' `sync-schemas --check`
+ * reported "in sync" while never seeing the file. Ask npm what it would
+ * actually pack rather than reading `files` back.
+ */
+describe('npm tarball ships every docs-data file consumers read', () => {
+  const { execFileSync } = require('child_process')
+  const root = path.join(__dirname, '..')
+  let packed
+
+  beforeAll(() => {
+    const out = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
+      cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']
+    })
+    packed = new Set(JSON.parse(out)[0].files.map((f) => f.path))
+  }, 120000)
+
+  const schemas = fs.readdirSync(path.join(root, 'docs-data')).filter((f) => f.endsWith('.schema.json'))
+
+  test.each(schemas)('docs-data/%s is packed', (file) => {
+    expect(packed).toContain(`docs-data/${file}`)
+  })
+
+  test('docs-data/kapa-source-groups.json is packed (read by extensions/kapa-source-groups.js)', () => {
+    expect(packed).toContain('docs-data/kapa-source-groups.json')
+  })
+})
