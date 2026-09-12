@@ -652,6 +652,34 @@ exit 0
     expect(r.exists('curl-argv')).toBe(false)
   })
 
+  test('a hyphenated secret segment is sanitised the way the secrets action does it', () => {
+    // aws-secretsmanager-get-secrets upper-cases and replaces every
+    // non-alphanumeric with _, so the JSON keys of a secret named
+    // .../docs-doc-strings-client arrive as DOCS_DOC_STRINGS_CLIENT_*. A prefix
+    // that only upper-cased produced DOCS-DOC-STRINGS-CLIENT_ID, an invalid
+    // bash name, and the indirect expansion aborted under set -u before the
+    // warning could print.
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs-doc-strings-client',
+      tokenUrl: IDP,
+      audience: '',
+      credEnv: {
+        DOCS_DOC_STRINGS_CLIENT_ID: 'serviceaccounts/doc-strings-review',
+        DOCS_DOC_STRINGS_CLIENT_SECRET: 's3cret'
+      }
+    })
+    expect(r.status).toBe(0)
+    expect(r.read('curl-argv') || '').toContain('client_id=serviceaccounts/doc-strings-review')
+  })
+
+  test('the scrub step derives the credential env names exactly as the mint does', () => {
+    const derive = (run) => (run.match(/prefix=\$\(printf '%s' "\$CLIENT_SECRET_ID" \| [^\n]*\)/) || [])[0]
+    const mintLine = derive(stepNamed('Mint the ADP gateway token').run)
+    const scrubLine = derive(stepNamed('Drop fetched credentials from the review\'s environment').run)
+    expect(mintLine).toBeTruthy()
+    expect(scrubLine).toBe(mintLine)
+  })
+
   test('the workflow defaults are the agent path', () => {
     const inputs = workflow.on.workflow_call.inputs
     expect(inputs.adp_client_secret_id.default).toBe('sdlc/prod/github/docs_doc_strings_client')

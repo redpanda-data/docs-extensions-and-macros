@@ -112,8 +112,9 @@ on:
         description: >-
           Route model traffic through the ADP AI Gateway's Bedrock provider
           (DEVPROD-4735) instead of an Anthropic API key. The sanctioned auth
-          for engineering repos. Requires the aws_* OIDC inputs above and an
-          adp_priv_client grant in devprod-infra for the calling repository.
+          for engineering repos. Requires the aws_* OIDC inputs above and a
+          devprod-infra grant letting the calling repository read the secret
+          named by adp_client_secret_id.
         type: boolean
         default: false
       adp_gateway_base_url:
@@ -369,8 +370,11 @@ jobs:
           # ADP_PRIV_CLIENT_ID, a docs-team secret yields its own prefix. A
           # caller pointing adp_client_secret_id at a differently-named secret
           # used to land the credential in env vars this step never read, and
-          # the mint failed open with no clue why.
-          prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}')
+          # the mint failed open with no clue why. The tr mirrors the secrets
+          # action's own sanitisation (non-alphanumerics become _), so a
+          # hyphenated segment yields a valid bash name instead of aborting
+          # the indirect expansion below under set -u.
+          prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
           id_var="${prefix}_ID"
           secret_var="${prefix}_SECRET"
           client_id="${!id_var:-}"
@@ -465,7 +469,7 @@ jobs:
           # tokens must not be readable from the review's environment. Its
           # env names come from the secret id the same way the mint step
           # derives them, so a renamed secret is still scrubbed.
-          prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}')
+          prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
           for v in ACTIONS_BOT_TOKEN "${prefix}_ID" "${prefix}_SECRET" AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION AWS_REGION; do
             echo "$v=" >> "$GITHUB_ENV"
           done
