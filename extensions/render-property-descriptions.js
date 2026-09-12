@@ -32,7 +32,9 @@
 
 const loadAsciiDoc = require('@antora/asciidoc-loader')
 const bigIntJson = require('../cli-utils/big-int-json')
-const { buildPageIndex, propertyAnchor } = require('../macros/prop')
+// compareTags is the one set-available-attachment-versions.js uses to pick the
+// tooltip dataset, so the build-time choice and the runtime fetch cannot disagree.
+const { buildPageIndex, propertyAnchor, compareTags } = require('../macros/prop')
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
@@ -164,31 +166,6 @@ function tagOf (file) {
   return basename(file).match(PROPERTIES_JSON_RX)[1]
 }
 
-/**
- * Compare two property tags, ascending. Numeric on the dotted release
- * segments, with a prerelease suffix ordering below the same release without
- * one, so v26.2.2 beats v26.2.2-rc1 beats v26.2.1.
- */
-function compareTags (a, b) {
-  const parse = (tag) => {
-    const [core, ...pre] = tag.replace(/^v/, '').split('-')
-    return { nums: core.split('.').map(Number), pre: pre.join('-') }
-  }
-  const [pa, pb] = [parse(a), parse(b)]
-  for (let i = 0; i < Math.max(pa.nums.length, pb.nums.length); i++) {
-    const diff = (pa.nums[i] || 0) - (pb.nums[i] || 0)
-    if (diff) return diff
-  }
-  if (pa.pre === pb.pre) return 0
-  if (!pa.pre) return 1
-  if (!pb.pre) return -1
-  // Prerelease counters are numeric where they are numeric: rc10 is newer
-  // than rc9, which a plain string comparison gets backwards.
-  const [la, lb] = [pa.pre.match(/^(\D*)(\d*)(.*)$/), pb.pre.match(/^(\D*)(\d*)(.*)$/)]
-  if (la[1] !== lb[1]) return la[1] < lb[1] ? -1 : 1
-  if (la[2] !== lb[2] && la[2] && lb[2]) return Number(la[2]) - Number(lb[2])
-  return pa.pre < pb.pre ? -1 : 1
-}
 
 /**
  * The newest property dataset per component version, and only that one.

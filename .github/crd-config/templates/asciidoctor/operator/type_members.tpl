@@ -3,6 +3,6 @@
 {{- if eq $field.Name "metadata" -}}
 Refer to the Kubernetes API documentation for fields of `metadata`.
 {{ else -}}
-{{ asciidocRenderFieldDoc $field.Doc | replace "${" "$\\{" }}
+{{ asciidocRenderFieldDoc $field.Doc | regexReplaceAll "\\$\\{(\\w[\\w-]*)\\}" "$\\{${1}}" }}
 {{- end -}}
 {{- end -}}

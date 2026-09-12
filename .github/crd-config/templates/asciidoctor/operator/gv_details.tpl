@@ -1,7 +1,7 @@
 {{- define "gvDetails" -}}
 {{- $gv := . -}}
 
-{{ $gv.Doc | replace "${" "$\\{" }}
+{{ $gv.Doc | regexReplaceAll "\\$\\{(\\w[\\w-]*)\\}" "$\\{${1}}" }}
 
 {{- if $gv.Kinds  }}
 .Resource Types
