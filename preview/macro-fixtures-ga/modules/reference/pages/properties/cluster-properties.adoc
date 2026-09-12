@@ -1,0 +1,15 @@
+= Cluster properties
+:page-property-source: cluster-properties
+
+== cloud_storage_enabled
+
+Enables Tiered Storage for the cluster.
+
+== iceberg_enabled
+
+Enables Iceberg integration for Redpanda topics.
+
+== retention.ms
+
+How long, in milliseconds, a topic retains messages before they become
+eligible for deletion.

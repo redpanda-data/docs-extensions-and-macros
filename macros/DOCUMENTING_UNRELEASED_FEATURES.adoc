@@ -47,16 +47,16 @@ The build validates the name against the RC data. A typo gets a warning naming t
 
 === If you forget the property data
 
-You get told, once per component version, with the command to run:
+You get told, once per component version, with the command to run. Every excerpt below is what actually lands in the build log, through Antora's own logger rather than the macro printing its own text -- `HH:MM:SS.mmm` stands in for the real timestamp, which varies on every build:
 
 [literal]
 ----
-prop macro: streaming@26.3 publishes no redpanda-properties-v26.3.*.json attachment
-in its reference module (found for other series: v26.2.1). prop: targets on 26.3
-pages are therefore not validated and their tooltips carry no data, rather than
-being checked against another release's properties. Generate it with
-'npx doc-tools generate property-docs --tag v26.3.<patch>' on that branch, or
-leave prop: out of 26.3 content.
+[HH:MM:SS.mmm] WARN (prop-macro): prop macro: streaming@26.3 publishes no
+redpanda-properties-v26.3.*.json attachment in its reference module (found for
+other series: v26.2.1). prop: targets on 26.3 pages are therefore not validated
+and their tooltips carry no data, rather than being checked against another
+release's properties. Generate it with 'npx doc-tools generate property-docs
+--tag v26.3.<patch>' on that branch, or leave prop: out of 26.3 content.
 ----
 
 Mentions render as plain code with no tooltip until the file exists. That is deliberate: validating 26.3 content against 26.2 data would accept properties that release never had and flag removed ones as typos.
@@ -116,6 +116,34 @@ Enterprise features are declared in the registry (`enterprise-features.yml` in t
 
 Add `status-tooltip` to override the hover text on an `unreleased` badge, or `beta-tooltip` on a `beta` badge.
 
+=== A shipped feature that only exists as of a version: `since`
+
+`status` answers "is this public yet," which is a question about a *branch* (prerelease or not). A different question comes up once a feature has fully shipped: an ordinarily-GA feature -- no `status` key at all -- still has a *first* version, and older released versions predate it. Without a check, a feature that ships in 26.3 would render as fully available on a 24.1 page that predates it by two years, because `status` alone has nothing to say about that.
+
+`since` closes that gap:
+
+[,yaml]
+----
+- name: My Shipped Feature
+  scope: redpanda
+  since: '26.3'
+  description: What it does.
+  expiration: What happens when the licence expires.
+----
+
+The check is against the *page's own version*, not the newest release: a mention on a 26.3 (or later) page renders normally, with no badge, because as of that page's version the feature has shipped. The identical mention on a 26.2 page renders as plain text with no styling, tooltip, or link, and a warning -- the same failure mode as an unreleased feature, but for a version reason rather than a branch reason:
+
+[literal]
+----
+[HH:MM:SS.mmm] WARN (enterprise-macro): enterprise:My Shipped Feature[] in
+modules/manage/pages/example.adoc: 'My Shipped Feature' is marked since: 26.3 in
+the enterprise features registry, but this page is version 26.2, which predates
+it. Move the mention to a page whose version is at or after the since version, or
+remove since if the feature covers this version too.
+----
+
+`since` and `status: unreleased` are independent and can combine: a feature still in an RC carries `status: unreleased` while it is not public at all, then drops that key once it ships and (optionally) gains `since` set to the version it shipped in, so older released versions stop claiming it. Most shipped features need neither key.
+
 === Writing the mention
 
 Unchanged:
@@ -129,12 +157,12 @@ On the prerelease branch this renders with the `unreleased` badge. On released d
 
 [literal]
 ----
-enterprise:My Upcoming Feature[] in modules/manage/pages/example.adoc:
-'My Upcoming Feature' is marked status: unreleased in the enterprise features
-registry, so it is only documented for an upcoming release. This page belongs to
-a released version, so the mention renders as plain text with no enterprise
-styling, tooltip, or link. Move the mention to the prerelease (beta) branch, or
-change the status once the feature ships.
+[HH:MM:SS.mmm] WARN (enterprise-macro): enterprise:My Upcoming Feature[] in
+modules/manage/pages/example.adoc: 'My Upcoming Feature' is marked status:
+unreleased in the enterprise features registry, so it is only documented for an
+upcoming release. This page belongs to a released version, so the mention renders
+as plain text with no enterprise styling, tooltip, or link. Move the mention to
+the prerelease (beta) branch, or change the status once the feature ships.
 ----
 
 The `unreleased` badge cannot be suppressed with `enterprise-beta-badge=false`. "Not in a release yet" is information a reader needs, not decoration.
@@ -167,19 +195,22 @@ Before opening a PR that documents something unreleased:
 * [ ] The mention is on the prerelease branch, not on `main` or a released `v/*` branch.
 * [ ] For a property: the RC property JSON is committed on that branch, generated from the RC tag.
 * [ ] For an enterprise feature: the registry entry has `status: unreleased`, not `beta: true`, unless it is genuinely a public beta.
+* [ ] For a shipped feature gated to a specific version: the registry entry has `since` set to the version it ships in, not left unset.
 * [ ] The build log has no `prop macro:` or `enterprise:` warnings for your additions.
 * [ ] No mention of an unreleased property or feature on a Cloud page.
 
 == Seeing it work
 
-The preview site in this repository has fixtures for every case above, including a prerelease component version and a Cloud component:
+The preview site in this repository has fixtures for every case above, including a prerelease component version and a Cloud component. The fast, fully local way to build just those fixtures, with no GitHub token and no real docs/cloud-docs content:
 
 [,bash]
 ----
-./scripts/macro-test.sh --serve
+./scripts/macro-showcase.sh --serve
 ----
 
-Open `/preview/macros-showcase/`, which shows each macro call, what it renders, and why. `/preview/release-status-test/` and `/macro-fixtures/26.3/` show the same unreleased feature gated on a released version and badged on a prerelease one.
+That builds `local-macro-showcase-playbook.yml` in seconds. Run `./scripts/macro-test.sh --serve` instead when you also want the fixtures proven against real production content (needs a token; pulls the full docs, cloud-docs, redpanda-labs, and rp-connect-docs repos).
+
+Either way, open `/preview/macros-course/` first -- it's a hands-on course, not just a reference: it has you mark a property and register an enterprise feature, then edit the actual fixture data (a property JSON, the enterprise registry) yourself and rebuild to watch the macros react, including reproducing the `status: unreleased` gate on purpose. It links to `/preview/macros-showcase/`, which shows every other macro call, what it renders, and why, as pure reference. `/macro-fixtures/26.2/` and `/macro-fixtures/26.3/` are two versions of the SAME component -- one released, one prerelease (`prerelease: true` in its `antora.yml`) -- so flipping the version selector between them shows the same enterprise: mentions rendering differently with no edits: the unreleased feature badged on 26.3 and gated on 26.2, the since-gated feature (shipped `since: '26.3'`) gated on 26.2 and shipped plain on 26.3, and the beta feature badged on both. `/preview/release-status-test/` shows the unreleased/beta contrast again from a third, versionless component. `/macro-fixtures-cloud/` shows the Cloud availability rules.
 
 == Why the build enforces this rather than trusting reviewers
 
