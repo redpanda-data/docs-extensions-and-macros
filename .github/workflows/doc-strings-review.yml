@@ -88,7 +88,7 @@ on:
           which for a workflow holding pull-requests: write in engineering
           repos is both a reproducibility and a supply-chain gap.
         type: string
-        default: "@redpanda-data/docs-extensions-and-macros@5.38.0"
+        default: "@redpanda-data/docs-extensions-and-macros@5.38.7"
       aws_region:
         description: >-
           AWS region used to assume the OIDC role that reads the bot token from
@@ -112,8 +112,9 @@ on:
         description: >-
           Route model traffic through the ADP AI Gateway's Bedrock provider
           (DEVPROD-4735) instead of an Anthropic API key. The sanctioned auth
-          for engineering repos. Requires the aws_* OIDC inputs above and an
-          adp_priv_client grant in devprod-infra for the calling repository.
+          for engineering repos. Requires the aws_* OIDC inputs above and a
+          devprod-infra grant letting the calling repository read the secret
+          named by adp_client_secret_id.
         type: boolean
         default: false
       adp_gateway_base_url:
@@ -121,17 +122,32 @@ on:
         type: string
         default: "https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/llm/v1/providers/claude-code-provider-adp"
       adp_client_secret_id:
-        description: "Secrets Manager id holding the ADP OAuth client credential."
+        description: >-
+          Secrets Manager id holding the ADP OAuth client credential. The
+          default is the doc-strings-review agent's own credential, which is
+          what makes this review's spend attribute to that agent on Cost and
+          usage rather than pooling into the shared adp_priv_client's total.
+          A caller must be granted the secret in devprod-infra to read it.
         type: string
-        default: "sdlc/prod/github/adp_priv_client"
+        default: "sdlc/prod/github/docs_doc_strings_client"
       adp_token_url:
-        description: "OAuth token endpoint that mints the gateway bearer."
+        description: >-
+          OAuth token endpoint that mints the gateway bearer. The default is
+          the gateway's own identity provider, which is what a self-managed
+          agent's credential authenticates against. The Cloud auth service at
+          auth.prd.cloud.redpanda.com is the endpoint for a standalone service
+          account instead, and it requires adp_token_audience.
         type: string
-        default: "https://auth.prd.cloud.redpanda.com/oauth/token"
+        default: "https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/oauth/idp/token"
       adp_token_audience:
-        description: "OAuth audience for the gateway token."
+        description: >-
+          OAuth audience for the gateway token. Empty by default, and it must
+          stay empty for an agent credential: the gateway's own IdP takes no
+          audience. Set it only when pointing adp_token_url back at the Cloud
+          auth service, which does require one
+          (cloudv2-production.redpanda.cloud).
         type: string
-        default: "cloudv2-production.redpanda.cloud"
+        default: ""
       gateway_model:
         description: >-
           Bedrock-style model id used when use_adp_gateway is on. Must be in
@@ -343,22 +359,49 @@ jobs:
         env:
           TOKEN_URL: ${{ inputs.adp_token_url }}
           TOKEN_AUDIENCE: ${{ inputs.adp_token_audience }}
+          CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
         run: |
           set -euo pipefail
-          if [ -z "${ADP_PRIV_CLIENT_ID:-}" ] || [ -z "${ADP_PRIV_CLIENT_SECRET:-}" ]; then
-            echo "::warning::ADP client credential missing from env; no review will be posted."
+          # parse-json-secrets names the env vars after the secret's JSON keys,
+          # and devprod's convention check (vtools scripts/cicd-secret/secret.py,
+          # _check_secret) requires those keys to start with the secret name's
+          # last path segment upper-cased. So the env names have to follow the
+          # secret id rather than being fixed: adp_priv_client yields
+          # ADP_PRIV_CLIENT_ID, a docs-team secret yields its own prefix. A
+          # caller pointing adp_client_secret_id at a differently-named secret
+          # used to land the credential in env vars this step never read, and
+          # the mint failed open with no clue why. The tr mirrors the secrets
+          # action's own sanitisation (non-alphanumerics become _), so a
+          # hyphenated segment yields a valid bash name instead of aborting
+          # the indirect expansion below under set -u.
+          prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
+          id_var="${prefix}_ID"
+          secret_var="${prefix}_SECRET"
+          client_id="${!id_var:-}"
+          client_secret="${!secret_var:-}"
+          if [ -z "$client_id" ] || [ -z "$client_secret" ]; then
+            echo "::warning::ADP client credential missing from env ($id_var, $secret_var); no review will be posted."
             exit 1
           fi
-          status=$(printf '%s' "$ADP_PRIV_CLIENT_SECRET" | curl -sS --request POST \
+          # The audience is omitted entirely when empty rather than sent
+          # blank. The gateway's own IdP, which is what an agent credential
+          # authenticates against, rejects the parameter; the Cloud auth
+          # service requires it. Sending `audience=` satisfies neither, so
+          # this has to be a present-or-absent argument, not an empty one.
+          audience_args=()
+          if [ -n "${TOKEN_AUDIENCE:-}" ]; then
+            audience_args=(--data audience="$TOKEN_AUDIENCE")
+          fi
+          status=$(printf '%s' "$client_secret" | curl -sS --request POST \
             --connect-timeout 10 --max-time 30 \
             --retry 3 --retry-all-errors --retry-delay 2 \
             --output "$RUNNER_TEMP/adp_token.json" --write-out '%{http_code}' \
             --url "$TOKEN_URL" \
             --header 'content-type: application/x-www-form-urlencoded' \
             --data grant_type=client_credentials \
-            --data-urlencode client_id="$ADP_PRIV_CLIENT_ID" \
+            --data-urlencode client_id="$client_id" \
             --data-urlencode client_secret@- \
-            --data audience="$TOKEN_AUDIENCE") || status=000
+            "${audience_args[@]+"${audience_args[@]}"}") || status=000
           token=$(jq -r '.access_token // empty' "$RUNNER_TEMP/adp_token.json" 2>/dev/null || true)
           rm -f "$RUNNER_TEMP/adp_token.json"
           if [ -z "$token" ]; then
@@ -414,6 +457,8 @@ jobs:
       # only runs when the OIDC inputs are set.
       - name: Drop fetched credentials from the review's environment
         if: (steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0') && inputs.aws_region != '' && inputs.aws_role_name_prefix != ''
+        env:
+          CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
         run: |
           set -euo pipefail
           umask 077
@@ -421,8 +466,11 @@ jobs:
           # AWS_BEARER_TOKEN_BEDROCK deliberately survives: it is the model
           # auth in gateway mode, short-lived, and usable only against the
           # gateway. The long-lived client credential that can mint fresh
-          # tokens must not be readable from the review's environment.
-          for v in ACTIONS_BOT_TOKEN ADP_PRIV_CLIENT_ID ADP_PRIV_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION AWS_REGION; do
+          # tokens must not be readable from the review's environment. Its
+          # env names come from the secret id the same way the mint step
+          # derives them, so a renamed secret is still scrubbed.
+          prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
+          for v in ACTIONS_BOT_TOKEN "${prefix}_ID" "${prefix}_SECRET" AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION AWS_REGION; do
             echo "$v=" >> "$GITHUB_ENV"
           done
       - name: Claude review with suggestions
