@@ -33,7 +33,11 @@ const CONVENTION = {
   case: 'sentence',
   terminal_period: true,
   verbatim_asciidoc: true,
-  state_default: true
+  // Not state_default. The rendered page builds a "Default:" row from the
+  // extractor's own field, so prose restating a concrete default duplicates
+  // structured data. Only a sentinel default (null, 0, -1, "") carries
+  // behavior that row cannot express.
+  state_sentinel_default: true
 }
 
 function run (cmd, args, options = {}) {
@@ -133,8 +137,9 @@ function mapExtractorJson (json, repo, options = {}) {
 
     const lineStart = prop.line_start != null ? prop.line_start : null
     const lineEnd = prop.line_end != null ? prop.line_end : lineStart
-    const hasDefault = Object.prototype.hasOwnProperty.call(prop, 'default') &&
-      prop.default !== null && prop.default !== ''
+    // null and "" are defaults too: the extractor emits null for every
+    // std::nullopt, and those are exactly the sentinels the rule below is for.
+    const hasDefault = Object.prototype.hasOwnProperty.call(prop, 'default')
 
     declarations.push({
       surface: 'properties',
@@ -148,6 +153,7 @@ function mapExtractorJson (json, repo, options = {}) {
       meta: {
         has_default: hasDefault,
         default: hasDefault ? prop.default : null,
+        type: typeof prop.type === 'string' ? prop.type : null,
         is_enum: Boolean(prop.is_enum),
         nullable: Boolean(prop.nullable)
       }
@@ -184,16 +190,52 @@ const RULES = [
     }
   },
   {
-    name: 'default-not-stated',
-    description: 'Property has a default the description never mentions',
+    name: 'sentinel-default-unexplained',
+    description: 'Property defaults to a sentinel whose meaning the description never explains',
     severity: 'info',
+    // The rendered page already carries a "Default:" row built from the
+    // extractor's own `default` field, so asking the prose to restate a
+    // concrete default duplicates structured data -- and duplicated facts go
+    // stale. A real example: tombstone_retention_ms's description claimed "a
+    // typical default setting is 86400000" while the actual default was null.
+    //
+    // A SENTINEL default is the exception. null, 0, -1 and "" usually mean
+    // disabled, unlimited or unset, and which one is not inferable from the
+    // value, so "Default: null" leaves the reader guessing. That meaning is
+    // information the structured field cannot carry, which is the only case
+    // worth a finding.
     check: (decl) => {
-      const text = decl.string || ''
+      const text = (decl.string || '').trim()
       if (!text || !decl.meta || !decl.meta.has_default) return []
-      const defaultText = String(decl.meta.default)
-      if (/\bdefaults?\b/i.test(text)) return []
-      if (defaultText.length > 0 && text.includes(defaultText)) return []
-      return [{ message: `Property has a default (${JSON.stringify(decl.meta.default)}) that the description does not state.` }]
+      const value = decl.meta.default
+      // Booleans are never sentinels: `false` is a real setting, not a
+      // stand-in for "off".
+      if (typeof value === 'boolean') return []
+      // A string-typed property defaulting to null or "" is plainly "not
+      // configured" (credentials, bucket names, endpoints); the "Default:" row
+      // says that on its own, so only non-string sentinels are ambiguous.
+      if (decl.meta.type === 'string' && (value === null || value === '')) return []
+      const sentinels = [
+        { match: (v) => v === null || v === 'null', token: /\bnull\b/i, label: 'null' },
+        { match: (v) => v === '' , token: /\b(empty|blank)\b/i, label: 'an empty string' },
+        { match: (v) => v === 0 || v === '0', token: /\b(0|zero)\b/i, label: '0' },
+        { match: (v) => v === -1 || v === '-1', token: /-1\b/, label: '-1' }
+      ]
+      const sentinel = sentinels.find((s) => s.match(value))
+      if (!sentinel) return []
+      // Either name the sentinel, or say what it does. Both forms explain it;
+      // neither is satisfied by an unrelated digit elsewhere in the sentence.
+      // "default"/"falls back"/"inherits"/"omitted" cover descriptions that
+      // explain the null case by naming what is used instead, which is the
+      // explanation being asked for.
+      const MEANING = /\b(disabl\w*|unlimited|no limit|unbounded|infinite|unset|not set|never|off|ignored|no maximum|no minimum|defaults?|inherit\w*|blank|omitted|not specified|falls? back)\b/i
+      if (sentinel.token.test(text) || MEANING.test(text)) return []
+      return [{
+        message: `Property defaults to ${sentinel.label}, and the description does not say what that means. `
+          + 'A sentinel default carries behavior the rendered "Default:" row cannot: say whether it disables '
+          + 'the property, means unlimited, or leaves it unset. There is no need to restate a concrete '
+          + 'default value; the page already renders it from structured data.'
+      }]
     }
   }
 ]

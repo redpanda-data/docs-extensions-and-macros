@@ -28,14 +28,16 @@ verbatim to docs.redpanda.com by the doc generators):
 
 - Every description is a complete thought that states the effect and when an
   operator would change the setting - never a restatement of the name.
-- State defaults, units, and valid ranges in prose. Spell out units.
+- State units and valid ranges in prose. Spell out units. The default renders
+  from structured data, so do not restate a concrete default; explain a
+  sentinel default (null, 0, -1, empty) instead.
 - No internal jargon (NTP, seastar, nullopt, stm, smp): users set null, not
   nullopt.
 
 Per-surface contract:
 - Properties (src/v/config/): verbatim AsciiDoc - keep backticks balanced, no
   raw | outside backticks, no unknown {attr} references. Sentence case,
-  terminal period. State the default shown in the declaration.
+  terminal period. Explain what a sentinel default means, if there is one.
 - Metrics (sm::description): zero escaping downstream - no | or {attr} at
   all. Capitalized, NO terminal period. Never echo the metric name.
 - rpk (src/go/rpk/pkg/cli/): Short = one line, capitalized, no period. Flag
@@ -64,7 +66,7 @@ Produce a GitHub suggestion block that replaces the FULL declaration span
 (lines ${finding.line_start}..${finding.line_end} of ${finding.file}, shown
 verbatim in declaration_text). Requirements:
 - Fix every rule violation listed in the finding.
-- The rewritten description must state effect${cpp ? ', default, and units where the declaration shows them (the default value is visible as an argument in declaration_text)' : ' and follow cobra conventions'}; never restate the name.
+- The rewritten description must state effect${cpp ? ' and units where the declaration shows them, and what a sentinel default (null, 0, -1, empty) means when the declaration has one; do not restate a concrete default, the page renders it from structured data' : ' and follow cobra conventions'}; never restate the name.
 ${cpp
     ? `- Re-wrap the description as clang-format-style adjacent string literals;
   every line of the suggestion must stay within ${columnLimit} columns.
@@ -149,9 +151,10 @@ Review every doc string changed in the diff against the contract:
 - For each declaration whose NEW string violates the contract, output a line
   "FILE <path> LINES <start>-<end>" followed by one fenced block tagged
   "suggestion" with the corrected declaration span.
-- Do not flag subjective polish: a string that already states effect,
-  default, and units, and satisfies the per-surface contract, gets NO
-  suggestion. Never bikeshed phrasing.
+- Do not flag subjective polish: a string that already states effect and
+  units, explains any sentinel default, and satisfies the per-surface
+  contract, gets NO suggestion. Never ask for a concrete default to be
+  restated. Never bikeshed phrasing.
 - PUBLISHED-CONTENT IMPACT: HIGH-IMPACT means the diff changes a default,
   unit, or observable behavior that published docs state, or removes or
   renames a user-facing surface, or adds a brand-new user-facing surface. A

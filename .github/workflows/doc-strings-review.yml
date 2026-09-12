@@ -88,7 +88,7 @@ on:
           which for a workflow holding pull-requests: write in engineering
           repos is both a reproducibility and a supply-chain gap.
         type: string
-        default: "@redpanda-data/docs-extensions-and-macros@5.38.0"
+        default: "@redpanda-data/docs-extensions-and-macros@5.38.5"
       aws_region:
         description: >-
           AWS region used to assume the OIDC role that reads the bot token from
@@ -246,15 +246,20 @@ jobs:
           status=0
           npx --yes --package="$PKG" doc-tools lint-strings "${ARGS[@]}" \
             > lint-findings.json 2> lint-stderr.txt || status=$?
-          # Distinguish "clean" from "broken". Reporting count=0 on the broken
-          # path is what keeps the gate fail-CLOSED: `jq '.findings | length'`
-          # over a 0-byte file prints NOTHING and exits 0, so the old
-          # `|| echo 0` never fired, count became the empty string, and every
-          # `count != '0'` step downstream ran over an absent findings file.
+          # Distinguish "clean" from "broken", and fail CLOSED on broken:
+          # `jq` over a 0-byte file prints NOTHING and exits 0, so an
+          # `|| echo 0` fallback never fires and the output becomes the empty
+          # string, which every `!= '0'` condition below reads as truthy.
+          # Both gate outputs are normalised to 0 for that reason.
+          #
+          # The gate is `declarations` and `removals`, NOT a finding count: a
+          # string can pass every mechanical rule and still tell an operator
+          # nothing, so the review has to see clean strings too. The findings
+          # array is still parsed here, because it is the only check that
+          # notices output which is valid JSON of the wrong shape.
           if [ "$status" -ne 0 ] || [ ! -s lint-findings.json ]; then
             echo "::warning::lint-strings failed (exit $status) or produced no output; skipping the Claude review."
             sed -n '1,40p' lint-stderr.txt >&2 || true
-            echo "count=0" >> "$GITHUB_OUTPUT"
             echo "declarations=0" >> "$GITHUB_OUTPUT"
             echo "removals=0" >> "$GITHUB_OUTPUT"
             exit 0
@@ -269,12 +274,11 @@ jobs:
               count=0
               ;;
           esac
-          echo "count=$count" >> "$GITHUB_OUTPUT"
           # Declarations the PR touched, findings or not. This is the gate
           # for the Claude pass: the lint is mechanical, and a string can
           # pass every rule while still telling an operator nothing, so the
           # review must see clean strings too. Same fail-closed handling as
-          # count: anything unparseable becomes 0 and skips the review.
+          # findings: anything unparseable becomes 0 and skips the review.
           if ! decls=$(jq '.summary.totalDeclarations // 0' lint-findings.json 2>/dev/null); then
             decls=0
           fi
@@ -508,8 +512,11 @@ jobs:
               comments keep the # -- marker conventions.
             - in_pr_diff false: plain comment, no suggestion block.
 
-            Rewrites state effect, default, and units where the code shows
-            them and never restate the name. Do not review code logic.
+            Rewrites state effect and units where the code shows them and
+            never restate the name. The rendered page builds its "Default:"
+            row from structured data, so do not ask for a concrete default
+            to be restated in prose; only a sentinel default (null, 0, -1,
+            empty) needs its meaning explained. Do not review code logic.
 
             PROSE QUALITY: the lint is mechanical, so a string can pass
             every rule and still tell an operator nothing. Read the PR diff
@@ -517,7 +524,8 @@ jobs:
             that has NO lint finding, judge the string against the writing
             standard's quality bar: it states what the setting or metric
             does, its effect, and when an operator would care, with units
-            and defaults where the code shows them. Post an inline
+            where the code shows them and the meaning of a sentinel default
+            where there is one. Post an inline
             suggestion ONLY when the string clearly fails that bar and the
             standard supports the objection, citing it. Skip this pass
             entirely when embedded-reference-strings.md is absent or empty.
