@@ -67,15 +67,24 @@ describe('package version', () => {
  * actually pack rather than reading `files` back.
  */
 describe('npm tarball ships every docs-data file consumers read', () => {
-  const { execFileSync } = require('child_process')
+  const { spawnSync } = require('child_process')
   const root = path.join(__dirname, '..')
   let packed
 
   beforeAll(() => {
-    const out = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
-      cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']
+    // spawnSync rather than execFileSync: when the spawn itself fails (ENOBUFS
+    // on a large file list, ENOENT), execFileSync throws an error that refers
+    // to itself, and jest-worker cannot serialise it, so the suite dies with
+    // "Converting circular structure to JSON" instead of saying what happened.
+    const r = spawnSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
+      cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024
     })
-    packed = new Set(JSON.parse(out)[0].files.map((f) => f.path))
+    if (r.error || r.status !== 0) {
+      throw new Error(`npm pack --dry-run failed (${r.error ? r.error.code : `exit ${r.status}`}): ${String(r.stderr || '').slice(0, 500)}`)
+    }
+    // npm may print notices before the JSON; the payload is the array.
+    const json = r.stdout.slice(r.stdout.indexOf('['))
+    packed = new Set(JSON.parse(json)[0].files.map((f) => f.path))
   }, 120000)
 
   const schemas = fs.readdirSync(path.join(root, 'docs-data')).filter((f) => f.endsWith('.schema.json'))
