@@ -512,8 +512,11 @@ jobs:
               comments keep the # -- marker conventions.
             - in_pr_diff false: plain comment, no suggestion block.
 
-            Rewrites state effect, default, and units where the code shows
-            them and never restate the name. Do not review code logic.
+            Rewrites state effect and units where the code shows them and
+            never restate the name. The rendered page builds its "Default:"
+            row from structured data, so do not ask for a concrete default
+            to be restated in prose; only a sentinel default (null, 0, -1,
+            empty) needs its meaning explained. Do not review code logic.
 
             PROSE QUALITY: the lint is mechanical, so a string can pass
             every rule and still tell an operator nothing. Read the PR diff
@@ -521,7 +524,8 @@ jobs:
             that has NO lint finding, judge the string against the writing
             standard's quality bar: it states what the setting or metric
             does, its effect, and when an operator would care, with units
-            and defaults where the code shows them. Post an inline
+            where the code shows them and the meaning of a sentinel default
+            where there is one. Post an inline
             suggestion ONLY when the string clearly fails that bar and the
             standard supports the objection, citing it. Skip this pass
             entirely when embedded-reference-strings.md is absent or empty.
