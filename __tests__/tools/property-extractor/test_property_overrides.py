@@ -33,7 +33,10 @@ class TestPhantomStubTracking(unittest.TestCase):
         self.assertEqual(len(property_extractor.phantom_stub_entries), 1)
         entry = property_extractor.phantom_stub_entries[0]
         self.assertEqual(entry["name"], "ghost_property")
-        self.assertEqual(entry["config_scope"], "topic")
+        # Underscored name, so it is inferred as a cluster property rather than
+        # defaulted to topic.
+        self.assertEqual(entry["config_scope"], "cluster")
+        self.assertTrue(entry["scope_inferred"])
 
     def test_phantom_stub_records_override_scope(self):
         """The recorded scope reflects the override's config_scope, not just the default."""
@@ -43,6 +46,60 @@ class TestPhantomStubTracking(unittest.TestCase):
 
         self.assertEqual(len(property_extractor.phantom_stub_entries), 1)
         self.assertEqual(property_extractor.phantom_stub_entries[0]["config_scope"], "cluster")
+        self.assertFalse(property_extractor.phantom_stub_entries[0]["scope_inferred"])
+
+    def test_dotted_name_is_inferred_as_a_topic_property(self):
+        """A dot-separated name is a topic property, matching Redpanda's naming."""
+        apply_property_overrides({}, {"properties": {"ghost.topic.property": {}}})
+
+        entry = property_extractor.phantom_stub_entries[0]
+        self.assertEqual(entry["config_scope"], "topic")
+        self.assertTrue(entry["scope_inferred"])
+
+    def test_underscored_name_is_not_fabricated_as_a_topic_property(self):
+        """Regression: cloud_topics_l1_indexing_interval landed on the topic page.
+
+        The override was keyed on the C++ member name rather than the
+        registered cloud_topics_indexing_interval, so it matched nothing and
+        was fabricated. Defaulting every fabricated property to topic scope
+        put an underscored cluster-style name into topic-properties.adoc.
+        """
+        result = apply_property_overrides(
+            {}, {"properties": {"cloud_topics_l1_indexing_interval": {"version": "v26.1.1"}}}
+        )
+
+        prop = result["cloud_topics_l1_indexing_interval"]
+        self.assertEqual(prop["config_scope"], "cluster")
+        self.assertFalse(prop["is_topic_property"])
+
+    def test_explicit_scope_beats_the_name_shape(self):
+        """An override naming its own scope wins, even against the name shape."""
+        result = apply_property_overrides(
+            {}, {"properties": {"ghost.dotted.name": {"config_scope": "cluster"}}}
+        )
+
+        self.assertEqual(result["ghost.dotted.name"]["config_scope"], "cluster")
+        self.assertFalse(result["ghost.dotted.name"]["is_topic_property"])
+
+    def test_scope_inference_never_reaches_the_output(self):
+        """Whether the scope was inferred is reported beside the stub, never on it."""
+        result = apply_property_overrides({}, {"properties": {"ghost_property": {}}})
+
+        self.assertNotIn("_scope_inferred", result["ghost_property"])
+
+    def test_warning_says_whether_the_scope_was_guessed(self):
+        """The operator can tell an inferred scope from a declared one."""
+        apply_property_overrides({}, {"properties": {
+            "ghost_guessed": {},
+            "ghost_declared": {"config_scope": "broker"},
+        }})
+
+        with self.assertLogs(property_extractor.logger, level="WARNING") as captured:
+            report_phantom_stubs()
+
+        joined = "\n".join(captured.output)
+        self.assertIn("config_scope 'cluster' inferred from the name", joined)
+        self.assertIn("config_scope 'broker' from the override", joined)
 
     def test_no_phantom_stub_when_override_matches_property_key(self):
         """Overrides applied to an existing property key are not phantom stubs."""
@@ -96,7 +153,7 @@ class TestPhantomStubTracking(unittest.TestCase):
         output = "\n".join(captured.output)
         self.assertIn("matched no extracted property", output)
         self.assertIn("ghost_property", output)
-        self.assertIn("config_scope 'topic'", output)
+        self.assertIn("config_scope 'cluster'", output)
         self.assertIn("property-overrides.json", output)
 
     def test_report_logs_nothing_when_no_phantom_stubs(self):

@@ -1024,9 +1024,14 @@ def report_phantom_stubs():
         f"{'entry' if len(phantom_stub_entries) == 1 else 'entries'} matched no extracted property"
     )
     for entry in phantom_stub_entries:
+        scope_note = (
+            f"config_scope '{entry['config_scope']}' inferred from the name"
+            if entry.get("scope_inferred")
+            else f"config_scope '{entry['config_scope']}' from the override"
+        )
         logger.warning(
             f"Override key '{entry['name']}' matched no extracted property — created a stub entry "
-            f"with config_scope '{entry['config_scope']}'. If the property was renamed or removed, "
+            f"with {scope_note}. If the property was renamed or removed, "
             f"update docs-data/property-overrides.json."
         )
     logger.warning("=" * 70)
@@ -1182,12 +1187,13 @@ def apply_property_overrides(properties, overrides, overrides_file_path=None):
                 else:
                     # Create new property from override
                     logger.info(f"Creating new property from override: {prop}")
-                    new_property = _create_property_from_override(prop, override, overrides_file_path)
+                    new_property, scope_inferred = _create_property_from_override(prop, override, overrides_file_path)
                     properties[prop] = new_property
                     # Record the phantom stub so the run summary can flag it loudly
                     phantom_stub_entries.append({
                         "name": prop,
                         "config_scope": new_property.get("config_scope"),
+                        "scope_inferred": scope_inferred,
                     })
 
     for property_data in properties.values():
@@ -1313,8 +1319,41 @@ def _apply_override_to_existing_property(property_dict, override, overrides_file
             property_dict["admonitions"] = normalized
 
 
+def _infer_config_scope_from_name(prop_name):
+    """Guess a fabricated property's scope from the shape of its name.
+
+    Redpanda topic property names are dot-separated (`cleanup.policy`,
+    `redpanda.remote.read`); cluster and broker names are underscore-separated
+    (`log_retention_ms`). An override key that matched no extracted property
+    has no `defined_in` to classify it, so the name is the only signal left.
+
+    This used to default to "topic" unconditionally, which put underscored
+    names on the topic properties page. `cloud_topics_l1_indexing_interval` is
+    the case that surfaced it: a stale override keyed on a C++ member name
+    rather than the registered `cloud_topics_indexing_interval`, fabricated as
+    a topic property and rendered into topic-properties.adoc.
+    """
+    return "topic" if "." in prop_name else "cluster"
+
+
 def _create_property_from_override(prop_name, override, overrides_file_path):
-    """Create a new property from override specification."""
+    """Create a new property from override specification.
+
+    Returns ``(new_property, scope_inferred)``. The flag is True when the
+    override named no config_scope and the scope came from the name shape, so
+    the caller can say so in the run summary without a marker on the property
+    that would otherwise have to be stripped before output.
+    """
+    # An override that names its own scope is authoritative. Otherwise infer it
+    # from the name, because there is no defined_in to classify a fabricated
+    # property and a wrong guess lands it on the wrong reference page.
+    if "config_scope" in override and override["config_scope"]:
+        scope = override["config_scope"]
+        scope_inferred = False
+    else:
+        scope = _infer_config_scope_from_name(prop_name)
+        scope_inferred = True
+
     # Create base property structure
     new_property = {
         "name": prop_name,
@@ -1322,10 +1361,10 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
         "type": override.get("type", "string"),
         "default": override.get("default", None),
         "defined_in": "override",  # Mark as override-created
-        "config_scope": override.get("config_scope", "topic"),  # Default to topic for new properties
-        "is_topic_property": override.get("config_scope", "topic") == "topic",
+        "config_scope": scope,
+        "is_topic_property": scope == "topic",
         "is_deprecated": override.get("is_deprecated", False),
-        "visibility": override.get("visibility", "user")
+        "visibility": override.get("visibility", "user"),
     }
     
     # Add version if specified
@@ -1382,7 +1421,7 @@ def _create_property_from_override(prop_name, override, overrides_file_path):
         if normalized is not None:
             new_property["admonitions"] = normalized
 
-    return new_property
+    return new_property, scope_inferred
 
 
 def _process_example_override(override, overrides_file_path=None):
