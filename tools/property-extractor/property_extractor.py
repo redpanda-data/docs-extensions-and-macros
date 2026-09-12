@@ -1034,9 +1034,15 @@ def report_phantom_stubs():
 
 def infer_topic_property_category(name):
     """Map a topic property's dotted name to a category, for properties with
-    no explicit category override. Every category returned here has a
-    corresponding tag::category-X[] section on the pages that render topic
-    properties -- "other" is a real, included category, not a discard pile.
+    no explicit category override.
+
+    "other" is the fallback for a name that matches no group. It only renders
+    where a page includes tags=category-other: cloud-docs' topic properties
+    page does (cloud-docs#686); docs' topic-properties.adoc and
+    broker-properties.adoc do not yet, so on docs main a property that falls
+    to "other" is present in the partial but appears on no page. The point of
+    the fallback is that such a property is at least reachable by a known tag,
+    rather than untagged and unreachable by any include.
     """
     retention = [
         "cleanup.policy", "compaction.strategy", "delete.retention.ms", "max.compaction.lag.ms",
