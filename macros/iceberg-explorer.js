@@ -1,6 +1,9 @@
 'use strict';
 
 const { escapeHtml } = require('../extension-utils/html-utils');
+// Same logger as the other macros (#283): warnings land in Antora's log with
+// a level Antora can fail on, instead of bypassing it through console.warn.
+const logger = require('@antora/logger')('iceberg-explorer-macro');
 
 /**
  * Iceberg Mode Explorer block.
@@ -101,7 +104,7 @@ function defineBlock (registry) {
         attributes['docfile'] ||
         'unknown page';
       const warn = (message) => {
-        console.warn(`[iceberg-explorer] ${page}: ${message}`);
+        logger.warn(`${page}: ${message}`);
       };
 
       // Author-supplied defaults (optional). Validate that the body is a JSON

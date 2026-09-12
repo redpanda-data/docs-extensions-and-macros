@@ -1,5 +1,15 @@
 'use strict'
 
+// The macro logs through @antora/logger rather than console.warn (see
+// macros/iceberg-explorer.js), so tests spy on this stable, mocked logger
+// instead of console.
+jest.mock('@antora/logger', () => {
+  const logger = { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} }
+  const getLogger = () => logger
+  getLogger.configure = () => getLogger
+  return getLogger
+})
+
 const asciidoctor = require('@asciidoctor/core')()
 const macro = require('../../macros/iceberg-explorer.js')
 
@@ -149,7 +159,7 @@ describe('iceberg-explorer macro', () => {
     })
 
     test('ignores an invalid JSON body but still renders the mount point', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
       const html = convert('[iceberg-explorer]\n----\nnot json\n----')
       expect(html).toContain(`class="${macro.MOUNT_CLASS}"`)
       expect(html).not.toContain('data-defaults=')
@@ -167,7 +177,7 @@ describe('iceberg-explorer macro', () => {
     let warn
 
     beforeEach(() => {
-      warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
     })
 
     afterEach(() => {
