@@ -181,7 +181,7 @@ function renderStyleRegressionWarnings(warnings) {
   lines.push('> [!WARNING]');
   lines.push('> **This update reintroduces house-style issues that the published docs do not have.** The fix belongs upstream in the Connect source, or in `docs-data/overrides.json`: correcting the generated partial is undone by the next regeneration.');
   for (const w of warnings) {
-    lines.push(`> - \`${w.partial}\` reintroduces: ${w.issues.join(', ')}`);
+    lines.push(`> - \`${w.partial}\` adds: ${w.issues.join(', ')}`);
   }
   lines.push('');
   return lines;

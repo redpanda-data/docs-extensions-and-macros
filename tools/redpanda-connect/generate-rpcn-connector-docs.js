@@ -197,15 +197,6 @@ function mergeOverrides(target, overrides) {
 }
 
 /**
- * Resolves $ref references in an object by replacing them with their definitions.
- * Supports JSON Pointer style references like "#/definitions/client_certs".
- * 
- * @param {Object} obj - The object to resolve references in
- * @param {Object} root - The root object containing definitions
- * @returns {Object} The object with references resolved
- */
-
-/**
  * House-style regressions that a regeneration would reintroduce.
  *
  * Generated prose passes through unchanged by design (see
@@ -231,6 +222,15 @@ const STYLE_REGRESSION_RULES = [
   { label: '"e.g."', count: (text) => (text.match(/(^|[^\w.])e\.g\./gi) || []).length },
   { label: '"i.e."', count: (text) => (text.match(/(^|[^\w.])i\.e\./gi) || []).length }
 ];
+
+/**
+ * Resolves $ref references in an object by replacing them with their definitions.
+ * Supports JSON Pointer style references like "#/definitions/client_certs".
+ * 
+ * @param {Object} obj - The object to resolve references in
+ * @param {Object} root - The root object containing definitions
+ * @returns {Object} The object with references resolved
+ */
 function resolveReferences(obj, root) {
   if (!obj || typeof obj !== 'object') {
     return obj;
