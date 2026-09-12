@@ -71,6 +71,7 @@
 const yaml = require('js-yaml')
 const semver = require('semver')
 const { buildBadgeHtml, DEFAULT_TOOLTIPS } = require('./badge')
+const { isAttributeSet } = require('./prop')
 const logger = require('@antora/logger')('enterprise-macro')
 
 const $enterpriseRegistry = Symbol('$enterpriseRegistry')
@@ -198,21 +199,16 @@ function isPrereleasePage (config, document) {
  * content came from an included self-managed file -- the same mechanism
  * resolveEntryXref already relied on for env-cloud.
  *
- * A bare `!== undefined` test would read `env-cloud: false` as Cloud, so
- * falsy strings are treated as unset. That matches prop.js's isAttributeSet,
- * which is the same three-line test, but this is NOT the same reader and the
- * two are not interchangeable: prop.js asks the CATALOG about the page's
- * component, while this asks the DOCUMENT being converted, which is the whole
- * point above. It is also not the codebase-wide convention, despite what an
- * earlier version of this comment claimed:
+ * The value test is prop.js's isAttributeSet, so `env-cloud: false` reads as
+ * unset in both places. The two readers are still not interchangeable:
+ * prop.js asks the CATALOG about the page's component, while this asks the
+ * DOCUMENT being converted, which is the whole point above.
  * rp-connect-components.js still uses a bare `!== undefined` for env-cloud,
  * so `env-cloud: false` reads as Cloud there. Worth aligning separately, but
  * not from here.
  */
 function isCloudPage (document) {
-  const raw = document && document.getAttribute('env-cloud')
-  if (raw === undefined || raw === null || raw === false) return false
-  return String(raw).toLowerCase() !== 'false'
+  return isAttributeSet(document && document.getAttribute('env-cloud'))
 }
 
 /**
