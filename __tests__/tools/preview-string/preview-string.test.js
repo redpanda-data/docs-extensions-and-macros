@@ -118,6 +118,62 @@ describe('preview-string helm/crd/connect output shapes (fixture repos)', () => 
 // lint-strings run). Skipped LOUDLY when they are absent so a local run stays
 // hermetic, and failed outright in CI, where a silent skip is
 // indistinguishable from a pass. See __tests__/helpers/extractor-env.js.
+describe('preview-string properties render with a second Handlebars instance in play', () => {
+  // The bug this guards against: after `make node-deps`, tools/property-extractor
+  // has its own node_modules/handlebars, so the generator registers the property
+  // helpers on an instance preview-string never sees, and property.hbs fails with
+  // "Missing helper". CI never runs node-deps, so every job sees one instance and
+  // the integration suite above cannot catch a regression. Loading the generator
+  // in an isolated module registry reproduces the two-instance condition without
+  // a nested install: its `require('handlebars')` is a fresh copy, and the mock
+  // hands that same copy to anything in this registry that requires the generator
+  // for its side effect, which is exactly what the old previewProperty did.
+  const generatorPath = require.resolve('../../../tools/property-extractor/generate-handlebars-docs')
+  const templatePath = path.join(properties.TOOL_ROOT, 'templates', 'property.hbs')
+  const prop = {
+    name: 'cluster_id',
+    description: 'Cluster identifier.',
+    type: 'string',
+    default: null,
+    defined_in: 'src/v/config/configuration.cc',
+    line_start: 3,
+    line_end: 9,
+    visibility: 'user',
+    is_deprecated: false,
+    config_scope: 'cluster'
+  }
+  let isolatedGenerator
+
+  beforeAll(() => {
+    jest.isolateModules(() => { isolatedGenerator = require(generatorPath) })
+    jest.doMock(generatorPath, () => isolatedGenerator)
+  })
+
+  afterAll(() => {
+    jest.dontMock(generatorPath)
+  })
+
+  test('the condition holds: this registry\'s handlebars has none of the property helpers', () => {
+    const shared = require('handlebars')
+    require(generatorPath) // the side effect the old code relied on
+    expect(shared.helpers.formatPropertyValue).toBeUndefined()
+    expect(() => shared.compile(fs.readFileSync(templatePath, 'utf8'))({ ...prop }))
+      .toThrow(/Missing helper/)
+  })
+
+  test('previewProperty renders anyway', () => {
+    const spy = jest.spyOn(properties, 'runExtractor').mockReturnValue({ properties: { cluster_id: prop } })
+    try {
+      const out = previewString({ repo: os.tmpdir(), surface: 'properties', name: 'cluster_id', log: () => {} })
+      expect(out).toContain('AS SOURCE (rendered from your checkout)')
+      expect(out).toContain('Cluster identifier.')
+      expect(out).not.toContain('Missing helper')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
+
 const describeIntegration = describeWithExtractor(properties)
 
 describeIntegration('preview-string properties (real extractor over fixtures)', () => {
