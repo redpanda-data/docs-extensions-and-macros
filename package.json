@@ -1,6 +1,6 @@
 {
   "name": "@redpanda-data/docs-extensions-and-macros",
-  "version": "5.38.0",
+  "version": "5.40.0",
   "description": "Antora extensions and macros developed for Redpanda documentation.",
   "keywords": [
     "antora",
@@ -94,7 +94,9 @@
     "./extensions/property-page-index": "./extensions/property-page-index.js",
     "./extensions/render-property-descriptions": "./extensions/render-property-descriptions.js",
     "./extensions/kapa-source-groups": "./extensions/kapa-source-groups.js",
-    "./docs-data/kapa-source-groups.json": "./docs-data/kapa-source-groups.json"
+    "./docs-data/kapa-source-groups.json": "./docs-data/kapa-source-groups.json",
+    "./macros/iceberg-explorer": "./macros/iceberg-explorer.js",
+    "./macros/iceberg-explorer.js": "./macros/iceberg-explorer.js"
   },
   "files": [
     "extensions",

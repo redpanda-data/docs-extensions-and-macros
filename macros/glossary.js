@@ -3,21 +3,11 @@
 const $glossaryContexts = Symbol('$glossaryContexts')
 const { posix: path } = require('path')
 const logger = require('@antora/logger')('glossary-macro')
+const { escapeHtml } = require('../extension-utils/html-utils')
 
 // Backtick-monospace in hover-text. The unconstrained (double-backtick) form is
 // matched first, otherwise it leaves a stray delimiter on each side.
 const MONOSPACE_RX = /``([^`]+)``|`([^`]+)`/g
-
-// Escape for interpolation into a double-quoted HTML attribute. Same four
-// replacements, in the same order, as badge.js and enterprise.js; `&` has to go
-// first or it re-escapes the entities the later passes introduce.
-function escapeAttr (value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
 
 // Only a data-* tooltip is read by a JS tooltip library that renders it as HTML;
 // the native title attribute is always plain text. Shared with the
@@ -45,14 +35,14 @@ function tooltipRendersHtml (tooltipAttr) {
 // file's raw :hover-text: value -- so it is escaped once rather than twice and
 // its markup survives to the reader instead of being shown as literal tags.
 function formatTooltipDefinition (text, tooltipAttr, definitionIsHtml) {
-  if (!tooltipRendersHtml(tooltipAttr)) return escapeAttr(text)
+  if (!tooltipRendersHtml(tooltipAttr)) return escapeHtml(text)
   if (definitionIsHtml) {
     // Already HTML, so one pass is right: the attribute decode hands the markup
     // back intact for innerHTML to render, and a quote in the text still cannot
     // terminate the attribute early.
-    return escapeAttr(text)
+    return escapeHtml(text)
   }
-  return escapeAttr(escapeAttr(text)).replace(
+  return escapeHtml(escapeHtml(text)).replace(
     MONOSPACE_RX,
     (match, unconstrained, constrained) =>
       `<code>${unconstrained !== undefined ? unconstrained : constrained}</code>`
