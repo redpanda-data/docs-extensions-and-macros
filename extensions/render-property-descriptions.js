@@ -32,7 +32,9 @@
 
 const loadAsciiDoc = require('@antora/asciidoc-loader')
 const bigIntJson = require('../cli-utils/big-int-json')
-const { buildPageIndex, propertyAnchor } = require('../macros/prop')
+// compareTags is the one set-available-attachment-versions.js uses to pick the
+// tooltip dataset, so the build-time choice and the runtime fetch cannot disagree.
+const { buildPageIndex, propertyAnchor, compareTags } = require('../macros/prop')
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 const PROPERTIES_JSON_RX = /^redpanda-properties-(v\d+\.\d+\.\d+(?:-[\w.]+)?)\.json$/
@@ -57,7 +59,7 @@ module.exports.register = function () {
   // without that every <<anchor>> silently degraded to plain text.
   const anchorIndexes = new Map()
   this.once('contentClassified', ({ contentCatalog }) => {
-    for (const attachment of propertyAttachments(contentCatalog)) {
+    for (const attachment of newestPropertyAttachments(contentCatalog)) {
       const properties = readProperties(attachment, logger)
       if (!properties) continue
       const key = `${attachment.src.component}@${attachment.src.version || ''}`
@@ -72,7 +74,7 @@ module.exports.register = function () {
   // class="xref unresolved" while the same xref resolved fine on a real page.
   // Attachments are still published after this event.
   this.once('documentsConverted', ({ contentCatalog, siteAsciiDocConfig }) => {
-    const attachments = propertyAttachments(contentCatalog)
+    const attachments = newestPropertyAttachments(contentCatalog)
     if (!attachments.length) return
 
     for (const attachment of attachments) {
@@ -135,13 +137,13 @@ module.exports.register = function () {
       logger.info(`${where}: rendered ${rendered} property descriptions to HTML${failed ? `, ${failed} failed` : ''}`)
       if (unresolved.size) {
         logger.warn(
-          `${where}: ${unresolved.size} xref target(s) in property descriptions could not be resolved, so they stay as raw macros in the published attachment: ` +
+          `${where} (${basename(attachment)}): ${unresolved.size} xref target(s) in property descriptions could not be resolved, so they stay as raw macros in the published attachment: ` +
           `${[...unresolved].sort().join(', ')}.`
         )
       }
       if (brokenAnchors.size) {
         logger.warn(
-          `${where}: ${brokenAnchors.size} <<anchor>> reference(s) in property descriptions name no documented property, so they render as plain text: ` +
+          `${where} (${basename(attachment)}): ${brokenAnchors.size} <<anchor>> reference(s) in property descriptions name no documented property, so they render as plain text: ` +
           `${[...brokenAnchors].sort().join(', ')}. Property anchors replace dots with hyphens, so redpanda.storage.mode is <<redpanda-storage-mode>>. ` +
           'Fix them in the description or in docs-data/property-overrides.json.'
         )
@@ -158,6 +160,36 @@ function propertyAttachments (contentCatalog) {
   return (contentCatalog.findBy({ family: 'attachment' }) || []).filter(
     (file) => file.src.module === 'reference' && PROPERTIES_JSON_RX.test(basename(file))
   )
+}
+
+function tagOf (file) {
+  return basename(file).match(PROPERTIES_JSON_RX)[1]
+}
+
+
+/**
+ * The newest property dataset per component version, and only that one.
+ *
+ * A branch can ship more than one: doc-tools retains the 2 newest property
+ * JSONs on purpose, because the next generation run needs the older one as its
+ * --diff baseline. Only the newest is ever read as a dataset -- the docs UI
+ * resolves tooltips against available-properties-tag, which
+ * set-available-attachment-versions sets to the newest -- so rendering the
+ * older one is not just wasted work. This extension rewrites
+ * entry.description to resolve xrefs and then replaces the attachment
+ * contents, so converting a baseline would make the next diff report a
+ * description change for every property in it, and every dead <<anchor>> in a
+ * superseded dataset would be reported a second time against a file nobody
+ * publishes.
+ */
+function newestPropertyAttachments (contentCatalog) {
+  const newest = new Map()
+  for (const file of propertyAttachments(contentCatalog)) {
+    const key = `${file.src.component}@${file.src.version || ''}`
+    const held = newest.get(key)
+    if (!held || compareTags(tagOf(file), tagOf(held)) > 0) newest.set(key, file)
+  }
+  return [...newest.values()]
 }
 
 /**
