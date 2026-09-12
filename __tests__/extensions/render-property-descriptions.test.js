@@ -256,6 +256,29 @@ describe('render-property-descriptions extension', () => {
     expect(warnings.some((w) => w.includes('redpandastoragemode'))).toBe(true)
   })
 
+  it('resolves the legacy dot-free anchor spelling to the documented property', () => {
+    // Before property anchors replaced dots with hyphens they dropped them, so
+    // descriptions written then say <<redpandaremoteread>> for
+    // redpanda.remote.read, and a few carry a stray hyphen
+    // (<<redpandastorage-mode>>). Every release branch still ships those, and
+    // each one warned on every build although the property is documented.
+    const partial = '=== redpanda.remote.read\n\nReads.\n\n=== redpanda.storage.mode\n\nMode.\n\n=== other_property\n\nSomething else.\n'
+    const catalog = catalogWith(
+      dataset({
+        other_property: 'See <<redpandaremoteread,`redpanda.remote.read`>> and <<redpandastorage-mode>>.',
+        'redpanda.remote.read': 'Reads.',
+        'redpanda.storage.mode': 'Mode.'
+      }),
+      { partialSource: partial }
+    )
+    const { data, warnings } = run(catalog)
+    const html = data.properties.other_property.description_html
+    expect(html).toContain('href="/streaming/26.2/reference/properties/cluster-properties/#redpanda-remote-read"')
+    expect(html).toContain('href="/streaming/26.2/reference/properties/cluster-properties/#redpanda-storage-mode"')
+    expect(html).not.toContain('<<')
+    expect(warnings.some((w) => w.includes('redpandaremoteread') || w.includes('redpandastorage-mode'))).toBe(false)
+  })
+
   it('falls back to the anchor name when a broken reference has no display text', () => {
     const catalog = catalogWith(dataset({ lonely: 'See <<flushbytes>> for details.' }))
     const { data } = run(catalog)
