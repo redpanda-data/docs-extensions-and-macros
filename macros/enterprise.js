@@ -41,8 +41,8 @@
  * or manage one -- so both macros treat a page in a Cloud component
  * (env-cloud) as having no enterprise feature to mark or list at all. The
  * inline macro renders plain text with no styling, tooltip, or link, and the
- * block macro renders a warning instead of a licensing table, both reported
- * according to enterprise-validate. This also covers the Cloud rendering of
+ * block macro renders nothing instead of a licensing table; both report to
+ * the build log according to enterprise-validate. This also covers the Cloud rendering of
  * single-sourced self-managed prose: the document reflects the page being
  * converted, regardless of which repo the included prose was written in.
  *
