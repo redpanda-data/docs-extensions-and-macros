@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://redpanda.com/schemas/solutions-relationships.schema.json",
   "title": "Solutions relationships",
-  "description": "Editorial graph edges between Solutions and Product Docs pages. Lives in the solutions repo at docs/modules/ROOT/partials/relationships.yml and is read by the solutions-catalog Antora extension through the content catalog, so the file is versioned with the content it describes. Editors and the ML suggestion bot both PR into this one file. Only `approved` entries influence what readers see; `rejected` suppresses an edge the category matcher would otherwise show; `pending` is ignored by the build until a reviewer changes it.",
+  "description": "Editorial graph edges between solutions and Product Docs pages. Lives in the solutions repo at docs/modules/ROOT/partials/relationships.yml and is read by the solutions-catalog Antora extension through the content catalog, so the file is versioned with the content it describes. Editors and the ML suggestion bot both PR into this one file. Only `approved` entries influence what readers see; `rejected` suppresses an edge the category matcher would otherwise show; `pending` is ignored by the build until a reviewer changes it.",
   "type": "object",
   "additionalProperties": false,
   "required": ["relationships"],

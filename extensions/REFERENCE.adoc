@@ -680,7 +680,7 @@ antora:
 
 == Related docs
 
-WARNING: Deprecated since 5.43.0 and removed in 6.0. The build logs one warning per run while it is registered. Solution overviews carry their related Product Docs in `page-solution.relatedDocs` (see <<Solutions catalog>>), with provenance and a stable ranking instead of a superset category match.
+WARNING: Deprecated since 5.43.0 and removed in 6.0. The build logs one warning per run while it is registered. Overviews of solutions carry their related Product Docs in `page-solution.relatedDocs` (see <<Solutions catalog>>), with provenance and a stable ranking instead of a superset category match.
 
 This extension enhances the connectivity between lab exercises and relevant documentation by dynamically identifying and linking related documentation pages and other lab exercises based on shared categories and deployment types.
 

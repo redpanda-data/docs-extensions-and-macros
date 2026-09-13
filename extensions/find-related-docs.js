@@ -8,7 +8,7 @@ module.exports.register = function ({ config }) {
   const logger = this.getLogger('related-docs-extension');
 
   this.on('documentsConverted', async ({ contentCatalog, siteCatalog }) => {
-    // Labs are being replaced by Solutions. Solution overviews carry their
+    // Labs are being replaced by solutions. Solution overviews carry their
     // related docs in page-solution (see solutions-catalog); this extension
     // goes away in the next major version.
     logger.warn('find-related-docs is deprecated and will be removed in 6.0. Use solutions-catalog (page-solution.relatedDocs) instead.');

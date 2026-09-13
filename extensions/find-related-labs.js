@@ -8,7 +8,7 @@ module.exports.register = function ({ config }) {
   const logger = this.getLogger('related-labs-extension');
 
   this.on('documentsConverted', async ({ contentCatalog, siteCatalog }) => {
-    // Labs are being replaced by Solutions. The solutions-catalog extension
+    // Labs are being replaced by solutions. The solutions-catalog extension
     // computes page-related-solutions with scored, explainable edges; this
     // extension goes away in the next major version.
     logger.warn('find-related-labs is deprecated and will be removed in 6.0. Use solutions-catalog (page-related-solutions) instead.');

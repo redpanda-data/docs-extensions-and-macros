@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * The content graph between Product Docs pages and Solutions.
+ * The content graph between Product Docs pages and solutions.
  *
  * Deterministic scoring with provenance on every edge:
  *

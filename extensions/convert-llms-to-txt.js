@@ -700,7 +700,7 @@ function getTopLevelNavItems(contentCatalog, component, componentVersion) {
     family: 'page',
   });
 
-  // Solutions has no nav.adoc either, but every step page would crowd out the
+  // The solutions component has no nav.adoc either, but every step page would crowd out the
   // list; the overviews (page-layout: solution) are the entry points.
   const isSolutionEntry = component.name === 'solutions'
     ? (page) => page.asciidoc?.attributes?.['page-layout'] === 'solution'

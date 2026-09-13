@@ -10,7 +10,7 @@ const { parseCategoryList } = require('../../extension-utils/categories')
 const textEncoder = new TextEncoder()
 
 // Landing/umbrella layouts have no `article.doc`; they are indexed from metadata
-// (title + description) instead of being skipped. The Solutions landing page and
+// (title + description) instead of being skipped. The solutions landing page and
 // the solution overview layout render their body from `page-solution*` data, so
 // they belong here too.
 const METADATA_ONLY_LAYOUTS = ['home', 'component-home-v3', 'data-platform', 'solutions-home', 'solution']
@@ -326,7 +326,7 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       }
 
       if (component.name === 'solutions') {
-        // One record type for the Solutions surface: the overview and every step
+        // One record type for the solutions surface: the overview and every step
         // share solutionId so the search UI can group them; stepId is empty on
         // the overview and the landing page. Facet fields come from the
         // attributes the solutions-catalog extension validated and mirrored.

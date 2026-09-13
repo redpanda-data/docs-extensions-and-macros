@@ -65,7 +65,7 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
   }
 }
 
-/** Sidebar model: Solutions home, overview, ordered steps. */
+/** Sidebar model: solutions home, overview, ordered steps. */
 function buildNav (publicRecord, { homeUrl } = {}) {
   return {
     home: { title: 'Solutions', url: homeUrl || null },
