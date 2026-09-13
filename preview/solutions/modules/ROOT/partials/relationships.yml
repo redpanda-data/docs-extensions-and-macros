@@ -1,0 +1,27 @@
+# Editorial graph edges between solutions and Product Docs pages.
+# Schema: docs-data/solutions-relationships.schema.json in docs-extensions-and-macros.
+# One example per status. Only approved entries change what readers see.
+version: 1
+relationships:
+  - solution: demo-solution
+    doc: preview:ROOT:faq-test.adoc
+    status: approved
+    source: editor
+    confidence: 0.9
+    reason: The FAQ fixture is the worked example editors chose for the demo.
+    reviewedBy: jake
+    reviewedAt: 2026-09-12
+  - solution: demo-solution
+    doc: preview:ROOT:url-to-xref-test.adoc
+    status: rejected
+    source: ml
+    confidence: 0.55
+    reason: Link-checking fixture, unrelated to the demo despite the text overlap.
+    reviewedBy: jake
+    reviewedAt: 2026-09-12
+  - solution: demo-solution
+    doc: preview:ROOT:iceberg-explorer-test.adoc
+    status: pending
+    source: ml
+    confidence: 0.71
+    reason: Embedding similarity on the Architecture section. Awaiting review.
