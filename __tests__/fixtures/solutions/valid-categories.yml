@@ -1,0 +1,19 @@
+# Subset of docs/shared/modules/ROOT/partials/valid-categories.yml, enough for
+# the solutions-catalog tests: one flat category and two parents with children.
+page-valid-categories:
+  - category: 'rpk'
+    definition: 'Command-line tool.'
+  - category: 'Development'
+    definition: 'Building applications that use Redpanda.'
+    subcategories:
+      - category: 'Clients'
+        definition: 'Client libraries.'
+      - category: 'Stream Processing'
+        definition: 'Processing streaming data.'
+  - category: 'Deployment'
+    definition: 'Deploying Redpanda.'
+    subcategories:
+      - category: 'Iceberg'
+        definition: 'Iceberg integration.'
+      - category: 'Integration'
+        definition: 'Integrating with other systems.'

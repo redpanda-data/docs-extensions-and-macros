@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redpanda.com/schemas/solutions-relationships.schema.json",
+  "title": "Solutions relationships",
+  "description": "Editorial graph edges between Solutions and Product Docs pages. Lives in the solutions repo at docs/modules/ROOT/partials/relationships.yml and is read by the solutions-catalog Antora extension through the content catalog, so the file is versioned with the content it describes. Editors and the ML suggestion bot both PR into this one file. Only `approved` entries influence what readers see; `rejected` suppresses an edge the category matcher would otherwise show; `pending` is ignored by the build until a reviewer changes it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["relationships"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version of this file. Only 1 exists."
+    },
+    "relationships": {
+      "type": "array",
+      "description": "One entry per (solution, doc) pair. The same pair twice is a build failure.",
+      "items": { "$ref": "#/$defs/relationship" }
+    }
+  },
+  "$defs": {
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["solution", "doc", "status"],
+      "properties": {
+        "solution": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$",
+          "description": "Solution id. Equals the Antora module name and the directory under solutions/."
+        },
+        "doc": {
+          "type": "string",
+          "pattern": "^(?:[^@:\\s]+@)?[A-Za-z0-9_-]+:[A-Za-z0-9_-]*:[^\\s]+\\.adoc$",
+          "description": "Fully qualified Antora page ID of the Product Docs page (component:module:relative/path.adoc). A version prefix is allowed but the build resolves against the latest version."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["approved", "rejected", "pending"],
+          "description": "approved: shown with score max(0.9, confidence). rejected: never shown, even if categories overlap. pending: awaiting review, ignored by the build."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["ml", "editor"],
+          "description": "Who proposed the edge."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Proposer confidence. For approved entries the build uses max(0.9, confidence) as the score."
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Why the pair is related. Surfaces in solutions-graph.json and the UI's debug view."
+        },
+        "reviewedBy": {
+          "type": "string",
+          "description": "GitHub handle or email of the reviewer who set the status."
+        },
+        "reviewedAt": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "ISO date (YYYY-MM-DD) the status was set. Quote it in YAML or leave it unquoted; the build loads YAML without timestamp coercion."
+        }
+      }
+    }
+  }
+}
