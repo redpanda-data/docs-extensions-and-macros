@@ -3,6 +3,8 @@
 const { parse } = require('node-html-parser')
 const { decode } = require('html-entities')
 const path = require('path')
+const { getDeploymentType } = require('../../extension-utils/deployment-type')
+const { parseCategoryList } = require('../../extension-utils/categories')
 
 // Create encoder once at module scope for efficiency
 const textEncoder = new TextEncoder()
@@ -274,19 +276,9 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       tag = `${title}${version ? ' v' + version : ''}`
     }
 
-    const deployment = page.asciidoc?.attributes['env-kubernetes']
-      ? 'Kubernetes'
-      : page.asciidoc?.attributes['env-linux']
-        ? 'Linux'
-        : page.asciidoc?.attributes['env-docker']
-          ? 'Docker'
-          : page.asciidoc?.attributes['page-cloud']
-            ? 'Redpanda Cloud'
-            : ''
+    const deployment = getDeploymentType(page.asciidoc?.attributes)
 
-    const categories = page.asciidoc?.attributes['page-categories']
-      ? page.asciidoc.attributes['page-categories'].split(',').map(category => category.trim())
-      : []
+    const categories = parseCategoryList(page.asciidoc?.attributes['page-categories'])
 
     const commercialNames = page.asciidoc?.attributes['page-commercial-names']
       ? page.asciidoc.attributes['page-commercial-names'].split(',').map(name => name.trim())
