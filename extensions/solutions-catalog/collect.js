@@ -153,7 +153,8 @@ function buildRecord (mod, modulePages, moduleAttachments, { version }) {
     overview,
     steps: stepPages,
     layout: attrs['page-layout'],
-    title: overview ? (overview.asciidoc.doctitle || overview.title || mod) : mod,
+    // At contentClassified pages have no asciidoc yet; only structure is read then.
+    title: (overview && overview.asciidoc && overview.asciidoc.doctitle) || (overview && overview.title) || mod,
     url: overview && overview.pub ? overview.pub.url : undefined,
     description: attrs.description ? String(attrs.description).trim() : '',
     version: solutionVersion,
