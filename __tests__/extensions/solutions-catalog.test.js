@@ -365,6 +365,29 @@ describe('solutions-catalog: happy path', () => {
     ])
   })
 
+  test('logs a coverage report and writes it into the graph', () => {
+    const info = result.logger.info.mock.calls.map((c) => c[0])
+    // Stream Processing and Clients are subcategories, Development is their parent.
+    expect(info).toContain('solutions-catalog: leaderboard reach: Stream Processing=1 (sub), Clients=1 (sub), Development=1 (top); zero-match: none')
+    expect(info).toContain('solutions-catalog: 1 doc pages decorated, 0 eligible doc pages without categories')
+
+    const graph = addedFile(result.siteCatalog, 'assets/data/solutions-graph.json')
+    expect(graph.coverage).toEqual({
+      solutions: {
+        leaderboard: {
+          categories: {
+            'Stream Processing': { pages: 1, level: 'sub' },
+            Clients: { pages: 1, level: 'sub' },
+            Development: { pages: 1, level: 'top' },
+          },
+          zeroMatch: [],
+        },
+      },
+      uncategorizedEligiblePages: 0,
+      uncategorizedSample: [],
+    })
+  })
+
   test('sets the solutions-catalog attribute on every component version', () => {
     for (const component of result.catalog.getComponents()) {
       for (const version of component.versions) {
@@ -930,6 +953,61 @@ describe('solutions-catalog: platform filter', () => {
     expect(relationships.platformCompatible('Docker', ['self-managed', 'cloud'])).toBe(true)
     expect(relationships.platformCompatible('Redpanda Cloud', ['self-managed'])).toBe(false)
     expect(relationships.platformCompatible('', ['cloud'])).toBe(true)
+  })
+})
+
+describe('solutions-catalog: coverage report', () => {
+  test('counts zero-match categories, uncategorized pages, and caps the sample at 20', async () => {
+    // rpk matches no doc; Iceberg matches one; 25 eligible pages carry no categories at all.
+    const solution = makeSolution('leaderboard', { attrs: { 'page-categories': 'rpk, Iceberg', 'page-solution-related-docs': undefined } })
+    delete solution.pages[0].asciidoc.attributes['page-solution-related-docs']
+    const docs = [makeDoc({ relative: 'iceberg.adoc', attrs: { 'page-categories': 'Iceberg' } })]
+    for (let i = 0; i < 25; i++) {
+      const d = makeDoc({ relative: `plain-${String(i).padStart(2, '0')}.adoc` })
+      delete d.asciidoc.attributes['page-categories']
+      docs.push(d)
+    }
+    const result = await run({ solutions: [solution], docs, relationshipsText: 'relationships: []' })
+    const info = result.logger.info.mock.calls.map((c) => c[0])
+    expect(info).toContain('solutions-catalog: leaderboard reach: rpk=0 (top), Iceberg=1 (sub), Deployment=1 (top); zero-match: rpk')
+    expect(info).toContain('solutions-catalog: 1 doc pages decorated, 25 eligible doc pages without categories')
+    const { coverage } = addedFile(result.siteCatalog, 'solutions-graph.json')
+    expect(coverage.solutions.leaderboard.zeroMatch).toEqual(['rpk'])
+    expect(coverage.uncategorizedEligiblePages).toBe(25)
+    expect(coverage.uncategorizedSample).toHaveLength(20)
+    expect(coverage.uncategorizedSample[0]).toBe('/streaming/26.2/develop/plain-00/')
+  })
+
+  test('covers included drafts and skips unpublished ones', async () => {
+    const draft = makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft' } })
+    const excluded = await run({ solutions: [makeSolution('leaderboard'), draft] })
+    expect(Object.keys(addedFile(excluded.siteCatalog, 'solutions-graph.json').coverage.solutions)).toEqual(['leaderboard'])
+    const included = await run({ solutions: [makeSolution('leaderboard'), makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft' } })], config: { include_drafts: true } })
+    expect(Object.keys(addedFile(included.siteCatalog, 'solutions-graph.json').coverage.solutions).sort()).toEqual(['leaderboard', 'sandbox'])
+  })
+
+  test('computeCoverage and formatCoverageLine are pure', () => {
+    const map = { categories: new Set(['Development']), subcategories: new Set(['Clients']) }
+    const coverage = relationships.computeCoverage({
+      docs: [
+        { url: '/a/', categories: ['Clients', 'Development'] },
+        { url: '/b/', categories: ['Development'] },
+        { url: '/c/', categories: [] },
+      ],
+      solutions: [{ id: 's', categories: ['Clients', 'Development', 'Ghost'] }],
+      categoryMap: map,
+      sampleSize: 1,
+    })
+    expect(coverage.solutions.s.categories).toEqual({
+      Clients: { pages: 1, level: 'sub' },
+      Development: { pages: 2, level: 'top' },
+      Ghost: { pages: 0, level: 'sub' },
+    })
+    expect(coverage.solutions.s.zeroMatch).toEqual(['Ghost'])
+    expect(coverage.uncategorizedEligiblePages).toBe(1)
+    expect(coverage.uncategorizedSample).toEqual(['/c/'])
+    expect(relationships.formatCoverageLine('s', coverage.solutions.s)).toBe('solutions-catalog: s reach: Clients=1 (sub), Development=2 (top), Ghost=0 (sub); zero-match: Ghost')
+    expect(relationships.formatCoverageLine('e', { categories: {}, zeroMatch: [] })).toBe('solutions-catalog: e reach: none; zero-match: none')
   })
 })
 

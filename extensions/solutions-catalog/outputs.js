@@ -183,13 +183,15 @@ function buildCatalog (publicRecords, { siteUrl = '', generatedAt = new Date().t
 }
 
 /** assets/data/solutions-graph.json: every edge with any signal. */
-function buildGraph (edges, { siteUrl = '', generatedAt = new Date().toISOString(), maxRelated, minScore } = {}) {
-  return {
+function buildGraph (edges, { siteUrl = '', generatedAt = new Date().toISOString(), maxRelated, minScore, coverage } = {}) {
+  const graph = {
     generatedAt,
     siteUrl,
     settings: { maxRelated, minScore },
     edges,
   }
+  if (coverage) graph.coverage = coverage
+  return graph
 }
 
 function toJsonBuffer (value) {

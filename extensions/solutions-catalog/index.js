@@ -360,6 +360,14 @@ module.exports.register = function ({ config = {} } = {}) {
       decorated++
     }
 
+    // Category coverage report: which of each solution's categories reach doc
+    // pages, and how many eligible pages carry no categories at all.
+    const coverage = relationships.computeCoverage({ docs: graphInput, solutions: active, categoryMap })
+    for (const [slug, entry] of Object.entries(coverage.solutions)) {
+      logger.info(relationships.formatCoverageLine(slug, entry))
+    }
+    logger.info(`solutions-catalog: ${decorated} doc pages decorated, ${coverage.uncategorizedEligiblePages} eligible doc pages without categories`)
+
     // Page attributes and the catalog
     const homeUrl = collected.landing && collected.landing.pub && collected.landing.pub.url
     const publicRecords = []
@@ -375,10 +383,10 @@ module.exports.register = function ({ config = {} } = {}) {
     const generatedAt = new Date().toISOString()
     state.records = active
     state.catalog = outputs.buildCatalog(publicRecords, { siteUrl, generatedAt })
-    state.graph = outputs.buildGraph(edges, { siteUrl, generatedAt, maxRelated: settings.maxRelated, minScore: settings.minScore })
+    state.graph = outputs.buildGraph(edges, { siteUrl, generatedAt, maxRelated: settings.maxRelated, minScore: settings.minScore, coverage })
     addAttributeToComponents(contentCatalog, ATTRIBUTE_NAME, JSON.stringify(state.catalog), logger)
 
-    logger.info(`solutions-catalog: ${state.catalog.solutions.length} solution${state.catalog.solutions.length === 1 ? '' : 's'} in the catalog, ${edges.length} graph edges, ${decorated} doc pages decorated with page-related-solutions`)
+    logger.info(`solutions-catalog: ${state.catalog.solutions.length} solution${state.catalog.solutions.length === 1 ? '' : 's'} in the catalog, ${edges.length} graph edges`)
   })
 
   this.on('navigationBuilt', ({ siteCatalog }) => {

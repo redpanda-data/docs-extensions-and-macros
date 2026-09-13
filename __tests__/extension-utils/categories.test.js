@@ -77,6 +77,24 @@ describe('normalizeCategories', () => {
     expect(result.invalid).toEqual(['clients'])
   })
 
+  test('accepts new taxonomy entries without code changes', () => {
+    // A future valid-categories.yml adds a top-level category with children;
+    // nothing here hardcodes the taxonomy, so it just works.
+    const extended = createCategoryMap([
+      ...VALID,
+      { category: 'Redpanda Connect', subcategories: [{ category: 'Pipelines' }, { category: 'Connectors' }] },
+    ])
+    expect(extended.parentMap.get('Pipelines')).toBe('Redpanda Connect')
+    expect(normalizeCategories(['Connectors', 'Pipelines'], extended)).toEqual({
+      categories: ['Connectors', 'Pipelines', 'Redpanda Connect'],
+      invalid: [],
+      parentsAdded: ['Redpanda Connect'],
+    })
+    expect(normalizeCategories(['Redpanda Connect'], extended).categories).toEqual(['Redpanda Connect'])
+    // and it is still unknown to the old map
+    expect(normalizeCategories(['Pipelines'], map).invalid).toEqual(['Pipelines'])
+  })
+
   test('handles a non-array input', () => {
     expect(normalizeCategories(undefined, map)).toEqual({ categories: [], invalid: [], parentsAdded: [] })
   })

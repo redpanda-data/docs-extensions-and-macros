@@ -968,7 +968,19 @@ Every (doc, solution) pair with any signal becomes an edge with provenance:
 `{ generatedAt, siteUrl, solutions[], facets: { categories, technologies, difficulty, platforms } }`. `solutions` holds the public record of every published and deprecated solution, sorted by id. Each facet is `[{ value, count }]` sorted by value. The same JSON is set as the `solutions-catalog` attribute on every component version. In Handlebars the precise path is `page.componentVersion.asciidoc.attributes['solutions-catalog']` (the version the page belongs to). docs-ui's `get-index-data.js` reads `page.component.asciidoc.attributes[...]` instead; that also works because Antora's component object exposes `asciidoc` as a getter onto `component.latest.asciidoc`, and the attribute is set on every version including the latest. Either path returns the same string; `componentVersion` is the one to prefer in new helpers because it does not depend on which version is latest.
 
 `assets/data/solutions-graph.json`::
-`{ generatedAt, siteUrl, settings: { maxRelated, minScore }, edges: [{ doc, docUrl, solution, provenance, score, shown, rank, reason }] }`. Every recommendation a reader sees is explained here, and so is every one they do not.
+`{ generatedAt, siteUrl, settings: { maxRelated, minScore }, edges: [{ doc, docUrl, solution, provenance, score, shown, rank, reason }], coverage }`. Every recommendation a reader sees is explained here, and so is every one they do not. `coverage` is the category coverage report: `{ solutions: { <slug>: { categories: { <category>: { pages, level: 'sub'|'top' } }, zeroMatch: [...] } }, uncategorizedEligiblePages, uncategorizedSample: [first 20 URLs] }`, where `pages` counts eligible doc pages (the same set recommendations use) that carry the category after normalization, and `zeroMatch` lists the solution's categories no doc page shares.
+
+=== Coverage report
+
+Once per build, after recommendations are computed, the extension logs one info line per published (or included draft) solution and one summary line:
+
+[source]
+----
+solutions-catalog: multiplayer-gaming reach: Stream Processing=19 (sub), Clients=13 (sub), Development=28 (top); zero-match: none
+solutions-catalog: 47 doc pages decorated, 312 eligible doc pages without categories
+----
+
+A category in `zero-match` reaches nobody: either the Product Docs pages that should carry it are missing `page-categories`, or the solution is categorized wrongly. The summary's second number is the size of the opportunity: eligible doc pages that can never receive a category recommendation until they are categorized. The same data is in `solutions-graph.json` under `coverage`.
 
 === relationships.yml
 

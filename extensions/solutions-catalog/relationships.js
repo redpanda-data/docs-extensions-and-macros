@@ -204,6 +204,56 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
   return { related, edges }
 }
 
+/**
+ * Category coverage: for every solution, how many eligible doc pages share each
+ * of its categories, so an author can see which categories reach readers and
+ * which reach nobody. Uses the same doc set and normalized categories as the
+ * recommendations.
+ *
+ * @param {Object} input
+ * @param {Array<{url: string, categories: Array<string>}>} input.docs - eligible doc pages
+ * @param {Array<Object>} input.solutions - active records (published or included drafts)
+ * @param {Object} [input.categoryMap]
+ * @param {number} [input.sampleSize=20]
+ * @returns {{solutions: Object, uncategorizedEligiblePages: number, uncategorizedSample: Array<string>}}
+ */
+function computeCoverage ({ docs, solutions, categoryMap, sampleSize = 20 }) {
+  const counts = new Map()
+  const uncategorized = []
+  for (const doc of docs) {
+    if (!doc.categories || !doc.categories.length) {
+      uncategorized.push(doc.url)
+      continue
+    }
+    for (const c of new Set(doc.categories)) counts.set(c, (counts.get(c) || 0) + 1)
+  }
+  const level = (c) => (categoryMap && categoryMap.categories.has(c) && !categoryMap.subcategories.has(c) ? 'top' : 'sub')
+
+  const perSolution = {}
+  for (const solution of solutions) {
+    const categories = {}
+    const zeroMatch = []
+    for (const c of solution.categories || []) {
+      const pages = counts.get(c) || 0
+      categories[c] = { pages, level: level(c) }
+      if (pages === 0) zeroMatch.push(c)
+    }
+    perSolution[solution.id] = { categories, zeroMatch }
+  }
+  return {
+    solutions: perSolution,
+    uncategorizedEligiblePages: uncategorized.length,
+    uncategorizedSample: uncategorized.slice(0, sampleSize),
+  }
+}
+
+/** One log line per solution: `<slug> reach: Clients=13 (sub), Development=28 (top); zero-match: X, Y`. */
+function formatCoverageLine (slug, entry) {
+  const reach = Object.entries(entry.categories).map(([c, v]) => `${c}=${v.pages} (${v.level})`).join(', ') || 'none'
+  const zero = entry.zeroMatch.length ? entry.zeroMatch.join(', ') : 'none'
+  return `solutions-catalog: ${slug} reach: ${reach}; zero-match: ${zero}`
+}
+
 function toRecommendation (solution, edge) {
   return {
     id: solution.id,
@@ -231,4 +281,6 @@ module.exports = {
   categoryScore,
   platformCompatible,
   computeRelatedSolutions,
+  computeCoverage,
+  formatCoverageLine,
 }
