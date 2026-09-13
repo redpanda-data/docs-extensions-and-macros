@@ -9,7 +9,7 @@ asciidoc:
     component-metadata:
       title: "Solutions"
       description: "Runnable, end-to-end reference implementations built on Redpanda."
-      color: "#0F766E"
+      color: "#B45309"
       order: 5
       icon: "rocket"
     solutions-personas:

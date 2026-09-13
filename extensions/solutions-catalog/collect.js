@@ -12,9 +12,15 @@
 
 const COMPONENT = 'solutions'
 
-// Ids the docs-site function routes shadow (/solutions/progress, /solutions/download)
-// plus names Antora already gives meaning to.
-const RESERVED_IDS = ['progress', 'download', 'api', 'index']
+// Ids the docs-site function routes shadow (/solutions/progress, /solutions/download),
+// names Antora already gives meaning to, and the non-solution module below.
+const RESERVED_IDS = ['progress', 'download', 'api', 'index', 'examples']
+
+// Modules of the solutions component that are not solutions. ROOT holds the
+// landing page and relationships.yml; `examples` holds public tutorial code
+// published as attachments for Product Docs pages. Neither is validated as a
+// solution, needs a pages/index.adoc, or appears in the catalog, nav, or graph.
+const NON_SOLUTION_MODULES = ['ROOT', 'examples']
 
 const LAYOUTS = Object.freeze({
   home: 'solutions-home',
@@ -127,7 +133,7 @@ function collectSolutions (contentCatalog, { component = COMPONENT } = {}) {
 
   const solutions = []
   for (const [mod, modulePages] of byModule) {
-    if (mod === 'ROOT') continue
+    if (NON_SOLUTION_MODULES.includes(mod)) continue
     solutions.push(buildRecord(mod, modulePages, attachments.filter((a) => a.src.module === mod), { version }))
   }
   solutions.sort((a, b) => a.id.localeCompare(b.id))
@@ -189,6 +195,7 @@ function buildRecord (mod, modulePages, moduleAttachments, { version }) {
 module.exports = {
   COMPONENT,
   RESERVED_IDS,
+  NON_SOLUTION_MODULES,
   LAYOUTS,
   ENUMS,
   SLUG_RX,

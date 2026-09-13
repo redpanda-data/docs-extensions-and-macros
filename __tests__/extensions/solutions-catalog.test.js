@@ -349,6 +349,57 @@ describe('solutions-catalog: happy path', () => {
   })
 })
 
+describe('solutions-catalog: non-solution modules', () => {
+  // `examples` holds public tutorial code published as attachments for Product
+  // Docs pages. Like ROOT it is not a solution: no validation, no index.adoc
+  // requirement, and it never reaches the catalog, nav, or graph.
+  function examplesModule ({ withPage = false } = {}) {
+    const attachments = [makeAttachment({ module: 'examples', relative: 'quickstart/docker-compose.yml' })]
+    const pages = withPage
+      ? [makePage({ module: 'examples', relative: 'quickstart.adoc', title: 'Quickstart code', attrs: { 'page-categories': 'Clients' }, html: '<article class="doc"><h1>Quickstart code</h1></article>' })]
+      : []
+    return { pages, attachments }
+  }
+
+  test('examples is a reserved id and a non-solution module', () => {
+    expect(collect.RESERVED_IDS).toContain('examples')
+    expect(collect.NON_SOLUTION_MODULES).toEqual(['ROOT', 'examples'])
+  })
+
+  test('an attachments-only examples module passes every hook untouched', async () => {
+    const result = await run({ solutions: [makeSolution('leaderboard'), examplesModule()] })
+    const catalog = addedFile(result.siteCatalog, 'solutions.json')
+    expect(catalog.solutions.map((s) => s.id)).toEqual(['leaderboard'])
+    const graph = addedFile(result.siteCatalog, 'solutions-graph.json')
+    expect(graph.edges.some((e) => e.solution === 'examples')).toBe(false)
+  })
+
+  test('an examples module with pages but no index.adoc is not validated as a solution', async () => {
+    const examples = examplesModule({ withPage: true })
+    const result = await run({ solutions: [makeSolution('leaderboard'), examples] })
+    const page = examples.pages[0]
+    expect(page.out).toBeDefined()
+    expect(attr(page, 'page-solution')).toBeUndefined()
+    expect(attr(page, 'page-solution-nav')).toBeUndefined()
+    expect(attr(page, 'page-related-solutions')).toBeUndefined()
+    const nav = json(result.solutions[0].pages[0], 'page-solution-nav')
+    expect(nav.steps.map((s) => s.id)).not.toContain('quickstart')
+    expect(addedFile(result.siteCatalog, 'solutions.json').solutions.map((s) => s.id)).toEqual(['leaderboard'])
+  })
+
+  test('no solution can point at examples as a related solution', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-related-solutions': 'examples' } })
+    await expect(run({ solutions: [solution, examplesModule()] })).rejects.toThrow(/entry "examples" is not a solution/)
+  })
+
+  test('a relationships.yml entry for examples is orphaned, not an edge', async () => {
+    const text = 'relationships:\n  - solution: examples\n    doc: streaming:develop:consumer-offsets.adoc\n    status: approved\n'
+    const result = await run({ solutions: [makeSolution('leaderboard'), examplesModule()], relationshipsText: text })
+    expect(result.logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(/orphaned, solution "examples"/)
+    expect(addedFile(result.siteCatalog, 'solutions-graph.json').edges.some((e) => e.solution === 'examples')).toBe(false)
+  })
+})
+
 describe('solutions-catalog: idle without a solutions component', () => {
   test('every hook is a no-op', async () => {
     const components = makeComponents().filter((c) => c.name !== 'solutions')
@@ -365,7 +416,9 @@ describe('solutions-catalog: structural fatals (contentClassified)', () => {
     await expect(run({ landing: null, hooks: ['contentClassified'] })).rejects.toThrow(/landing page ROOT\/pages\/index\.adoc is missing/)
   })
 
-  test.each(collect.RESERVED_IDS)('reserved module name %s', async (id) => {
+  // `examples` is reserved by being a non-solution module (see the dedicated
+  // describe): it never reaches this check, so it is excluded here.
+  test.each(collect.RESERVED_IDS.filter((id) => !collect.NON_SOLUTION_MODULES.includes(id)))('reserved module name %s', async (id) => {
     await expect(run({ solutions: [makeSolution(id)], hooks: ['contentClassified'] })).rejects.toThrow(/is reserved/)
   })
 

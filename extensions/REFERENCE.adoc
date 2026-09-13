@@ -744,7 +744,7 @@ Everything Antora-independent lives in pure modules next to `index.js`:
 === Hooks
 
 contentClassified::
-Structural fatals: the landing page `ROOT/pages/index.adoc` exists; every non-ROOT module has `pages/index.adoc`; module names are unique, lower-case slugs, and not reserved (`progress`, `download`, `api`, `index`); `ROOT/partials/relationships.yml` parses as YAML and validates against `docs-data/solutions-relationships.schema.json`. A missing `relationships.yml` warns and builds with no editorial edges.
+Structural fatals: the landing page `ROOT/pages/index.adoc` exists; every solution module has `pages/index.adoc`; module names are unique, lower-case slugs, and not reserved (`progress`, `download`, `api`, `index`, `examples`); `ROOT/partials/relationships.yml` parses as YAML and validates against `docs-data/solutions-relationships.schema.json`. A missing `relationships.yml` warns and builds with no editorial edges.
 
 documentsConverted::
 Register directly before `validate-attributes`, and after `unpublish-pages` and `add-git-dates`. Collects records, normalizes `page-categories` (parents added, unknown values fatal), runs every validation rule, applies `page-solution-status`, computes `page-related-solutions` for eligible Product Docs pages, writes the derived attributes onto solution pages, and sets the `solutions-catalog` component attribute on every component version. The attribute is set here rather than at `beforePublish` because Antora composes pages before `beforePublish` fires.
@@ -802,7 +802,10 @@ docs/modules/<slug>/pages/index.adoc         overview, :page-layout: solution
 docs/modules/<slug>/pages/<step-id>.adoc     one page per step, :page-layout: solution-step
 docs/modules/<slug>/attachments/*            build-along files, published at /solutions/<slug>/_attachments/
 docs/modules/<slug>/examples/*               code pulled into pages with the example$ include macro
+docs/modules/examples/attachments/*          public tutorial code for Product Docs pages (not a solution)
 ----
+
+Two modules are not solutions and are skipped by every rule, output, and the graph: `ROOT` (landing page and `relationships.yml`) and `examples` (public tutorial code that Product Docs pages link to as attachments). Neither needs a `pages/index.adoc`. `examples` is also a reserved id, so no solution can take that slug.
 
 The module name is the solution id, the URL segment, the release tag prefix, and the asset prefix. Steps have no order of their own: `page-solution-steps` on the overview is the only ordering, and the set of listed ids must equal the set of non-index pages in the module.
 
