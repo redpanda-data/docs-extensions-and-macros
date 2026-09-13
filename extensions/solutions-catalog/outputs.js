@@ -46,6 +46,7 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     asset: record.asset,
     repo: record.repo,
     status: record.status,
+    draft: record.status === 'draft',
     featured: Boolean(record.featured),
     difficulty: record.difficulty,
     duration: Number(record.duration),
@@ -159,10 +160,14 @@ function countValues (records, pick) {
     .map(([value, count]) => ({ value, count }))
 }
 
-/** assets/data/solutions.json: published and deprecated solutions plus facets. */
+/**
+ * assets/data/solutions.json: published and deprecated solutions plus facets.
+ * Drafts only reach this function when include_drafts admitted them, and then
+ * they are listed with status 'draft' and draft: true.
+ */
 function buildCatalog (publicRecords, { siteUrl = '', generatedAt = new Date().toISOString() } = {}) {
   const solutions = publicRecords
-    .filter((r) => CATALOG_STATUSES.includes(r.status))
+    .filter((r) => CATALOG_STATUSES.includes(r.status) || r.draft === true)
     .sort((a, b) => a.id.localeCompare(b.id))
   return {
     generatedAt,

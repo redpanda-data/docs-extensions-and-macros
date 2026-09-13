@@ -282,10 +282,15 @@ module.exports.register = function ({ config = {} } = {}) {
     warnings.forEach((w) => logger.warn(`solutions-catalog: ${w}`))
     if (rel.pendingCount) logger.info(`solutions-catalog: ${rel.pendingCount} pending relationship${rel.pendingCount === 1 ? '' : 's'} awaiting review (ignored by the build)`)
 
-    // Status: drafts vanish unless include_drafts; deprecated publish but never recommend
+    // Status: drafts vanish unless include_drafts. When included they behave as
+    // published for every output (catalog, JSON, graph, recommendations, nav)
+    // so a preview shows the real landing page; `status` stays 'draft' and the
+    // record carries `draft: true` so the UI can show a Draft chip. Deprecated
+    // solutions publish but are never recommended.
     const active = []
     let draftsBuilt = 0
     for (const record of collected.solutions) {
+      record.draft = record.status === 'draft'
       if (record.status === 'draft' && !settings.includeDrafts) {
         // The whole module goes: pages, their aliases, and the attachments and
         // images only those pages reference.
@@ -302,7 +307,7 @@ module.exports.register = function ({ config = {} } = {}) {
       active.push(record)
     }
     if (draftsBuilt) logger.warn(`solutions-catalog: building ${draftsBuilt} draft solution${draftsBuilt === 1 ? '' : 's'} because include_drafts is on`)
-    if (!active.some((r) => r.status === 'published' && r.featured)) logger.warn('solutions-catalog: no published solution is featured')
+    if (!active.some((r) => (r.status === 'published' || r.draft) && r.featured)) logger.warn('solutions-catalog: no published solution is featured')
 
     // Explicit related docs, resolved to keys and display items. A rejected
     // relationship wins over an authored explicit link in both directions: the
@@ -327,7 +332,7 @@ module.exports.register = function ({ config = {} } = {}) {
       }
       record.relatedSolutions = record.relatedSolutionIds
         .map((id) => activeById.get(id))
-        .filter((r) => r && r.status !== 'draft')
+        .filter(Boolean)
         .map((r) => ({ id: r.id, title: r.title, url: r.url }))
     }
 

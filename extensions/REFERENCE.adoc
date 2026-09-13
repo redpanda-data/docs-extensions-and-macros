@@ -899,7 +899,7 @@ Written on the overview and every step page (complex values are JSON strings, re
 | Attribute | Value
 
 | `page-solution`
-| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo`, `status`, `featured`, `difficulty`, `duration`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `personas`, `steps[{id, title, url, order, duration}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]`, `supersededBy`, `lastModified`.
+| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo`, `status`, `draft` (true only for a draft built with `include_drafts`), `featured`, `difficulty`, `duration`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `personas`, `steps[{id, title, url, order, duration}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]`, `supersededBy`, `lastModified`.
 
 | `page-solution-nav`
 | `{ home: {title, url}, overview: {title, url}, steps: [{id, title, url, order, duration}] }`. Every title in the JSON outputs is plain text: inline markup in the document title (`<code>`, entities) is stripped before it enters `page-solution`, the nav, `relatedDocs`, or `relatedSolutions`.
@@ -927,7 +927,7 @@ Eligible Product Docs pages receive `page-related-solutions`, only when non-empt
 === Status
 
 draft::
-Unpublished unless `include_drafts` or `SOLUTIONS_INCLUDE_DRAFTS=true`: `out` is deleted on the module's pages, aliases, attachments, and images, and the page and alias URLs are added to `siteCatalog.unpublishedPages` (re-asserted at `navigationBuilt` and `beforePublish`, so the list survives `unpublish-pages` resetting it if that runs later). Never in the catalog or the graph when unpublished; when built, it is in the graph with `shown: false` and the build warns that drafts are being built. Section checks are skipped for drafts.
+Unpublished unless `include_drafts` or `SOLUTIONS_INCLUDE_DRAFTS=true`: `out` is deleted on the module's pages, aliases, attachments, and images, and the page and alias URLs are added to `siteCatalog.unpublishedPages` (re-asserted at `navigationBuilt` and `beforePublish`, so the list survives `unpublish-pages` resetting it if that runs later). When drafts are included (previews, local builds) they behave as published for every output: they are in `solutions.json`, the `solutions-catalog` attribute, the graph, `page-related-solutions`, and the nav, so the preview shows the real landing page and recommendations. The record keeps `status: "draft"` and adds `draft: true`, which is what the UI's status chip reads. The build still warns that drafts are being built, and the release check skips them. Never in the catalog or the graph when unpublished; when built, it is in the graph with `shown: false` and the build warns that drafts are being built. Section checks are skipped for drafts.
 
 published::
 Everything applies.

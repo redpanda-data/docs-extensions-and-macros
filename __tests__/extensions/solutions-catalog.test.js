@@ -653,24 +653,53 @@ describe('solutions-catalog: status handling', () => {
     const graph = addedFile(result.siteCatalog, 'solutions-graph.json')
     expect(graph.edges.some((e) => e.solution === 'sandbox')).toBe(false)
     expect(attr(draft.pages[0], 'page-solution')).toBeUndefined()
+    expect(json(result.docs[0], 'page-related-solutions').map((r) => r.id)).toEqual(['leaderboard'])
+    expect(JSON.parse(result.catalog.getComponent('home').versions[0].asciidoc.attributes['solutions-catalog']).solutions.map((s) => s.id)).toEqual(['leaderboard'])
   })
 
   test.each([
     ['config include_drafts', { config: { include_drafts: true } }],
     ['env SOLUTIONS_INCLUDE_DRAFTS', { env: { SOLUTIONS_INCLUDE_DRAFTS: 'true' } }],
-  ])('drafts build with %s but are never recommended', async (_name, options) => {
+  ])('drafts build with %s and are first-class everywhere, keeping status draft', async (_name, options) => {
     const draft = makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft' } })
     const result = await run({ solutions: [draft], ...options })
     for (const page of draft.pages) expect(page.out).toBeDefined()
     expect(result.siteCatalog.unpublishedPages).toEqual([])
-    expect(json(draft.pages[0], 'page-solution').status).toBe('draft')
-    expect(attr(result.docs[0], 'page-related-solutions')).toBeUndefined()
+
+    // page-solution and nav on the draft's own pages
+    const record = json(draft.pages[0], 'page-solution')
+    expect(record.status).toBe('draft')
+    expect(record.draft).toBe(true)
+    expect(attr(draft.pages[0], 'page-solution-status')).toBe('draft')
+    expect(json(draft.pages[1], 'page-solution-nav').steps).toHaveLength(3)
+
+    // catalog JSON and component attribute
+    const catalog = addedFile(result.siteCatalog, 'solutions.json')
+    expect(catalog.solutions.map((s) => [s.id, s.status, s.draft])).toEqual([['sandbox', 'draft', true]])
+    expect(catalog.facets.difficulty).toEqual([{ value: 'intermediate', count: 1 }])
+    const attrCatalog = JSON.parse(result.catalog.getComponent('home').versions[0].asciidoc.attributes['solutions-catalog'])
+    expect(attrCatalog.solutions[0].id).toBe('sandbox')
+
+    // recommendations and graph
+    expect(json(result.docs[0], 'page-related-solutions')[0]).toMatchObject({ id: 'sandbox', provenance: 'explicit' })
     const graph = addedFile(result.siteCatalog, 'solutions-graph.json')
-    expect(graph.edges[0]).toMatchObject({ solution: 'sandbox', shown: false })
-    expect(graph.edges[0].reason).toMatch(/status is draft/)
-    // drafts are not catalog entries
-    expect(addedFile(result.siteCatalog, 'solutions.json').solutions).toEqual([])
+    expect(graph.edges[0]).toMatchObject({ solution: 'sandbox', shown: true, rank: 1 })
+
     expect(result.logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(/building 1 draft solution/)
+  })
+
+  test('an included draft can be a related solution and a featured one', async () => {
+    const draft = makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft', 'page-solution-featured': '' } })
+    const live = makeSolution('leaderboard', { attrs: { 'page-solution-featured': 'false', 'page-solution-related-solutions': 'sandbox' } })
+    const result = await run({ solutions: [live, draft], config: { include_drafts: true } })
+    expect(json(live.pages[0], 'page-solution').relatedSolutions.map((s) => s.id)).toEqual(['sandbox'])
+    expect(result.logger.warn.mock.calls.map((c) => c[0]).join('\n')).not.toMatch(/no published solution is featured/)
+  })
+
+  test('published records carry draft: false', async () => {
+    const result = await run()
+    expect(json(result.solutions[0].pages[0], 'page-solution').draft).toBe(false)
+    expect(addedFile(result.siteCatalog, 'solutions.json').solutions[0].draft).toBe(false)
   })
 
   test('deprecated solutions publish, appear in the catalog, and are excluded from recommendations', async () => {
@@ -1005,10 +1034,12 @@ describe('solutions-catalog: pure helpers', () => {
     expect(relationships.createRelationshipsValidator()(data)).toBe(true)
   })
 
-  test('buildCatalog keeps published and deprecated only', () => {
+  test('buildCatalog keeps published and deprecated, plus drafts only when flagged as included', () => {
     const recs = ['published', 'deprecated', 'draft'].map((status, i) => ({ id: `s${i}`, status, categories: [], technologies: [], platforms: [], difficulty: 'beginner' }))
     const catalog = outputs.buildCatalog(recs, { siteUrl: 'x', generatedAt: 't' })
     expect(catalog.solutions.map((s) => s.status)).toEqual(['published', 'deprecated'])
     expect(catalog.facets.difficulty).toEqual([{ value: 'beginner', count: 2 }])
+    recs[2].draft = true
+    expect(outputs.buildCatalog(recs, { siteUrl: 'x', generatedAt: 't' }).solutions.map((s) => s.status)).toEqual(['published', 'deprecated', 'draft'])
   })
 })

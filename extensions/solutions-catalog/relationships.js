@@ -14,7 +14,7 @@
  *                    Kubernetes/Linux/Docker doc -> platforms includes self-managed
  *   threshold        min_score (default 0.3): parent-only overlap never shows
  *   rank             score desc, featured desc, lastModified desc, title asc; cap max_related
- *   excluded         solution status != published
+ *   excluded         solution status != published (a draft built with include_drafts counts as published)
  *
  * Everything here is pure so the ranking can be unit tested without Antora.
  */
@@ -167,7 +167,7 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
         edges.push(edge)
         continue
       }
-      if (solution.status !== 'published') {
+      if (solution.status !== 'published' && !solution.draft) {
         edge.reason = `${edge.reason}; hidden: solution status is ${solution.status}`
         edges.push(edge)
         continue
