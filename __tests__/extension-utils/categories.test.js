@@ -23,9 +23,14 @@ describe('createCategoryMap', () => {
     expect(map.parentMap.get('Iceberg')).toBe('Deployment')
   })
 
-  test('tolerates a missing or malformed list', () => {
-    expect(createCategoryMap(undefined).categories.size).toBe(0)
-    expect(createCategoryMap([null, { nope: true }]).categories.size).toBe(0)
+  test('throws a clear error when the list is not an array', () => {
+    expect(() => createCategoryMap(undefined)).toThrow(/page-valid-categories must be a list .* got undefined/)
+    expect(() => createCategoryMap({ category: 'x' })).toThrow(/got object/)
+    expect(() => createCategoryMap(null)).toThrow(/got null/)
+  })
+
+  test('skips malformed entries inside a valid list', () => {
+    expect(createCategoryMap([null, { nope: true }, { category: 'ok' }]).categories).toEqual(new Set(['ok']))
   })
 })
 

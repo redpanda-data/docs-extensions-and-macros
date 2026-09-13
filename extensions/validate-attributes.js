@@ -7,7 +7,7 @@
 'use strict';
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
-const { createCategoryMap, parseCategoryList, normalizeCategories } = require('../extension-utils/categories')
+const { createCategoryMap, normalizeCategories } = require('../extension-utils/categories')
 
 module.exports.register = function ({ config }) {
   raiseListenerLimit(this)

@@ -24,7 +24,10 @@ function createCategoryMap (validCategories) {
     subcategories: new Set(),
     parentMap: new Map(),
   }
-  if (!Array.isArray(validCategories)) return categoryMap
+  if (!Array.isArray(validCategories)) {
+    const got = validCategories === null ? 'null' : Array.isArray(validCategories) ? 'array' : typeof validCategories
+    throw new TypeError(`page-valid-categories must be a list of { category, subcategories } entries, got ${got}. Check shared/modules/ROOT/partials/valid-categories.yml`)
+  }
 
   validCategories.forEach((categoryInfo) => {
     if (!categoryInfo || !categoryInfo.category) return

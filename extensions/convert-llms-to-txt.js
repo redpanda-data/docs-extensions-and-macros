@@ -706,9 +706,10 @@ function getTopLevelNavItems(contentCatalog, component, componentVersion) {
     ? (page) => page.asciidoc?.attributes?.['page-layout'] === 'solution'
     : () => true;
 
-  // Return all pages with URLs, sorted by title
+  // Return published pages with URLs, sorted by title. `page.out` is gone on
+  // pages an extension unpublished (unpublish-pages, solutions-catalog drafts).
   return pages
-    .filter(page => page.pub?.url && isSolutionEntry(page))
+    .filter(page => page.out && page.pub?.url && isSolutionEntry(page))
     .map(page => ({
       content: page.asciidoc?.navtitle || page.asciidoc?.doctitle || page.src.stem,
       url: page.pub.url,
@@ -716,3 +717,5 @@ function getTopLevelNavItems(contentCatalog, component, componentVersion) {
     .sort((a, b) => a.content.localeCompare(b.content))
     .slice(0, 10);
 }
+
+module.exports.getTopLevelNavItems = getTopLevelNavItems
