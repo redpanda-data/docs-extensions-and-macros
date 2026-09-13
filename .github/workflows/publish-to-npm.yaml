@@ -30,7 +30,7 @@ jobs:
     needs: publish
     strategy:
       matrix:
-        repo: ['redpanda-data/docs', 'redpanda-data/cloud-docs', 'redpanda-data/rp-connect-docs', 'redpanda-data/api-docs']
+        repo: ['redpanda-data/docs', 'redpanda-data/cloud-docs', 'redpanda-data/rp-connect-docs', 'redpanda-data/api-docs', 'redpanda-data/docs-site']
     runs-on: ubuntu-latest
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
