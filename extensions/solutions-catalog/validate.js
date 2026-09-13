@@ -50,18 +50,33 @@ function hasVerifySection (contents) {
 }
 
 /**
- * Attachment names linked from the page. `link:{attachmentsdir}/x.yml[]` renders
- * as an href ending in `/_attachments/x.yml`, so the name is whatever follows
- * the last `_attachments/` segment.
+ * Attachment prefix for a solution module: the overview URL directory plus
+ * `_attachments/`, which is where Antora publishes the module's attachments.
  */
-function attachmentLinkTargets (contents) {
+function attachmentPrefixOf (overviewUrl) {
+  const dir = String(overviewUrl || '').replace(/[^/]*$/, '')
+  return `${dir}_attachments/`
+}
+
+/**
+ * Names of THIS module's attachments linked from a page. Every href is resolved
+ * against the page's own URL first (a step at /solutions/x/step/ links its files
+ * as ../_attachments/f), and only hrefs that land under `attachmentPrefix` count.
+ * Links to another module's or component's attachments are someone else's to
+ * validate and pass through untouched.
+ */
+function attachmentLinkTargets (contents, { pageUrl = '/', attachmentPrefix } = {}) {
+  if (!attachmentPrefix) return []
   const root = parseHtml(contents)
+  const base = new URL(pageUrl, 'https://site.invalid')
   const names = new Set()
   root.querySelectorAll('a[href]').forEach((a) => {
     const href = a.getAttribute('href') || ''
-    const idx = href.lastIndexOf('_attachments/')
-    if (idx === -1) return
-    const raw = href.slice(idx + '_attachments/'.length).split(/[?#]/)[0]
+    let resolved
+    try { resolved = new URL(href, base) } catch { return }
+    if (resolved.origin !== base.origin) return
+    if (!resolved.pathname.startsWith(attachmentPrefix)) return
+    const raw = resolved.pathname.slice(attachmentPrefix.length)
     let name
     try { name = decodeURIComponent(raw) } catch { name = raw }
     if (name) names.add(name)
@@ -83,11 +98,8 @@ function validateStructure (collected, { reservedIds = RESERVED_IDS } = {}) {
   if (!collected.landing) {
     errors.push('solutions: landing page ROOT/pages/index.adoc is missing')
   }
-  const seen = new Set()
   for (const record of collected.solutions) {
     const id = record.id
-    if (seen.has(id)) errors.push(`${id}: duplicate module name`)
-    seen.add(id)
     if (reservedIds.includes(id)) errors.push(`${id}: module name is reserved (${reservedIds.join(', ')})`)
     if (!SLUG_RX.test(id)) errors.push(`${id}: module name must be a lower-case slug (letters, digits, hyphens)`)
     if (!record.overview) errors.push(`${id}: module has no pages/index.adoc overview`)
@@ -214,11 +226,13 @@ function validateSolution (record, { categoryMap, resolveDoc, solutionIds } = {}
     }
   }
 
-  // Attachment links must point at files in this module
+  // Links into this module's attachments must point at files that exist
   const attachmentNames = new Set(record.attachments.map((a) => a.name))
+  const attachmentPrefix = attachmentPrefixOf(record.overview.pub && record.overview.pub.url)
   const pagesToScan = [{ id: 'index', page: record.overview }, ...record.steps]
   for (const { id: pageId, page } of pagesToScan) {
-    for (const name of attachmentLinkTargets(page.contents)) {
+    const pageUrl = (page.pub && page.pub.url) || attachmentPrefix
+    for (const name of attachmentLinkTargets(page.contents, { pageUrl, attachmentPrefix })) {
       if (!attachmentNames.has(name)) err(`${pageId}.adoc links to attachment "${name}" which does not exist in the module`)
     }
   }
@@ -304,6 +318,7 @@ module.exports = {
   normalizeHeading,
   headingTexts,
   hasVerifySection,
+  attachmentPrefixOf,
   attachmentLinkTargets,
   validateStructure,
   validateSolution,

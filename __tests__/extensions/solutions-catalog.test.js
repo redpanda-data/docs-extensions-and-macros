@@ -52,6 +52,16 @@ function makeAttachment ({ component = 'solutions', version = '', module, relati
   }
 }
 
+function makeAlias ({ component = 'solutions', version = '', module, relative, target }) {
+  const url = urlFor(component, version, module, relative)
+  return {
+    src: { component, version, module, relative, family: 'alias' },
+    rel: target,
+    out: { path: `${url.slice(1)}index.html` },
+    pub: { url },
+  }
+}
+
 function makePartial ({ component = 'solutions', version = '', module = 'ROOT', relative, text }) {
   return {
     src: { component, version, module, relative, family: 'partial' },
@@ -99,7 +109,7 @@ function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title } 
     relative: 'index.adoc',
     title: title || `Solution ${id}`,
     attrs: overviewAttrs,
-    html: overviewHtml || OVERVIEW_HTML(title || `Solution ${id}`, '<a href="../_attachments/docker-compose.yml">compose</a>'),
+    html: overviewHtml || OVERVIEW_HTML(title || `Solution ${id}`, '<a href="_attachments/docker-compose.yml">compose</a>'),
   })
   const stepPages = stepIds.map((stepId, i) => makePage({
     module: id,
@@ -180,7 +190,8 @@ async function run ({
   components,
   config = {},
   env = {},
-  hooks = ['contentClassified', 'documentsConverted', 'beforePublish'],
+  hooks = ['contentClassified', 'documentsConverted', 'navigationBuilt', 'beforePublish'],
+  beforeNavigationBuilt,
 } = {}) {
   const pages = [...(landing ? [landing] : []), ...solutions.flatMap((s) => s.pages), ...docs]
   const attachments = solutions.flatMap((s) => s.attachments)
@@ -195,6 +206,8 @@ async function run ({
     const { handlers, logger } = createContext(config)
     if (hooks.includes('contentClassified')) await handlers.contentClassified({ contentCatalog: catalog, siteCatalog, playbook })
     if (hooks.includes('documentsConverted')) await handlers.documentsConverted({ contentCatalog: catalog, siteCatalog, playbook })
+    if (beforeNavigationBuilt) beforeNavigationBuilt(siteCatalog)
+    if (hooks.includes('navigationBuilt')) await handlers.navigationBuilt({ contentCatalog: catalog, siteCatalog, playbook })
     if (hooks.includes('beforePublish')) await handlers.beforePublish({ contentCatalog: catalog, siteCatalog, playbook })
     return { catalog, siteCatalog, logger, pages, docs, solutions }
   } finally {
@@ -256,6 +269,25 @@ describe('solutions-catalog: happy path', () => {
     expect(record.relatedDocs).toEqual([
       { id: 'streaming:develop:consumer-offsets.adoc', title: 'consumer-offsets.adoc', url: '/streaming/26.2/develop/consumer-offsets/', provenance: 'explicit' },
     ])
+  })
+
+  test('strips inline markup from titles before they enter JSON', async () => {
+    const solution = makeSolution('leaderboard', { title: 'Use <code>rpk</code> &amp; friends' })
+    solution.pages[1].asciidoc.doctitle = 'Start <em>fast</em>'
+    const doc = makeDoc({ title: 'Consumer <code>offsets</code>' })
+    const other = makeSolution('other', { title: 'Other <b>one</b>', attrs: { 'page-solution-related-docs': undefined, 'page-categories': 'rpk' } })
+    delete other.pages[0].asciidoc.attributes['page-solution-related-docs']
+    solution.pages[0].asciidoc.attributes['page-solution-related-solutions'] = 'other'
+    const res = await run({ solutions: [solution, other], docs: [doc] })
+    const record = json(solution.pages[0], 'page-solution')
+    expect(record.title).toBe('Use rpk & friends')
+    expect(record.steps[0].title).toBe('Start fast')
+    expect(record.relatedDocs[0].title).toBe('Consumer offsets')
+    expect(record.relatedSolutions[0].title).toBe('Other one')
+    expect(json(solution.pages[0], 'page-solution-nav').overview.title).toBe('Use rpk & friends')
+    expect(attr(solution.pages[1], 'page-solution-prev-title')).toBe('Use rpk & friends')
+    expect(json(doc, 'page-related-solutions')[0].title).toBe('Use rpk & friends')
+    expect(addedFile(res.siteCatalog, 'solutions.json').solutions.find((s) => s.id === 'leaderboard').title).toBe('Use rpk & friends')
   })
 
   test('writes nav, prev/next, step index and count on every page', () => {
@@ -428,6 +460,14 @@ describe('solutions-catalog: structural fatals (contentClassified)', () => {
     await expect(run({ solutions: [solution], hooks: ['contentClassified'] })).rejects.toThrow(/orphan: module has no pages\/index\.adoc overview/)
   })
 
+  test('runs on pages that have no asciidoc yet (as Antora provides them at contentClassified)', async () => {
+    const strip = (solution) => { for (const p of solution.pages) delete p.asciidoc; return solution }
+    const landing = makeLanding(); delete landing.asciidoc
+    await expect(run({ solutions: [strip(makeSolution('download'))], landing, hooks: ['contentClassified'] })).rejects.toThrow(/download: module name is reserved/)
+    const ok = strip(makeSolution('leaderboard'))
+    await expect(run({ solutions: [ok], landing, docs: [], hooks: ['contentClassified'] })).resolves.toBeTruthy()
+  })
+
   test('module name that is not a slug', async () => {
     await expect(run({ solutions: [makeSolution('Not_A_Slug')], hooks: ['contentClassified'] })).rejects.toThrow(/lower-case slug/)
   })
@@ -534,7 +574,7 @@ describe('solutions-catalog: step bijection', () => {
 
 describe('solutions-catalog: section checks on converted HTML', () => {
   test.each(['Architecture', 'Prerequisites', 'Production considerations'])('published overview without h2 %s', async (missing) => {
-    const html = OVERVIEW_HTML('Solution leaderboard', '<a href="../_attachments/docker-compose.yml">c</a>').replace(`>${missing}</h2>`, '>Something else</h2>')
+    const html = OVERVIEW_HTML('Solution leaderboard', '<a href="_attachments/docker-compose.yml">c</a>').replace(`>${missing}</h2>`, '>Something else</h2>')
     const solution = makeSolution('leaderboard', { overviewHtml: html })
     await expect(run({ solutions: [solution] })).rejects.toThrow(new RegExp(`missing an h2 "${missing}"`))
   })
@@ -570,8 +610,32 @@ describe('solutions-catalog: section checks on converted HTML', () => {
   })
 
   test('a link to a missing attachment is fatal', async () => {
-    const solution = makeSolution('leaderboard', { overviewHtml: OVERVIEW_HTML('x', '<a href="../_attachments/missing.env">env</a>') })
+    const solution = makeSolution('leaderboard', { overviewHtml: OVERVIEW_HTML('x', '<a href="_attachments/missing.env">env</a>') })
     await expect(run({ solutions: [solution] })).rejects.toThrow(/index\.adoc links to attachment "missing\.env" which does not exist/)
+  })
+
+  test('a relative attachment link from a step resolves against the step URL', async () => {
+    // /solutions/leaderboard/build-leaderboard/ + ../_attachments/f -> /solutions/leaderboard/_attachments/f
+    const ok = makeSolution('leaderboard', { stepHtml: { 'build-leaderboard': STEP_HTML('b') .replace('</article>', '<a href="../_attachments/docker-compose.yml">c</a></article>') } })
+    await expect(run({ solutions: [ok] })).resolves.toBeTruthy()
+    const bad = makeSolution('leaderboard', { stepHtml: { 'build-leaderboard': STEP_HTML('b').replace('</article>', '<a href="../_attachments/nope.yml">c</a></article>') } })
+    await expect(run({ solutions: [bad] })).rejects.toThrow(/build-leaderboard\.adoc links to attachment "nope\.yml" which does not exist/)
+  })
+
+  test('links to another module\'s or component\'s attachments, or off-site, are not checked', async () => {
+    const extra = '<a href="/solutions/other-solution/_attachments/theirs.yml">a</a>' +
+      '<a href="../../streaming/26.2/get-started/_attachments/docker-compose/redpanda.yml">b</a>' +
+      '<a href="https://example.com/solutions/leaderboard/_attachments/external.yml">c</a>' +
+      '<a href="../examples/_attachments/quickstart/docker-compose.yml">d</a>'
+    const solution = makeSolution('leaderboard', { overviewHtml: OVERVIEW_HTML('x', extra) })
+    await expect(run({ solutions: [solution] })).resolves.toBeTruthy()
+  })
+
+  test('attachmentPrefixOf and attachmentLinkTargets', () => {
+    expect(validate.attachmentPrefixOf('/solutions/leaderboard/')).toBe('/solutions/leaderboard/_attachments/')
+    const html = '<a href="../_attachments/a%20b.yml">1</a><a href="/solutions/leaderboard/_attachments/c.yml#x">2</a><a href="/solutions/zzz/_attachments/d.yml">3</a><a href="mailto:x@y">4</a>'
+    expect(validate.attachmentLinkTargets(html, { pageUrl: '/solutions/leaderboard/step/', attachmentPrefix: '/solutions/leaderboard/_attachments/' })).toEqual(['a b.yml', 'c.yml'])
+    expect(validate.attachmentLinkTargets(html, {})).toEqual([])
   })
 })
 
@@ -622,9 +686,41 @@ describe('solutions-catalog: status handling', () => {
     expect(edge.reason).toMatch(/status is deprecated/)
   })
 
-  test('warns when no published solution is featured', async () => {
-    const result = await run({ solutions: [makeSolution('leaderboard', { attrs: { 'page-solution-featured': 'false' } })] })
+  test('warns when no published solution is featured, and omits page-solution-featured', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-featured': 'false' } })
+    const result = await run({ solutions: [solution] })
     expect(result.logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(/no published solution is featured/)
+    for (const page of solution.pages) expect(attr(page, 'page-solution-featured')).toBeUndefined()
+    expect(json(solution.pages[0], 'page-solution').featured).toBe(false)
+  })
+
+  test('drafts take their attachments, images, and aliases with them, and the list survives a reset', async () => {
+    const draft = makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft' } })
+    delete draft.pages[0].asciidoc.attributes['page-solution-related-docs']
+    const alias = makeAlias({ module: 'sandbox', relative: 'old-name.adoc', target: draft.pages[0] })
+    const image = { src: { component: 'solutions', version: '', module: 'sandbox', relative: 'arch.svg', family: 'image' }, out: { path: 'x' }, pub: { url: '/solutions/sandbox/_images/arch.svg' } }
+    draft.attachments.push(alias, image)
+    const result = await run({
+      solutions: [makeSolution('leaderboard'), draft],
+      // unpublish-pages registered after us would do exactly this
+      beforeNavigationBuilt: (siteCatalog) => { siteCatalog.unpublishedPages = [] },
+    })
+    for (const file of [...draft.pages, ...draft.attachments]) expect(file.out).toBeUndefined()
+    expect(result.siteCatalog.unpublishedPages).toEqual(expect.arrayContaining(['/solutions/sandbox/', '/solutions/sandbox/start-environment/', '/solutions/sandbox/old-name/']))
+    expect(new Set(result.siteCatalog.unpublishedPages).size).toBe(result.siteCatalog.unpublishedPages.length)
+    // attachments and images are files, not pages: not in the unpublished URL list
+    expect(result.siteCatalog.unpublishedPages).not.toContain('/solutions/sandbox/_attachments/docker-compose.yml')
+    // a live solution's files are untouched
+    for (const file of result.solutions[0].attachments) expect(file.out).toBeDefined()
+  })
+
+  test('ensureUnpublished is idempotent and tolerates a missing array', () => {
+    const siteCatalog = {}
+    extension.ensureUnpublished(siteCatalog, ['/a/', '/b/'])
+    extension.ensureUnpublished(siteCatalog, ['/b/', '/c/'])
+    expect(siteCatalog.unpublishedPages).toEqual(['/a/', '/b/', '/c/'])
+    extension.ensureUnpublished(siteCatalog, [])
+    expect(siteCatalog.unpublishedPages).toEqual(['/a/', '/b/', '/c/'])
   })
 })
 
@@ -751,10 +847,14 @@ describe('solutions-catalog: recommendation ranking', () => {
     expect(edge.reason).toMatch(/not really related/)
   })
 
-  test('rejected beats explicit', async () => {
-    const text = 'relationships:\n  - solution: leaderboard\n    doc: streaming:develop:consumer-offsets.adoc\n    status: rejected\n'
+  test('rejected beats explicit in both directions and warns', async () => {
+    const text = 'relationships:\n  - solution: leaderboard\n    doc: streaming:develop:consumer-offsets.adoc\n    status: rejected\n    reason: wrong page\n'
     const result = await run({ relationshipsText: text })
     expect(attr(result.docs[0], 'page-related-solutions')).toBeUndefined()
+    expect(json(result.solutions[0].pages[0], 'page-solution').relatedDocs).toEqual([])
+    expect(result.logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(/leaderboard: page-solution-related-docs lists streaming:develop:consumer-offsets\.adoc but relationships\.yml rejects the pair/)
+    const [edge] = addedFile(result.siteCatalog, 'solutions-graph.json').edges
+    expect(edge).toMatchObject({ provenance: 'rejected', shown: false })
   })
 
   test('pending relationships are ignored entirely', async () => {

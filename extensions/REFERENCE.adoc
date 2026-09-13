@@ -680,7 +680,7 @@ antora:
 
 == Related docs
 
-WARNING: Deprecated since 5.39.0 and removed in 6.0. The build logs one warning per run while it is registered. Solution overviews carry their related Product Docs in `page-solution.relatedDocs` (see <<Solutions catalog>>), with provenance and a stable ranking instead of a superset category match.
+WARNING: Deprecated since 5.43.0 and removed in 6.0. The build logs one warning per run while it is registered. Solution overviews carry their related Product Docs in `page-solution.relatedDocs` (see <<Solutions catalog>>), with provenance and a stable ranking instead of a superset category match.
 
 This extension enhances the connectivity between lab exercises and relevant documentation by dynamically identifying and linking related documentation pages and other lab exercises based on shared categories and deployment types.
 
@@ -705,7 +705,7 @@ antora:
 
 == Related labs
 
-WARNING: Deprecated since 5.39.0 and removed in 6.0. The build logs one warning per run while it is registered. Product Docs pages now receive `page-related-solutions` from <<Solutions catalog>>, which only shows a solution when the score clears a threshold, so the "Suggested labs" block that appeared on every categorized page goes away with it.
+WARNING: Deprecated since 5.43.0 and removed in 6.0. The build logs one warning per run while it is registered. Product Docs pages now receive `page-related-solutions` from <<Solutions catalog>>, which only shows a solution when the score clears a threshold, so the "Suggested labs" block that appeared on every categorized page goes away with it.
 
 This extension enriches documentation pages with links to related lab exercises, facilitating a deeper understanding of the content through practical application. It dynamically assigns related labs to each documentation page based on shared categories and deployment types.
 
@@ -888,7 +888,7 @@ On the overview (`pages/index.adoc`):
 
 On a step page: `page-layout` must be `solution-step`; `description` is the step's own; `page-solution-step-duration` (optional) is an integer number of minutes.
 
-Published solutions must also pass the section checks on the converted HTML: the overview needs `h2` headings `Architecture`, `Prerequisites`, and `Production considerations` (matched after lower-casing, collapsing whitespace, and dropping trailing punctuation); every step needs an `h2`/`h3` whose text starts with `Verify` or a block with the `solution-verify` role. Every `link:{attachmentsdir}/...` on any page of the module must point at a file that exists in the module's attachments.
+Published solutions must also pass the section checks on the converted HTML: the overview needs `h2` headings `Architecture`, `Prerequisites`, and `Production considerations` (matched after lower-casing, collapsing whitespace, and dropping trailing punctuation); every step needs an `h2`/`h3` whose text starts with `Verify` or a block with the `solution-verify` role. Every link into this module's own attachments (`link:{attachmentsdir}/...`, or any href that resolves under `/solutions/<slug>/_attachments/` once resolved against the page URL) must point at a file that exists in the module. Links to another module's or another component's attachments are not checked here.
 
 === Derived attributes
 
@@ -902,10 +902,10 @@ Written on the overview and every step page (complex values are JSON strings, re
 | The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo`, `status`, `featured`, `difficulty`, `duration`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `personas`, `steps[{id, title, url, order, duration}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]`, `supersededBy`, `lastModified`.
 
 | `page-solution-nav`
-| `{ home: {title, url}, overview: {title, url}, steps: [{id, title, url, order, duration}] }`.
+| `{ home: {title, url}, overview: {title, url}, steps: [{id, title, url, order, duration}] }`. Every title in the JSON outputs is plain text: inline markup in the document title (`<code>`, entities) is stripped before it enters `page-solution`, the nav, `relatedDocs`, or `relatedSolutions`.
 
 | `page-solution-id`, `page-solution-title`, `page-solution-url`, `page-solution-description`, `page-solution-version`, `page-solution-tag`, `page-solution-asset`, `page-solution-repo`, `page-solution-status`, `page-solution-difficulty`, `page-solution-duration`, `page-solution-download`, `page-solution-featured`, `page-solution-platforms`, `page-solution-technologies`
-| Scalar mirrors of the overview values, so a step page template can read them without parsing JSON. `page-solution-featured` is `true`/`false`; lists are comma joined.
+| Scalar mirrors of the overview values, so a step page template can read them without parsing JSON. `page-solution-featured` is present (`true`) only on featured solutions and absent otherwise, so templates test for existence; lists are comma joined.
 
 | `page-solution-step-count`
 | Number of steps.
@@ -927,7 +927,7 @@ Eligible Product Docs pages receive `page-related-solutions`, only when non-empt
 === Status
 
 draft::
-Unpublished (`page.out` deleted and the URL added to `siteCatalog.unpublishedPages`) unless `include_drafts` or `SOLUTIONS_INCLUDE_DRAFTS=true`. Never in the catalog or the graph when unpublished; when built, it is in the graph with `shown: false` and the build warns that drafts are being built. Section checks are skipped for drafts.
+Unpublished unless `include_drafts` or `SOLUTIONS_INCLUDE_DRAFTS=true`: `out` is deleted on the module's pages, aliases, attachments, and images, and the page and alias URLs are added to `siteCatalog.unpublishedPages` (re-asserted at `navigationBuilt` and `beforePublish`, so the list survives `unpublish-pages` resetting it if that runs later). Never in the catalog or the graph when unpublished; when built, it is in the graph with `shown: false` and the build warns that drafts are being built. Section checks are skipped for drafts.
 
 published::
 Everything applies.
@@ -952,7 +952,7 @@ Every (doc, solution) pair with any signal becomes an edge with provenance:
 | `max(0.9, confidence)`
 
 | `rejected`
-| `relationships.yml` entry with `status: rejected`. Beats every other signal.
+| `relationships.yml` entry with `status: rejected`. Beats every other signal, including an authored `page-solution-related-docs` entry: the doc gets no recommendation and the overview's `relatedDocs` drops it, with a build warning naming the pair so the disagreement is resolved in one place.
 | kept in the graph, `shown: false`
 
 | `category`
@@ -965,7 +965,7 @@ Every (doc, solution) pair with any signal becomes an edge with provenance:
 === Outputs
 
 `assets/data/solutions.json`::
-`{ generatedAt, siteUrl, solutions[], facets: { categories, technologies, difficulty, platforms } }`. `solutions` holds the public record of every published and deprecated solution, sorted by id. Each facet is `[{ value, count }]` sorted by value. The same JSON is set as the `solutions-catalog` attribute on every component version; the UI helper reads `page.component.asciidoc.attributes['solutions-catalog']` the way `get-index-data` reads `generate-index-data` output.
+`{ generatedAt, siteUrl, solutions[], facets: { categories, technologies, difficulty, platforms } }`. `solutions` holds the public record of every published and deprecated solution, sorted by id. Each facet is `[{ value, count }]` sorted by value. The same JSON is set as the `solutions-catalog` attribute on every component version. In Handlebars the precise path is `page.componentVersion.asciidoc.attributes['solutions-catalog']` (the version the page belongs to). docs-ui's `get-index-data.js` reads `page.component.asciidoc.attributes[...]` instead; that also works because Antora's component object exposes `asciidoc` as a getter onto `component.latest.asciidoc`, and the attribute is set on every version including the latest. Either path returns the same string; `componentVersion` is the one to prefer in new helpers because it does not depend on which version is latest.
 
 `assets/data/solutions-graph.json`::
 `{ generatedAt, siteUrl, settings: { maxRelated, minScore }, edges: [{ doc, docUrl, solution, provenance, score, shown, rank, reason }] }`. Every recommendation a reader sees is explained here, and so is every one they do not.

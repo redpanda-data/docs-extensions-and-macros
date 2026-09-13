@@ -6,6 +6,8 @@
  * assets/data/solutions-graph.json. Pure functions over validated records.
  */
 
+const { plainTitle } = require('./collect')
+
 const CATALOG_STATUSES = ['published', 'deprecated']
 
 /** Ordered step list following page-solution-steps. */
@@ -19,7 +21,7 @@ function buildSteps (record) {
     const duration = attrs['page-solution-step-duration']
     steps.push({
       id,
-      title: (page.asciidoc && page.asciidoc.doctitle) || page.title || id,
+      title: plainTitle(page.asciidoc && page.asciidoc.doctitle) || page.title || id,
       url: page.pub && page.pub.url,
       order: steps.length + 1,
       duration: duration === undefined || duration === '' ? null : Number(duration),
@@ -109,7 +111,9 @@ function applyPageAttributes (record, publicRecord, nav) {
       attrs[attr] = String(value)
     }
     attrs['page-solution-duration'] = String(publicRecord.duration)
-    attrs['page-solution-featured'] = publicRecord.featured ? 'true' : 'false'
+    // Present only when true, so templates can test the attribute's existence.
+    if (publicRecord.featured) attrs['page-solution-featured'] = 'true'
+    else delete attrs['page-solution-featured']
     attrs['page-solution-platforms'] = publicRecord.platforms.join(', ')
     attrs['page-solution-technologies'] = publicRecord.technologies.join(', ')
     if (publicRecord.categories.length) attrs['page-categories'] = publicRecord.categories.join(', ')

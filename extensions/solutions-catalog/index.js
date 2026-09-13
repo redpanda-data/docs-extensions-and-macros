@@ -128,6 +128,29 @@ function eligibleDocPages (contentCatalog) {
   })
 }
 
+/**
+ * Add URLs to siteCatalog.unpublishedPages without duplicating them. Called at
+ * documentsConverted, navigationBuilt, and beforePublish, so the list survives
+ * unpublish-pages resetting the array if a playbook registers it later than
+ * this extension.
+ */
+function ensureUnpublished (siteCatalog, urls) {
+  if (!siteCatalog || !urls.length) return
+  if (!Array.isArray(siteCatalog.unpublishedPages)) siteCatalog.unpublishedPages = []
+  for (const url of urls) {
+    if (!siteCatalog.unpublishedPages.includes(url)) siteCatalog.unpublishedPages.push(url)
+  }
+}
+
+/** Every file of a module that Antora would publish: pages, attachments, images, aliases. */
+function modulePublishables (contentCatalog, { component, version, module }) {
+  const files = []
+  for (const family of ['page', 'attachment', 'image', 'alias']) {
+    files.push(...contentCatalog.findBy({ component, version, module, family }))
+  }
+  return files
+}
+
 function makeResolver (contentCatalog) {
   return (spec) => {
     if (typeof contentCatalog.resolveResource !== 'function') return null
@@ -194,6 +217,7 @@ module.exports.register = function ({ config = {} } = {}) {
     catalog: null,
     graph: null,
     records: [],
+    draftUrls: [],
   }
   let validator = null
   const getValidator = () => (validator = validator || relationships.createRelationshipsValidator())
@@ -263,12 +287,15 @@ module.exports.register = function ({ config = {} } = {}) {
     let draftsBuilt = 0
     for (const record of collected.solutions) {
       if (record.status === 'draft' && !settings.includeDrafts) {
-        siteCatalog.unpublishedPages = siteCatalog.unpublishedPages || []
-        for (const page of [record.overview, ...record.steps.map((s) => s.page)]) {
-          if (page.pub && page.pub.url) siteCatalog.unpublishedPages.push(page.pub.url)
-          delete page.out
+        // The whole module goes: pages, their aliases, and the attachments and
+        // images only those pages reference.
+        const files = modulePublishables(contentCatalog, { component: collect.COMPONENT, version: collected.version, module: record.module })
+        for (const file of files) {
+          if (file.pub && file.pub.url && (file.src.family === 'page' || file.src.family === 'alias')) state.draftUrls.push(file.pub.url)
+          delete file.out
         }
-        logger.info(`solutions-catalog: ${record.id} is a draft; unpublished (set SOLUTIONS_INCLUDE_DRAFTS=true to build it)`)
+        ensureUnpublished(siteCatalog, state.draftUrls)
+        logger.info(`solutions-catalog: ${record.id} is a draft; unpublished with its attachments, images, and aliases (set SOLUTIONS_INCLUDE_DRAFTS=true to build it)`)
         continue
       }
       if (record.status === 'draft') draftsBuilt++
@@ -277,7 +304,12 @@ module.exports.register = function ({ config = {} } = {}) {
     if (draftsBuilt) logger.warn(`solutions-catalog: building ${draftsBuilt} draft solution${draftsBuilt === 1 ? '' : 's'} because include_drafts is on`)
     if (!active.some((r) => r.status === 'published' && r.featured)) logger.warn('solutions-catalog: no published solution is featured')
 
-    // Explicit related docs, resolved to keys and display items
+    // Explicit related docs, resolved to keys and display items. A rejected
+    // relationship wins over an authored explicit link in both directions: the
+    // doc gets no recommendation and the overview drops the doc from
+    // relatedDocs. Authors see a warning so the disagreement gets resolved in
+    // one place rather than silently.
+    const rejectedPairs = new Set(rel.entries.filter((e) => e.status === 'rejected').map((e) => `${e.solutionId} ${e.docKey}`))
     const activeById = new Map(active.map((r) => [r.id, r]))
     for (const record of active) {
       record.relatedDocKeys = new Set()
@@ -286,8 +318,12 @@ module.exports.register = function ({ config = {} } = {}) {
         const page = resolveDoc(collect.stripVersion(ref))
         if (!page) continue
         const key = collect.pageKey(page)
+        if (rejectedPairs.has(`${record.id} ${key}`)) {
+          logger.warn(`solutions-catalog: ${record.id}: page-solution-related-docs lists ${key} but relationships.yml rejects the pair; the rejection wins and the link is dropped`)
+          continue
+        }
         record.relatedDocKeys.add(key)
-        record.relatedDocs.push({ id: key, title: page.asciidoc && page.asciidoc.doctitle, url: page.pub && page.pub.url, provenance: 'explicit' })
+        record.relatedDocs.push({ id: key, title: collect.plainTitle(page.asciidoc && page.asciidoc.doctitle), url: page.pub && page.pub.url, provenance: 'explicit' })
       }
       record.relatedSolutions = record.relatedSolutionIds
         .map((id) => activeById.get(id))
@@ -340,7 +376,12 @@ module.exports.register = function ({ config = {} } = {}) {
     logger.info(`solutions-catalog: ${state.catalog.solutions.length} solution${state.catalog.solutions.length === 1 ? '' : 's'} in the catalog, ${edges.length} graph edges, ${decorated} doc pages decorated with page-related-solutions`)
   })
 
+  this.on('navigationBuilt', ({ siteCatalog }) => {
+    ensureUnpublished(siteCatalog, state.draftUrls)
+  })
+
   this.on('beforePublish', async ({ siteCatalog, playbook }) => {
+    ensureUnpublished(siteCatalog, state.draftUrls)
     if (!state.catalog) return
     const siteUrl = (playbook && playbook.site && playbook.site.url) || ''
     if (siteUrl && !state.catalog.siteUrl) {
@@ -368,3 +409,4 @@ module.exports.resolveConfig = resolveConfig
 module.exports.shouldRunNetworkChecks = shouldRunNetworkChecks
 module.exports.eligibleDocPages = eligibleDocPages
 module.exports.checkReleases = checkReleases
+module.exports.ensureUnpublished = ensureUnpublished

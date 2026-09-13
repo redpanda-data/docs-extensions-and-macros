@@ -10,6 +10,8 @@
  * and validate.js decides what is acceptable.
  */
 
+const { decode } = require('html-entities')
+
 const COMPONENT = 'solutions'
 
 // Ids the docs-site function routes shadow (/solutions/progress, /solutions/download),
@@ -93,6 +95,14 @@ function stripVersion (spec) {
   return String(spec || '').replace(/^[^@:\s]+@/, '')
 }
 
+/**
+ * Plain-text page title. Asciidoctor's doctitle keeps inline markup
+ * (`<code>rpk</code>`), which must not leak into JSON the UI prints as text.
+ */
+function plainTitle (value) {
+  return decode(String(value || '').replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim()
+}
+
 /** Step id for a page of a solution module: the file stem relative to pages/. */
 function stepIdOf (page) {
   return String(page.src.relative || '').replace(/\.adoc$/, '')
@@ -160,7 +170,7 @@ function buildRecord (mod, modulePages, moduleAttachments, { version }) {
     steps: stepPages,
     layout: attrs['page-layout'],
     // At contentClassified pages have no asciidoc yet; only structure is read then.
-    title: (overview && overview.asciidoc && overview.asciidoc.doctitle) || (overview && overview.title) || mod,
+    title: plainTitle(overview && overview.asciidoc && overview.asciidoc.doctitle) || (overview && overview.title) || mod,
     url: overview && overview.pub ? overview.pub.url : undefined,
     description: attrs.description ? String(attrs.description).trim() : '',
     version: solutionVersion,
@@ -206,5 +216,6 @@ module.exports = {
   pageKey,
   stripVersion,
   stepIdOf,
+  plainTitle,
   collectSolutions,
 }
