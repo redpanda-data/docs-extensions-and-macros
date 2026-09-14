@@ -1564,6 +1564,65 @@ personas:
 Your markdown content here...
 ----
 
+=== Solution metadata
+
+Pages of the `solutions` component carry their metadata into the `.md` twin as one structured `solution:` block, because the consumer is a machine: agents and LLMs read the Markdown, not the rendered page. Every value is projected from the `page-solution` record that <<Solutions catalog>> builds, so the facts have a single source. The raw JSON attributes (`page-solution`, `page-solution-nav`, `page-related-solutions`) stay blocked from the frontmatter. This is a shaped projection, not a dump.
+
+On a solution overview:
+
+[,yaml]
+----
+solution:
+  id: multiplayer-gaming
+  version: v1.0.0
+  status: draft
+  difficulty: intermediate
+  duration_minutes: 45
+  assumes:
+    - Docker
+    - topics
+    - reading Go
+  technologies:
+    - Redpanda
+    - Schema Registry
+    - Go
+  platforms:
+    - self-managed
+    - cloud
+  categories:
+    - Topics and Partitions
+    - Producers
+  use_cases:
+    - live-leaderboards
+  steps:
+    - id: start-environment
+      title: Start the environment
+      url: /solutions/multiplayer-gaming/start-environment/
+  related_docs:
+    - title: Consumer offsets
+      url: /streaming/develop/consumer-offsets/
+  repository:
+    url: https://github.com/redpanda-data/solutions
+    ref: multiplayer-gaming/v1.0.0
+    download: authenticated
+----
+
+A step page gets the same block without `steps`, and with its own position instead: `step: {id, index, of}`. `repository.ref` is the release tag that exists (`<id>/<version>`), not the bare version, so a consumer can check the ref out. The generic frontmatter (title, description, and the allowlist) is unchanged, and `personas` stays a top-level key rather than moving into the block.
+
+A field whose value cannot be sourced truthfully is left out rather than guessed, and so is an empty list, so that every key present is a claim. `verified`, the Doc Detective evidence for a solution, is not emitted for that reason: the specs are generated into a transient run directory at test time and never reach the content catalog, so a build has neither a spec count nor a run time to report. Publishing a manifest alongside the solution is what would make the field emittable, and projecting it is then a change to this emitter alone.
+
+==== Field naming
+
+The field names line up with the docmeta metadata vocabularies proposal (hawkeyexl/manni proposal 0023 and its nine vocabularies): `core` requires `title` and `description`; `audience` covers who the page serves, which is personas, `assumes`, and `difficulty`; `lifecycle` covers `status` and `version`; `structure` covers what the page connects to, which is `steps` and `related_docs`; `evals` covers what must be true of the page, which is the generated Doc Detective specs. Nothing in that proposal is registered, so nothing here claims conformance. The shape is chosen so that adopting those vocabularies later is a change to this emitter alone.
+
+Two of its principles this already follows:
+
+One value is a string and many values are a list::
+`id`, `status`, and `difficulty` are strings; `assumes`, `technologies`, and `platforms` are lists even when they hold one entry.
+
+Metadata claims content, not rendering::
+This is why `page-layout` and featured placement stay out of the block. They say where a page appears, not what it is about.
+
 == Generate llms.txt exports
 
 The `convert-llms-to-txt` extension generates AI-optimized documentation exports in plain text format following the llms.txt standard.
