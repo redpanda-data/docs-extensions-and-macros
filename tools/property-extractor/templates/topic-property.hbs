@@ -132,13 +132,13 @@ endif::[]
 | Nullable
 | {{#if nullable}}Yes{{else}}No{{/if}}
 
-ifndef::env-cloud[]
 {{#if (ne gets_restored undefined)}}
 
+ifndef::env-cloud[]
 | Restored on xref:manage:whole-cluster-restore.adoc[Whole Cluster Restore]
 | {{#if gets_restored}}Yes{{else}}No{{/if}}
-{{/if}}
 endif::[]
+{{/if}}
 {{#if example}}
 
 | Example
