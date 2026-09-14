@@ -284,6 +284,7 @@ function toRecommendation (solution, edge) {
     difficulty: solution.difficulty,
     duration: Number(solution.duration),
     technologies: solution.technologies,
+    assumes: solution.assumes,
     provenance: edge.provenance,
     score: edge.score,
     reason: edge.reason,

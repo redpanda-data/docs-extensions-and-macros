@@ -92,6 +92,7 @@ const OVERVIEW_ATTRS = {
   'page-solution-download': 'authenticated',
   'page-solution-platforms': 'self-managed, cloud',
   'page-solution-technologies': 'Go, Protobuf',
+  'page-solution-assumes': 'Docker, topics, reading Go',
   'page-categories': 'Stream Processing, Clients',
   'page-solution-steps': 'start-environment, build-leaderboard, verify-end-to-end',
   'page-solution-related-docs': 'streaming:develop:consumer-offsets.adoc',
@@ -1147,6 +1148,60 @@ describe('solutions-catalog: eligible doc pages', () => {
 })
 
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+
+describe('solutions-catalog: assumes', () => {
+  test('parses a comma list, trimming values and dropping blanks', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-assumes': ' Docker ,, topics ,  reading Go ' } })
+    const result = await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').assumes).toEqual(['Docker', 'topics', 'reading Go'])
+    expect(result.logger.warn.mock.calls.map((c) => c[0]).join('\n')).not.toMatch(/page-solution-assumes is empty/)
+  })
+
+  test('caps the list at four items', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-assumes': 'a, b, c, d, e, f' } })
+    await run({ solutions: [solution] })
+    expect(collect.ASSUMES_MAX).toBe(4)
+    expect(json(solution.pages[0], 'page-solution').assumes).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  test('absence yields an empty array like useCases, not a missing key', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-assumes': undefined, 'page-solution-use-cases': undefined } })
+    await run({ solutions: [solution] })
+    const record = json(solution.pages[0], 'page-solution')
+    expect('assumes' in record).toBe(true)
+    expect(record.assumes).toEqual([])
+    expect(record.useCases).toEqual([])
+    expect(attr(solution.pages[0], 'page-solution-assumes')).toBe('')
+  })
+
+  test('warns when a published solution has none, and stays quiet for a draft', async () => {
+    const published = makeSolution('leaderboard', { attrs: { 'page-solution-assumes': undefined } })
+    const publishedRun = await run({ solutions: [published] })
+    expect(publishedRun.logger.warn.mock.calls.map((c) => c[0]).join('\n'))
+      .toMatch(/leaderboard: page-solution-assumes is empty; readers get no prerequisites beside the difficulty/)
+
+    const draft = makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft', 'page-solution-assumes': undefined } })
+    const draftRun = await run({ solutions: [draft], config: { include_drafts: true } })
+    expect(draftRun.logger.warn.mock.calls.map((c) => c[0]).join('\n')).not.toMatch(/page-solution-assumes is empty/)
+  })
+
+  test('reaches page-solution, the scalar mirror, solutions.json, the component attribute, and every recommendation', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-assumes': 'Docker, topics' } })
+    const result = await run({ solutions: [solution] })
+    const expected = ['Docker', 'topics']
+
+    for (const page of solution.pages) {
+      expect(json(page, 'page-solution').assumes).toEqual(expected)
+      expect(attr(page, 'page-solution-assumes')).toBe('Docker, topics')
+    }
+    expect(addedFile(result.siteCatalog, 'solutions.json').solutions[0].assumes).toEqual(expected)
+    const attrCatalog = JSON.parse(result.catalog.getComponent('home').versions[0].asciidoc.attributes['solutions-catalog'])
+    expect(attrCatalog.solutions[0].assumes).toEqual(expected)
+    expect(json(result.docs[0], 'page-related-solutions')[0].assumes).toEqual(expected)
+  })
+})
 
 describe('solutions-catalog: pure helpers', () => {
   test.each([

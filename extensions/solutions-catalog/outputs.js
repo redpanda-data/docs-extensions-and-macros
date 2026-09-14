@@ -55,6 +55,7 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     technologies: record.technologies,
     categories: record.categories,
     useCases: record.useCases,
+    assumes: record.assumes,
     personas: record.personas,
     steps: steps || buildSteps(record),
     relatedDocs,
@@ -117,6 +118,7 @@ function applyPageAttributes (record, publicRecord, nav) {
     else delete attrs['page-solution-featured']
     attrs['page-solution-platforms'] = publicRecord.platforms.join(', ')
     attrs['page-solution-technologies'] = publicRecord.technologies.join(', ')
+    attrs['page-solution-assumes'] = publicRecord.assumes.join(', ')
     if (publicRecord.categories.length) attrs['page-categories'] = publicRecord.categories.join(', ')
   }
 

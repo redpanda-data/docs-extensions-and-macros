@@ -12,6 +12,7 @@
 :page-solution-technologies: Go, Docker Compose
 :page-categories: Stream Processing, Clients
 :page-solution-use-cases: Gaming
+:page-solution-assumes: Docker, topics, reading Go
 :personas: application-developer
 :page-solution-steps: start-environment, verify-end-to-end
 :page-solution-related-docs: preview:ROOT:test.adoc
