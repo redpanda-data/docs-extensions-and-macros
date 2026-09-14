@@ -1,7 +1,6 @@
 'use strict'
 
 const { spawnSync } = require('child_process')
-const crypto = require('crypto')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -9,6 +8,7 @@ const semver = require('semver')
 const { findRepoRoot } = require('../../cli-utils/doc-tools-utils')
 const { generateRpkDocs, applyOverridesToTree, resolveReferences, shouldExcludeCommand, shouldUsePartialDir, derivePartialsDir } = require('./generate-rpk-docs')
 const { detectLinuxOnlyFromSource, warnIfDetectionLooksBroken } = require('./detect-platform-commands')
+const { downloadRpkBinary, RPK_RELEASE_TAG_RE, RPK_CDN_BASE } = require('../../cli-utils/rpk-cdn')
 const { generateRpkDiff, printDiffReport, generateWhatsNewSection, flattenToMap } = require('./report-delta')
 const { loadAndValidateOverrides, ValidationResult } = require('./validate-overrides')
 const { validateDirectory, formatResults } = require('./validate-output')
@@ -1306,138 +1306,26 @@ function buildRpkBinary(sourcePath, outPath) {
 }
 
 /**
- * Download an official rpk release binary for the current platform.
- * @param {string} tag - Release tag (e.g., v26.1.12)
+ * Download the official rpk release binary for the current platform from the
+ * rpk distribution CDN (https://rpk.redpanda.com). GA and RC tags are both
+ * published there; no token is needed. See cli-utils/rpk-cdn.js for the
+ * layout and the verification rules.
+ * @param {string} tag - Release tag (e.g., v26.1.12, v26.2.1-rc2)
  * @param {string} destDir - Directory to download and extract into
- * @returns {string|null} Path to the extracted binary, or null if the
- *   release asset is unavailable (caller falls back to a source build)
+ * @returns {string|null} Path to the extracted binary, or null if the CDN has
+ *   no build for the tag (HTTP 403/404; caller falls back to a source build).
+ *   Throws on a checksum mismatch or an archive with no rpk binary.
  */
 function downloadRpkRelease(tag, destDir) {
-  const osName = { darwin: 'darwin', linux: 'linux', win32: 'windows' }[process.platform]
-  const archName = { arm64: 'arm64', x64: 'amd64' }[process.arch]
-  if (!osName || !archName) {
-    console.warn(`No rpk release asset for platform ${process.platform}/${process.arch}`)
-    return null
-  }
-
-  // Releases now publish to streaming-enterprise (private), not the public
-  // redpanda-data/redpanda. This function already has a fallback (the
-  // caller builds from source instead), so a missing token warns and
-  // returns null here rather than throwing the way the clone-only paths do.
-  const { getGitHubApiToken } = require('../../cli-utils/github-token')
-  const token = getGitHubApiToken()
-  if (!token) {
-    console.warn('No GitHub token available for the private streaming-enterprise release download; falling back to a source build.')
-    return null
-  }
-
-  const assetName = `rpk-${osName}-${archName}.zip`
-  const checksumAsset = `rpk_${tag.replace(/^v/, '')}_checksums.txt`
-  const zipPath = path.join(destDir, assetName)
-  // The Authorization header reaches curl through a config file on stdin
-  // (--config -), never as an -H argument: an argv header is readable by
-  // any process on the host (ps, /proc) for as long as the transfer runs.
-  const curlAuthConfig = `header = "Authorization: token ${token}"`
-
-  // streaming-enterprise is private, so the release's browser download URL
-  // (releases/download/<tag>/<asset>) 404s even with a valid token: it
-  // redirects to a signed storage URL that requires an authenticated
-  // browser session, not a bearer token. Only the API's per-asset url
-  // (asset.url, not asset.browser_download_url) accepts this Authorization
-  // header, so resolve assets through the release-by-tag API first.
-  const releaseResult = spawnSync('curl', [
-    '-fsSL', '--retry', '5', '--retry-all-errors',
-    '--connect-timeout', '30', '--max-time', '60',
-    '--config', '-',
-    '-H', 'Accept: application/vnd.github+json',
-    `https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/tags/${tag}`
-  ], { encoding: 'utf8', input: curlAuthConfig, timeout: 90000 })
-
-  if (releaseResult.status !== 0) {
-    console.warn(`Could not look up release ${tag} from streaming-enterprise (draft or missing release)`)
-    return null
-  }
-
-  let release
-  try {
-    release = JSON.parse(releaseResult.stdout)
-  } catch {
-    console.warn(`Could not parse release metadata for ${tag}`)
-    return null
-  }
-
-  const assetUrl = (release.assets || []).find(a => a.name === assetName)?.url
-  if (!assetUrl) {
-    console.warn(`Release ${tag} has no asset named ${assetName} (draft or missing release asset)`)
-    return null
-  }
-  const checksumUrl = (release.assets || []).find(a => a.name === checksumAsset)?.url
-
-  console.log(`Downloading ${assetName} for ${tag}...`)
-  // Accept: application/octet-stream is required on the API asset url to
-  // receive the binary itself instead of its JSON metadata.
-  const curlResult = spawnSync('curl', [
-    '-fL', '--retry', '5', '--retry-all-errors',
-    '--connect-timeout', '30', '--max-time', '300',
-    '--config', '-',
-    '-H', 'Accept: application/octet-stream',
-    '-o', zipPath, assetUrl
-  ], { encoding: 'utf8', input: curlAuthConfig, timeout: 360000 })
-
-  if (curlResult.status !== 0) {
-    console.warn(`Could not download rpk release for ${tag} (draft or missing release asset)`)
-    return null
-  }
-
-  // Verify against the release checksum file when it exists
-  const checksumPath = path.join(destDir, checksumAsset)
-  const checksumResult = checksumUrl ? spawnSync('curl', [
-    '-fsSL', '--retry', '3', '--connect-timeout', '30', '--max-time', '60',
-    '--config', '-',
-    '-H', 'Accept: application/octet-stream',
-    '-o', checksumPath, checksumUrl
-  ], { encoding: 'utf8', input: curlAuthConfig, timeout: 90000 }) : { status: 1 }
-
-  if (checksumResult.status === 0) {
-    const expectedLine = fs.readFileSync(checksumPath, 'utf8')
-      .split('\n')
-      .find(line => line.trim().endsWith(assetName))
-    if (expectedLine) {
-      const expected = expectedLine.trim().split(/\s+/)[0]
-      const actual = crypto.createHash('sha256').update(fs.readFileSync(zipPath)).digest('hex')
-      if (expected !== actual) {
-        throw new Error(
-          `Checksum mismatch for ${assetName} (${tag}):\n` +
-          `  expected ${expected}\n  actual   ${actual}`
-        )
-      }
-      console.log('Checksum verified')
-    }
-  } else {
-    console.warn('No checksum file published for this release; skipping verification')
-  }
-
-  const unzipResult = spawnSync('unzip', ['-o', zipPath, '-d', destDir], {
-    encoding: 'utf8',
-    timeout: 60000
-  })
-  if (unzipResult.status !== 0) {
-    throw new Error(`Failed to extract ${assetName}: ${unzipResult.stderr}`)
-  }
-
-  const binPath = path.join(destDir, 'rpk')
-  if (!fs.existsSync(binPath)) {
-    throw new Error(`Extracted archive did not contain an rpk binary: ${zipPath}`)
-  }
-  fs.chmodSync(binPath, 0o755)
-  return binPath
+  return downloadRpkBinary(tag, destDir)
 }
 
 /**
  * Get an rpk binary matching the given version.
- * Prefers the official release download (published stable releases only;
- * RC releases are drafts, so their assets are not publicly downloadable).
- * Falls back to building from source at the tag.
+ * Prefers the official release download: GA and RC tags are published to
+ * https://rpk.redpanda.com/v<tag>/ with no token needed. Falls back to
+ * building from source at the tag (private clone, token required) when the
+ * CDN has no build; vdev always builds from source.
  * @param {string} rpkVersion - Version tag from the snapshot (e.g., v26.1.12, v26.2.1-rc2)
  * @param {Object} [options]
  * @param {string} [options.rpkBin] - Existing binary to use, skipping download/build
@@ -1456,25 +1344,26 @@ function acquireRpkBinary(rpkVersion, options = {}) {
   }
 
   const tag = rpkVersion.startsWith('v') ? rpkVersion : `v${rpkVersion}`
+
+  if (!RPK_RELEASE_TAG_RE.test(tag) && tag !== 'vdev') {
+    throw new Error(
+      `Cannot acquire an rpk binary for version '${rpkVersion}'.\n` +
+      'The snapshot\'s rpk_version is not a release tag. ' +
+      'Pass --rpk-bin <path> to use a local rpk binary instead.'
+    )
+  }
+
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-bin-'))
 
-  // Only published (non-draft) releases have downloadable assets
-  if (/^v\d+\.\d+\.\d+$/.test(tag)) {
+  // GA and RC tags both have a build on the CDN; only branches do not
+  if (RPK_RELEASE_TAG_RE.test(tag)) {
     const downloaded = downloadRpkRelease(tag, workDir)
     if (downloaded) {
       return downloaded
     }
     console.log('Falling back to building rpk from source...')
   } else {
-    console.log(`No published release binary for ${tag}; building from source...`)
-  }
-
-  if (!/^v\d+\.\d+\.\d+(-rc\d+)?$/.test(tag) && tag !== 'vdev') {
-    throw new Error(
-      `Cannot acquire an rpk binary for version '${rpkVersion}'.\n` +
-      'The snapshot\'s rpk_version is not a release tag. ' +
-      'Pass --rpk-bin <path> to use a local rpk binary instead.'
-    )
+    console.log(`${tag} has no build on ${RPK_CDN_BASE} (branches build from source)...`)
   }
 
   const sourceRef = tag === 'vdev' ? 'dev' : tag
