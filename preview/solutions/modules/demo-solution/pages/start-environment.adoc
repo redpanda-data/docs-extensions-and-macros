@@ -9,7 +9,7 @@ Download link:{attachmentsdir}/docker-compose.yml[docker-compose.yml] and start 
 
 [source,bash]
 ----
-docker compose up -d --wait
+include::example$commands.sh[tags=up]
 ----
 
 == Why
@@ -20,7 +20,7 @@ Everything the solution needs runs locally; nothing is installed on the host.
 
 [source,bash]
 ----
-rpk cluster info
+include::example$commands.sh[tags=info]
 ----
 
 The output lists one broker.

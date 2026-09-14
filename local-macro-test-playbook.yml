@@ -70,6 +70,7 @@ asciidoc:
   - './macros/helm-ref'
   - './macros/rp-connect-components'
   - './asciidoc-extensions/add-line-numbers-highlights'
+  - './asciidoc-extensions/add-solution-file-provenance'
 antora:
   extensions:
   - require: './extensions/add-global-attributes'

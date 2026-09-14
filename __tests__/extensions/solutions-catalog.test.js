@@ -1320,6 +1320,105 @@ describe('solutions-catalog: verification manifest', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+
+// `files` is the allowlist the download endpoint enforces, so it has to be
+// exactly what the pages render: a path that is rendered but missing means a
+// broken download, and a path nobody renders is surface the endpoint should not
+// serve. Both directions are asserted against the fixture HTML itself.
+describe('solutions-catalog: snippet allowlist', () => {
+  const snippet = (file, tag) =>
+    `<div class="listingblock sol-snippet" data-solution-file="${file}"` +
+    `${tag ? ` data-solution-tag="${tag}"` : ''}><div class="content"><pre>code</pre></div></div>`
+
+  /** Every provenance path in a page's HTML, the way the download UI sees it. */
+  const renderedFiles = (pages) => {
+    const found = new Set()
+    for (const page of pages) {
+      for (const m of page.contents.toString('utf8').matchAll(/data-solution-file="([^"]*)"/g)) found.add(m[1])
+    }
+    return [...found].sort()
+  }
+
+  const withSnippets = () => makeSolution('leaderboard', {
+    overviewHtml: OVERVIEW_HTML('Solution leaderboard', snippet('Makefile') + snippet('docker-compose.yml', 'redpanda')),
+    stepHtml: {
+      'start-environment': STEP_HTML('Step start-environment', '<h2 id="verify">Verify</h2>' + snippet('Makefile', 'topics') + snippet('services/leaderboard/main.go')),
+      'build-leaderboard': STEP_HTML('Step build-leaderboard', '<h2 id="verify">Verify</h2>' + snippet('services/leaderboard/main.go', 'handler')),
+    },
+  })
+
+  test('is the deduplicated, sorted set of every rendered snippet', async () => {
+    const solution = withSnippets()
+    await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').files).toEqual([
+      'Makefile',
+      'docker-compose.yml',
+      'services/leaderboard/main.go',
+    ])
+  })
+
+  test('nothing rendered is missing from it, and nothing in it is unrendered', async () => {
+    const solution = withSnippets()
+    await run({ solutions: [solution] })
+    const files = json(solution.pages[0], 'page-solution').files
+    const rendered = renderedFiles(solution.pages)
+
+    // Every path a reader can see is downloadable.
+    for (const path of rendered) expect(files).toContain(path)
+    // And the endpoint is offered no surface beyond that.
+    for (const path of files) expect(rendered).toContain(path)
+    expect(files).toEqual(rendered)
+  })
+
+  test('reaches solutions.json and the solutions-catalog attribute', async () => {
+    const solution = withSnippets()
+    const result = await run({ solutions: [solution] })
+    const expected = ['Makefile', 'docker-compose.yml', 'services/leaderboard/main.go']
+    expect(addedFile(result.siteCatalog, 'solutions.json').solutions[0].files).toEqual(expected)
+    const attrCatalog = JSON.parse(result.catalog.getComponent('home').versions[0].asciidoc.attributes['solutions-catalog'])
+    expect(attrCatalog.solutions[0].files).toEqual(expected)
+  })
+
+  test('a solution whose pages render no snippets has an empty allowlist', async () => {
+    const solution = makeSolution('leaderboard')
+    await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').files).toEqual([])
+  })
+
+  test('html entities in a path are decoded once, not carried through', async () => {
+    const solution = makeSolution('leaderboard', {
+      overviewHtml: OVERVIEW_HTML('Solution leaderboard', snippet('scripts/a&amp;b.sh')),
+    })
+    await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').files).toEqual(['scripts/a&b.sh'])
+  })
+
+  test('collectSnippetFiles ignores pages with no contents', () => {
+    expect(collect.collectSnippetFiles([undefined, {}, { contents: Buffer.from('<p>none</p>') }])).toEqual([])
+  })
+})
+
+// The provenance attributes exist only when Antora attaches block source
+// locations, so the extension turns sourcemap on itself rather than relying on
+// every consuming playbook to set it.
+describe('solutions-catalog: sourcemap', () => {
+  test('enables asciidoc sourcemap before documents are converted', async () => {
+    const { handlers } = createContext()
+    const siteAsciiDocConfig = { attributes: {} }
+    await handlers.beforeProcess({ siteAsciiDocConfig })
+    expect(siteAsciiDocConfig.sourcemap).toBe(true)
+  })
+
+  test('leaves an explicit setting and a missing config alone', async () => {
+    const { handlers } = createContext()
+    const explicit = { attributes: {}, sourcemap: true }
+    await handlers.beforeProcess({ siteAsciiDocConfig: explicit })
+    expect(explicit.sourcemap).toBe(true)
+    expect(() => handlers.beforeProcess({})).not.toThrow()
+  })
+})
+
 describe('solutions-catalog: pure helpers', () => {
   test.each([
     ['https://github.com/redpanda-data/solutions.git', 'redpanda-data/solutions'],

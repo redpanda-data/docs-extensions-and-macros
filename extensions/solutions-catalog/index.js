@@ -394,6 +394,18 @@ module.exports.register = function ({ config = {} } = {}) {
     logger.info(`solutions-catalog: ${state.catalog.solutions.length} solution${state.catalog.solutions.length === 1 ? '' : 's'} in the catalog, ${edges.length} graph edges`)
   })
 
+  // Block source locations are how add-solution-file-provenance knows which
+  // example file a snippet came from, and Antora only attaches them when
+  // asciidoc.sourcemap is set. Turn it on here rather than asking every
+  // consuming playbook to remember: without it the provenance attributes, and
+  // so the download allowlist, are silently empty.
+  this.on('beforeProcess', ({ siteAsciiDocConfig }) => {
+    if (siteAsciiDocConfig && !siteAsciiDocConfig.sourcemap) {
+      siteAsciiDocConfig.sourcemap = true
+      logger.debug('solutions-catalog: enabled asciidoc sourcemap for snippet provenance')
+    }
+  })
+
   this.on('navigationBuilt', ({ siteCatalog }) => {
     ensureUnpublished(siteCatalog, state.draftUrls)
   })

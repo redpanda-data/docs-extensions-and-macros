@@ -56,6 +56,8 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     categories: record.categories,
     useCases: record.useCases,
     assumes: record.assumes,
+    // The download endpoint's allowlist: exactly the snippets these pages render.
+    files: record.files || [],
     personas: record.personas,
     steps: steps || buildSteps(record),
     relatedDocs,

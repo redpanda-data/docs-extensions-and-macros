@@ -533,3 +533,24 @@ describe('solution verification in Markdown frontmatter', () => {
     expect(block.verified).toEqual({ suite: 'doc-detective', specs: 4, media: 0 })
   })
 })
+
+// The allowlist travels with the .md too, so an agent reading it knows exactly
+// which files it may fetch.
+describe('solution files in Markdown frontmatter', () => {
+  const { buildSolutionMetadata } = require('../../extensions/convert-to-markdown')
+  const page = (record) => ({
+    src: { component: 'solutions', version: '' },
+    asciidoc: { doctitle: 'T', attributes: { 'page-solution': JSON.stringify(record) } },
+  })
+  const BASE = { id: 'mg', version: 'v1.0.0', tag: 'mg/v1.0.0', status: 'published', difficulty: 'beginner', duration: 15, steps: [] }
+
+  test('emits the files a reader may download', () => {
+    const block = buildSolutionMetadata(page({ ...BASE, files: ['Makefile', 'services/leaderboard/main.go'] }))
+    expect(block.files).toEqual(['Makefile', 'services/leaderboard/main.go'])
+  })
+
+  test('omits the key when the solution renders no snippets', () => {
+    expect(buildSolutionMetadata(page({ ...BASE, files: [] })).files).toBeUndefined()
+    expect(buildSolutionMetadata(page(BASE)).files).toBeUndefined()
+  })
+})

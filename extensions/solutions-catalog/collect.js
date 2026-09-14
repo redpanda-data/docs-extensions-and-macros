@@ -156,6 +156,36 @@ function plainTitle (value) {
   return decode(String(value || '').replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim()
 }
 
+/**
+ * Every example file a solution's pages actually render, deduplicated and
+ * sorted: the set a reader may download and nothing more.
+ *
+ * Read back out of the rendered HTML, from the `data-solution-file` attributes
+ * that the add-solution-file-provenance AsciiDoc extension stamps on each
+ * snippet. Scraping what shipped rather than re-reading the AsciiDoc is what
+ * keeps the allowlist and the page in step: a snippet the reader can see is in
+ * the list, and a path no page renders cannot be.
+ */
+function collectSnippetFiles (pages) {
+  const files = new Set()
+  const rx = /data-solution-file="([^"]*)"/g
+  for (const page of pages) {
+    if (!page || !page.contents) continue
+    const html = page.contents.toString('utf8')
+    let match
+    while ((match = rx.exec(html))) {
+      const value = match[1]
+        .replace(/&quot;/g, '"')
+        .replace(/&gt;/g, '>')
+        .replace(/&lt;/g, '<')
+        .replace(/&amp;/g, '&')
+        .trim()
+      if (value) files.add(value)
+    }
+  }
+  return [...files].sort()
+}
+
 /** Step id for a page of a solution module: the file stem relative to pages/. */
 function stepIdOf (page) {
   return String(page.src.relative || '').replace(/\.adoc$/, '')
@@ -253,6 +283,7 @@ function buildRecord (mod, modulePages, moduleAttachments, { version }) {
     asset: solutionVersion ? `${mod}-${solutionVersion}.zip` : '',
     verified,
     verifiedError,
+    files: collectSnippetFiles([overview, ...stepPages.map((s) => s.page)]),
     attachments: moduleAttachments
       .filter((a) => a.src.relative !== VERIFICATION_FILE)
       .filter((a) => a.pub && a.pub.url)
@@ -274,6 +305,7 @@ module.exports = {
   VERIFICATION_FILE,
   VERIFICATION_FIELDS,
   parseVerification,
+  collectSnippetFiles,
   parseList,
   parseFlag,
   deriveRepo,
