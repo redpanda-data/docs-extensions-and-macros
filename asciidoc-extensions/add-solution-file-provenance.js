@@ -104,6 +104,14 @@ function sourceLinesOf (file) {
   }
 }
 
+// Captured command output is not code a reader can run, so a Download control
+// on it would offer a file that only makes sense next to the test that wrote
+// it. tools/capture-expected.sh puts these under a step's expected/ directory,
+// which is how the solutions repo distinguishes them from sources.
+function isCapturedOutput (relative) {
+  return String(relative).split('/').includes('expected')
+}
+
 function register (registry, context = {}) {
   const file = context.file
   if (!file || !file.src || file.src.component !== SOLUTIONS_COMPONENT) return registry
@@ -119,6 +127,7 @@ function register (registry, context = {}) {
       for (const block of doc.findBy({ context: 'listing' })) {
         const src = includedSrcOf(block)
         if (!src || src.family !== EXAMPLE_FAMILY || !src.relative) continue
+        if (isCapturedOutput(src.relative)) continue
         const marker = `${MARKER_PREFIX}${stamped.size + 1}`
         stamped.set(marker, { path: src.relative, tag: tagFromDirective(includeDirectiveLine(block, file, pageLines)) })
         const role = block.getAttribute('role')

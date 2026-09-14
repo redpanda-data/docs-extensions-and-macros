@@ -58,6 +58,11 @@ function exampleFile (relative, contents) {
 const EXAMPLES = new Map([
   ['services/leaderboard/main.go', exampleFile('services/leaderboard/main.go', GO)],
   ['Makefile', exampleFile('Makefile', MAKEFILE)],
+  [
+    'steps/build-leaderboard/expected/leaderboard.txt',
+    exampleFile('steps/build-leaderboard/expected/leaderboard.txt', 'player-7  1240\n'),
+  ],
+  ['steps/build-leaderboard/commands.sh', exampleFile('steps/build-leaderboard/commands.sh', MAKEFILE)],
 ])
 
 const contentCatalog = {
@@ -149,6 +154,22 @@ describe('solution snippet provenance', () => {
       ['Makefile', 'topics'],
     ])
     expect(html).not.toMatch(/sol-snippet-\d/)
+  })
+
+  // Expected output is written by tools/capture-expected.sh and only means
+  // anything beside the test that produced it, so offering it for download
+  // would put a file in the reader's hands that they cannot use. Every step
+  // page shows at least one, so without this the control appeared on all of
+  // them.
+  renderTest('captured command output is not a downloadable snippet', () => {
+    const html = render('[,text]\n----\ninclude::example$steps/build-leaderboard/expected/leaderboard.txt[]\n----\n')
+    expect(html).not.toContain('data-solution-file')
+    expect(html).not.toContain('sol-snippet')
+  })
+
+  renderTest('a step command source next to it is still downloadable', () => {
+    const [block] = listings(render('[,bash]\n----\ninclude::example$steps/build-leaderboard/commands.sh[tag=topics]\n----\n'))
+    expect(block).toMatchObject({ file: 'steps/build-leaderboard/commands.sh', tag: 'topics' })
   })
 
   renderTest('an existing role on the block survives', () => {

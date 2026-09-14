@@ -48,6 +48,9 @@
     "./asciidoc-extensions/add-line-numbers-highlights": {
       "require": "./asciidoc-extensions/add-line-numbers-highlights.js"
     },
+    "./asciidoc-extensions/add-solution-file-provenance": {
+      "require": "./asciidoc-extensions/add-solution-file-provenance.js"
+    },
     "./extensions/unlisted-pages": {
       "require": "./extensions/unlisted-pages.js"
     },
