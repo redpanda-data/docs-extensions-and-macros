@@ -479,7 +479,15 @@ def find_meta_dict(info):
 
         # Case 1: Already parsed dict
         if isinstance(val, dict) and any(
-            k in val for k in ("needs_restart", "visibility", "deprecated", "secret", "experimental")
+            k in val
+            for k in (
+                "needs_restart", "visibility", "deprecated", "secret", "experimental",
+                # A block holding only one of these is still a meta block. Left
+                # out, `meta{ .gets_restored = gets_restored::no }` resolved to
+                # None here and the caller fell back to its default, inverting
+                # the value it had already parsed correctly.
+                "gets_restored", "restored",
+            )
         ):
             return val
 
@@ -1072,14 +1080,45 @@ class GetsRestoredTransformer:
     """
     
     def accepts(self, info, file_pair):
-        """Process properties with backup/restore metadata."""
-        return (get_meta_value(info, "gets_restored") is not None or 
-                get_meta_value(info, "restored") is not None)
+        """Process every property parsed from source, annotated or not.
+
+        Accepting only annotated properties left the key absent for the
+        majority, and absent then had to carry two incompatible meanings:
+        "the declared default applies" and "the data never reached us". The
+        templates cannot tell those apart, and for a release whose rp_util
+        schema can never be published they picked the second, rendering
+        "Unknown" for 626 properties whose value is not in doubt.
+
+        A property reaching this transformer was parsed out of the C++, so the
+        first meaning is the true one and this is the place that knows it.
+        """
+        return True
 
     def parse(self, property, info, file_pair):
-        """Extract restoration flag from either naming convention."""
-        val = get_meta_value(info, "gets_restored") or get_meta_value(info, "restored", "no")
-        property["gets_restored"] = (val != "no")
+        """Extract the restoration flag, defaulting to the declared default.
+
+        base_property.h declares `gets_restored gets_restored{gets_restored::yes}`,
+        so a property carrying no annotation is restored. Materialize that
+        rather than leaving it implicit: at v26.2.2 every one of the 17
+        annotated properties says `no`, so the default is what the other 674
+        actually rely on.
+
+        rp_util's runtime value still wins wherever the merge runs -- it sets
+        the same key afterwards (see rp_util_merge.map_rp_util_property) -- so
+        this is the fallback for the releases the merge cannot cover, not a
+        competing source of truth.
+        """
+        val = get_meta_value(info, "gets_restored")
+        if val is None:
+            val = get_meta_value(info, "restored")
+        if val is not None:
+            property["gets_restored"] = (val != "no")
+        else:
+            # MetaParamTransformer runs first (property_extractor.py) and sets
+            # this key off the same meta block, so only default when nothing
+            # upstream resolved a real value. Assigning unconditionally would
+            # overwrite an explicit `no` with the default.
+            property.setdefault("gets_restored", True)
         return property
 
 
