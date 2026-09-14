@@ -367,7 +367,6 @@ describe('solution metadata in Markdown frontmatter', () => {
     technologies: ['Redpanda', 'Schema Registry', 'Go'],
     categories: ['Topics and Partitions', 'Producers'],
     useCases: ['live-leaderboards'],
-    assumes: ['Docker', 'topics', 'reading Go'],
     personas: ['application-developer'],
     steps: [
       { id: 'start-environment', title: 'Start the environment', url: '/solutions/multiplayer-gaming/start-environment/', order: 1, duration: 5 },
@@ -410,7 +409,6 @@ describe('solution metadata in Markdown frontmatter', () => {
       status: 'draft',
       difficulty: 'intermediate',
       duration_minutes: 45,
-      assumes: ['Docker', 'topics', 'reading Go'],
       technologies: ['Redpanda', 'Schema Registry', 'Go'],
       platforms: ['self-managed', 'cloud'],
       categories: ['Topics and Partitions', 'Producers'],
@@ -431,7 +429,6 @@ describe('solution metadata in Markdown frontmatter', () => {
     expect(parsed.solution.steps).toBeUndefined()
     // Everything else is the same block, from the same record.
     expect(parsed.solution.id).toBe('multiplayer-gaming')
-    expect(parsed.solution.assumes).toEqual(['Docker', 'topics', 'reading Go'])
     expect(parsed.solution.repository.ref).toBe('multiplayer-gaming/v1.0.0')
   })
 
@@ -470,7 +467,7 @@ describe('solution metadata in Markdown frontmatter', () => {
   })
 
   test('a field with nothing truthful to say is left out, not guessed', () => {
-    const sparse = { id: 'minimal', status: 'published', difficulty: 'beginner', duration: 15, version: 'v0.1.0', tag: 'minimal/v0.1.0', download: 'none', repo: '', steps: [], technologies: [], platforms: [], categories: [], useCases: [], assumes: [], relatedDocs: [] }
+    const sparse = { id: 'minimal', status: 'published', difficulty: 'beginner', duration: 15, version: 'v0.1.0', tag: 'minimal/v0.1.0', download: 'none', repo: '', steps: [], technologies: [], platforms: [], categories: [], useCases: [], relatedDocs: [] }
     const parsed = parse(generateFrontmatter(makePage({ record: sparse })))
     expect(parsed.solution).toEqual({
       id: 'minimal',

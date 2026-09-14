@@ -343,7 +343,6 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
         indexItem.platforms = parseCategoryList(attrs['page-solution-platforms'])
         indexItem.status = attrs['page-solution-status'] || ''
         // Displayed on the result, never faceted on.
-        indexItem.assumes = parseCategoryList(attrs['page-solution-assumes'])
       } else if (component.name !== 'labs') {
         indexItem.product = component.title
         indexItem.breadcrumbs = breadcrumbs

@@ -40,11 +40,6 @@ const ENUMS = Object.freeze({
 const SLUG_RX = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 const VERSION_RX = /^v\d+\.\d+\.\d+$/
 
-// Prerequisite knowledge and tools the reader needs before starting. Capped so
-// the UI can render them beside the difficulty chip without wrapping; items
-// beyond the cap are dropped.
-const ASSUMES_MAX = 4
-
 // Doc Detective evidence for a solution, written by the monorepo's runner after
 // a passing full run and committed like the captured media. It is machine
 // evidence rather than build-along scaffolding, so it is projected as the
@@ -271,7 +266,6 @@ function buildRecord (mod, modulePages, moduleAttachments, { version }) {
     categoriesRaw: parseList(attrs['page-categories']),
     categories: parseList(attrs['page-categories']),
     useCases: parseList(attrs['page-solution-use-cases']),
-    assumes: parseList(attrs['page-solution-assumes']).slice(0, ASSUMES_MAX),
     personas: parseList(attrs.personas || attrs['page-personas']),
     stepIds: parseList(attrs['page-solution-steps']),
     relatedDocRefs: parseList(attrs['page-solution-related-docs']),
@@ -301,7 +295,6 @@ module.exports = {
   ENUMS,
   SLUG_RX,
   VERSION_RX,
-  ASSUMES_MAX,
   VERIFICATION_FILE,
   VERIFICATION_FIELDS,
   parseVerification,

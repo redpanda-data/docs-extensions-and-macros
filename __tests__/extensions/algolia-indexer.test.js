@@ -162,7 +162,6 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
           'page-solution-technologies': 'Go, Protobuf',
           'page-solution-platforms': 'self-managed, cloud',
           'page-solution-status': 'published',
-          'page-solution-assumes': 'Docker, topics',
           'page-categories': 'Clients'
         }
       }
@@ -179,7 +178,6 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
       technologies: ['Go', 'Protobuf'],
       platforms: ['self-managed', 'cloud'],
       status: 'published',
-      assumes: ['Docker', 'topics'],
       categories: ['Clients']
     })
     expect(record.deployment).toBeUndefined()

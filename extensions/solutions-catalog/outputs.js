@@ -55,7 +55,6 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     technologies: record.technologies,
     categories: record.categories,
     useCases: record.useCases,
-    assumes: record.assumes,
     // The download endpoint's allowlist: exactly the snippets these pages render.
     files: record.files || [],
     personas: record.personas,
@@ -123,7 +122,6 @@ function applyPageAttributes (record, publicRecord, nav) {
     else delete attrs['page-solution-featured']
     attrs['page-solution-platforms'] = publicRecord.platforms.join(', ')
     attrs['page-solution-technologies'] = publicRecord.technologies.join(', ')
-    attrs['page-solution-assumes'] = publicRecord.assumes.join(', ')
     // Step pages show when the solution was last verified without parsing JSON.
     if (publicRecord.verified) {
       const { runAt, redpandaVersion } = publicRecord.verified

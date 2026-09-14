@@ -86,7 +86,6 @@ function buildSolutionMetadata(page) {
     status: record.status,
     difficulty: record.difficulty,
     duration_minutes: Number.isFinite(duration) ? duration : undefined,
-    assumes: record.assumes,
     technologies: record.technologies,
     platforms: record.platforms,
     categories: record.categories,

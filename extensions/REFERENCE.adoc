@@ -869,14 +869,6 @@ On the overview (`pages/index.adoc`):
 | no
 | Comma list, carried into the catalog.
 
-| `page-solution-assumes`
-| no (warns when published and empty)
-| Comma list of up to four short phrases naming what the reader should already know before starting: prerequisite knowledge and tools, not assumptions about the environment. For example `Docker, topics, reading Go`. Items beyond the fourth are dropped. Renders beside the difficulty chip.
-
-| `personas`
-| no
-| Ids from the component's `solutions-personas` attribute, carried into the catalog.
-
 | `page-solution-related-docs`
 | no (warns if empty)
 | Fully qualified page IDs (`component:module:path.adoc`). Each must resolve in the build (fatal otherwise).
@@ -903,12 +895,12 @@ Written on the overview and every step page (complex values are JSON strings, re
 | Attribute | Value
 
 | `page-solution`
-| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo`, `status`, `draft` (true only for a draft built with `include_drafts`), `featured`, `difficulty`, `duration`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `assumes`, `files` (see <<Snippet provenance and the download allowlist>>), `personas`, `steps[{id, title, url, order, duration}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]`, `supersededBy`, `lastModified`, and `verified{suite, specs, steps, commands, checks, media, verifyScript, redpandaVersion, runAt}` when the solution ships a verification manifest (see <<Verification>>). Keys the manifest did not carry are absent, and a solution with no manifest has no `verified` key at all.
+| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo`, `status`, `draft` (true only for a draft built with `include_drafts`), `featured`, `difficulty`, `duration`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `files` (see <<Snippet provenance and the download allowlist>>), `personas`, `steps[{id, title, url, order, duration}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]`, `supersededBy`, `lastModified`, and `verified{suite, specs, steps, commands, checks, media, verifyScript, redpandaVersion, runAt}` when the solution ships a verification manifest (see <<Verification>>). Keys the manifest did not carry are absent, and a solution with no manifest has no `verified` key at all.
 
 | `page-solution-nav`
 | `{ home: {title, url}, overview: {title, url}, steps: [{id, title, url, order, duration}] }`. Every title in the JSON outputs is plain text: inline markup in the document title (`<code>`, entities) is stripped before it enters `page-solution`, the nav, `relatedDocs`, or `relatedSolutions`.
 
-| `page-solution-id`, `page-solution-title`, `page-solution-url`, `page-solution-description`, `page-solution-version`, `page-solution-tag`, `page-solution-asset`, `page-solution-repo`, `page-solution-status`, `page-solution-difficulty`, `page-solution-duration`, `page-solution-download`, `page-solution-featured`, `page-solution-platforms`, `page-solution-technologies`, `page-solution-assumes`, `page-solution-verified-at`, `page-solution-verified-version`
+| `page-solution-id`, `page-solution-title`, `page-solution-url`, `page-solution-description`, `page-solution-version`, `page-solution-tag`, `page-solution-asset`, `page-solution-repo`, `page-solution-status`, `page-solution-difficulty`, `page-solution-duration`, `page-solution-download`, `page-solution-featured`, `page-solution-platforms`, `page-solution-technologies`, `page-solution-verified-at`, `page-solution-verified-version`
 | Scalar mirrors of the overview values, so a step page template can read them without parsing JSON. `page-solution-featured` is present (`true`) only on featured solutions and absent otherwise, so templates test for existence; lists are comma joined.
 
 | `page-solution-step-count`
@@ -926,7 +918,7 @@ Written on the overview and every step page (complex values are JSON strings, re
 
 Derived, never authored: `page-solution-id` is the module name; `page-solution-repo` is `owner/name` from the page's git origin URL (https, ssh, and scp forms; a local `file://` origin yields an empty string); `page-solution-tag` is `<id>/<version>`; `page-solution-asset` is `<id>-<version>.zip`.
 
-Eligible Product Docs pages receive `page-related-solutions`, only when non-empty: `[{id, title, url, description, difficulty, duration, technologies, assumes, provenance, score, reason}]` in rank order. Eligible means: a published page (`page.out`) in the latest version of its component, the component is not `solutions`, `home`, `shared`, `search`, `data-platform`, `self-managed`, or `labs`, the layout or role is not an umbrella or index layout (`home`, `component-home-v3`, `data-platform`, `labs-home`, `labs-search`, `search`, `404`, `index`, `index-list`, `solutions-home`, `solution`, `solution-step`), and the page does not set `page-exclude-related-solutions`. Labs are excluded because they are the content solutions replace; section index pages because they carry an area's broad categories and would match every solution in that area.
+Eligible Product Docs pages receive `page-related-solutions`, only when non-empty: `[{id, title, url, description, difficulty, duration, technologies, provenance, score, reason}]` in rank order. Eligible means: a published page (`page.out`) in the latest version of its component, the component is not `solutions`, `home`, `shared`, `search`, `data-platform`, `self-managed`, or `labs`, the layout or role is not an umbrella or index layout (`home`, `component-home-v3`, `data-platform`, `labs-home`, `labs-search`, `search`, `404`, `index`, `index-list`, `solutions-home`, `solution`, `solution-step`), and the page does not set `page-exclude-related-solutions`. Labs are excluded because they are the content solutions replace; section index pages because they carry an area's broad categories and would match every solution in that area.
 
 === Snippet provenance and the download allowlist
 
@@ -1037,7 +1029,7 @@ Unknown keys, a bad `status`, a `solution` that is not a slug, or a `doc` that i
 
 === Warnings
 
-Missing `page-solution-related-docs`; a published solution with no `page-solution-assumes`; a published solution with no `verification.json`; an unreadable `verification.json`; a `run_at` that is absent or not an ISO 8601 timestamp; a description over 200 characters; no published solution featured; orphaned relationships; pending relationships (count); drafts being built; `page-valid-categories` unavailable (category validation and category edges are skipped); a release or asset missing on GitHub when `network_checks` runs.
+Missing `page-solution-related-docs`; a published solution with no `verification.json`; an unreadable `verification.json`; a `run_at` that is absent or not an ISO 8601 timestamp; a description over 200 characters; no published solution featured; orphaned relationships; pending relationships (count); drafts being built; `page-valid-categories` unavailable (category validation and category edges are skipped); a release or asset missing on GitHub when `network_checks` runs.
 
 == Solution snippet provenance
 
@@ -1626,10 +1618,6 @@ solution:
   status: draft
   difficulty: intermediate
   duration_minutes: 45
-  assumes:
-    - Docker
-    - topics
-    - reading Go
   technologies:
     - Redpanda
     - Schema Registry
@@ -1678,12 +1666,12 @@ A solution with no manifest, or one whose manifest could not be read, has no `ve
 
 ==== Field naming
 
-The field names line up with the docmeta metadata vocabularies proposal (hawkeyexl/manni proposal 0023 and its nine vocabularies): `core` requires `title` and `description`; `audience` covers who the page serves, which is personas, `assumes`, and `difficulty`; `lifecycle` covers `status` and `version`; `structure` covers what the page connects to, which is `steps` and `related_docs`; `evals` covers what must be true of the page, which is the generated Doc Detective specs. Nothing in that proposal is registered, so nothing here claims conformance. The shape is chosen so that adopting those vocabularies later is a change to this emitter alone.
+The field names line up with the docmeta metadata vocabularies proposal (hawkeyexl/manni proposal 0023 and its nine vocabularies): `core` requires `title` and `description`; `audience` covers who the page serves, which is personas and `difficulty`; `lifecycle` covers `status` and `version`; `structure` covers what the page connects to, which is `steps` and `related_docs`; `evals` covers what must be true of the page, which is the generated Doc Detective specs. Nothing in that proposal is registered, so nothing here claims conformance. The shape is chosen so that adopting those vocabularies later is a change to this emitter alone.
 
 Two of its principles this already follows:
 
 One value is a string and many values are a list::
-`id`, `status`, and `difficulty` are strings; `assumes`, `technologies`, and `platforms` are lists even when they hold one entry.
+`id`, `status`, and `difficulty` are strings; `technologies` and `platforms` are lists even when they hold one entry.
 
 Metadata claims content, not rendering::
 This is why `page-layout` and featured placement stay out of the block. They say where a page appears, not what it is about.

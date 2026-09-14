@@ -190,12 +190,6 @@ function validateSolution (record, { categoryMap, resolveDoc, solutionIds } = {}
     else if (!isIsoTimestamp(runAt)) warn(`${VERIFICATION_FILE} run_at "${runAt}" is not an ISO 8601 timestamp`)
   }
 
-  // Assumes: optional, but a published solution without it gives the reader only
-  // half of the pair (prerequisites beside difficulty) they choose on.
-  if (record.status === 'published' && !record.assumes.length) {
-    warn('page-solution-assumes is empty; readers get no prerequisites beside the difficulty')
-  }
-
   if (record.status === 'deprecated' && !record.supersededBy) err('page-solution-superseded-by is required when status is deprecated')
   if (record.supersededBy && solutionIds && !solutionIds.has(record.supersededBy)) {
     warn(`page-solution-superseded-by "${record.supersededBy}" is not a solution in this build`)
