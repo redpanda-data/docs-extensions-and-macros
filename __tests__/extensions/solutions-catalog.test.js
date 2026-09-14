@@ -8,6 +8,7 @@ const extension = require('../../extensions/solutions-catalog/index')
 const collect = require('../../extensions/solutions-catalog/collect')
 const validate = require('../../extensions/solutions-catalog/validate')
 const relationships = require('../../extensions/solutions-catalog/relationships')
+const { createCategoryMap } = require('../../extension-utils/categories')
 const outputs = require('../../extensions/solutions-catalog/outputs')
 
 const FIXTURES = path.join(__dirname, '..', 'fixtures', 'solutions')
@@ -805,7 +806,7 @@ describe('solutions-catalog: recommendation ranking', () => {
       ['category-one', 'category', 0.7],
     ])
     expect(recs[1].reason).toMatch(/editor said so/)
-    expect(recs[2].reason).toBe('shares categories Stream Processing, Clients (Development)')
+    expect(recs[2].reason).toBe('shares categories Stream Processing, Clients (and the parent category Development)')
   })
 
   test('approved score has a 0.9 floor', () => {
@@ -843,13 +844,71 @@ describe('solutions-catalog: recommendation ranking', () => {
     expect(json(two, 'page-related-solutions')[0]).toMatchObject({ provenance: 'category', score: 0.7 })
   })
 
-  test('parent bonuses are capped at 0.1 per edge and the total at 0.85', () => {
-    const map = { subcategories: new Set(['a', 'b', 'c', 'd']), categories: new Set(['P', 'Q', 'R']) }
-    expect(relationships.categoryScore(['a', 'b', 'c', 'd', 'P'], ['a', 'b', 'c', 'd', 'P'], map).score).toBe(0.85)
+  test('leaves score 0.3, parents with children 0.1 and capped, total capped at 0.85', () => {
+    const map = createCategoryMap([
+      { category: 'P', subcategories: [{ category: 'a' }, { category: 'b' }] },
+      { category: 'Q', subcategories: [{ category: 'c' }] },
+      { category: 'R', subcategories: [{ category: 'd' }] },
+      { category: 'Leaf' },
+    ])
+    const score = (cats) => relationships.categoryScore(cats, cats, map).score
+    expect(score(['a', 'b', 'c', 'd', 'P'])).toBe(0.85)
     // three shared parents still add only 0.1
-    expect(relationships.categoryScore(['a', 'P', 'Q', 'R'], ['a', 'P', 'Q', 'R'], map).score).toBe(0.4)
-    expect(relationships.categoryScore(['P', 'Q', 'R'], ['P', 'Q', 'R'], map).score).toBe(0.1)
+    expect(score(['a', 'P', 'Q', 'R'])).toBe(0.4)
+    expect(score(['P', 'Q', 'R'])).toBe(0.1)
+    // a top-level category with no subcategories is a leaf, worth a full 0.3
+    expect(score(['Leaf'])).toBe(0.3)
+    expect(score(['Leaf', 'a'])).toBe(0.6)
+    expect(relationships.categoryScore(['Leaf'], ['Leaf'], map).sharedLeaves).toEqual(['Leaf'])
+    expect(relationships.categoryScore(['P'], ['P'], map).sharedParents).toEqual(['P'])
+    // with no map every match counts as specific
+    expect(relationships.categoryScore(['x', 'y'], ['x', 'y'], null).score).toBe(0.6)
     expect(relationships.DEFAULT_MIN_SCORE).toBe(0.6)
+  })
+
+  test('a childless top-level category reaches its pages (two leaves clear the threshold)', async () => {
+    // Schema Registry and rpk are top-level with no subcategories: two of them
+    // are two leaves, 0.3 + 0.3, with no parent involved at all.
+    const solution = makeSolution('registry-migration', { attrs: { 'page-categories': 'Schema Registry, rpk', 'page-solution-related-docs': undefined } })
+    delete solution.pages[0].asciidoc.attributes['page-solution-related-docs']
+    const both = makeDoc({ relative: 'schema-reg/both.adoc', attrs: { 'page-categories': 'Schema Registry, rpk' } })
+    const alone = makeDoc({ relative: 'schema-reg/alone.adoc', attrs: { 'page-categories': 'Schema Registry' } })
+    const result = await run({ solutions: [solution], docs: [both, alone], relationshipsText: 'relationships: []' })
+
+    const shown = json(both, 'page-related-solutions')[0]
+    expect(shown).toMatchObject({ id: 'registry-migration', provenance: 'category', score: 0.6 })
+    expect(shown.reason).toBe('shares categories Schema Registry, rpk')
+
+    // one leaf on its own is still too weak
+    expect(attr(alone, 'page-related-solutions')).toBeUndefined()
+    const hidden = addedFile(result.siteCatalog, 'solutions-graph.json').edges.find((e) => e.doc.endsWith('alone.adoc'))
+    expect(hidden).toMatchObject({ provenance: 'category', score: 0.3, shown: false })
+    expect(hidden.reason).toMatch(/^shares categories Schema Registry; hidden: score 0\.3 below 0\.6$/)
+  })
+
+  test('a childless top-level category plus a subcategory also shows', async () => {
+    // Schema Registry (leaf) + Clients (leaf) + the auto-added parent
+    // Development (0.1) = 0.7.
+    const solution = makeSolution('registry-migration', { attrs: { 'page-categories': 'Schema Registry, Clients', 'page-solution-related-docs': undefined } })
+    delete solution.pages[0].asciidoc.attributes['page-solution-related-docs']
+    const doc = makeDoc({ attrs: { 'page-categories': 'Schema Registry, Clients' } })
+    await run({ solutions: [solution], docs: [doc], relationshipsText: 'relationships: []' })
+    const rec = json(doc, 'page-related-solutions')[0]
+    expect(rec.score).toBe(0.7)
+    expect(rec.reason).toBe('shares categories Schema Registry, Clients (and the parent category Development)')
+  })
+
+  test('sharing only parents with children stays hidden however many there are', async () => {
+    // Solution and doc sit in the same two areas but name different children,
+    // so only the auto-added parents overlap: 0.1 total.
+    const solution = makeSolution('leaderboard', { attrs: { 'page-categories': 'Clients, Pipelines', 'page-solution-related-docs': undefined } })
+    delete solution.pages[0].asciidoc.attributes['page-solution-related-docs']
+    const doc = makeDoc({ attrs: { 'page-categories': 'Stream Processing, Connectors' } })
+    const result = await run({ solutions: [solution], docs: [doc], relationshipsText: 'relationships: []' })
+    expect(attr(doc, 'page-related-solutions')).toBeUndefined()
+    const [edge] = addedFile(result.siteCatalog, 'solutions-graph.json').edges
+    expect(edge).toMatchObject({ provenance: 'category', score: 0.1, shown: false })
+    expect(edge.reason).toBe('shares only the parent categories Development, Redpanda Connect; hidden: score 0.1 below 0.6')
   })
 
   test('shows at most max_related, in deterministic order', async () => {

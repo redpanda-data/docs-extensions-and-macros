@@ -1,6 +1,6 @@
 'use strict'
 
-const { createCategoryMap, parseCategoryList, normalizeCategories } = require('../../extension-utils/categories')
+const { createCategoryMap, parseCategoryList, normalizeCategories, isLeafCategory } = require('../../extension-utils/categories')
 
 const VALID = [
   { category: 'rpk' },
@@ -15,6 +15,13 @@ const VALID = [
 ]
 
 describe('createCategoryMap', () => {
+  test('records which top-level categories actually have children', () => {
+    const map = createCategoryMap(VALID)
+    expect([...map.withChildren]).toEqual(['Development', 'Deployment'])
+    // rpk is top-level with no subcategories, so it is not a parent
+    expect(map.withChildren.has('rpk')).toBe(false)
+  })
+
   test('separates top-level categories, subcategories, and parents', () => {
     const map = createCategoryMap(VALID)
     expect([...map.categories]).toEqual(['rpk', 'Development', 'Deployment'])
@@ -97,5 +104,42 @@ describe('normalizeCategories', () => {
 
   test('handles a non-array input', () => {
     expect(normalizeCategories(undefined, map)).toEqual({ categories: [], invalid: [], parentsAdded: [] })
+  })
+})
+
+describe('isLeafCategory', () => {
+  const map = createCategoryMap(VALID)
+
+  test('a subcategory is a leaf', () => {
+    expect(isLeafCategory('Clients', map)).toBe(true)
+    expect(isLeafCategory('Iceberg', map)).toBe(true)
+  })
+
+  test('a top-level category with no subcategories is a leaf', () => {
+    // rpk, and in the real taxonomy Schema Registry, Troubleshooting,
+    // Redpanda Console, Streaming, Emergency Response, Agentic Data Plane.
+    expect(isLeafCategory('rpk', map)).toBe(true)
+  })
+
+  test('a top-level category with subcategories is not a leaf', () => {
+    expect(isLeafCategory('Development', map)).toBe(false)
+    expect(isLeafCategory('Deployment', map)).toBe(false)
+  })
+
+  test('an unknown category, or no map, counts as a leaf', () => {
+    expect(isLeafCategory('Bogus', map)).toBe(true)
+    expect(isLeafCategory('Clients')).toBe(true)
+    expect(isLeafCategory('Clients', {})).toBe(true)
+  })
+
+  test('a newly added parent becomes a parent, its children leaves', () => {
+    const extended = createCategoryMap([
+      ...VALID,
+      { category: 'Redpanda Connect', subcategories: [{ category: 'Pipelines' }, { category: 'Connectors' }] },
+    ])
+    expect(isLeafCategory('Redpanda Connect', extended)).toBe(false)
+    expect(isLeafCategory('Pipelines', extended)).toBe(true)
+    // and it was a leaf before the children existed
+    expect(isLeafCategory('Redpanda Connect', createCategoryMap([...VALID, { category: 'Redpanda Connect' }]))).toBe(true)
   })
 })

@@ -14,15 +14,19 @@
  * Build fast lookup structures from the valid-categories list.
  *
  * @param {Array<{category: string, subcategories?: Array<{category: string}>}>} validCategories
- * @returns {{categories: Set<string>, subcategories: Set<string>, parentMap: Map<string, string>}}
+ * @returns {{categories: Set<string>, subcategories: Set<string>, parentMap: Map<string, string>, withChildren: Set<string>}}
  *   `categories` holds top-level names, `subcategories` holds subcategory
- *   names, and `parentMap` maps a subcategory to its top-level parent.
+ *   names, `parentMap` maps a subcategory to its top-level parent, and
+ *   `withChildren` holds the top-level categories that actually have
+ *   subcategories. A top-level category absent from `withChildren` is a leaf:
+ *   as specific as any subcategory, which is what `isLeafCategory` reports.
  */
 function createCategoryMap (validCategories) {
   const categoryMap = {
     categories: new Set(),
     subcategories: new Set(),
     parentMap: new Map(),
+    withChildren: new Set(),
   }
   if (!Array.isArray(validCategories)) {
     const got = validCategories === null ? 'null' : Array.isArray(validCategories) ? 'array' : typeof validCategories
@@ -37,6 +41,7 @@ function createCategoryMap (validCategories) {
         if (!subcat || !subcat.category) return
         categoryMap.subcategories.add(subcat.category)
         categoryMap.parentMap.set(subcat.category, categoryInfo.category)
+        categoryMap.withChildren.add(categoryInfo.category)
       })
     }
   })
@@ -89,4 +94,27 @@ function normalizeCategories (list, categoryMap) {
   return { categories: Array.from(adjusted), invalid, parentsAdded }
 }
 
-module.exports = { createCategoryMap, parseCategoryList, normalizeCategories }
+/**
+ * Is this category a leaf of the taxonomy, that is, as specific as it gets?
+ *
+ * True for a subcategory and for a top-level category with no subcategories
+ * (`Schema Registry`, `Troubleshooting`, `rpk`, ...). False only for a
+ * top-level category that has children, which is broad by construction and is
+ * auto-added to pages by `normalizeCategories`. An unknown category, or no map
+ * at all, counts as a leaf: callers that skip validation should treat a match
+ * as specific rather than silently discounting it.
+ *
+ * @param {string} category
+ * @param {ReturnType<typeof createCategoryMap>} [categoryMap]
+ * @returns {boolean}
+ */
+function isLeafCategory (category, categoryMap) {
+  if (!categoryMap) return true
+  if (categoryMap.subcategories && categoryMap.subcategories.has(category)) return true
+  if (categoryMap.categories && categoryMap.categories.has(category)) {
+    return !(categoryMap.withChildren && categoryMap.withChildren.has(category))
+  }
+  return true
+}
+
+module.exports = { createCategoryMap, parseCategoryList, normalizeCategories, isLeafCategory }

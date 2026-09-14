@@ -9,12 +9,13 @@
  *   editor-approved  relationships.yml status: approved                          max(0.9, confidence)
  *   rejected         relationships.yml status: rejected                          suppressed (edge kept, shown: false)
  *   pending          ignored (awaiting review)
- *   category         0.3 per shared subcategory + 0.1 per shared top-level (parents capped
- *                    at 0.1 per edge in total), cap 0.85
+ *   category         0.3 per shared leaf category (a subcategory, or a top-level category
+ *                    with no subcategories) + 0.1 per shared parent category (a top-level
+ *                    one that has subcategories; capped at 0.1 per edge), cap 0.85
  *   platform filter  category edges only: Cloud doc -> platforms includes cloud,
  *                    Kubernetes/Linux/Docker doc -> platforms includes self-managed
- *   threshold        min_score (default 0.6): a category-only edge needs two shared
- *                    subcategories; parent-only or single-subcategory overlap never shows
+ *   threshold        min_score (default 0.6): a category-only edge needs two shared leaf
+ *                    categories; parent-only or single-leaf overlap never shows
  *   rank             score desc, featured desc, lastModified desc, title asc; cap max_related
  *   excluded         solution status != published (a draft built with include_drafts counts as published)
  *
@@ -23,14 +24,15 @@
 
 const path = require('path')
 const yaml = require('js-yaml')
+const { isLeafCategory } = require('../../extension-utils/categories')
 
 const SCORE_EXPLICIT = 1.0
 const SCORE_APPROVED_FLOOR = 0.9
-const SCORE_PER_SUBCATEGORY = 0.3
-const SCORE_PER_TOP_LEVEL = 0.1
+const SCORE_PER_LEAF = 0.3
+const SCORE_PER_PARENT = 0.1
 // Every solution shares a parent with every doc in the same area; that says
 // nothing about the page, so parents contribute at most one bonus per edge.
-const SCORE_TOP_LEVEL_CAP = 0.1
+const SCORE_PARENT_CAP = 0.1
 const SCORE_CATEGORY_CAP = 0.85
 const DEFAULT_MIN_SCORE = 0.6
 
@@ -55,24 +57,40 @@ function parseRelationships (text) {
 /**
  * Category overlap between a doc and a solution.
  *
+ * Leaf categories carry the signal: a subcategory, or a top-level category with
+ * no subcategories at all (`Schema Registry`, `Troubleshooting`, `rpk`), is a
+ * specific statement about the page. A top-level category that has children is
+ * not, because `normalizeCategories` adds it to every page that names one of
+ * its subcategories, so it only says "same product area".
+ *
  * @param {Array<string>} docCategories - normalized (parents present)
  * @param {Array<string>} solutionCategories - normalized
- * @param {{subcategories: Set<string>, categories: Set<string>}} categoryMap
- * @returns {{score: number, sharedSub: Array<string>, sharedTop: Array<string>}}
+ * @param {ReturnType<import('../../extension-utils/categories').createCategoryMap>} [categoryMap]
+ * @returns {{score: number, sharedLeaves: Array<string>, sharedParents: Array<string>}}
  */
 function categoryScore (docCategories, solutionCategories, categoryMap) {
   const solutionSet = new Set(solutionCategories || [])
-  const sharedSub = []
-  const sharedTop = []
+  const sharedLeaves = []
+  const sharedParents = []
   for (const c of docCategories || []) {
     if (!solutionSet.has(c)) continue
-    if (categoryMap && categoryMap.subcategories.has(c)) sharedSub.push(c)
-    else if (categoryMap && categoryMap.categories.has(c)) sharedTop.push(c)
-    else sharedSub.push(c) // no map: treat every match as specific
+    if (isLeafCategory(c, categoryMap)) sharedLeaves.push(c)
+    else sharedParents.push(c)
   }
-  const raw = sharedSub.length * SCORE_PER_SUBCATEGORY + Math.min(SCORE_TOP_LEVEL_CAP, sharedTop.length * SCORE_PER_TOP_LEVEL)
+  const raw = sharedLeaves.length * SCORE_PER_LEAF +
+    Math.min(SCORE_PARENT_CAP, sharedParents.length * SCORE_PER_PARENT)
   const score = Math.min(SCORE_CATEGORY_CAP, round(raw))
-  return { score, sharedSub, sharedTop }
+  return { score, sharedLeaves, sharedParents }
+}
+
+/** Readable explanation of a category edge, naming what actually matched. */
+function formatCategoryReason ({ sharedLeaves, sharedParents }) {
+  const parents = sharedParents.length
+    ? `parent categor${sharedParents.length === 1 ? 'y' : 'ies'} ${sharedParents.join(', ')}`
+    : ''
+  if (!sharedLeaves.length) return parents ? `shares only the ${parents}` : 'shares no categories'
+  const leaves = `shares categories ${sharedLeaves.join(', ')}`
+  return parents ? `${leaves} (and the ${parents})` : leaves
 }
 
 /**
@@ -150,10 +168,7 @@ function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap,
       } else {
         provenance = 'category'
         score = cat.score
-        const parts = []
-        if (cat.sharedSub.length) parts.push(cat.sharedSub.join(', '))
-        if (cat.sharedTop.length) parts.push(`(${cat.sharedTop.join(', ')})`)
-        reason = `shares categories ${parts.join(' ')}`.trim()
+        reason = formatCategoryReason(cat)
       }
 
       const edge = {
@@ -278,15 +293,16 @@ function toRecommendation (solution, edge) {
 module.exports = {
   SCORE_EXPLICIT,
   SCORE_APPROVED_FLOOR,
-  SCORE_PER_SUBCATEGORY,
-  SCORE_PER_TOP_LEVEL,
-  SCORE_TOP_LEVEL_CAP,
+  SCORE_PER_LEAF,
+  SCORE_PER_PARENT,
+  SCORE_PARENT_CAP,
   SCORE_CATEGORY_CAP,
   DEFAULT_MIN_SCORE,
   SCHEMA_PATH,
   createRelationshipsValidator,
   parseRelationships,
   categoryScore,
+  formatCategoryReason,
   platformCompatible,
   computeRelatedSolutions,
   computeCoverage,

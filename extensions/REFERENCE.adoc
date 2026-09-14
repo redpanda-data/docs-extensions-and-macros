@@ -766,7 +766,7 @@ max_related (optional)::
 Maximum number of solutions shown on one Product Docs page. Default `3`.
 
 min_score (optional)::
-Minimum score an edge needs to be shown. Default `0.6`, which a category-only edge reaches with two shared subcategories (`0.3 + 0.3`); one subcategory plus the parent bonus scores `0.4` and stays hidden. Explicit and approved edges score `1.0` and `0.9` or more, so they always clear it.
+Minimum score an edge needs to be shown. Default `0.6`, which a category-only edge reaches with two shared leaf categories (`0.3 + 0.3`); one leaf plus the parent bonus scores `0.4` and stays hidden. Explicit and approved edges score `1.0` and `0.9` or more, so they always clear it.
 
 network_checks (optional)::
 `auto` (default), `true`, or `false`. See the `beforePublish` hook.
@@ -957,10 +957,12 @@ Every (doc, solution) pair with any signal becomes an edge with provenance:
 
 | `category`
 | Shared categories after normalization.
-| `0.3` per shared subcategory + `0.1` per shared top-level category (parents capped at `0.1` per edge in total), capped at `0.85`
+| `0.3` per shared *leaf* category + `0.1` per shared *parent* category (parents capped at `0.1` per edge in total), capped at `0.85`
 |===
 
-Why the threshold sits at two subcategories: an audit of the demo build's edges found that pages sharing one broad subcategory such as `Clients` with a solution were not relevant to it, while pages sharing two or more were. One subcategory is too weak a signal in practice, and a parent bonus says only that the page is in the same product area, so it can never carry an edge over the line on its own. Where a single page is genuinely the right companion, `page-solution-related-docs` (explicit, `1.0`) is the tool; `relationships.yml` (`approved`) covers the cases an editor confirms after the fact.
+A category is a leaf when it is a subcategory, or a top-level category that has no subcategories of its own: `Schema Registry`, `Troubleshooting`, `Redpanda Console`, `rpk`, `Streaming`, `Emergency Response`, and `Agentic Data Plane` are all leaves, and are as specific a statement about a page as any subcategory. A category is a parent only when it has subcategories, which makes it broad by construction: `normalizeCategories` adds it automatically to every page that names one of its children, so a shared parent says "same product area" and nothing more. That distinction is why the two scores exist, and why it is the shape of the taxonomy rather than the indent level that decides: scoring every top-level category at `0.1` meant a solution teaching Schema Registry could not reach the Schema Registry pages by category at all, only through an explicit link.
+
+Why the threshold sits at two leaves: an audit of the demo build's edges found that pages sharing one broad subcategory such as `Clients` with a solution were not relevant to it, while pages sharing two or more were. One leaf is too weak a signal in practice, and a parent bonus can never carry an edge over the line on its own. Where a single page is genuinely the right companion, `page-solution-related-docs` (explicit, `1.0`) is the tool; `relationships.yml` (`approved`) covers the cases an editor confirms after the fact.
 
 `pending` entries are ignored (they are Stage 2 ML output awaiting review); the build logs how many there are. The platform filter applies to category edges only: a Cloud doc (`page-cloud` or `env-cloud`) needs `cloud` in the solution's platforms; a Kubernetes, Linux, or Docker doc needs `self-managed`; a doc with no marker matches everything. Edges below `min_score`, edges to non-published solutions, and edges past `max_related` stay in the graph with `shown: false` and a reason. Ranking is score descending, then featured first, then `lastModified` descending (from `add-git-dates`), then title ascending, so the output is the same on every build.
 
@@ -1016,7 +1018,7 @@ Two modules under `extension-utils/` replace copies that had drifted apart acros
 `getDeploymentType(attributes)` returns `Kubernetes`, `Linux`, `Docker`, `Redpanda Cloud`, or `''`, checking `env-kubernetes`, `env-linux`, `env-docker`, then `env-cloud` or `page-cloud`, in that order. Used by `generate-index-data`, the Algolia indexer, `find-related-docs`, `find-related-labs`, and `solutions-catalog`.
 
 `extension-utils/categories`::
-`createCategoryMap(validCategories)` builds `{ categories: Set, subcategories: Set, parentMap: Map }` from the `page-valid-categories` list. `parseCategoryList(value)` splits a comma list. `normalizeCategories(list, map)` returns `{ categories, invalid, parentsAdded }`: authored order kept, parents appended, unknown values removed. `validate-attributes` logs the `invalid` and `parentsAdded` results; `solutions-catalog` treats `invalid` as fatal.
+`createCategoryMap(validCategories)` builds `{ categories: Set, subcategories: Set, parentMap: Map, withChildren: Set }` from the `page-valid-categories` list, where `withChildren` holds the top-level categories that actually have subcategories. `isLeafCategory(category, map)` reports whether a category is as specific as it gets (a subcategory, or a top-level category with no children), which is what the solutions scorer weighs. `parseCategoryList(value)` splits a comma list. `normalizeCategories(list, map)` returns `{ categories, invalid, parentsAdded }`: authored order kept, parents appended, unknown values removed. `validate-attributes` logs the `invalid` and `parentsAdded` results; `solutions-catalog` treats `invalid` as fatal. Adding a category or subcategory to `valid-categories.yml` needs no code change here.
 
 == Global attributes
 
