@@ -359,7 +359,7 @@ describe('solutions-catalog: happy path', () => {
     expect(catalog.facets.technologies.map((t) => t.value)).toEqual(['Go', 'Protobuf'])
 
     const graph = addedFile(result.siteCatalog, 'assets/data/solutions-graph.json')
-    expect(graph.settings).toEqual({ maxRelated: 3, minScore: 0.3 })
+    expect(graph.settings).toEqual({ maxRelated: 3, minScore: 0.6 })
     expect(graph.edges).toEqual([
       expect.objectContaining({ doc: 'streaming:develop:consumer-offsets.adoc', solution: 'leaderboard', provenance: 'explicit', score: 1, shown: true, rank: 1 }),
     ])
@@ -826,21 +826,30 @@ describe('solutions-catalog: recommendation ranking', () => {
     expect(attr(doc, 'page-related-solutions')).toBeUndefined()
     const [edge] = addedFile(result.siteCatalog, 'solutions-graph.json').edges
     expect(edge).toMatchObject({ provenance: 'category', score: 0.1, shown: false })
-    expect(edge.reason).toMatch(/below 0\.3/)
+    expect(edge.reason).toMatch(/below 0\.6/)
   })
 
-  test('a single shared subcategory is enough to show', async () => {
-    const doc = makeDoc({ attrs: { 'page-categories': 'Clients' } })
+  test('one shared subcategory is not enough; two are', async () => {
+    const one = makeDoc({ relative: 'one.adoc', attrs: { 'page-categories': 'Clients' } })
+    const two = makeDoc({ relative: 'two.adoc', attrs: { 'page-categories': 'Clients, Stream Processing' } })
     const solution = makeSolution('leaderboard', { attrs: { 'page-solution-related-docs': undefined } })
     delete solution.pages[0].asciidoc.attributes['page-solution-related-docs']
-    const result = await run({ solutions: [solution], docs: [doc], relationshipsText: 'relationships: []' })
-    // Clients (0.3) + parent Development (0.1) = 0.4
-    expect(json(doc, 'page-related-solutions')[0]).toMatchObject({ provenance: 'category', score: 0.4 })
+    const result = await run({ solutions: [solution], docs: [one, two], relationshipsText: 'relationships: []' })
+    // Clients (0.3) + parent Development (0.1) = 0.4: hidden
+    expect(attr(one, 'page-related-solutions')).toBeUndefined()
+    const hidden = addedFile(result.siteCatalog, 'solutions-graph.json').edges.find((e) => e.doc.endsWith('one.adoc'))
+    expect(hidden).toMatchObject({ provenance: 'category', score: 0.4, shown: false })
+    // two subcategories (0.6) + parent (0.1) = 0.7: shown
+    expect(json(two, 'page-related-solutions')[0]).toMatchObject({ provenance: 'category', score: 0.7 })
   })
 
-  test('category score is capped at 0.85', () => {
-    const map = { subcategories: new Set(['a', 'b', 'c', 'd']), categories: new Set(['P']) }
+  test('parent bonuses are capped at 0.1 per edge and the total at 0.85', () => {
+    const map = { subcategories: new Set(['a', 'b', 'c', 'd']), categories: new Set(['P', 'Q', 'R']) }
     expect(relationships.categoryScore(['a', 'b', 'c', 'd', 'P'], ['a', 'b', 'c', 'd', 'P'], map).score).toBe(0.85)
+    // three shared parents still add only 0.1
+    expect(relationships.categoryScore(['a', 'P', 'Q', 'R'], ['a', 'P', 'Q', 'R'], map).score).toBe(0.4)
+    expect(relationships.categoryScore(['P', 'Q', 'R'], ['P', 'Q', 'R'], map).score).toBe(0.1)
+    expect(relationships.DEFAULT_MIN_SCORE).toBe(0.6)
   })
 
   test('shows at most max_related, in deterministic order', async () => {
@@ -970,7 +979,7 @@ describe('solutions-catalog: coverage report', () => {
     const result = await run({ solutions: [solution], docs, relationshipsText: 'relationships: []' })
     const info = result.logger.info.mock.calls.map((c) => c[0])
     expect(info).toContain('solutions-catalog: leaderboard reach: rpk=0 (top), Iceberg=1 (sub), Deployment=1 (top); zero-match: rpk')
-    expect(info).toContain('solutions-catalog: 1 doc pages decorated, 25 eligible doc pages without categories')
+    expect(info).toContain('solutions-catalog: 0 doc pages decorated, 25 eligible doc pages without categories')
     const { coverage } = addedFile(result.siteCatalog, 'solutions-graph.json')
     expect(coverage.solutions.leaderboard.zeroMatch).toEqual(['rpk'])
     expect(coverage.uncategorizedEligiblePages).toBe(25)
@@ -1018,16 +1027,63 @@ describe('solutions-catalog: eligible doc pages', () => {
       makeDoc({ relative: 'old.adoc', version: '26.1' }),
       makeDoc({ relative: 'landing.adoc', attrs: { 'page-layout': 'component-home-v3' } }),
       makeDoc({ relative: 'role.adoc', attrs: { 'page-role': 'home' } }),
+      makeDoc({ relative: 'section-index.adoc', attrs: { 'page-layout': 'index' } }),
+      makeDoc({ relative: 'index-list.adoc', attrs: { 'page-role': 'index-list' } }),
       makeDoc({ relative: 'optout.adoc', attrs: { 'page-exclude-related-solutions': '' } }),
       makeDoc({ component: 'home', version: '', module: 'ROOT', relative: 'index.adoc' }),
+      makeDoc({ component: 'labs', version: '', module: 'clients', relative: 'docker-go.adoc' }),
     ]
     const unpublished = makeDoc({ relative: 'gone.adoc' })
     delete unpublished.out
     docs.push(unpublished)
     const solution = makeSolution('leaderboard', { attrs: { 'page-solution-related-docs': 'streaming:develop:ok.adoc' } })
-    await run({ solutions: [solution], docs, relationshipsText: 'relationships: []' })
+    const labsVersion = { version: '', asciidoc: { attributes: {} } }
+    const components = makeComponents([{ name: 'labs', title: 'Labs', latest: labsVersion, versions: [labsVersion] }])
+    const result = await run({ solutions: [solution], docs, components, relationshipsText: 'relationships: []' })
     const decorated = docs.filter((d) => attr(d, 'page-related-solutions')).map((d) => d.src.relative)
     expect(decorated).toEqual(['ok.adoc'])
+    // ineligible pages get no edge at all, not even a hidden one
+    const edgeDocs = addedFile(result.siteCatalog, 'solutions-graph.json').edges.map((e) => e.doc)
+    expect(edgeDocs).toEqual(['streaming:develop:ok.adoc'])
+  })
+
+  test('regression: the demo-build audit (labs, index pages, one broad subcategory are noise)', async () => {
+    // Models the 39-edge audit of the gaming solution: only explicit links and
+    // pages sharing two or more subcategories were relevant.
+    const gaming = makeSolution('multiplayer-gaming', {
+      attrs: {
+        'page-categories': 'Producers, Consumer Groups, Topics and Partitions, Schema Registry, Retention and Compaction, Pipelines',
+        'page-solution-related-docs': 'streaming:develop:consumer-offsets.adoc',
+      },
+    })
+    const docs = [
+      makeDoc({ relative: 'consumer-offsets.adoc', attrs: { 'page-categories': 'rpk' } }),                       // explicit
+      makeDoc({ relative: 'manage-topics/config-topics.adoc', attrs: { 'page-categories': 'Topics and Partitions, Retention and Compaction, Producers' } }), // 3 shared
+      makeDoc({ relative: 'produce-data/configure-producers.adoc', attrs: { 'page-categories': 'Producers, Topics and Partitions' } }),           // 2 shared
+      makeDoc({ relative: 'kafka-clients.adoc', attrs: { 'page-categories': 'Clients' } }),                      // parent only
+      makeDoc({ relative: 'k-manage-topics.adoc', module: 'manage', attrs: { 'page-categories': 'Topics and Partitions, Redpanda Connect', 'env-kubernetes': true } }), // 1 sub + 2 parents
+      makeDoc({ relative: 'produce-data/index.adoc', attrs: { 'page-layout': 'index', 'page-categories': 'Producers, Topics and Partitions, Consumer Groups' } }),    // index layout
+      makeDoc({ component: 'labs', version: '', module: 'clients', relative: 'docker-go.adoc', attrs: { 'page-categories': 'Producers, Consumer Groups, Topics and Partitions' } }), // labs
+    ]
+    const labsVersion = { version: '', asciidoc: { attributes: {} } }
+    const components = makeComponents([{ name: 'labs', title: 'Labs', latest: labsVersion, versions: [labsVersion] }])
+    const result = await run({ solutions: [gaming], docs, components, relationshipsText: 'relationships: []' })
+
+    const shown = docs.filter((d) => attr(d, 'page-related-solutions')).map((d) => d.src.relative).sort()
+    expect(shown).toEqual(['consumer-offsets.adoc', 'manage-topics/config-topics.adoc', 'produce-data/configure-producers.adoc'])
+
+    const edges = addedFile(result.siteCatalog, 'solutions-graph.json').edges
+    const byDoc = Object.fromEntries(edges.map((e) => [e.doc.split(':').pop(), e]))
+    expect(byDoc['consumer-offsets.adoc']).toMatchObject({ provenance: 'explicit', score: 1, shown: true })
+    expect(byDoc['manage-topics/config-topics.adoc']).toMatchObject({ provenance: 'category', score: 0.85, shown: true })
+    expect(byDoc['produce-data/configure-producers.adoc']).toMatchObject({ provenance: 'category', score: 0.7, shown: true })
+    expect(byDoc['kafka-clients.adoc']).toMatchObject({ provenance: 'category', score: 0.1, shown: false })
+    expect(byDoc['k-manage-topics.adoc']).toMatchObject({ provenance: 'category', score: 0.4, shown: false })
+    expect(byDoc['k-manage-topics.adoc'].reason).toMatch(/below 0\.6/)
+    // labs and index pages are not eligible: no edge at all
+    expect(byDoc['produce-data/index.adoc']).toBeUndefined()
+    expect(byDoc['docker-go.adoc']).toBeUndefined()
+    expect(edges).toHaveLength(5)
   })
 })
 
@@ -1060,9 +1116,9 @@ describe('solutions-catalog: pure helpers', () => {
   })
 
   test('resolveConfig accepts camelCase and snake_case, with defaults and env', () => {
-    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.3, networkChecks: 'auto', includeDrafts: false })
+    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false })
     expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true' }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true })
-    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.3, networkChecks: false, includeDrafts: true })
+    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true })
     expect(extension.resolveConfig({ include_drafts: false }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' }).includeDrafts).toBe(false)
     expect(extension.resolveConfig({ max_related: 'lots' }, {}).maxRelated).toBe(3)
   })

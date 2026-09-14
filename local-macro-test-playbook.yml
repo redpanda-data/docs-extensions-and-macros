@@ -128,7 +128,7 @@ antora:
   - require: './extensions/unpublish-pages'
   - require: './extensions/solutions-catalog/index'
     max_related: 3
-    min_score: 0.3
+    min_score: 0.6
     network_checks: auto
   - require: './extensions/validate-attributes'
   - require: './extensions/find-related-docs'

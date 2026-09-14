@@ -9,10 +9,12 @@
  *   editor-approved  relationships.yml status: approved                          max(0.9, confidence)
  *   rejected         relationships.yml status: rejected                          suppressed (edge kept, shown: false)
  *   pending          ignored (awaiting review)
- *   category         0.3 per shared subcategory + 0.1 per shared top-level, cap 0.85
+ *   category         0.3 per shared subcategory + 0.1 per shared top-level (parents capped
+ *                    at 0.1 per edge in total), cap 0.85
  *   platform filter  category edges only: Cloud doc -> platforms includes cloud,
  *                    Kubernetes/Linux/Docker doc -> platforms includes self-managed
- *   threshold        min_score (default 0.3): parent-only overlap never shows
+ *   threshold        min_score (default 0.6): a category-only edge needs two shared
+ *                    subcategories; parent-only or single-subcategory overlap never shows
  *   rank             score desc, featured desc, lastModified desc, title asc; cap max_related
  *   excluded         solution status != published (a draft built with include_drafts counts as published)
  *
@@ -26,7 +28,11 @@ const SCORE_EXPLICIT = 1.0
 const SCORE_APPROVED_FLOOR = 0.9
 const SCORE_PER_SUBCATEGORY = 0.3
 const SCORE_PER_TOP_LEVEL = 0.1
+// Every solution shares a parent with every doc in the same area; that says
+// nothing about the page, so parents contribute at most one bonus per edge.
+const SCORE_TOP_LEVEL_CAP = 0.1
 const SCORE_CATEGORY_CAP = 0.85
+const DEFAULT_MIN_SCORE = 0.6
 
 const SCHEMA_PATH = path.join(__dirname, '..', '..', 'docs-data', 'solutions-relationships.schema.json')
 
@@ -64,7 +70,7 @@ function categoryScore (docCategories, solutionCategories, categoryMap) {
     else if (categoryMap && categoryMap.categories.has(c)) sharedTop.push(c)
     else sharedSub.push(c) // no map: treat every match as specific
   }
-  const raw = sharedSub.length * SCORE_PER_SUBCATEGORY + sharedTop.length * SCORE_PER_TOP_LEVEL
+  const raw = sharedSub.length * SCORE_PER_SUBCATEGORY + Math.min(SCORE_TOP_LEVEL_CAP, sharedTop.length * SCORE_PER_TOP_LEVEL)
   const score = Math.min(SCORE_CATEGORY_CAP, round(raw))
   return { score, sharedSub, sharedTop }
 }
@@ -112,7 +118,7 @@ function compareCandidates (a, b) {
  *   `related` maps doc key to the shown recommendation items in rank order;
  *   `edges` is every (doc, solution) pair with any signal, for solutions-graph.json.
  */
-function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap, maxRelated = 3, minScore = 0.3 }) {
+function computeRelatedSolutions ({ docs, solutions, relationships, categoryMap, maxRelated = 3, minScore = DEFAULT_MIN_SCORE }) {
   const related = new Map()
   const edges = []
 
@@ -274,7 +280,9 @@ module.exports = {
   SCORE_APPROVED_FLOOR,
   SCORE_PER_SUBCATEGORY,
   SCORE_PER_TOP_LEVEL,
+  SCORE_TOP_LEVEL_CAP,
   SCORE_CATEGORY_CAP,
+  DEFAULT_MIN_SCORE,
   SCHEMA_PATH,
   createRelationshipsValidator,
   parseRelationships,

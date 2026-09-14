@@ -12,7 +12,7 @@
  *     extensions:
  *       - require: '@redpanda-data/docs-extensions-and-macros/extensions/solutions-catalog/index'
  *         max_related: 3
- *         min_score: 0.3
+ *         min_score: 0.6
  *         network_checks: auto
  *
  * Hooks
@@ -47,17 +47,22 @@ const ASSET_DIR = 'assets/data'
 const CATALOG_FILENAME = 'solutions.json'
 const GRAPH_FILENAME = 'solutions-graph.json'
 
-// Components whose pages never receive recommendations.
-const EXCLUDED_DOC_COMPONENTS = ['solutions', 'home', 'shared', 'search', 'data-platform', 'self-managed']
-// Landing/umbrella layouts and roles: no article body to hang recommendations on.
+// Components whose pages never receive recommendations. `labs` is retiring and
+// its pages are themselves the kind of content solutions replace.
+const EXCLUDED_DOC_COMPONENTS = ['solutions', 'home', 'shared', 'search', 'data-platform', 'self-managed', 'labs']
+// Landing/umbrella/index layouts and roles: no article body to hang
+// recommendations on, and section indexes match broad categories by accident.
 const UMBRELLA_LAYOUTS = [
   'home', 'component-home-v3', 'data-platform', 'labs-home', 'labs-search', 'search', '404',
-  'solutions-home', 'solution', 'solution-step',
+  'index', 'index-list', 'solutions-home', 'solution', 'solution-step',
 ]
 
 const DEFAULTS = Object.freeze({
   maxRelated: 3,
-  minScore: 0.3,
+  // A category-only edge needs two shared subcategories (0.3 + 0.3): one broad
+  // subcategory such as Clients is too weak in practice, and parent bonuses are
+  // capped at 0.1 so they never carry an edge over the line on their own.
+  minScore: 0.6,
   networkChecks: 'auto',
   includeDrafts: false,
 })

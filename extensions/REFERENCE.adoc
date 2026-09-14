@@ -766,7 +766,7 @@ max_related (optional)::
 Maximum number of solutions shown on one Product Docs page. Default `3`.
 
 min_score (optional)::
-Minimum score an edge needs to be shown. Default `0.3`. Two pages that share only a top-level category score `0.1`, so parent-only overlap never shows.
+Minimum score an edge needs to be shown. Default `0.6`, which a category-only edge reaches with two shared subcategories (`0.3 + 0.3`); one subcategory plus the parent bonus scores `0.4` and stays hidden. Explicit and approved edges score `1.0` and `0.9` or more, so they always clear it.
 
 network_checks (optional)::
 `auto` (default), `true`, or `false`. See the `beforePublish` hook.
@@ -784,7 +784,7 @@ antora:
   - require: '@redpanda-data/docs-extensions-and-macros/extensions/add-git-dates'
   - require: '@redpanda-data/docs-extensions-and-macros/extensions/solutions-catalog/index'
     max_related: 3
-    min_score: 0.3
+    min_score: 0.6
     network_checks: auto
   - require: '@redpanda-data/docs-extensions-and-macros/extensions/validate-attributes'
   - require: '@redpanda-data/docs-extensions-and-macros/extensions/unlisted-pages'
@@ -922,7 +922,7 @@ Written on the overview and every step page (complex values are JSON strings, re
 
 Derived, never authored: `page-solution-id` is the module name; `page-solution-repo` is `owner/name` from the page's git origin URL (https, ssh, and scp forms; a local `file://` origin yields an empty string); `page-solution-tag` is `<id>/<version>`; `page-solution-asset` is `<id>-<version>.zip`.
 
-Eligible Product Docs pages receive `page-related-solutions`, only when non-empty: `[{id, title, url, description, difficulty, duration, technologies, provenance, score, reason}]` in rank order. Eligible means: a published page (`page.out`) in the latest version of its component, the component is not `solutions`, `home`, `shared`, `search`, `data-platform`, or `self-managed`, the layout or role is not an umbrella layout (`home`, `component-home-v3`, `data-platform`, `labs-home`, `labs-search`, `search`, `404`, `solutions-home`, `solution`, `solution-step`), and the page does not set `page-exclude-related-solutions`.
+Eligible Product Docs pages receive `page-related-solutions`, only when non-empty: `[{id, title, url, description, difficulty, duration, technologies, provenance, score, reason}]` in rank order. Eligible means: a published page (`page.out`) in the latest version of its component, the component is not `solutions`, `home`, `shared`, `search`, `data-platform`, `self-managed`, or `labs`, the layout or role is not an umbrella or index layout (`home`, `component-home-v3`, `data-platform`, `labs-home`, `labs-search`, `search`, `404`, `index`, `index-list`, `solutions-home`, `solution`, `solution-step`), and the page does not set `page-exclude-related-solutions`. Labs are excluded because they are the content solutions replace; section index pages because they carry an area's broad categories and would match every solution in that area.
 
 === Status
 
@@ -957,8 +957,10 @@ Every (doc, solution) pair with any signal becomes an edge with provenance:
 
 | `category`
 | Shared categories after normalization.
-| `0.3` per shared subcategory + `0.1` per shared top-level category, capped at `0.85`
+| `0.3` per shared subcategory + `0.1` per shared top-level category (parents capped at `0.1` per edge in total), capped at `0.85`
 |===
+
+Why the threshold sits at two subcategories: an audit of the demo build's edges found that pages sharing one broad subcategory such as `Clients` with a solution were not relevant to it, while pages sharing two or more were. One subcategory is too weak a signal in practice, and a parent bonus says only that the page is in the same product area, so it can never carry an edge over the line on its own. Where a single page is genuinely the right companion, `page-solution-related-docs` (explicit, `1.0`) is the tool; `relationships.yml` (`approved`) covers the cases an editor confirms after the fact.
 
 `pending` entries are ignored (they are Stage 2 ML output awaiting review); the build logs how many there are. The platform filter applies to category edges only: a Cloud doc (`page-cloud` or `env-cloud`) needs `cloud` in the solution's platforms; a Kubernetes, Linux, or Docker doc needs `self-managed`; a doc with no marker matches everything. Edges below `min_score`, edges to non-published solutions, and edges past `max_related` stay in the graph with `shown: false` and a reason. Ranking is score descending, then featured first, then `lastModified` descending (from `add-git-dates`), then title ascending, so the output is the same on every build.
 
