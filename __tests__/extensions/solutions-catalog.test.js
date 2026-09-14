@@ -44,13 +44,27 @@ function makePage ({ component = 'solutions', version = '', module, relative, at
   }
 }
 
-function makeAttachment ({ component = 'solutions', version = '', module, relative }) {
+function makeAttachment ({ component = 'solutions', version = '', module, relative, text }) {
   const url = `/${[component, version, module].filter(Boolean).join('/')}/_attachments/${relative}`
   return {
     src: { component, version, module, relative, family: 'attachment' },
+    ...(text === undefined ? {} : { contents: Buffer.from(text) }),
     out: { path: url.slice(1) },
     pub: { url },
   }
+}
+
+// What the monorepo's Doc Detective runner commits after a passing full run.
+const MANIFEST = {
+  suite: 'doc-detective',
+  specs: 11,
+  steps: 50,
+  commands: 34,
+  checks: 23,
+  media: 2,
+  verify_script: 'PASS (9/9)',
+  redpanda_version: 'v26.2.2',
+  run_at: '2026-09-14T09:12:00Z',
 }
 
 function makeAlias ({ component = 'solutions', version = '', module, relative, target }) {
@@ -103,7 +117,7 @@ const OVERVIEW_ATTRS = {
  * A complete, valid solution: overview + three steps + one attachment.
  * `mutate` can edit the overview attrs / html / steps before pages are built.
  */
-function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title } = {}) {
+function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title, verification = JSON.stringify(MANIFEST) } = {}) {
   const overviewAttrs = { ...OVERVIEW_ATTRS, ...attrs }
   const stepIds = steps || collect.parseList(overviewAttrs['page-solution-steps'])
   const overview = makePage({
@@ -122,7 +136,10 @@ function makeSolution (id, { attrs = {}, steps, overviewHtml, stepHtml, title } 
   }))
   return {
     pages: [overview, ...stepPages],
-    attachments: [makeAttachment({ module: id, relative: 'docker-compose.yml' })],
+    attachments: [
+      makeAttachment({ module: id, relative: 'docker-compose.yml' }),
+      ...(verification === null ? [] : [makeAttachment({ module: id, relative: 'verification.json', text: verification })]),
+    ],
   }
 }
 
@@ -1200,6 +1217,106 @@ describe('solutions-catalog: assumes', () => {
     const attrCatalog = JSON.parse(result.catalog.getComponent('home').versions[0].asciidoc.attributes['solutions-catalog'])
     expect(attrCatalog.solutions[0].assumes).toEqual(expected)
     expect(json(result.docs[0], 'page-related-solutions')[0].assumes).toEqual(expected)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('solutions-catalog: verification manifest', () => {
+  const warningsOf = (result) => result.logger.warn.mock.calls.map((c) => c[0]).join('\n')
+  const EXPECTED = {
+    suite: 'doc-detective',
+    specs: 11,
+    steps: 50,
+    commands: 34,
+    checks: 23,
+    media: 2,
+    verifyScript: 'PASS (9/9)',
+    redpandaVersion: 'v26.2.2',
+    runAt: '2026-09-14T09:12:00Z',
+  }
+
+  test('reaches page-solution, solutions.json, and the component attribute', async () => {
+    const solution = makeSolution('leaderboard')
+    const result = await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').verified).toEqual(EXPECTED)
+    expect(addedFile(result.siteCatalog, 'solutions.json').solutions[0].verified).toEqual(EXPECTED)
+    const attrCatalog = JSON.parse(result.catalog.getComponent('home').versions[0].asciidoc.attributes['solutions-catalog'])
+    expect(attrCatalog.solutions[0].verified).toEqual(EXPECTED)
+    expect(warningsOf(result)).not.toMatch(/verification\.json/)
+  })
+
+  test('mirrors the date and version as scalars on the overview and every step page', async () => {
+    const solution = makeSolution('leaderboard')
+    await run({ solutions: [solution] })
+    for (const page of solution.pages) {
+      expect(attr(page, 'page-solution-verified-at')).toBe('2026-09-14T09:12:00Z')
+      expect(attr(page, 'page-solution-verified-version')).toBe('v26.2.2')
+    }
+  })
+
+  test('the manifest is evidence, not a reader attachment', async () => {
+    const solution = makeSolution('leaderboard')
+    await run({ solutions: [solution] })
+    const record = json(solution.pages[0], 'page-solution')
+    expect(record.attachments.map((a) => a.name)).toEqual(['docker-compose.yml'])
+  })
+
+  test('no manifest means no key, and a published solution says so', async () => {
+    const solution = makeSolution('leaderboard', { verification: null })
+    const result = await run({ solutions: [solution] })
+    const record = json(solution.pages[0], 'page-solution')
+    expect('verified' in record).toBe(false)
+    expect(attr(solution.pages[0], 'page-solution-verified-at')).toBeUndefined()
+    expect(addedFile(result.siteCatalog, 'solutions.json').solutions[0].verified).toBeUndefined()
+    expect(warningsOf(result)).toMatch(/leaderboard: no verification\.json attachment; readers get no verification evidence/)
+  })
+
+  test('a draft without a manifest is not nagged', async () => {
+    const draft = makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft' }, verification: null })
+    const result = await run({ solutions: [draft], config: { include_drafts: true } })
+    expect(warningsOf(result)).not.toMatch(/no verification\.json attachment/)
+  })
+
+  test.each([
+    ['malformed JSON', '{not json', /could not be read \(/],
+    ['a JSON array', '[]', /could not be read \(not a JSON object\)/],
+    ['an object with no known fields', '{"foo":1}', /could not be read \(no known fields\)/],
+  ])('%s means no key plus a warning naming the file', async (_name, text, expected) => {
+    const solution = makeSolution('leaderboard', { verification: text })
+    const result = await run({ solutions: [solution] })
+    expect('verified' in json(solution.pages[0], 'page-solution')).toBe(false)
+    expect(warningsOf(result)).toMatch(/leaderboard: verification\.json/)
+    expect(warningsOf(result)).toMatch(expected)
+    // The unreadable file is reported once, not also as a missing one.
+    expect(warningsOf(result)).not.toMatch(/no verification\.json attachment/)
+  })
+
+  test('warns when run_at is not an ISO timestamp, and keeps the manifest', async () => {
+    const solution = makeSolution('leaderboard', { verification: JSON.stringify({ ...MANIFEST, run_at: 'last Tuesday' }) })
+    const result = await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').verified.runAt).toBe('last Tuesday')
+    expect(warningsOf(result)).toMatch(/verification\.json run_at "last Tuesday" is not an ISO 8601 timestamp/)
+  })
+
+  test('warns when run_at is absent', async () => {
+    const { run_at: _omit, ...noRunAt } = MANIFEST
+    const solution = makeSolution('leaderboard', { verification: JSON.stringify(noRunAt) })
+    const result = await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').verified.specs).toBe(11)
+    expect(attr(solution.pages[0], 'page-solution-verified-at')).toBeUndefined()
+    expect(warningsOf(result)).toMatch(/verification\.json has no run_at/)
+  })
+
+  test('a zero count is evidence and survives', async () => {
+    const solution = makeSolution('leaderboard', { verification: JSON.stringify({ ...MANIFEST, media: 0 }) })
+    await run({ solutions: [solution] })
+    expect(json(solution.pages[0], 'page-solution').verified.media).toBe(0)
+  })
+
+  test('parseVerification is pure over the file', () => {
+    expect(collect.parseVerification(undefined)).toEqual({ verified: null, error: null })
+    expect(collect.parseVerification({ contents: Buffer.from(JSON.stringify(MANIFEST)) }).verified).toEqual(EXPECTED)
   })
 })
 

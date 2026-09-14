@@ -45,6 +45,54 @@ const VERSION_RX = /^v\d+\.\d+\.\d+$/
 // beyond the cap are dropped.
 const ASSUMES_MAX = 4
 
+// Doc Detective evidence for a solution, written by the monorepo's runner after
+// a passing full run and committed like the captured media. It is machine
+// evidence rather than build-along scaffolding, so it is projected as the
+// record's `verified` and kept out of the record's attachment list.
+const VERIFICATION_FILE = 'verification.json'
+
+// Manifest key -> record key. Only these are read, and only when the manifest
+// carries them: nothing here is defaulted or synthesised.
+const VERIFICATION_FIELDS = Object.freeze([
+  ['suite', 'suite'],
+  ['specs', 'specs'],
+  ['steps', 'steps'],
+  ['commands', 'commands'],
+  ['checks', 'checks'],
+  ['media', 'media'],
+  ['verify_script', 'verifyScript'],
+  ['redpanda_version', 'redpandaVersion'],
+  ['run_at', 'runAt'],
+])
+
+/**
+ * Read a solution's verification manifest.
+ *
+ * Returns `{ verified, error }`: a record object when the file parses and
+ * carries at least one known field, otherwise `verified: null` and a reason for
+ * validate.js to warn with. A missing file is neither: no data, no complaint.
+ */
+function parseVerification (file) {
+  if (!file) return { verified: null, error: null }
+  let data
+  try {
+    data = JSON.parse(file.contents ? file.contents.toString('utf8') : '')
+  } catch (err) {
+    return { verified: null, error: err.message }
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return { verified: null, error: 'not a JSON object' }
+  }
+  const verified = {}
+  for (const [from, to] of VERIFICATION_FIELDS) {
+    const value = data[from]
+    if (value === undefined || value === null || value === '') continue
+    verified[to] = value
+  }
+  if (!Object.keys(verified).length) return { verified: null, error: 'no known fields' }
+  return { verified, error: null }
+}
+
 /** Split a comma list attribute into trimmed, non-empty values. */
 function parseList (value) {
   if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean)
@@ -165,6 +213,9 @@ function buildRecord (mod, modulePages, moduleAttachments, { version }) {
 
   const attrs = (overview && overview.asciidoc && overview.asciidoc.attributes) || {}
   const solutionVersion = attrs['page-solution-version'] ? String(attrs['page-solution-version']).trim() : ''
+  const { verified, error: verifiedError } = parseVerification(
+    moduleAttachments.find((a) => a.src.relative === VERIFICATION_FILE)
+  )
   const platforms = parseList(attrs['page-solution-platforms'])
 
   return {
@@ -200,7 +251,10 @@ function buildRecord (mod, modulePages, moduleAttachments, { version }) {
     repo: deriveRepo(overview && overview.src && overview.src.origin && overview.src.origin.url),
     tag: solutionVersion ? `${mod}/${solutionVersion}` : '',
     asset: solutionVersion ? `${mod}-${solutionVersion}.zip` : '',
+    verified,
+    verifiedError,
     attachments: moduleAttachments
+      .filter((a) => a.src.relative !== VERIFICATION_FILE)
       .filter((a) => a.pub && a.pub.url)
       .map((a) => ({ name: a.src.relative, url: a.pub.url }))
       .sort((a, b) => a.name.localeCompare(b.name)),
@@ -217,6 +271,9 @@ module.exports = {
   SLUG_RX,
   VERSION_RX,
   ASSUMES_MAX,
+  VERIFICATION_FILE,
+  VERIFICATION_FIELDS,
+  parseVerification,
   parseList,
   parseFlag,
   deriveRepo,

@@ -482,3 +482,54 @@ describe('solution metadata in Markdown frontmatter', () => {
     })
   })
 })
+
+// The Doc Detective evidence a solution ships travels with the .md too, under
+// the manifest's own key names.
+describe('solution verification in Markdown frontmatter', () => {
+  const yaml = require('js-yaml')
+  const { buildSolutionMetadata } = require('../../extensions/convert-to-markdown')
+
+  const VERIFIED = {
+    suite: 'doc-detective',
+    specs: 11,
+    steps: 50,
+    commands: 34,
+    checks: 23,
+    media: 2,
+    verifyScript: 'PASS (9/9)',
+    redpandaVersion: 'v26.2.2',
+    runAt: '2026-09-14T09:12:00Z',
+  }
+
+  const page = (record) => ({
+    src: { component: 'solutions', version: '' },
+    asciidoc: { doctitle: 'T', attributes: { 'page-solution': JSON.stringify(record) } },
+  })
+  const BASE = { id: 'multiplayer-gaming', version: 'v1.0.0', tag: 'multiplayer-gaming/v1.0.0', repo: 'redpanda-data/solutions', status: 'published', difficulty: 'intermediate', duration: 45, download: 'authenticated', steps: [] }
+
+  test('projects the manifest with its own snake_case keys', () => {
+    const block = buildSolutionMetadata(page({ ...BASE, verified: VERIFIED }))
+    expect(block.verified).toEqual({
+      suite: 'doc-detective',
+      specs: 11,
+      steps: 50,
+      commands: 34,
+      checks: 23,
+      media: 2,
+      verify_script: 'PASS (9/9)',
+      redpanda_version: 'v26.2.2',
+      run_at: '2026-09-14T09:12:00Z',
+    })
+    // Still valid YAML once dumped with the rest of the block.
+    expect(yaml.load(yaml.dump({ solution: block })).solution.verified.specs).toBe(11)
+  })
+
+  test('no manifest in the record means no verified key', () => {
+    expect(buildSolutionMetadata(page(BASE)).verified).toBeUndefined()
+  })
+
+  test('only the fields the manifest carried are emitted', () => {
+    const block = buildSolutionMetadata(page({ ...BASE, verified: { suite: 'doc-detective', specs: 4, media: 0 } }))
+    expect(block.verified).toEqual({ suite: 'doc-detective', specs: 4, media: 0 })
+  })
+})

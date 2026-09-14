@@ -11,7 +11,7 @@
 
 const { parse } = require('node-html-parser')
 const {
-  RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, stripVersion,
+  RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, stripVersion,
 } = require('./collect')
 const { normalizeCategories } = require('../../extension-utils/categories')
 
@@ -111,6 +111,13 @@ function isInteger (value) {
   return /^-?\d+$/.test(String(value).trim())
 }
 
+/** ISO 8601 instant, as the verification manifest is expected to carry. */
+function isIsoTimestamp (value) {
+  if (typeof value !== 'string') return false
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value.trim())) return false
+  return !Number.isNaN(Date.parse(value.trim()))
+}
+
 /**
  * Validate one collected solution record after conversion.
  *
@@ -169,6 +176,19 @@ function validateSolution (record, { categoryMap, resolveDoc, solutionIds } = {}
   if (badPlatforms.length) err(`page-solution-platforms contains unknown values: ${badPlatforms.join(', ')} (allowed: ${ENUMS.platforms.join(', ')})`)
 
   if (!record.technologies.length) err('page-solution-technologies is required')
+
+  // Verification manifest: the build-side twin of the monorepo's check-metadata.
+  // Nothing is inferred when it is absent or unreadable, so say so instead.
+  if (record.verifiedError) {
+    warn(`${VERIFICATION_FILE} could not be read (${record.verifiedError}); no verification is published for this solution`)
+  } else if (record.status === 'published' && !record.verified) {
+    warn(`no ${VERIFICATION_FILE} attachment; readers get no verification evidence`)
+  }
+  if (record.verified) {
+    const runAt = record.verified.runAt
+    if (runAt === undefined) warn(`${VERIFICATION_FILE} has no run_at`)
+    else if (!isIsoTimestamp(runAt)) warn(`${VERIFICATION_FILE} run_at "${runAt}" is not an ISO 8601 timestamp`)
+  }
 
   // Assumes: optional, but a published solution without it gives the reader only
   // half of the pair (prerequisites beside difficulty) they choose on.
@@ -317,6 +337,7 @@ function formatErrors (errors) {
 }
 
 module.exports = {
+  isIsoTimestamp,
   DURATION_MIN,
   DURATION_MAX,
   DESCRIPTION_MAX,

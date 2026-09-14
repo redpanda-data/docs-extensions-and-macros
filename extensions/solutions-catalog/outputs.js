@@ -36,7 +36,7 @@ function buildSteps (record) {
  * renders it.
  */
 function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions = [] } = {}) {
-  return {
+  const publicRecord = {
     id: record.id,
     title: record.title,
     description: record.description,
@@ -64,6 +64,9 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     supersededBy: record.supersededBy || null,
     lastModified: record.lastModified || null,
   }
+  // Evidence, not a default: no manifest means no key at all.
+  if (record.verified) publicRecord.verified = record.verified
+  return publicRecord
 }
 
 /** Sidebar model: solutions home, overview, ordered steps. */
@@ -119,6 +122,12 @@ function applyPageAttributes (record, publicRecord, nav) {
     attrs['page-solution-platforms'] = publicRecord.platforms.join(', ')
     attrs['page-solution-technologies'] = publicRecord.technologies.join(', ')
     attrs['page-solution-assumes'] = publicRecord.assumes.join(', ')
+    // Step pages show when the solution was last verified without parsing JSON.
+    if (publicRecord.verified) {
+      const { runAt, redpandaVersion } = publicRecord.verified
+      if (runAt) attrs['page-solution-verified-at'] = String(runAt)
+      if (redpandaVersion) attrs['page-solution-verified-version'] = String(redpandaVersion)
+    }
     if (publicRecord.categories.length) attrs['page-categories'] = publicRecord.categories.join(', ')
   }
 

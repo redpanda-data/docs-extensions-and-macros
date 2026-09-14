@@ -120,6 +120,24 @@ function buildSolutionMetadata(page) {
   })
   if (Object.keys(repository).length) block.repository = repository
 
+  // Doc Detective evidence, when the solution ships a verification manifest.
+  // Projected with the manifest's own key names, so the block and the file it
+  // came from read the same way. Absent manifest, absent key.
+  if (record.verified) {
+    const verified = assignPresent({}, {
+      suite: record.verified.suite,
+      specs: record.verified.specs,
+      steps: record.verified.steps,
+      commands: record.verified.commands,
+      checks: record.verified.checks,
+      media: record.verified.media,
+      verify_script: record.verified.verifyScript,
+      redpanda_version: record.verified.redpandaVersion,
+      run_at: record.verified.runAt,
+    })
+    if (Object.keys(verified).length) block.verified = verified
+  }
+
   return Object.keys(block).length ? block : null
 }
 

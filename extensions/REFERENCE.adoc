@@ -903,12 +903,12 @@ Written on the overview and every step page (complex values are JSON strings, re
 | Attribute | Value
 
 | `page-solution`
-| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo`, `status`, `draft` (true only for a draft built with `include_drafts`), `featured`, `difficulty`, `duration`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `assumes`, `personas`, `steps[{id, title, url, order, duration}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]`, `supersededBy`, `lastModified`.
+| The full record: `id`, `title`, `description`, `url`, `version`, `tag`, `asset`, `repo`, `status`, `draft` (true only for a draft built with `include_drafts`), `featured`, `difficulty`, `duration`, `download`, `platforms`, `technologies`, `categories`, `useCases`, `assumes`, `personas`, `steps[{id, title, url, order, duration}]`, `relatedDocs[{id, title, url, provenance}]`, `relatedSolutions[{id, title, url}]`, `attachments[{name, url}]`, `supersededBy`, `lastModified`, and `verified{suite, specs, steps, commands, checks, media, verifyScript, redpandaVersion, runAt}` when the solution ships a verification manifest (see <<Verification>>). Keys the manifest did not carry are absent, and a solution with no manifest has no `verified` key at all.
 
 | `page-solution-nav`
 | `{ home: {title, url}, overview: {title, url}, steps: [{id, title, url, order, duration}] }`. Every title in the JSON outputs is plain text: inline markup in the document title (`<code>`, entities) is stripped before it enters `page-solution`, the nav, `relatedDocs`, or `relatedSolutions`.
 
-| `page-solution-id`, `page-solution-title`, `page-solution-url`, `page-solution-description`, `page-solution-version`, `page-solution-tag`, `page-solution-asset`, `page-solution-repo`, `page-solution-status`, `page-solution-difficulty`, `page-solution-duration`, `page-solution-download`, `page-solution-featured`, `page-solution-platforms`, `page-solution-technologies`, `page-solution-assumes`
+| `page-solution-id`, `page-solution-title`, `page-solution-url`, `page-solution-description`, `page-solution-version`, `page-solution-tag`, `page-solution-asset`, `page-solution-repo`, `page-solution-status`, `page-solution-difficulty`, `page-solution-duration`, `page-solution-download`, `page-solution-featured`, `page-solution-platforms`, `page-solution-technologies`, `page-solution-assumes`, `page-solution-verified-at`, `page-solution-verified-version`
 | Scalar mirrors of the overview values, so a step page template can read them without parsing JSON. `page-solution-featured` is present (`true`) only on featured solutions and absent otherwise, so templates test for existence; lists are comma joined.
 
 | `page-solution-step-count`
@@ -927,6 +927,20 @@ Written on the overview and every step page (complex values are JSON strings, re
 Derived, never authored: `page-solution-id` is the module name; `page-solution-repo` is `owner/name` from the page's git origin URL (https, ssh, and scp forms; a local `file://` origin yields an empty string); `page-solution-tag` is `<id>/<version>`; `page-solution-asset` is `<id>-<version>.zip`.
 
 Eligible Product Docs pages receive `page-related-solutions`, only when non-empty: `[{id, title, url, description, difficulty, duration, technologies, assumes, provenance, score, reason}]` in rank order. Eligible means: a published page (`page.out`) in the latest version of its component, the component is not `solutions`, `home`, `shared`, `search`, `data-platform`, `self-managed`, or `labs`, the layout or role is not an umbrella or index layout (`home`, `component-home-v3`, `data-platform`, `labs-home`, `labs-search`, `search`, `404`, `index`, `index-list`, `solutions-home`, `solution`, `solution-step`), and the page does not set `page-exclude-related-solutions`. Labs are excluded because they are the content solutions replace; section index pages because they carry an area's broad categories and would match every solution in that area.
+
+=== Verification
+
+A solution's Doc Detective evidence comes from `verification.json`, an attachment of the solution's module that the monorepo's runner writes after a passing full run, from that run's own results, and commits like the captured media:
+
+[,json]
+----
+{"suite":"doc-detective","specs":11,"steps":50,"commands":34,"checks":23,"media":2,
+ "verify_script":"PASS (9/9)","redpanda_version":"v26.2.2","run_at":"2026-09-14T09:12:00Z"}
+----
+
+The file is read from the content catalog, mapped onto the record's `verified` (the manifest's `verify_script`, `redpanda_version`, and `run_at` become `verifyScript`, `redpandaVersion`, and `runAt`), and mirrored as `page-solution-verified-at` and `page-solution-verified-version` so a step page template can show when the solution was last verified without parsing JSON. Because it is machine evidence rather than build-along scaffolding, it is left out of the record's `attachments` list.
+
+Nothing about verification is inferred. A solution with no manifest has no `verified` key, and the build warns when that solution is published, which is the build-side twin of the monorepo's `check-metadata`. A manifest that does not parse, is not a JSON object, or carries none of the known fields produces no key either, plus a warning naming the file and the reason. `run_at` is never synthesised from a git date: when it is missing or not an ISO 8601 timestamp the build warns and the value is published exactly as the manifest wrote it, so the disagreement is visible rather than papered over.
 
 === Status
 
@@ -1012,7 +1026,7 @@ Unknown keys, a bad `status`, a `solution` that is not a slug, or a `doc` that i
 
 === Warnings
 
-Missing `page-solution-related-docs`; a published solution with no `page-solution-assumes`; a description over 200 characters; no published solution featured; orphaned relationships; pending relationships (count); drafts being built; `page-valid-categories` unavailable (category validation and category edges are skipped); a release or asset missing on GitHub when `network_checks` runs.
+Missing `page-solution-related-docs`; a published solution with no `page-solution-assumes`; a published solution with no `verification.json`; an unreadable `verification.json`; a `run_at` that is absent or not an ISO 8601 timestamp; a description over 200 characters; no published solution featured; orphaned relationships; pending relationships (count); drafts being built; `page-valid-categories` unavailable (category validation and category edges are skipped); a release or asset missing on GitHub when `network_checks` runs.
 
 == Shared helpers
 
@@ -1609,7 +1623,24 @@ solution:
 
 A step page gets the same block without `steps`, and with its own position instead: `step: {id, index, of}`. `repository.ref` is the release tag that exists (`<id>/<version>`), not the bare version, so a consumer can check the ref out. The generic frontmatter (title, description, and the allowlist) is unchanged, and `personas` stays a top-level key rather than moving into the block.
 
-A field whose value cannot be sourced truthfully is left out rather than guessed, and so is an empty list, so that every key present is a claim. `verified`, the Doc Detective evidence for a solution, is not emitted for that reason: the specs are generated into a transient run directory at test time and never reach the content catalog, so a build has neither a spec count nor a run time to report. Publishing a manifest alongside the solution is what would make the field emittable, and projecting it is then a change to this emitter alone.
+A field whose value cannot be sourced truthfully is left out rather than guessed, and so is an empty list, so that every key present is a claim. `verified` follows from the solution's `verification.json` manifest (see <<Verification>>) and is emitted with that file's own snake_case keys, so the block and the file read the same way:
+
+[,yaml]
+----
+solution:
+  verified:
+    suite: doc-detective
+    specs: 11
+    steps: 50
+    commands: 34
+    checks: 23
+    media: 2
+    verify_script: PASS (9/9)
+    redpanda_version: v26.2.2
+    run_at: '2026-09-14T09:12:00Z'
+----
+
+A solution with no manifest, or one whose manifest could not be read, has no `verified` key. Only the fields the manifest carried are emitted.
 
 ==== Field naming
 
