@@ -49,74 +49,22 @@ const runSteps = job.steps.filter((s) => typeof s.run === 'string')
  * substitution is what makes an unquoted input injectable, and `-e` without
  * `-o pipefail` is what let a failing gh in a pipeline look like success.
  */
-function execRun (step, { env = {}, stubs = {}, expressions = {}, files = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-step-'))
-  const bin = path.join(dir, 'bin')
-  fs.mkdirSync(bin)
+const { execRun: execRunShared } = require('./helpers/exec-run')
 
-  for (const [name, body] of Object.entries(stubs)) {
-    const p = path.join(bin, name)
-    fs.writeFileSync(p, body.startsWith('#!') ? body : `#!/bin/bash\n${body}\n`)
-    fs.chmodSync(p, 0o755)
-  }
-  for (const [name, body] of Object.entries(files)) {
-    fs.writeFileSync(path.join(dir, name), body)
-  }
-
-  // Substituted the way the runner does it: textually, before bash. The map
-  // covers the expressions an EARLIER version of this workflow inlined into
-  // its run: bodies as well as the ones the current version uses, so a
-  // regression that moves an input back inline still executes here and fails
-  // on behaviour rather than on an unresolved-placeholder error.
-  const allExpressions = {
-    '${{ github.repository }}': env.GITHUB_REPOSITORY || 'redpanda-data/redpanda',
-    '${{ github.event.pull_request.number }}': env.PR || '7',
-    '${{ github.event.pull_request.html_url }}': 'https://github.com/redpanda-data/redpanda/pull/7',
-    '${{ inputs.doc_tools_package }}': env.PKG || PKG_DEFAULT,
-    '${{ inputs.surfaces }}': env.SURFACES || '',
-    '${{ inputs.dispatch_repo }}': env.DISPATCH_REPO || 'redpanda-data/docs-site',
-    ...expressions
-  }
-  let body = step.run
-  for (const [expr, value] of Object.entries(allExpressions)) {
-    body = body.split(expr).join(value)
-  }
-  const unresolved = body.match(/\$\{\{[^}]*\}\}/g)
-  if (unresolved) throw new Error(`unresolved expressions in step body: ${unresolved.join(', ')}`)
-
-  const scriptPath = path.join(dir, 'step.sh')
-  fs.writeFileSync(scriptPath, body)
-  const outputFile = path.join(dir, 'github_output')
-  fs.writeFileSync(outputFile, '')
-
-  const result = spawnSync('/bin/bash', ['-e', scriptPath], {
-    cwd: dir,
-    encoding: 'utf8',
-    env: {
-      PATH: `${bin}:${process.env.PATH}`,
-      HOME: dir,
-      GITHUB_OUTPUT: outputFile,
-      ...env
+// This workflow's expression defaults; see helpers/exec-run.js for the runner.
+function execRun (step, opts = {}) {
+  const env = opts.env || {}
+  return execRunShared(step, {
+    ...opts,
+    defaults: {
+      '${{ github.repository }}': env.GITHUB_REPOSITORY || 'redpanda-data/redpanda',
+      '${{ github.event.pull_request.number }}': env.PR || '7',
+      '${{ github.event.pull_request.html_url }}': 'https://github.com/redpanda-data/redpanda/pull/7',
+      '${{ inputs.doc_tools_package }}': env.PKG || PKG_DEFAULT,
+      '${{ inputs.surfaces }}': env.SURFACES || '',
+      '${{ inputs.dispatch_repo }}': env.DISPATCH_REPO || 'redpanda-data/docs-site'
     }
   })
-
-  const outputs = {}
-  for (const line of fs.readFileSync(outputFile, 'utf8').split('\n')) {
-    const m = line.match(/^([^=]+)=(.*)$/)
-    if (m) outputs[m[1]] = m[2]
-  }
-
-  return {
-    status: result.status,
-    stdout: result.stdout || '',
-    stderr: result.stderr || '',
-    all: `${result.stdout || ''}${result.stderr || ''}`,
-    outputs,
-    dir,
-    exists: (f) => fs.existsSync(path.join(dir, f)),
-    size: (f) => (fs.existsSync(path.join(dir, f)) ? fs.statSync(path.join(dir, f)).size : -1),
-    read: (f) => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), 'utf8') : null)
-  }
 }
 
 // An npx stub that reproduces npm exec's actual bin resolution: with no
@@ -181,13 +129,39 @@ describe('doc-strings-review workflow: static contracts', () => {
     }
   })
 
-  test('the caller contract does not point at a ref that cannot resolve', () => {
-    // The repo publishes no git tags, so a @v<version> example in the shim
-    // hands every caller an unresolvable ref.
+  test('the caller contract never shows a ref that would silently float', () => {
+    // This used to assert the opposite end of the same problem: with no tags in
+    // the repo, a `@v<version>` example handed callers an unresolvable ref, so
+    // the example said `@main`. publish-to-npm.yaml now tags every published
+    // version, but `@main` was always the worse failure: an unresolvable ref
+    // fails the caller's job loudly, while `@main` runs whatever landed here
+    // last, inside the caller's job, with their OIDC role and pull-requests:
+    // write, and with no review in their repository.
+    //
+    // So the contract is: the example must be an obvious placeholder, never a
+    // ref that resolves to moving code. People copy the block and skip the
+    // prose, which is exactly how the old example contradicted the paragraph
+    // beneath it.
     const shim = fs.readFileSync(WORKFLOW_PATH, 'utf8')
-    const refs = [...shim.matchAll(/doc-strings-review\.yml@([\w.\-/]+)/g)].map((m) => m[1])
+    const refs = [...shim.matchAll(/doc-strings-review\.yml@(\S+)/g)].map((m) => m[1])
     expect(refs.length).toBeGreaterThan(0)
-    for (const ref of refs) expect(ref).not.toMatch(/^v\d/)
+    for (const ref of refs) {
+      expect(ref).not.toBe('main')
+      expect(ref).not.toMatch(/^(main|master|HEAD)$/)
+      // A placeholder, i.e. not something git could resolve as-is.
+      expect(ref).toMatch(/[<>]/)
+    }
+  })
+
+  test('the caller contract tells security-sensitive callers to pin the SHA', () => {
+    // A tag is a movable pointer and this repo has no `v*` tag ruleset yet, so
+    // anyone with push access can re-point or delete a tag with no review.
+    // Until that ruleset exists the SHA is the only real pin, and the header
+    // has to say so rather than merely offer it as an alternative.
+    const header = fs.readFileSync(WORKFLOW_PATH, 'utf8')
+      .split('\n').filter((l) => l.startsWith('#')).join('\n')
+    expect(header).toMatch(/Prefer the commit SHA/i)
+    expect(header).toMatch(/ruleset/i)
   })
 
   test('doc_tools_package pins a version, and the pin matches this package', () => {
