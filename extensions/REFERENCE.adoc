@@ -1631,6 +1631,8 @@ solution:
   use_cases:
     - Real-time analytics
     - Event-driven microservices
+  industries:
+    - Gaming
   steps:
     - id: start-environment
       title: Start the environment

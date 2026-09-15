@@ -90,6 +90,10 @@ function buildSolutionMetadata(page) {
     platforms: record.platforms,
     categories: record.categories,
     use_cases: record.useCases,
+    // Both facet axes, so an agent reading the .md can filter on the same two
+    // the landing page does. industries is optional and usually absent, and an
+    // empty list is dropped like every other empty value.
+    industries: record.industries,
     // The files an agent may fetch: the same allowlist the download endpoint
     // enforces, so reading the .md is enough to know what is available.
     files: record.files,

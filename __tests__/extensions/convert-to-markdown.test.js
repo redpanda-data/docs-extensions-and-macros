@@ -366,7 +366,8 @@ describe('solution metadata in Markdown frontmatter', () => {
     platforms: ['self-managed', 'cloud'],
     technologies: ['Redpanda', 'Schema Registry', 'Go'],
     categories: ['Topics and Partitions', 'Producers'],
-    useCases: ['live-leaderboards'],
+    useCases: ['Real-time analytics'],
+    industries: ['Gaming'],
     personas: ['application-developer'],
     steps: [
       { id: 'start-environment', title: 'Start the environment', url: '/solutions/multiplayer-gaming/start-environment/', order: 1, duration: 5 },
@@ -412,7 +413,8 @@ describe('solution metadata in Markdown frontmatter', () => {
       technologies: ['Redpanda', 'Schema Registry', 'Go'],
       platforms: ['self-managed', 'cloud'],
       categories: ['Topics and Partitions', 'Producers'],
-      use_cases: ['live-leaderboards'],
+      use_cases: ['Real-time analytics'],
+      industries: ['Gaming'],
       steps: [
         { id: 'start-environment', title: 'Start the environment', url: '/solutions/multiplayer-gaming/start-environment/' },
         { id: 'build-leaderboard', title: 'Build the leaderboard', url: '/solutions/multiplayer-gaming/build-leaderboard/' },
@@ -467,7 +469,7 @@ describe('solution metadata in Markdown frontmatter', () => {
   })
 
   test('a field with nothing truthful to say is left out, not guessed', () => {
-    const sparse = { id: 'minimal', status: 'published', difficulty: 'beginner', duration: 15, version: 'v0.1.0', tag: 'minimal/v0.1.0', download: 'none', repo: '', steps: [], technologies: [], platforms: [], categories: [], useCases: [], relatedDocs: [] }
+    const sparse = { id: 'minimal', status: 'published', difficulty: 'beginner', duration: 15, version: 'v0.1.0', tag: 'minimal/v0.1.0', download: 'none', repo: '', steps: [], technologies: [], platforms: [], categories: [], useCases: [], industries: [], relatedDocs: [] }
     const parsed = parse(generateFrontmatter(makePage({ record: sparse })))
     expect(parsed.solution).toEqual({
       id: 'minimal',
