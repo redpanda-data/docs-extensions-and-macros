@@ -1,0 +1,841 @@
+# Reusable docs PR review pipeline. Called by the thin docs-review.yml
+# caller in each of the twelve docs repos (template: .github/docs-review-caller-template.yml).
+#
+# HOSTING: this is the CANONICAL copy (public host, next to the
+# doc-strings review that runs the same host/skills split in production).
+# Callers reference
+#   redpanda-data/docs-extensions-and-macros/.github/workflows/docs-pr-review-reusable.yml@<SHA>
+# The SKILLS stay in docs-team-standards and are read at runtime (pinned
+# checkout inside the claude-skill action) — only the host lives here. The
+# twin copy in docs-team-standards (PR #2912, DOC-2496) is the review and
+# dogfood path; keep the two in sync until dogfooding moves here. Neither
+# host publishes git tags (`git ls-remote --tags` is empty), so @v1 is an
+# unresolvable ref: pin a commit SHA per caller.
+#
+# TWO-STEP PIN after this PR merges: the claude-skill `uses:` refs below
+# say @main because an action cannot reference its own not-yet-existing
+# SHA. Step 1: merge this PR (SHA-1). Step 2: a one-line follow-up commit
+# replaces @main with SHA-1 in every claude-skill ref (SHA-2). Callers
+# then pin @SHA-2 — from that point nothing in the pipeline floats.
+#
+# Design doc + decision record: https://claude.ai/code/artifact/36e1362f-11d3-4532-8fe1-a5191c8def9f
+#
+# Ordering contract: the automated docs review never runs before one SME
+# approval (SME = (requested ∪ reviewed) − docs team − author, recomputed
+# from the API on every run — never cached), runs exactly once per
+# (PR, head SHA), and never merges anything. The only physical merge gate
+# is the docs-team approval (CODEOWNERS); the docs-review commit status is
+# informational — nothing here blocks a merge.
+#
+# Exactly-once = two layers: the caller's `concurrency` group serializes
+# runs per PR (primary; every caller must keep it), and the gate CLAIMS the
+# head SHA with a pending status naming its run id before any paid job
+# starts (backstop for a caller that dropped the group). A completed
+# success/failure status on the SHA ends the matter for good.
+#
+# Trust boundary: the PR head is untrusted. The claude-skill action strips
+# project-level Claude config (.claude/, .mcp.json) from it, runs Claude
+# with a read-only `gh` shim on PATH and no tree-mutating git verbs, never
+# persists git credentials in any checkout, and refuses an unpinned
+# plugin_ref. Repo-private skills are fetched with a per-run App token
+# scoped to docs-team-standards with Contents: read.
+
+name: docs-pr-review (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: number
+      # ── ADP AI Gateway auth (docs-team-agents service account) ─────────
+      # No Anthropic API key anywhere: model auth is the gateway, which
+      # gives per-account spend attribution on the ADP cost page. Nine of
+      # the twelve callers were granted the credential in devprod-infra
+      # #779; adp-cloud-docs, oxla-docs, and docs-template need a follow-up.
+      aws_region:
+        description: RP_AWS_CRED_REGION org variable
+        type: string
+        required: true
+      aws_role_name_prefix:
+        description: RP_AWS_CRED_BASE_ROLE_NAME org variable (caller repo name is appended)
+        type: string
+        required: true
+      use_adp_gateway:
+        description: Present for shim symmetry with the doc-strings review; the gateway is the only auth path here.
+        type: boolean
+        default: true
+      adp_client_secret_id:
+        description: >-
+          Secrets Manager id of the docs-team-agents OAuth client. NOTE the
+          JSON key names inside derive from the secret's own name:
+          DOCS_TEAM_AGENTS_CLIENT_ID/_SECRET — not ADP_PRIV_CLIENT_*.
+        type: string
+        default: 'sdlc/prod/github/docs_team_agents_client'
+      plugin_ref:
+        description: >-
+          Commit SHA of redpanda-data/docs-team-standards checked out as the
+          skills plugin at runtime. The default is bumped deliberately with
+          each verified release of the skills; it is the rollback unit.
+        type: string
+        # PIN-ME(rollout): set to the verified docs-team-standards SHA before
+        # enabling any caller. An unset/bad ref fails the checkout loudly —
+        # never a silent skill-less review.
+        default: ''
+      doc_tools_version:
+        description: >-
+          Published @redpanda-data/docs-extensions-and-macros version whose
+          `doc-tools lint-screenshots` runs the deterministic screenshot
+          checks — the same command cloud-docs runs on every PR and in its
+          daily screenshot cron. Exact version, never a range or a tag.
+        type: string
+        default: '5.38.0'
+      docs_app_id:
+        description: >-
+          DOCS_APP_ID — the redpanda-docs-automation GitHub App. Used only to
+          mint a per-run, Contents:read token scoped to docs-team-standards
+          for the plugin/scripts checkout: that repo is private and
+          github.token cannot clone it from any other repo. Required in
+          every caller except docs-team-standards itself.
+        type: string
+        default: ''
+    secrets:
+      aws_cred_account_id:
+        description: RP_AWS_CRED_ACCOUNT_ID org secret (AWS account owning the OIDC role)
+        required: true
+      docs_app_private_key:
+        description: DOCS_APP_PRIVATE_KEY — private key for docs_app_id (see above)
+        required: false
+
+env:
+  REVIEW_STATUS_CONTEXT: docs-review
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  # §2 — SME gating + exactly-once. Event-agnostic evaluation; snapshot
+  # maintenance on pull_request events that change the reviewer set.
+  # ──────────────────────────────────────────────────────────────────────
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    outputs:
+      run_review: ${{ steps.eval.outputs.run_review }}
+      head_sha: ${{ steps.eval.outputs.head_sha }}
+      sme_approver: ${{ steps.eval.outputs.sme_approver }}
+      sme_set: ${{ steps.eval.outputs.sme_set }}
+    steps:
+      - id: eval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          DOC_TEAM: ${{ vars.DOC_TEAM_LOGINS }}
+          PLUGIN_REF: ${{ inputs.plugin_ref }}
+        run: |
+          set -euo pipefail
+
+          HEAD_SHA=$(gh pr view "$PR" --repo "$R" --json headRefOid -q .headRefOid)
+          AUTHOR=$(gh pr view "$PR" --repo "$R" --json author -q .author.login)
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+          # Helpers ---------------------------------------------------------
+          derive_smes() {
+            # (requested ∪ reviewed) − docs team − author − bots, recomputed
+            # from the API on EVERY run. Deliberately not cached anywhere: a
+            # marker comment would be shared mutable state that anyone with
+            # write access can edit or delete, and a stale snapshot silently
+            # changes gate behaviour. requested_reviewers alone is DESTRUCTIVE
+            # (GitHub drops a user the moment they submit any review), which
+            # is why the union with users-who-reviewed is what makes this
+            # recomputable at any moment.
+            local live reviewed
+            live=$(gh api "repos/$R/pulls/$PR" --jq '[.requested_reviewers[].login] | join(",")')
+            reviewed=$(gh api "repos/$R/pulls/$PR/reviews" --paginate \
+              --jq '[.[].user.login] | unique | join(",")')
+            jq -nr --arg live "$live" --arg reviewed "$reviewed" \
+              --arg team "$DOC_TEAM" --arg author "$AUTHOR" '
+              (($live | split(",")) + ($reviewed | split(","))) | unique
+              | map(select(. != "" and . != $author))
+              | map(select(endswith("[bot]") | not))
+              | map(select(. as $l | ($team | split(",") | map(gsub("\\s";""))) | index($l) | not))
+              | join(",")'
+          }
+          set_pending() {
+            gh api "repos/$R/statuses/$HEAD_SHA" \
+              -f context="$REVIEW_STATUS_CONTEXT" -f state=pending \
+              -f description="$1" \
+              -f target_url="${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}" > /dev/null
+          }
+
+          # Config guard: a missing DOC_TEAM_LOGINS is environment
+          # misconfiguration, not a review verdict — hold the gate with an
+          # informative pending status instead of a hard fail (the same
+          # posture as every other infra failure in this pipeline: never a
+          # red X for a broken environment). See DOCS_REVIEW_ROLLOUT.md in
+          # docs-team-standards, org-setup, for the variable.
+          if [[ -z "${DOC_TEAM:-}" ]]; then
+            echo "::warning::DOC_TEAM_LOGINS org variable is not set — holding the SME gate (pending), skipping review"
+            set_pending "Waiting for SME approval (DOC_TEAM_LOGINS is not configured)"
+            echo "sme_set=" >> "$GITHUB_OUTPUT"
+            echo "run_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Same posture for the skills pin: an empty plugin_ref would make
+          # every downstream checkout fall back to the default branch — an
+          # unpinned review under a "pinned" rollout. Hold instead of run.
+          if [[ ! "${PLUGIN_REF:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::warning::plugin_ref is not a full commit SHA ('${PLUGIN_REF:-}') — holding the gate (pending), skipping review"
+            set_pending "Docs review pipeline misconfigured (plugin_ref is not pinned)"
+            echo "sme_set=" >> "$GITHUB_OUTPUT"
+            echo "run_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # ── Reviewer-set events (opened / review_requested /
+          #    review_request_removed): nothing to persist — the set is
+          #    recomputed from the API on every run — but the pending status
+          #    keeps the PR's docs-review context honest while the gate waits.
+          if [[ "$EVENT_NAME" == "pull_request" && "$EVENT_ACTION" != "synchronize" ]]; then
+            SMES=$(derive_smes)
+            set_pending "Waiting for SME approval (${SMES:-no SME tagged — daily nag active})"
+            echo "sme_set=$SMES" >> "$GITHUB_OUTPUT"
+            echo "run_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # ── Exactly-once per (PR, head SHA) ───────────────────────────
+          DONE=$(gh api "repos/$R/commits/$HEAD_SHA/status" \
+            --jq '[.statuses[] | select(.context=="'"$REVIEW_STATUS_CONTEXT"'")
+                   | select(.state=="success" or .state=="failure")] | length')
+          if [[ "$DONE" -gt 0 ]]; then
+            echo "Review already completed for $HEAD_SHA — exiting (exactly-once)."
+            echo "run_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # ── Evaluate the SME gate (event-agnostic, stateless) ─────────
+          SMES=$(derive_smes)
+          echo "sme_set=$SMES" >> "$GITHUB_OUTPUT"
+
+          if [[ -z "$SMES" ]]; then
+            set_pending "Waiting for SME approval (no SME tagged — daily nag active)"
+            echo "run_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Latest non-COMMENTED review state per SME, by submitted_at.
+          gh api "repos/$R/pulls/$PR/reviews" --paginate \
+            --jq '[.[] | select(.state != "COMMENTED")]
+                  | group_by(.user.login)
+                  | map(max_by(.submitted_at))
+                  | map({login: .user.login, state})' > states.json
+
+          # Decision 2 (corrected): ONE SME approval opens the gate, but any
+          # other SME's outstanding CHANGES_REQUESTED vetoes it until that
+          # SME approves or their review is dismissed (either fires a
+          # pull_request_review event, re-evaluating here). The gate does
+          # NOT assume dismiss-stale-approvals: enabling it changes merge
+          # behaviour for every human contributor across twelve repos and is
+          # its own decision, outside this project. With it ON, APPROVED
+          # always refers to current code; with it OFF, an earlier SME
+          # approval persists across pushes — the review still runs at most
+          # once per head SHA either way, and the status stays informational.
+          PASS=$(jq -r --arg smes "$SMES" '
+            ($smes | split(",")) as $set
+            | [ .[] | select(.login as $l | $set | index($l)) ] as $sme
+            | if ($sme | map(select(.state=="CHANGES_REQUESTED")) | length) > 0
+              then "false"
+              elif ($sme | map(select(.state=="APPROVED")) | length) > 0
+              then "true"
+              else "false"
+              end' states.json)
+
+          APPROVER=$(jq -r --arg smes "$SMES" '
+            ($smes | split(",")) as $set
+            | [ .[] | select(.login as $l | $set | index($l)) | select(.state=="APPROVED") | .login ]
+            | join(", ")' states.json)
+          echo "sme_approver=$APPROVER" >> "$GITHUB_OUTPUT"
+
+          if [[ "$PASS" != "true" ]]; then
+            set_pending "Waiting for SME approval (${SMES})"
+            echo "run_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # ── Claim this head SHA before spending anything ──────────────
+          # The exactly-once check above only sees success/failure, which
+          # aggregate writes at the END of a run — so two events for the same
+          # SHA that overlap (an SME approval plus a synchronize seconds
+          # later, or two SME approvals) would both read DONE=0 and both
+          # start the paid Claude jobs. The caller's `concurrency` group
+          # (docs-review-<pr>, cancel-in-progress: false — REQUIRED in every
+          # caller) serializes runs per PR and is the primary guard; this
+          # claim is the belt to that braces for a caller that dropped it:
+          # write a pending status naming this run, then read back the
+          # latest docs-review status — statuses are ordered, so of two
+          # racing writers exactly one sees its own claim on top. A claim
+          # older than 90 minutes (a run that died before aggregate) is
+          # stale and may be taken over.
+          CLAIM="Review running (run ${GITHUB_RUN_ID})"
+          latest_claim() {
+            gh api "repos/$R/commits/$HEAD_SHA/status" \
+              --jq '[.statuses[] | select(.context=="'"$REVIEW_STATUS_CONTEXT"'")] | first
+                    | {description: (.description // ""), updated_at: (.updated_at // "")}'
+          }
+          CURRENT=$(latest_claim)
+          DESC=$(jq -r .description <<< "$CURRENT")
+          if [[ "$DESC" == "Review running (run "* && "$DESC" != "$CLAIM" ]]; then
+            AGE=$(( $(date +%s) - $(date -d "$(jq -r .updated_at <<< "$CURRENT")" +%s) ))
+            if (( AGE < 5400 )); then
+              echo "Head $HEAD_SHA is already claimed: '$DESC' (${AGE}s ago) — exiting (exactly-once)."
+              echo "run_review=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::warning::stale claim '$DESC' (${AGE}s old) — taking over"
+          fi
+          set_pending "$CLAIM"
+          sleep 3   # let a racing writer land before the read-back
+          if [[ "$(latest_claim | jq -r .description)" != "$CLAIM" ]]; then
+            echo "Lost the claim race for $HEAD_SHA to another run — exiting (exactly-once)."
+            echo "run_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "run_review=true" >> "$GITHUB_OUTPUT"
+
+  # ──────────────────────────────────────────────────────────────────────
+  # §4 — content classification for skill routing.
+  # ──────────────────────────────────────────────────────────────────────
+  classify:
+    needs: gate
+    if: needs.gate.outputs.run_review == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      has_adoc: ${{ steps.c.outputs.has_adoc }}
+      only_json: ${{ steps.c.outputs.only_json }}
+      overrides_json: ${{ steps.c.outputs.overrides_json }}
+      code_heavy: ${{ steps.c.outputs.code_heavy }}
+      has_images: ${{ steps.c.outputs.has_images }}
+      ticket: ${{ steps.c.outputs.ticket }}
+    steps:
+      - id: c
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh pr diff "$PR" --repo "$R" --name-only > files.txt
+          TOTAL=$(grep -c . files.txt || true)
+          ADOC=$(grep -cE '\.adoc$' files.txt || true)
+          JSON=$(grep -cE '\.json$' files.txt || true)
+          OVERRIDES=$(grep -ciE '(^|/)[^/]*overrides[^/]*\.json$' files.txt || true)
+          IMG=$(grep -cE '\.(png|svg|jpe?g|gif|webp)$' files.txt || true)
+          CODE=$(grep -cE '\.(go|java|py|js|ts|jsx|tsx|sh|sql|proto|c|cc|cpp|rs)$' files.txt || true)
+          {
+            echo "has_adoc=$([[ $ADOC -gt 0 ]] && echo true || echo false)"
+            echo "only_json=$([[ $TOTAL -gt 0 && $JSON -eq $TOTAL ]] && echo true || echo false)"
+            echo "overrides_json=$([[ $OVERRIDES -gt 0 ]] && echo true || echo false)"
+            # Code-heavy heuristic (decision 3): ≥3 code files AND more code
+            # files than .adoc files. Tune with data.
+            echo "code_heavy=$([[ $CODE -ge 3 && $CODE -gt $ADOC ]] && echo true || echo false)"
+            echo "has_images=$([[ $IMG -gt 0 ]] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+          TICKET=$(gh pr view "$PR" --repo "$R" --json title,body,headRefName \
+            --jq '[.title, .body // "", .headRefName] | join(" ")' \
+            | grep -oE 'DOC-[0-9]+' | head -1 || true)
+          echo "ticket=$TICKET" >> "$GITHUB_OUTPUT"
+
+  # ──────────────────────────────────────────────────────────────────────
+  # §4 — /docs-team-standards:pr-review over the .adoc changes.
+  # ──────────────────────────────────────────────────────────────────────
+  adoc_review:
+    needs: [gate, classify]
+    if: needs.classify.outputs.has_adoc == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write   # OIDC role for the ADP gateway credential
+    timeout-minutes: 45
+    steps:
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+        id: claude
+        with:
+          repo: ${{ github.repository }}
+          pr_number: ${{ inputs.pr_number }}
+          plugin_ref: ${{ inputs.plugin_ref }}
+          aws_region: ${{ inputs.aws_region }}
+          aws_role_name_prefix: ${{ inputs.aws_role_name_prefix }}
+          aws_cred_account_id: ${{ secrets.aws_cred_account_id }}
+          adp_client_secret_id: ${{ inputs.adp_client_secret_id }}
+          plugin_app_id: ${{ inputs.docs_app_id }}
+          plugin_app_private_key: ${{ secrets.docs_app_private_key }}
+          cli_version: ${{ vars.CLAUDE_CLI_VERSION || '2.1.258' }}
+          output_dir: review-output
+          prompt: >
+            /docs-team-standards:pr-review ${{ github.server_url }}/${{ github.repository }}/pull/${{ inputs.pr_number }}
+            HEADLESS MODE — you are running in CI with no human present.
+            Do NOT post anything to GitHub; there is no approval step here,
+            so the pr-review rule "never post without approval" means: never
+            post. Where the pr-review flow would spawn the content-reviewer
+            agent for prose feedback, do so. If Jira is unreachable, note
+            that in the findings instead of failing. Write human-readable
+            findings to review-output/findings.md and a machine verdict to
+            review-output/verdict.json with the exact schema
+            {"verdict":"pass"|"fail","blocking":["..."],"suggestions":["..."]}
+            where "fail" means at least one genuinely blocking violation of
+            team standards.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: adoc-review
+          path: review-output/
+          if-no-files-found: ignore
+
+  # ──────────────────────────────────────────────────────────────────────
+  # §4 — JSON-only PRs (decision 4). docs-team-standards: the PR #2902
+  # deterministic validators. Content repos: headless overrides-review for
+  # *overrides*.json; plain jq validity for anything else.
+  # ──────────────────────────────────────────────────────────────────────
+  json_validation:
+    needs: [gate, classify]
+    if: needs.classify.outputs.only_json == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write   # OIDC role for the ADP gateway credential
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ inputs.pr_number }}/head
+          persist-credentials: false
+
+      - name: Deterministic validation (docs-team-standards)
+        if: github.repository == 'redpanda-data/docs-team-standards'
+        run: |
+          set -euo pipefail
+          mkdir -p review-output
+          FAILED=0
+          python3 scripts/validate-manifests.py || FAILED=1
+          if compgen -G "evaluations/tier-*/*.eval.json" > /dev/null; then
+            npx --yes ajv-cli@5.0.0 validate -s evaluations/schema.json \
+              -d "evaluations/tier-*/*.eval.json" || FAILED=1
+          fi
+          if [[ "$FAILED" -eq 1 ]]; then
+            jq -n '{verdict:"fail",blocking:["JSON validation failed (validate-manifests / eval schema) — see job log"],suggestions:[]}' > review-output/verdict.json
+          else
+            jq -n '{verdict:"pass",blocking:[],suggestions:[]}' > review-output/verdict.json
+          fi
+
+      - name: Basic JSON validity (content repos, non-overrides)
+        if: github.repository != 'redpanda-data/docs-team-standards' && needs.classify.outputs.overrides_json != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p review-output
+          BAD=()
+          while IFS= read -r f; do
+            [[ -f "$f" ]] || continue   # deleted files
+            jq -e . "$f" > /dev/null 2>&1 || BAD+=("$f")
+          done < <(gh pr diff "${{ inputs.pr_number }}" --repo "${{ github.repository }}" --name-only | grep -E '\.json$')
+          if [[ ${#BAD[@]} -gt 0 ]]; then
+            printf '%s\n' "${BAD[@]}" | jq -R . | jq -s '{verdict:"fail",blocking:(map("Invalid JSON: " + .)),suggestions:[]}' > review-output/verdict.json
+          else
+            jq -n '{verdict:"pass",blocking:[],suggestions:[]}' > review-output/verdict.json
+          fi
+
+      - name: Overrides review (content repos, decision 4)
+        if: github.repository != 'redpanda-data/docs-team-standards' && needs.classify.outputs.overrides_json == 'true'
+        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+        with:
+          repo: ${{ github.repository }}
+          pr_number: ${{ inputs.pr_number }}
+          plugin_ref: ${{ inputs.plugin_ref }}
+          aws_region: ${{ inputs.aws_region }}
+          aws_role_name_prefix: ${{ inputs.aws_role_name_prefix }}
+          aws_cred_account_id: ${{ secrets.aws_cred_account_id }}
+          adp_client_secret_id: ${{ inputs.adp_client_secret_id }}
+          plugin_app_id: ${{ inputs.docs_app_id }}
+          plugin_app_private_key: ${{ secrets.docs_app_private_key }}
+          cli_version: ${{ vars.CLAUDE_CLI_VERSION || '2.1.258' }}
+          output_dir: review-output
+          prompt: >
+            /docs-team-standards:overrides-review — review the overrides
+            JSON changes in ${{ github.server_url }}/${{ github.repository }}/pull/${{ inputs.pr_number }}.
+            HEADLESS MODE: do NOT post anything to GitHub. Write findings to
+            review-output/findings.md and review-output/verdict.json with schema
+            {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}.
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: json-validation
+          path: review-output/
+          if-no-files-found: ignore
+
+  # ──────────────────────────────────────────────────────────────────────
+  # §4 — /code-review for code-example-heavy PRs (additive to adoc_review).
+  # ──────────────────────────────────────────────────────────────────────
+  code_review:
+    needs: [gate, classify]
+    if: needs.classify.outputs.code_heavy == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write   # OIDC role for the ADP gateway credential
+    timeout-minutes: 45
+    steps:
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+        with:
+          repo: ${{ github.repository }}
+          pr_number: ${{ inputs.pr_number }}
+          plugin_ref: ${{ inputs.plugin_ref }}
+          aws_region: ${{ inputs.aws_region }}
+          aws_role_name_prefix: ${{ inputs.aws_role_name_prefix }}
+          aws_cred_account_id: ${{ secrets.aws_cred_account_id }}
+          adp_client_secret_id: ${{ inputs.adp_client_secret_id }}
+          plugin_app_id: ${{ inputs.docs_app_id }}
+          plugin_app_private_key: ${{ secrets.docs_app_private_key }}
+          cli_version: ${{ vars.CLAUDE_CLI_VERSION || '2.1.258' }}
+          output_dir: review-output
+          prompt: >
+            /code-review ${{ inputs.pr_number }} medium
+            HEADLESS MODE: do NOT post comments or apply fixes. Write
+            findings to review-output/findings.md and review-output/verdict.json
+            with schema {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
+            where "fail" means a confirmed correctness bug in a code example.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-review
+          path: review-output/
+          if-no-files-found: ignore
+
+  # ──────────────────────────────────────────────────────────────────────
+  # §5 — screenshot standards: deterministic lint + Claude vision pass.
+  # The lint is `doc-tools lint-screenshots` from docs-extensions-and-macros
+  # — the ONE implementation, promoted from cloud-docs' repo-local script,
+  # that cloud-docs also runs on every PR and in its daily screenshot cron
+  # — so no two jobs disagree about the same 100KB limit. It runs on any
+  # .adoc or image change (alt text lives in the .adoc); the paid vision
+  # pass runs only when an image file changed.
+  # ──────────────────────────────────────────────────────────────────────
+  screenshot_gate:
+    needs: [gate, classify]
+    if: needs.classify.outputs.has_images == 'true' || needs.classify.outputs.has_adoc == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write   # OIDC role for the ADP gateway credential
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ inputs.pr_number }}/head
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Deterministic checks (doc-tools lint-screenshots)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+          DOC_TOOLS_VERSION: ${{ inputs.doc_tools_version }}
+        run: |
+          set -euo pipefail
+          # Everything lands under RUNNER_TEMP: the claude-skill action's
+          # own checkout runs `git clean` in the workspace and would delete
+          # anything written there before the merge step reads it.
+          LINT_DIR="$RUNNER_TEMP/screenshot-lint"; mkdir -p "$LINT_DIR"
+          OUT="$LINT_DIR/screenshot-lint.json"
+          if [[ ! -d modules ]]; then
+            # Not an Antora content repo (docs-site, docs-ui, ...): nothing
+            # to lint, and the pipeline's posture is that "nothing to check"
+            # is a pass, not a red X.
+            jq -n '{verdict:"pass", blocking:[], suggestions:["No modules/ directory in this repo — screenshot lint skipped"]}' > "$OUT"
+            exit 0
+          fi
+          gh pr diff "$PR" --repo "$R" --name-only > "$LINT_DIR/changed-files.txt"
+          # --files: only pages changed in the PR plus pages that use a changed
+          # image. A whole-repo scan would flag every pre-existing violation
+          # in a repo that has never been linted (docs has dozens today).
+          # Exit 1 means findings — the jq below turns them into the verdict.
+          # Any other non-zero exit (usage error, npx failure) fails the step.
+          npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
+            doc-tools lint-screenshots --files "$LINT_DIR/changed-files.txt" \
+            --format json --output "$LINT_DIR/result.json" > /dev/null || [[ $? -eq 1 ]]
+          jq '
+            def line: "\(.file)\(if .line then ":\(.line)" else "" end)\(if .image then " [\(.image)]" else "" end) \(.message)";
+            {
+              verdict: (if .summary.errors > 0 then "fail" else "pass" end),
+              blocking:    [.findings[] | select(.severity == "error")   | line],
+              suggestions: [.findings[] | select(.severity == "warning") | line]
+            }' "$LINT_DIR/result.json" > "$OUT"
+          jq -r '"screenshot-lint: verdict=\(.verdict), \(.blocking | length) blocking, \(.suggestions | length) suggestion(s)"' "$OUT"
+
+      - name: Claude vision pass
+        if: needs.classify.outputs.has_images == 'true'
+        uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+        with:
+          repo: ${{ github.repository }}
+          pr_number: ${{ inputs.pr_number }}
+          plugin_ref: ${{ inputs.plugin_ref }}
+          aws_region: ${{ inputs.aws_region }}
+          aws_role_name_prefix: ${{ inputs.aws_role_name_prefix }}
+          aws_cred_account_id: ${{ secrets.aws_cred_account_id }}
+          adp_client_secret_id: ${{ inputs.adp_client_secret_id }}
+          plugin_app_id: ${{ inputs.docs_app_id }}
+          plugin_app_private_key: ${{ secrets.docs_app_private_key }}
+          cli_version: ${{ vars.CLAUDE_CLI_VERSION || '2.1.258' }}
+          output_dir: review-output
+          prompt: >
+            Review every image file changed in PR #${{ inputs.pr_number }} of
+            ${{ github.repository }} against the docs screenshot standards
+            judgment checks: (1) purpose test — the image clarifies config
+            state, topology, a dashboard result, or position in a multi-step
+            flow; it is NOT a validate-only shot of plain text, CLI, or
+            terminal output; (2) annotations — red rectangles by default
+            (blue/black only on heavily red UI), numbered callouts for
+            sequences, max 3–4 per image; (3) PII — covered by a solid
+            100%-opacity overlay; blur or mosaic is a FAIL; (4) background —
+            transparent or neutral; (5) the alt text's values also appear in
+            surrounding body prose. Read each image file directly. Do NOT
+            post to GitHub. Write review-output/screenshots.json as
+            [{"file":"...","checks":{...},"verdict":"pass"|"fail","notes":"..."}]
+            and review-output/verdict.json as
+            {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
+            covering only these judgment checks (the deterministic lint runs
+            separately).
+
+      - name: Merge deterministic + vision verdicts
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p review-output
+          LINT="$RUNNER_TEMP/screenshot-lint/screenshot-lint.json"
+          VISION=review-output/verdict.json
+          # Keep the raw lint verdict in the artifact next to the merged one.
+          [[ -f "$LINT" ]] && cp "$LINT" review-output/screenshot-lint.json
+          if [[ -f "$LINT" ]]; then
+            if [[ -f "$VISION" ]]; then
+              jq -s '{
+                verdict: (if (.[0].verdict=="fail" or .[1].verdict=="fail") then "fail" else "pass" end),
+                blocking: ((.[0].blocking // []) + (.[1].blocking // [])),
+                suggestions: ((.[0].suggestions // []) + (.[1].suggestions // []))
+              }' "$LINT" "$VISION" > review-output/merged.json && mv review-output/merged.json "$VISION"
+            else
+              cp "$LINT" "$VISION"
+            fi
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshot-gate
+          path: review-output/
+          if-no-files-found: ignore
+
+  # ──────────────────────────────────────────────────────────────────────
+  # §4 — constrained doc-ticket delta pass (decision 10: stages 1–2 only).
+  # ──────────────────────────────────────────────────────────────────────
+  ticket_delta:
+    needs: [gate, classify, adoc_review]
+    if: needs.classify.outputs.ticket != '' && needs.classify.outputs.has_adoc == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write   # OIDC role for the ADP gateway credential
+    timeout-minutes: 45
+    steps:
+      # Under RUNNER_TEMP, not the workspace: the claude-skill action's own
+      # checkout runs `git clean` there and would delete the download before
+      # the prompt reads it. continue-on-error: adoc_review uploads nothing
+      # when the skill wrote no files (if-no-files-found: ignore), and a
+      # missing prose-review artifact must degrade the delta, not skip it.
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: adoc-review
+          path: ${{ runner.temp }}/prior-review
+      - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
+        with:
+          repo: ${{ github.repository }}
+          pr_number: ${{ inputs.pr_number }}
+          plugin_ref: ${{ inputs.plugin_ref }}
+          aws_region: ${{ inputs.aws_region }}
+          aws_role_name_prefix: ${{ inputs.aws_role_name_prefix }}
+          aws_cred_account_id: ${{ secrets.aws_cred_account_id }}
+          adp_client_secret_id: ${{ inputs.adp_client_secret_id }}
+          plugin_app_id: ${{ inputs.docs_app_id }}
+          plugin_app_private_key: ${{ secrets.docs_app_private_key }}
+          cli_version: ${{ vars.CLAUDE_CLI_VERSION || '2.1.258' }}
+          output_dir: review-output
+          prompt: >
+            Run ONLY stages 1–2 of /docs-team-standards:doc-ticket for
+            ${{ needs.classify.outputs.ticket }} (dedupe + research; NO plan,
+            NO draft — approval checkpoints cannot be granted in CI). If Jira
+            is unreachable from this runner, derive the ticket's requirements
+            from any quoted description in the PR body and say so. Then
+            compare the ticket's requirements against the pr-review findings
+            in ${{ runner.temp }}/prior-review/findings.md and this PR's diff
+            (if that file does not exist, the prose review produced no
+            findings file — say so and compare against the diff alone). Do
+            NOT post to GitHub. Write the delta report (requirements the PR misses; PR
+            content the ticket doesn't cover) to review-output/ticket-delta.md
+            and review-output/verdict.json as
+            {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
+            where "fail" means the PR clearly misses a requirement the ticket
+            states.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ticket-delta
+          path: review-output/
+          if-no-files-found: ignore
+
+  # ──────────────────────────────────────────────────────────────────────
+  # §6 — one verdict, one upserted comment, final informational status.
+  # ──────────────────────────────────────────────────────────────────────
+  aggregate:
+    needs: [gate, classify, adoc_review, json_validation, code_review, screenshot_gate, ticket_delta]
+    if: always() && needs.gate.outputs.run_review == 'true'
+    runs-on: ubuntu-latest
+    # 25, not 15: preview-links.sh now waits up to 10 minutes for the
+    # Netlify deploy (observed docs-repo deploys land between 4m22s and
+    # 5m09s — a 5-minute bound sat right on the boundary).
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      statuses: write
+      checks: read
+    steps:
+      # docs-team-standards is private: github.token cannot clone it from
+      # any other repo, so the scripts checkout uses a per-run App token
+      # scoped to that repo with Contents: read (same as the plugin checkout
+      # inside claude-skill). Empty docs_app_id = the caller is
+      # docs-team-standards itself and github.token suffices.
+      - name: Mint a read-only token for the scripts checkout
+        id: standards_token
+        if: inputs.docs_app_id != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.docs_app_id }}
+          private-key: ${{ secrets.docs_app_private_key }}
+          owner: redpanda-data
+          repositories: docs-team-standards
+          permission-contents: read
+
+      - uses: actions/checkout@v4
+        with:
+          repository: redpanda-data/docs-team-standards
+          # Same pin as the skills plugin: scripts and skills version together.
+          ref: ${{ inputs.plugin_ref }}
+          path: .standards
+          token: ${{ steps.standards_token.outputs.token || github.token }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: results
+        continue-on-error: true
+
+      - name: Build preview links
+        id: previews
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+          PREVIEW_PATH_PREFIX: ${{ vars.PREVIEW_PATH_PREFIX }}
+        run: |
+          bash .standards/scripts/preview-links.sh "$R" "$PR" preview-links.md || : > preview-links.md
+
+      - name: Merge verdicts and build the comment
+        id: verdict
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+          HEAD_SHA: ${{ needs.gate.outputs.head_sha }}
+          SME_APPROVER: ${{ needs.gate.outputs.sme_approver }}
+          TICKET: ${{ needs.classify.outputs.ticket }}
+          RESULT_ADOC: ${{ needs.adoc_review.result }}
+          RESULT_JSON: ${{ needs.json_validation.result }}
+          RESULT_CODE: ${{ needs.code_review.result }}
+          RESULT_SHOTS: ${{ needs.screenshot_gate.result }}
+          RESULT_TICKET: ${{ needs.ticket_delta.result }}
+        run: |
+          bash .standards/scripts/aggregate-review.sh results comment.md
+
+      - name: Upsert the review comment
+        uses: actions/github-script@v7
+        env:
+          PR: ${{ inputs.pr_number }}
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('comment.md', 'utf8');
+            const issue_number = Number(process.env.PR);
+            const marker = '<!-- docs-review:comment -->';
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner, repo: context.repo.repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number, body,
+              });
+            }
+
+      - name: Apply labels and set the final status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+          HEAD_SHA: ${{ needs.gate.outputs.head_sha }}
+          STATE: ${{ steps.verdict.outputs.state }}
+          DESCRIPTION: ${{ steps.verdict.outputs.description }}
+          LABELS: ${{ steps.verdict.outputs.labels }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${LABELS:-}" ]]; then
+            # gh api, not `gh pr edit --add-label`: pr edit trips on the
+            # Projects-classic GraphQL deprecation in some repos.
+            IFS=',' read -ra LS <<< "$LABELS"
+            for L in "${LS[@]}"; do
+              gh api "repos/$R/issues/$PR/labels" -f "labels[]=$L" > /dev/null 2>&1 || \
+                echo "::warning::could not add label '$L' to $R#$PR"
+            done
+          fi
+          # Informational status (decision 7 corrected): docs-review is NOT
+          # a required check; the docs-team approval is the physical gate.
+          gh api "repos/$R/statuses/$HEAD_SHA" \
+            -f context=docs-review \
+            -f state="$STATE" \
+            -f description="$DESCRIPTION" \
+            -f target_url="${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}" > /dev/null
