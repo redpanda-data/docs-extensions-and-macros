@@ -1,0 +1,56 @@
+= Demo solution: live leaderboard
+:page-layout: solution
+:page-topic-type: solution
+:description: A fixture solution that exercises the solutions-catalog extension end to end: metadata, steps, attachments, and recommendations.
+:page-solution-version: v1.0.0
+:page-solution-difficulty: beginner
+:page-solution-duration: 15
+:page-solution-status: published
+:page-solution-featured: true
+:page-solution-download: authenticated
+:page-solution-platforms: self-managed, cloud
+:page-solution-technologies: Go, Docker Compose
+:page-categories: Stream Processing, Clients
+:page-solution-use-cases: Gaming
+:page-solution-assumes: Docker, topics, reading Go
+:personas: application-developer
+:page-solution-steps: start-environment, verify-end-to-end
+:page-solution-related-docs: preview:ROOT:test.adoc
+
+This fixture stands in for a real solution so the local build proves the `solutions-catalog` extension: every `page-solution-*` attribute is derived from this page, the two steps are ordered by `page-solution-steps`, and Product Docs fixture pages with matching categories receive `page-related-solutions`.
+
+== What you build
+
+A producer that emits player events and a consumer that keeps a leaderboard.
+
+== Architecture
+
+The producer writes to one topic; the consumer reads it with its own consumer group so replay is free.
+
+== Prerequisites
+
+* Docker and Docker Compose
+* Go 1.22 or later
+
+== Production considerations
+
+|===
+| Concern | What to change
+
+| Durability
+| Run three brokers with replication factor 3.
+
+| Security
+| Enable TLS and SASL, and create ACLs per service.
+|===
+
+== Build-along files
+
+* link:{attachmentsdir}/docker-compose.yml[docker-compose.yml]
+
+== Clean up
+
+[source,bash]
+----
+docker compose down -v
+----

@@ -26,6 +26,128 @@ function decodeHtmlEntities (str) {
 }
 
 /**
+ * Solution metadata for the `.md` twin of a solution page.
+ *
+ * Agents and LLMs read the Markdown, not the rendered page, so the solution
+ * facts have to travel with it. This is a shaped projection of the
+ * `page-solution` record that the solutions-catalog extension already builds,
+ * which is the single source for every value here. The raw JSON attributes
+ * stay blocked from the frontmatter: this is a projection, not a dump.
+ *
+ * Field names are chosen to line up with the docmeta metadata vocabularies
+ * proposal (hawkeyexl/manni proposal 0023). Nothing in that proposal is
+ * registered yet, so nothing here claims conformance; the shape is chosen so
+ * that adopting those vocabularies later is a change to this emitter alone.
+ * Two of its principles this already follows: one value is a string and many
+ * values are a list, and metadata claims content rather than rendering, which
+ * is why `page-layout` and featured placement stay out of the block.
+ *
+ * A field whose value cannot be sourced truthfully is left out rather than
+ * guessed, so a reader can treat every key present as a claim.
+ */
+const SOLUTIONS_COMPONENT = 'solutions'
+
+/** A value worth emitting: not undefined, null, '' or an empty list. */
+function hasValue(value) {
+  if (value === undefined || value === null || value === '') return false
+  if (Array.isArray(value)) return value.length > 0
+  return true
+}
+
+/** Assign only the keys whose values are worth emitting. */
+function assignPresent(target, entries) {
+  for (const [key, value] of Object.entries(entries)) {
+    if (hasValue(value)) target[key] = value
+  }
+  return target
+}
+
+function buildSolutionMetadata(page) {
+  if (page.src?.component !== SOLUTIONS_COMPONENT) return null
+  const attrs = page.asciidoc?.attributes || {}
+  const raw = attrs['page-solution']
+  if (!raw) return null
+
+  let record
+  try {
+    record = typeof raw === 'string' ? JSON.parse(raw) : raw
+  } catch {
+    return null
+  }
+  if (!record || !record.id) return null
+
+  const steps = Array.isArray(record.steps) ? record.steps : []
+  const stepId = attrs['page-solution-step-id']
+  const duration = Number(record.duration)
+
+  const block = assignPresent({}, {
+    id: record.id,
+    version: record.version,
+    status: record.status,
+    difficulty: record.difficulty,
+    duration_minutes: Number.isFinite(duration) ? duration : undefined,
+    technologies: record.technologies,
+    platforms: record.platforms,
+    categories: record.categories,
+    use_cases: record.useCases,
+    // Both facet axes, so an agent reading the .md can filter on the same two
+    // the landing page does. industries is optional and usually absent, and an
+    // empty list is dropped like every other empty value.
+    industries: record.industries,
+    // The files an agent may fetch: the same allowlist the download endpoint
+    // enforces, so reading the .md is enough to know what is available.
+    files: record.files,
+  })
+
+  if (stepId) {
+    // A step page describes its own position instead of relisting the steps.
+    const index = steps.findIndex((s) => s.id === stepId) + 1
+    block.step = assignPresent({}, {
+      id: stepId,
+      index: index > 0 ? index : undefined,
+      of: steps.length || undefined,
+    })
+  } else if (steps.length) {
+    block.steps = steps.map((s) => assignPresent({}, { id: s.id, title: s.title, url: s.url }))
+  }
+
+  const relatedDocs = (Array.isArray(record.relatedDocs) ? record.relatedDocs : [])
+    .map((d) => assignPresent({}, { title: d.title, url: d.url }))
+    .filter((d) => Object.keys(d).length > 0)
+  if (relatedDocs.length) block.related_docs = relatedDocs
+
+  // `repo` is owner/name; GitHub is the host the release and asset lookups
+  // already assume. `ref` is the release tag that exists, <id>/<version>, not
+  // the bare version, so a consumer can check the ref out.
+  const repository = assignPresent({}, {
+    url: record.repo ? `https://github.com/${record.repo}` : undefined,
+    ref: record.tag,
+    download: record.download,
+  })
+  if (Object.keys(repository).length) block.repository = repository
+
+  // Doc Detective evidence, when the solution ships a verification manifest.
+  // Projected with the manifest's own key names, so the block and the file it
+  // came from read the same way. Absent manifest, absent key.
+  if (record.verified) {
+    const verified = assignPresent({}, {
+      suite: record.verified.suite,
+      specs: record.verified.specs,
+      steps: record.verified.steps,
+      commands: record.verified.commands,
+      checks: record.verified.checks,
+      media: record.verified.media,
+      verify_script: record.verified.verifyScript,
+      redpanda_version: record.verified.redpandaVersion,
+      run_at: record.verified.runAt,
+    })
+    if (Object.keys(verified).length) block.verified = verified
+  }
+
+  return Object.keys(block).length ? block : null
+}
+
+/**
  * Converts AsciiDoc page attributes to YAML frontmatter
  * @param {Object} page - The page object with asciidoc attributes
  * @returns {string} YAML frontmatter string or empty string if no attributes
@@ -87,6 +209,13 @@ function generateFrontmatter(page) {
     'cacheSupportData',  // Cache support matrix
     'csvData',  // Raw CSV data from generate-rp-connect-info
     'commercialNamesMap',  // Commercial names mapping
+    // Solution records, nav, and recommendations: large JSON strings. The
+    // solution facts reach the Markdown through the shaped `solution` block
+    // below instead. These are already outside the allowlist; naming them here
+    // keeps a later allowlist edit from leaking a raw dump.
+    'page-solution',
+    'page-solution-nav',
+    'page-related-solutions',
   ]
 
   // Add allowed page attributes to frontmatter
@@ -149,6 +278,12 @@ function generateFrontmatter(page) {
     }
     frontmatter['release-status'] = betaStatus
   }
+
+  // Solution pages carry their metadata as one structured block, since the
+  // consumer is a machine. Derived from the page-solution record, so there is
+  // one source for the facts.
+  const solution = buildSolutionMetadata(page)
+  if (solution) frontmatter.solution = solution
 
   // Return empty string if no frontmatter
   if (Object.keys(frontmatter).length === 0) return ''
@@ -293,6 +428,8 @@ function createEnterpriseFeatureRules () {
   return { enterpriseFeature, betaBadge }
 }
 
+module.exports.generateFrontmatter = generateFrontmatter
+module.exports.buildSolutionMetadata = buildSolutionMetadata
 module.exports.createEnterpriseFeatureRules = createEnterpriseFeatureRules
 module.exports.formatStatusMarker = formatStatusMarker
 module.exports.ENTERPRISE_MARKER = ENTERPRISE_MARKER

@@ -3,9 +3,17 @@
 const { parse } = require('node-html-parser')
 const { decode } = require('html-entities')
 const path = require('path')
+const { getDeploymentType } = require('../../extension-utils/deployment-type')
+const { parseCategoryList } = require('../../extension-utils/categories')
 
 // Create encoder once at module scope for efficiency
 const textEncoder = new TextEncoder()
+
+// Landing/umbrella layouts have no `article.doc`; they are indexed from metadata
+// (title + description) instead of being skipped. The solutions landing page and
+// the solution overview layout render their body from `page-solution*` data, so
+// they belong here too.
+const METADATA_ONLY_LAYOUTS = ['home', 'component-home-v3', 'data-platform', 'solutions-home', 'solution']
 
 /**
  * Generates an Algolia index:
@@ -113,8 +121,8 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       // Check if this is a landing page we should index with metadata
       const pageRole = page.asciidoc?.attributes?.['page-role'] || ''
       const pageLayout = page.asciidoc?.attributes?.['page-layout'] || ''
-      const isUmbrellaPage = ['home', 'component-home-v3', 'data-platform'].includes(pageRole) ||
-                            ['home', 'component-home-v3', 'data-platform'].includes(pageLayout)
+      const isUmbrellaPage = METADATA_ONLY_LAYOUTS.includes(pageRole) ||
+                            METADATA_ONLY_LAYOUTS.includes(pageLayout)
 
       if (!isUmbrellaPage) {
         logger.warn(`Page is not an article...skipping ${page.pub.url}`)
@@ -274,19 +282,9 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       tag = `${title}${version ? ' v' + version : ''}`
     }
 
-    const deployment = page.asciidoc?.attributes['env-kubernetes']
-      ? 'Kubernetes'
-      : page.asciidoc?.attributes['env-linux']
-        ? 'Linux'
-        : page.asciidoc?.attributes['env-docker']
-          ? 'Docker'
-          : page.asciidoc?.attributes['page-cloud']
-            ? 'Redpanda Cloud'
-            : ''
+    const deployment = getDeploymentType(page.asciidoc?.attributes)
 
-    const categories = page.asciidoc?.attributes['page-categories']
-      ? page.asciidoc.attributes['page-categories'].split(',').map(category => category.trim())
-      : []
+    const categories = parseCategoryList(page.asciidoc?.attributes['page-categories'])
 
     const commercialNames = page.asciidoc?.attributes['page-commercial-names']
       ? page.asciidoc.attributes['page-commercial-names'].split(',').map(name => name.trim())
@@ -327,7 +325,25 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
         unixTimestamp: unixTimestamp
       }
 
-      if (component.name !== 'labs') {
+      if (component.name === 'solutions') {
+        // One record type for the solutions surface: the overview and every step
+        // share solutionId so the search UI can group them; stepId is empty on
+        // the overview and the landing page. Facet fields come from the
+        // attributes the solutions-catalog extension validated and mirrored.
+        const attrs = page.asciidoc?.attributes || {}
+        indexItem.product = 'Solutions'
+        indexItem.type = 'Solution'
+        indexItem._tags = ['Solutions']
+        indexItem.breadcrumbs = breadcrumbs
+        indexItem.solutionId = attrs['page-solution-id'] || ''
+        indexItem.stepId = attrs['page-solution-step-id'] || ''
+        indexItem.difficulty = attrs['page-solution-difficulty'] || ''
+        indexItem.duration = attrs['page-solution-duration'] ? Number(attrs['page-solution-duration']) : null
+        indexItem.technologies = parseCategoryList(attrs['page-solution-technologies'])
+        indexItem.platforms = parseCategoryList(attrs['page-solution-platforms'])
+        indexItem.status = attrs['page-solution-status'] || ''
+        // Displayed on the result, never faceted on.
+      } else if (component.name !== 'labs') {
         indexItem.product = component.title
         indexItem.breadcrumbs = breadcrumbs
         indexItem.type = 'Doc'

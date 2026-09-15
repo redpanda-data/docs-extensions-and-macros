@@ -130,3 +130,80 @@ describe('algolia-indexer generate-index (DOC-1878 chunking)', () => {
     expect(records[0].text).toContain('Description for step-one')
   })
 })
+
+describe('algolia-indexer generate-index (Solutions records)', () => {
+  const solutionsComponent = { name: 'solutions', title: 'Solutions', latest: { version: '' } }
+
+  function runSolutions (page) {
+    return generateIndex(
+      { site: { url: 'https://docs.redpanda.com' } },
+      {
+        getPages: (fn) => [page].filter((p) => fn(p) !== undefined),
+        getComponent: () => solutionsComponent,
+        getComponentVersion: () => solutionsComponent.latest,
+        getComponents: () => [component, solutionsComponent]
+      },
+      { logger: noopLogger }
+    )[solutionsComponent.name]['']
+  }
+
+  test('pages in the solutions component become type Solution with facet fields', () => {
+    const page = makePage(buildArticle({ h1: 'Build a leaderboard', sections: [{ name: 'verify' }] }), {
+      out: { dirname: 'solutions/leaderboard/build-leaderboard', basename: 'index.html' },
+      pub: { url: '/solutions/leaderboard/build-leaderboard/' },
+      src: { component: 'solutions', version: '', origin: {} },
+      asciidoc: {
+        attributes: {
+          'page-layout': 'solution-step',
+          'page-solution-id': 'leaderboard',
+          'page-solution-step-id': 'build-leaderboard',
+          'page-solution-difficulty': 'intermediate',
+          'page-solution-duration': '45',
+          'page-solution-technologies': 'Go, Protobuf',
+          'page-solution-platforms': 'self-managed, cloud',
+          'page-solution-status': 'published',
+          'page-categories': 'Clients'
+        }
+      }
+    })
+    const [record] = runSolutions(page)
+    expect(record).toMatchObject({
+      type: 'Solution',
+      product: 'Solutions',
+      _tags: ['Solutions'],
+      solutionId: 'leaderboard',
+      stepId: 'build-leaderboard',
+      difficulty: 'intermediate',
+      duration: 45,
+      technologies: ['Go', 'Protobuf'],
+      platforms: ['self-managed', 'cloud'],
+      status: 'published',
+      categories: ['Clients']
+    })
+    expect(record.deployment).toBeUndefined()
+    expect(record.interactive).toBeUndefined()
+  })
+
+  test('the solutions landing page is indexed from metadata like other umbrella layouts', () => {
+    const html = '<html><head><meta name="description" content="Runnable Redpanda solutions"></head>' +
+      '<body><h1 class="hero-title">Redpanda Solutions</h1></body></html>'
+    const page = makePage(html, {
+      out: { dirname: 'solutions', basename: 'index.html' },
+      pub: { url: '/solutions/' },
+      src: { component: 'solutions', version: '', origin: {} },
+      asciidoc: { attributes: { 'page-layout': 'solutions-home' } }
+    })
+    const [record] = runSolutions(page)
+    expect(record.type).toBe('Solution')
+    expect(record.title).toBe('Redpanda Solutions')
+    expect(record.intro).toBe('Runnable Redpanda solutions')
+    expect(record.stepId).toBe('')
+  })
+
+  test('non-solutions components still produce Doc records', () => {
+    const page = makePage(buildArticle({ h1: 'Doc' }))
+    const [record] = runIndex(page)
+    expect(record.type).toBe('Doc')
+    expect(record.solutionId).toBeUndefined()
+  })
+})

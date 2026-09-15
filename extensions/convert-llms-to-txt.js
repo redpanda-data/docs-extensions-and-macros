@@ -700,9 +700,16 @@ function getTopLevelNavItems(contentCatalog, component, componentVersion) {
     family: 'page',
   });
 
-  // Return all pages with URLs, sorted by title
+  // The solutions component has no nav.adoc either, but every step page would crowd out the
+  // list; the overviews (page-layout: solution) are the entry points.
+  const isSolutionEntry = component.name === 'solutions'
+    ? (page) => page.asciidoc?.attributes?.['page-layout'] === 'solution'
+    : () => true;
+
+  // Return published pages with URLs, sorted by title. `page.out` is gone on
+  // pages an extension unpublished (unpublish-pages, solutions-catalog drafts).
   return pages
-    .filter(page => page.pub?.url)
+    .filter(page => page.out && page.pub?.url && isSolutionEntry(page))
     .map(page => ({
       content: page.asciidoc?.navtitle || page.asciidoc?.doctitle || page.src.stem,
       url: page.pub.url,
@@ -710,3 +717,5 @@ function getTopLevelNavItems(contentCatalog, component, componentVersion) {
     .sort((a, b) => a.content.localeCompare(b.content))
     .slice(0, 10);
 }
+
+module.exports.getTopLevelNavItems = getTopLevelNavItems

@@ -5,6 +5,7 @@
 * xref:preview:ROOT:faq-test.adoc[]
 * xref:preview:ROOT:faq-blocks-test.adoc[]
 * xref:preview:ROOT:iceberg-explorer-test.adoc[]
+* xref:preview:ROOT:solutions-related-test.adoc[]
 * xref:preview:reference:glossary.adoc[]
 * Macro showcase
 ** xref:ROOT:macros-showcase.adoc[Property and enterprise macros]

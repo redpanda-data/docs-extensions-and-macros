@@ -42,6 +42,26 @@ describe('package exports cover all extensions', () => {
     const specifier = file.replace(/\.js$/, '')
     expect(Object.keys(pkg.exports || {})).toContain(specifier)
   })
+
+  // extensions/ was the only directory checked until add-solution-file-provenance
+  // shipped unexported: it is an AsciiDoc extension, so it lives here instead,
+  // and the docs-site playbook that required it got
+  // ERR_PACKAGE_PATH_NOT_EXPORTED. Every directory a playbook can name is now
+  // covered, so the next one cannot repeat it.
+  const siblingFiles = ['asciidoc-extensions', 'macros'].flatMap((dir) =>
+    fs
+      .readdirSync(path.join(__dirname, '..', dir))
+      .filter((f) => f.endsWith('.js'))
+      .map((f) => `./${dir}/${f}`)
+  )
+
+  test.each(siblingFiles)('%s is exported', (file) => {
+    expect(exportedTargets).toContain(file)
+  })
+
+  test.each(siblingFiles)('%s is reachable by its conventional specifier', (file) => {
+    expect(Object.keys(pkg.exports || {})).toContain(file.replace(/\.js$/, ''))
+  })
 })
 
 /**

@@ -34,7 +34,7 @@ content:
   - url: .
     branches: HEAD
     start_paths: [preview/extensions-and-macros, preview/shared, preview/home,
-                 preview/macro-fixtures-beta, preview/macro-fixtures-cloud]
+                 preview/macro-fixtures-beta, preview/macro-fixtures-cloud, preview/solutions]
   # WIP: jake/property-source-attributes stands in for main (it is branched
   # from it) and carries the page-property-source declarations. v/26.1 and
   # v/25.3 are where the 586 and 607 prop: calls live, so they are what
@@ -70,6 +70,7 @@ asciidoc:
   - './macros/helm-ref'
   - './macros/rp-connect-components'
   - './asciidoc-extensions/add-line-numbers-highlights'
+  - './asciidoc-extensions/add-solution-file-provenance'
 antora:
   extensions:
   - require: './extensions/add-global-attributes'
@@ -88,6 +89,7 @@ antora:
           attribute_name: docker-labs-index
   - require: './extensions/add-pages-to-root'
   - require: './extensions/unlisted-pages'
+    skip_components: [api, labs, solutions]
   - require: './extensions/git-full-clone'
   - require: './extensions/add-git-dates'
   - require: './extensions/add-faq-structured-data'
@@ -125,6 +127,10 @@ antora:
           eol_doc: https://support.redpanda.com/hc/en-us/articles/20617574366743-Redpanda-Supported-Versions
           upgrade_doc: ROOT:upgrade:index.adoc
   - require: './extensions/unpublish-pages'
+  - require: './extensions/solutions-catalog/index'
+    max_related: 3
+    min_score: 0.6
+    network_checks: auto
   - require: './extensions/validate-attributes'
   - require: './extensions/find-related-docs'
   - require: './extensions/find-related-labs'
