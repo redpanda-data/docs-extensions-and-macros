@@ -14,6 +14,7 @@ const {
   RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, stripVersion,
 } = require('./collect')
 const { normalizeCategories } = require('../../extension-utils/categories')
+const yaml = require('js-yaml')
 
 const DURATION_MIN = 5
 const DURATION_MAX = 600
@@ -127,11 +128,13 @@ function isIsoTimestamp (value) {
  * @param {Object} record - from collect.js
  * @param {Object} ctx
  * @param {Object} [ctx.categoryMap] - from createCategoryMap
+ * @param {Object} [ctx.facetVocab] - {industries: string[], useCases: string[]} from
+ *   ROOT/partials/solution-facets.yml; when absent the two facet axes are not validated
  * @param {(spec: string) => Object|null|undefined} [ctx.resolveDoc] - resolve a page ID to a page
  * @param {Set<string>} [ctx.solutionIds] - all module names in the component
  * @returns {{errors: Array<string>, warnings: Array<string>}}
  */
-function validateSolution (record, { categoryMap, resolveDoc, solutionIds } = {}) {
+function validateSolution (record, { categoryMap, facetVocab, resolveDoc, solutionIds } = {}) {
   const errors = []
   const warnings = []
   const id = record.id
@@ -203,6 +206,27 @@ function validateSolution (record, { categoryMap, resolveDoc, solutionIds } = {}
     record.categories = categories
   }
 
+  // Industries and use cases: fatal on an unknown value, for the same reason
+  // categories are. These two drive facets, and a facet built from free text
+  // becomes a list of near-duplicates ("CDC", "Change data capture") as soon
+  // as more than one author writes one. The vocabulary is a reviewed file, so
+  // adding a value is a deliberate act rather than a typo.
+  if (facetVocab) {
+    for (const [attr, values] of [
+      ['page-solution-use-cases', record.useCases],
+      ['page-solution-industries', record.industries],
+    ]) {
+      const allowed = facetVocab[attr === 'page-solution-use-cases' ? 'useCases' : 'industries'] || []
+      const invalid = values.filter((v) => !allowed.includes(v))
+      if (invalid.length) {
+        err(`${attr} contains unknown values: ${invalid.join(', ')}. Add them to ROOT/partials/solution-facets.yml first, or use an existing value`)
+      }
+    }
+    if (record.status === 'published' && !record.useCases.length) {
+      warn('page-solution-use-cases is empty; the solution will not appear under any use case on the landing page')
+    }
+  }
+
   // Steps: bijection between page-solution-steps and non-index pages
   if (!record.stepIds.length) err('page-solution-steps is required')
   const listed = new Set()
@@ -258,6 +282,36 @@ function validateSolution (record, { categoryMap, resolveDoc, solutionIds } = {}
   }
 
   return { errors, warnings }
+}
+
+/**
+ * Parse ROOT/partials/solution-facets.yml into the allowed values per axis.
+ *
+ * Shape:
+ *   industries: [Gaming, Financial services]
+ *   use_cases:  [Change data capture, Data lakehouse]
+ *
+ * Returns null when the file is missing or unparseable, which makes the two
+ * axes unvalidated rather than failing every build: the same posture the
+ * category check takes when page-valid-categories is unavailable.
+ *
+ * @param {string|Buffer} contents
+ * @returns {null | {industries: string[], useCases: string[]}}
+ */
+function parseFacetVocab (contents) {
+  if (!contents) return null
+  let data
+  try {
+    data = yaml.load(String(contents))
+  } catch (err) {
+    return null
+  }
+  if (!data || typeof data !== 'object') return null
+  const list = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()) : [])
+  const industries = list(data.industries)
+  const useCases = list(data.use_cases !== undefined ? data.use_cases : data.useCases)
+  if (!industries.length && !useCases.length) return null
+  return { industries, useCases }
 }
 
 function titleCase (s) {
@@ -345,4 +399,5 @@ module.exports = {
   validateSolution,
   validateRelationships,
   formatErrors,
+  parseFacetVocab,
 }

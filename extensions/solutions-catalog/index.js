@@ -223,6 +223,7 @@ module.exports.register = function ({ config = {} } = {}) {
     graph: null,
     records: [],
     draftUrls: [],
+    facetsFile: null,
   }
   let validator = null
   const getValidator = () => (validator = validator || relationships.createRelationshipsValidator())
@@ -234,6 +235,8 @@ module.exports.register = function ({ config = {} } = {}) {
       return
     }
     const errors = validate.validateStructure(collected)
+
+    state.facetsFile = collected.facetsFile || null
 
     if (collected.relationshipsFile) {
       try {
@@ -260,6 +263,13 @@ module.exports.register = function ({ config = {} } = {}) {
     const validCategories = siteCatalog && siteCatalog.attributeFile && siteCatalog.attributeFile['page-valid-categories']
     const categoryMap = validCategories ? createCategoryMap(validCategories) : null
     if (!categoryMap) logger.warn('solutions-catalog: page-valid-categories is unavailable; category validation and category edges are skipped')
+    // The industry and use-case vocabulary. Absent means those two axes go
+    // unvalidated, matching how an unavailable category list is handled: a
+    // missing vocabulary should not fail every build, only stop enforcing.
+    const facetVocab = state.facetsFile ? validate.parseFacetVocab(state.facetsFile.contents) : null
+    if (!facetVocab) {
+      logger.warn('solutions-catalog: ROOT/partials/solution-facets.yml is missing or unparseable; page-solution-industries and page-solution-use-cases are not validated')
+    }
 
     const resolveDoc = makeResolver(contentCatalog)
     const solutionIds = new Set(collected.solutions.map((s) => s.id))
@@ -272,7 +282,7 @@ module.exports.register = function ({ config = {} } = {}) {
     }
 
     for (const record of collected.solutions) {
-      const result = validate.validateSolution(record, { categoryMap, resolveDoc, solutionIds })
+      const result = validate.validateSolution(record, { categoryMap, facetVocab, resolveDoc, solutionIds })
       errors.push(...result.errors)
       warnings.push(...result.warnings)
     }

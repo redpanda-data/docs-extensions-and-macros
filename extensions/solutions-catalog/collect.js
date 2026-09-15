@@ -194,7 +194,8 @@ function stepIdOf (page) {
  * @param {string} [options.component='solutions']
  * @returns {null | {
  *   component: Object, version: string, landing: Object|undefined,
- *   solutions: Array<Object>, rootPages: Array<Object>, relationshipsFile: Object|undefined
+ *   solutions: Array<Object>, rootPages: Array<Object>, relationshipsFile: Object|undefined,
+ *   facetsFile: Object|undefined
  * }} null when the component is not part of the build
  */
 function collectSolutions (contentCatalog, { component = COMPONENT } = {}) {
@@ -218,6 +219,10 @@ function collectSolutions (contentCatalog, { component = COMPONENT } = {}) {
   const rootPages = byModule.get('ROOT') || []
   const landing = rootPages.find((p) => p.src.relative === 'index.adoc')
   const relationshipsFile = partials.find((f) => f.src.module === 'ROOT' && f.src.relative === 'relationships.yml')
+  // The controlled vocabulary for the industry and use-case facets. Same
+  // mechanism as relationships.yml: a ROOT partial the repo owns, so the
+  // vocabulary travels with the solutions rather than with this package.
+  const facetsFile = partials.find((f) => f.src.module === 'ROOT' && f.src.relative === 'solution-facets.yml')
 
   const solutions = []
   for (const [mod, modulePages] of byModule) {
@@ -226,7 +231,7 @@ function collectSolutions (contentCatalog, { component = COMPONENT } = {}) {
   }
   solutions.sort((a, b) => a.id.localeCompare(b.id))
 
-  return { component: comp, version, landing, solutions, rootPages, relationshipsFile }
+  return { component: comp, version, landing, solutions, rootPages, relationshipsFile, facetsFile }
 }
 
 function buildRecord (mod, modulePages, moduleAttachments, { version }) {
@@ -266,6 +271,7 @@ function buildRecord (mod, modulePages, moduleAttachments, { version }) {
     categoriesRaw: parseList(attrs['page-categories']),
     categories: parseList(attrs['page-categories']),
     useCases: parseList(attrs['page-solution-use-cases']),
+    industries: parseList(attrs['page-solution-industries']),
     personas: parseList(attrs.personas || attrs['page-personas']),
     stepIds: parseList(attrs['page-solution-steps']),
     relatedDocRefs: parseList(attrs['page-solution-related-docs']),

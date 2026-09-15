@@ -55,6 +55,7 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     technologies: record.technologies,
     categories: record.categories,
     useCases: record.useCases,
+    industries: record.industries,
     // The download endpoint's allowlist: exactly the snippets these pages render.
     files: record.files || [],
     personas: record.personas,
@@ -158,10 +159,35 @@ function applyPageAttributes (record, publicRecord, nav) {
   })
 }
 
+/**
+ * Keep only the facet values that actually narrow the catalogue.
+ *
+ * A value carried by every solution filters nothing: ticking "Runs on: Cloud"
+ * when all of them run on Cloud returns the same list, so it is noise in the
+ * sidebar rather than a filter. Everything else stays, including a value held
+ * by a single solution: that is a narrowing from many to one, which is the
+ * whole point of a facet, and it is how a small catalogue grows into a large
+ * one without the UI needing to change.
+ *
+ * A group left with no values renders nothing (every template gates on
+ * `.length`), which is also what a one-solution catalogue gets: with nothing
+ * to narrow, every value is on every solution.
+ *
+ * @param {Array<{value: string, count: number}>} values
+ * @param {number} total number of solutions in the catalogue
+ * @returns {Array<{value: string, count: number}>} the values that discriminate
+ */
+function discriminating (values, total) {
+  return values.filter((v) => v.count < total)
+}
+
 function countValues (records, pick) {
   const counts = new Map()
   for (const r of records) {
-    for (const v of pick(r)) {
+    // pick() can return undefined for a facet whose attribute the solution
+    // never set, so the fallback is the point rather than defensiveness: an
+    // optional axis such as industries is absent on most records.
+    for (const v of pick(r) || []) {
       if (v === undefined || v === null || v === '') continue
       counts.set(v, (counts.get(v) || 0) + 1)
     }
@@ -184,11 +210,17 @@ function buildCatalog (publicRecords, { siteUrl = '', generatedAt = new Date().t
     generatedAt,
     siteUrl,
     solutions,
+    // A facet only earns a place when it discriminates. discriminating()
+    // drops values that match every solution (they filter nothing) and drops
+    // a group left with fewer than two values (it filters nothing either), so
+    // the UI needs no change as the catalogue grows from five to fifty.
     facets: {
-      categories: countValues(solutions, (r) => r.categories),
-      technologies: countValues(solutions, (r) => r.technologies),
-      difficulty: countValues(solutions, (r) => [r.difficulty]),
-      platforms: countValues(solutions, (r) => r.platforms),
+      industries: discriminating(countValues(solutions, (r) => r.industries), solutions.length),
+      useCases: discriminating(countValues(solutions, (r) => r.useCases), solutions.length),
+      categories: discriminating(countValues(solutions, (r) => r.categories), solutions.length),
+      technologies: discriminating(countValues(solutions, (r) => r.technologies), solutions.length),
+      difficulty: discriminating(countValues(solutions, (r) => [r.difficulty]), solutions.length),
+      platforms: discriminating(countValues(solutions, (r) => r.platforms), solutions.length),
     },
   }
 }
@@ -219,4 +251,5 @@ module.exports = {
   buildCatalog,
   buildGraph,
   toJsonBuffer,
+  discriminating,
 }

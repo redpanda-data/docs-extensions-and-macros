@@ -205,6 +205,7 @@ async function run ({
   landing = makeLanding(),
   docs = [makeDoc()],
   relationshipsText = RELATIONSHIPS_YML,
+  facetsText = null,
   components,
   config = {},
   env = {},
@@ -213,7 +214,10 @@ async function run ({
 } = {}) {
   const pages = [...(landing ? [landing] : []), ...solutions.flatMap((s) => s.pages), ...docs]
   const attachments = solutions.flatMap((s) => s.attachments)
-  const partials = relationshipsText === null ? [] : [makePartial({ relative: 'relationships.yml', text: relationshipsText })]
+  const partials = [
+    ...(relationshipsText === null ? [] : [makePartial({ relative: 'relationships.yml', text: relationshipsText })]),
+    ...(facetsText === null ? [] : [makePartial({ relative: 'solution-facets.yml', text: facetsText })]),
+  ]
   const catalog = makeCatalog({ pages, attachments, partials, components })
   const siteCatalog = { attributeFile: { 'page-valid-categories': VALID_CATEGORIES }, unpublishedPages: [], addFile: jest.fn() }
   const playbook = { site: { url: 'https://docs.redpanda.com' } }
@@ -369,12 +373,13 @@ describe('solutions-catalog: happy path', () => {
     expect(catalog.siteUrl).toBe('https://docs.redpanda.com')
     expect(typeof catalog.generatedAt).toBe('string')
     expect(catalog.solutions.map((s) => s.id)).toEqual(['leaderboard'])
-    expect(catalog.facets.categories).toEqual([
-      { value: 'Clients', count: 1 }, { value: 'Development', count: 1 }, { value: 'Stream Processing', count: 1 },
-    ])
-    expect(catalog.facets.difficulty).toEqual([{ value: 'intermediate', count: 1 }])
-    expect(catalog.facets.platforms).toEqual([{ value: 'cloud', count: 1 }, { value: 'self-managed', count: 1 }])
-    expect(catalog.facets.technologies.map((t) => t.value)).toEqual(['Go', 'Protobuf'])
+    // Every facet is empty here, and that is the rule working rather than a
+    // gap: this fixture has one solution, so every value it carries is a value
+    // every solution carries, and ticking any of them would return the same
+    // single card. The two-solution case below is where the facets appear.
+    expect(catalog.facets).toEqual({
+      industries: [], useCases: [], categories: [], technologies: [], difficulty: [], platforms: [],
+    })
 
     const graph = addedFile(result.siteCatalog, 'assets/data/solutions-graph.json')
     expect(graph.settings).toEqual({ maxRelated: 3, minScore: 0.6 })
@@ -717,7 +722,9 @@ describe('solutions-catalog: status handling', () => {
     // catalog JSON and component attribute
     const catalog = addedFile(result.siteCatalog, 'solutions.json')
     expect(catalog.solutions.map((s) => [s.id, s.status, s.draft])).toEqual([['sandbox', 'draft', true]])
-    expect(catalog.facets.difficulty).toEqual([{ value: 'intermediate', count: 1 }])
+    // Empty because a one-solution catalogue has nothing to narrow, not
+    // because drafts are treated differently: they are counted like any other.
+    expect(catalog.facets.difficulty).toEqual([])
     const attrCatalog = JSON.parse(result.catalog.getComponent('home').versions[0].asciidoc.attributes['solutions-catalog'])
     expect(attrCatalog.solutions[0].id).toBe('sandbox')
 
@@ -1444,11 +1451,117 @@ describe('solutions-catalog: pure helpers', () => {
   })
 
   test('buildCatalog keeps published and deprecated, plus drafts only when flagged as included', () => {
-    const recs = ['published', 'deprecated', 'draft'].map((status, i) => ({ id: `s${i}`, status, categories: [], technologies: [], platforms: [], difficulty: 'beginner' }))
+    const recs = ['published', 'deprecated', 'draft'].map((status, i) => ({ id: `s${i}`, status, categories: [], technologies: [], platforms: [], difficulty: i ? 'advanced' : 'beginner' }))
     const catalog = outputs.buildCatalog(recs, { siteUrl: 'x', generatedAt: 't' })
     expect(catalog.solutions.map((s) => s.status)).toEqual(['published', 'deprecated'])
-    expect(catalog.facets.difficulty).toEqual([{ value: 'beginner', count: 2 }])
+    expect(catalog.facets.difficulty).toEqual([{ value: 'advanced', count: 1 }, { value: 'beginner', count: 1 }])
+    // The same records with one difficulty between them: it is then a value on
+    // every solution, narrows nothing and is dropped. This is why the
+    // assertion above needs two different values to prove facets are built.
+    const same = recs.map((r) => ({ ...r, difficulty: 'beginner' }))
+    expect(outputs.buildCatalog(same, { siteUrl: 'x', generatedAt: 't' }).facets.difficulty).toEqual([])
     recs[2].draft = true
     expect(outputs.buildCatalog(recs, { siteUrl: 'x', generatedAt: 't' }).solutions.map((s) => s.status)).toEqual(['published', 'deprecated', 'draft'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('solutions-catalog: the industry and use-case vocabulary', () => {
+  const VOCAB = [
+    'industries:',
+    '  - Gaming',
+    'use_cases:',
+    '  - Real-time analytics',
+    '  - Change data capture',
+    '',
+  ].join('\n')
+
+  test('parseFacetVocab reads both lists, and returns null for anything it cannot use', () => {
+    expect(validate.parseFacetVocab(VOCAB)).toEqual({
+      industries: ['Gaming'],
+      useCases: ['Real-time analytics', 'Change data capture'],
+    })
+    // useCases is accepted as well as use_cases, so the file can be written
+    // either way round without a silent empty vocabulary.
+    expect(validate.parseFacetVocab('useCases: [A]').useCases).toEqual(['A'])
+    expect(validate.parseFacetVocab('')).toBeNull()
+    expect(validate.parseFacetVocab('industries: []\nuse_cases: []')).toBeNull()
+    expect(validate.parseFacetVocab('this: [is: not: yaml')).toBeNull()
+    expect(validate.parseFacetVocab('- a list, not a map')).toBeNull()
+  })
+
+  test('an unknown use case or industry fails the build, naming the file to change', async () => {
+    const bad = makeSolution('leaderboard', { attrs: { 'page-solution-use-cases': 'Real-time analytics, CDC' } })
+    await expect(run({ solutions: [bad], facetsText: VOCAB }))
+      .rejects.toThrow(/page-solution-use-cases contains unknown values: CDC.*solution-facets\.yml/s)
+
+    const badIndustry = makeSolution('leaderboard', { attrs: { 'page-solution-industries': 'Fintech' } })
+    await expect(run({ solutions: [badIndustry], facetsText: VOCAB }))
+      .rejects.toThrow(/page-solution-industries contains unknown values: Fintech/)
+  })
+
+  test('values in the vocabulary pass, and reach the record and the catalog', async () => {
+    const solution = makeSolution('leaderboard', {
+      attrs: { 'page-solution-use-cases': 'Real-time analytics', 'page-solution-industries': 'Gaming' },
+    })
+    const result = await run({ solutions: [solution], facetsText: VOCAB })
+    const record = json(solution.pages[0], 'page-solution')
+    expect(record.useCases).toEqual(['Real-time analytics'])
+    expect(record.industries).toEqual(['Gaming'])
+    expect(addedFile(result.siteCatalog, 'solutions.json').solutions[0].industries).toEqual(['Gaming'])
+  })
+
+  test('without the file the two axes are not validated, so a missing vocabulary cannot break a build', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-use-cases': 'Anything At All' } })
+    const result = await run({ solutions: [solution], facetsText: null })
+    expect(json(solution.pages[0], 'page-solution').useCases).toEqual(['Anything At All'])
+    expect(result.logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(/solution-facets\.yml is missing or unparseable/)
+  })
+
+  test('with two solutions the facets carry the values that tell them apart', async () => {
+    // The pair the whole taxonomy exists for: a shared use case that cannot
+    // narrow anything, a use case only one of them has, and an industry only
+    // one of them has.
+    const a = makeSolution('leaderboard', {
+      attrs: { 'page-solution-use-cases': 'Real-time analytics, Change data capture', 'page-solution-industries': 'Gaming' },
+    })
+    const b = makeSolution('other', {
+      attrs: { 'page-solution-use-cases': 'Real-time analytics', 'page-solution-related-docs': undefined, 'page-categories': 'rpk' },
+    })
+    const catalog = addedFile((await run({ solutions: [a, b], facetsText: VOCAB })).siteCatalog, 'solutions.json')
+    expect(catalog.solutions.map((r) => r.id)).toEqual(['leaderboard', 'other'])
+    expect(catalog.facets.useCases).toEqual([{ value: 'Change data capture', count: 1 }])
+    expect(catalog.facets.industries).toEqual([{ value: 'Gaming', count: 1 }])
+    // Real-time analytics is on both, so it is not a filter. It is still on
+    // the records, which is what the page shows and the search matches.
+    expect(catalog.solutions.map((r) => r.useCases)).toEqual([
+      ['Real-time analytics', 'Change data capture'], ['Real-time analytics'],
+    ])
+  })
+
+  test('a published solution with no use case warns, because it lands under nothing', async () => {
+    const solution = makeSolution('leaderboard', { attrs: { 'page-solution-use-cases': undefined } })
+    const result = await run({ solutions: [solution], facetsText: VOCAB })
+    expect(result.logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(/page-solution-use-cases is empty/)
+  })
+})
+
+describe('solutions-catalog: facets only appear when they discriminate', () => {
+  const { discriminating } = outputs
+
+  test('a value on every solution is dropped, because ticking it changes nothing', () => {
+    expect(discriminating([{ value: 'a', count: 3 }, { value: 'b', count: 1 }], 3))
+      .toEqual([{ value: 'b', count: 1 }])
+    expect(discriminating([{ value: 'a', count: 3 }, { value: 'b', count: 3 }], 3)).toEqual([])
+  })
+
+  test('a value on one solution is kept: many to one is the narrowing a facet is for', () => {
+    expect(discriminating([{ value: 'only', count: 1 }], 4)).toEqual([{ value: 'only', count: 1 }])
+    expect(discriminating([], 4)).toEqual([])
+  })
+
+  test('a one-solution catalogue has nothing to narrow, so every group empties', () => {
+    expect(discriminating([{ value: 'a', count: 1 }, { value: 'b', count: 1 }], 1)).toEqual([])
   })
 })
