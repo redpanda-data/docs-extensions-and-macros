@@ -1629,7 +1629,8 @@ solution:
     - Topics and Partitions
     - Producers
   use_cases:
-    - live-leaderboards
+    - Real-time analytics
+    - Event-driven microservices
   steps:
     - id: start-environment
       title: Start the environment
@@ -1638,7 +1639,7 @@ solution:
     - title: Consumer offsets
       url: /streaming/develop/consumer-offsets/
   repository:
-    url: https://github.com/redpanda-data/solutions
+    url: https://github.com/redpanda-data/redpanda-solutions
     ref: multiplayer-gaming/v1.0.0
     download: authenticated
 ----
