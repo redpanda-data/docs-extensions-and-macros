@@ -198,6 +198,23 @@ describe('doc-strings-review workflow: static contracts', () => {
     expect(PKG_DEFAULT).toMatch(/@\d+\.\d+\.\d+$/)
   })
 
+  test('the review gate conditions on declarations or removals, never on a finding count', () => {
+    // A string can pass every mechanical rule and still tell an operator
+    // nothing, and a deletion produces no findings at all, so gating the
+    // review on a finding count would skip exactly the PRs the prose and
+    // published-content passes exist for.
+    const gated = job.steps.filter((s) => (s.if || '').includes('steps.lint.outputs'))
+    expect(gated.length).toBeGreaterThan(0)
+    for (const s of gated) {
+      expect(s.if).toMatch(/steps\.lint\.outputs\.declarations/)
+      expect(s.if).toMatch(/steps\.lint\.outputs\.removals/)
+      expect(s.if).not.toMatch(/steps\.lint\.outputs\.count/)
+    }
+    // And the review itself is one of them.
+    const review = job.steps.find((s) => s.name === 'Claude review with suggestions')
+    expect(review.if).toMatch(/declarations != '0' \|\| steps\.lint\.outputs\.removals != '0'/)
+  })
+
   test('the caller contract documents the permissions a caller must grant', () => {
     const header = fs.readFileSync(WORKFLOW_PATH, 'utf8').split('name: doc-strings-review')[0]
     expect(header).toMatch(/pull-requests:\s*write/)
@@ -209,9 +226,16 @@ describe('doc-strings-review workflow: lint step (executed)', () => {
   const step = stepNamed('Lint doc strings in the diff')
   const baseEnv = { BASE: 'deadbeef', SURFACES: '', PKG: PKG_DEFAULT }
 
+  // These assert on `declarations` and `removals`, which are what the review,
+  // credential and dispatch steps actually condition on. An earlier version of
+  // this suite asserted a `count` output instead. That output gated nothing,
+  // so the fail-closed paths below were only ever verified by proxy and the
+  // real gate had no coverage at all.
+  const JSON_2 = '{"findings":[{"a":1},{"b":2}],"summary":{"totalDeclarations":2,"removedSurfaceLines":0}}'
+
   test('invokes the CLI through --package= so npx can resolve the doc-tools bin', () => {
     const r = execRun(step, {
-      env: { ...baseEnv, LINT_JSON: '{"findings":[{"a":1},{"b":2}]}' },
+      env: { ...baseEnv, LINT_JSON: JSON_2 },
       stubs: { npx: NPX_STUB }
     })
     const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8').split('\n')
@@ -221,52 +245,70 @@ describe('doc-strings-review workflow: lint step (executed)', () => {
     expect(argv).not.toContain(PKG_DEFAULT)
     expect(argv).toContain('lint-strings')
     expect(r.status).toBe(0)
-    expect(r.outputs.count).toBe('2')
+    expect(r.outputs.declarations).toBe('2')
   })
 
-  test('the bare npx form would produce count=0, not an empty count', () => {
+  test('the bare npx form leaves the gate at 0, never empty', () => {
     // Drive the same body with a stub that refuses to resolve a bin, which is
     // exactly what the shipped `npx --yes <pkg> doc-tools` form did: exit 1,
-    // zero bytes. The gate must read 0 and annotate, never ''.
+    // zero bytes. '' would read as truthy in `!= '0'` and open the gate over
+    // an absent findings file, so both outputs must be a literal 0.
     const r = execRun(step, {
       env: { ...baseEnv, LINT_EXIT: '1' },
       stubs: {
         npx: '#!/bin/bash\necho \'npm error could not determine executable to run\' >&2\nexit 1\n'
       }
     })
-    expect(r.outputs.count).toBe('0')
-    expect(r.outputs.count).not.toBe('')
+    expect(r.outputs.declarations).toBe('0')
+    expect(r.outputs.removals).toBe('0')
+    expect(r.outputs.declarations).not.toBe('')
+    expect(r.outputs.removals).not.toBe('')
     expect(r.all).toMatch(/::warning::/)
     expect(r.status).toBe(0)
   })
 
-  test('a zero-byte findings file yields count=0 (jq prints nothing there)', () => {
+  test('a zero-byte findings file closes the gate (jq prints nothing there)', () => {
     const r = execRun(step, { env: baseEnv, stubs: { npx: NPX_STUB } })
     expect(r.size('lint-findings.json')).toBe(0)
-    expect(r.outputs.count).toBe('0')
+    expect(r.outputs.declarations).toBe('0')
+    expect(r.outputs.removals).toBe('0')
     expect(r.all).toMatch(/::warning::/)
   })
 
-  test('non-JSON output yields count=0 rather than a non-numeric gate value', () => {
+  test('non-JSON output closes the gate rather than emitting a non-numeric value', () => {
     const r = execRun(step, {
       env: { ...baseEnv, LINT_JSON: 'this is not json' },
       stubs: { npx: NPX_STUB }
     })
-    expect(r.outputs.count).toBe('0')
+    expect(r.outputs.declarations).toBe('0')
+    expect(r.outputs.removals).toBe('0')
     expect(r.all).toMatch(/::warning::/)
   })
 
-  test('a clean lint reports count=0 and a dirty lint reports the real count', () => {
+  test('a lint with zero findings still opens the gate, so clean strings reach the review', () => {
+    // The whole point of gating on declarations rather than findings: the lint
+    // is mechanical, and a string can pass every rule while telling an
+    // operator nothing. A PR whose strings are all mechanically clean must
+    // still get the prose pass.
     const clean = execRun(step, {
-      env: { ...baseEnv, LINT_JSON: '{"findings":[]}' },
+      env: { ...baseEnv, LINT_JSON: '{"findings":[],"summary":{"totalDeclarations":4,"removedSurfaceLines":0}}' },
       stubs: { npx: NPX_STUB }
     })
-    expect(clean.outputs.count).toBe('0')
-    const dirty = execRun(step, {
-      env: { ...baseEnv, LINT_JSON: '{"findings":[{},{},{}]}' },
+    expect(clean.outputs.declarations).toBe('4')
+    expect(clean.outputs.removals).toBe('0')
+  })
+
+  test('a deletion-only PR opens the gate through removals', () => {
+    // Declarations are extracted from HEAD, so a PR that only removes a
+    // property reports totalDeclarations 0 and would skip every step below,
+    // including the published-content check that treats a removed surface as
+    // high impact. removals is the second half of the gate for that case.
+    const deleted = execRun(step, {
+      env: { ...baseEnv, LINT_JSON: '{"findings":[],"summary":{"totalDeclarations":0,"removedSurfaceLines":12}}' },
       stubs: { npx: NPX_STUB }
     })
-    expect(dirty.outputs.count).toBe('3')
+    expect(deleted.outputs.declarations).toBe('0')
+    expect(deleted.outputs.removals).toBe('12')
   })
 
   test('an empty surfaces input does not abort the step under errexit', () => {
