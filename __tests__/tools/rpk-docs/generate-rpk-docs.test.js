@@ -1466,4 +1466,35 @@ describe('env vars partial output location', () => {
     expect(fs.existsSync(path.join(root, 'rpk-env-vars.adoc'))).toBe(false)
     fs.rmSync(root, { recursive: true, force: true })
   })
+
+  it('sections the partial by group when the tree carries group_title, in the main pipeline', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-env-grouped-'))
+    const outputDir = path.join(root, 'modules', 'reference', 'pages', 'rpk')
+    fs.mkdirSync(outputDir, { recursive: true })
+
+    await generateRpkDocs({
+      tree: {
+        name: 'rpk',
+        x_options: [
+          { name: 'brokers', env: 'RPK_BROKERS', group: 'admin', group_title: 'Admin API' },
+          { name: 'tls.enabled', group: 'admin', group_title: 'Admin API' },
+          { name: 'kafka.timeout', group: 'kafka', group_title: 'Kafka API' }
+        ],
+        commands: [{
+          name: 'widget',
+          description: 'Widget things.',
+          usage: 'rpk widget [flags]',
+          commands: []
+        }]
+      },
+      overrides: { commands: {} },
+      outputDir
+    })
+
+    const written = fs.readFileSync(path.join(root, 'modules', 'reference', 'partials', 'rpk-env-vars.adoc'), 'utf8')
+    expect(written).toContain('2+s|Admin API')
+    expect(written).toContain('2+s|Kafka API')
+
+    fs.rmSync(root, { recursive: true, force: true })
+  })
 })
