@@ -54,9 +54,9 @@ inputs:
     description: >
       Base IAM role name (RP_AWS_CRED_BASE_ROLE_NAME); the calling
       repository's own name is appended, matching the engineering-repo
-      convention. Nine of the twelve docs callers were granted the
-      credential in devprod-infra #779; adp-cloud-docs, oxla-docs, and
-      docs-template need a follow-up grant.
+      convention. Seven of the nine docs callers were granted the
+      credential in devprod-infra #779; adp-cloud-docs and docs-template
+      need a follow-up grant.
     required: true
   aws_cred_account_id:
     description: AWS account id owning the role (RP_AWS_CRED_ACCOUNT_ID). Pass from secrets.
@@ -152,6 +152,37 @@ runs:
             rm -rf "$p"
           fi
         done
+
+    # Repo-local CLAUDE.md files carry rules that apply only to that repo and
+    # don't belong in the plugin (cloud-docs' single-sourcing rules, adp-docs'
+    # vendor-claim rules, ...). Claude Code loads CLAUDE.md from the working
+    # directory (and nested ones as it reads into subdirectories), so the
+    # review honours them — but from the PR's BASE branch, not its head: the
+    # head is untrusted, and a PR must not be able to rewrite the rules it is
+    # reviewed against. Every CLAUDE.md / CLAUDE.local.md in the head is
+    # dropped first, then the base branch's CLAUDE.md files are restored.
+    # Consequence: a PR that edits CLAUDE.md is reviewed under the OLD rules;
+    # the new ones apply to the next PR after it merges.
+    - name: Load this repo's CLAUDE.md files from the base branch
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        R: ${{ inputs.repo }}
+        PR: ${{ inputs.pr_number }}
+      run: |
+        set -euo pipefail
+        BASE_REF=$(gh api "repos/$R/pulls/$PR" --jq .base.ref)
+        find . -type f \( -name CLAUDE.md -o -name CLAUDE.local.md \) -not -path './.git/*' -print0 \
+          | xargs -0 -r rm -f
+        N=0; LOADED=""
+        while IFS= read -r f; do
+          [[ -z "$f" ]] && continue
+          mkdir -p "$(dirname "$f")"
+          gh api "repos/$R/contents/$f?ref=$BASE_REF" -H 'Accept: application/vnd.github.raw+json' > "$f"
+          N=$((N + 1)); LOADED="$LOADED $f"
+        done < <(gh api "repos/$R/git/trees/$BASE_REF?recursive=1" \
+          --jq '.tree[] | select(.type=="blob") | select(.path | test("(^|/)CLAUDE\\.md$")) | .path')
+        echo "Loaded $N CLAUDE.md file(s) from $BASE_REF:${LOADED:- none}"
 
     # The plugin, checked out at a pinned SHA rather than installed via
     # `claude plugin marketplace add`: the marketplace path clones a private

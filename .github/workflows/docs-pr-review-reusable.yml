@@ -1,5 +1,24 @@
 # Reusable docs PR review pipeline. Called by the thin docs-review.yml
-# caller in each of the twelve docs repos (template: .github/docs-review-caller-template.yml).
+# caller in each of the nine docs repos (template: .github/docs-review-caller-template.yml).
+#
+# Two caller modes (the `sme_gate` input):
+#   - SME-gated content repos (docs, cloud-docs, api-docs, adp-docs,
+#     adp-cloud-docs, rp-connect-docs): the review waits for one SME approval.
+#   - Docs-only repos (docs-site, docs-team-standards, docs-template): no page
+#     is owned by an engineer, so there is no SME step — the review runs as
+#     soon as the PR is ready for review; the docs-team approval is the only
+#     review these repos require.
+#
+# What never gets reviewed here (gate exits without touching the PR):
+#   - draft PRs — marking a PR "ready for review" is the review-now button
+#   - bot-authored PRs (GitHub Apps, plus the `bot_logins` service accounts,
+#     e.g. vbotbuildovich) unless the caller sets bot_pr_policy: review, in
+#     which case they are reviewed WITHOUT an SME gate (api-docs auto PRs)
+#   - PRs matching a caller's skip_branch_patterns / skip_title_patterns
+#     (adp-docs' daily sync PRs, which have their own critic)
+#   - fork PRs (excluded by the caller's `if`)
+# The `no-sme-needed` label bypasses the SME gate on any PR in an SME-gated
+# repo, exactly as it already silences the daily nag.
 #
 # HOSTING: this is the CANONICAL copy (public host, next to the
 # doc-strings review that runs the same host/skills split in production).
@@ -20,12 +39,18 @@
 #
 # Design doc + decision record: https://claude.ai/code/artifact/36e1362f-11d3-4532-8fe1-a5191c8def9f
 #
-# Ordering contract: the automated docs review never runs before one SME
-# approval (SME = (requested ∪ reviewed) − docs team − author, recomputed
-# from the API on every run — never cached), runs exactly once per
-# (PR, head SHA), and never merges anything. The only physical merge gate
-# is the docs-team approval (CODEOWNERS); the docs-review commit status is
-# informational — nothing here blocks a merge.
+# Ordering contract: in an SME-gated repo the automated docs review never
+# runs before one SME approval (SME = (requested ∪ reviewed) − docs team −
+# author, recomputed from the API on every run — never cached). Everywhere
+# it runs exactly once per (PR, head SHA), and it never merges anything.
+# The only physical merge gate is the docs-team approval (CODEOWNERS).
+#
+# `docs-review` is a COMMIT STATUS, not a label: the workflow writes it on
+# the PR's head SHA and it shows up in the PR's checks list. pending =
+# holding (waiting for SME / review running), success/failure = the review's
+# verdict. It is informational — nothing here blocks a merge. The labels the
+# workflow applies (`needs-human-review`, `screenshot-standards`) and the one
+# humans apply (`no-sme-needed`) are listed in .github/DOCS_REVIEW_ROLLOUT.md.
 #
 # Exactly-once = two layers: the caller's `concurrency` group serializes
 # runs per PR (primary; every caller must keep it), and the gate CLAIMS the
@@ -34,9 +59,11 @@
 # success/failure status on the SHA ends the matter for good.
 #
 # Trust boundary: the PR head is untrusted. The claude-skill action strips
-# project-level Claude config (.claude/, .mcp.json) from it, runs Claude
-# with a read-only `gh` shim on PATH and no tree-mutating git verbs, never
-# persists git credentials in any checkout, and refuses an unpinned
+# project-level Claude config (.claude/, .mcp.json) from it, replaces every
+# CLAUDE.md in the head with the BASE branch's copies (repo-local rules are
+# honoured, but a PR cannot rewrite the rules it is reviewed against), runs
+# Claude with a read-only `gh` shim on PATH and no tree-mutating git verbs,
+# never persists git credentials in any checkout, and refuses an unpinned
 # plugin_ref. Repo-private skills are fetched with a per-run App token
 # scoped to docs-team-standards with Contents: read.
 
@@ -50,9 +77,45 @@ on:
         type: number
       # ── ADP AI Gateway auth (docs-team-agents service account) ─────────
       # No Anthropic API key anywhere: model auth is the gateway, which
-      # gives per-account spend attribution on the ADP cost page. Nine of
-      # the twelve callers were granted the credential in devprod-infra
-      # #779; adp-cloud-docs, oxla-docs, and docs-template need a follow-up.
+      # gives per-account spend attribution on the ADP cost page. Seven of
+      # the nine callers were granted the credential in devprod-infra #779;
+      # adp-cloud-docs and docs-template need a follow-up.
+      sme_gate:
+        description: >-
+          true (default): hold the review until one SME approves. false for
+          docs-only repos (docs-site, docs-team-standards, docs-template):
+          no engineer owns pages there, so the review runs as soon as the PR
+          is ready for review and only the docs-team approval is required.
+        type: boolean
+        default: true
+      bot_pr_policy:
+        description: >-
+          What to do with bot-authored PRs (GitHub App authors, plus the
+          logins in bot_logins). "skip" (default): no review at all — the
+          writers run the deterministic checks by hand. "review": run the
+          automated review WITHOUT an SME gate (api-docs auto PRs).
+        type: string
+        default: 'skip'
+      bot_logins:
+        description: >-
+          Comma-separated service-account logins that count as bots even
+          though GitHub types them as User (vbotbuildovich opens the
+          auto-docs / dependency-bump PRs across the docs repos).
+        type: string
+        default: 'vbotbuildovich'
+      skip_branch_patterns:
+        description: >-
+          Newline-separated shell globs; a PR whose head branch matches any
+          of them is never reviewed by this pipeline (e.g. claude/docs-updates-*
+          in adp-docs, whose daily sync PRs already have a dedicated critic).
+        type: string
+        default: ''
+      skip_title_patterns:
+        description: >-
+          Newline-separated extended regexes; a PR whose title matches any of
+          them is never reviewed by this pipeline.
+        type: string
+        default: ''
       aws_region:
         description: RP_AWS_CRED_REGION org variable
         type: string
@@ -112,8 +175,10 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────
-  # §2 — SME gating + exactly-once. Event-agnostic evaluation; snapshot
-  # maintenance on pull_request events that change the reviewer set.
+  # §2 — skip rules, SME gating, exactly-once. Event-agnostic: every event
+  # (opened, ready_for_review, synchronize, review_requested, labeled,
+  # pull_request_review, repository_dispatch) re-evaluates the same rules
+  # from the live API — nothing is cached between runs.
   # ──────────────────────────────────────────────────────────────────────
   gate:
     runs-on: ubuntu-latest
@@ -127,6 +192,9 @@ jobs:
       head_sha: ${{ steps.eval.outputs.head_sha }}
       sme_approver: ${{ steps.eval.outputs.sme_approver }}
       sme_set: ${{ steps.eval.outputs.sme_set }}
+      # How the SME requirement was satisfied — the review comment says so:
+      # approved | repo-not-gated | no-sme-needed-label | bot-author
+      sme_mode: ${{ steps.eval.outputs.sme_mode }}
     steps:
       - id: eval
         env:
@@ -137,12 +205,68 @@ jobs:
           EVENT_ACTION: ${{ github.event.action }}
           DOC_TEAM: ${{ vars.DOC_TEAM_LOGINS }}
           PLUGIN_REF: ${{ inputs.plugin_ref }}
+          SME_GATE: ${{ inputs.sme_gate }}
+          BOT_PR_POLICY: ${{ inputs.bot_pr_policy }}
+          BOT_LOGINS: ${{ inputs.bot_logins }}
+          SKIP_BRANCHES: ${{ inputs.skip_branch_patterns }}
+          SKIP_TITLES: ${{ inputs.skip_title_patterns }}
         run: |
           set -euo pipefail
 
-          HEAD_SHA=$(gh pr view "$PR" --repo "$R" --json headRefOid -q .headRefOid)
-          AUTHOR=$(gh pr view "$PR" --repo "$R" --json author -q .author.login)
-          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          PRJ=$(gh api "repos/$R/pulls/$PR")
+          HEAD_SHA=$(jq -r .head.sha <<< "$PRJ")
+          AUTHOR=$(jq -r .user.login <<< "$PRJ")
+          AUTHOR_TYPE=$(jq -r .user.type <<< "$PRJ")     # "User" | "Bot" (GitHub Apps)
+          IS_DRAFT=$(jq -r .draft <<< "$PRJ")
+          TITLE=$(jq -r .title <<< "$PRJ")
+          BRANCH=$(jq -r .head.ref <<< "$PRJ")
+          LABELS=$(jq -r '[.labels[].name] | join(",")' <<< "$PRJ")
+          {
+            echo "head_sha=$HEAD_SHA"
+            echo "sme_set="
+            echo "sme_approver="
+            echo "sme_mode="
+          } >> "$GITHUB_OUTPUT"
+
+          # skip: leave the PR untouched — no status, no comment, no label.
+          skip() { echo "$1"; echo "run_review=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+          # ── Drafts are never reviewed ──────────────────────────────────
+          # Converting to "ready for review" fires ready_for_review, which
+          # every caller listens for: that is the author's review-now button
+          # and the biggest spend lever (no review per push while drafting).
+          if [[ "$IS_DRAFT" == "true" ]]; then
+            skip "PR #$PR is a draft — not reviewed. Mark it ready for review to request the automated review."
+          fi
+
+          # ── Bot-authored PRs ───────────────────────────────────────────
+          IS_BOT=false
+          if [[ "$AUTHOR_TYPE" == "Bot" ]] || [[ "$AUTHOR" == *"[bot]" ]]; then
+            IS_BOT=true
+          else
+            IFS=',' read -ra BOTS <<< "${BOT_LOGINS:-}"
+            for b in "${BOTS[@]}"; do
+              [[ "${b// /}" == "$AUTHOR" ]] && IS_BOT=true
+            done
+          fi
+          if [[ "$IS_BOT" == "true" && "$BOT_PR_POLICY" != "review" ]]; then
+            skip "PR #$PR is bot-authored (@$AUTHOR) and bot_pr_policy=skip — not reviewed; run the deterministic checks by hand."
+          fi
+
+          # ── Caller exclusions (branch glob / title regex) ──────────────
+          while IFS= read -r pat; do
+            pat="${pat#"${pat%%[![:space:]]*}"}"; [[ -z "$pat" ]] && continue
+            # shellcheck disable=SC2053  # unquoted on purpose: glob match
+            if [[ "$BRANCH" == $pat ]]; then
+              skip "PR #$PR head branch '$BRANCH' matches skip_branch_patterns '$pat' — not reviewed by this pipeline."
+            fi
+          done <<< "${SKIP_BRANCHES:-}"
+          while IFS= read -r pat; do
+            pat="${pat#"${pat%%[![:space:]]*}"}"; [[ -z "$pat" ]] && continue
+            if [[ "$TITLE" =~ $pat ]]; then
+              skip "PR #$PR title matches skip_title_patterns '$pat' — not reviewed by this pipeline."
+            fi
+          done <<< "${SKIP_TITLES:-}"
 
           # Helpers ---------------------------------------------------------
           derive_smes() {
@@ -173,43 +297,22 @@ jobs:
               -f target_url="${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}" > /dev/null
           }
 
-          # Config guard: a missing DOC_TEAM_LOGINS is environment
-          # misconfiguration, not a review verdict — hold the gate with an
+          # Config guard for the skills pin: an empty plugin_ref would make
+          # every downstream checkout fall back to the default branch — an
+          # unpinned review under a "pinned" rollout. Hold with an
           # informative pending status instead of a hard fail (the same
           # posture as every other infra failure in this pipeline: never a
-          # red X for a broken environment). See DOCS_REVIEW_ROLLOUT.md in
-          # docs-team-standards, org-setup, for the variable.
-          if [[ -z "${DOC_TEAM:-}" ]]; then
-            echo "::warning::DOC_TEAM_LOGINS org variable is not set — holding the SME gate (pending), skipping review"
-            set_pending "Waiting for SME approval (DOC_TEAM_LOGINS is not configured)"
-            echo "sme_set=" >> "$GITHUB_OUTPUT"
-            echo "run_review=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Same posture for the skills pin: an empty plugin_ref would make
-          # every downstream checkout fall back to the default branch — an
-          # unpinned review under a "pinned" rollout. Hold instead of run.
+          # red X for a broken environment).
           if [[ ! "${PLUGIN_REF:-}" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::warning::plugin_ref is not a full commit SHA ('${PLUGIN_REF:-}') — holding the gate (pending), skipping review"
             set_pending "Docs review pipeline misconfigured (plugin_ref is not pinned)"
-            echo "sme_set=" >> "$GITHUB_OUTPUT"
-            echo "run_review=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # ── Reviewer-set events (opened / review_requested /
-          #    review_request_removed): nothing to persist — the set is
-          #    recomputed from the API on every run — but the pending status
-          #    keeps the PR's docs-review context honest while the gate waits.
-          if [[ "$EVENT_NAME" == "pull_request" && "$EVENT_ACTION" != "synchronize" ]]; then
-            SMES=$(derive_smes)
-            set_pending "Waiting for SME approval (${SMES:-no SME tagged — daily nag active})"
-            echo "sme_set=$SMES" >> "$GITHUB_OUTPUT"
             echo "run_review=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # ── Exactly-once per (PR, head SHA) ───────────────────────────
+          # Checked before anything writes a status, so a review_requested or
+          # labeled event after a completed review leaves the verdict alone.
           DONE=$(gh api "repos/$R/commits/$HEAD_SHA/status" \
             --jq '[.statuses[] | select(.context=="'"$REVIEW_STATUS_CONTEXT"'")
                    | select(.state=="success" or .state=="failure")] | length')
@@ -219,54 +322,79 @@ jobs:
             exit 0
           fi
 
-          # ── Evaluate the SME gate (event-agnostic, stateless) ─────────
-          SMES=$(derive_smes)
-          echo "sme_set=$SMES" >> "$GITHUB_OUTPUT"
-
-          if [[ -z "$SMES" ]]; then
-            set_pending "Waiting for SME approval (no SME tagged — daily nag active)"
-            echo "run_review=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          # ── Does this PR need an SME approval first? ──────────────────
+          SME_MODE=approved
+          if [[ "$SME_GATE" != "true" ]]; then
+            SME_MODE=repo-not-gated          # docs-only repo: no engineer-owned pages
+          elif [[ ",$LABELS," == *",no-sme-needed,"* ]]; then
+            SME_MODE=no-sme-needed-label     # same escape hatch the daily nag honours
+          elif [[ "$IS_BOT" == "true" ]]; then
+            SME_MODE=bot-author              # bot_pr_policy=review: auto PRs get no SME review
           fi
 
-          # Latest non-COMMENTED review state per SME, by submitted_at.
-          gh api "repos/$R/pulls/$PR/reviews" --paginate \
-            --jq '[.[] | select(.state != "COMMENTED")]
-                  | group_by(.user.login)
-                  | map(max_by(.submitted_at))
-                  | map({login: .user.login, state})' > states.json
+          if [[ "$SME_MODE" == "approved" ]]; then
+            # A missing DOC_TEAM_LOGINS is environment misconfiguration, not
+            # a review verdict — hold with an informative pending status.
+            # See .github/DOCS_REVIEW_ROLLOUT.md org-setup for the variable.
+            if [[ -z "${DOC_TEAM:-}" ]]; then
+              echo "::warning::DOC_TEAM_LOGINS org variable is not set — holding the SME gate (pending), skipping review"
+              set_pending "Waiting for SME approval (DOC_TEAM_LOGINS is not configured)"
+              echo "run_review=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
 
-          # Decision 2 (corrected): ONE SME approval opens the gate, but any
-          # other SME's outstanding CHANGES_REQUESTED vetoes it until that
-          # SME approves or their review is dismissed (either fires a
-          # pull_request_review event, re-evaluating here). The gate does
-          # NOT assume dismiss-stale-approvals: enabling it changes merge
-          # behaviour for every human contributor across twelve repos and is
-          # its own decision, outside this project. With it ON, APPROVED
-          # always refers to current code; with it OFF, an earlier SME
-          # approval persists across pushes — the review still runs at most
-          # once per head SHA either way, and the status stays informational.
-          PASS=$(jq -r --arg smes "$SMES" '
-            ($smes | split(",")) as $set
-            | [ .[] | select(.login as $l | $set | index($l)) ] as $sme
-            | if ($sme | map(select(.state=="CHANGES_REQUESTED")) | length) > 0
-              then "false"
-              elif ($sme | map(select(.state=="APPROVED")) | length) > 0
-              then "true"
-              else "false"
-              end' states.json)
+            # ── Evaluate the SME gate (event-agnostic, stateless) ───────
+            SMES=$(derive_smes)
+            echo "sme_set=$SMES" >> "$GITHUB_OUTPUT"
 
-          APPROVER=$(jq -r --arg smes "$SMES" '
-            ($smes | split(",")) as $set
-            | [ .[] | select(.login as $l | $set | index($l)) | select(.state=="APPROVED") | .login ]
-            | join(", ")' states.json)
-          echo "sme_approver=$APPROVER" >> "$GITHUB_OUTPUT"
+            if [[ -z "$SMES" ]]; then
+              set_pending "Waiting for SME approval (no SME tagged — daily nag active; or add the no-sme-needed label)"
+              echo "run_review=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
 
-          if [[ "$PASS" != "true" ]]; then
-            set_pending "Waiting for SME approval (${SMES})"
-            echo "run_review=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            # Latest non-COMMENTED review state per SME, by submitted_at.
+            gh api "repos/$R/pulls/$PR/reviews" --paginate \
+              --jq '[.[] | select(.state != "COMMENTED")]
+                    | group_by(.user.login)
+                    | map(max_by(.submitted_at))
+                    | map({login: .user.login, state})' > states.json
+
+            # Decision 2 (corrected): ONE SME approval opens the gate, but any
+            # other SME's outstanding CHANGES_REQUESTED vetoes it until that
+            # SME approves or their review is dismissed (either fires a
+            # pull_request_review event, re-evaluating here). The gate does
+            # NOT assume dismiss-stale-approvals: enabling it changes merge
+            # behaviour for every human contributor across the docs repos and
+            # is its own decision, outside this project. With it ON, APPROVED
+            # always refers to current code; with it OFF, an earlier SME
+            # approval persists across pushes — the review still runs at most
+            # once per head SHA either way, and the status stays informational.
+            PASS=$(jq -r --arg smes "$SMES" '
+              ($smes | split(",")) as $set
+              | [ .[] | select(.login as $l | $set | index($l)) ] as $sme
+              | if ($sme | map(select(.state=="CHANGES_REQUESTED")) | length) > 0
+                then "false"
+                elif ($sme | map(select(.state=="APPROVED")) | length) > 0
+                then "true"
+                else "false"
+                end' states.json)
+
+            APPROVER=$(jq -r --arg smes "$SMES" '
+              ($smes | split(",")) as $set
+              | [ .[] | select(.login as $l | $set | index($l)) | select(.state=="APPROVED") | .login ]
+              | join(", ")' states.json)
+            echo "sme_approver=$APPROVER" >> "$GITHUB_OUTPUT"
+
+            if [[ "$PASS" != "true" ]]; then
+              set_pending "Waiting for SME approval (${SMES})"
+              echo "run_review=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            echo "SME gate not required for PR #$PR ($SME_MODE) — proceeding to review."
           fi
+          echo "sme_mode=$SME_MODE" >> "$GITHUB_OUTPUT"
 
           # ── Claim this head SHA before spending anything ──────────────
           # The exactly-once check above only sees success/failure, which
@@ -346,7 +474,11 @@ jobs:
             echo "only_json=$([[ $TOTAL -gt 0 && $JSON -eq $TOTAL ]] && echo true || echo false)"
             echo "overrides_json=$([[ $OVERRIDES -gt 0 ]] && echo true || echo false)"
             # Code-heavy heuristic (decision 3): ≥3 code files AND more code
-            # files than .adoc files. Tune with data.
+            # files than .adoc files. The callers are all content repos, so
+            # what this catches is EXAMPLE code shipped alongside a page (a
+            # lab, a quickstart's docker-compose + client snippets), not the
+            # main content — the /code-review pass is additive to the prose
+            # review, never a substitute for it. Tune with data.
             echo "code_heavy=$([[ $CODE -ge 3 && $CODE -gt $ADOC ]] && echo true || echo false)"
             echo "has_images=$([[ $IMG -gt 0 ]] && echo true || echo false)"
           } >> "$GITHUB_OUTPUT"
@@ -388,8 +520,12 @@ jobs:
             Do NOT post anything to GitHub; there is no approval step here,
             so the pr-review rule "never post without approval" means: never
             post. Where the pr-review flow would spawn the content-reviewer
-            agent for prose feedback, do so. If Jira is unreachable, note
-            that in the findings instead of failing. Write human-readable
+            agent for prose feedback, do so. This repository's own CLAUDE.md
+            files (in the working tree, taken from the base branch) carry
+            rules that apply only to this repo: apply them alongside the
+            plugin's skills, and where a repo-local rule is more specific
+            than a plugin rule, the repo-local rule wins. If Jira is
+            unreachable, note that in the findings instead of failing. Write human-readable
             findings to review-output/findings.md and a machine verdict to
             review-output/verdict.json with the exact schema
             {"verdict":"pass"|"fail","blocking":["..."],"suggestions":["..."]}
@@ -475,7 +611,9 @@ jobs:
           prompt: >
             /docs-team-standards:overrides-review — review the overrides
             JSON changes in ${{ github.server_url }}/${{ github.repository }}/pull/${{ inputs.pr_number }}.
-            HEADLESS MODE: do NOT post anything to GitHub. Write findings to
+            HEADLESS MODE: do NOT post anything to GitHub. Apply this
+            repository's own CLAUDE.md rules (in the working tree, from the
+            base branch) alongside the skill. Write findings to
             review-output/findings.md and review-output/verdict.json with schema
             {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}.
 
@@ -488,6 +626,9 @@ jobs:
 
   # ──────────────────────────────────────────────────────────────────────
   # §4 — /code-review for code-example-heavy PRs (additive to adoc_review).
+  # In content repos "code-heavy" means example code shipped with a page,
+  # so this pass checks that the examples are correct — the prose review
+  # above still owns the page itself.
   # ──────────────────────────────────────────────────────────────────────
   code_review:
     needs: [gate, classify]
@@ -514,7 +655,11 @@ jobs:
           output_dir: review-output
           prompt: >
             /code-review ${{ inputs.pr_number }} medium
-            HEADLESS MODE: do NOT post comments or apply fixes. Write
+            HEADLESS MODE: do NOT post comments or apply fixes. The changed
+            code files are documentation EXAMPLES that ship with a page;
+            judge them as examples a reader will copy (correct, runnable,
+            matching the prose), and apply this repository's own CLAUDE.md
+            rules (in the working tree, from the base branch). Write
             findings to review-output/findings.md and review-output/verdict.json
             with schema {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
             where "fail" means a confirmed correctness bug in a code example.
@@ -567,7 +712,7 @@ jobs:
           LINT_DIR="$RUNNER_TEMP/screenshot-lint"; mkdir -p "$LINT_DIR"
           OUT="$LINT_DIR/screenshot-lint.json"
           if [[ ! -d modules ]]; then
-            # Not an Antora content repo (docs-site, docs-ui, ...): nothing
+            # Not an Antora content repo (docs-site, docs-team-standards): nothing
             # to lint, and the pipeline's posture is that "nothing to check"
             # is a pass, not a red X.
             jq -n '{verdict:"pass", blocking:[], suggestions:["No modules/ directory in this repo — screenshot lint skipped"]}' > "$OUT"
@@ -778,6 +923,7 @@ jobs:
           R: ${{ github.repository }}
           HEAD_SHA: ${{ needs.gate.outputs.head_sha }}
           SME_APPROVER: ${{ needs.gate.outputs.sme_approver }}
+          SME_MODE: ${{ needs.gate.outputs.sme_mode }}
           TICKET: ${{ needs.classify.outputs.ticket }}
           RESULT_ADOC: ${{ needs.adoc_review.result }}
           RESULT_JSON: ${{ needs.json_validation.result }}
