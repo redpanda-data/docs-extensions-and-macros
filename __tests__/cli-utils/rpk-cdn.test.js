@@ -65,6 +65,15 @@ describe('rpk-cdn', () => {
     test.each([['freebsd', 'x64'], ['linux', 'ia32']])('%s/%s is unsupported', (platform, arch) => {
       expect(rpkAssetName({ platform, arch })).toBeNull()
     })
+
+    test.each([
+      ['windows', 'amd64', 'rpk-windows-amd64.zip'],
+      ['windows', 'x86_64', 'rpk-windows-amd64.zip'],
+      ['linux', 'x86_64', 'rpk-linux-amd64.zip'],
+      ['darwin', 'aarch64', 'rpk-darwin-arm64.zip']
+    ])('accepts the CDN asset spelling %s/%s -> %s', (platform, arch, expected) => {
+      expect(rpkAssetName({ platform, arch })).toBe(expected)
+    })
   })
 
   describe('normalizeRpkTag', () => {
@@ -147,7 +156,7 @@ describe('rpk-cdn', () => {
       expect(result).toEqual({ ok: true, httpCode: 200, status: 0, stderr: '' })
       const [cmd, args, opts] = spawnSync.mock.calls[0]
       expect(cmd).toBe('curl')
-      expect(args).toEqual(expect.arrayContaining(['-w', '%{http_code}', '-o', dest, '--max-time', '42', '--retry', '3']))
+      expect(args).toEqual(expect.arrayContaining(['-w', '%{http_code}', '-o', dest, '--max-time', '42', '--retry', '3', '--retry-max-time', '42']))
       expect(args[args.length - 1]).toBe('https://rpk.redpanda.com/v26.2.2/x')
       expect(args).not.toContain('--retry-all-errors')
       expect(args).not.toContain('--config')
@@ -288,11 +297,20 @@ describe('rpk-cdn', () => {
       expect(spawnSync).not.toHaveBeenCalled()
     })
 
-    test('without a token and a populated latest/, learns the version from the binary', async () => {
+    test('without a token and a populated latest/, learns the version from the binary and confirms it against that tag\'s checksums', async () => {
+      const crypto = require('crypto')
+      const zipBytes = 'zip bytes'
+      const zipSha = crypto.createHash('sha256').update(zipBytes).digest('hex')
       const probe = jest.fn(() => 200)
       spawnSync.mockImplementation((cmd, args) => {
         if (cmd === 'curl') {
-          fs.writeFileSync(args[args.indexOf('-o') + 1], 'zip bytes')
+          const url = args[args.length - 1]
+          const dest = args[args.indexOf('-o') + 1]
+          if (url.endsWith('_checksums.txt')) {
+            fs.writeFileSync(dest, `${zipSha}  rpk-linux-amd64.zip\n`)
+          } else {
+            fs.writeFileSync(dest, zipBytes)
+          }
           return { status: 0, stdout: '200', stderr: '' }
         }
         if (cmd === 'unzip') {
@@ -305,6 +323,69 @@ describe('rpk-cdn', () => {
 
       await expect(resolveLatestRpkTag({ env: {}, probe, platform: 'linux', arch: 'x64', log: quiet })).resolves.toBe('v26.2.5')
       expect(spawnSync.mock.calls[0][1][spawnSync.mock.calls[0][1].length - 1]).toBe('https://rpk.redpanda.com/latest/rpk-linux-amd64.zip')
+      // The reported tag's own checksums are fetched and checked against the
+      // already-downloaded latest/ bytes before the tag is trusted.
+      expect(spawnSync.mock.calls.some(([cmd, args]) =>
+        cmd === 'curl' && args[args.length - 1] === 'https://rpk.redpanda.com/v26.2.5/rpk_26.2.5_checksums.txt'
+      )).toBe(true)
+    })
+
+    test('when the reported version does not match its own published checksum, latest/ is not trusted', async () => {
+      const probe = jest.fn(() => 200)
+      spawnSync.mockImplementation((cmd, args) => {
+        if (cmd === 'curl') {
+          const url = args[args.length - 1]
+          const dest = args[args.indexOf('-o') + 1]
+          if (url.endsWith('_checksums.txt')) {
+            // A checksum for different bytes than what latest/ actually served.
+            fs.writeFileSync(dest, '0000000000000000000000000000000000000000000000000000000000000000  rpk-linux-amd64.zip\n')
+          } else {
+            fs.writeFileSync(dest, 'zip bytes')
+          }
+          return { status: 0, stdout: '200', stderr: '' }
+        }
+        if (cmd === 'unzip') {
+          fs.writeFileSync(path.join(args[args.indexOf('-d') + 1], 'rpk'), '#!/bin/sh\n')
+          return { status: 0, stdout: '', stderr: '' }
+        }
+        return { status: 0, stdout: 'Version:     v26.2.5\n', stderr: '' }
+      })
+
+      await expect(resolveLatestRpkTag({ env: {}, probe, platform: 'linux', arch: 'x64', log: quiet }))
+        .rejects.toThrow(/Set RPK_VERSION=vX\.Y\.Z/)
+    })
+
+    test('with a token, when listing tags throws, falls back to latest/ instead of failing', async () => {
+      process.env.GH_TOKEN = 'test-token-throws'
+      const octokit = {
+        rest: { git: { listMatchingRefs: 'listMatchingRefs' } },
+        paginate: jest.fn(async () => { throw new Error('404 Not Found') })
+      }
+      const crypto = require('crypto')
+      const zipBytes = 'zip bytes'
+      const zipSha = crypto.createHash('sha256').update(zipBytes).digest('hex')
+      const probe = jest.fn(() => 200)
+      spawnSync.mockImplementation((cmd, args) => {
+        if (cmd === 'curl') {
+          const url = args[args.length - 1]
+          const dest = args[args.indexOf('-o') + 1]
+          if (url.endsWith('_checksums.txt')) {
+            fs.writeFileSync(dest, `${zipSha}  rpk-linux-amd64.zip\n`)
+          } else {
+            fs.writeFileSync(dest, zipBytes)
+          }
+          return { status: 0, stdout: '200', stderr: '' }
+        }
+        if (cmd === 'unzip') {
+          fs.writeFileSync(path.join(args[args.indexOf('-d') + 1], 'rpk'), '#!/bin/sh\n')
+          return { status: 0, stdout: '', stderr: '' }
+        }
+        return { status: 0, stdout: 'Version:     v26.2.5\n', stderr: '' }
+      })
+
+      await expect(resolveLatestRpkTag({ env: {}, octokit, probe, platform: 'linux', arch: 'x64', log: quiet })).resolves.toBe('v26.2.5')
+      expect(octokit.paginate).toHaveBeenCalled()
+      expect(quiet.warn).toHaveBeenCalledWith(expect.stringMatching(/Could not list redpanda-data\/streaming-enterprise tags/))
     })
   })
 

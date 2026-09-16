@@ -35,6 +35,11 @@ const RPK_RELEASE_TAG_RE = /^v\d+\.\d+\.\d+(-rc\d+)?$/
 const RPK_GA_TAG_RE = /^v\d+\.\d+\.\d+$/
 const RPK_OS_BY_PLATFORM = { darwin: 'darwin', linux: 'linux', win32: 'windows' }
 const RPK_ARCH_BY_NODE_ARCH = { arm64: 'arm64', x64: 'amd64' }
+// --platform/--arch are Node's own names (process.platform/process.arch), but
+// the CLI asset spelling ("windows", "amd64") leaks into error messages, so
+// callers reasonably try that spelling too. Accept both.
+const PLATFORM_ALIASES = { windows: 'win32' }
+const ARCH_ALIASES = { amd64: 'x64', x86_64: 'x64', aarch64: 'arm64' }
 // S3 without ListBucket answers 403 for a missing key; a 404 would mean the
 // same thing if the distribution ever changes.
 const NOT_PUBLISHED_HTTP_CODES = new Set([403, 404])
@@ -63,8 +68,8 @@ function normalizeRpkTag(version) {
  * @returns {string|null} e.g. "rpk-linux-amd64.zip", or null when unsupported
  */
 function rpkAssetName({ platform = process.platform, arch = process.arch } = {}) {
-  const osName = RPK_OS_BY_PLATFORM[platform]
-  const archName = RPK_ARCH_BY_NODE_ARCH[arch]
+  const osName = RPK_OS_BY_PLATFORM[PLATFORM_ALIASES[platform] || platform]
+  const archName = RPK_ARCH_BY_NODE_ARCH[ARCH_ALIASES[arch] || arch]
   if (!osName || !archName) return null
   return `rpk-${osName}-${archName}.zip`
 }
@@ -132,7 +137,7 @@ function parseHttpCode(stdout) {
  */
 function curlToFile(url, dest, { maxTime = 300, retries = 3 } = {}) {
   const result = spawnSync('curl', [
-    '-sSfL', '--retry', String(retries),
+    '-sSfL', '--retry', String(retries), '--retry-max-time', String(maxTime),
     '--connect-timeout', '30', '--max-time', String(maxTime),
     '-o', dest, '-w', '%{http_code}', url
   ], { encoding: 'utf8', timeout: (maxTime + 60) * 1000 })
@@ -153,7 +158,7 @@ function curlToFile(url, dest, { maxTime = 300, retries = 3 } = {}) {
  */
 function curlHead(url) {
   const result = spawnSync('curl', [
-    '-sfIL', '--retry', '3',
+    '-sfIL', '--retry', '3', '--retry-max-time', '30',
     '--connect-timeout', '15', '--max-time', '30',
     '-o', os.devNull, '-w', '%{http_code}', url
   ], { encoding: 'utf8', timeout: 90000 })
@@ -307,10 +312,13 @@ async function newestPublishedGaTagFromGitHub(octokit, probe, { platform, arch, 
 /**
  * Identify the version behind latest/ by downloading it and asking the
  * binary. The CDN has no listing and no version marker, so this is the only
- * tokenless way to learn what latest/ holds. The caller then installs that
- * tag through downloadRpkBinary so the installed bytes are checksum-verified;
- * this probe only guards integrity (same origin as the checksums), not
- * provenance.
+ * tokenless way to learn what latest/ holds. Once the reported version names
+ * a tag, the already-downloaded zip is hashed against that tag's own
+ * checksums file: latest/ is supposed to be a byte copy of v<tag>/, so a
+ * mismatch means the reported version does not describe these bytes, and the
+ * tag is not trusted. The caller still re-downloads and re-verifies through
+ * downloadRpkBinary before installing anything, so this only gates whether
+ * the resolved tag is trustworthy, not the final install.
  */
 function versionBehindLatest(probe, { platform, arch, log }) {
   const assetName = rpkAssetName({ platform, arch })
@@ -343,7 +351,23 @@ function versionBehindLatest(probe, { platform, arch, log }) {
       log.warn(`Could not read a version from the ${RPK_CDN_LATEST_PREFIX}/ rpk binary`)
       return null
     }
-    return match[0]
+    const tag = match[0]
+
+    const checksumsName = rpkChecksumsName(tag)
+    const checksumsPath = path.join(tmpDir, checksumsName)
+    const checksumsResult = curlToFile(rpkCdnUrl(tag, checksumsName), checksumsPath, { maxTime: 60 })
+    if (!checksumsResult.ok) {
+      log.warn(`Could not verify ${RPK_CDN_LATEST_PREFIX}/ against ${tag}'s checksums (HTTP ${checksumsResult.httpCode}); not trusting it`)
+      return null
+    }
+    const expected = parseChecksums(fs.readFileSync(checksumsPath, 'utf8'), assetName)
+    const actual = sha256File(zipPath)
+    if (!expected || expected !== actual) {
+      log.warn(`${RPK_CDN_LATEST_PREFIX}/ does not match ${tag}'s published checksum for ${assetName}; not trusting it`)
+      return null
+    }
+
+    return tag
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true })
   }
@@ -419,7 +443,9 @@ function usage() {
     '  node rpk-cdn.js resolve-latest [--platform <p>] [--arch <a>]',
     '      Prints the tag "install" would use.',
     '  node rpk-cdn.js url --tag <tag> [--platform <p>] [--arch <a>]',
-    '      Prints the zip and checksums URLs for a tag.'
+    '      Prints the zip and checksums URLs for a tag.',
+    '',
+    '--platform accepts win32/darwin/linux (or windows). --arch accepts x64/arm64 (or amd64, x86_64, aarch64).'
   ].join('\n')
 }
 
