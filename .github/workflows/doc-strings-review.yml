@@ -387,6 +387,16 @@ jobs:
             echo "::warning::ADP client credential missing from env ($id_var, $secret_var); no review will be posted."
             exit 1
           fi
+          # client_secret rides in the request body; refuse to send it anywhere
+          # but https, so a misconfigured or malicious adp_token_url can't
+          # exfiltrate it over plaintext.
+          case "$TOKEN_URL" in
+            https://*) ;;
+            *)
+              echo "::warning::adp_token_url must be https, got: $TOKEN_URL; no review will be posted."
+              exit 1
+              ;;
+          esac
           # The audience is omitted entirely when empty rather than sent
           # blank. The gateway's own IdP, which is what an agent credential
           # authenticates against, rejects the parameter; the Cloud auth

@@ -666,6 +666,21 @@ exit 0
     expect(argv).toContain('audience=cloudv2-production.redpanda.cloud')
   })
 
+  test('a non-https token endpoint is rejected before curl runs', () => {
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs_doc_strings_client',
+      tokenUrl: 'http://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/oauth/idp/token',
+      audience: '',
+      credEnv: {
+        DOCS_DOC_STRINGS_CLIENT_ID: 'serviceaccounts/doc-strings-review',
+        DOCS_DOC_STRINGS_CLIENT_SECRET: 's3cret'
+      }
+    })
+    expect(r.status).not.toBe(0)
+    expect(r.all).toContain('must be https')
+    expect(r.exists('curl-argv')).toBe(false)
+  })
+
   test('the credential env names follow the secret id, not a fixed prefix', () => {
     const r = mint({
       secretId: 'sdlc/prod/github/docs_doc_strings_client',
