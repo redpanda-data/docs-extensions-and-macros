@@ -70,7 +70,7 @@ inputs:
       hardcoding it. See ATTRIBUTION in the mint step before pointing this
       at a different agent's credential.
     required: false
-    default: 'sdlc/prod/github/docs_team_agents_client'
+    default: 'sdlc/prod/github/docs_pr_review_client'
   adp_gateway_base_url:
     description: ADP AI Gateway provider endpoint for Claude Code traffic
     required: false
@@ -362,13 +362,13 @@ runs:
         # ATTRIBUTION: the credential in this secret belongs to a registered
         # ADP agent's own service account, and the agent's static tags are
         # what Cost and usage attributes spend to. Attribution granularity is
-        # therefore agent granularity: one agent per WORKLOAD. This review is
-        # a different workload from doc-detective (which owns the credential
-        # currently in docs_team_agents_client) and from doc-strings-review
-        # (which has its own agent and its own docs_doc_strings_client), so
-        # pointing this at docs_team_agents_client bills docs PR review to
-        # the doc-detective agent. Give this pipeline its own agent and
-        # secret before rollout if the spend needs to be separable.
+        # therefore agent granularity: one agent per WORKLOAD. This review has
+        # its own agent, `docs-pr-review` on adp-production (client id
+        # serviceaccounts/docs-pr-review, tagged team=docs and env=ci), so its
+        # spend appears on its own line rather than inside doc-detective's,
+        # whose credential is the one in docs_team_agents_client. Do not point
+        # this at another workload's secret to save a registration: sharing an
+        # agent collapses the two workloads' spend permanently.
         #
         # NAMING TRAP: parse-json-secrets names the env vars after the
         # secret's OWN JSON keys, and devprod's convention check (vtools
