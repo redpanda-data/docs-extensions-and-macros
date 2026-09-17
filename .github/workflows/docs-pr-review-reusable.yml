@@ -130,9 +130,17 @@ on:
         default: true
       adp_client_secret_id:
         description: >-
-          Secrets Manager id of the docs-team-agents OAuth client. NOTE the
-          JSON key names inside derive from the secret's own name:
-          DOCS_TEAM_AGENTS_CLIENT_ID/_SECRET — not ADP_PRIV_CLIENT_*.
+          Secrets Manager id of the ADP OAuth client. The JSON key names
+          inside derive from the secret's own last path segment
+          (DOCS_TEAM_AGENTS_CLIENT_ID/_SECRET here, not ADP_PRIV_CLIENT_*),
+          and the mint and scrub steps derive that prefix from this value
+          rather than hardcoding it, so pointing this at another secret
+          actually works. ATTRIBUTION: the credential in
+          docs_team_agents_client belongs to the doc-detective agent, and
+          Cost and usage attributes spend per agent, so as it stands this
+          review's spend lands in doc-detective's bucket. Give this pipeline
+          its own agent and secret if the spend needs to be separable
+          (doc-strings-review did exactly that with docs_doc_strings_client).
         type: string
         default: 'sdlc/prod/github/docs_team_agents_client'
       plugin_ref:

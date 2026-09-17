@@ -62,7 +62,13 @@ inputs:
     description: AWS account id owning the role (RP_AWS_CRED_ACCOUNT_ID). Pass from secrets.
     required: true
   adp_client_secret_id:
-    description: Secrets Manager id holding the docs-team-agents OAuth client credential
+    description: >
+      Secrets Manager id holding the ADP OAuth client credential. The JSON
+      keys inside it, and therefore the env var names the mint step reads,
+      are derived from this id's last path segment (devprod's convention
+      check requires that), so the mint derives the prefix rather than
+      hardcoding it. See ATTRIBUTION in the mint step before pointing this
+      at a different agent's credential.
     required: false
     default: 'sdlc/prod/github/docs_team_agents_client'
   adp_gateway_base_url:
@@ -70,20 +76,37 @@ inputs:
     required: false
     default: 'https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/llm/v1/providers/claude-code-provider-adp'
   adp_token_url:
-    description: OAuth token endpoint that mints the gateway bearer
+    description: >
+      OAuth token endpoint that mints the gateway bearer. The default is the
+      gateway's OWN identity provider, which is what a self-managed agent
+      credential authenticates against, and it takes no audience. The Cloud
+      auth service at auth.prd.cloud.redpanda.com/oauth/token is the endpoint
+      for a standalone service account instead, and that one requires
+      adp_token_audience. Minting an agent credential against the Cloud auth
+      service returns 401 (seen in cloud-docs' doc-detective runs from
+      2026-09-12 onwards), so do not point this there for an agent.
     required: false
-    default: 'https://auth.prd.cloud.redpanda.com/oauth/token'
+    default: 'https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/oauth/idp/token'
   adp_token_audience:
-    description: OAuth audience for the gateway token
+    description: >
+      OAuth audience for the gateway token. Empty by default and it must stay
+      empty for an agent credential: the gateway's own IdP rejects the
+      parameter. Set it only when pointing adp_token_url back at the Cloud
+      auth service, which does require one (cloudv2-production.redpanda.cloud).
+      The parameter is sent only when non-empty, never as `audience=`, which
+      satisfies neither endpoint.
     required: false
-    default: 'cloudv2-production.redpanda.cloud'
+    default: ''
   gateway_model:
     description: >
-      Bedrock-style model id; must be in the ADP provider's allowlist
-      (streaming-enterprise's review runs us.anthropic.claude-opus-5 through
-      the same provider).
+      Bedrock-style model id; must be in the ADP provider's allowlist. Only
+      us.anthropic.claude-opus-5 and us.anthropic.claude-haiku-4-5 are proven
+      against claude-code-provider-adp (cloud-docs' doc-detective and
+      streaming-enterprise's review both run opus-5 through it). An id that
+      is not on the allowlist returns 400 and the review silently never
+      appears, so confirm the allowlist before changing this.
     required: false
-    default: 'us.anthropic.claude-sonnet-5'
+    default: 'us.anthropic.claude-opus-5'
   cli_version:
     description: >
       Claude Code CLI version to install. 2.1.258 is the version the
@@ -299,9 +322,17 @@ runs:
         [[ "$REFUSAL2" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse pr comment (got: $REFUSAL2)"; exit 1; }
         echo "gh read-only shim installed at $SHIM_DIR"
 
-    # ── ADP gateway auth (DEVPROD-4735 pattern, docs-team-agents account) ──
+    # ── ADP gateway auth (DEVPROD-4735 pattern) ────────────────────────────
+    # Every step in this chain is continue-on-error and gated on the previous
+    # one's outcome, so a caller that has not been granted the credential (or
+    # has no OIDC role) degrades to "automated review unavailable" instead of
+    # a red job. Without that, the missing-grant case fails the composite
+    # action before the run step can even report claude_failed, which is the
+    # opposite of this pipeline's stated posture: never a red X for a broken
+    # environment. Same shape as doc-strings-review.yml in this repo.
     - name: Assume the OIDC role
       id: aws_credentials
+      continue-on-error: true
       uses: aws-actions/configure-aws-credentials@v6
       with:
         aws-region: ${{ inputs.aws_region }}
@@ -309,6 +340,8 @@ runs:
 
     - name: Fetch the ADP client credential
       id: adpsecrets
+      if: steps.aws_credentials.outcome == 'success'
+      continue-on-error: true
       uses: aws-actions/aws-secretsmanager-get-secrets@v3
       with:
         secret-ids: |
@@ -317,51 +350,93 @@ runs:
 
     - name: Mint the ADP gateway token
       id: mint
+      if: steps.adpsecrets.outcome == 'success'
+      continue-on-error: true
       shell: bash
       env:
         TOKEN_URL: ${{ inputs.adp_token_url }}
         TOKEN_AUDIENCE: ${{ inputs.adp_token_audience }}
+        CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
       run: |
         set -euo pipefail
-        # NAMING TRAP: parse-json-secrets derives env names from the secret's
-        # OWN JSON keys, which devprod's convention check derives from the
-        # secret's name. sdlc/prod/github/docs_team_agents_client yields
-        # DOCS_TEAM_AGENTS_CLIENT_ID / DOCS_TEAM_AGENTS_CLIENT_SECRET.
-        # ADP_PRIV_CLIENT_* belongs to a DIFFERENTLY-NAMED secret; reading
-        # those names here fails open with no review posted and a green
-        # check. Hence: fail LOUD when the expected names are absent.
-        if [ -z "${DOCS_TEAM_AGENTS_CLIENT_ID:-}" ] || [ -z "${DOCS_TEAM_AGENTS_CLIENT_SECRET:-}" ]; then
-          echo "::error::DOCS_TEAM_AGENTS_CLIENT_ID/_SECRET missing from env — wrong secret id, wrong JSON key names, or the caller lacks the devprod-infra #779 grant"
+        # ATTRIBUTION: the credential in this secret belongs to a registered
+        # ADP agent's own service account, and the agent's static tags are
+        # what Cost and usage attributes spend to. Attribution granularity is
+        # therefore agent granularity: one agent per WORKLOAD. This review is
+        # a different workload from doc-detective (which owns the credential
+        # currently in docs_team_agents_client) and from doc-strings-review
+        # (which has its own agent and its own docs_doc_strings_client), so
+        # pointing this at docs_team_agents_client bills docs PR review to
+        # the doc-detective agent. Give this pipeline its own agent and
+        # secret before rollout if the spend needs to be separable.
+        #
+        # NAMING TRAP: parse-json-secrets names the env vars after the
+        # secret's OWN JSON keys, and devprod's convention check (vtools
+        # scripts/cicd-secret/secret.py, _check_secret) requires those keys to
+        # start with the secret name's last path segment, upper-cased. So the
+        # env names follow the secret id and cannot be hardcoded: a caller
+        # overriding adp_client_secret_id used to land the credential in env
+        # vars this step never read, and the mint failed with a misleading
+        # error. The tr mirrors the secrets action's own sanitisation
+        # (non-alphanumerics become _), so a hyphenated segment yields a valid
+        # bash name instead of aborting the indirect expansion under set -u.
+        prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
+        id_var="${prefix}_ID"
+        secret_var="${prefix}_SECRET"
+        client_id="${!id_var:-}"
+        client_secret="${!secret_var:-}"
+        if [ -z "$client_id" ] || [ -z "$client_secret" ]; then
+          echo "::warning::ADP client credential missing from env ($id_var, $secret_var) — wrong secret id, wrong JSON key names, or this repository was never granted the secret in devprod-infra. No review will be posted."
           exit 1
+        fi
+        # client_secret rides in the request body, so refuse to send it
+        # anywhere but https: adp_token_url is a caller-supplied input and a
+        # typo'd or hostile scheme would put the credential on the wire in
+        # cleartext.
+        case "$TOKEN_URL" in
+          https://*) ;;
+          *)
+            echo "::warning::adp_token_url must be https, got: $TOKEN_URL. No review will be posted."
+            exit 1
+            ;;
+        esac
+        # The audience is omitted entirely when empty rather than sent blank.
+        # The gateway's own IdP, which is what an agent credential
+        # authenticates against, rejects the parameter; the Cloud auth service
+        # requires it. `audience=` satisfies neither, so this has to be a
+        # present-or-absent argument. The +"${arr[@]}" form is needed because
+        # a plain expansion of an empty array trips set -u under bash 3.2.
+        audience_args=()
+        if [ -n "${TOKEN_AUDIENCE:-}" ]; then
+          audience_args=(--data-urlencode audience="$TOKEN_AUDIENCE")
         fi
         # Secret rides stdin so it never appears in argv; a token containing
         # whitespace could smuggle extra variables into GITHUB_ENV and
         # ::add-mask:: covers only the first line.
-        status=$(printf '%s' "$DOCS_TEAM_AGENTS_CLIENT_SECRET" | curl -sS --request POST \
+        status=$(printf '%s' "$client_secret" | curl -sS --request POST \
           --connect-timeout 10 --max-time 30 \
           --retry 3 --retry-all-errors --retry-delay 2 \
           --output "$RUNNER_TEMP/adp_token.json" --write-out '%{http_code}' \
           --url "$TOKEN_URL" \
           --header 'content-type: application/x-www-form-urlencoded' \
           --data grant_type=client_credentials \
-          --data-urlencode client_id="$DOCS_TEAM_AGENTS_CLIENT_ID" \
+          --data-urlencode client_id="$client_id" \
           --data-urlencode client_secret@- \
-          --data audience="$TOKEN_AUDIENCE") || status=000
+          "${audience_args[@]+"${audience_args[@]}"}") || status=000
         token=$(jq -r '.access_token // empty' "$RUNNER_TEMP/adp_token.json" 2>/dev/null || true)
         rm -f "$RUNNER_TEMP/adp_token.json"
-        # Transient mint failures soft-fail (exit 0, no bearer exported): the
-        # run step below turns the missing bearer into claude_failed=true and
-        # the aggregate posts "human review required" — never a red X for an
-        # infra blip. Only the naming-trap case above fails the job loudly,
-        # because that one is a permanent config bug that would otherwise
-        # fail open forever.
+        # Every failure path here exits 1 with a warning, and the step is
+        # continue-on-error, so no bearer is exported and the run step below
+        # turns that into claude_failed=true while the aggregate posts "human
+        # review required". Never a red X for a broken environment, and never
+        # an infra failure dressed up as a review verdict.
         if [ -z "$token" ]; then
-          echo "::warning::failed to mint ADP gateway token (HTTP $status) — soft-failing to 'human review required'"
-          exit 0
+          echo "::warning::failed to mint ADP gateway token (HTTP $status). No review will be posted."
+          exit 1
         fi
         case "$token" in *[[:space:][:cntrl:]]*)
-          echo "::warning::minted token contains whitespace or control characters — soft-failing"
-          exit 0 ;;
+          echo "::warning::minted token contains whitespace or control characters. No review will be posted."
+          exit 1 ;;
         esac
         echo "::add-mask::$token"
         echo "AWS_BEARER_TOKEN_BEDROCK=$token" >> "$GITHUB_ENV"
@@ -369,12 +444,21 @@ runs:
     - name: Scrub the long-lived client credential
       if: always()
       shell: bash
+      env:
+        CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
       run: |
+        set -euo pipefail
         # AWS_BEARER_TOKEN_BEDROCK deliberately survives: it is the model
         # auth, short-lived, and usable only against the gateway. The
         # long-lived client credential that can mint fresh tokens must not
         # be readable from the review's environment.
-        for v in DOCS_TEAM_AGENTS_CLIENT_ID DOCS_TEAM_AGENTS_CLIENT_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+        #
+        # The prefix is derived exactly as the mint step derives it. Hardcoded
+        # names would silently stop scrubbing the moment a caller pointed
+        # adp_client_secret_id at a differently-named secret, leaving the
+        # minting credential live in the environment Claude runs in.
+        prefix=$(printf '%s' "$CLIENT_SECRET_ID" | awk -F/ '{print toupper($NF)}' | tr -c 'A-Za-z0-9_\n' '_')
+        for v in "${prefix}_ID" "${prefix}_SECRET" AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
           echo "$v=" >> "$GITHUB_ENV"
         done
 
