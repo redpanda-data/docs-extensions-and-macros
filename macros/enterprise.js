@@ -639,22 +639,27 @@ function enterpriseInlineMacro (config) {
       let registry
       if (config && config.contentCatalog) {
         registry = loadRegistry(config)
-        if (!registry) warnNoRegistry(config && config.contentCatalog)
+        if (!registry) warnNoRegistry(config.contentCatalog)
+      }
+      if (!registry) {
+        // Nothing to validate against, so nothing should render as if it
+        // were. Mirrors prop:'s plain fallback for the same reason: a styled
+        // term this build cannot check is worse than an unstyled one.
+        return self.createInline(parent, 'quoted', attributes.text || target)
       }
       let feature = target
-      let entry
-      if (registry) {
-        entry = registry.lookup.get(target.trim().toLowerCase())
-        if (entry) {
-          feature = entry.name
-        } else {
-          reportUnknownFeature({
-            feature: target,
-            mode,
-            registry,
-            filePath,
-          })
-        }
+      const entry = registry.lookup.get(target.trim().toLowerCase())
+      if (entry) {
+        feature = entry.name
+      } else {
+        reportUnknownFeature({ feature: target, mode, registry, filePath })
+        // An unrecognized name has nothing behind it to style -- no xref, no
+        // tooltip, no licence terms to point at. Falling through to the same
+        // styled output a real feature gets, just with a generic fallback
+        // tooltip, let a typo pass for a real feature with nothing on the
+        // page to show a reader it was wrong. Mirrors prop:'s plain fallback
+        // for an unrecognized property name, for the same reason.
+        return self.createInline(parent, 'quoted', attributes.text || feature)
       }
       const status = entryStatus(entry, { mode, filePath, contentCatalog: config && config.contentCatalog })
       if (status === STATUS_UNRELEASED && !isPrereleasePage(config, document)) {

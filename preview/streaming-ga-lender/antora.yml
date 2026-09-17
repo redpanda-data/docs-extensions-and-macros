@@ -1,0 +1,11 @@
+# A real self-managed docs component (named exactly 'streaming') is what
+# lends Cloud its GA property data in production -- macros/prop.js only
+# recognizes components literally named 'streaming' or 'ROOT' as lenders.
+# The full macro-test.sh harness gets that for free from the real docs repo.
+# This lightweight showcase does not pull that repo, so this fixture plays
+# the same role with nothing but the one file Cloud actually reads: no
+# pages, no nav, just the GA properties attachment macro-fixtures-cloud
+# validates against.
+name: streaming
+title: Streaming GA data (lender-only fixture)
+version: '26.2'
