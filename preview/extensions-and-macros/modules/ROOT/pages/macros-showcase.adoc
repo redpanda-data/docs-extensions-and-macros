@@ -161,11 +161,31 @@ side by side, and the
 xref:macro-fixtures::index.adoc[prerelease fixtures^] show the unreleased one
 rendering with its badge on a beta branch.
 
+=== Cloud pages
+
+Redpanda Cloud has no Enterprise Edition license -- customers never apply or
+manage one -- so a page in a Cloud component has nothing true to say about a
+license, its expiration, or its restrictions. This page is not a Cloud
+component, so the `+enterprise:Tiered Storage[]+` call above renders styled, as
+usual.
+
+The xref:macro-fixtures-cloud::index.adoc[Cloud fixtures^] page sets
+`env-cloud`, so the same `+enterprise:Tiered Storage[]+` call renders as plain
+text there, with no styling, tooltip, or link, and
+`enterprise_features::redpanda[]` renders a warning instead of a table --
+regardless of what the registry says, and even for a feature the registry
+does recognize.
+
+This also covers the Cloud rendering of single-sourced self-managed prose:
+the check reads the page actually being converted (the Cloud stub page), not
+which repo the included `+enterprise:+` mention was written in.
+
 == Where else to look
 
 * xref:macro-fixtures-cloud::index.adoc[Cloud fixtures^] -- only
-  `cloud_supported` properties are available, and release candidates are
-  ignored because Cloud runs released Redpanda.
+  `cloud_supported` properties are available, release candidates are
+  ignored because Cloud runs released Redpanda, and `+enterprise:+` renders
+  plain because Cloud has no Enterprise Edition license.
 * xref:macro-fixtures::index.adoc[Prerelease fixtures^] -- a beta branch
   validates against its own release candidate data.
 * xref:ROOT:macros-showcase-kubernetes.adoc[Kubernetes variant^] -- the same

@@ -229,6 +229,36 @@ describe('rpk Docs Generation', () => {
       expect(formatDescription(input)).toContain('`$REDPANDA_BROKERS`')
     })
 
+    // Published on rpk-plugin-install.adoc before this fix: the merge step
+    // that joins a backticked env var with its adjacent path matched through
+    // a directly-adjacent closing paren or period, landing sentence
+    // punctuation inside the code span instead of outside it.
+    test('does not pull a directly adjacent closing paren into the path', () => {
+      const input = 'Destination directory to save the installed plugin (defaults to $HOME/.local/bin)'
+      expect(formatDescription(input)).toContain('(defaults to `$HOME/.local/bin`)')
+      expect(formatDescription(input)).not.toContain('`$HOME/.local/bin)`')
+    })
+
+    test('does not pull a directly adjacent sentence period into the path', () => {
+      const input = 'By default, this command installs plugins to $HOME/.local/bin. This can be changed with --dir'
+      expect(formatDescription(input)).toContain('`$HOME/.local/bin`. This')
+      expect(formatDescription(input)).not.toContain('`$HOME/.local/bin.`')
+    })
+
+    test('still merges the env var into a path with no trailing punctuation', () => {
+      const input = 'Plugins are installed to $HOME/.local/bin by default'
+      expect(formatDescription(input)).toContain('`$HOME/.local/bin`')
+    })
+
+    // CodeRabbit caught this on #292: requiring a character after the slash
+    // meant a bare trailing slash ($HOME/, $PWD/ -- both real in the rpk
+    // source) never merged at all, staying split as `$HOME`/.
+    test('merges a bare trailing slash with nothing after it', () => {
+      const input = 'Files live in $HOME/ by default'
+      expect(formatDescription(input)).toContain('`$HOME/`')
+      expect(formatDescription(input)).not.toContain('`$HOME`/')
+    })
+
     test('does not double-backtick already formatted flags', () => {
       const input = 'Use `--verbose` for output'
       // After the regex, we clean up double backticks, result should be same
