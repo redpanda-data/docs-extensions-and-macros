@@ -414,166 +414,65 @@ ensure_dependencies_installed() {
 log_info "Installing/checking dependencies for doc-tools CLI commands..."
 ensure_dependencies_installed
 
-# install_rpk installs Redpanda's rpk CLI into ~/.local/bin by downloading the appropriate release for the current OS and architecture, adding it to PATH for the current and future sessions, and verifying the installation; returns 0 on success and non-zero on failure.
+# install_rpk installs Redpanda's rpk CLI into ~/.local/bin from the rpk
+# distribution CDN (https://rpk.redpanda.com), adds it to PATH for the current
+# and future sessions, and verifies the installation; returns 0 on success and
+# non-zero on failure. Set RPK_VERSION=vX.Y.Z to pin a version. The URL layout,
+# version resolution and checksum verification live in cli-utils/rpk-cdn.js so
+# this script and the rpk docs generator share one implementation.
 install_rpk() {
     if command_exists rpk; then
         log_info "rpk is already installed. Version information:"
         rpk --version
         return 0
     fi
-    
+
     log_info "Installing rpk..."
-    
-    # Detect OS and architecture
-    local os_name=$(uname -s)
-    local arch_name=$(uname -m)
-    
-    # Map OS name to rpk release format
-    local rpk_os=""
-    case "$os_name" in
-        "Darwin")
-            rpk_os="darwin"
-            ;;
-        "Linux")
-            rpk_os="linux"
-            ;;
-        *)
-            log_warn "Unsupported operating system: $os_name"
-            log_warn "Please install rpk manually:"
-            log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
-            return 1
-            ;;
-    esac
-    
-    # Map architecture to rpk release format
-    local rpk_arch=""
-    case "$arch_name" in
-        "x86_64" | "amd64")
-            rpk_arch="amd64"
-            ;;
-        "arm64" | "aarch64")
-            rpk_arch="arm64"
-            ;;
-        *)
-            log_warn "Unsupported architecture: $arch_name"
-            log_warn "Please install rpk manually:"
-            log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
-            return 1
-            ;;
-    esac
-    
-    # rpk releases now publish to the private redpanda-data/streaming-enterprise,
-    # not the public redpanda-data/redpanda, so a token is required (same
-    # priority order as cli-utils/github-token.js's getGitHubToken(), minus
-    # GIT_CREDENTIALS, which is Antora's own credential store and doesn't
-    # apply to this standalone installer script).
-    local gh_token="${REDPANDA_GITHUB_TOKEN:-${ACTIONS_BOT_TOKEN:-${GITHUB_TOKEN:-${VBOT_GITHUB_API_TOKEN:-${GH_TOKEN:-}}}}}"
-    if [ -z "$gh_token" ]; then
-        log_warn "No GitHub token found (checked REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, GH_TOKEN)."
-        log_warn "rpk releases are now published to the private redpanda-data/streaming-enterprise repo and require authentication."
-        log_warn "Please install rpk manually:"
+
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local rpk_bin
+
+    # node is always present: this script is launched by bin/doc-tools.js.
+    # Without RPK_VERSION the module resolves the latest release itself
+    # (GitHub tags when a token is available, otherwise latest/ on the CDN).
+    if ! rpk_bin=$(node "${script_dir}/rpk-cdn.js" install --dest "${tmp_dir}" ${RPK_VERSION:+--version "${RPK_VERSION}"}); then
+        rm -rf "${tmp_dir}"
+        log_warn "Could not install rpk from https://rpk.redpanda.com (see the message above)."
+        log_warn "Set RPK_VERSION=vX.Y.Z to pin a version, or install rpk manually:"
         log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
         return 1
     fi
 
-    local rpk_filename="rpk-${rpk_os}-${rpk_arch}.zip"
-    local releases_api="https://api.github.com/repos/redpanda-data/streaming-enterprise/releases/latest"
-
-    log_info "Detected ${os_name} ${arch_name}, looking up the latest rpk release..."
-
-    # The Authorization header reaches curl through a config file on stdin
-    # (--config -), never as an -H argument: an argv header is readable by
-    # any process on the host (ps, /proc) for as long as the transfer runs.
-    local release_json
-    if ! release_json=$(curl -fsSL --retry 5 --retry-all-errors \
-            --connect-timeout 30 --max-time 60 --retry-max-time 120 \
-            --config - \
-            -H "Accept: application/vnd.github+json" \
-            "$releases_api" <<EOF
-header = "Authorization: token ${gh_token}"
-EOF
-    ); then
-        log_warn "Failed to query the latest release from streaming-enterprise"
+    mkdir -p ~/.local/bin
+    if ! mv "${rpk_bin}" ~/.local/bin/rpk; then
+        rm -rf "${tmp_dir}"
+        log_warn "Failed to move rpk binary to ~/.local/bin/"
         log_warn "Please install rpk manually:"
         log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
         return 1
     fi
+    rm -rf "${tmp_dir}"
 
-    # Resolve the asset's API url (not browser_download_url): only the API
-    # asset endpoint accepts the Authorization header this private repo needs.
-    local rpk_url
-    rpk_url=$(printf '%s' "$release_json" | jq -r --arg name "$rpk_filename" '.assets[] | select(.name == $name) | .url')
-    if [ -z "$rpk_url" ] || [ "$rpk_url" = "null" ]; then
-        log_warn "Latest streaming-enterprise release has no asset named ${rpk_filename}"
-        log_warn "Please install rpk manually:"
-        log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
-        return 1
+    # Add to PATH for current session
+    export PATH=$HOME/.local/bin:$PATH
+
+    # Add the target directory to PATH for future sessions
+    if ! grep -q 'export PATH=$HOME/.local/bin:$PATH' ~/.bashrc 2>/dev/null; then
+        echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
     fi
 
-    log_info "Downloading ${rpk_filename}..."
-
-    # Try to download and install rpk.
-    # Use -f so HTTP errors (e.g. 403/404/429/503) fail instead of writing an
-    # error page into the zip, and retry with curl's default exponential
-    # backoff (1s, 2s, 4s, ...) to ride out transient GitHub/CDN and network
-    # errors, including rate limits that need time to clear. --retry-max-time
-    # caps the whole retry window so CI fails fast on persistent errors.
-    # Accept: application/octet-stream is required on the API asset url to
-    # receive the binary itself instead of its JSON metadata.
-    # Same as the release lookup above: the token travels on stdin, not argv.
-    if curl -fL --retry 5 --retry-all-errors \
-            --connect-timeout 30 --max-time 300 --retry-max-time 600 \
-            --config - \
-            -H "Accept: application/octet-stream" \
-            -o "$rpk_filename" "$rpk_url" <<EOF
-header = "Authorization: token ${gh_token}"
-EOF
-    then
-        if unzip "$rpk_filename" 2>/dev/null; then
-            mkdir -p ~/.local/bin
-            if mv rpk ~/.local/bin/ 2>/dev/null; then
-                rm "$rpk_filename"
-                
-                # Add to PATH for current session
-                export PATH=$HOME/.local/bin:$PATH
-                
-                # Add the target directory to PATH for future sessions
-                if ! grep -q 'export PATH=$HOME/.local/bin:$PATH' ~/.bashrc 2>/dev/null; then
-                    echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
-                fi
-                
-                # Verify installation
-                if command_exists rpk; then
-                    log_info "rpk has been installed successfully. Version information:"
-                    rpk --version
-                    return 0
-                else
-                    log_warn "rpk installation may have failed. Please install manually:"
-                    log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
-                    return 1
-                fi
-            else
-                log_warn "Failed to move rpk binary to ~/.local/bin/"
-                rm -f "$rpk_filename" rpk 2>/dev/null
-                log_warn "Please install rpk manually:"
-                log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
-                return 1
-            fi
-        else
-            log_warn "Failed to unzip $rpk_filename (may not exist for ${rpk_os}-${rpk_arch})"
-            rm -f "$rpk_filename" 2>/dev/null
-            log_warn "Please install rpk manually:"
-            log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
-            return 1
-        fi
-    else
-        log_warn "Failed to download $rpk_url"
-        # A mid-transfer failure can leave a partial file behind even with -f.
-        rm -f "$rpk_filename" 2>/dev/null
-        log_warn "Please install rpk manually:"
-        log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
-        return 1
+    # Verify installation
+    if command_exists rpk; then
+        log_info "rpk has been installed successfully. Version information:"
+        rpk --version
+        return 0
     fi
+    log_warn "rpk installation may have failed. Please install manually:"
+    log_warn "https://docs.redpanda.com/current/get-started/rpk-install/"
+    return 1
 }
 
 # Install rpk for rpcn-connector-docs command

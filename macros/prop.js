@@ -1012,6 +1012,7 @@ module.exports.propertyAnchor = propertyAnchor
 module.exports.helmValuesPath = helmValuesPath
 module.exports.loadPropertiesFor = loadPropertiesFor
 module.exports.compareTags = compareTags
+module.exports.isAttributeSet = isAttributeSet
 module.exports.isPrerelease = isPrerelease
 module.exports.releaseSeries = releaseSeries
 module.exports.extractHeadingsWithTags = extractHeadingsWithTags

@@ -1718,7 +1718,15 @@ function formatDescription(desc, customTransformations = null, options = {}) {
 
   // Merge backticked environment variables with adjacent paths
   // e.g., `$HOME`/.local/bin → `$HOME/.local/bin`
-  result = result.replace(/`(\$[A-Z_][A-Z0-9_]*)`(\/[^\s`]+)/g, '`$1$2`')
+  // The continuation excludes a trailing ) . , ; : ! ? so sentence punctuation
+  // immediately after the path (no space) lands outside the code span instead
+  // of being swallowed into it, e.g. "...(defaults to `$HOME/.local/bin)`" or
+  // "...saved in `$HOME/.local/bin.` This" -- both published on
+  // rpk-plugin-install.adoc before this fix. The continuation past the slash
+  // is optional, so a bare trailing slash ($HOME/, $PWD/ -- both real in the
+  // rpk source) still merges into `$HOME/` instead of staying split as
+  // `$HOME`/.
+  result = result.replace(/`(\$[A-Z_][A-Z0-9_]*)`(\/(?:[^\s`]*[^\s`).,;:!?])?)/g, '`$1$2`')
 
   // Add backticks around file paths (but not if already backticked)
   // Must check both the slash and the path aren't already inside backticks
