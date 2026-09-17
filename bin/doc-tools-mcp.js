@@ -446,7 +446,7 @@ const tools = [
         },
         surface: {
           type: 'string',
-          description: 'Comma-separated surfaces to lint: properties, metrics, rpk, helm, crd, connect (optional, defaults to all)'
+          description: `Comma-separated surfaces to lint: ${Object.keys(require('../tools/lint-strings').SURFACES).join(', ')} (optional, defaults to all)`
         },
         diff: {
           type: 'string',

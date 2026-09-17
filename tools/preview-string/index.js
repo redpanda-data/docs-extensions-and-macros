@@ -68,10 +68,16 @@ function previewString (options) {
 
 function previewProperty (repo, name, overridesPath, log) {
   const properties = require('../lint-strings/surfaces/properties')
-  const handlebars = require('handlebars')
-  // Requiring the generator registers its Handlebars helpers (eq, ...) as a
-  // side effect - the same environment a real generation run uses.
-  require('../property-extractor/generate-handlebars-docs')
+  // The generator registers its helpers on whichever handlebars its own
+  // require resolves to, and tools/property-extractor/node_modules can hold
+  // a second copy - a different instance from this module's, leaving every
+  // helper unregistered here. Register them explicitly on an isolated
+  // environment instead of relying on that side effect.
+  const handlebars = require('handlebars').create()
+  const propertyHelpers = require('../property-extractor/helpers')
+  for (const [helperName, fn] of Object.entries(propertyHelpers)) {
+    handlebars.registerHelper(helperName, fn)
+  }
 
   const json = properties.runExtractor(repo, log)
   const prop = (json.properties || {})[name]

@@ -1,6 +1,6 @@
 const yaml = require('js-yaml');
 const { spawnSync } = require('child_process');
-const { getGitHubToken } = require('./github-token');
+const { getGitHubApiToken } = require('./github-token');
 
 const ANTORA_URL = 'https://raw.githubusercontent.com/redpanda-data/docs/main/antora.yml'
 
@@ -23,7 +23,7 @@ const REJECTED_HINT = ' A GitHub token was sent but rejected, so it may be expir
  */
 async function fetchRemoteAntoraVersion(deps = {}) {
   const fetchImpl = deps.fetchImpl || fetch
-  const ghToken = 'token' in deps ? deps.token : getGitHubToken()
+  const ghToken = 'token' in deps ? deps.token : getGitHubApiToken()
 
   let resp = await fetchImpl(ANTORA_URL, ghToken ? { headers: { Authorization: `Bearer ${ghToken}` } } : undefined)
   const hint = ghToken ? REJECTED_HINT : TOKEN_HINT

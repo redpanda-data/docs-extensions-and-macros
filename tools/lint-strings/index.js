@@ -25,7 +25,8 @@ const SURFACES = {
   rpk: require('./surfaces/rpk'),
   helm: require('./surfaces/helm'),
   crd: require('./surfaces/crd'),
-  connect: require('./surfaces/connect')
+  connect: require('./surfaces/connect'),
+  api: require('./surfaces/api')
 }
 
 /**

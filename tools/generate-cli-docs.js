@@ -138,11 +138,19 @@ function parseJSDocComments(sourceFile) {
   // was documented with the first command's prose. That is exactly what
   // happened to `generate migrate-rpcn-descriptions`, which shipped a
   // regenerated section describing migrate-rpcn-metadata.
-  const pattern = /\/\*\*\s*((?:(?!\*\/)[\s\S])*?)\s*\*\/\s*(?:programCli|automation|validation)\s*\.command\(['"]([^'"]+)['"]\)/g;
+  //
+  // The group is captured too, because a command NAME is not unique: the same
+  // name can be registered under both `automation` (generate) and `validation`
+  // (validate). `kapa-source-groups` is, and keying on the bare name alone made
+  // the later registration silently overwrite the earlier, so the
+  // `generate kapa-source-groups` section shipped describing the validate
+  // command, complete with validate examples under a generate usage line.
+  // Same failure as the migrate-rpcn one above, one level up.
+  const pattern = /\/\*\*\s*((?:(?!\*\/)[\s\S])*?)\s*\*\/\s*(programCli|automation|validation)\s*\.command\(['"]([^'"]+)['"]\)/g;
 
   let match;
   while ((match = pattern.exec(content)) !== null) {
-    const [, commentText, commandName] = match;
+    const [, commentText, group, commandName] = match;
 
     // Parse the comment into sections
     const parsed = {
@@ -189,7 +197,12 @@ function parseJSDocComments(sourceFile) {
         .trim();
     }
 
-    comments[commandName] = parsed;
+    // Keyed by the CLI path a reader would type, so `generate x` and
+    // `validate x` cannot collide. The bare name is kept as well, for the
+    // top-level commands registered straight onto programCli.
+    const groupPrefix = { automation: 'generate ', validation: 'validate ', programCli: '' }[group]
+    comments[`${groupPrefix}${commandName}`] = parsed;
+    if (comments[commandName] === undefined) comments[commandName] = parsed;
   }
 
   return comments;
@@ -290,7 +303,9 @@ IMPORTANT: This documentation is auto-generated. Do not edit manually. Run \`npm
     const label = commandPath.join(' ');
     console.log(`${'  '.repeat(level - 1)}Generating docs for: ${label}`);
     const data = parseHelp(getHelpOutput(label));
-    const jsdoc = jsdocs[commandPath[commandPath.length - 1]];
+    // Prefer the full command path, falling back to the bare name so that
+    // commands registered directly on programCli still resolve.
+    const jsdoc = jsdocs[label] || jsdocs[commandPath[commandPath.length - 1]];
     doc += generateCommandDoc(label, data, jsdoc, level);
     for (const child of data.commands) {
       // Commander lists `help [command]` in every group; it is not a command

@@ -103,13 +103,18 @@ describe('link extensions end-to-end', () => {
       '  extensions:',
       "  - require: '@redpanda-data/docs-extensions-and-macros/extensions/url-to-xref'",
       "  - require: '@redpanda-data/docs-extensions-and-macros/extensions/external-link-checker'",
+      // snake_case in the playbook; Antora converts it to reportFile.
+      `    report_file: ${path.join(workDir, 'link-check.json')}`,
       '',
     ].join('\n')
     const playbookPath = path.join(workDir, 'antora-playbook.yml')
     fs.writeFileSync(playbookPath, playbook)
 
     // Run the build in-process so the extensions and the fixture HTTP server
-    // share a process, and capture the structured log via --log-file.
+    // share a process, and capture the structured log via --log-file. The link
+    // checker is inert without LINK_CHECK, which is the point: registering it
+    // in a shared playbook must not make preview builds hit the network.
+    process.env.LINK_CHECK = 'true'
     const logPath = path.join(workDir, 'build-log.json')
     await generateSite([
       '--playbook', playbookPath,
@@ -122,6 +127,7 @@ describe('link extensions end-to-end', () => {
   })
 
   afterAll(() => {
+    delete process.env.LINK_CHECK
     if (server) {
       if (server.closeAllConnections) server.closeAllConnections()
       server.close()
@@ -214,5 +220,41 @@ describe('link extensions end-to-end', () => {
 
   test('produces no unresolved-xref warnings for converted links', () => {
     expect(buildOutput).not.toContain('target of xref not found')
+  })
+
+  // Every one of these shapes was reported as a broken external link by the
+  // weekly docs-site link check while the published page carried no such link.
+  test.each([
+    ['a line comment', '/in-line-comment'],
+    ['a comment block', '/in-comment-block'],
+    ['a fence with a language info string', '/in-annotated-fence'],
+  ])('never requests a URL in %s', (_, urlPath) => {
+    expect(requests.some((line) => line.includes(urlPath))).toBe(false)
+    expect(buildOutput).not.toContain(urlPath)
+  })
+
+  // Attributes are substituted after the extensions run, so the braces are
+  // still literal when the URL is scanned. Fetching it reports a false 404.
+  test('reports an unresolved attribute reference instead of fetching it', () => {
+    expect(requests.some((line) => line.includes('undefined-attribute'))).toBe(false)
+    expect(buildOutput).toMatch(/Unchecked external link \S+\{undefined-attribute\}\S* \(unresolved attribute\)/)
+    expect(buildOutput).toContain('Skipped 1 URL(s) holding an unresolved attribute reference')
+  })
+
+  test('writes a machine-readable report naming the repository and path of each finding', () => {
+    const report = JSON.parse(fs.readFileSync(path.join(workDir, 'link-check.json'), 'utf8'))
+    expect(report.counts).toEqual({ ok: 1, broken: 1, unverifiable: 0 })
+    // Broken first, so a consumer reading the head of the list gets the
+    // actionable findings.
+    expect(report.results[0].classification).toBe('broken')
+    expect(report.results[0].url).toMatch(/\/missing$/)
+    expect(report.results[0].refs).toEqual([
+      expect.objectContaining({
+        component: 'streaming',
+        version: '25.3',
+        path: 'modules/manage/pages/links.adoc',
+      }),
+    ])
+    expect(report.unresolvedAttributeReferences[0].url).toContain('{undefined-attribute}')
   })
 })

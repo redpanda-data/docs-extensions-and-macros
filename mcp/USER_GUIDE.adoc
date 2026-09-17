@@ -571,7 +571,7 @@ NOTE: Stack traces are only included when `NODE_ENV=development` for security re
   "version": "v25.3.1",
   "docker_tag": "docker.redpanda.com/redpandadata/redpanda:v25.3.1",
   "is_beta": false,
-  "notes_url": "https://github.com/redpanda-data/redpanda/releases/tag/v25.3.1"
+  "notes_url": "https://github.com/redpanda-data/streaming-enterprise/releases/tag/v25.3.1"
 }
 ----
 
@@ -592,7 +592,7 @@ notes_url:: GitHub release notes URL
   "version": "v25.4.1-rc1",
   "docker_tag": "docker.redpanda.com/redpandadata/redpanda-unstable:v25.4.1-rc1",
   "is_beta": true,
-  "notes_url": "https://github.com/redpanda-data/redpanda/releases/tag/v25.4.1-rc1"
+  "notes_url": "https://github.com/redpanda-data/streaming-enterprise/releases/tag/v25.4.1-rc1"
 }
 ----
 
@@ -857,7 +857,7 @@ Claude: *uses get_redpanda_version MCP tool*
 The latest Redpanda version is v25.3.1, released on January 15, 2024.
 
 Docker tag: docker.redpanda.com/redpandadata/redpanda:v25.3.1
-Release notes: https://github.com/redpanda-data/redpanda/releases/tag/v25.3.1
+Release notes: https://github.com/redpanda-data/streaming-enterprise/releases/tag/v25.3.1
 ----
 
 ----
@@ -969,7 +969,7 @@ Claude: *uses generate_property_docs MCP tool*
 ❌ Generation failed: Tag v99.9.9 not found in Redpanda repository
 
 Suggestion: Check that the version exists in the Redpanda repository. You can find available versions at:
-https://github.com/redpanda-data/redpanda/releases
+https://github.com/redpanda-data/streaming-enterprise/releases
 ----
 
 === Example 7: Property documentation updates (with prompt)

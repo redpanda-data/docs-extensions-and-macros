@@ -483,6 +483,11 @@ function convertContent (content, resolverContext) {
       continue
     }
     if (!hostnames.has(url.hostname) || match.inAttributeEntry || match.inAttributeValue) continue
+    // The path still holds a literal {attribute} reference: attributes are
+    // substituted after this hook, so the real target is unknown here. It
+    // cannot be looked up in the catalog, and reporting it as unmatched would
+    // be wrong when the substituted URL resolves fine.
+    if (match.hasAttributeReference) continue
     if (ignore.some((pattern) => pattern.test(url.pathname))) continue
     // An xref target cannot carry a query string, and dropping one would
     // change the link: the docs UI reads parameters such as

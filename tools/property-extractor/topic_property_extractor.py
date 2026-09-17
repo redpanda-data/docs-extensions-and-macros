@@ -119,6 +119,16 @@ class TopicPropertyExtractor:
                             "default": None,  # Will be populated from cluster property if available
                             "is_noop": False,  # Will be updated later in _correlate_properties_with_data
                             "is_topic_property": True,
+                            # A topic property is a Kafka topic config, not a
+                            # config::property, so there is no per-property
+                            # `restored` annotation to read and rp_util's dumps
+                            # do not cover topic scope. Whole Cluster Restore
+                            # restores topic metadata (see the WCR docs), which
+                            # is where these live, so the answer is yes for all
+                            # of them. Set it explicitly: topic-property.hbs
+                            # drops the row when the key is absent, which
+                            # silently deleted it from all 48 properties.
+                            "gets_restored": True,
                             "config_scope": "topic"
                         }
             print(f"Found {total_matches} topic properties in {file_path}")
@@ -176,6 +186,16 @@ class TopicPropertyExtractor:
                             "default": None,  # Will be populated from cluster property if available
                             "is_noop": False,  # Will be updated later in _correlate_properties_with_data
                             "is_topic_property": True,
+                            # A topic property is a Kafka topic config, not a
+                            # config::property, so there is no per-property
+                            # `restored` annotation to read and rp_util's dumps
+                            # do not cover topic scope. Whole Cluster Restore
+                            # restores topic metadata (see the WCR docs), which
+                            # is where these live, so the answer is yes for all
+                            # of them. Set it explicitly: topic-property.hbs
+                            # drops the row when the key is absent, which
+                            # silently deleted it from all 48 properties.
+                            "gets_restored": True,
                             "config_scope": "topic"
                         }
         except Exception as e:

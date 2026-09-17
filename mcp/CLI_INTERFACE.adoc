@@ -43,7 +43,7 @@ npx doc-tools get-redpanda-version [--beta]
 ----
 REDPANDA_VERSION=v25.3.1
 REDPANDA_DOCKER_TAG=docker.redpanda.com/redpandadata/redpanda:v25.3.1
-REDPANDA_RELEASE_NOTES=https://github.com/redpanda-data/redpanda/releases/tag/v25.3.1
+REDPANDA_RELEASE_NOTES=https://github.com/redpanda-data/streaming-enterprise/releases/tag/v25.3.1
 ----
 
 *Flags:*

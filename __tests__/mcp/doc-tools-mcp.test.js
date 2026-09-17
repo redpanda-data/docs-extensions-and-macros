@@ -534,7 +534,7 @@ describe('MCP Server Library - Repository Detection', () => {
         expect(result.version).toBe('v25.3.1');
         expect(result.docker_tag).toBe('docker.redpanda.com/redpandadata/redpanda:v25.3.1');
         expect(result.is_beta).toBe(false);
-        expect(result.notes_url).toBe('https://github.com/redpanda-data/redpanda/releases/tag/v25.3.1');
+        expect(result.notes_url).toBe('https://github.com/redpanda-data/streaming-enterprise/releases/tag/v25.3.1');
       });
 
       it('should return version information for beta release', () => {

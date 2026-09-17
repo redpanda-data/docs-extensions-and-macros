@@ -1,7 +1,6 @@
 'use strict'
 
 const { spawnSync } = require('child_process')
-const crypto = require('crypto')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -9,6 +8,7 @@ const semver = require('semver')
 const { findRepoRoot } = require('../../cli-utils/doc-tools-utils')
 const { generateRpkDocs, applyOverridesToTree, resolveReferences, shouldExcludeCommand, shouldUsePartialDir, derivePartialsDir } = require('./generate-rpk-docs')
 const { detectLinuxOnlyFromSource, warnIfDetectionLooksBroken } = require('./detect-platform-commands')
+const { downloadRpkBinary, RPK_RELEASE_TAG_RE, RPK_CDN_BASE } = require('../../cli-utils/rpk-cdn')
 const { generateRpkDiff, printDiffReport, generateWhatsNewSection, flattenToMap } = require('./report-delta')
 const { loadAndValidateOverrides, ValidationResult } = require('./validate-overrides')
 const { validateDirectory, formatResults } = require('./validate-output')
@@ -241,7 +241,31 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-source-'))
   const repoDir = path.join(tmpDir, 'redpanda')
 
-  console.log(`Sparse-cloning redpanda repo (ref: ${sourceRef}) to ${repoDir}...`)
+  // streaming-enterprise is private, so a token is required. Auth travels
+  // via a credential helper registered through GIT_CONFIG_* environment
+  // variables, never as a git -c argument, so the token cannot appear in
+  // this process's argv (visible to anything that can list processes) and
+  // never embedded in the remote URL, so no token is persisted in the
+  // clone's .git/config either.
+  const { getGitHubToken } = require('../../cli-utils/github-token')
+  const token = getGitHubToken()
+  if (!token) {
+    throw new Error(
+      'redpanda-data/streaming-enterprise is a private repository.\n' +
+      'Set GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN so the clone can authenticate.'
+    )
+  }
+  const gitEnv = {
+    ...process.env,
+    RPK_SOURCE_CLONE_TOKEN: token,
+    GIT_CONFIG_COUNT: '2',
+    GIT_CONFIG_KEY_0: 'credential.helper',
+    GIT_CONFIG_VALUE_0: '',
+    GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
+    GIT_CONFIG_VALUE_1: '!f() { echo "username=x-access-token"; echo "password=$RPK_SOURCE_CLONE_TOKEN"; }; f'
+  }
+
+  console.log(`Sparse-cloning streaming-enterprise repo (ref: ${sourceRef}) to ${repoDir}...`)
 
   // Clone with sparse checkout
   const cloneResult = spawnSync('git', [
@@ -250,27 +274,31 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
     '--filter=blob:none',
     '--sparse',
     '--branch', sourceRef,
-    'https://github.com/redpanda-data/redpanda.git',
+    'https://github.com/redpanda-data/streaming-enterprise.git',
     repoDir
   ], {
     encoding: 'utf8',
     timeout: 120000,
+    env: gitEnv,
     stdio: ['pipe', 'pipe', 'pipe']
   })
 
   if (cloneResult.status !== 0) {
     throw new Error(
-      `Failed to clone redpanda repo with ref '${sourceRef}'.\n` +
+      `Failed to clone streaming-enterprise repo with ref '${sourceRef}'.\n` +
       `Make sure the branch or tag exists.\n` +
       `Error: ${cloneResult.stderr}`
     )
   }
 
-  // Set sparse checkout to only get rpk
+  // Set sparse checkout to only get rpk. With --filter=blob:none, the blobs
+  // for src/go/rpk were not fetched by the clone above and are pulled lazily
+  // here, so this invocation needs the same credential helper.
   const sparseResult = spawnSync('git', ['sparse-checkout', 'set', 'src/go/rpk'], {
     cwd: repoDir,
     encoding: 'utf8',
-    timeout: 60000
+    timeout: 60000,
+    env: gitEnv
   })
 
   if (sparseResult.status !== 0) {
@@ -292,8 +320,8 @@ function fetchRpkTreeFromSource(sourcePath) {
   if (!fs.existsSync(sourcePath)) {
     throw new Error(
       `rpk source directory not found: ${sourcePath}\n` +
-      'To use --from-source, you need a local checkout of the redpanda repository.\n' +
-      'Clone it with: git clone https://github.com/redpanda-data/redpanda.git\n' +
+      'To use --from-source, you need a local checkout of the streaming-enterprise repository (private).\n' +
+      'Clone it with: git clone https://github.com/redpanda-data/streaming-enterprise.git\n' +
       'Then point to: <repo>/src/go/rpk'
     )
   }
@@ -393,8 +421,8 @@ function fetchRpkTreeFromLinuxSource(sourcePath, pluginPins = {}) {
   if (!fs.existsSync(absoluteSourcePath)) {
     throw new Error(
       `rpk source directory not found: ${absoluteSourcePath}\n` +
-      'Expected a checkout of the redpanda repository.\n' +
-      'Clone it with: git clone https://github.com/redpanda-data/redpanda.git'
+      'Expected a checkout of the streaming-enterprise repository (private).\n' +
+      'Clone it with: git clone https://github.com/redpanda-data/streaming-enterprise.git'
     )
   }
 
@@ -1278,84 +1306,26 @@ function buildRpkBinary(sourcePath, outPath) {
 }
 
 /**
- * Download an official rpk release binary for the current platform.
- * @param {string} tag - Release tag (e.g., v26.1.12)
+ * Download the official rpk release binary for the current platform from the
+ * rpk distribution CDN (https://rpk.redpanda.com). GA and RC tags are both
+ * published there; no token is needed. See cli-utils/rpk-cdn.js for the
+ * layout and the verification rules.
+ * @param {string} tag - Release tag (e.g., v26.1.12, v26.2.1-rc2)
  * @param {string} destDir - Directory to download and extract into
- * @returns {string|null} Path to the extracted binary, or null if the
- *   release asset is unavailable (caller falls back to a source build)
+ * @returns {string|null} Path to the extracted binary, or null if the CDN has
+ *   no build for the tag (HTTP 403/404; caller falls back to a source build).
+ *   Throws on a checksum mismatch or an archive with no rpk binary.
  */
 function downloadRpkRelease(tag, destDir) {
-  const osName = { darwin: 'darwin', linux: 'linux', win32: 'windows' }[process.platform]
-  const archName = { arm64: 'arm64', x64: 'amd64' }[process.arch]
-  if (!osName || !archName) {
-    console.warn(`No rpk release asset for platform ${process.platform}/${process.arch}`)
-    return null
-  }
-
-  const assetName = `rpk-${osName}-${archName}.zip`
-  const baseUrl = `https://github.com/redpanda-data/redpanda/releases/download/${tag}`
-  const zipPath = path.join(destDir, assetName)
-
-  console.log(`Downloading ${assetName} for ${tag}...`)
-  const curlResult = spawnSync('curl', [
-    '-fL', '--retry', '5', '--retry-all-errors',
-    '--connect-timeout', '30', '--max-time', '300',
-    '-o', zipPath, `${baseUrl}/${assetName}`
-  ], { encoding: 'utf8', timeout: 360000 })
-
-  if (curlResult.status !== 0) {
-    console.warn(`Could not download rpk release for ${tag} (draft or missing release asset)`)
-    return null
-  }
-
-  // Verify against the release checksum file when it exists
-  const checksumAsset = `rpk_${tag.replace(/^v/, '')}_checksums.txt`
-  const checksumPath = path.join(destDir, checksumAsset)
-  const checksumResult = spawnSync('curl', [
-    '-fsSL', '--retry', '3', '--connect-timeout', '30', '--max-time', '60',
-    '-o', checksumPath, `${baseUrl}/${checksumAsset}`
-  ], { encoding: 'utf8', timeout: 90000 })
-
-  if (checksumResult.status === 0) {
-    const expectedLine = fs.readFileSync(checksumPath, 'utf8')
-      .split('\n')
-      .find(line => line.trim().endsWith(assetName))
-    if (expectedLine) {
-      const expected = expectedLine.trim().split(/\s+/)[0]
-      const actual = crypto.createHash('sha256').update(fs.readFileSync(zipPath)).digest('hex')
-      if (expected !== actual) {
-        throw new Error(
-          `Checksum mismatch for ${assetName} (${tag}):\n` +
-          `  expected ${expected}\n  actual   ${actual}`
-        )
-      }
-      console.log('Checksum verified')
-    }
-  } else {
-    console.warn('No checksum file published for this release; skipping verification')
-  }
-
-  const unzipResult = spawnSync('unzip', ['-o', zipPath, '-d', destDir], {
-    encoding: 'utf8',
-    timeout: 60000
-  })
-  if (unzipResult.status !== 0) {
-    throw new Error(`Failed to extract ${assetName}: ${unzipResult.stderr}`)
-  }
-
-  const binPath = path.join(destDir, 'rpk')
-  if (!fs.existsSync(binPath)) {
-    throw new Error(`Extracted archive did not contain an rpk binary: ${zipPath}`)
-  }
-  fs.chmodSync(binPath, 0o755)
-  return binPath
+  return downloadRpkBinary(tag, destDir)
 }
 
 /**
  * Get an rpk binary matching the given version.
- * Prefers the official release download (published stable releases only;
- * RC releases are drafts, so their assets are not publicly downloadable).
- * Falls back to building from source at the tag.
+ * Prefers the official release download: GA and RC tags are published to
+ * https://rpk.redpanda.com/v<tag>/ with no token needed. Falls back to
+ * building from source at the tag (private clone, token required) when the
+ * CDN has no build; vdev always builds from source.
  * @param {string} rpkVersion - Version tag from the snapshot (e.g., v26.1.12, v26.2.1-rc2)
  * @param {Object} [options]
  * @param {string} [options.rpkBin] - Existing binary to use, skipping download/build
@@ -1374,25 +1344,26 @@ function acquireRpkBinary(rpkVersion, options = {}) {
   }
 
   const tag = rpkVersion.startsWith('v') ? rpkVersion : `v${rpkVersion}`
+
+  if (!RPK_RELEASE_TAG_RE.test(tag) && tag !== 'vdev') {
+    throw new Error(
+      `Cannot acquire an rpk binary for version '${rpkVersion}'.\n` +
+      'The snapshot\'s rpk_version is not a release tag. ' +
+      'Pass --rpk-bin <path> to use a local rpk binary instead.'
+    )
+  }
+
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-bin-'))
 
-  // Only published (non-draft) releases have downloadable assets
-  if (/^v\d+\.\d+\.\d+$/.test(tag)) {
+  // GA and RC tags both have a build on the CDN; only branches do not
+  if (RPK_RELEASE_TAG_RE.test(tag)) {
     const downloaded = downloadRpkRelease(tag, workDir)
     if (downloaded) {
       return downloaded
     }
     console.log('Falling back to building rpk from source...')
   } else {
-    console.log(`No published release binary for ${tag}; building from source...`)
-  }
-
-  if (!/^v\d+\.\d+\.\d+(-rc\d+)?$/.test(tag) && tag !== 'vdev') {
-    throw new Error(
-      `Cannot acquire an rpk binary for version '${rpkVersion}'.\n` +
-      'The snapshot\'s rpk_version is not a release tag. ' +
-      'Pass --rpk-bin <path> to use a local rpk binary instead.'
-    )
+    console.log(`${tag} has no build on ${RPK_CDN_BASE} (branches build from source)...`)
   }
 
   const sourceRef = tag === 'vdev' ? 'dev' : tag

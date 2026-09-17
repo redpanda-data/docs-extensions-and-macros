@@ -86,6 +86,49 @@ describe('set-latest-version extension', () => {
     expect(versionAttributes['redpanda-beta-commit']).toBe('rc456')
   })
 
+  // Assigning an attribute the value `undefined` is not the same as leaving it
+  // alone: it shadows the fallback in antora.yml, and Asciidoctor then renders
+  // the reference literally. That is how the published operator and helm-chart
+  // release-notes pages ended up linking to
+  // .../blob/{latest-operator-version}/operator/CHANGELOG.md.
+  it.each([
+    ['latest-operator-version', { 'redpanda-operator': { latestStableRelease: null, latestBetaRelease: null } }, {}],
+    ['latest-redpanda-helm-chart-version', undefined, { latestStableRelease: null, latestBetaRelease: null }],
+  ])('leaves %s unset when the fetch resolves without a version', (key, dockerTags, helmChart) => {
+    const scenario = {}
+    if (dockerTags) scenario.dockerTags = { console: { latestStableRelease: 'v3.2.5' }, ...dockerTags }
+    if (helmChart) scenario.helmChart = helmChart
+    const { versionAttributes } = runExtension(scenario)
+
+    expect(Object.keys(versionAttributes)).not.toContain(key)
+    expect(Object.keys(versionAttributes)).not.toContain(`${key}-short`)
+  })
+
+  // The empty-object cases above prove only that a null release never ADDS
+  // the key. They can't catch the actual regression, which was overwriting a
+  // real fallback: antora.yml seeds latest-operator-version so the attribute
+  // still resolves when the GitHub fetch fails, and the bug assigned it
+  // `undefined` anyway, shadowing that seed. Seed a representative fallback
+  // here and assert it survives byte-for-byte.
+  it.each([
+    [
+      'latest-operator-version', 'v2.3.8-24.3.6', '2.3',
+      { dockerTags: { console: { latestStableRelease: 'v3.2.5' }, 'redpanda-operator': { latestStableRelease: null, latestBetaRelease: null } } },
+    ],
+    [
+      'latest-redpanda-helm-chart-version', '5.9.0', '5.9',
+      { helmChart: { latestStableRelease: null, latestBetaRelease: null } },
+    ],
+  ])('preserves an existing %s fallback when the fetch resolves without a version', (key, seededValue, seededShort, scenario) => {
+    const { versionAttributes } = runExtension({
+      ...scenario,
+      versionAttributes: { [key]: seededValue, [`${key}-short`]: seededShort },
+    })
+
+    expect(versionAttributes[key]).toBe(seededValue)
+    expect(versionAttributes[`${key}-short`]).toBe(seededShort)
+  })
+
   it('emits -version-short for the operator and Helm chart attributes too', () => {
     const { versionAttributes } = runExtension()
 

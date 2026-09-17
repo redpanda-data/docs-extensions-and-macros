@@ -6,7 +6,7 @@ This module fetches cloud configuration from the cloudv2 repository to determine
 which Redpanda properties are supported, editable, or readonly in cloud deployments.
 
 Prerequisites:
-    - GITHUB_TOKEN environment variable set with appropriate permissions
+    - GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN environment variable set with appropriate permissions
     - Internet connection to access GitHub API
     
 Usage:
@@ -105,14 +105,14 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
     """
     Fetch the latest cloud configuration from the redpanda-data/cloudv2 repository and return it as a CloudConfig.
     
-    This function uses a GitHub personal access token for authentication. If `github_token` is not provided, it will read GITHUB_TOKEN or REDPANDA_GITHUB_TOKEN from the environment. It downloads the most recent versioned YAML from the repository's install-pack directory, validates expected sections (`customer_managed_configs` and `readonly_cluster_config`), and constructs a CloudConfig instance.
-    
+    This function uses a GitHub personal access token for authentication. If `github_token` is not provided, it will read GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN from the environment. It downloads the most recent versioned YAML from the repository's install-pack directory, validates expected sections (`customer_managed_configs` and `readonly_cluster_config`), and constructs a CloudConfig instance.
+
     Parameters:
-        github_token (Optional[str]): Personal access token for GitHub API. If omitted, the function will try environment variables GITHUB_TOKEN or REDPANDA_GITHUB_TOKEN.
-    
+        github_token (Optional[str]): Personal access token for GitHub API. If omitted, the function will try environment variables GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN.
+
     Returns:
         CloudConfig: Parsed cloud configuration for the latest available version.
-    
+
     Raises:
         GitHubAuthError: Authentication or access problems with the GitHub API (including 401/403 responses).
         NetworkError: Network connectivity or timeout failures when contacting the GitHub API.
@@ -120,7 +120,11 @@ def fetch_cloud_config(github_token: Optional[str] = None) -> CloudConfig:
         CloudConfigError: Generic configuration error (for example, missing token) or unexpected internal failures.
     """
     if not github_token:
-        github_token = os.environ.get('GITHUB_TOKEN') or os.environ.get('REDPANDA_GITHUB_TOKEN')
+        # GH_TOKEN takes priority: `doc-tools generate property-docs` pre-resolves
+        # a token via cli-utils/github-token.js's full priority chain (GIT_CREDENTIALS,
+        # ACTIONS_BOT_TOKEN, etc.) and passes it down as GH_TOKEN, so this must see
+        # that name too -- not just the two env vars a directly-invoked `make` sets.
+        github_token = os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN') or os.environ.get('REDPANDA_GITHUB_TOKEN')
     
     if not github_token:
         error_msg = (

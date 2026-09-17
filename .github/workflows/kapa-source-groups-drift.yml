@@ -1,0 +1,110 @@
+name: Kapa source-group drift
+
+# Runs `doc-tools validate kapa-source-groups` on a schedule and files one issue
+# in docs-ui when it finds a gap. The command reports four kinds of gap for the
+# streaming versions the docs site currently publishes: a version with no Kapa
+# source, a source left in no group (global in Kapa), a grouped source that the
+# committed docs-data/kapa-source-groups.json has no segment for, and a segment
+# whose group_id is not a group that version's source sits in (a group deleted
+# and recreated in the dashboard, or a source moved to another version's group).
+#
+# The first is the reason this runs on a schedule rather than only on PRs.
+# Cutting a v/X.Y branch in redpanda-data/docs publishes a new version segment
+# with no file change in THIS repo at all, so no PR-triggered check would ever
+# see it. Kapa also has no write API, so the matching source and group are
+# created by hand and are easy to forget. Left alone, readers on the new version
+# silently fall back to the default segment, which is the DOC-2450 failure.
+#
+# The bash lives in .github/scripts/kapa-source-groups-drift.sh, which the last
+# step runs from the checkout; __tests__/workflows/kapa-source-groups-drift.test.js
+# asserts that and exercises every exit path against a stubbed gh.
+
+on:
+  schedule:
+    # Mondays 06:00 UTC, matching check-env-vars.yml in redpanda-data/docs.
+    - cron: '0 6 * * 1'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'docs-data/kapa-source-groups.json'
+      - 'docs-data/kapa-source-groups.schema.json'
+      - 'bin/doc-tools.js'
+      - 'tools/kapa-source-groups/**'
+      - 'cli-utils/kapa-credentials.js'
+      - '.github/scripts/kapa-source-groups-drift.sh'
+      - '.github/workflows/kapa-source-groups-drift.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  drift:
+    name: Check Kapa source groups
+    runs-on: ubuntu-latest
+    # A pull_request from a fork gets no secrets and a read-only token, so the
+    # OIDC step below cannot assume the role: RP_AWS_CRED_ACCOUNT_ID expands to
+    # empty, role-to-assume becomes arn:aws:iam:::role/... and the action errors
+    # out. That leaves an external contributor with a permanently red check and
+    # nothing they can do about it. Skipped rather than failed, because the check
+    # needs credentials that a fork PR is not allowed to have by design.
+    #
+    # Schedule and workflow_dispatch always run: head.repo is unset for those,
+    # so the comparison holds without needing a per-event branch.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+
+      - name: Get the Kapa credentials
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/kapa
+          parse-json-secrets: true
+
+      # The org bot token can write issues in docs-ui. A pull_request run never
+      # files an issue (the failing check is the notification), and same-repo
+      # PRs run the workflow file from the PR branch, so the token is only
+      # fetched for the events that need it.
+      - name: Get the bot token for filing issues
+        if: github.event_name != 'pull_request'
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/actions_bot_token
+          parse-json-secrets: true
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # npm ci then npx --no-install, deliberately: an unpinned npx would resolve
+      # whatever doc-tools release is newest, so this check could change or start
+      # failing with no change in this repo.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check for drift
+        env:
+          KAPA_API_KEY: ${{ env.KAPA_API_KEY }}
+          KAPA_PROJECT_ID: ${{ env.KAPA_PROJECT_ID }}
+          # The org bot token, not github.token: the issue is filed in docs-ui,
+          # and github.token cannot write outside the repo running the job.
+          GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
+          ISSUE_REPO: redpanda-data/docs-ui
+          EVENT_NAME: ${{ github.event_name }}
+          # Only a run against main may file an issue. A workflow_dispatch from
+          # a work-in-progress branch reports and fails, but files nothing.
+          GITHUB_REF: ${{ github.ref }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash .github/scripts/kapa-source-groups-drift.sh

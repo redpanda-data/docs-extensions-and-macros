@@ -107,3 +107,23 @@ features:
     source:
       kind: core-enum
       value: preview_beta
+  - name: Preview Since-Gated Feature
+    scope: redpanda
+    # Shipped (no status key -- entryStatus reads this as GA), but gated to
+    # a specific version: a mention on a page whose OWN version predates
+    # `since` renders unstyled, the same way an unreleased feature renders on
+    # released docs, because as of that page's version the feature had not
+    # shipped yet. This is a different gate from status: unreleased -- that
+    # one is about which BRANCH (prerelease or not) may mention a feature at
+    # all; this one is about which VERSION of an ordinarily-GA feature a page
+    # may claim, so it also applies across two released versions where
+    # neither is a prerelease.
+    since: '26.3'
+    description: |
+      Fixture for since-gating. Shipped in 26.3 and later; renders unstyled
+      on any page whose own version predates that.
+    expiration: |
+      The feature is disabled.
+    source:
+      kind: core-enum
+      value: preview_since_gated

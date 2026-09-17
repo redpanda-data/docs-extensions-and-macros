@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync, spawnSync } = require('child_process');
+const { execSync, execFileSync, spawnSync } = require('child_process');
 
 // Mock child_process for isolated testing
 jest.mock('child_process');
@@ -649,5 +649,73 @@ describe('CLI Integration Tests', () => {
       // Skip if CLI not available in test environment
       console.warn('CLI test skipped:', error.message);
     }
+  });
+});
+
+describe('bundleOpenAPI repository resolution and auth', () => {
+  // redpanda-data/streaming-enterprise (the default repo) is private, unlike
+  // the public redpanda-data/redpanda it replaced, so a token is now
+  // mandatory for the default and the clone must authenticate without ever
+  // putting the token in the URL (visible in process listings, persisted in
+  // .git/config).
+  const TOKEN_VARS = ['GIT_CREDENTIALS', 'REDPANDA_GITHUB_TOKEN', 'ACTIONS_BOT_TOKEN', 'GITHUB_TOKEN', 'VBOT_GITHUB_API_TOKEN', 'GH_TOKEN'];
+  const savedEnv = {};
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    for (const name of TOKEN_VARS) {
+      savedEnv[name] = process.env[name];
+      delete process.env[name];
+    }
+  });
+
+  afterEach(() => {
+    for (const name of TOKEN_VARS) {
+      if (savedEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = savedEnv[name];
+    }
+  });
+
+  test('throws a clear error when the default repo has no token, without attempting a clone', async () => {
+    await expect(bundleOpenAPI({ tag: 'v25.3.1', surface: 'admin' }))
+      .rejects.toThrow(/streaming-enterprise is a private repository/);
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+
+  test('clones the default repo with a credential helper, never exposing the token in argv', async () => {
+    process.env.GH_TOKEN = 'test-token-123';
+    execFileSync.mockImplementation(() => ''); // no real clone happens, so repoDir is never created
+
+    await expect(bundleOpenAPI({ tag: 'v25.3.1', surface: 'admin' }))
+      .rejects.toThrow('Repository clone failed - directory not found');
+
+    expect(execFileSync).toHaveBeenCalledTimes(1);
+    const [cmd, args, options] = execFileSync.mock.calls[0];
+    expect(cmd).toBe('git');
+    expect(args).toEqual([
+      'clone', '--depth', '1', '--branch', 'v25.3.1',
+      'https://github.com/redpanda-data/streaming-enterprise.git', 'redpanda'
+    ]);
+    // The token must never appear in argv (visible via ps/proc to anything
+    // that can list processes) -- it travels through env-only git config
+    // instead of a -c argument.
+    expect(args.join(' ')).not.toContain('test-token-123');
+    expect(args.some((a) => a.includes('extraheader'))).toBe(false);
+
+    expect(options.env.BUNDLE_OPENAPI_CLONE_TOKEN).toBe('test-token-123');
+    expect(options.env.GIT_CONFIG_COUNT).toBe('2');
+    expect(options.env.GIT_CONFIG_KEY_1).toBe('credential.https://github.com.helper');
+    expect(options.env.GIT_CONFIG_VALUE_1).toContain('$BUNDLE_OPENAPI_CLONE_TOKEN');
+  });
+
+  test('does not require a token when a custom --repo is given', async () => {
+    execFileSync.mockImplementation(() => '');
+
+    await expect(bundleOpenAPI({ tag: 'v25.3.1', surface: 'admin', repo: 'https://internal.example/mirror.git' }))
+      .rejects.toThrow('Repository clone failed - directory not found');
+
+    const [, args] = execFileSync.mock.calls[0];
+    expect(args.some((a) => a.includes('extraheader'))).toBe(false);
+    expect(args).toEqual(expect.arrayContaining(['https://internal.example/mirror.git']));
   });
 });

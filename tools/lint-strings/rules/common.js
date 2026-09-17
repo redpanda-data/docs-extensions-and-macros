@@ -54,6 +54,91 @@ function isNameEcho (name, description) {
   return true
 }
 
+/**
+ * Blank out the spans of a description where a code-ish token is expected to
+ * appear bare, so the inline-code rule only sees prose:
+ *
+ *   * backticked spans - already marked up, which is the whole point;
+ *   * URLs and Markdown link targets - a path inside a link is part of the
+ *     link, and backticking it would break the link;
+ *   * anything the declaration is named after, which name-echo owns.
+ *
+ * Replaced with spaces rather than removed so match indices stay meaningful.
+ */
+function maskNonProse (text) {
+  let out = text
+  const blank = (m) => ' '.repeat(m.length)
+  // Backticked spans first: a URL inside backticks is already marked up.
+  out = out.replace(/`[^`]*`/g, blank)
+  // Markdown links: mask the whole construct, target included.
+  out = out.replace(/\[[^\]]*\]\([^)]*\)/g, blank)
+  // Bare URLs, and AsciiDoc's url[text] form.
+  out = out.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, blank)
+  return out
+}
+
+/**
+ * Tokens that are code and read as code, so they belong in inline code.
+ * Backticks are the portable choice: a single-backtick span is inline code in
+ * both AsciiDoc and Markdown, so one rule covers every surface regardless of
+ * which format the generator emits.
+ *
+ * Deliberately narrow. This rule posts inline suggestions on engineering PRs,
+ * so a false positive costs more than a miss:
+ *
+ *   * snake_case with at least two segments - in this domain that is always an
+ *     identifier (`default_topic_partitions`), never prose;
+ *   * long flags (`--tolerate-data-loss`);
+ *   * absolute paths with at least two segments (`/etc/redpanda/redpanda.yaml`,
+ *     `/v1/topics`).
+ *
+ * Not included, on purpose: dotted keys (`segment.bytes`) collide with
+ * sentence boundaries and abbreviations; bare `true`/`false` and numbers
+ * appear in ordinary prose; single-segment lowercase words are unrecoverable
+ * from prose without a symbol table.
+ */
+const CODE_TOKEN_PATTERNS = Object.freeze([
+  { id: 'identifier', re: /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g },
+  { id: 'flag', re: /(?<![\w-])--[a-z][a-z0-9]*(?:-[a-z0-9]+)*\b/g },
+  { id: 'path', re: /(?<![\w/])\/[a-z][a-zA-Z0-9_.-]*(?:\/[a-zA-Z0-9_.{}-]+)+\/?/g }
+])
+
+/**
+ * Code-ish tokens in a description that are not inside inline code.
+ * Exported for tests and for the surfaces that scope the rule differently.
+ */
+function findBareCodeTokens (text, name = null) {
+  const masked = maskNonProse(String(text || ''))
+  const found = []
+  const seen = new Set()
+  for (const { id, re } of CODE_TOKEN_PATTERNS) {
+    re.lastIndex = 0
+    let match
+    while ((match = re.exec(masked)) !== null) {
+      const token = match[0]
+      // The declaration's own name restating itself is name-echo's finding,
+      // not a markup one.
+      if (name && token === name) continue
+      if (seen.has(token)) continue
+      seen.add(token)
+      found.push({ token, kind: id })
+    }
+  }
+  return found
+}
+
+/**
+ * A short window of `text` around the first occurrence of `needle`, for use in
+ * rule messages so the writer can see the offending phrase in context.
+ */
+function excerpt (text, needle, width = 60) {
+  const at = text.toLowerCase().indexOf(needle.toLowerCase())
+  if (at === -1) return text.slice(0, width)
+  const start = Math.max(0, at - Math.floor(width / 2))
+  const slice = text.slice(start, start + width)
+  return `${start > 0 ? '...' : ''}${slice}${start + width < text.length ? '...' : ''}`
+}
+
 const COMMON_RULES = [
   {
     name: 'empty-description',
@@ -131,6 +216,49 @@ const COMMON_RULES = [
     }
   },
   {
+    name: 'em-dash',
+    description: 'Em dash in prose that ships to docs.redpanda.com',
+    severity: 'warning',
+    check: (decl) => {
+      const text = decl.string || ''
+      if (!text.includes('\u2014')) return []
+      // The docs style guide takes commas, parentheses or a sentence break
+      // instead of em dashes. Reference docs generated from these strings pass
+      // prose through unchanged, so an em dash here is published verbatim, and
+      // correcting it in the generated partial is undone by the next
+      // regeneration.
+      const count = (text.match(/\u2014/g) || []).length
+      return [{
+        message: `Contains ${count} em dash${count === 1 ? '' : 'es'}. Use a comma, parentheses, or a separate sentence: "${excerpt(text, '\u2014')}"`
+      }]
+    }
+  },
+  {
+    name: 'latin-abbreviation',
+    description: 'Latin abbreviation instead of plain English',
+    severity: 'warning',
+    check: (decl) => {
+      const text = decl.string || ''
+      if (!text) return []
+      const issues = []
+      // "e.g." and "i.e." are both ruled out by the style guide's terminology
+      // list. Match the abbreviation only, so "e.g" inside a longer token such
+      // as a URL or an identifier is left alone.
+      for (const [abbr, replacement] of [['e.g.', '"for example"'], ['i.e.', '"that is"']]) {
+        // Boundaries on both sides: the abbreviation must not be part of a
+        // longer token, so a host or identifier that happens to contain it
+        // (https://e.g.example/path) is left alone.
+        const pattern = new RegExp(`(^|[^\\w.])${abbr.replace(/\./g, '\\.')}(?=$|[^\\w])`, 'i')
+        if (pattern.test(text)) {
+          issues.push({
+            message: `Uses "${abbr}". Write ${replacement} instead: "${excerpt(text, abbr)}"`
+          })
+        }
+      }
+      return issues
+    }
+  },
+  {
     name: 'unbalanced-backticks',
     description: 'Odd number of backticks ships broken markup',
     severity: 'error',
@@ -142,7 +270,20 @@ const COMMON_RULES = [
       }
       return []
     }
+  },
+  {
+    name: 'missing-inline-code',
+    description: 'Code value or field name in prose without inline code',
+    severity: 'warning',
+    check: (decl) => {
+      const bare = findBareCodeTokens(decl.string, decl.name)
+      if (bare.length === 0) return []
+      const list = bare.map((b) => `\`${b.token}\``).join(', ')
+      return [{
+        message: `Code values and field names belong in inline code: ${list}. Wrap each in backticks, which render as inline code in both AsciiDoc and Markdown.`
+      }]
+    }
   }
 ]
 
-module.exports = { COMMON_RULES, JARGON_TERMS, isNameEcho, tokenize }
+module.exports = { COMMON_RULES, JARGON_TERMS, isNameEcho, tokenize, findBareCodeTokens, maskNonProse }
