@@ -292,11 +292,34 @@ jobs:
               | join(",")'
           }
           set_pending() {
+            # Truncated to 139: GitHub rejects a status description over 140
+            # characters with a 422, and under `set -e` that would abort the
+            # gate entirely, leaving the PR with no review, no comment and no
+            # status. The SME-list caller below is unbounded (one login per
+            # tagged reviewer), and aggregate-review.sh truncates its own
+            # description for the same reason.
             gh api "repos/$R/statuses/$HEAD_SHA" \
               -f context="$REVIEW_STATUS_CONTEXT" -f state=pending \
-              -f description="$1" \
+              -f description="${1:0:139}" \
               -f target_url="${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}" > /dev/null
           }
+
+          # ── Exactly-once per (PR, head SHA) ───────────────────────────
+          # Checked before anything writes a status, so a review_requested or
+          # labeled event after a completed review leaves the verdict alone.
+          # This has to stay ABOVE the plugin_ref guard below: that guard
+          # writes a pending status, and writing one over a head SHA that
+          # already carries a completed verdict would both destroy the verdict
+          # and re-arm exactly-once, so the same SHA could be reviewed, and
+          # billed, a second time.
+          DONE=$(gh api "repos/$R/commits/$HEAD_SHA/status" \
+            --jq '[.statuses[] | select(.context=="'"$REVIEW_STATUS_CONTEXT"'")
+                   | select(.state=="success" or .state=="failure")] | length')
+          if [[ "$DONE" -gt 0 ]]; then
+            echo "Review already completed for $HEAD_SHA — exiting (exactly-once)."
+            echo "run_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # Config guard for the skills pin: an empty plugin_ref would make
           # every downstream checkout fall back to the default branch — an
@@ -307,18 +330,6 @@ jobs:
           if [[ ! "${PLUGIN_REF:-}" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::warning::plugin_ref is not a full commit SHA ('${PLUGIN_REF:-}') — holding the gate (pending), skipping review"
             set_pending "Docs review pipeline misconfigured (plugin_ref is not pinned)"
-            echo "run_review=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # ── Exactly-once per (PR, head SHA) ───────────────────────────
-          # Checked before anything writes a status, so a review_requested or
-          # labeled event after a completed review leaves the verdict alone.
-          DONE=$(gh api "repos/$R/commits/$HEAD_SHA/status" \
-            --jq '[.statuses[] | select(.context=="'"$REVIEW_STATUS_CONTEXT"'")
-                   | select(.state=="success" or .state=="failure")] | length')
-          if [[ "$DONE" -gt 0 ]]; then
-            echo "Review already completed for $HEAD_SHA — exiting (exactly-once)."
             echo "run_review=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -950,7 +961,34 @@ jobs:
           RESULT_SHOTS: ${{ needs.screenshot_gate.result }}
           RESULT_TICKET: ${{ needs.ticket_delta.result }}
         run: |
-          bash .standards/scripts/aggregate-review.sh results comment.md
+          set -uo pipefail
+          # Guarded like the preview-links call above it. If the aggregator
+          # cannot run (missing from a plugin_ref that predates it, or a bug
+          # in the script), an unguarded failure skips the two steps below,
+          # so the PR gets no comment, no terminal status, and keeps the
+          # gate's pending claim until the 90-minute stale window expires.
+          # Degrade to the pipeline's standard infra-failure posture instead:
+          # a comment carrying the same marker (so it still upserts in place),
+          # a failure status, and needs-human-review.
+          if ! bash .standards/scripts/aggregate-review.sh results comment.md; then
+            echo "::warning::aggregate-review.sh could not run — posting the unavailable fallback"
+            {
+              echo "state=failure"
+              echo "description=automated review unavailable, human review required"
+              echo "labels=needs-human-review"
+            } >> "$GITHUB_OUTPUT"
+            {
+              echo "<!-- docs-review:comment -->"
+              echo "## 📋 Docs review: ⚠️ automated review unavailable"
+              echo
+              echo "The pipeline could not assemble a verdict for this revision (the"
+              echo "aggregation step failed to run), so there is no automated result here."
+              echo "Human review is required. See the [workflow run](${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}) for details."
+              echo
+              echo "**This workflow never merges.** Merge requires a documentation approval"
+              echo "from a docs team member."
+            } > comment.md
+          fi
 
       - name: Upsert the review comment
         uses: actions/github-script@v7

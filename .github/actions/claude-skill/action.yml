@@ -401,9 +401,14 @@ runs:
         # Make it loud instead: the skill listing must show the plugin. This
         # also catches the --plugin-dir marketplace trap regressing (the
         # manifest removal above), because a marketplace load lists nothing.
-        if ! claude --plugin-dir "$PWD/.docs-team-standards-plugin" -p "list skills" \
-            --max-turns 2 --output-format text 2>/dev/null \
-            | grep -q "docs-team-standards:"; then
+        # Captured into a variable rather than piped into `grep -q`: this step
+        # runs under `pipefail`, and grep exits at its first match, so the
+        # still-writing claude process dies of SIGPIPE (141), pipefail
+        # propagates that, the `!` inverts it, and a healthy run reports the
+        # plugin as missing. Matching the captured string has no such race.
+        SKILLS=$(claude --plugin-dir "$PWD/.docs-team-standards-plugin" -p "list skills" \
+          --max-turns 2 --output-format text 2>/dev/null || true)
+        if [[ "$SKILLS" != *"docs-team-standards:"* ]]; then
           echo "::error::docs-team-standards plugin did not load from the pinned checkout (plugin_ref=${{ inputs.plugin_ref }}) — refusing to review without the skills"
           exit 1
         fi
