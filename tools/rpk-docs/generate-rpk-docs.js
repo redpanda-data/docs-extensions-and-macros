@@ -3227,7 +3227,11 @@ function writeEnvVarsPartial (tree, partialsDir) {
     return { written: false }
   }
   const { renderPartial, keyToEnvVar } = require('./generate-x-env-partial.js')
-  const options = tree.x_options.map(o => ({ name: o.name, env: o.env || keyToEnvVar(o.name) }))
+  const options = tree.x_options.map(o => ({
+    name: o.name,
+    env: o.env || keyToEnvVar(o.name),
+    groupTitle: o.group_title || null
+  }))
   const output = path.join(partialsDir, 'rpk-env-vars.adoc')
   fs.mkdirSync(path.dirname(output), { recursive: true })
   fs.writeFileSync(output, renderPartial(options))

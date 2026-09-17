@@ -11,6 +11,12 @@
  *    descriptions.
  * 2. `rpk -X list` text output, for rpk versions that predate x_options.
  *
+ * Each x_option also carries the API it configures, as `group` (a stable
+ * slug) and `group_title` (the heading), added in
+ * redpanda-data/streaming-enterprise#311. When rpk supplies them the table is
+ * sectioned by API, so the grouping comes from rpk rather than being restated
+ * here; rpk versions without them get one flat table.
+ *
  * The partial is included by both reference:rpk/rpk-x-options.adoc and
  * reference:environment-variables.adoc in the docs repo. Hidden -X options
  * (for example cloud_environment, whose values are deliberately
@@ -38,10 +44,12 @@ const GENERATED_BANNER = `// tag::generated[]
 /**
  * Extract -X options from `rpk --print-tree` JSON.
  * @param {string} output - Raw stdout from `rpk --print-tree`
- * @returns {Array<{name: string, env: string}>|null} options in display
- *   order, or null when the tree has no x_options (rpk predates
- *   redpanda#31520). The env name comes from rpk itself when present
+ * @returns {Array<{name: string, env: string, group: ?string, groupTitle: ?string}>|null}
+ *   options in display order, or null when the tree has no x_options (rpk
+ *   predates redpanda#31520). The env name comes from rpk itself when present
  *   (the tree's env field is produced by the same derivation rpk reads).
+ *   group and groupTitle are null on rpk versions that do not group the
+ *   options.
  */
 function xOptionsFromTree (output) {
   let tree
@@ -51,7 +59,12 @@ function xOptionsFromTree (output) {
     return null
   }
   if (!Array.isArray(tree.x_options) || tree.x_options.length === 0) return null
-  return tree.x_options.map(o => ({ name: o.name, env: o.env || keyToEnvVar(o.name) }))
+  return tree.x_options.map(o => ({
+    name: o.name,
+    env: o.env || keyToEnvVar(o.name),
+    group: o.group || null,
+    groupTitle: o.group_title || null
+  }))
 }
 
 /**
@@ -97,15 +110,52 @@ function keyToAnchor (key) {
 }
 
 /**
+ * Group options by the API group rpk reports, in first-seen order.
+ *
+ * Returns null unless every option carries a group title, so a table is
+ * either fully sectioned or not sectioned at all: a half-sectioned table
+ * would read as though the options with no heading belonged to the section
+ * above them.
+ *
+ * Grouping by title rather than slicing on the boundaries means a group whose
+ * options are not contiguous still gets one heading instead of two.
+ * @param {Array<{name: string, env: string, groupTitle: ?string}>} options
+ * @returns {Array<{title: string, options: Array<Object>}>|null}
+ */
+function groupOptions (options) {
+  if (!options.every(o => o.groupTitle)) return null
+  const byTitle = new Map()
+  for (const option of options) {
+    const existing = byTitle.get(option.groupTitle)
+    if (existing) existing.push(option)
+    else byTitle.set(option.groupTitle, [option])
+  }
+  return [...byTitle].map(([title, opts]) => ({ title, options: opts }))
+}
+
+/**
+ * Render one table row for an option.
+ * @param {{name: string, env: string}} option
+ * @returns {string}
+ */
+function renderRow ({ name, env }) {
+  return `|xref:reference:rpk/rpk-x-options.adoc#${keyToAnchor(name)}[${name}] |${env}`
+}
+
+/**
  * Render the partial's AsciiDoc content.
- * @param {Array<{name: string, env: string}>} options - -X options
+ *
+ * The table is sectioned by API group when rpk reports one for every option,
+ * and is a single flat table otherwise (rpk versions that predate the groups,
+ * and the -X list fallback, which has no group data to parse).
+ * @param {Array<{name: string, env: string, groupTitle: ?string}>} options - -X options
  * @returns {string}
  */
 function renderPartial (options) {
-  const rows = options.map(({ name, env }) => {
-    const xrefTarget = `xref:reference:rpk/rpk-x-options.adoc#${keyToAnchor(name)}[${name}]`
-    return `|${xrefTarget} |${env}`
-  })
+  const groups = groupOptions(options)
+  const body = groups
+    ? groups.map(g => `2+s|${g.title}\n${g.options.map(renderRow).join('\n')}`).join('\n\n')
+    : options.map(renderRow).join('\n')
   return `${GENERATED_BANNER}
 Every \`-X\` option has a corresponding \`RPK_*\` environment variable. Convert by prefixing with \`RPK_\` and replacing dots with underscores:
 
@@ -113,7 +163,7 @@ Every \`-X\` option has a corresponding \`RPK_*\` environment variable. Convert 
 |===
 |\`-X\` Option |Environment Variable
 
-${rows.join('\n')}
+${body}
 |===
 // end::generated[]
 `
@@ -276,6 +326,7 @@ function handleXEnvPartialGeneration (options) {
 
 module.exports = {
   xOptionsFromTree,
+  groupOptions,
   parseXList,
   keyToEnvVar,
   keyToAnchor,

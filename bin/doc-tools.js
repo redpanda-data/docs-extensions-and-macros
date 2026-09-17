@@ -1476,6 +1476,9 @@ automation
  * parsing `-X list` text for rpk versions that predate it. Hidden -X options
  * appear in neither source, so they are excluded automatically.
  *
+ * The table is sectioned by the API group rpk reports for each option, and is
+ * a single flat table on rpk versions that report no groups.
+ *
  * The main rpk-docs pipeline also writes this partial from the tree it
  * already holds; this standalone command is for targeted refreshes without
  * a full generation run.
@@ -1492,7 +1495,7 @@ automation
  */
 automation
   .command('rpk-env-partial')
-  .description('Generate the -X -> RPK_* env var mapping partial from rpk -X list output.')
+  .description('Generate the -X -> RPK_* env var mapping partial from rpk itself.')
   .option('-r, --ref <ref>', 'Git branch or tag to build rpk from (e.g., dev, v26.2.1). Clones from GitHub.')
   .option('--from-source <path>', 'Path to local rpk source (src/go/rpk directory)')
   .option('--rpk-bin <path>', 'Path to an existing rpk binary (skips clone and build)')
