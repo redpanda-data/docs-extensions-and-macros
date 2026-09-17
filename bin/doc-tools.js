@@ -76,6 +76,11 @@ programCli
  * - Node.js and npm
  * - Python 3.9 or higher
  * - Docker (for some dependencies)
+ * - Network access to https://rpk.redpanda.com (rpk is downloaded from the
+ *   rpk distribution CDN and checksum-verified; no GitHub token needed).
+ *   Optional: RPK_VERSION=vX.Y.Z pins the rpk version. Without it, the
+ *   newest GA is resolved from streaming-enterprise tags when a GitHub token
+ *   is available, otherwise from latest/ on the CDN.
  */
 programCli
   .command('install-test-dependencies')
@@ -1358,6 +1363,10 @@ automation
  * - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
  *   access to redpanda-data/streaming-enterprise, which is private (not
  *   needed when --from-source points at an existing local checkout)
+ * - --plugin refreshes need none of the above when the snapshot's rpk_version
+ *   is a published GA or RC tag: the rpk binary is downloaded from
+ *   https://rpk.redpanda.com and checksum-verified. Go, Git and the token are
+ *   only used as a fallback when the CDN has no build for that tag.
  */
 automation
   .command('rpk-docs')
