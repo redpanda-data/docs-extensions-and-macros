@@ -160,10 +160,10 @@ runs:
     # review honours them — but from the PR's BASE branch, not its head: the
     # head is untrusted, and a PR must not be able to rewrite the rules it is
     # reviewed against. Every CLAUDE.md / CLAUDE.local.md in the head is
-    # dropped first, then the base branch's CLAUDE.md files are restored.
+    # dropped first, then the base branch's copies of BOTH are restored.
     # Consequence: a PR that edits CLAUDE.md is reviewed under the OLD rules;
     # the new ones apply to the next PR after it merges.
-    - name: Load this repo's CLAUDE.md files from the base branch
+    - name: Load this repo's CLAUDE.md/CLAUDE.local.md files from the base branch
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -181,8 +181,8 @@ runs:
           gh api "repos/$R/contents/$f?ref=$BASE_REF" -H 'Accept: application/vnd.github.raw+json' > "$f"
           N=$((N + 1)); LOADED="$LOADED $f"
         done < <(gh api "repos/$R/git/trees/$BASE_REF?recursive=1" \
-          --jq '.tree[] | select(.type=="blob") | select(.path | test("(^|/)CLAUDE\\.md$")) | .path')
-        echo "Loaded $N CLAUDE.md file(s) from $BASE_REF:${LOADED:- none}"
+          --jq '.tree[] | select(.type=="blob") | select(.path | test("(^|/)CLAUDE(\\.local)?\\.md$")) | .path')
+        echo "Loaded $N CLAUDE.md/CLAUDE.local.md file(s) from $BASE_REF:${LOADED:- none}"
 
     # The plugin, checked out at a pinned SHA rather than installed via
     # `claude plugin marketplace add`: the marketplace path clones a private
@@ -288,9 +288,15 @@ runs:
         EOF
         chmod +x "$SHIM_DIR/gh"
         echo "GH_READONLY_SHIM=$SHIM_DIR" >> "$GITHUB_ENV"
-        # Self-test: a refused mutation must not reach the real binary.
-        PATH="$SHIM_DIR:$PATH" gh api repos/x/y/issues/1/comments -f body=hi 2>/dev/null && { echo "::error::gh shim failed to refuse a POST"; exit 1; }
-        PATH="$SHIM_DIR:$PATH" gh pr comment 1 --body hi 2>/dev/null && { echo "::error::gh shim failed to refuse pr comment"; exit 1; }
+        # Self-test: a refused mutation must not reach the real binary. This
+        # step has no GH_TOKEN, so the real `gh` would itself fail on auth —
+        # an exit-code check alone can't tell that apart from a correct
+        # refusal (a broken/removed deny() would still "pass"). Grep for the
+        # shim's own message instead: only deny() prints "refused:".
+        REFUSAL1=$(PATH="$SHIM_DIR:$PATH" gh api repos/x/y/issues/1/comments -f body=hi 2>&1 1>/dev/null || true)
+        [[ "$REFUSAL1" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse a POST (got: $REFUSAL1)"; exit 1; }
+        REFUSAL2=$(PATH="$SHIM_DIR:$PATH" gh pr comment 1 --body hi 2>&1 1>/dev/null || true)
+        [[ "$REFUSAL2" == *"refused:"* ]] || { echo "::error::gh shim failed to refuse pr comment (got: $REFUSAL2)"; exit 1; }
         echo "gh read-only shim installed at $SHIM_DIR"
 
     # ── ADP gateway auth (DEVPROD-4735 pattern, docs-team-agents account) ──

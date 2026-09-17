@@ -283,10 +283,11 @@ jobs:
             reviewed=$(gh api "repos/$R/pulls/$PR/reviews" --paginate \
               --jq '[.[].user.login] | unique | join(",")')
             jq -nr --arg live "$live" --arg reviewed "$reviewed" \
-              --arg team "$DOC_TEAM" --arg author "$AUTHOR" '
+              --arg team "$DOC_TEAM" --arg author "$AUTHOR" --arg bots "$BOT_LOGINS" '
               (($live | split(",")) + ($reviewed | split(","))) | unique
               | map(select(. != "" and . != $author))
               | map(select(endswith("[bot]") | not))
+              | map(select(. as $l | ($bots | split(",") | map(gsub("\\s";""))) | index($l) | not))
               | map(select(. as $l | ($team | split(",") | map(gsub("\\s";""))) | index($l) | not))
               | join(",")'
           }
@@ -626,9 +627,12 @@ jobs:
 
   # ──────────────────────────────────────────────────────────────────────
   # §4 — /code-review for code-example-heavy PRs (additive to adoc_review).
-  # In content repos "code-heavy" means example code shipped with a page,
-  # so this pass checks that the examples are correct — the prose review
-  # above still owns the page itself.
+  # In content repos "code-heavy" means example code shipped with a page, so
+  # this pass checks that the examples are correct — the prose review above
+  # still owns the page itself. This pipeline also has at least one
+  # tooling-repo caller (docs-team-standards, whose own scripts/workflows are
+  # its "code"), so the prompt below asks Claude to tell the two cases apart
+  # rather than assuming every caller is a content repo.
   # ──────────────────────────────────────────────────────────────────────
   code_review:
     needs: [gate, classify]
@@ -655,14 +659,20 @@ jobs:
           output_dir: review-output
           prompt: >
             /code-review ${{ inputs.pr_number }} medium
-            HEADLESS MODE: do NOT post comments or apply fixes. The changed
-            code files are documentation EXAMPLES that ship with a page;
-            judge them as examples a reader will copy (correct, runnable,
-            matching the prose), and apply this repository's own CLAUDE.md
-            rules (in the working tree, from the base branch). Write
-            findings to review-output/findings.md and review-output/verdict.json
+            HEADLESS MODE: do NOT post comments or apply fixes. First decide
+            whether the changed code files are documentation EXAMPLES that
+            ship with a page (a lab, a quickstart snippet) or this
+            repository's OWN implementation code (scripts, CI, tooling) —
+            most callers of this review are content repos where changed code
+            is examples, but not all are. If they are examples, judge them as
+            a reader will copy them (correct, runnable, matching the prose).
+            If they are this repo's own implementation, review them as
+            regular code (correctness, not doc-example fidelity). Either way,
+            apply this repository's own CLAUDE.md rules (in the working tree,
+            from the base branch). Write findings to
+            review-output/findings.md and review-output/verdict.json
             with schema {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
-            where "fail" means a confirmed correctness bug in a code example.
+            where "fail" means a confirmed correctness bug.
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -727,6 +737,15 @@ jobs:
           npx --yes --package "@redpanda-data/docs-extensions-and-macros@${DOC_TOOLS_VERSION}" \
             doc-tools lint-screenshots --files "$LINT_DIR/changed-files.txt" \
             --format json --output "$LINT_DIR/result.json" > /dev/null || [[ $? -eq 1 ]]
+          # An unrecognized `lint-screenshots` subcommand (doc_tools_version
+          # pinned to a release that predates it) also exits 1, the same code
+          # the line above tolerates for "findings present" — but it writes no
+          # result.json. Tell the two apart before jq turns a missing file
+          # into a cryptic crash.
+          if [[ ! -s "$LINT_DIR/result.json" ]]; then
+            echo "::error::doc-tools lint-screenshots produced no output at doc_tools_version=${DOC_TOOLS_VERSION} — the pin may predate this subcommand, or npx failed to install it"
+            exit 1
+          fi
           jq '
             def line: "\(.file)\(if .line then ":\(.line)" else "" end)\(if .image then " [\(.image)]" else "" end) \(.message)";
             {
