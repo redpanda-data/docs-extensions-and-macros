@@ -37,6 +37,15 @@
  * the same way an unreleased feature renders on released docs, because as
  * of that page's version the feature had not shipped yet.
  *
+ * Redpanda Cloud has no Enterprise Edition license -- customers never apply
+ * or manage one -- so both macros treat a page in a Cloud component
+ * (env-cloud) as having no enterprise feature to mark or list at all. The
+ * inline macro renders plain text with no styling, tooltip, or link, and the
+ * block macro renders nothing instead of a licensing table; both report to
+ * the build log according to enterprise-validate. This also covers the Cloud rendering of
+ * single-sourced self-managed prose: the document reflects the page being
+ * converted, regardless of which repo the included prose was written in.
+ *
  * Document or site attributes:
  *
  *   enterprise-validate        'warn' (default) to log unknown feature names,
@@ -62,6 +71,7 @@
 const yaml = require('js-yaml')
 const semver = require('semver')
 const { buildBadgeHtml, DEFAULT_TOOLTIPS } = require('./badge')
+const { isAttributeSet } = require('./prop')
 const logger = require('@antora/logger')('enterprise-macro')
 
 const $enterpriseRegistry = Symbol('$enterpriseRegistry')
@@ -179,6 +189,42 @@ function isPrereleasePage (config, document) {
   const versions = Array.isArray(component.versions) ? component.versions : []
   const componentVersion = versions.find((entry) => entry.version === src.version)
   return Boolean(componentVersion && componentVersion.prerelease)
+}
+
+/**
+ * Whether the page being converted belongs to a Cloud component.
+ *
+ * Read from the document rather than the component's antora.yml, because the
+ * document is what reflects a Cloud stub page's own attributes even when its
+ * content came from an included self-managed file -- the same mechanism
+ * resolveEntryXref already relied on for env-cloud.
+ *
+ * The value test is prop.js's isAttributeSet, so `env-cloud: false` reads as
+ * unset in both places. The two readers are still not interchangeable:
+ * prop.js asks the CATALOG about the page's component, while this asks the
+ * DOCUMENT being converted, which is the whole point above.
+ * rp-connect-components.js still uses a bare `!== undefined` for env-cloud,
+ * so `env-cloud: false` reads as Cloud there. Worth aligning separately, but
+ * not from here.
+ */
+function isCloudPage (document) {
+  return isAttributeSet(document && document.getAttribute('env-cloud'))
+}
+
+/**
+ * Report an enterprise: mention or enterprise_features::[] call on a page
+ * belonging to a Cloud component. Redpanda Cloud has no Enterprise Edition
+ * license, so nothing about a license, its expiration, or its restrictions
+ * is true there.
+ */
+function reportNoLicenseOnCloud ({ call, mode, filePath }) {
+  if (mode === 'off') return
+  const where = filePath ? ` in ${filePath}` : ''
+  const message =
+    `${call}${where}: this page belongs to a Cloud component, and Redpanda Cloud has no Enterprise Edition license. ` +
+    'Reword the content for Cloud instead of relying on this macro, or wrap it in ifndef::env-cloud[] if the same prose is single-sourced to a non-Cloud page too.'
+  if (mode === 'error') throw new Error(message)
+  logger.warn(message)
 }
 
 /**
@@ -310,14 +356,15 @@ function buildBetaBadgeAsciiDoc (entry) {
   return html ? `pass:[${html}]` : ''
 }
 const REGISTRY_FILENAME = 'enterprise-features.yml'
-const VALID_SCOPES = ['redpanda', 'console', 'connect', 'operator', 'cloud']
+// No 'cloud' scope: Redpanda Cloud has no Enterprise Edition license, so
+// there is no licensing table to generate for it. See isCloudPage.
+const VALID_SCOPES = ['redpanda', 'console', 'connect', 'operator']
 
 const TABLE_TITLES = {
   redpanda: 'Enterprise features in Redpanda',
   console: 'Enterprise features in Redpanda Console',
   connect: 'Enterprise features in Redpanda Connect',
   operator: 'Enterprise features in the Redpanda Operator',
-  cloud: 'Enterprise features in Redpanda Cloud',
 }
 
 const THIRD_COLUMN_HEADINGS = {
@@ -438,12 +485,15 @@ function reportUnknownFeature ({ feature, mode, registry, filePath }) {
 }
 
 /**
- * Pick the environment-appropriate feature page from a registry entry.
- * Some features have separate documentation for Kubernetes, Linux
- * (self-managed), and Redpanda Cloud. Mirrors the config_ref macro's
- * environment-awareness: the env-cloud and env-kubernetes page attributes
- * select the xref-cloud and xref-kubernetes registry fields, falling back
- * to the default xref.
+ * Pick the environment-appropriate feature page from a registry entry. Some
+ * features have separate documentation for Kubernetes and Linux
+ * (self-managed). Mirrors the config_ref macro's environment-awareness: the
+ * env-kubernetes page attribute selects the xref-kubernetes registry field,
+ * falling back to the default xref.
+ *
+ * No Cloud counterpart: a page in a Cloud component never reaches this
+ * function, because isCloudPage short-circuits the inline macro to plain
+ * text first. See isCloudPage.
  *
  * @param {object} entry - Registry entry.
  * @param {object} document - Asciidoctor document (for env attributes).
@@ -451,7 +501,6 @@ function reportUnknownFeature ({ feature, mode, registry, filePath }) {
  */
 function resolveEntryXref (entry, document) {
   if (!entry) return undefined
-  if (document.getAttribute('env-cloud') !== undefined && entry['xref-cloud']) return entry['xref-cloud']
   if (document.getAttribute('env-kubernetes') !== undefined && entry['xref-kubernetes']) return entry['xref-kubernetes']
   return entry.xref
 }
@@ -577,6 +626,16 @@ function enterpriseInlineMacro (config) {
     self.$option('regexp', /enterprise:([^[]+)\[(|.*?[^\\])\]/)
     self.process(function (parent, target, attributes) {
       const document = parent.getDocument()
+      const mode = document.getAttribute('enterprise-validate', 'warn')
+      const filePath = config && config.file && config.file.src && config.file.src.path
+      if (isCloudPage(document)) {
+        // Redpanda Cloud has no Enterprise Edition license, so there is
+        // nothing to validate against the registry, no status to gate on,
+        // and no styling that would be true here. Bail out before any of
+        // that runs, the same way an unrecognized name bails out below.
+        reportNoLicenseOnCloud({ call: `enterprise:${target}[]`, mode, filePath })
+        return self.createInline(parent, 'quoted', attributes.text || target)
+      }
       let registry
       if (config && config.contentCatalog) {
         registry = loadRegistry(config)
@@ -591,14 +650,12 @@ function enterpriseInlineMacro (config) {
         } else {
           reportUnknownFeature({
             feature: target,
-            mode: document.getAttribute('enterprise-validate', 'warn'),
+            mode,
             registry,
-            filePath: config && config.file && config.file.src && config.file.src.path,
+            filePath,
           })
         }
       }
-      const mode = document.getAttribute('enterprise-validate', 'warn')
-      const filePath = config && config.file && config.file.src && config.file.src.path
       const status = entryStatus(entry, { mode, filePath, contentCatalog: config && config.contentCatalog })
       if (status === STATUS_UNRELEASED && !isPrereleasePage(config, document)) {
         // Documented for an upcoming release, referenced from released docs.
@@ -654,6 +711,23 @@ function enterpriseFeaturesBlockMacro (config) {
       if (!VALID_SCOPES.includes(scope)) {
         throw new Error(`enterprise_features::[] needs a scope of ${VALID_SCOPES.join(', ')} as its target, got '${scope}'.`)
       }
+      const document = parent.getDocument()
+      if (isCloudPage(document)) {
+        // Same reasoning as the inline macro: no license, no table.
+        reportNoLicenseOnCloud({
+          call: `enterprise_features::${scope}[]`,
+          mode: document.getAttribute('enterprise-validate', 'warn'),
+          filePath: config && config.file && config.file.src && config.file.src.path,
+        })
+        // Render NOTHING, not an admonition. The message is internal tooling
+        // language aimed at a writer, and all three docs-site playbooks run
+        // with enterprise-validate: warn, so an admonition here would ship to
+        // docs.redpanda.com and tell a reader about a macro. The diagnostic
+        // belongs in the build log, which reportNoLicenseOnCloud just wrote,
+        // and it names the page. This also makes the inline and block macros
+        // behave the same way on Cloud, which the docs claim.
+        return undefined
+      }
       const registry = config && config.contentCatalog ? loadRegistry(config) : undefined
       if (!registry) {
         warnNoRegistry(config && config.contentCatalog)
@@ -663,13 +737,13 @@ function enterpriseFeaturesBlockMacro (config) {
         title: attributes.title,
         heading: attributes.heading,
         report: {
-          mode: parent.getDocument().getAttribute('enterprise-validate', 'warn'),
+          mode: document.getAttribute('enterprise-validate', 'warn'),
           filePath: config && config.file && config.file.src && config.file.src.path,
           contentCatalog: config && config.contentCatalog,
         },
         // Prerelease docs describe the upcoming release, so they list features
         // that are still only in a release candidate.
-        includeUnreleased: isPrereleasePage(config, parent.getDocument()),
+        includeUnreleased: isPrereleasePage(config, document),
         config,
       })
       // A block anchor before the macro call ([[my-id]]) is consumed into the
