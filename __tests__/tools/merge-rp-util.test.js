@@ -347,6 +347,35 @@ describe('markRpUtilMergeUnavailable', () => {
     expect(result.properties.no_scope.rp_util_merge_status).toBeUndefined()
   })
 
+  test('skips override-fabricated stubs: no source means no default to miss', () => {
+    fs.writeFileSync(tmpFile, JSON.stringify({
+      properties: {
+        from_source: { config_scope: 'cluster', defined_in: 'src/v/config/configuration.cc' },
+        fabricated: { config_scope: 'cluster', defined_in: 'override' }
+      }
+    }))
+
+    markRpUtilMergeUnavailable(tmpFile)
+
+    const result = JSON.parse(fs.readFileSync(tmpFile, 'utf8'))
+    expect(result.properties.from_source.rp_util_merge_status).toBe('unavailable')
+    // "the merge did not run" is the wrong reason for a property that has no
+    // declaration anywhere, so it renders no row rather than a wrong one.
+    expect(result.properties.fabricated.rp_util_merge_status).toBeUndefined()
+  })
+
+  test('writes the marker without minifying the dataset', () => {
+    fs.writeFileSync(tmpFile, JSON.stringify({
+      properties: { a: { config_scope: 'cluster', defined_in: 'src/v/config/configuration.cc' } }
+    }, null, 4))
+
+    markRpUtilMergeUnavailable(tmpFile)
+
+    const text = fs.readFileSync(tmpFile, 'utf8')
+    expect(text.split('\n').length).toBeGreaterThan(1)
+    expect(text).toContain('\n    "properties"')
+  })
+
   test('does not rewrite the file at all when nothing needs marking', () => {
     fs.writeFileSync(tmpFile, JSON.stringify({
       properties: { a: { config_scope: 'cluster', gets_restored: true } }
