@@ -353,6 +353,29 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
     })
   }
 
+  // A source property with no line_start has no description to replace. The
+  // topic extractor reports a name constant (topic_properties.h,
+  // handlers/topics/types.h) and fills description with an empty string, so a
+  // naive comparison reads "override differs from source" and proposes
+  // upstreaming prose into a file that has nowhere to put it. Measured against
+  // dev: 45 of 216 candidates, and not one of them in a .cc file, while every
+  // row the upstreaming workflow can actually edit carries a line.
+  //
+  // This is REVIEW rather than KEEP because the right answer is a judgement
+  // call: give the property a real doc string upstream, or accept that docs are
+  // the only place it is described. Never UPSTREAMABLE, which would hand the
+  // upstreaming workflow work it cannot do.
+  if (sourceProp.line_start === undefined) {
+    return row({
+      ...common,
+      class: CLASSES.REVIEW,
+      note:
+        'Source defines this property\'s name but carries no description for it (' +
+        (sourceProp.defined_in || 'unknown file') +
+        '), so there is nothing to upstream into. Decide whether the source should gain one.'
+    })
+  }
+
   const sourceText = normalizeText(sourceProp.description)
   const overrideNormalized = normalizeText(overrideText)
 

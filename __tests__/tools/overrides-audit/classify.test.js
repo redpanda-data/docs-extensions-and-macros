@@ -16,6 +16,11 @@ function sourceProp (fields = {}) {
     type: 'integer',
     default: 100,
     defined_in: 'src/v/config/configuration.cc',
+    // Every property the extractor finds a description for reports the line it
+    // sits on. Its absence is the signal that the source has no description
+    // slot at all, so the default has to carry it or every case here reads as
+    // that one.
+    line_start: 1000,
     ...fields
   }
 }
@@ -401,5 +406,39 @@ describe('declared links and audience-scoped descriptions', () => {
     const row = classify.classifyDescription('p', { description: ['A fuller description.'] }, src)
     expect(row.class).toBe(CLASSES.UPSTREAMABLE)
     expect(row.upstream_candidate_text).toBe('A fuller description.')
+  })
+})
+
+describe('a source property with no description slot', () => {
+  it('is REVIEW, not UPSTREAMABLE, when the source has no line to edit', () => {
+    // The topic extractor reports a name constant and an empty description, so
+    // without this the audit proposes upstreaming prose into a header that has
+    // nowhere to put it. The upstreaming workflow would hand that to Claude.
+    const src = sourceProp({ description: '', defined_in: 'src/v/kafka/protocol/topic_properties.h' })
+    delete src.line_start
+    const row = classify.classifyDescription('cleanup.policy', { description: 'A real description.' }, src)
+
+    expect(row.class).toBe(CLASSES.REVIEW)
+    expect(row.note).toMatch(/carries no description for it/)
+    expect(row.note).toMatch(/topic_properties\.h/)
+    expect(row.upstream_candidate_text).toBeUndefined()
+  })
+
+  it('still upstreams when the source has a line, even if its description is empty', () => {
+    // An empty description in a file that does have a slot is a real gap worth
+    // filling, so that case must keep flowing to the upstreaming workflow.
+    const row = classify.classifyDescription(
+      'a_cluster_property',
+      { description: 'A real description.' },
+      sourceProp({ description: '', line_start: 1038, defined_in: 'src/v/config/configuration.cc' })
+    )
+    expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+    expect(row.upstream_candidate_text).toBe('A real description.')
+  })
+
+  it('leaves a missing property on the existing REVIEW path', () => {
+    const row = classify.classifyDescription('gone', { description: 'x' }, null)
+    expect(row.class).toBe(CLASSES.REVIEW)
+    expect(row.note).toMatch(/not present in extracted source JSON/)
   })
 })
