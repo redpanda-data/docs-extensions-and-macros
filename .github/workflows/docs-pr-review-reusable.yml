@@ -831,7 +831,13 @@ jobs:
           plugin_app_id: ${{ inputs.docs_app_id }}
           plugin_app_private_key: ${{ secrets.docs_app_private_key }}
           cli_version: ${{ vars.CLAUDE_CLI_VERSION || '2.1.258' }}
-          output_dir: review-output
+          # Its own directory, not review-output: review-output/verdict.json
+          # is the job's FINAL merged verdict, and the aggregate treats a
+          # present verdict.json as "this branch ran". Writing the vision
+          # verdict there made a soft-failed vision pass indistinguishable
+          # from a clean one, because the merge below then filled that same
+          # file with the deterministic lint's pass.
+          output_dir: review-output/vision
           prompt: >
             Review every image file changed in PR #${{ inputs.pr_number }} of
             ${{ github.repository }} against the docs screenshot standards
@@ -844,33 +850,51 @@ jobs:
             100%-opacity overlay; blur or mosaic is a FAIL; (4) background —
             transparent or neutral; (5) the alt text's values also appear in
             surrounding body prose. Read each image file directly. Do NOT
-            post to GitHub. Write review-output/screenshots.json as
+            post to GitHub. Write review-output/vision/screenshots.json as
             [{"file":"...","checks":{...},"verdict":"pass"|"fail","notes":"..."}]
-            and review-output/verdict.json as
+            and review-output/vision/verdict.json as
             {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
             covering only these judgment checks (the deterministic lint runs
             separately).
 
       - name: Merge deterministic + vision verdicts
         if: always()
+        env:
+          HAS_IMAGES: ${{ needs.classify.outputs.has_images }}
         run: |
           set -uo pipefail
           mkdir -p review-output
           LINT="$RUNNER_TEMP/screenshot-lint/screenshot-lint.json"
-          VISION=review-output/verdict.json
+          VISION=review-output/vision/verdict.json
+          FINAL=review-output/verdict.json
           # Keep the raw lint verdict in the artifact next to the merged one.
           [[ -f "$LINT" ]] && cp "$LINT" review-output/screenshot-lint.json
-          if [[ -f "$LINT" ]]; then
-            if [[ -f "$VISION" ]]; then
-              jq -s '{
-                verdict: (if (.[0].verdict=="fail" or .[1].verdict=="fail") then "fail" else "pass" end),
-                blocking: ((.[0].blocking // []) + (.[1].blocking // [])),
-                suggestions: ((.[0].suggestions // []) + (.[1].suggestions // []))
-              }' "$LINT" "$VISION" > review-output/merged.json && mv review-output/merged.json "$VISION"
-            else
-              cp "$LINT" "$VISION"
-            fi
+          # Three states, and the third is the one that used to be reported as
+          # a clean pass. The aggregate reads a present verdict.json as "this
+          # branch produced a verdict", so when a pass that was SUPPOSED to run
+          # produced nothing, the only honest thing is to leave verdict.json
+          # absent and let the aggregate say "automated review unavailable".
+          if [[ ! -f "$LINT" ]]; then
+            echo "::warning::no deterministic lint result — leaving no verdict so the aggregate reports this branch unavailable"
+            exit 0
           fi
+          if [[ "${HAS_IMAGES:-}" != "true" ]]; then
+            # No image changed, so the vision pass was never meant to run and
+            # the lint alone is the complete answer for this PR.
+            cp "$LINT" "$FINAL"
+            echo "no image changes: verdict is the deterministic lint alone"
+            exit 0
+          fi
+          if [[ ! -f "$VISION" ]]; then
+            echo "::warning::the vision pass produced no verdict (soft-failed) — leaving no merged verdict so the aggregate reports this branch unavailable rather than passing it on the lint alone"
+            exit 0
+          fi
+          jq -s '{
+            verdict: (if (.[0].verdict=="fail" or .[1].verdict=="fail") then "fail" else "pass" end),
+            blocking: ((.[0].blocking // []) + (.[1].blocking // [])),
+            suggestions: ((.[0].suggestions // []) + (.[1].suggestions // []))
+          }' "$LINT" "$VISION" > "$FINAL"
+          echo "merged the deterministic lint with the vision verdict"
 
       - uses: actions/upload-artifact@v4
         if: always()
