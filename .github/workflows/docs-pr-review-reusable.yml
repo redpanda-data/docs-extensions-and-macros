@@ -389,6 +389,12 @@ jobs:
             SME_MODE=repo-not-gated          # docs-only repo: no engineer-owned pages
           elif [[ ",$LABELS," == *",no-sme-needed,"* ]]; then
             SME_MODE=no-sme-needed-label     # same escape hatch the daily nag honours
+          elif [[ ",$LABELS," == *",author-is-sme,"* ]]; then
+            # Engineer-authored PR (e.g. adp-docs-author): the author IS the
+            # SME, and derive_smes subtracts the author, so the set would be
+            # empty forever. Same effect as no-sme-needed; a label the
+            # engineer reads should describe their situation.
+            SME_MODE=author-is-sme-label
           elif [[ "$IS_BOT" == "true" ]]; then
             SME_MODE=bot-author              # bot_pr_policy=review: auto PRs get no SME review
           fi
@@ -409,7 +415,7 @@ jobs:
             echo "sme_set=$SMES" >> "$GITHUB_OUTPUT"
 
             if [[ -z "$SMES" ]]; then
-              set_pending "Waiting for SME approval (no SME tagged — daily nag active; or add the no-sme-needed label)"
+              set_pending "Waiting for SME approval (no SME tagged — daily nag active; or label no-sme-needed / author-is-sme)"
               echo "run_review=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -581,6 +587,9 @@ jobs:
           prompt: >
             /docs-team-standards:pr-review ${{ github.server_url }}/${{ github.repository }}/pull/${{ inputs.pr_number }}
             HEADLESS MODE — you are running in CI with no human present.
+            The PR's head is ALREADY checked out in the working directory:
+            do not run `gh pr checkout` or `git remote` (both are refused
+            here); read files in place and use `gh pr diff` for the diff.
             Do NOT post anything to GitHub; there is no approval step here,
             so the pr-review rule "never post without approval" means: never
             post. Where the pr-review flow would spawn the content-reviewer
@@ -859,13 +868,19 @@ jobs:
           output_dir: review-output/vision
           prompt: >
             Review every image file changed in PR #${{ inputs.pr_number }} of
-            ${{ github.repository }} against the JUDGMENT checks in the
-            plugin's screenshot standard: read
-            .docs-team-standards-plugin/resources/writing-style/screenshot-standards.md
-            first and apply its "Judgment checks" section exactly (the
-            deterministic checks in that file run separately as
-            `doc-tools lint-screenshots` — do not repeat them). Read each
-            image file directly. Do NOT post to GitHub. Write
+            ${{ github.repository }} against the plugin's screenshot
+            standard: read .docs-team-standards-plugin/resources/screenshot-standards.md
+            first and apply its judgment rules (purpose test; sanitize-at-
+            capture preferred, solid overlay only as the fallback for
+            existing images; crop and annotation rules; alt text agreeing
+            with prose). Do not repeat the deterministic size/alt-text
+            checks — `doc-tools lint-screenshots` runs those separately. If
+            that file is ABSENT, the plugin pin predates
+            docs-team-standards#2929: write review-output/vision/findings.md
+            saying so and write NO verdict.json, so this branch reports
+            "automated review unavailable" instead of grading against rules
+            it cannot read. Read each image file directly. Do NOT post to
+            GitHub. Write
             review-output/vision/screenshots.json as
             [{"file":"...","checks":{...},"verdict":"pass"|"fail","notes":"..."}]
             and review-output/vision/verdict.json as
