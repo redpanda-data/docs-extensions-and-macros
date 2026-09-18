@@ -24,6 +24,7 @@ const {
   runSchemaFlag,
   fetchPublishedSchema
 } = require('../../tools/property-extractor/rp-util-fetch')
+const { TOKEN_ENV_VAR } = require('../../cli-utils/git-credential-env')
 
 describe('runSchemaFlag', () => {
   beforeEach(() => spawnSync.mockReset())
@@ -66,7 +67,7 @@ describe('cloneStreamingEnterprise', () => {
     expect(args).not.toContain('-c')
     expect(args.some((a) => /extraheader|authorization/i.test(a))).toBe(false)
     // The env carries the helper config and the token.
-    expect(opts.env.RP_UTIL_FETCH_GIT_TOKEN).toBe(token)
+    expect(opts.env[TOKEN_ENV_VAR]).toBe(token)
     expect(opts.env.GIT_CONFIG_COUNT).toBe('2')
     expect(opts.env.GIT_CONFIG_KEY_0).toBe('credential.helper')
     expect(opts.env.GIT_CONFIG_VALUE_0).toBe('')
@@ -75,7 +76,7 @@ describe('cloneStreamingEnterprise', () => {
     // token from env at callback time -- asserted exactly, so no token
     // value could hide in it.
     expect(opts.env.GIT_CONFIG_VALUE_1).toBe(
-      '!f() { echo "username=x-access-token"; echo "password=$RP_UTIL_FETCH_GIT_TOKEN"; }; f'
+      `!f() { echo "username=x-access-token"; echo "password=$${TOKEN_ENV_VAR}"; }; f`
     )
   }
 

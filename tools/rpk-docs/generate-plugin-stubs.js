@@ -18,6 +18,7 @@ const path = require('path')
 const os = require('os')
 const { spawnSync } = require('child_process')
 const { getGitHubToken } = require('../../cli-utils/github-token')
+const { gitAuthEnv, redactCredentials } = require('../../cli-utils/git-credential-env')
 
 /**
  * Read command titles from generated partials. The title line is
@@ -65,46 +66,6 @@ function readPartialTitles(partialsDir) {
 }
 
 /**
- * Environment for the git subprocesses that read the docs repo. With a
- * token, a credential helper is registered through GIT_CONFIG_* variables
- * (the same shape the other doc-tools clones use), so the token never
- * appears in argv, in the remote URL, or in the clone's .git/config.
- * Without a token the inherited environment is returned unchanged: git then
- * falls back to the host's own credential helpers, which is what a local run
- * relies on and all a public docs repo needs.
- * @param {string|null} token - GitHub token, or null to clone anonymously
- * @returns {NodeJS.ProcessEnv}
- */
-function gitAuthEnv(token) {
-  if (!token) return process.env
-  return {
-    ...process.env,
-    PLUGIN_STUBS_CLONE_TOKEN: token,
-    GIT_CONFIG_COUNT: '2',
-    // Clear inherited helpers first so a system credential manager cannot
-    // intercept (or prompt) before ours answers.
-    GIT_CONFIG_KEY_0: 'credential.helper',
-    GIT_CONFIG_VALUE_0: '',
-    GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
-    // The helper reads the token from its own environment at callback time;
-    // argv carries only this static, secret-free string.
-    GIT_CONFIG_VALUE_1: '!f() { echo "username=x-access-token"; echo "password=$PLUGIN_STUBS_CLONE_TOKEN"; }; f'
-  }
-}
-
-/**
- * Scrub anything that looks like a credential out of git output before it
- * reaches an error message or a CI log.
- * @param {string} text
- * @returns {string}
- */
-function redactCredentials(text) {
-  return String(text || '')
-    .replace(/\/\/[^/@\s]+@/g, '//***@')
-    .replace(/(authorization:\s*basic\s+)\S+/gi, '$1***')
-}
-
-/**
  * Sparse-clone the docs repo and return the path to a plugin's partials dir.
  * @param {Object} params
  * @param {string} params.docsRepo - owner/repo (e.g. redpanda-data/docs)
@@ -124,6 +85,8 @@ function fetchPartialsDir({ docsRepo, docsRef, plugin, sourcePath }) {
   // and friends in workflows). Clone anonymously otherwise, and say so, so a
   // failed run in CI names the missing piece instead of a bare git prompt.
   const token = getGitHubToken()
+  // gitAuthEnv keeps the token in the subprocess environment only: never in
+  // argv, never in the remote URL, never in the clone's .git/config.
   const env = gitAuthEnv(token)
   const authNote = token ? '' : ' (no GitHub token found; cloning anonymously)'
   console.log(`Fetching ${sparsePath} from ${docsRepo}@${docsRef}${authNote}...`)
@@ -393,8 +356,5 @@ module.exports = {
   fetchPartialsDir,
   inferIncludePrefix,
   renderStub,
-  reconcileStubs,
-  // exported for testing
-  gitAuthEnv,
-  redactCredentials
+  reconcileStubs
 }

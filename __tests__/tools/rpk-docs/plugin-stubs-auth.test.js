@@ -16,14 +16,11 @@ const fs = require('fs')
 const path = require('path')
 const { spawnSync } = require('child_process')
 const githubToken = require('../../../cli-utils/github-token')
-const {
-  fetchPartialsDir,
-  gitAuthEnv,
-  redactCredentials
-} = require('../../../tools/rpk-docs/generate-plugin-stubs.js')
+const { fetchPartialsDir } = require('../../../tools/rpk-docs/generate-plugin-stubs.js')
+const { TOKEN_ENV_VAR } = require('../../../cli-utils/git-credential-env')
 
 const SPARSE = 'modules/reference/partials/rpk-ai'
-const HELPER = '!f() { echo "username=x-access-token"; echo "password=$PLUGIN_STUBS_CLONE_TOKEN"; }; f'
+const HELPER = `!f() { echo "username=x-access-token"; echo "password=$${TOKEN_ENV_VAR}"; }; f`
 
 // A git that succeeds: the clone creates the repo dir and the partials path
 // so fetchPartialsDir's existence check passes without a network.
@@ -60,7 +57,7 @@ describe('fetchPartialsDir authentication', () => {
       expect(JSON.stringify(args)).not.toContain('tok-123')
       expect(args.some((a) => /extraheader|authorization|@github\.com/i.test(a))).toBe(false)
       // The env carries the helper config and the token.
-      expect(opts.env.PLUGIN_STUBS_CLONE_TOKEN).toBe('tok-123')
+      expect(opts.env[TOKEN_ENV_VAR]).toBe('tok-123')
       expect(opts.env.GIT_CONFIG_COUNT).toBe('2')
       expect(opts.env.GIT_CONFIG_KEY_0).toBe('credential.helper')
       expect(opts.env.GIT_CONFIG_VALUE_0).toBe('')
@@ -105,27 +102,5 @@ describe('fetchPartialsDir authentication', () => {
     expect(thrown).toBeDefined()
     expect(thrown.message).not.toContain('super-secret')
     expect(thrown.message).toContain('//***@github.com')
-  })
-})
-
-describe('gitAuthEnv', () => {
-  test('returns the inherited env untouched when there is no token', () => {
-    expect(gitAuthEnv(null)).toBe(process.env)
-    expect(gitAuthEnv('')).toBe(process.env)
-  })
-
-  test('keeps the token out of the helper command string', () => {
-    const env = gitAuthEnv('abc')
-    expect(env.PLUGIN_STUBS_CLONE_TOKEN).toBe('abc')
-    expect(env.GIT_CONFIG_VALUE_1).toBe(HELPER)
-    expect(env.GIT_CONFIG_VALUE_1).not.toContain('abc')
-  })
-})
-
-describe('redactCredentials', () => {
-  test('scrubs URL userinfo and basic auth headers', () => {
-    expect(redactCredentials('https://tok@github.com/x AUTHORIZATION: basic abc=='))
-      .toBe('https://***@github.com/x AUTHORIZATION: basic ***')
-    expect(redactCredentials(undefined)).toBe('')
   })
 })

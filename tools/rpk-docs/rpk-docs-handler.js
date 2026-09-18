@@ -12,6 +12,7 @@ const { downloadRpkBinary, RPK_RELEASE_TAG_RE, RPK_CDN_BASE } = require('../../c
 const { generateRpkDiff, printDiffReport, generateWhatsNewSection, flattenToMap } = require('./report-delta')
 const { loadAndValidateOverrides, ValidationResult } = require('./validate-overrides')
 const { validateDirectory, formatResults } = require('./validate-output')
+const { gitAuthEnv, redactCredentials } = require('../../cli-utils/git-credential-env')
 
 /**
  * Known rpk plugins that are managed separately (have install/uninstall commands)
@@ -241,12 +242,10 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-source-'))
   const repoDir = path.join(tmpDir, 'redpanda')
 
-  // streaming-enterprise is private, so a token is required. Auth travels
-  // via a credential helper registered through GIT_CONFIG_* environment
-  // variables, never as a git -c argument, so the token cannot appear in
-  // this process's argv (visible to anything that can list processes) and
-  // never embedded in the remote URL, so no token is persisted in the
-  // clone's .git/config either.
+  // streaming-enterprise is private, so a token is required. gitAuthEnv
+  // hands it to git through a credential helper carried in the subprocess
+  // environment, so it never reaches argv, the remote URL, or the clone's
+  // .git/config.
   const { getGitHubToken } = require('../../cli-utils/github-token')
   const token = getGitHubToken()
   if (!token) {
@@ -255,15 +254,7 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
       'Set GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN so the clone can authenticate.'
     )
   }
-  const gitEnv = {
-    ...process.env,
-    RPK_SOURCE_CLONE_TOKEN: token,
-    GIT_CONFIG_COUNT: '2',
-    GIT_CONFIG_KEY_0: 'credential.helper',
-    GIT_CONFIG_VALUE_0: '',
-    GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
-    GIT_CONFIG_VALUE_1: '!f() { echo "username=x-access-token"; echo "password=$RPK_SOURCE_CLONE_TOKEN"; }; f'
-  }
+  const gitEnv = gitAuthEnv(token)
 
   console.log(`Sparse-cloning streaming-enterprise repo (ref: ${sourceRef}) to ${repoDir}...`)
 
@@ -287,7 +278,7 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
     throw new Error(
       `Failed to clone streaming-enterprise repo with ref '${sourceRef}'.\n` +
       `Make sure the branch or tag exists.\n` +
-      `Error: ${cloneResult.stderr}`
+      `Error: ${redactCredentials(cloneResult.stderr)}`
     )
   }
 
@@ -302,7 +293,7 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
   })
 
   if (sparseResult.status !== 0) {
-    throw new Error(`Failed to set sparse checkout: ${sparseResult.stderr}`)
+    throw new Error(`Failed to set sparse checkout: ${redactCredentials(sparseResult.stderr)}`)
   }
 
   console.log(`Sparse checkout complete`)
