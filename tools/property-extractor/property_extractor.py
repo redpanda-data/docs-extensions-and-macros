@@ -1243,15 +1243,32 @@ def _normalize_admonitions(admonitions):
                 continue
             if entry["title"]:
                 normalized_entry["title"] = entry["title"]
+        # The entry is rebuilt rather than copied, so every field the templates
+        # read has to be carried across explicitly. These two scope the whole
+        # admonition block to one docs build; setting both would wrap it in
+        # ifdef and ifndef at once so it rendered in neither, which the schema
+        # rejects and the generator drops with a warning.
+        for scope_field in ("cloud_only", "self_hosted_only"):
+            if entry.get(scope_field) is True:
+                normalized_entry[scope_field] = True
         normalized.append(normalized_entry)
     return normalized
 
 
 def _apply_override_to_existing_property(property_dict, override, overrides_file_path):
     """Apply overrides to an existing property."""
-    # Apply description override
+    # Apply description override. Either a plain string or, when a paragraph has
+    # to be scoped to one docs build, an array of paragraphs; the generator
+    # flattens the array into AsciiDoc so the audience conditional never has to
+    # be hand-written into the JSON string.
     if "description" in override:
         property_dict["description"] = override["description"]
+
+    # Declared links: {"<text in the prose>": "<target>"}. Carried through as
+    # data and turned into AsciiDoc by the generator, which is what keeps the
+    # description itself plain prose the overrides audit can compare to source.
+    if "links" in override:
+        property_dict["links"] = override["links"]
     
     # Apply version override (introduced in version)
     if "version" in override:

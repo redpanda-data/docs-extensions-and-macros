@@ -269,5 +269,64 @@ class TestAdmonitionsOverride(unittest.TestCase):
         self.assertNotIn("admonitions", result["ghost_property"])
 
 
+class TestLinksAndAudienceScopes(unittest.TestCase):
+    """Fields the generator turns into AsciiDoc must survive the Python stage.
+
+    `_apply_override_to_existing_property` is a flat list of explicit
+    assignments with no catch-all passthrough (only the phantom-stub path has
+    one), so a new override field reaches the generator only if it is named
+    there. `_normalize_admonitions` rebuilds each entry from scratch rather than
+    copying it, so the same applies to every admonition field.
+    """
+
+    def test_links_survive_on_an_existing_property(self):
+        properties = {"real_property": {"name": "real_property", "description": "src"}}
+        overrides = {"properties": {"real_property": {"links": {"`x`": "#x"}}}}
+
+        result = apply_property_overrides(properties, overrides)
+
+        self.assertEqual(result["real_property"]["links"], {"`x`": "#x"})
+
+    def test_links_survive_on_a_phantom_stub(self):
+        overrides = {"properties": {"ghost_property": {"links": {"`x`": "#x"}}}}
+
+        result = apply_property_overrides({}, overrides)
+
+        self.assertEqual(result["ghost_property"]["links"], {"`x`": "#x"})
+
+    def test_array_description_is_passed_through_unflattened(self):
+        """The generator flattens the array into AsciiDoc, so Python must not
+        stringify or reorder it."""
+        properties = {"real_property": {"name": "real_property", "description": "src"}}
+        overrides = {"properties": {"real_property": {
+            "description": ["One.", "cloud-only: Cloud bit."],
+        }}}
+
+        result = apply_property_overrides(properties, overrides)
+
+        self.assertEqual(result["real_property"]["description"],
+                         ["One.", "cloud-only: Cloud bit."])
+
+    def test_admonition_audience_scopes_survive_normalization(self):
+        self.assertEqual(
+            _normalize_admonitions([
+                {"type": "tip", "text": "cloud", "cloud_only": True},
+                {"type": "note", "text": "sm", "self_hosted_only": True},
+            ]),
+            [
+                {"type": "TIP", "text": "cloud", "cloud_only": True},
+                {"type": "NOTE", "text": "sm", "self_hosted_only": True},
+            ],
+        )
+
+    def test_admonition_scope_that_is_not_true_is_not_carried(self):
+        """Only an exact True scopes the block; a truthy string would otherwise
+        hide an admonition from one build on a typo."""
+        self.assertEqual(
+            _normalize_admonitions([{"type": "note", "text": "t", "cloud_only": "yes"}]),
+            [{"type": "NOTE", "text": "t"}],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

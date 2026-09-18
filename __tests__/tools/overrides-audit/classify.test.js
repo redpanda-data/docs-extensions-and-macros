@@ -313,3 +313,83 @@ describe('audience prefixes never reach an upstream candidate', () => {
     expect(row.class).toBe(CLASSES.KEEP)
   })
 })
+
+describe('declared links and audience-scoped descriptions', () => {
+  it('keeps a links override by design rather than calling it unrecognized', () => {
+    const row = classify.classifyField('p', 'links', { links: { '`x`': '#x' } }, sourceProp())
+    // Links are docs-site structure the C++ doc string cannot carry, same as
+    // related_topics. Before this they landed in the "unrecognized field"
+    // bucket: still KEEP, so the burn-down never deleted them, but the audit
+    // report gave the wrong reason.
+    expect(row.class).toBe(CLASSES.KEEP)
+    expect(row.note).not.toMatch(/Unrecognized/)
+  })
+
+  it('keeps see_also and admonitions by design too', () => {
+    for (const field of ['see_also', 'admonitions']) {
+      const row = classify.classifyField('p', field, { [field]: [] }, sourceProp())
+      expect(row.class).toBe(CLASSES.KEEP)
+      expect(row.note).not.toMatch(/Unrecognized/)
+    }
+  })
+
+  describe('unconditionalProse', () => {
+    it('returns a string description unchanged, so existing rows cannot shift', () => {
+      expect(classify.unconditionalProse('The source description.'))
+        .toEqual({ prose: 'The source description.', scoped: 0 })
+    })
+
+    it('drops audience-scoped paragraphs and counts them', () => {
+      expect(classify.unconditionalProse(['One.', 'cloud-only: Cloud bit.', 'Two.']))
+        .toEqual({ prose: 'One.\n\nTwo.', scoped: 1 })
+    })
+
+    it('handles a description that is neither string nor array', () => {
+      expect(classify.unconditionalProse(undefined)).toEqual({ prose: '', scoped: 0 })
+    })
+  })
+
+  it('treats an array description of only unconditional paragraphs like the string form', () => {
+    const src = sourceProp({ description: 'One. Two.' })
+    const row = classify.classifyDescription('p', { description: ['One.', 'Two.'] }, src)
+    // normalizeText collapses the paragraph break to a space, so this is the
+    // same REDUNDANT verdict the equivalent string would get.
+    expect(row.class).toBe(CLASSES.REDUNDANT)
+  })
+
+  it('keeps an override whose prose matches source but which carries a scoped paragraph', () => {
+    const src = sourceProp({ description: 'The source description.' })
+    const row = classify.classifyDescription(
+      'p',
+      { description: ['The source description.', 'cloud-only: Cloud requires at least 3.'] },
+      src
+    )
+    // Retiring it would delete the scoped paragraph with it, because
+    // `description` replaces wholesale rather than merging.
+    expect(row.class).toBe(CLASSES.KEEP)
+    expect(row.note).toMatch(/1 audience-scoped paragraph/)
+    expect(row.upstream_candidate_text).toBeUndefined()
+  })
+
+  it('splits when the prose is upstreamable but a scoped paragraph must stay', () => {
+    const src = sourceProp({ description: 'Terse source text.' })
+    const row = classify.classifyDescription(
+      'p',
+      { description: ['A fuller, better description.', 'cloud-only: Cloud requires at least 3.'] },
+      src
+    )
+    expect(row.class).toBe(CLASSES.KEEP_UNTIL_UPSTREAMED)
+    // The scoped paragraph must never reach the upstream candidate: the C++
+    // doc string has no audience.
+    expect(row.upstream_candidate_text).toBe('A fuller, better description.')
+    expect(row.upstream_candidate_text).not.toMatch(/Cloud requires/)
+    expect(row.upstream_candidate_text).not.toMatch(/cloud-only/)
+  })
+
+  it('still upstreams a markup-free array description with no scoped paragraphs', () => {
+    const src = sourceProp({ description: 'Terse source text.' })
+    const row = classify.classifyDescription('p', { description: ['A fuller description.'] }, src)
+    expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+    expect(row.upstream_candidate_text).toBe('A fuller description.')
+  })
+})

@@ -59,6 +59,9 @@ const PRODUCT_ATTR_ALLOWLIST = Object.freeze([])
  */
 const KEEP_BY_DESIGN_FIELDS = Object.freeze([
   'related_topics',
+  'see_also',
+  'admonitions',
+  'links',
   'category',
   'config_scope',
   'version',
@@ -90,6 +93,38 @@ const META_FIELDS = Object.freeze(['upstream_ref', '_comment'])
 function normalizeText (text) {
   if (typeof text !== 'string') return ''
   return text.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Separate a description's unconditional prose from its audience-scoped
+ * paragraphs.
+ *
+ * A description is either a plain string or an array of paragraphs, each
+ * optionally prefixed `cloud-only:` / `self-managed-only:`. Only the
+ * unconditional paragraphs are comparable to the source string: a paragraph
+ * written for one docs build is docs-only by definition and must never reach an
+ * upstream candidate, because the C++ doc string has no audience.
+ *
+ * The string form is returned unchanged, so every existing classification is
+ * byte-for-byte what it was before the array form existed.
+ *
+ * @param {string|Array<string>} description - Override description, either form.
+ * @returns {{prose: string, scoped: number}} Unconditional prose, and how many paragraphs were scoped away.
+ */
+function unconditionalProse (description) {
+  if (typeof description === 'string') return { prose: description, scoped: 0 }
+  if (!Array.isArray(description)) return { prose: '', scoped: 0 }
+  const kept = []
+  let scoped = 0
+  for (const paragraph of description) {
+    if (typeof paragraph !== 'string' || !paragraph.trim()) continue
+    if (/^\s*(?:cloud-only|self-managed-only):/.test(paragraph)) {
+      scoped += 1
+      continue
+    }
+    kept.push(paragraph.trim())
+  }
+  return { prose: kept.join('\n\n'), scoped }
 }
 
 // Docs-only markup detectors. `<<anchor>>` cross-references are included
@@ -281,7 +316,11 @@ function row (fields) {
  */
 function classifyDescription (name, override, sourceProp, opts = {}) {
   const attrAllowlist = opts.attrAllowlist || PRODUCT_ATTR_ALLOWLIST
-  const overrideText = override.description
+  // Audience-scoped paragraphs are filtered out here rather than inside
+  // stripDocsMarkup, which must keep stripping a prefix and retaining the
+  // content: for a see_also item the prefixed value IS the link, and dropping
+  // it there would silently empty every conditional related-topics entry.
+  const { prose: overrideText, scoped: scopedParagraphs } = unconditionalProse(override.description)
   const common = {
     name,
     field: 'description',
@@ -303,6 +342,16 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
   const overrideNormalized = normalizeText(overrideText)
 
   if (overrideNormalized === sourceText) {
+    if (scopedParagraphs > 0) {
+      // Retiring this would delete the audience-scoped paragraphs with it,
+      // because `description` replaces wholesale rather than merging. The
+      // redundant prose cannot be dropped on its own.
+      return row({
+        ...common,
+        class: CLASSES.KEEP,
+        note: `Unconditional prose already matches source, but ${scopedParagraphs} audience-scoped paragraph(s) are docs-only and would be lost with it. Nothing to upstream.`
+      })
+    }
     return row({
       ...common,
       class: CLASSES.REDUNDANT,
@@ -312,6 +361,16 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
 
   const markupKinds = detectDocsMarkup(overrideText, attrAllowlist)
   if (markupKinds.length === 0) {
+    if (scopedParagraphs > 0) {
+      // The prose is upstreamable but the override still has to stay, to carry
+      // the scoped paragraphs -- which is exactly the SPLIT case.
+      return row({
+        ...common,
+        class: CLASSES.KEEP_UNTIL_UPSTREAMED,
+        upstream_candidate_text: overrideText,
+        note: `SPLIT: unconditional prose differs from source and is markup-free, but ${scopedParagraphs} audience-scoped paragraph(s) must stay in the override. Keep it until the prose ships.`
+      })
+    }
     return row({
       ...common,
       class: CLASSES.UPSTREAMABLE,
@@ -530,6 +589,7 @@ function summarize (manifest) {
 module.exports = {
   CLASSES,
   PRODUCT_ATTR_ALLOWLIST,
+  unconditionalProse,
   KEEP_BY_DESIGN_FIELDS,
   TYPO_KEYS,
   normalizeText,

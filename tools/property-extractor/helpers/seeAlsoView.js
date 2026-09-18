@@ -1,5 +1,7 @@
 'use strict';
 
+const parseAudience = require('./audienceScope.js');
+
 /**
  * Normalizes a property's related-topics data into one shape for the
  * templates to render, regardless of which field or convention the override
@@ -14,6 +16,9 @@
  *     behaviour. That prefix was free text with no validation; see_also
  *     replaces it with data a schema can check.
  *
+ * Both spellings are read by the shared helpers/audienceScope.js parser, which
+ * every audience-scoped override field uses, so they cannot drift apart.
+ *
  * @param {object} property - A property record, as extracted or overridden.
  * @returns {Array<{content: string, cloudOnly: boolean, selfHostedOnly: boolean}>}
  */
@@ -26,26 +31,7 @@ function normalizeSeeAlso(property) {
       : [];
 
   return rawItems
-    .map((item) => {
-      if (typeof item === 'string') {
-        const trimmed = item.trim();
-        if (trimmed.startsWith('cloud-only:')) {
-          return { content: trimmed.slice('cloud-only:'.length).trim(), cloudOnly: true, selfHostedOnly: false };
-        }
-        if (trimmed.startsWith('self-managed-only:')) {
-          return { content: trimmed.slice('self-managed-only:'.length).trim(), cloudOnly: false, selfHostedOnly: true };
-        }
-        return { content: trimmed, cloudOnly: false, selfHostedOnly: false };
-      }
-      if (item && typeof item === 'object' && typeof item.content === 'string') {
-        return {
-          content: item.content.trim(),
-          cloudOnly: item.cloud_only === true,
-          selfHostedOnly: item.self_hosted_only === true,
-        };
-      }
-      return null;
-    })
+    .map((item) => parseAudience(item))
     .filter((item) => item && item.content);
 }
 

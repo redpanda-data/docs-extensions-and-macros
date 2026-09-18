@@ -21,7 +21,21 @@
           "type": "string",
           "description": "Free-text note to whoever edits this entry next. Never read by the generator."
         },
-        "description": { "type": "string" },
+        "description": {
+          "description": "Property description. A plain string, or an array of paragraphs when one of them belongs to a single docs build: an array entry may carry a 'cloud-only:' / 'self-managed-only:' prefix and the generator wraps it in the matching ifdef::env-cloud[] conditional. Prefer the array form over writing the conditional into the string, because the overrides audit can only compare prose it can separate from markup, so a hand-written conditional pins the override forever.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "minItems": 1, "items": { "type": "string" } }
+          ]
+        },
+        "links": {
+          "type": "object",
+          "description": "Inline links, keyed by the literal text to find in the prose (backticks included, as written) and valued by the target. Only the first occurrence of a key is linked, and the longest key wins. Two target forms: '#<property_name>' emits a prop macro, which resolves the reference page itself and renders plain code in a build that does not publish the target, so it needs no conditional and cannot dangle; 'xref:<target>' emits a literal xref with the key as its link text. A target may carry a 'cloud-only:' / 'self-managed-only:' prefix, in which case the containing paragraph is emitted twice: linked in that branch, plain in the other. Keeping links here rather than in the sentence is what lets the description stay prose the audit can compare against the source string.",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^(?:(?:cloud-only|self-managed-only):\\s*)?(?:#[^\\s#]+|xref:[^\\s\\[\\]]+)$"
+          }
+        },
         "upstream_ref": {
           "type": "string",
           "description": "The upstream issue or PR (against the engineering repo whose defective string this description patches, either the short form 'redpanda-data/streaming-enterprise#12345' or the full URL) that will make this description override redundant once merged and released. A description override is a stopgap, not a fix: set this so the override is born with a retirement path, and remove both the override and this field once the fix ships. Only meaningful alongside 'description' — has no effect on generation or rendering."
@@ -124,7 +138,23 @@
               "title": {
                 "type": "string",
                 "description": "Optional admonition title, shown in place of the default type label."
+              },
+              "cloud_only": {
+                "type": "boolean",
+                "description": "Show this admonition only in the Cloud build (wrapped with ifdef::env-cloud[])."
+              },
+              "self_hosted_only": {
+                "type": "boolean",
+                "description": "Show this admonition only in the self-managed build (wrapped with ifndef::env-cloud[])."
               }
+            },
+            "not": {
+              "$comment": "Setting both would wrap the block in ifdef and ifndef at once, so it would render in neither build. Only an exact true counts, so cloud_only: false beside self_hosted_only: true stays valid.",
+              "properties": {
+                "cloud_only": { "const": true },
+                "self_hosted_only": { "const": true }
+              },
+              "required": ["cloud_only", "self_hosted_only"]
             },
             "additionalProperties": false
           }

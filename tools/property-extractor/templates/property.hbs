@@ -31,6 +31,12 @@ No description available.
 {{#if admonitions}}
 {{#each admonitions}}
 
+{{#if cloud_only}}
+ifdef::env-cloud[]
+{{/if}}
+{{#if self_hosted_only}}
+ifndef::env-cloud[]
+{{/if}}
 {{#if title}}
 .{{{title}}}
 {{/if}}
@@ -38,6 +44,12 @@ No description available.
 ====
 {{{text}}}
 ====
+{{#if cloud_only}}
+endif::[]
+{{/if}}
+{{#if self_hosted_only}}
+endif::[]
+{{/if}}
 {{/each}}
 {{/if}}
 {{#if is_enterprise}}
