@@ -8,6 +8,7 @@ const asciidoctor = require('@asciidoctor/core')();
 const generate = require('../../../tools/property-extractor/generate-handlebars-docs');
 const applyPropertyLinks = require('../../../tools/property-extractor/helpers/applyPropertyLinks');
 const { findGluedConditionals } = require('../../../tools/property-extractor/helpers/audienceScope');
+const classify = require('../../../tools/overrides-audit/classify');
 
 // The real overrides file from the docs repo and a reduced snapshot of the real
 // extracted properties, not hand-written fixtures. A fixture passes while the
@@ -37,7 +38,7 @@ function buildCorpus (overridesDoc) {
       type: 'string',
     };
     const merged = { ...base, name };
-    for (const field of ['description', 'links', 'admonitions', 'related_topics', 'see_also', 'example', 'category', 'version']) {
+    for (const field of ['description', 'links', 'includes', 'admonitions', 'related_topics', 'see_also', 'example', 'category', 'version']) {
       if (override[field] !== undefined) merged[field] = override[field];
     }
     // property_extractor.py's _process_example_override joins an example array
@@ -54,17 +55,30 @@ function buildCorpus (overridesDoc) {
   return properties;
 }
 
-/** Render the four partials from a property map, returning their AsciiDoc. */
+/**
+ * Render the four partials the way the generator actually does.
+ *
+ * Through generateAllDocs, not generatePropertyPartials: the link pass, the
+ * description flattening and the config_ref rewrite all live in generateAllDocs,
+ * so calling the inner function skips them. This test file did exactly that at
+ * first, and every assertion about links and conditionals was passing against
+ * partials that had neither applied.
+ */
 function renderPartials (properties) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prop-corpus-'));
+  const inputFile = path.join(dir, 'input.json');
+  fs.writeFileSync(inputFile, JSON.stringify({ properties }));
   const quiet = ['log', 'warn', 'error'].map((m) => jest.spyOn(console, m).mockImplementation(() => {}));
-  const previous = process.env.GENERATE_PARTIALS;
+  const previous = { gen: process.env.GENERATE_PARTIALS, out: process.env.OUTPUT_PARTIALS_DIR };
   process.env.GENERATE_PARTIALS = '1';
+  process.env.OUTPUT_PARTIALS_DIR = dir;
   try {
-    generate.generatePropertyPartials(properties, dir);
+    generate.generateAllDocs(inputFile, dir);
   } finally {
-    if (previous === undefined) delete process.env.GENERATE_PARTIALS;
-    else process.env.GENERATE_PARTIALS = previous;
+    for (const [key, value] of [['GENERATE_PARTIALS', previous.gen], ['OUTPUT_PARTIALS_DIR', previous.out]]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     quiet.forEach((s) => s.mockRestore());
   }
   const out = {};
@@ -195,6 +209,62 @@ describe('live overrides corpus', () => {
       // errors and no text goes missing; the paragraphs just run together.
       expect(merged).toEqual([]);
     });
+  });
+});
+
+describe('declared includes and glossary terms over the live corpus', () => {
+  it('emits one include:: directive per declared include', () => {
+    const declared = Object.values(OVERRIDES.properties)
+      .filter((o) => o && o.includes)
+      .reduce((n, o) => n + o.includes.length, 0);
+    const emitted = PARTIAL_NAMES.reduce(
+      (n, f) => n + (partials[f].match(/^include::/gm) || []).length,
+      0
+    );
+    // Written into the description string these were markup the overrides audit
+    // could not separate from the prose. As data they have to still reach the
+    // page, in the same place.
+    expect(emitted).toBe(declared);
+  });
+
+  it('gives every include:: its own line, with a blank line before it', () => {
+    // A directive that is not at line start publishes as literal text, and one
+    // glued to the prose above it lands inside that paragraph.
+    for (const file of PARTIAL_NAMES) {
+      const lines = partials[file].split('\n');
+      lines.forEach((line, i) => {
+        if (!line.includes('include::')) return;
+        expect(line).toMatch(/^include::/);
+        expect(i === 0 || lines[i - 1].trim() === '' || /^if(n?)def::/.test(lines[i - 1].trim())).toBe(true);
+      });
+    }
+  });
+
+  it('emits a glossterm macro for every declared glossary term', () => {
+    const declared = Object.values(OVERRIDES.properties)
+      .filter((o) => o && o.links)
+      .reduce((n, o) => n + Object.values(o.links).filter((t) => /(^|:\s*)glossterm/.test(t)).length, 0);
+    const emitted = PARTIAL_NAMES.reduce(
+      (n, f) => n + (partials[f].match(/glossterm:[^[]+\[\]/g) || []).length,
+      0
+    );
+    expect(emitted).toBeGreaterThanOrEqual(declared);
+  });
+
+  it('leaves no description carrying docs-only markup', () => {
+    // The point of links, includes, admonitions and the description array: with
+    // the structure in its own fields, every description is prose the overrides
+    // audit can compare against the C++ doc string, so none of them is pinned
+    // as a permanent override any more.
+    const offenders = [];
+    for (const [name, o] of Object.entries(OVERRIDES.properties)) {
+      if (!o || typeof o !== 'object') continue;
+      const { prose } = classify.unconditionalProse(o.description);
+      if (!prose) continue;
+      const kinds = classify.detectDocsMarkup(prose, []);
+      if (kinds.length) offenders.push(`${name}: ${kinds.join(', ')}`);
+    }
+    expect(offenders).toEqual([]);
   });
 });
 

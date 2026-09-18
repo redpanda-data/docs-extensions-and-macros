@@ -62,6 +62,7 @@ const KEEP_BY_DESIGN_FIELDS = Object.freeze([
   'see_also',
   'admonitions',
   'links',
+  'includes',
   'category',
   'config_scope',
   'version',

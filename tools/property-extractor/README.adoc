@@ -158,6 +158,7 @@ Create a `property-overrides.json` file to customize extracted documentation:
 
 * `description` - Replace the auto-extracted description. Either a string, or an array of paragraphs when one of them belongs to a single docs build: an array entry may carry a `cloud-only:` / `self-managed-only:` prefix and the generator wraps it in the matching conditional. Use the array form rather than writing `ifdef::env-cloud[]` into the string. See <<Keeping a description upstreamable>>.
 * `links` - Inline links, keyed by the literal text to find in the prose and valued by the target. See <<Adding links without forking the source prose>>.
+* `includes` - Shared partials to pull into the property's entry, as Antora resource IDs. See <<Pulling in a shared partial>>.
 * `example` - Add usage example in AsciiDoc format
 * `example_file` - Load example from external file
 * `version` - Document when property was introduced
@@ -201,6 +202,7 @@ Two target forms:
 
 `#<property_name>`:: Emits a `prop` macro. The macro resolves the reference page itself and renders plain code in a build that does not publish the target, so a property link needs no conditional and cannot dangle. A name that is not a known property is refused with a warning rather than emitted, because an unverifiable `prop` call publishes as literal macro text.
 `xref:<target>`:: Emits a literal xref with the key as its link text. Property-page targets are canonicalized to `xref:reference:properties/<page>.adoc`.
+`glossterm`:: Wraps the key in a glossary tooltip. The macro takes the term as its target and looks the definition up in the glossary, so the key is the term. Use `glossterm:<Term>` when the prose says something other than the term's own name.
 
 A target may carry a `cloud-only:` / `self-managed-only:` prefix, in which case the containing paragraph is emitted twice: linked in that branch, plain in the other. AsciiDoc preprocessor directives have to start a line, so they cannot bracket an inline span; the paragraph is the smallest thing that can be wrapped. A scoped link that matches inside a delimited block is refused with a warning, since duplicating that paragraph would split the block across both branches.
 
@@ -208,9 +210,27 @@ The generator reports every key that matched no text. A link key that matches no
 
 Links are applied at generation time, so they reach the rendered partials but not the published `redpanda-properties-<tag>.json`. That file is the machine-readable data surface, and its descriptions drive hover tooltips, where an inline link is not wanted.
 
+==== Pulling in a shared partial
+
+Some entries end with a shared block: the "internal use only" warning, or the HTTP Proxy ephemeral-credentials breaking-change notice. Those are block-level docs structure, so they go in `includes` rather than into the description string:
+
+[,json]
+----
+{
+  "properties": {
+    "data_transforms_read_buffer_memory_percentage": {
+      "description": "The percentage of available memory in the transform subsystem to use for read buffers.",
+      "includes": ["reference:partial$internal-use-property.adoc"]
+    }
+  }
+}
+----
+
+Each entry is an Antora resource ID, rendered as an `include::` directive immediately after the description, which is where these were previously written by hand. An entry may carry a `cloud-only:` / `self-managed-only:` prefix, and its own `[attrs]` if it needs them; without brackets the generator adds the empty pair the directive requires. A value that does not look like a resource ID is emitted as given, with a warning, because an include with no family segment resolves to nothing at build time and does it silently.
+
 ==== Keeping a description upstreamable
 
-`links`, `see_also` and `admonitions` all exist so that a description can carry docs-site structure without mixing markup into the sentence. That is not a style preference. It is what makes the override retirable. `doc-tools overrides audit` compares an override's prose against the C++ doc string to decide whether it is redundant, upstreamable, or has to stay. Markup in the sentence makes the two incomparable, so an enriched description could never be retired or sent upstream. A hand-written `ifdef::env-cloud[]` does the same thing, which is why the array form exists.
+`links`, `includes`, `see_also` and `admonitions` all exist so that a description can carry docs-site structure without mixing markup into the sentence. That is not a style preference. It is what makes the override retirable. `doc-tools overrides audit` compares an override's prose against the C++ doc string to decide whether it is redundant, upstreamable, or has to stay. Markup in the sentence makes the two incomparable, so an enriched description could never be retired or sent upstream. A hand-written `ifdef::env-cloud[]` does the same thing, which is why the array form exists.
 
 An audience-scoped paragraph is docs-only by definition, because the source string has no audience, so the audit compares only the unconditional paragraphs and never puts scoped text into an upstream candidate.
 

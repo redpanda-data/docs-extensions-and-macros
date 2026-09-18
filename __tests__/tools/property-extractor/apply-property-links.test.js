@@ -88,7 +88,9 @@ describe('what is refused', () => {
     const props = corpus({ description: 'See docs.', links: { docs: 'https://example.com' } });
     const result = applyPropertyLinks(props);
     expect(props.subject.description).toBe('See docs.');
-    expect(result.warnings).toEqual([expect.stringContaining('is neither "#<property_name>" nor "xref:..."')]);
+    expect(result.warnings).toEqual([
+      expect.stringContaining('is not "#<property_name>", "xref:..." or "glossterm"'),
+    ]);
   });
 
   it('refuses to audience-scope a link that matches inside a delimited block', () => {
@@ -282,6 +284,81 @@ describe('resolveLinkSpecs', () => {
   it('ignores a links value that is not an object', () => {
     expect(resolveLinkSpecs('p', ['#rpc_server'], {}).specs).toEqual([]);
     expect(resolveLinkSpecs('p', 'nope', {}).specs).toEqual([]);
+  });
+});
+
+describe('glossterm targets', () => {
+  it('wraps the key in a glossary tooltip, with the key as the term', () => {
+    // The macro takes the term as its target and looks the definition up in the
+    // glossary, so the payload stays empty and the displayed text is the term.
+    const props = corpus({
+      description: 'Network address for the Admin API server.',
+      links: { 'Admin API': 'glossterm' },
+    });
+    applyPropertyLinks(props);
+    expect(props.subject.description).toBe('Network address for the glossterm:Admin API[] server.');
+  });
+
+  it('takes an explicit term when the prose says something else', () => {
+    const props = corpus({
+      description: 'The length of time that a consensus group is muted.',
+      links: { 'consensus group': 'glossterm:Raft' },
+    });
+    applyPropertyLinks(props);
+    expect(props.subject.description).toBe('The length of time that a glossterm:Raft[] is muted.');
+  });
+
+  it('refuses a glossterm target with no term', () => {
+    const props = corpus({ description: 'See it.', links: { 'it': 'glossterm:' } });
+    const result = applyPropertyLinks(props);
+    expect(props.subject.description).toBe('See it.');
+    expect(result.warnings).toEqual([expect.stringContaining('glossterm target with no term')]);
+  });
+});
+
+describe('includes', () => {
+  const { normalizeIncludes } = require('../../../tools/property-extractor/helpers/applyPropertyLinks');
+
+  it('adds the empty brackets the directive needs', () => {
+    const warnings = [];
+    expect(normalizeIncludes('p', ['reference:partial$internal-use-property.adoc'], warnings))
+      .toEqual([{ target: 'reference:partial$internal-use-property.adoc[]' }]);
+    expect(warnings).toEqual([]);
+  });
+
+  it('keeps attributes the author supplied', () => {
+    expect(normalizeIncludes('p', ['reference:partial$x.adoc[leveloffset=+1]'], []))
+      .toEqual([{ target: 'reference:partial$x.adoc[leveloffset=+1]' }]);
+  });
+
+  it('tolerates a value that already carries the directive', () => {
+    expect(normalizeIncludes('p', ['include::reference:partial$x.adoc[]'], []))
+      .toEqual([{ target: 'reference:partial$x.adoc[]' }]);
+  });
+
+  it('carries the audience scope', () => {
+    expect(normalizeIncludes('p', ['self-managed-only: shared:partial$x.adoc'], []))
+      .toEqual([{ target: 'shared:partial$x.adoc[]', self_hosted_only: true }]);
+    expect(normalizeIncludes('p', ['cloud-only: shared:partial$x.adoc'], []))
+      .toEqual([{ target: 'shared:partial$x.adoc[]', cloud_only: true }]);
+  });
+
+  it('accepts a bare string as well as an array', () => {
+    expect(normalizeIncludes('p', 'reference:partial$x.adoc', [])).toHaveLength(1);
+  });
+
+  it('warns when the value does not look like an Antora resource ID', () => {
+    // Without a family segment the include resolves to nothing at build time,
+    // silently, which is the failure worth naming at generation.
+    const warnings = [];
+    normalizeIncludes('p', ['some/relative/path.adoc'], warnings);
+    expect(warnings).toEqual([expect.stringContaining('does not look like an Antora resource ID')]);
+  });
+
+  it('drops an entry with no resource ID', () => {
+    const warnings = [];
+    expect(normalizeIncludes('p', ['', null], warnings)).toEqual([]);
+    expect(warnings).toHaveLength(2);
   });
 });
 

@@ -28,6 +28,24 @@ endif::[]
 No description available.
 
 {{/if}}
+{{#if includes}}
+{{#each includes}}
+
+{{#if cloud_only}}
+ifdef::env-cloud[]
+{{/if}}
+{{#if self_hosted_only}}
+ifndef::env-cloud[]
+{{/if}}
+include::{{{target}}}
+{{#if cloud_only}}
+endif::[]
+{{/if}}
+{{#if self_hosted_only}}
+endif::[]
+{{/if}}
+{{/each}}
+{{/if}}
 {{#if admonitions}}
 {{#each admonitions}}
 

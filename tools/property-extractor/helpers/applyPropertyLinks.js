@@ -70,8 +70,22 @@ function resolveLinkSpecs(propName, links, properties) {
       continue;
     }
 
+    if (target === 'glossterm' || target.startsWith('glossterm:')) {
+      // The macro takes the term as its target and looks the definition up in
+      // the glossary, so the displayed text is the term. Bare `glossterm` means
+      // the key is the term; `glossterm:<Term>` is for prose that says
+      // something other than the term's own name.
+      const term = target === 'glossterm' ? display : target.slice('glossterm:'.length).trim();
+      if (!term) {
+        warnings.push(`${propName}: links["${key}"] has a glossterm target with no term; skipped.`);
+        continue;
+      }
+      specs.push({ key: key.trim(), display, scope, kind: 'glossterm', term });
+      continue;
+    }
+
     warnings.push(
-      `${propName}: links["${key}"] target "${target}" is neither "#<property_name>" nor "xref:..."; skipped.`
+      `${propName}: links["${key}"] target "${target}" is not "#<property_name>", "xref:..." or "glossterm"; skipped.`
     );
   }
 
@@ -96,6 +110,10 @@ function renderLink(spec) {
       attrs.push(spec.display.includes(',') ? `text="${spec.display}"` : `text=${spec.display}`);
     }
     return `prop:${spec.targetName}[${attrs.join(',')}]`;
+  }
+  if (spec.kind === 'glossterm') {
+    // Empty payload: the definition comes from the glossary, not from here.
+    return `glossterm:${spec.term}[]`;
   }
   return canonicalizePropertyXrefs(`xref:${spec.target.slice('xref:'.length)}[${spec.display}]`).text;
 }
@@ -239,6 +257,53 @@ function flattenDescription(description) {
 }
 
 /**
+ * Normalize an `includes` override into what the template renders.
+ *
+ * A shared partial pulled into a property entry is block-level docs structure:
+ * the "internal use only" warning, or the HTTP Proxy ephemeral-credentials
+ * breaking-change notice. Written into the description string it is markup the
+ * overrides audit cannot separate from the prose, which pinned seven
+ * descriptions as permanent overrides. As its own field the prose stays
+ * comparable to source and the include still renders in the same place.
+ *
+ * Each entry is a resource ID, optionally audience-scoped with the same prefix
+ * every other field uses. An entry may carry its own `[attrs]`; without them
+ * the generator adds the empty brackets the directive requires.
+ *
+ * @param {string} propName - For messages.
+ * @param {Array<string>|string} raw - The `includes` override value.
+ * @param {string[]} warnings - Collected warnings, appended to in place.
+ * @returns {Array<{target: string, cloud_only?: boolean, self_hosted_only?: boolean}>}
+ */
+function normalizeIncludes(propName, raw, warnings) {
+  const items = Array.isArray(raw) ? raw : [raw];
+  const out = [];
+  for (const entry of items) {
+    const scope = parseAudience(entry);
+    if (!scope || !scope.content) {
+      warnings.push(`${propName}: an includes entry has no resource ID; dropped.`);
+      continue;
+    }
+    let target = scope.content;
+    if (target.startsWith('include::')) target = target.slice('include::'.length);
+    if (!/\$/.test(target) && !target.includes('$')) {
+      // Antora resource IDs for a partial carry a family segment; without one
+      // the include silently resolves to nothing at build time.
+      warnings.push(
+        `${propName}: includes entry "${target}" does not look like an Antora resource ID ` +
+        '(expected something like reference:partial$name.adoc); emitted as given.'
+      );
+    }
+    if (!target.endsWith(']')) target = `${target}[]`;
+    const item = { target };
+    if (scope.cloudOnly) item.cloud_only = true;
+    if (scope.selfHostedOnly) item.self_hosted_only = true;
+    out.push(item);
+  }
+  return out;
+}
+
+/**
  * Why the Cloud build cannot reach a link target, or null when it can.
  *
  * Two separate reasons, and only the first was obvious. `cloud_supported: false`
@@ -282,6 +347,9 @@ function applyPropertyLinks(properties) {
     // that paragraph already carries rather than triggering a second wrapper.
     if (prop.description !== undefined) {
       prop.description = flattenDescription(prop.description);
+    }
+    if (prop.includes !== undefined) {
+      prop.includes = normalizeIncludes(propName, prop.includes, warnings);
     }
     if (Array.isArray(prop.admonitions)) {
       prop.admonitions = prop.admonitions.filter((item) => {
@@ -390,3 +458,4 @@ module.exports.resolveLinkSpecs = resolveLinkSpecs;
 module.exports.applyLinksToText = applyLinksToText;
 module.exports.renderLink = renderLink;
 module.exports.cloudUnreachable = cloudUnreachable;
+module.exports.normalizeIncludes = normalizeIncludes;

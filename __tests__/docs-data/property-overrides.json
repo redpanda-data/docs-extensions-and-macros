@@ -21,9 +21,10 @@
         "* `<external-broker-hostname>`: The externally accessible hostname or IP address that clients use to connect to this broker",
         "* `<admin-api-port>`: The port number for the Admin API endpoint"
       ],
-      "description": "Network address for the glossterm:Admin API[] server.",
+      "description": "Network address for the Admin API server.",
       "links": {
-        "`admin_api_tls`": "#admin_api_tls"
+        "`admin_api_tls`": "#admin_api_tls",
+        "Admin API": "glossterm"
       },
       "config_scope": "broker",
       "category": "redpanda"
@@ -864,11 +865,17 @@
       "config_scope": "cluster"
     },
     "data_transforms_read_buffer_memory_percentage": {
-      "description": "The percentage of available memory in the transform subsystem to use for read buffers.\n\ninclude::reference:partial$internal-use-property.adoc[]",
+      "description": "The percentage of available memory in the transform subsystem to use for read buffers.",
+      "includes": [
+        "reference:partial$internal-use-property.adoc[]"
+      ],
       "config_scope": "cluster"
     },
     "data_transforms_write_buffer_memory_percentage": {
-      "description": "The percentage of available memory in the transform subsystem to use for write buffers.\n\ninclude::reference:partial$internal-use-property.adoc[]",
+      "description": "The percentage of available memory in the transform subsystem to use for write buffers.",
+      "includes": [
+        "reference:partial$internal-use-property.adoc[]"
+      ],
       "config_scope": "cluster"
     },
     "datalake_coordinator_max_bytes_per_commit": {
@@ -976,7 +983,10 @@
       ]
     },
     "disable_cluster_recovery_loop_for_tests": {
-      "description": "Disables the cluster recovery loop. This property is used to simplify testing and should not be set in production.\n\ninclude::reference:partial$internal-use-property.adoc[]",
+      "description": "Disables the cluster recovery loop. This property is used to simplify testing and should not be set in production.",
+      "includes": [
+        "reference:partial$internal-use-property.adoc[]"
+      ],
       "config_scope": "cluster"
     },
     "disk_reservation_percent": {
@@ -1561,7 +1571,10 @@
       "config_scope": "cluster"
     },
     "leader_balancer_mute_timeout": {
-      "description": "The length of time that a glossterm:Raft[] group is muted after a leadership rebalance operation. Any group that has been moved, regardless of whether the move succeeded or failed, undergoes a cooling-off period. This prevents Raft groups from repeatedly experiencing leadership rebalance operations in a short time frame, which can lead to instability in the cluster.\n\nThe leader balancer maintains a list of muted groups and reevaluates muted status at the start of each balancing iteration. Muted groups still contribute to overall cluster balance calculations although they can't themselves be moved until the mute period is over.\n\nThis timeout also determines how long a broker that hasn't sent a heartbeat is considered muted. Muted brokers are not targeted for leadership transfers when the cluster rebalances, for example, because of unreliable network connectivity.",
+      "description": "The length of time that a Raft group is muted after a leadership rebalance operation. Any group that has been moved, regardless of whether the move succeeded or failed, undergoes a cooling-off period. This prevents Raft groups from repeatedly experiencing leadership rebalance operations in a short time frame, which can lead to instability in the cluster.\n\nThe leader balancer maintains a list of muted groups and reevaluates muted status at the start of each balancing iteration. Muted groups still contribute to overall cluster balance calculations although they can't themselves be moved until the mute period is over.\n\nThis timeout also determines how long a broker that hasn't sent a heartbeat is considered muted. Muted brokers are not targeted for leadership transfers when the cluster rebalances, for example, because of unreliable network connectivity.",
+      "links": {
+        "Raft": "glossterm"
+      },
       "config_scope": "cluster"
     },
     "leader_balancer_node_mute_timeout": {
@@ -1989,7 +2002,10 @@
       "config_scope": "cluster"
     },
     "raft_recovery_throttle_disable_dynamic_mode": {
-      "description": "Disables cross shard sharing used to throttle recovery traffic. Should only be used to debug unexpected problems.\n\ninclude::reference:partial$internal-use-property.adoc[]",
+      "description": "Disables cross shard sharing used to throttle recovery traffic. Should only be used to debug unexpected problems.",
+      "includes": [
+        "reference:partial$internal-use-property.adoc[]"
+      ],
       "config_scope": "cluster"
     },
     "raft_smp_max_non_local_requests": {
@@ -2428,10 +2444,13 @@
       "config_scope": "cluster"
     },
     "sasl_mechanism": {
-      "description": "The SASL mechanism to use when the HTTP Proxy client connects to the Kafka API. These credentials are used when the HTTP Proxy API listener has `authentication_method`: `none` but the cluster requires authenticated access to the Kafka API. This property specifies which individual SASL mechanism the HTTP Proxy client should use, while the cluster-wide available mechanisms are configured using the `sasl_mechanisms` cluster property.\n\ninclude::shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]",
+      "description": "The SASL mechanism to use when the HTTP Proxy client connects to the Kafka API. These credentials are used when the HTTP Proxy API listener has `authentication_method`: `none` but the cluster requires authenticated access to the Kafka API. This property specifies which individual SASL mechanism the HTTP Proxy client should use, while the cluster-wide available mechanisms are configured using the `sasl_mechanisms` cluster property.",
       "links": {
         "`authentication_method`": "xref:reference:properties/broker-properties.adoc#http_based_auth_method"
       },
+      "includes": [
+        "shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]"
+      ],
       "related_topics": [
         "xref:reference:properties/cluster-properties.adoc#sasl_mechanisms[`sasl_mechanisms`]"
       ],
@@ -2525,18 +2544,24 @@
       "version": "v26.2.1"
     },
     "scram_password": {
-      "description": "Password to use for SCRAM authentication mechanisms when the HTTP Proxy client connects to the Kafka API. This property is required when the HTTP Proxy API listener has `authentication_method`: `none` but the cluster requires authenticated access to the Kafka API.\n\ninclude::shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]",
+      "description": "Password to use for SCRAM authentication mechanisms when the HTTP Proxy client connects to the Kafka API. This property is required when the HTTP Proxy API listener has `authentication_method`: `none` but the cluster requires authenticated access to the Kafka API.",
       "links": {
         "`authentication_method`": "xref:reference:properties/broker-properties.adoc#http_based_auth_method"
       },
+      "includes": [
+        "shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]"
+      ],
       "config_scope": "broker",
       "category": "pandaproxy-client"
     },
     "scram_username": {
-      "description": "Username to use for SCRAM authentication mechanisms when the HTTP Proxy client connects to the Kafka API. This property is required when the HTTP Proxy API listener has `authentication_method`: `none` but the cluster requires authenticated access to the Kafka API.\n\ninclude::shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]",
+      "description": "Username to use for SCRAM authentication mechanisms when the HTTP Proxy client connects to the Kafka API. This property is required when the HTTP Proxy API listener has `authentication_method`: `none` but the cluster requires authenticated access to the Kafka API.",
       "links": {
         "`authentication_method`": "xref:reference:properties/broker-properties.adoc#http_based_auth_method"
       },
+      "includes": [
+        "shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]"
+      ],
       "config_scope": "broker",
       "category": "pandaproxy-client",
       "example": [

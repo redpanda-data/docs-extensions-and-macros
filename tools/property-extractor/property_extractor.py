@@ -1269,6 +1269,12 @@ def _apply_override_to_existing_property(property_dict, override, overrides_file
     # description itself plain prose the overrides audit can compare to source.
     if "links" in override:
         property_dict["links"] = override["links"]
+
+    # Shared partials pulled into the property entry (the "internal use only"
+    # warning, the HTTP Proxy breaking-change notice). Carried as data so the
+    # description stays prose the overrides audit can compare against source.
+    if "includes" in override:
+        property_dict["includes"] = override["includes"]
     
     # Apply version override (introduced in version)
     if "version" in override:
