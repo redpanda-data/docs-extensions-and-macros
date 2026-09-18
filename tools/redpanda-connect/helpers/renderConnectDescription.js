@@ -93,10 +93,16 @@ function ensureHeadingSeparation (body) {
  * Single-backtick spans still apply attribute substitution, so spans are
  * escaped too; `----` listing blocks and ```/~~~ fences are verbatim and stay
  * untouched (a `\{` inside a fence would render as a literal backslash).
+ *
+ * The name may start uppercase or with an underscore, because environment
+ * variable placeholders are the common case in prose: Asciidoctor downcases
+ * a reference before looking it up, so ${SALESFORCE_CLIENT_SECRET} outside a
+ * fence is consumed exactly like a lowercase one and logs the missing
+ * attribute as salesforce_client_secret.
  */
 function escapePlaceholderBraces (body) {
   return annotateVerbatimLines(body).map(({ line, verbatim }) => (
-    verbatim ? line : line.replace(/(?<![\\{])\{([a-z][\w.-]{1,30})\}/g, '\\{$1}')
+    verbatim ? line : line.replace(/(?<![\\{])\{([A-Za-z_][\w.-]{1,30})\}/g, '\\{$1}')
   )).join('\n');
 }
 
