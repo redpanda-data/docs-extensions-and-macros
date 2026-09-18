@@ -307,6 +307,13 @@ jobs:
 
           # Helpers ---------------------------------------------------------
           derive_smes() {
+            # MIRROR: .github/workflows/sme-nag.yml derives the same set from
+            # `gh pr list --json reviewRequests,latestReviews` (a different API
+            # shape, so the code cannot be shared verbatim). The RULE must stay
+            # identical — (requested ∪ reviewed) − docs team − author − bots —
+            # or the nag will chase authors the gate is already satisfied
+            # with, or vice versa. Change both together.
+            #
             # (requested ∪ reviewed) − docs team − author − bots, recomputed
             # from the API on EVERY run. Deliberately not cached anywhere: a
             # marker comment would be shared mutable state that anyone with
