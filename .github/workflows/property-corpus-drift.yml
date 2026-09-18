@@ -79,6 +79,10 @@ jobs:
       - name: Check corpus against the docs repo
         env:
           GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
+          # A PR that updates the corpus is ahead of docs main on purpose, so a
+          # PR run reports in the log and files nothing. Left to itself it filed
+          # an issue against its own branch's work.
+          FILE_ISSUE: ${{ github.event_name != 'pull_request' }}
         run: |
           set -euo pipefail
           # Exit 1 means drift was found and reported, which is not a build

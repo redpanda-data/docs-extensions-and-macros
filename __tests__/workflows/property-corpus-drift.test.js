@@ -74,9 +74,18 @@ afterAll(() => fs.rmSync(harnessDir, { recursive: true, force: true }));
  * Build the "live docs repo" side. `matching` derives it from the committed
  * corpus so a clean run is genuinely clean; otherwise it perturbs it.
  */
-function setLive ({ matching = true, dropEntries = 0, changeField = false } = {}) {
+function setLive ({ matching = true, dropEntries = 0, changeField = false, changeEntry = false } = {}) {
   const snapshot = JSON.parse(fs.readFileSync(path.join(CORPUS_DIR, 'property-snapshot.json'), 'utf8'));
   const overrides = JSON.parse(fs.readFileSync(path.join(CORPUS_DIR, 'property-overrides.json'), 'utf8'));
+
+  if (!matching && changeEntry) {
+    // Same keys on both sides, different content: the case a count comparison
+    // cannot see.
+    const first = Object.keys(overrides.properties)[0];
+    overrides.properties[first] = Object.assign({}, overrides.properties[first], {
+      description: 'a description only the live repo has',
+    });
+  }
 
   if (!matching && dropEntries > 0) {
     for (const name of Object.keys(overrides.properties).slice(0, dropEntries)) {
@@ -175,6 +184,28 @@ describe('property-corpus-drift.sh', () => {
     const { status, stderr } = run({ GH_STUB_WRITE_FAIL: '1' });
     expect(status).toBe(2);
     expect(stderr).toMatch(/could not create an issue/);
+  });
+
+  it('reports drift without filing when FILE_ISSUE is not true', () => {
+    // A pull request that updates the corpus is ahead of docs main by design.
+    // Left to itself the check filed an issue against the very branch fixing
+    // it, which is noise a human is already looking at.
+    setLive({ matching: false, dropEntries: 3 });
+    const { status, stdout, ghCalls } = run({ FILE_ISSUE: 'false' });
+    expect(status).toBe(1);
+    expect(stdout).toMatch(/Drift found/);
+    expect(stdout).toMatch(/Not filing an issue/);
+    expect(ghCalls).not.toMatch(/issue (create|comment|list)/);
+  });
+
+  it('names what differs when both sides have the same entries', () => {
+    // "438 entries live, 438 in the mirror" on its own says nothing about what
+    // changed, which is exactly what the first real CI run reported.
+    setLive({ matching: false, changeEntry: true });
+    const { status, stdout } = run({ FILE_ISSUE: 'false' });
+    expect(status).toBe(1);
+    expect(stdout).toMatch(/same entries/);
+    expect(stdout).toMatch(/differing in content/);
   });
 
   it('fails closed with 2 when gh is not on PATH at all', () => {

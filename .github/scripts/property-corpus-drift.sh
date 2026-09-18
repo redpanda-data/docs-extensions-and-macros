@@ -23,6 +23,10 @@ set -euo pipefail
 DOCS_REF="${DOCS_REF:-main}"
 DOCS_REPO="${DOCS_REPO:-redpanda-data/docs}"
 ISSUE_REPO="${ISSUE_REPO:-redpanda-data/docs-extensions-and-macros}"
+# A pull request that updates the corpus is ahead of docs main by design, so a
+# PR run reports drift in the log and files nothing. Only the unattended paths
+# (schedule, workflow_dispatch) need an issue, because nobody is looking.
+FILE_ISSUE="${FILE_ISSUE:-true}"
 ISSUE_TITLE="${ISSUE_TITLE:-Property test corpus has fallen behind redpanda-data/docs}"
 ISSUE_LABEL="${ISSUE_LABEL:-documentation}"
 CORPUS_DIR="${CORPUS_DIR:-__tests__/docs-data}"
@@ -77,9 +81,18 @@ DRIFT="$(node -e '
     const mirror = Object.keys(mirrorOverrides.properties || {});
     const missing = live.filter((k) => !mirror.includes(k));
     const extra = mirror.filter((k) => !live.includes(k));
-    report.push(`- \`property-overrides.json\`: ${live.length} entries live, ${mirror.length} in the mirror`
-      + (missing.length ? `, ${missing.length} missing here` : "")
-      + (extra.length ? `, ${extra.length} no longer in the docs repo` : ""));
+    let detail = "";
+    if (missing.length) detail += `, ${missing.length} missing here`;
+    if (extra.length) detail += `, ${extra.length} no longer in the docs repo`;
+    if (!detail) {
+      // Same keys on both sides, so the difference is inside the entries. Name
+      // a few, because "438 live, 438 in the mirror" on its own says nothing.
+      const changed = live.filter((k) => JSON.stringify(liveOverrides.properties[k]) !== JSON.stringify(mirrorOverrides.properties[k]));
+      detail = ` (same entries, ${changed.length} of them differing in content`
+        + (changed.length ? `: ${changed.slice(0, 5).join(", ")}${changed.length > 5 ? ", ..." : ""}` : "")
+        + ")";
+    }
+    report.push(`- \`property-overrides.json\`: ${live.length} entries live, ${mirror.length} in the mirror${detail}`);
   }
 
   // The snapshot is a reduction, so re-derive it the same way the refresh
@@ -130,6 +143,11 @@ Reported by \`.github/workflows/property-corpus-drift.yml\` for
 opening a duplicate.
 EOF
 )"
+
+if [ "$FILE_ISSUE" != "true" ]; then
+  echo "Not filing an issue (FILE_ISSUE=$FILE_ISSUE). The drift is above."
+  exit 1
+fi
 
 # Title-scoped, so an unrelated open issue that happens to mention the corpus
 # does not get commented on instead.
