@@ -175,7 +175,14 @@ function collectReferences (adocFile, modulesDir, root) {
  * @returns {Object} { findings, summary, scope }
  */
 function lintScreenshots (options) {
-  const opts = { ...DEFAULTS, ...options }
+  // Explicit undefined wins a spread, and intOption() returns undefined for
+  // an option nobody passed, so a plain `{ ...DEFAULTS, ...options }` lets a
+  // programmatic caller silently erase a threshold: every `size > undefined`
+  // is then false and the size rules vanish without a word. Drop undefined
+  // keys so an omitted threshold means "the default", not "no limit".
+  const provided = Object.fromEntries(
+    Object.entries(options || {}).filter(([, value]) => value !== undefined))
+  const opts = { ...DEFAULTS, ...provided }
   if (!opts.root) throw new Error('lint-screenshots requires a root directory')
   const root = path.resolve(opts.root)
   const modulesDir = path.join(root, 'modules')
@@ -186,12 +193,23 @@ function lintScreenshots (options) {
   const scoped = Array.isArray(opts.files)
   const changedAdoc = new Set()
   const changedImages = new Set()
+  // Deleted images stay in scope. Skipping a path that no longer exists would
+  // drop the pages that still reference it out of the scoped pass, so a PR
+  // that deletes a screenshot still referenced by a page would report nothing
+  // in --files mode while a whole-repo run reports image-missing. They are
+  // tracked separately so the orphaned-image rule can skip them: a file that
+  // is gone cannot be orphaned.
+  const deletedImages = new Set()
   if (scoped) {
     for (const f of opts.files) {
       const abs = path.resolve(root, f)
-      if (!fs.existsSync(abs)) continue // deletions
-      if (f.endsWith('.adoc')) changedAdoc.add(abs)
-      else if (IMAGE_EXT_RE.test(f)) changedImages.add(abs)
+      const exists = fs.existsSync(abs)
+      if (f.endsWith('.adoc')) {
+        if (exists) changedAdoc.add(abs)
+      } else if (IMAGE_EXT_RE.test(f)) {
+        changedImages.add(abs)
+        if (!exists) deletedImages.add(abs)
+      }
     }
   }
 
@@ -264,6 +282,7 @@ function lintScreenshots (options) {
   if (scoped) {
     const referenced = new Set(allRefs.map((r) => r.resolved).filter(Boolean))
     for (const img of changedImages) {
+      if (deletedImages.has(img)) continue // gone, so not orphaned
       if (!referenced.has(img)) {
         add('orphaned-image', 'warning', null,
           'No image macro under modules/ references this file - if it is used through an attribute or from another repo, ignore this; otherwise remove it or add the macro',

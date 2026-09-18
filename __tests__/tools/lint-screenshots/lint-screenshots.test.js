@@ -271,6 +271,54 @@ describe('lintScreenshots - changed-files scope (--files)', () => {
     expect(result.findings).toEqual([])
     expect(result.summary.references).toBe(0)
   })
+
+  test('a deleted image a page still references is reported, not silently skipped', () => {
+    // Regression: skipping changed paths that no longer exist dropped the
+    // referencing pages out of the scoped pass, so deleting a screenshot that
+    // a page still uses reported nothing here while a whole-repo run
+    // reported image-missing.
+    const root = makeRepo({
+      'modules/m/pages/page.adoc': 'image::gone.png[Some alt text]\n'
+    })
+    const result = lintScreenshots({ root, files: ['modules/m/images/gone.png'] })
+    expect(result.findings).toEqual([expect.objectContaining({
+      rule: 'image-missing', severity: 'error', file: 'modules/m/pages/page.adoc'
+    })])
+    expect(result.summary.references).toBe(1)
+  })
+
+  test('a deleted image nothing references is not reported as orphaned', () => {
+    const root = repo()
+    const result = lintScreenshots({ root, files: ['modules/m/images/never-existed.png'] })
+    expect(result.findings).toEqual([])
+  })
+})
+
+describe('lintScreenshots - threshold defaults', () => {
+  function oversizeRepo () {
+    return makeRepo({
+      'modules/m/pages/page.adoc': 'image::big.png[Some alt text]\n',
+      'modules/m/images/big.png': Buffer.concat([pngBytes(), Buffer.alloc(200 * 1024)])
+    })
+  }
+
+  test('an omitted threshold falls back to the default instead of erasing it', () => {
+    // Regression: an explicit undefined wins a spread, and intOption() returns
+    // undefined for an option nobody passed, so `{ ...DEFAULTS, ...options }`
+    // turned every `size > undefined` comparison into false and the size rules
+    // disappeared without a word.
+    const root = oversizeRepo()
+    const omitted = lintScreenshots({ root, maxBytes: undefined, targetBytes: undefined, maxWidth: undefined, maxAltLength: undefined })
+    const explicit = lintScreenshots({ root })
+    expect(omitted.findings.map((f) => f.rule)).toEqual(explicit.findings.map((f) => f.rule))
+    expect(omitted.findings.some((f) => f.rule === 'image-too-large')).toBe(true)
+  })
+
+  test('an explicitly passed threshold still overrides the default', () => {
+    const root = oversizeRepo()
+    const result = lintScreenshots({ root, maxBytes: 10 * 1024 * 1024, targetBytes: 10 * 1024 * 1024 })
+    expect(result.findings.some((f) => f.rule === 'image-too-large')).toBe(false)
+  })
 })
 
 describe('formatHuman', () => {

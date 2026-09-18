@@ -13,6 +13,8 @@
  *
  * A block closes only on a delimiter of the same length as the one that opened
  * it; a longer run, such as the row of dashes in a rendered table, is content.
+ * - indented literal paragraphs: an indented line that opens a block is
+ *   rendered verbatim, so a URL on it is text and not a link
  * - line comments (//), which Asciidoctor drops entirely
  * - inline code spans (`...`)
  *
@@ -59,6 +61,23 @@ const ATTRIBUTE_REFERENCE_RX = /\{[a-zA-Z0-9_][a-zA-Z0-9_-]*\}/
 // Cap on how far a wrapped label may run, so an unmatched bracket somewhere in
 // prose cannot swallow the rest of the document.
 const MAX_WRAPPED_LABEL_LENGTH = 500
+
+// An indented line that opens a block is a literal paragraph: Asciidoctor
+// renders it verbatim, so any URL on it is text rather than a link. This is
+// where connector descriptions put their shell examples, which is how the
+// three comma-joined gcloud scope strings in google_drive_list_labels were
+// read as one URL and reported broken.
+const INDENTED_RX = /^[ \t]+\S/
+// Indentation does not make a literal paragraph out of a list item, a table
+// cell or a description list: Asciidoctor still parses those, so their links
+// are real. Verified against @asciidoctor/core, marker by marker (-, *, **,
+// ., .., 1., a., |, term::).
+const INDENTED_PARSED_RX = /^[ \t]+(?:[*.-]+[ \t]|\d+\.[ \t]|[a-zA-Z]\.[ \t]|\||\S.*::(?:[ \t]|$))/
+// Lines a block can start after, so an indented line that follows one opens a
+// literal paragraph: a list continuation (+), a block attribute list
+// ([source,yaml]) or a block title (.Title). A blank line and the close of a
+// delimited block do the same and are handled in the scan loop.
+const BLOCK_START_RX = /^(?:\+|\[.*\]|\.\S.*)$/
 
 // A delimiter run, plus the info string a fence may carry. Comment blocks
 // (////) come first in the alternation so a //// line is not mistaken for the
@@ -108,22 +127,48 @@ function closesBlock (delimiter, open) {
   return delimiter.char === open.char && delimiter.length === open.length && !delimiter.info
 }
 
+/**
+ * True when an indented line at the start of a block opens a literal
+ * paragraph, rather than continuing a construct Asciidoctor still parses.
+ */
+function opensLiteralParagraph (line) {
+  return INDENTED_RX.test(line) && !INDENTED_PARSED_RX.test(line)
+}
+
 function scanContentUrls (content) {
   const matches = []
   const lines = content.split('\n')
   let offset = 0
   let openDelimiter = null
+  // A literal paragraph runs from the indented line that opened it to the next
+  // blank line, and takes any unindented lines in between with it.
+  let inLiteralParagraph = false
+  // A block can start at the top of the file, and again after every line that
+  // ended the last one.
+  let atBlockStart = true
   for (const rawLine of lines) {
     const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
     const delimiter = blockDelimiter(line)
     if (openDelimiter) {
       // Inside a block, only its own matching delimiter gets out. Anything
       // else on this line is content and is never scanned.
-      if (delimiter && closesBlock(delimiter, openDelimiter)) openDelimiter = null
+      if (delimiter && closesBlock(delimiter, openDelimiter)) {
+        openDelimiter = null
+        atBlockStart = true
+      }
     } else if (delimiter) {
       openDelimiter = delimiter
-    } else if (!LINE_COMMENT_RX.test(line)) {
-      scanLine(line, offset, matches, content)
+      inLiteralParagraph = false
+    } else {
+      const blank = !line.trim()
+      if (inLiteralParagraph) {
+        if (blank) inLiteralParagraph = false
+      } else if (atBlockStart && opensLiteralParagraph(line)) {
+        inLiteralParagraph = true
+      } else if (!LINE_COMMENT_RX.test(line)) {
+        scanLine(line, offset, matches, content)
+      }
+      atBlockStart = blank || BLOCK_START_RX.test(line)
     }
     offset += rawLine.length + 1
   }

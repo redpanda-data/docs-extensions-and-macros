@@ -76,6 +76,11 @@ programCli
  * - Node.js and npm
  * - Python 3.9 or higher
  * - Docker (for some dependencies)
+ * - Network access to https://rpk.redpanda.com (rpk is downloaded from the
+ *   rpk distribution CDN and checksum-verified; no GitHub token needed).
+ *   Optional: RPK_VERSION=vX.Y.Z pins the rpk version. Without it, the
+ *   newest GA is resolved from streaming-enterprise tags when a GitHub token
+ *   is available, otherwise from latest/ on the CDN.
  */
 programCli
   .command('install-test-dependencies')
@@ -1358,6 +1363,10 @@ automation
  * - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
  *   access to redpanda-data/streaming-enterprise, which is private (not
  *   needed when --from-source points at an existing local checkout)
+ * - --plugin refreshes need none of the above when the snapshot's rpk_version
+ *   is a published GA or RC tag: the rpk binary is downloaded from
+ *   https://rpk.redpanda.com and checksum-verified. Go, Git and the token are
+ *   only used as a fallback when the CDN has no build for that tag.
  */
 automation
   .command('rpk-docs')
@@ -1467,6 +1476,9 @@ automation
  * parsing `-X list` text for rpk versions that predate it. Hidden -X options
  * appear in neither source, so they are excluded automatically.
  *
+ * The table is sectioned by the API group rpk reports for each option, and is
+ * a single flat table on rpk versions that report no groups.
+ *
  * The main rpk-docs pipeline also writes this partial from the tree it
  * already holds; this standalone command is for targeted refreshes without
  * a full generation run.
@@ -1483,7 +1495,7 @@ automation
  */
 automation
   .command('rpk-env-partial')
-  .description('Generate the -X -> RPK_* env var mapping partial from rpk -X list output.')
+  .description('Generate the -X -> RPK_* env var mapping partial from rpk itself.')
   .option('-r, --ref <ref>', 'Git branch or tag to build rpk from (e.g., dev, v26.2.1). Clones from GitHub.')
   .option('--from-source <path>', 'Path to local rpk source (src/go/rpk directory)')
   .option('--rpk-bin <path>', 'Path to an existing rpk binary (skips clone and build)')

@@ -19,6 +19,21 @@
 #     a schema for any recent release/RC tag that doesn't have one, so a
 #     missed or failed dispatch heals without anyone remembering to run it.
 #   - workflow_dispatch stays for backfills and one-offs.
+#
+# A tag whose rp_util predates a scope cannot be published, so resolve
+# pre-flights the tag's own src/v/rp_util/main.cc and skips it rather than
+# starting a build that must fail. Without that check every scheduled run built
+# six tags for ~27 minutes each and died on the first unsupported flag: the
+# broker-scope dumps (node/pandaproxy/kafka_client/schema_registry) landed on
+# streaming-enterprise's dev on 2026-08-26 and 2026-08-27, so every tag cut
+# before they reached a release branch carries only --config_schema_json.
+#
+# The flags are on v26.2.x now, but a tag is immutable: the six tags in the
+# window when this was written (v26.2.1 through v26.2.3-rc1) each still have
+# one of five, so they stay skipped forever and the first tag to publish a
+# schema is the next one cut from that branch. That is the intended shape
+# rather than a gap to close, which is why the check needs no skip list: a tag
+# carrying all five flags stops being skipped on its own.
 name: publish-rp-util-schema
 on:
   workflow_dispatch:
@@ -33,6 +48,17 @@ on:
 permissions:
   id-token: write
   contents: write
+# One line per rp_util config_store scope, `flag:asset`. Single source for all
+# three consumers below: resolve's pre-flight, resolve's published-completeness
+# check, and the generate step. rp-util-fetch.js validates the same asset names
+# on its side (RELEASE_ASSET_TO_SCHEMA_KEY); keep the two in step.
+env:
+  RP_UTIL_SCHEMAS: |
+    config_schema_json:cluster-config-schema.json
+    node_config_schema_json:node-config-schema.json
+    pandaproxy_config_schema_json:pandaproxy-config-schema.json
+    kafka_client_config_schema_json:kafka-client-config-schema.json
+    schema_registry_config_schema_json:schema-registry-config-schema.json
 # One run at a time: concurrent runs would race each other creating the same
 # rp-util-schema-<tag> release. cancel-in-progress: false keeps the running
 # build alive, but GitHub holds at most ONE pending run per concurrency
@@ -116,6 +142,12 @@ jobs:
               ;;
           esac
 
+          # Asset names the completeness check expects, derived from
+          # RP_UTIL_SCHEMAS so the list lives in exactly one place.
+          expected_assets=$(printf '%s\n' "$RP_UTIL_SCHEMAS" \
+            | awk -F: 'NF>1 && $2 != "" {print $2}' \
+            | python3 -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')
+
           missing=()
           for tag in "${candidates[@]}"; do
             # Normalize a v-less release-shaped tag to its canonical
@@ -136,15 +168,43 @@ jobs:
             # incomplete-asset release as "already published" would wedge the
             # tag forever; here it stays a candidate and the publish step
             # deletes and recreates it.
-            # Asset NAMES, not just a count of 5: five uploads of the
-            # wrong or duplicated names satisfy a count check while leaving
-            # a scope the consumer can never resolve. rp-util-fetch.js
-            # validates the same five names on its side.
-            missing_assets=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/rp-util-schema-${tag}" \
-              --jq '["cluster-config-schema.json","node-config-schema.json","pandaproxy-config-schema.json","kafka-client-config-schema.json","schema-registry-config-schema.json"]
-                    - [.assets[].name] | join(",")' 2>/dev/null || echo "missing")
+            # Asset NAMES, not just a count: five uploads of the wrong or
+            # duplicated names satisfy a count check while leaving a scope the
+            # consumer can never resolve. rp-util-fetch.js validates the same
+            # names on its side.
+            missing_assets=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/rp-util-schema-${tag}" 2>/dev/null \
+              | jq -r --argjson want "$expected_assets" '$want - [.assets[].name] | join(",")' 2>/dev/null \
+              || echo "missing")
             if [ -z "$missing_assets" ]; then
               echo "rp-util-schema-${tag} already published with all assets; skipping" >&2
+              continue
+            fi
+            # Pre-flight the tag's own rp_util before committing a runner to a
+            # ~27-minute Bazel build. A binary that predates a scope aborts on
+            # the unrecognised option (boost program_options throws, exit 134),
+            # so the build can only ever fail, and `bash -e` in the generate
+            # step means nothing is published -- not even the scopes that did
+            # work. Reading main.cc costs one API call and answers the same
+            # question the build would answer 27 minutes later.
+            #
+            # Grep for the QUOTED flag: `"config_schema_json"` must not match
+            # inside `"node_config_schema_json"`, and the leading quote is what
+            # prevents it (the character before the substring there is `_`).
+            main_cc=$(GH_TOKEN="$SE_TOKEN" gh api \
+              "repos/redpanda-data/streaming-enterprise/contents/src/v/rp_util/main.cc?ref=${tag}" \
+              --jq '.content' 2>/dev/null | tr -d '\n' | base64 -d 2>/dev/null || true)
+            if [ -z "$main_cc" ]; then
+              echo "::warning::Skipping '$tag': could not read src/v/rp_util/main.cc at that ref" >&2
+              continue
+            fi
+            unsupported=""
+            while IFS=: read -r flag _asset; do
+              [ -z "$flag" ] && continue
+              printf '%s' "$main_cc" | grep -q "\"${flag}\"" \
+                || unsupported="${unsupported}${unsupported:+, }--${flag}"
+            done <<< "$RP_UTIL_SCHEMAS"
+            if [ -n "$unsupported" ]; then
+              echo "::notice::Skipping '$tag': its rp_util does not support ${unsupported}. Nothing to publish until a tag carries every scope." >&2
               continue
             fi
             missing+=("$tag")
@@ -241,13 +301,14 @@ jobs:
         run: bazel build --lockfile_mode=off //src/v/rp_util:rp_util
       - name: Generate schema JSON
         run: |
+          set -euo pipefail
           mkdir -p schema-out
           BIN=streaming-enterprise/bazel-bin/src/v/rp_util/rp_util
-          "$BIN" --config_schema_json > schema-out/cluster-config-schema.json
-          "$BIN" --node_config_schema_json > schema-out/node-config-schema.json
-          "$BIN" --pandaproxy_config_schema_json > schema-out/pandaproxy-config-schema.json
-          "$BIN" --kafka_client_config_schema_json > schema-out/kafka-client-config-schema.json
-          "$BIN" --schema_registry_config_schema_json > schema-out/schema-registry-config-schema.json
+          while IFS=: read -r flag asset; do
+            [ -z "$flag" ] && continue
+            echo "--${flag} -> schema-out/${asset}"
+            "$BIN" "--${flag}" > "schema-out/${asset}"
+          done <<< "$RP_UTIL_SCHEMAS"
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
