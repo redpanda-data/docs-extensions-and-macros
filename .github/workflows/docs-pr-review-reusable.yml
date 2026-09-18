@@ -63,11 +63,13 @@
 # Trust boundary: the PR head is untrusted. The claude-skill action strips
 # project-level Claude config (.claude/, .mcp.json) from it, replaces every
 # CLAUDE.md in the head with the BASE branch's copies (repo-local rules are
-# honoured, but a PR cannot rewrite the rules it is reviewed against), runs
-# Claude with a read-only `gh` shim on PATH and no tree-mutating git verbs,
-# never persists git credentials in any checkout, and refuses an unpinned
-# plugin_ref. Repo-private skills are fetched with a per-run App token
-# scoped to docs-team-standards with Contents: read.
+# honoured, but a PR cannot rewrite the rules it is reviewed against),
+# strips `allowed-tools:` grants from the plugin's command frontmatter (in
+# -p mode those grants widen the CLI allowlist — a bare `Bash` grant would
+# void the sandbox), runs Claude with a read-only `gh` shim on PATH and no
+# tree-mutating git verbs, never persists git credentials in any checkout,
+# and refuses an unpinned plugin_ref. Repo-private skills are fetched with a
+# per-run App token scoped to docs-team-standards with Contents: read.
 
 name: docs-pr-review (reusable)
 
@@ -77,7 +79,7 @@ on:
       pr_number:
         required: true
         type: number
-      # ── ADP AI Gateway auth (docs-team-agents service account) ─────────
+      # ── ADP AI Gateway auth (docs-pr-review agent's service account) ───
       # No Anthropic API key anywhere: model auth is the gateway, which
       # gives per-account spend attribution on the ADP cost page. Seven of
       # the nine callers were granted the credential in devprod-infra #779;
@@ -151,12 +153,12 @@ on:
       plugin_ref:
         description: >-
           Commit SHA of redpanda-data/docs-team-standards checked out as the
-          skills plugin at runtime. The default is bumped deliberately with
-          each verified release of the skills; it is the rollback unit.
+          skills plugin at runtime. EVERY CALLER MUST PASS IT: there is no
+          usable default, and the gate holds the PR pending (never a silent
+          skill-less review) when it is not a full SHA. The dogfood caller
+          passes its own PR head SHA; every other caller pins a verified SHA
+          and bumps it deliberately — it is the rollback unit.
         type: string
-        # PIN-ME(rollout): set to the verified docs-team-standards SHA before
-        # enabling any caller. An unset/bad ref fails the checkout loudly —
-        # never a silent skill-less review.
         default: ''
       doc_tools_version:
         description: >-
@@ -260,8 +262,10 @@ jobs:
           # Running Claude over untrusted head content is the prompt-injection
           # and credential-exfil risk this pipeline exists to avoid, so the
           # check belongs where every event path passes through it.
-          if [[ -n "$HEAD_REPO" && "$HEAD_REPO" != "$R" ]]; then
-            skip "PR #$PR is from a fork ($HEAD_REPO) — not reviewed. Fork PRs fall through to human review."
+          # An EMPTY head.repo means the fork was deleted: origin unknown, so
+          # it is skipped too rather than treated as same-repo.
+          if [[ "$HEAD_REPO" != "$R" ]]; then
+            skip "PR #$PR is from a fork (${HEAD_REPO:-<deleted fork>}) — not reviewed. Fork PRs fall through to human review."
           fi
 
           # ── Drafts are never reviewed ──────────────────────────────────
@@ -313,8 +317,12 @@ jobs:
             # recomputable at any moment.
             local live reviewed
             live=$(gh api "repos/$R/pulls/$PR" --jq '[.requested_reviewers[].login] | join(",")')
-            reviewed=$(gh api "repos/$R/pulls/$PR/reviews" --paginate \
-              --jq '[.[].user.login] | unique | join(",")')
+            # --slurp: without it `--paginate --jq` applies the filter to
+            # each 30-item page separately and prints one line per page, so
+            # a PR with >30 reviews yields "a,b\nc,d" and a bogus login
+            # "b\nc" after split(",") — real SMEs silently dropped.
+            reviewed=$(gh api "repos/$R/pulls/$PR/reviews" --paginate --slurp \
+              --jq '[.[][].user.login] | unique | join(",")')
             jq -nr --arg live "$live" --arg reviewed "$reviewed" \
               --arg team "$DOC_TEAM" --arg author "$AUTHOR" --arg bots "$BOT_LOGINS" '
               (($live | split(",")) + ($reviewed | split(","))) | unique
@@ -399,8 +407,11 @@ jobs:
             fi
 
             # Latest non-COMMENTED review state per SME, by submitted_at.
-            gh api "repos/$R/pulls/$PR/reviews" --paginate \
-              --jq '[.[] | select(.state != "COMMENTED")]
+            # --slurp + [.[][]] flattens the pages into ONE array; per-page
+            # output would make PASS a multi-line string that never equals
+            # "true", holding the gate forever on PRs with >30 reviews.
+            gh api "repos/$R/pulls/$PR/reviews" --paginate --slurp \
+              --jq '[.[][] | select(.state != "COMMENTED")]
                     | group_by(.user.login)
                     | map(max_by(.submitted_at))
                     | map({login: .user.login, state})' > states.json
@@ -840,22 +851,18 @@ jobs:
           output_dir: review-output/vision
           prompt: >
             Review every image file changed in PR #${{ inputs.pr_number }} of
-            ${{ github.repository }} against the docs screenshot standards
-            judgment checks: (1) purpose test — the image clarifies config
-            state, topology, a dashboard result, or position in a multi-step
-            flow; it is NOT a validate-only shot of plain text, CLI, or
-            terminal output; (2) annotations — red rectangles by default
-            (blue/black only on heavily red UI), numbered callouts for
-            sequences, max 3–4 per image; (3) PII — covered by a solid
-            100%-opacity overlay; blur or mosaic is a FAIL; (4) background —
-            transparent or neutral; (5) the alt text's values also appear in
-            surrounding body prose. Read each image file directly. Do NOT
-            post to GitHub. Write review-output/vision/screenshots.json as
+            ${{ github.repository }} against the JUDGMENT checks in the
+            plugin's screenshot standard: read
+            .docs-team-standards-plugin/resources/writing-style/screenshot-standards.md
+            first and apply its "Judgment checks" section exactly (the
+            deterministic checks in that file run separately as
+            `doc-tools lint-screenshots` — do not repeat them). Read each
+            image file directly. Do NOT post to GitHub. Write
+            review-output/vision/screenshots.json as
             [{"file":"...","checks":{...},"verdict":"pass"|"fail","notes":"..."}]
             and review-output/vision/verdict.json as
             {"verdict":"pass"|"fail","blocking":[...],"suggestions":[...]}
-            covering only these judgment checks (the deterministic lint runs
-            separately).
+            covering only the judgment checks.
 
       - name: Merge deterministic + vision verdicts
         if: always()
@@ -1072,9 +1079,16 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const body = fs.readFileSync('comment.md', 'utf8');
+            let body = fs.readFileSync('comment.md', 'utf8');
             const issue_number = Number(process.env.PR);
             const marker = '<!-- docs-review:comment -->';
+            // GitHub rejects issue comments over 65,536 characters; five
+            // model-written findings files can exceed that even after the
+            // aggregator's per-file cap.
+            const MAX = 60000;
+            if (body.length > MAX) {
+              body = body.slice(0, MAX) + '\n\n…\n\n_Comment truncated — the full findings are in the workflow run artifacts._';
+            }
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner, repo: context.repo.repo, issue_number, per_page: 100,
             });
@@ -1113,7 +1127,7 @@ jobs:
           # Informational status (decision 7 corrected): docs-review is NOT
           # a required check; the docs-team approval is the physical gate.
           gh api "repos/$R/statuses/$HEAD_SHA" \
-            -f context=docs-review \
+            -f context="$REVIEW_STATUS_CONTEXT" \
             -f state="$STATE" \
-            -f description="$DESCRIPTION" \
+            -f description="${DESCRIPTION:0:139}" \
             -f target_url="${GITHUB_SERVER_URL}/${R}/actions/runs/${GITHUB_RUN_ID}" > /dev/null

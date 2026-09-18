@@ -253,6 +253,22 @@ runs:
         # and does so silently. Move the marketplace manifest aside so the
         # checkout loads as the plugin itself.
         rm -f .docs-team-standards-plugin/.claude-plugin/marketplace.json
+        # Frontmatter grants WIDEN the sandbox: in -p mode a command's
+        # `allowed-tools:` (and an agent's `tools:`) is honoured on top of
+        # --allowedTools, and commands/pr-review.md grants bare `Bash` — which
+        # would void the read-only gh shim and the no-mutating-git rule for
+        # the whole run (verified on CLI 2.1.258: a frontmatter
+        # `Bash(touch:*)` ran under `--allowedTools Read`). Those grants are
+        # a local convenience for humans; in CI the --allowedTools list is
+        # the ONLY grant. Strip them from the staged plugin copy.
+        find .docs-team-standards-plugin/commands -name '*.md' -exec sed -i '/^allowed-tools:/d' {} +
+        find .docs-team-standards-plugin/agents -name '*.md' -exec perl -pi -e \
+          'if (/^tools:/) { s/\b(Bash|WebFetch|Write|Edit|NotebookEdit)\b//g; s/,([ \t]*,)+/,/g; s/:[ \t]*,/: /; s/,[ \t]*$//; }' {} +
+        if grep -rn '^allowed-tools:' .docs-team-standards-plugin/commands/ || \
+           grep -rnE '^tools:.*\b(Bash|WebFetch|Write|Edit)\b' .docs-team-standards-plugin/agents/; then
+          echo "::error::a plugin frontmatter grant survived stripping — refusing to run with a widened sandbox"
+          exit 1
+        fi
         # Clean-room user config: nothing on the runner's home dir can add
         # settings, hooks, or MCP servers to the review.
         mkdir -p "$RUNNER_TEMP/claude-config"
@@ -297,6 +313,9 @@ runs:
               a="${args[$i]}"
               case "$a" in
                 graphql) deny api "$@" ;;
+                # A foreign host would turn a GET into an exfiltration
+                # channel for GH_TOKEN (sent as the Authorization header).
+                --hostname|--hostname=*) deny api "$@" ;;
                 -X|--method)
                   m="${args[$((i+1))]:-}"; [[ "$m" =~ ^[Gg][Ee][Tt]$ ]] || deny api "$@"; i=$((i+1)) ;;
                 -X*|--method=*)
