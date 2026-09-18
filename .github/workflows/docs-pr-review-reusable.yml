@@ -317,12 +317,13 @@ jobs:
             # recomputable at any moment.
             local live reviewed
             live=$(gh api "repos/$R/pulls/$PR" --jq '[.requested_reviewers[].login] | join(",")')
-            # --slurp: without it `--paginate --jq` applies the filter to
+            # Pipe into `jq -s`, never `--paginate --jq`: gh applies --jq to
             # each 30-item page separately and prints one line per page, so
             # a PR with >30 reviews yields "a,b\nc,d" and a bogus login
-            # "b\nc" after split(",") — real SMEs silently dropped.
-            reviewed=$(gh api "repos/$R/pulls/$PR/reviews" --paginate --slurp \
-              --jq '[.[][].user.login] | unique | join(",")')
+            # "b\nc" after split(",") — real SMEs silently dropped. (gh's
+            # own --slurp cannot be combined with --jq.)
+            reviewed=$(gh api "repos/$R/pulls/$PR/reviews" --paginate \
+              | jq -rs '[.[][].user.login] | unique | join(",")')
             jq -nr --arg live "$live" --arg reviewed "$reviewed" \
               --arg team "$DOC_TEAM" --arg author "$AUTHOR" --arg bots "$BOT_LOGINS" '
               (($live | split(",")) + ($reviewed | split(","))) | unique
@@ -407,11 +408,11 @@ jobs:
             fi
 
             # Latest non-COMMENTED review state per SME, by submitted_at.
-            # --slurp + [.[][]] flattens the pages into ONE array; per-page
-            # output would make PASS a multi-line string that never equals
-            # "true", holding the gate forever on PRs with >30 reviews.
-            gh api "repos/$R/pulls/$PR/reviews" --paginate --slurp \
-              --jq '[.[][] | select(.state != "COMMENTED")]
+            # `jq -s` + [.[][]] flattens the pages into ONE array; per-page
+            # `--jq` output would make PASS a multi-line string that never
+            # equals "true", holding the gate forever on PRs with >30 reviews.
+            gh api "repos/$R/pulls/$PR/reviews" --paginate \
+              | jq -s '[.[][] | select(.state != "COMMENTED")]
                     | group_by(.user.login)
                     | map(max_by(.submitted_at))
                     | map({login: .user.login, state})' > states.json
