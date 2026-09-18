@@ -558,7 +558,15 @@ programCli
  * copy is a strict superset of the destination; otherwise it reports which
  * keys only the destination has and leaves the file alone (status
  * 'diverged') unless --force is passed. --check never writes, for a CI
- * gate.
+ * gate. A schema is also only synced into a repo that is plausibly its
+ * home: one that already has the schema, or that has the *.json the schema
+ * documents. Anything else is reported as 'not for this repo' and skipped,
+ * and never counts as drift. kapa-source-groups.json is the reason: it is
+ * generated into this package and read from node_modules by an Antora
+ * extension, so it never lives in a content repo at all, and planting its
+ * schema in redpanda-data/docs would leave a file describing data that repo
+ * will never have, with --check reporting its absence as drift on every run
+ * afterwards.
  * @example
  * # Sync into ./docs-data (writes any missing or out-of-date schema)
  * npx doc-tools sync-schemas
