@@ -522,7 +522,7 @@ jobs:
             # files than .adoc files. The callers are all content repos, so
             # what this catches is EXAMPLE code shipped alongside a page (a
             # lab, a quickstart's docker-compose + client snippets), not the
-            # main content — the /code-review pass is additive to the prose
+            # main content — the code pass is additive to the prose
             # review, never a substitute for it. Tune with data.
             echo "code_heavy=$([[ $CODE -ge 3 && $CODE -gt $ADOC ]] && echo true || echo false)"
             echo "has_images=$([[ $IMG -gt 0 ]] && echo true || echo false)"
@@ -670,13 +670,22 @@ jobs:
           if-no-files-found: ignore
 
   # ──────────────────────────────────────────────────────────────────────
-  # §4 — /code-review for code-example-heavy PRs (additive to adoc_review).
+  # §4 — code pass for code-example-heavy PRs (additive to adoc_review).
   # In content repos "code-heavy" means example code shipped with a page, so
   # this pass checks that the examples are correct — the prose review above
   # still owns the page itself. This pipeline also has at least one
   # tooling-repo caller (docs-team-standards, whose own scripts/workflows are
   # its "code"), so the prompt below asks Claude to tell the two cases apart
   # rather than assuming every caller is a content repo.
+  #
+  # The prompt spells the task out instead of invoking /code-review. That
+  # command comes from the code-review plugin in the claude-plugins-official
+  # marketplace, which installs under the Claude config dir, and this action
+  # points CLAUDE_CONFIG_DIR at a fresh empty directory on purpose so nothing
+  # on the runner can inject settings or hooks into a review. So the plugin
+  # never loads, the slash command would degrade to literal prompt text, and
+  # the job would stay green while reviewing without it. It is not a CLI
+  # built-in and docs-team-standards does not ship it either.
   # ──────────────────────────────────────────────────────────────────────
   code_review:
     needs: [gate, classify]
@@ -702,7 +711,16 @@ jobs:
           cli_version: ${{ vars.CLAUDE_CLI_VERSION || '2.1.258' }}
           output_dir: review-output
           prompt: >
-            /code-review ${{ inputs.pr_number }} medium
+            Review the code changed by pull request
+            ${{ inputs.pr_number }} in this repository. Read the diff with
+            `gh pr diff`, then read the changed files in the working tree for
+            the context the diff alone does not show. Report correctness bugs
+            first: something that is wrong, breaks, or does not do what the
+            surrounding prose or code says it does. Note obvious
+            simplifications only where they are clearly worth it, and skip
+            style preferences. For anything you report, give the file, the
+            line, and the concrete circumstances under which it goes wrong,
+            and say so plainly if you are unsure rather than padding the list.
             HEADLESS MODE: do NOT post comments or apply fixes. First decide
             whether the changed code files are documentation EXAMPLES that
             ship with a page (a lab, a quickstart snippet) or this
