@@ -604,8 +604,13 @@ programCli
           created: '+ created',
           updated: '↻ updated',
           diverged: options.force ? '↻ updated (forced)' : '⚠ diverged, left alone',
+          'not-applicable': '- not for this repo',
         }[status]
         console.log(`  ${label}  ${name}`)
+        if (status === 'not-applicable') {
+          // Said out loud, because a silently missing schema looks like a bug.
+          console.log(`      no ${name.replace(/\.schema\.json$/, '.json')} here, so this schema has no data file to document`)
+        }
         if (status === 'diverged' && !options.force) {
           hasUnresolvedDivergence = true
           for (const p of destOnlyPaths) console.log(`      only in the destination: ${p}`)

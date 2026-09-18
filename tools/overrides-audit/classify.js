@@ -109,22 +109,25 @@ function normalizeText (text) {
  * byte-for-byte what it was before the array form existed.
  *
  * @param {string|Array<string>} description - Override description, either form.
- * @returns {{prose: string, scoped: number}} Unconditional prose, and how many paragraphs were scoped away.
+ * @returns {{prose: string, scoped: number, scopedParagraphs: string[]}} The
+ *   unconditional prose, how many paragraphs were scoped away, and their text.
+ *   The text is returned so a row can show a reviewer what it is holding back
+ *   rather than dropping it silently.
  */
 function unconditionalProse (description) {
-  if (typeof description === 'string') return { prose: description, scoped: 0 }
-  if (!Array.isArray(description)) return { prose: '', scoped: 0 }
+  if (typeof description === 'string') return { prose: description, scoped: 0, scopedParagraphs: [] }
+  if (!Array.isArray(description)) return { prose: '', scoped: 0, scopedParagraphs: [] }
   const kept = []
-  let scoped = 0
+  const scopedParagraphs = []
   for (const paragraph of description) {
     if (typeof paragraph !== 'string' || !paragraph.trim()) continue
     if (/^\s*(?:cloud-only|self-managed-only):/.test(paragraph)) {
-      scoped += 1
+      scopedParagraphs.push(paragraph.trim())
       continue
     }
     kept.push(paragraph.trim())
   }
-  return { prose: kept.join('\n\n'), scoped }
+  return { prose: kept.join('\n\n'), scoped: scopedParagraphs.length, scopedParagraphs }
 }
 
 // Docs-only markup detectors. `<<anchor>>` cross-references are included
@@ -299,7 +302,7 @@ function deepEqual (a, b) {
  */
 function row (fields) {
   const base = { name: fields.name, field: fields.field, class: fields.class }
-  for (const key of ['upstream_candidate_text', 'upstream_ref', 'content_hash', 'source_file', 'source_line', 'note']) {
+  for (const key of ['upstream_candidate_text', 'audience_scoped_text', 'upstream_ref', 'content_hash', 'source_file', 'source_line', 'note']) {
     if (fields[key] !== undefined) base[key] = fields[key]
   }
   return base
@@ -320,7 +323,11 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
   // stripDocsMarkup, which must keep stripping a prefix and retaining the
   // content: for a see_also item the prefixed value IS the link, and dropping
   // it there would silently empty every conditional related-topics entry.
-  const { prose: overrideText, scoped: scopedParagraphs } = unconditionalProse(override.description)
+  const {
+    prose: overrideText,
+    scoped: scopedCount,
+    scopedParagraphs: scopedText
+  } = unconditionalProse(override.description)
   const common = {
     name,
     field: 'description',
@@ -329,6 +336,13 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
     source_line: sourceProp && sourceProp.line_start !== undefined ? sourceProp.line_start : undefined
   }
   if (override.upstream_ref !== undefined) common.upstream_ref = override.upstream_ref
+  // Shown, never upstreamed. A scoped paragraph exists precisely so the other
+  // audience does not see it, and the C++ doc string is one string for every
+  // audience, so upstreaming it would both leak it to the wrong readers and
+  // duplicate it for the right ones (the override keeps its copy). Putting the
+  // text on the row lets a reviewer decide to upstream it and delete the
+  // paragraph in one deliberate change, instead of the audit deciding for them.
+  if (scopedText && scopedText.length > 0) common.audience_scoped_text = scopedText
 
   if (!sourceProp) {
     return row({
@@ -342,14 +356,14 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
   const overrideNormalized = normalizeText(overrideText)
 
   if (overrideNormalized === sourceText) {
-    if (scopedParagraphs > 0) {
+    if (scopedCount > 0) {
       // Retiring this would delete the audience-scoped paragraphs with it,
       // because `description` replaces wholesale rather than merging. The
       // redundant prose cannot be dropped on its own.
       return row({
         ...common,
         class: CLASSES.KEEP,
-        note: `Unconditional prose already matches source, but ${scopedParagraphs} audience-scoped paragraph(s) are docs-only and would be lost with it. Nothing to upstream.`
+        note: `Unconditional prose already matches source, but ${scopedCount} audience-scoped paragraph(s) are docs-only and would be lost with it. Nothing to upstream.`
       })
     }
     return row({
@@ -361,14 +375,14 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
 
   const markupKinds = detectDocsMarkup(overrideText, attrAllowlist)
   if (markupKinds.length === 0) {
-    if (scopedParagraphs > 0) {
+    if (scopedCount > 0) {
       // The prose is upstreamable but the override still has to stay, to carry
       // the scoped paragraphs -- which is exactly the SPLIT case.
       return row({
         ...common,
         class: CLASSES.KEEP_UNTIL_UPSTREAMED,
         upstream_candidate_text: overrideText,
-        note: `SPLIT: unconditional prose differs from source and is markup-free, but ${scopedParagraphs} audience-scoped paragraph(s) must stay in the override. Keep it until the prose ships.`
+        note: `SPLIT: unconditional prose differs from source and is markup-free, but ${scopedCount} audience-scoped paragraph(s) must stay in the override. Keep it until the prose ships.`
       })
     }
     return row({

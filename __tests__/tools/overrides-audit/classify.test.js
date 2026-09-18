@@ -336,16 +336,20 @@ describe('declared links and audience-scoped descriptions', () => {
   describe('unconditionalProse', () => {
     it('returns a string description unchanged, so existing rows cannot shift', () => {
       expect(classify.unconditionalProse('The source description.'))
-        .toEqual({ prose: 'The source description.', scoped: 0 })
+        .toEqual({ prose: 'The source description.', scoped: 0, scopedParagraphs: [] })
     })
 
     it('drops audience-scoped paragraphs and counts them', () => {
       expect(classify.unconditionalProse(['One.', 'cloud-only: Cloud bit.', 'Two.']))
-        .toEqual({ prose: 'One.\n\nTwo.', scoped: 1 })
+        .toEqual({
+          prose: 'One.\n\nTwo.',
+          scoped: 1,
+          scopedParagraphs: ['cloud-only: Cloud bit.']
+        })
     })
 
     it('handles a description that is neither string nor array', () => {
-      expect(classify.unconditionalProse(undefined)).toEqual({ prose: '', scoped: 0 })
+      expect(classify.unconditionalProse(undefined)).toEqual({ prose: '', scoped: 0, scopedParagraphs: [] })
     })
   })
 
@@ -369,6 +373,11 @@ describe('declared links and audience-scoped descriptions', () => {
     expect(row.class).toBe(CLASSES.KEEP)
     expect(row.note).toMatch(/1 audience-scoped paragraph/)
     expect(row.upstream_candidate_text).toBeUndefined()
+    // Shown to a reviewer, never handed to the upstreaming workflow: the C++
+    // doc string is one string for every audience, so upstreaming a scoped
+    // paragraph leaks it to the wrong readers and duplicates it for the right
+    // ones, because the override keeps its copy.
+    expect(row.audience_scoped_text).toEqual(['cloud-only: Cloud requires at least 3.'])
   })
 
   it('splits when the prose is upstreamable but a scoped paragraph must stay', () => {
@@ -384,6 +393,7 @@ describe('declared links and audience-scoped descriptions', () => {
     expect(row.upstream_candidate_text).toBe('A fuller, better description.')
     expect(row.upstream_candidate_text).not.toMatch(/Cloud requires/)
     expect(row.upstream_candidate_text).not.toMatch(/cloud-only/)
+    expect(row.audience_scoped_text).toEqual(['cloud-only: Cloud requires at least 3.'])
   })
 
   it('still upstreams a markup-free array description with no scoped paragraphs', () => {

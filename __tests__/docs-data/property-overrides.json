@@ -941,11 +941,12 @@
       "config_scope": "cluster"
     },
     "delete.retention.ms": {
-      "description": "The retention time for tombstone records in a compacted topic. Redpanda removes tombstone records after the retention limit is exceeded.\n\nFor topics that use Tiered Storage v1, tombstone removal is silently skipped while Tiered Storage is enabled and `redpanda.remote.read` or `redpanda.remote.write` is set for the topic: the configuration is accepted, but tombstones are not removed for the topic.\nThis restriction does not apply to topics that use Tiered Storage v2, available starting in Redpanda v26.2.\n\nIf both `delete.retention.ms` and the cluster property prop:tombstone_retention_ms[link=true] are set, `delete.retention.ms` overrides the cluster level tombstone retention for an individual topic.\n\nThis property supports three states:\n\n* Positive value: Sets the milliseconds to retain tombstone records before removal.\n* 0: Tombstone records are immediately eligible for removal.\n* Negative value: Disables tombstone removal entirely for this topic.",
+      "description": "The retention time for tombstone records in a compacted topic. Redpanda removes tombstone records after the retention limit is exceeded.\n\nFor topics that use Tiered Storage v1, tombstone removal is silently skipped while Tiered Storage is enabled and `redpanda.remote.read` or `redpanda.remote.write` is set for the topic: the configuration is accepted, but tombstones are not removed for the topic.\nThis restriction does not apply to topics that use Tiered Storage v2, available starting in Redpanda v26.2.\n\nIf both `delete.retention.ms` and the cluster property `tombstone_retention_ms` are set, `delete.retention.ms` overrides the cluster level tombstone retention for an individual topic.\n\nThis property supports three states:\n\n* Positive value: Sets the milliseconds to retain tombstone records before removal.\n* 0: Tombstone records are immediately eligible for removal.\n* Negative value: Disables tombstone removal entirely for this topic.",
       "links": {
         "`redpanda.remote.read`": "#redpanda.remote.read",
         "`redpanda.remote.write`": "#redpanda.remote.write",
-        "Tiered Storage v2": "self-managed-only: xref:manage:tiered-storage.adoc#tiered-storage-versions"
+        "Tiered Storage v2": "self-managed-only: xref:manage:tiered-storage.adoc#tiered-storage-versions",
+        "`tombstone_retention_ms`": "#tombstone_retention_ms"
       },
       "related_topics": [
         "self-managed-only: xref:reference:properties/cluster-properties.adoc#tombstone_retention_ms[`tombstone_retention_ms`]",
@@ -1671,7 +1672,10 @@
       "config_scope": "topic"
     },
     "max.message.bytes": {
-      "description": "The maximum size of a message or batch of a topic. If a compression type is enabled, `max.message.bytes` sets the maximum size of the compressed message or batch.\n\nIf `max.message.bytes` is set to a positive value, it overrides the cluster property `kafka_batch_max_bytes` for the topic.\n\nSet an upper limit for `max.message.bytes` using the cluster property prop:kafka_max_message_size_upper_limit_bytes[link=true].",
+      "description": "The maximum size of a message or batch of a topic. If a compression type is enabled, `max.message.bytes` sets the maximum size of the compressed message or batch.\n\nIf `max.message.bytes` is set to a positive value, it overrides the cluster property `kafka_batch_max_bytes` for the topic.\n\nSet an upper limit for `max.message.bytes` using the cluster property `kafka_max_message_size_upper_limit_bytes`.",
+      "links": {
+        "`kafka_max_message_size_upper_limit_bytes`": "#kafka_max_message_size_upper_limit_bytes"
+      },
       "related_topics": [
         "self-managed-only: xref:reference:properties/cluster-properties.adoc#kafka_batch_max_bytes[`kafka_batch_max_bytes`]",
         "xref:develop:produce-data/configure-producers.adoc#message-batching[Message batching]",
@@ -2079,7 +2083,11 @@
       ]
     },
     "redpanda.leaders.preference": {
-      "description": "The preferred location (rack) for partition leaders of a topic.\n\nThis property inherits the value from the prop:default_leaders_preference[link=true] cluster configuration property. You may override the cluster-wide setting by specifying the value for individual topics.\n\nIf the cluster configuration property prop:enable_rack_awareness[link=true] is set to `false`, Leader Pinning is disabled across the cluster.\n\nAccepted values:\n\n* `none`: Opt out the topic from Leader Pinning.\n* `racks:<rack1>[,<rack2>,...]`: Specify the preferred location (rack) of all topic partition leaders. The list can contain one or more rack IDs. If you specify multiple IDs, Redpanda tries to distribute the partition leader locations equally across brokers in these racks.\n* `ordered_racks:<rack1>[,<rack2>,...]`: Supported in Redpanda v26.1 or later. Specify the preferred racks in priority order. Redpanda places leaders in the first listed rack when available, failing over to each subsequent rack when higher-priority racks are unavailable. If all listed racks are unavailable, leaders fall back to any other available brokers. Brokers with no rack assignment are treated as lowest priority.",
+      "description": "The preferred location (rack) for partition leaders of a topic.\n\nThis property inherits the value from the `default_leaders_preference` cluster configuration property. You may override the cluster-wide setting by specifying the value for individual topics.\n\nIf the cluster configuration property `enable_rack_awareness` is set to `false`, Leader Pinning is disabled across the cluster.\n\nAccepted values:\n\n* `none`: Opt out the topic from Leader Pinning.\n* `racks:<rack1>[,<rack2>,...]`: Specify the preferred location (rack) of all topic partition leaders. The list can contain one or more rack IDs. If you specify multiple IDs, Redpanda tries to distribute the partition leader locations equally across brokers in these racks.\n* `ordered_racks:<rack1>[,<rack2>,...]`: Supported in Redpanda v26.1 or later. Specify the preferred racks in priority order. Redpanda places leaders in the first listed rack when available, failing over to each subsequent rack when higher-priority racks are unavailable. If all listed racks are unavailable, leaders fall back to any other available brokers. Brokers with no rack assignment are treated as lowest priority.",
+      "links": {
+        "`default_leaders_preference`": "#default_leaders_preference",
+        "`enable_rack_awareness`": "#enable_rack_awareness"
+      },
       "related_topics": [
         "xref:develop:produce-data/leader-pinning.adoc[Leader pinning]"
       ],
@@ -2166,9 +2174,11 @@
       "default": "."
     },
     "redpanda.storage.mode": {
-      "description": "The storage mode for a topic. Determines how topic data is stored and whether it is eligible for upload to object storage.\n\nAccepted values:\n\n* `local`: Topic data is stored only on the broker's local disk. Object storage upload is disabled for the topic, regardless of cluster-level Tiered Storage settings.\n* `tiered`: Topic data is stored on local disk and also uploaded to object storage. Enables Tiered Storage for the topic.\n* `cloud`: Topic data is stored in object storage using the Cloud Topics architecture. Local storage is used only as a write buffer.\n* `unset`: Specifies that the topic's storage mode is unset, regardless of the cluster default. The topic may still have Tiered Storage enabled through the legacy properties `redpanda.remote.read` and `redpanda.remote.write`.\n\nStarting in Redpanda v26.2, the `tiered` value is an alias that resolves to Tiered Storage v1 or v2 when the topic is created, according to the prop:default_redpanda_storage_mode_tiered_impl[link=true] cluster property. The resolved version is reported by the read-only `redpanda.storage.mode.impl` property, and the storage mode of a topic displays as `tiered` for both versions.\n\nThis property overrides the cluster-wide prop:default_redpanda_storage_mode[link=true] setting for individual topics.",
+      "description": "The storage mode for a topic. Determines how topic data is stored and whether it is eligible for upload to object storage.\n\nAccepted values:\n\n* `local`: Topic data is stored only on the broker's local disk. Object storage upload is disabled for the topic, regardless of cluster-level Tiered Storage settings.\n* `tiered`: Topic data is stored on local disk and also uploaded to object storage. Enables Tiered Storage for the topic.\n* `cloud`: Topic data is stored in object storage using the Cloud Topics architecture. Local storage is used only as a write buffer.\n* `unset`: Specifies that the topic's storage mode is unset, regardless of the cluster default. The topic may still have Tiered Storage enabled through the legacy properties `redpanda.remote.read` and `redpanda.remote.write`.\n\nStarting in Redpanda v26.2, the `tiered` value is an alias that resolves to Tiered Storage v1 or v2 when the topic is created, according to the `default_redpanda_storage_mode_tiered_impl` cluster property. The resolved version is reported by the read-only `redpanda.storage.mode.impl` property, and the storage mode of a topic displays as `tiered` for both versions.\n\nThis property overrides the cluster-wide `default_redpanda_storage_mode` setting for individual topics.",
       "links": {
-        "`redpanda.storage.mode.impl`": "#redpanda.storage.mode.impl"
+        "`redpanda.storage.mode.impl`": "#redpanda.storage.mode.impl",
+        "`default_redpanda_storage_mode_tiered_impl`": "#default_redpanda_storage_mode_tiered_impl",
+        "`default_redpanda_storage_mode`": "#default_redpanda_storage_mode"
       },
       "related_topics": [
         "self-managed-only: xref:manage:tiered-storage.adoc[Tiered Storage]",
@@ -2180,9 +2190,10 @@
       "version": "v26.1.1"
     },
     "redpanda.storage.mode.impl": {
-      "description": "The exact implementation of the topic's storage mode. Topics with the `tiered` storage mode report `tiered_v1` (Tiered Storage v1) or `tiered_v2` (Tiered Storage v2); topics with other storage modes mirror the value of `redpanda.storage.mode`.\n\nThis property is read-only after topic creation. To select the Tiered Storage version for a topic explicitly, set this property together with a matching `redpanda.storage.mode` value when you create the topic (both `tiered_v1` and `tiered_v2` correspond to the `tiered` mode). You can omit `redpanda.storage.mode` only if this property matches the version selected by the cluster default. To change a topic's storage mode after creation, alter `redpanda.storage.mode` instead.\n\nIf this property is not set at topic creation, the `tiered` storage mode resolves to the version selected by the prop:default_redpanda_storage_mode_tiered_impl[link=true] cluster property.",
+      "description": "The exact implementation of the topic's storage mode. Topics with the `tiered` storage mode report `tiered_v1` (Tiered Storage v1) or `tiered_v2` (Tiered Storage v2); topics with other storage modes mirror the value of `redpanda.storage.mode`.\n\nThis property is read-only after topic creation. To select the Tiered Storage version for a topic explicitly, set this property together with a matching `redpanda.storage.mode` value when you create the topic (both `tiered_v1` and `tiered_v2` correspond to the `tiered` mode). You can omit `redpanda.storage.mode` only if this property matches the version selected by the cluster default. To change a topic's storage mode after creation, alter `redpanda.storage.mode` instead.\n\nIf this property is not set at topic creation, the `tiered` storage mode resolves to the version selected by the `default_redpanda_storage_mode_tiered_impl` cluster property.",
       "links": {
-        "`redpanda.storage.mode`": "#redpanda.storage.mode"
+        "`redpanda.storage.mode`": "#redpanda.storage.mode",
+        "`default_redpanda_storage_mode_tiered_impl`": "#default_redpanda_storage_mode_tiered_impl"
       },
       "accepted_values": [
         "local",

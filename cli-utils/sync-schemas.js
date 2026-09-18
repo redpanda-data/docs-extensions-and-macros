@@ -23,6 +23,16 @@ const { isDeepStrictEqual } = require('util')
  * package's copy is a superset of it (every object key the destination has,
  * the source also has) — otherwise it reports the destination-only keys and
  * refuses, same as `check` mode, unless the caller passes `force: true`.
+ *
+ * Not every schema belongs in every content repo. kapa-source-groups.json is
+ * generated into THIS package and read from node_modules by an Antora
+ * extension, so it never lives in a content repo at all; copying its schema
+ * into redpanda-data/docs leaves a file describing data that repo will never
+ * have, and `check` mode then reports its absence as drift forever. So a
+ * schema is only synced into a destination that is plausibly its home: the
+ * destination already has the schema, or it has the *.json the schema
+ * documents. Anything else is reported as 'not-applicable' and does not count
+ * as drift.
  */
 
 const PACKAGE_SCHEMA_DIR = path.resolve(__dirname, '..', 'docs-data')
@@ -73,6 +83,17 @@ function findDestOnlyPaths (source, dest, pathPrefix = '') {
 }
 
 /**
+ * The docs-data file a schema documents: property-overrides.schema.json
+ * documents property-overrides.json.
+ *
+ * @param {string} schemaName - Bare schema filename.
+ * @returns {string} The data filename it documents.
+ */
+function dataFileFor (schemaName) {
+  return schemaName.replace(/\.schema\.json$/, '.json')
+}
+
+/**
  * Compare this package's schemas against the copies in a destination
  * directory (a content repo's docs-data/), and optionally write updates.
  *
@@ -88,15 +109,18 @@ function findDestOnlyPaths (source, dest, pathPrefix = '') {
  *   destDir: string,
  *   results: Array<{
  *     name: string,
- *     status: ('created'|'updated'|'unchanged'|'diverged'),
+ *     status: ('created'|'updated'|'unchanged'|'diverged'|'not-applicable'),
  *     sourcePath: string,
  *     destPath: string,
  *     destOnlyPaths?: string[]
  *   }>,
  *   drift: boolean
- * }} drift is true when any schema is missing, differs, or has diverged.
- *   status 'diverged' means the destination has content this package's copy
- *   doesn't — nothing was written for that file unless `force` was set.
+ * }} drift is true when any applicable schema is missing, differs, or has
+ *   diverged. status 'diverged' means the destination has content this
+ *   package's copy doesn't — nothing was written for that file unless `force`
+ *   was set. status 'not-applicable' means neither the schema nor the *.json it
+ *   documents is in the destination, so that schema does not belong there;
+ *   nothing is written and it never counts as drift.
  */
 function syncSchemas ({ destDir, check = false, force = false } = {}) {
   const resolvedDest = path.resolve(destDir || 'docs-data')
@@ -110,7 +134,13 @@ function syncSchemas ({ destDir, check = false, force = false } = {}) {
 
     let status
     let destOnlyPaths
-    if (!destExists) {
+    if (!destExists && !fs.existsSync(path.join(resolvedDest, dataFileFor(name)))) {
+      // Neither the schema nor the data file it documents is here, so this
+      // repo is not where that schema lives. Writing it would plant a file
+      // describing data this repo never has, and `check` would then call its
+      // absence drift on every run.
+      status = 'not-applicable'
+    } else if (!destExists) {
       status = 'created'
     } else {
       // Compare parsed content, not raw text — a destination reformatted by a
@@ -136,9 +166,9 @@ function syncSchemas ({ destDir, check = false, force = false } = {}) {
     return { name, status, sourcePath, destPath, ...(destOnlyPaths ? { destOnlyPaths } : {}) }
   })
 
-  const drift = results.some((r) => r.status !== 'unchanged')
+  const drift = results.some((r) => r.status !== 'unchanged' && r.status !== 'not-applicable')
 
   return { destDir: resolvedDest, results, drift }
 }
 
-module.exports = { listPackageSchemas, syncSchemas, findDestOnlyPaths, PACKAGE_SCHEMA_DIR }
+module.exports = { listPackageSchemas, syncSchemas, findDestOnlyPaths, dataFileFor, PACKAGE_SCHEMA_DIR }

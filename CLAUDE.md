@@ -351,7 +351,9 @@ After a content repo updates its `@redpanda-data/docs-extensions-and-macros` dep
 npx doc-tools sync-schemas
 ```
 
-This copies every `docs-data/*.schema.json` this package ships into the content repo's own `docs-data/`, reporting which files were created, updated, or already current. Use `npx doc-tools sync-schemas --check` in CI (see `docs`'s `validate-docs-data.yml` for the pattern) to fail the build instead of silently accumulating drift.
+This copies the `docs-data/*.schema.json` files this package ships into the content repo's own `docs-data/`, reporting which files were created, updated, or already current. Use `npx doc-tools sync-schemas --check` in CI (see `docs`'s `validate-docs-data.yml` for the pattern) to fail the build instead of silently accumulating drift.
+
+A schema is only synced into a repo that is plausibly its home: one that already has the schema, or that has the `*.json` the schema documents. Anything else is reported as "not for this repo" and skipped. `kapa-source-groups.json` is the reason: it is generated into *this* package and read from `node_modules` by an Antora extension, so it never lives in a content repo, and copying its schema into `redpanda-data/docs` would leave a file describing data that repo will never have, with `--check` calling its absence drift on every run afterwards.
 
 ## How this repository is organized
 
