@@ -16,7 +16,9 @@
 #     which case they are reviewed WITHOUT an SME gate (api-docs auto PRs)
 #   - PRs matching a caller's skip_branch_patterns / skip_title_patterns
 #     (adp-docs' daily sync PRs, which have their own critic)
-#   - fork PRs (excluded by the caller's `if`)
+#   - fork PRs (derived in the gate from the PR object, not trusted
+#     from the caller's `if`, which cannot see head.repo on a
+#     repository_dispatch event)
 # The `no-sme-needed` label bypasses the SME gate on any PR in an SME-gated
 # repo, exactly as it already silences the daily nag.
 #
@@ -236,6 +238,7 @@ jobs:
           IS_DRAFT=$(jq -r .draft <<< "$PRJ")
           TITLE=$(jq -r .title <<< "$PRJ")
           BRANCH=$(jq -r .head.ref <<< "$PRJ")
+          HEAD_REPO=$(jq -r '.head.repo.full_name // ""' <<< "$PRJ")
           LABELS=$(jq -r '[.labels[].name] | join(",")' <<< "$PRJ")
           {
             echo "head_sha=$HEAD_SHA"
@@ -246,6 +249,20 @@ jobs:
 
           # skip: leave the PR untouched — no status, no comment, no label.
           skip() { echo "$1"; echo "run_review=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+          # ── Fork PRs are never reviewed ───────────────────────────────
+          # Derived HERE, from the PR object above, rather than trusted from
+          # the caller's `if`. A caller can only see head.repo on a
+          # pull_request event: on repository_dispatch (the Slack scan's entry
+          # point) github.event.pull_request does not exist, so a caller-side
+          # `event_name == 'repository_dispatch' || head.repo.full_name ==
+          # github.repository` short-circuits to true and admits fork PRs.
+          # Running Claude over untrusted head content is the prompt-injection
+          # and credential-exfil risk this pipeline exists to avoid, so the
+          # check belongs where every event path passes through it.
+          if [[ -n "$HEAD_REPO" && "$HEAD_REPO" != "$R" ]]; then
+            skip "PR #$PR is from a fork ($HEAD_REPO) — not reviewed. Fork PRs fall through to human review."
+          fi
 
           # ── Drafts are never reviewed ──────────────────────────────────
           # Converting to "ready for review" fires ready_for_review, which
