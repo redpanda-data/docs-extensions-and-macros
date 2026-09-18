@@ -8,7 +8,7 @@ const parseAudience = require('./audienceScope.js');
  * author used:
  *
  *   - see_also (current): array of items, each either a plain string (shown
- *     everywhere) or {content, cloud_only, self_hosted_only} (shown only in
+ *     everywhere) or {content, cloud_only, self_managed_only} (shown only in
  *     the named build). Schema-validated — see docs-data/property-overrides.schema.json.
  *   - related_topics (deprecated, still read for back-compat with existing
  *     override files): array of strings, optionally prefixed with
@@ -20,7 +20,7 @@ const parseAudience = require('./audienceScope.js');
  * every audience-scoped override field uses, so they cannot drift apart.
  *
  * @param {object} property - A property record, as extracted or overridden.
- * @returns {Array<{content: string, cloudOnly: boolean, selfHostedOnly: boolean}>}
+ * @returns {Array<{content: string, cloudOnly: boolean, selfManagedOnly: boolean}>}
  */
 function normalizeSeeAlso(property) {
   if (!property) return [];
@@ -42,7 +42,7 @@ function normalizeSeeAlso(property) {
  * once instead of duplicated per item.
  *
  * sectionType is 'cloud' only when every item is cloud-only, 'self-managed'
- * only when every item is self-hosted-only, and 'normal' otherwise (a mix of
+ * only when every item is self-managed-only, and 'normal' otherwise (a mix of
  * conditional and/or unconditional items, each wrapped individually).
  *
  * @param {object} property - A property record, as extracted or overridden.
@@ -53,7 +53,7 @@ function seeAlsoView(property) {
   let sectionType = 'normal';
   if (items.length > 0) {
     if (items.every((item) => item.cloudOnly)) sectionType = 'cloud';
-    else if (items.every((item) => item.selfHostedOnly)) sectionType = 'self-managed';
+    else if (items.every((item) => item.selfManagedOnly)) sectionType = 'self-managed';
   }
   return { items, sectionType };
 }

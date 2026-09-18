@@ -186,7 +186,7 @@ function applyLinksToText(text, specs, propName, surface) {
     if (index === -1) continue;
 
     const link = renderLink(spec);
-    const scoped = spec.scope.cloudOnly || spec.scope.selfHostedOnly;
+    const scoped = spec.scope.cloudOnly || spec.scope.selfManagedOnly;
 
     if (!scoped) {
       out = out.slice(0, index) + link + out.slice(index + spec.key.length);
@@ -242,7 +242,7 @@ function flattenDescription(description) {
     if (!scope || !scope.content) continue;
     if (scope.cloudOnly) {
       parts.push(`ifdef::env-cloud[]\n${scope.content}\nendif::[]`);
-    } else if (scope.selfHostedOnly) {
+    } else if (scope.selfManagedOnly) {
       parts.push(`ifndef::env-cloud[]\n${scope.content}\nendif::[]`);
     } else {
       parts.push(scope.content);
@@ -273,7 +273,7 @@ function flattenDescription(description) {
  * @param {string} propName - For messages.
  * @param {Array<string>|string} raw - The `includes` override value.
  * @param {string[]} warnings - Collected warnings, appended to in place.
- * @returns {Array<{target: string, cloud_only?: boolean, self_hosted_only?: boolean}>}
+ * @returns {Array<{target: string, cloud_only?: boolean, self_managed_only?: boolean}>}
  */
 function normalizeIncludes(propName, raw, warnings) {
   const items = Array.isArray(raw) ? raw : [raw];
@@ -297,7 +297,7 @@ function normalizeIncludes(propName, raw, warnings) {
     if (!target.endsWith(']')) target = `${target}[]`;
     const item = { target };
     if (scope.cloudOnly) item.cloud_only = true;
-    if (scope.selfHostedOnly) item.self_hosted_only = true;
+    if (scope.selfManagedOnly) item.self_managed_only = true;
     out.push(item);
   }
   return out;
@@ -354,9 +354,9 @@ function applyPropertyLinks(properties) {
     if (Array.isArray(prop.admonitions)) {
       prop.admonitions = prop.admonitions.filter((item) => {
         if (!item || typeof item !== 'object') return false;
-        if (item.cloud_only === true && item.self_hosted_only === true) {
+        if (item.cloud_only === true && (item.self_managed_only === true || item.self_hosted_only === true)) {
           warnings.push(
-            `${propName}: an admonition sets both cloud_only and self_hosted_only, so it would render in neither build; dropped.`
+            `${propName}: an admonition sets both cloud_only and self_managed_only, so it would render in neither build; dropped.`
           );
           return false;
         }
@@ -373,7 +373,7 @@ function applyPropertyLinks(properties) {
     // here says which override to fix, rather than leaving it to an Antora log.
     for (const spec of specs) {
       if (spec.kind !== 'property') continue;
-      if (spec.scope.cloudOnly || spec.scope.selfHostedOnly) continue;
+      if (spec.scope.cloudOnly || spec.scope.selfManagedOnly) continue;
       if (!prop.cloud_supported) continue;
       const target = properties[spec.targetName];
       if (!target) continue;

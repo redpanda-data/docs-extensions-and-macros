@@ -106,7 +106,7 @@ describe('what is refused', () => {
   });
 
   it('drops an admonition that sets both scopes', () => {
-    const props = corpus({ admonitions: [{ type: 'NOTE', text: 't', cloud_only: true, self_hosted_only: true }] });
+    const props = corpus({ admonitions: [{ type: 'NOTE', text: 't', cloud_only: true, self_managed_only: true }] });
     const result = applyPropertyLinks(props);
     expect(props.subject.admonitions).toEqual([]);
     expect(result.warnings).toEqual([expect.stringContaining('would render in neither build')]);
@@ -338,7 +338,7 @@ describe('includes', () => {
 
   it('carries the audience scope', () => {
     expect(normalizeIncludes('p', ['self-managed-only: shared:partial$x.adoc'], []))
-      .toEqual([{ target: 'shared:partial$x.adoc[]', self_hosted_only: true }]);
+      .toEqual([{ target: 'shared:partial$x.adoc[]', self_managed_only: true }]);
     expect(normalizeIncludes('p', ['cloud-only: shared:partial$x.adoc'], []))
       .toEqual([{ target: 'shared:partial$x.adoc[]', cloud_only: true }]);
   });

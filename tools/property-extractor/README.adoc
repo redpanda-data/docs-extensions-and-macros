@@ -162,7 +162,7 @@ Create a `property-overrides.json` file to customize extracted documentation:
 * `example` - Add usage example in AsciiDoc format
 * `example_file` - Load example from external file
 * `version` - Document when property was introduced
-* `see_also` - Array of related links. Each item is either a plain string (shown in every build) or an object `{content, cloud_only}` / `{content, self_hosted_only}` (shown only in that build, wrapped with `ifdef::env-cloud[]`/`ifndef::env-cloud[]` at generation time). Setting both `cloud_only` and `self_hosted_only` on the same item is rejected by the schema — it would wrap the item in both directives at once, so it renders in neither build.
+* `see_also` - Array of related links. Each item is either a plain string (shown in every build) or an object `{content, cloud_only}` / `{content, self_managed_only}` (shown only in that build, wrapped with `ifdef::env-cloud[]`/`ifndef::env-cloud[]` at generation time). Setting both `cloud_only` and `self_managed_only` on the same item is rejected by the schema — it would wrap the item in both directives at once, so it renders in neither build.
 * `related_topics` - Deprecated predecessor to `see_also`. An array of plain strings, optionally prefixed `cloud-only:` / `self-managed-only:` for the same conditional behavior — that prefix is free text with no validation, which is why `see_also` replaced it. Existing `related_topics` entries keep working; new entries should use `see_also`.
 
 Validate an overrides file against its schema (`docs-data/property-overrides.schema.json`) before generating docs:
@@ -236,7 +236,7 @@ An audience-scoped paragraph is docs-only by definition, because the source stri
 
 ==== Conditional admonitions
 
-An `admonitions` entry takes the same `cloud_only` / `self_hosted_only` booleans as a `see_also` object, wrapping the whole block:
+An `admonitions` entry takes the same `cloud_only` / `self_managed_only` booleans as a `see_also` object, wrapping the whole block:
 
 [,json]
 ----
@@ -247,6 +247,12 @@ An `admonitions` entry takes the same `cloud_only` / `self_hosted_only` booleans
   ]
 }
 ----
+
+==== One name per concept
+
+The audience flags are `cloud-only:` / `self-managed-only:` as a string prefix, and `cloud_only` / `self_managed_only` as object booleans. The hyphens and underscores differ because one is prose and the other is a JSON key in a snake_case file, but the *word* is the same in both: self-managed, matching the product name.
+
+`self_hosted_only` was the old spelling of that boolean, so the same concept went by two different words depending on how you wrote it. It still parses, and normalizes to `self_managed_only`, so nothing emits it. `docs-data/rpk-overrides.json` still spells its equivalent `selfHostedOnly` (camelCase, to match that file's own key style) and carries 34 live entries, so it needs its own rename.
 
 ==== Conditionals and blank lines
 

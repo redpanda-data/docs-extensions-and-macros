@@ -1248,9 +1248,14 @@ def _normalize_admonitions(admonitions):
         # admonition block to one docs build; setting both would wrap it in
         # ifdef and ifndef at once so it rendered in neither, which the schema
         # rejects and the generator drops with a warning.
-        for scope_field in ("cloud_only", "self_hosted_only"):
-            if entry.get(scope_field) is True:
-                normalized_entry[scope_field] = True
+        if entry.get("cloud_only") is True:
+            normalized_entry["cloud_only"] = True
+        # self_hosted_only is the deprecated spelling of self_managed_only, read
+        # so an override written against the older schema still scopes, and
+        # normalized to the current name so only one spelling reaches the
+        # templates.
+        if entry.get("self_managed_only") is True or entry.get("self_hosted_only") is True:
+            normalized_entry["self_managed_only"] = True
         normalized.append(normalized_entry)
     return normalized
 
@@ -1305,7 +1310,7 @@ def _apply_override_to_existing_property(property_dict, override, overrides_file
             logger.warning(f"related_topics for property must be an array")
 
     # Apply see_also override. Structural shape (plain string, or an object
-    # naming exactly one of cloud_only/self_hosted_only) is enforced by
+    # naming exactly one of cloud_only/self_managed_only) is enforced by
     # docs-data/property-overrides.schema.json via `doc-tools validate
     # property-overrides`, not here — this just passes the data through for
     # seeAlsoView.js to normalize at render time.

@@ -2635,7 +2635,7 @@ validation
  * Validates docs-data/property-overrides.json against its JSON Schema:
  * unknown keys (a typo that would otherwise be silently dropped by the
  * extractor), and the see_also shape (a plain string, or an object naming
- * exactly one of cloud_only/self_hosted_only).
+ * exactly one of cloud_only/self_managed_only).
  *
  * @why
  * property-overrides.json has no catch-all pass-through when an override

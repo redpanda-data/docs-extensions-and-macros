@@ -6,24 +6,33 @@ const { normalizeSeeAlso } = require('../../../tools/property-extractor/helpers/
 describe('parseAudience', () => {
   it('reads the cloud-only string prefix', () => {
     expect(parseAudience('cloud-only: xref:manage:monitor-cloud.adoc[Monitor]'))
-      .toEqual({ content: 'xref:manage:monitor-cloud.adoc[Monitor]', cloudOnly: true, selfHostedOnly: false });
+      .toEqual({ content: 'xref:manage:monitor-cloud.adoc[Monitor]', cloudOnly: true, selfManagedOnly: false });
   });
 
   it('reads the self-managed-only string prefix', () => {
     expect(parseAudience('self-managed-only: #foo'))
-      .toEqual({ content: '#foo', cloudOnly: false, selfHostedOnly: true });
+      .toEqual({ content: '#foo', cloudOnly: false, selfManagedOnly: true });
   });
 
   it('treats an unprefixed string as unconditional', () => {
     expect(parseAudience('  xref:a.adoc[A]  '))
-      .toEqual({ content: 'xref:a.adoc[A]', cloudOnly: false, selfHostedOnly: false });
+      .toEqual({ content: 'xref:a.adoc[A]', cloudOnly: false, selfManagedOnly: false });
   });
 
   it('reads the object booleans', () => {
     expect(parseAudience({ content: 'x', cloud_only: true }))
-      .toEqual({ content: 'x', cloudOnly: true, selfHostedOnly: false });
+      .toEqual({ content: 'x', cloudOnly: true, selfManagedOnly: false });
+    expect(parseAudience({ content: 'x', self_managed_only: true }))
+      .toEqual({ content: 'x', cloudOnly: false, selfManagedOnly: true });
+  });
+
+  it('still reads the deprecated self_hosted_only spelling', () => {
+    // The product is Self-Managed and the string prefix has always been
+    // `self-managed-only:`, so the boolean going by `self_hosted_only` meant one
+    // concept had two different words depending on how you wrote it. The old
+    // name is in the published schema, so it keeps parsing; nothing emits it.
     expect(parseAudience({ content: 'x', self_hosted_only: true }))
-      .toEqual({ content: 'x', cloudOnly: false, selfHostedOnly: true });
+      .toEqual({ content: 'x', cloudOnly: false, selfManagedOnly: true });
   });
 
   it('only honors a boolean that is exactly true', () => {

@@ -146,12 +146,12 @@ describe('the source-level detector catches the symmetric case', () => {
 
 describe('the emitters produce blank-line separated output', () => {
   it('wrapForAudience pads both sides', () => {
-    expect(wrapForAudience('body', { cloudOnly: true, selfHostedOnly: false }))
+    expect(wrapForAudience('body', { cloudOnly: true, selfManagedOnly: false }))
       .toBe('\nifdef::env-cloud[]\nbody\nendif::[]\n');
   });
 
   it('wrapForAudience leaves unscoped content alone', () => {
-    expect(wrapForAudience('body', { cloudOnly: false, selfHostedOnly: false })).toBe('body');
+    expect(wrapForAudience('body', { cloudOnly: false, selfManagedOnly: false })).toBe('body');
   });
 
   it('wrapBothAudiences emits the cloud branch first and pads both sides', () => {

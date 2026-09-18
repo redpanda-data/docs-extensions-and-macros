@@ -8,7 +8,9 @@
     "properties": {
       "type": "object",
       "description": "Keyed by property key or name (see property_extractor.py's name-fallback lookup). An override key that matches neither creates a phantom stub property — see property_extractor.py's report_phantom_stubs().",
-      "additionalProperties": { "$ref": "#/$defs/propertyOverride" }
+      "additionalProperties": {
+        "$ref": "#/$defs/propertyOverride"
+      }
     }
   },
   "additionalProperties": false,
@@ -24,8 +26,16 @@
         "description": {
           "description": "Property description. A plain string, or an array of paragraphs when one of them belongs to a single docs build: an array entry may carry a 'cloud-only:' / 'self-managed-only:' prefix and the generator wraps it in the matching ifdef::env-cloud[] conditional. Prefer the array form over writing the conditional into the string, because the overrides audit can only compare prose it can separate from markup, so a hand-written conditional pins the override forever.",
           "oneOf": [
-            { "type": "string" },
-            { "type": "array", "minItems": 1, "items": { "type": "string" } }
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            }
           ]
         },
         "links": {
@@ -40,7 +50,9 @@
           "description": "Shared partials pulled into this property's entry, as Antora resource IDs (for example reference:partial$internal-use-property.adoc). Rendered as include:: directives immediately after the description, which is where they used to be written by hand. Keeping them here rather than inside the description string is what lets the prose stay comparable to the source doc string. An entry may carry a 'cloud-only:' / 'self-managed-only:' prefix, and its own [attrs] if it needs them.",
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "upstream_ref": {
           "type": "string",
@@ -53,17 +65,30 @@
         "example": {
           "description": "Literal example content, or an example_file/example_yaml reference resolved relative to this overrides file."
         },
-        "example_file": { "type": "string" },
-        "example_yaml": { "type": "string" },
+        "example_file": {
+          "type": "string"
+        },
+        "example_yaml": {
+          "type": "string"
+        },
         "default": {
           "description": "Replaces the extracted default. Prefer leaving this unset — it silently pins a value the extractor would otherwise keep in sync with the C++ source on every release."
         },
-        "type": { "type": "string" },
+        "type": {
+          "type": "string"
+        },
         "config_scope": {
-          "enum": ["cluster", "broker", "topic", null],
+          "enum": [
+            "cluster",
+            "broker",
+            "topic",
+            null
+          ],
           "description": "Almost always inferred automatically from defined_in — see property_extractor.py's add_config_scope(). Only set this for an override-created property (defined_in: 'override'), which has no source file to infer from."
         },
-        "exclude_from_docs": { "type": "boolean" },
+        "exclude_from_docs": {
+          "type": "boolean"
+        },
         "category": {
           "type": "string",
           "description": "Documentation grouping. Not inferable for cluster/broker properties; topic properties get a mechanical default from infer_category() that this can still override."
@@ -73,17 +98,23 @@
           "description": "Replaces the enum field to filter displayed values (e.g. hiding an internal-only mode).",
           "items": {}
         },
-        "is_deprecated": { "type": "boolean" },
-        "visibility": { "type": "string" },
+        "is_deprecated": {
+          "type": "boolean"
+        },
+        "visibility": {
+          "type": "string"
+        },
         "related_topics": {
           "type": "array",
           "deprecated": true,
           "description": "Deprecated — use see_also. A plain string, or one prefixed 'cloud-only:'/'self-managed-only:' for conditional display. The prefix is free text with no validation; still read for existing entries, normalized alongside see_also by seeAlsoView.js.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "see_also": {
           "type": "array",
-          "description": "Related commands or documentation pages, in the docs-data/rpk-overrides.json 'seeAlso' shape. Each item is a plain string (shown everywhere) or an object naming exactly one of cloud_only/self_hosted_only (shown only in that build).",
+          "description": "Related commands or documentation pages. Each item is a plain string (shown everywhere) or an object naming exactly one of cloud_only/self_managed_only (shown only in that build). Same shape as rpk-overrides.json's 'seeAlso', except that file spells the flags in camelCase to match its own key style.",
           "items": {
             "oneOf": [
               {
@@ -104,19 +135,75 @@
                   },
                   "self_hosted_only": {
                     "type": "boolean",
-                    "description": "If true, only shown in self-hosted docs (wrapped with ifndef::env-cloud[])."
+                    "deprecated": true,
+                    "description": "Deprecated spelling of self_managed_only. Still read, so an override written against the older schema keeps working, but nothing emits it. Use self_managed_only."
+                  },
+                  "self_managed_only": {
+                    "type": "boolean",
+                    "description": "If true, only shown in self-managed docs (wrapped with ifndef::env-cloud[])."
                   }
                 },
-                "required": ["content"],
+                "required": [
+                  "content"
+                ],
                 "additionalProperties": false,
                 "oneOf": [
                   {
-                    "required": ["cloud_only"],
-                    "not": { "required": ["self_hosted_only"] }
+                    "required": [
+                      "cloud_only"
+                    ],
+                    "not": {
+                      "anyOf": [
+                        {
+                          "required": [
+                            "self_managed_only"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "self_hosted_only"
+                          ]
+                        }
+                      ]
+                    }
                   },
                   {
-                    "required": ["self_hosted_only"],
-                    "not": { "required": ["cloud_only"] }
+                    "required": [
+                      "self_managed_only"
+                    ],
+                    "not": {
+                      "anyOf": [
+                        {
+                          "required": [
+                            "cloud_only"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "self_hosted_only"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "required": [
+                      "self_hosted_only"
+                    ],
+                    "not": {
+                      "anyOf": [
+                        {
+                          "required": [
+                            "cloud_only"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "self_managed_only"
+                          ]
+                        }
+                      ]
+                    }
                   }
                 ]
               }
@@ -128,14 +215,31 @@
           "description": "Structured NOTE/TIP/IMPORTANT/WARNING/CAUTION callouts, rendered as Asciidoctor admonition blocks instead of hand-written markup in description. Each entry needs type and text; title is optional. See property_extractor.py's _normalize_admonitions() -- an entry that doesn't match this shape is dropped with a warning, not rejected here, so the schema stays permissive on casing/whitespace that the generator itself normalizes.",
           "items": {
             "type": "object",
-            "required": ["type", "text"],
+            "required": [
+              "type",
+              "text"
+            ],
             "properties": {
               "type": {
                 "type": "string",
                 "description": "Case-insensitive; normalized to uppercase. One of note, tip, important, warning, caution.",
-                "enum": ["note", "tip", "important", "warning", "caution",
-                         "NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION",
-                         "Note", "Tip", "Important", "Warning", "Caution"]
+                "enum": [
+                  "note",
+                  "tip",
+                  "important",
+                  "warning",
+                  "caution",
+                  "NOTE",
+                  "TIP",
+                  "IMPORTANT",
+                  "WARNING",
+                  "CAUTION",
+                  "Note",
+                  "Tip",
+                  "Important",
+                  "Warning",
+                  "Caution"
+                ]
               },
               "text": {
                 "type": "string",
@@ -149,19 +253,52 @@
                 "type": "boolean",
                 "description": "Show this admonition only in the Cloud build (wrapped with ifdef::env-cloud[])."
               },
-              "self_hosted_only": {
+              "self_managed_only": {
                 "type": "boolean",
                 "description": "Show this admonition only in the self-managed build (wrapped with ifndef::env-cloud[])."
+              },
+              "self_hosted_only": {
+                "type": "boolean",
+                "deprecated": true,
+                "description": "Deprecated spelling of self_managed_only. Still read, so an override written against the older schema keeps working, but nothing emits it: the product is Self-Managed and the string prefix has always been 'self-managed-only:', so one concept was going by two words depending on whether you wrote it as a prefix or a boolean. Use self_managed_only."
               }
             },
-            "not": {
-              "$comment": "Setting both would wrap the block in ifdef and ifndef at once, so it would render in neither build. Only an exact true counts, so cloud_only: false beside self_hosted_only: true stays valid.",
-              "properties": {
-                "cloud_only": { "const": true },
-                "self_hosted_only": { "const": true }
+            "allOf": [
+              {
+                "not": {
+                  "$comment": "Setting both audiences would wrap the block in ifdef and ifndef at once, so it would render in neither build. Only an exact true counts, so cloud_only: false beside self_managed_only: true stays valid.",
+                  "properties": {
+                    "cloud_only": {
+                      "const": true
+                    },
+                    "self_managed_only": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "cloud_only",
+                    "self_managed_only"
+                  ]
+                }
               },
-              "required": ["cloud_only", "self_hosted_only"]
-            },
+              {
+                "not": {
+                  "$comment": "Same check against the deprecated spelling.",
+                  "properties": {
+                    "cloud_only": {
+                      "const": true
+                    },
+                    "self_hosted_only": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "cloud_only",
+                    "self_hosted_only"
+                  ]
+                }
+              }
+            ],
             "additionalProperties": false
           }
         }

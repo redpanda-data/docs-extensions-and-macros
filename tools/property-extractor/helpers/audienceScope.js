@@ -5,7 +5,7 @@
 // prefix is what 79 entries in the live overrides file are written as, and the
 // booleans are what a JSON schema can actually check.
 const CLOUD_PREFIX = 'cloud-only:';
-const SELF_HOSTED_PREFIX = 'self-managed-only:';
+const SELF_MANAGED_PREFIX = 'self-managed-only:';
 
 /**
  * Read the audience an override value is scoped to.
@@ -14,31 +14,37 @@ const SELF_HOSTED_PREFIX = 'self-managed-only:';
  * `see_also`, `links`, description paragraphs and admonitions cannot drift apart
  * on how the scope is spelled. Strings carry the scope as a leading
  * `cloud-only:` / `self-managed-only:` prefix; objects carry it as a
- * `cloud_only` / `self_hosted_only` boolean beside a `content` string.
+ * `cloud_only` / `self_managed_only` boolean beside a `content` string
+ * (`self_hosted_only` is the deprecated spelling of the same flag).
  *
  * Setting both would wrap the value in `ifdef` and `ifndef` at once, so it would
  * render in neither build. The schema rejects that on objects; on a string it
  * cannot happen, since only one prefix can lead.
  *
- * @param {string|{content: string, cloud_only?: boolean, self_hosted_only?: boolean}} item
- * @returns {{content: string, cloudOnly: boolean, selfHostedOnly: boolean}|null} Null when the item carries no usable content.
+ * @param {string|{content: string, cloud_only?: boolean, self_managed_only?: boolean}} item
+ * @returns {{content: string, cloudOnly: boolean, selfManagedOnly: boolean}|null} Null when the item carries no usable content.
  */
 function parseAudience(item) {
   if (typeof item === 'string') {
     const trimmed = item.trim();
     if (trimmed.startsWith(CLOUD_PREFIX)) {
-      return { content: trimmed.slice(CLOUD_PREFIX.length).trim(), cloudOnly: true, selfHostedOnly: false };
+      return { content: trimmed.slice(CLOUD_PREFIX.length).trim(), cloudOnly: true, selfManagedOnly: false };
     }
-    if (trimmed.startsWith(SELF_HOSTED_PREFIX)) {
-      return { content: trimmed.slice(SELF_HOSTED_PREFIX.length).trim(), cloudOnly: false, selfHostedOnly: true };
+    if (trimmed.startsWith(SELF_MANAGED_PREFIX)) {
+      return { content: trimmed.slice(SELF_MANAGED_PREFIX.length).trim(), cloudOnly: false, selfManagedOnly: true };
     }
-    return { content: trimmed, cloudOnly: false, selfHostedOnly: false };
+    return { content: trimmed, cloudOnly: false, selfManagedOnly: false };
   }
   if (item && typeof item === 'object' && typeof item.content === 'string') {
     return {
       content: item.content.trim(),
       cloudOnly: item.cloud_only === true,
-      selfHostedOnly: item.self_hosted_only === true,
+      // self_hosted_only is the old name for the same flag. The product is
+      // called Self-Managed and the string prefix has always been
+      // `self-managed-only:`, so one concept was going by two different words
+      // depending on whether you wrote it as a prefix or a boolean. Still read,
+      // because it is in the published schema, but nothing emits it.
+      selfManagedOnly: item.self_managed_only === true || item.self_hosted_only === true,
     };
   }
   return null;
@@ -61,11 +67,11 @@ function parseAudience(item) {
  * convention already used throughout templates/property.hbs.
  *
  * @param {string} content - AsciiDoc to wrap.
- * @param {{cloudOnly: boolean, selfHostedOnly: boolean}} scope - Audience, as returned by parseAudience.
+ * @param {{cloudOnly: boolean, selfManagedOnly: boolean}} scope - Audience, as returned by parseAudience.
  * @returns {string} The content, wrapped in a blank-line-separated conditional when it is scoped.
  */
 function wrapForAudience(content, scope) {
-  if (!scope || (!scope.cloudOnly && !scope.selfHostedOnly)) return content;
+  if (!scope || (!scope.cloudOnly && !scope.selfManagedOnly)) return content;
   const directive = scope.cloudOnly ? 'ifdef::env-cloud[]' : 'ifndef::env-cloud[]';
   return `\n${directive}\n${content}\nendif::[]\n`;
 }
@@ -79,18 +85,18 @@ function wrapForAudience(content, scope) {
  * Cloud branch first, same as wrapForAudience.
  *
  * @param {string} cloudContent - What the Cloud build shows.
- * @param {string} selfHostedContent - What the self-managed build shows.
+ * @param {string} selfManagedContent - What the self-managed build shows.
  * @returns {string} Both branches, blank-line separated.
  */
-function wrapBothAudiences(cloudContent, selfHostedContent) {
-  if (cloudContent === selfHostedContent) return cloudContent;
+function wrapBothAudiences(cloudContent, selfManagedContent) {
+  if (cloudContent === selfManagedContent) return cloudContent;
   return [
     '',
     'ifdef::env-cloud[]',
     cloudContent,
     'endif::[]',
     'ifndef::env-cloud[]',
-    selfHostedContent,
+    selfManagedContent,
     'endif::[]',
     '',
   ].join('\n');
@@ -153,4 +159,4 @@ module.exports.wrapForAudience = wrapForAudience;
 module.exports.wrapBothAudiences = wrapBothAudiences;
 module.exports.findGluedConditionals = findGluedConditionals;
 module.exports.CLOUD_PREFIX = CLOUD_PREFIX;
-module.exports.SELF_HOSTED_PREFIX = SELF_HOSTED_PREFIX;
+module.exports.SELF_MANAGED_PREFIX = SELF_MANAGED_PREFIX;

@@ -311,12 +311,20 @@ class TestLinksAndAudienceScopes(unittest.TestCase):
         self.assertEqual(
             _normalize_admonitions([
                 {"type": "tip", "text": "cloud", "cloud_only": True},
-                {"type": "note", "text": "sm", "self_hosted_only": True},
+                {"type": "note", "text": "sm", "self_managed_only": True},
             ]),
             [
                 {"type": "TIP", "text": "cloud", "cloud_only": True},
-                {"type": "NOTE", "text": "sm", "self_hosted_only": True},
+                {"type": "NOTE", "text": "sm", "self_managed_only": True},
             ],
+        )
+
+    def test_deprecated_self_hosted_only_normalizes_to_self_managed_only(self):
+        """The old spelling keeps parsing, and comes out under the current
+        name so only one spelling ever reaches the templates."""
+        self.assertEqual(
+            _normalize_admonitions([{"type": "note", "text": "t", "self_hosted_only": True}]),
+            [{"type": "NOTE", "text": "t", "self_managed_only": True}],
         )
 
     def test_admonition_scope_that_is_not_true_is_not_carried(self):
