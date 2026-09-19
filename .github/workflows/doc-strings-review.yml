@@ -128,9 +128,17 @@ on:
         type: string
         default: "https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/llm/v1/providers/claude-code-provider-adp"
       adp_client_secret_id:
-        description: "Secrets Manager id holding the ADP OAuth client credential."
+        description: >-
+          Secrets Manager id holding the ADP OAuth client credential. The
+          default is the docs-doc-strings-review ADP agent, which is the
+          credential granted to this workflow's callers (this repository,
+          streaming-enterprise and redpanda-operator) and which attributes
+          the spend to that agent rather than to the shared provider's
+          Untagged bucket. The mint step derives the credential's environment
+          variable names from the last path segment of whatever is passed
+          here, so overriding this needs no other change.
         type: string
-        default: "sdlc/prod/github/adp_priv_client"
+        default: "sdlc/prod/github/docs_doc_strings_client"
       adp_token_url:
         description: "OAuth token endpoint that mints the gateway bearer."
         type: string
@@ -422,20 +430,34 @@ jobs:
         env:
           TOKEN_URL: ${{ inputs.adp_token_url }}
           TOKEN_AUDIENCE: ${{ inputs.adp_token_audience }}
+          ADP_CLIENT_SECRET_ID: ${{ inputs.adp_client_secret_id }}
         run: |
           set -euo pipefail
-          if [ -z "${ADP_PRIV_CLIENT_ID:-}" ] || [ -z "${ADP_PRIV_CLIENT_SECRET:-}" ]; then
-            echo "::warning::ADP client credential missing from env; no review will be posted."
+          # The JSON keys inside the secret are not ours to choose: vtools
+          # scripts/cicd-secret/secret.py (_check_secret) requires every key
+          # to start with the secret name's last path segment, upper-cased.
+          # So derive the variable names from adp_client_secret_id rather than
+          # hardcoding one secret's names -- hardcoding ADP_PRIV_CLIENT_* is
+          # why overriding this input used to fail the mint silently: the
+          # fetch succeeded, the variables it exported were named after the
+          # OTHER secret, and this step reported a missing credential.
+          prefix=$(basename "$ADP_CLIENT_SECRET_ID" | tr '[:lower:]-' '[:upper:]_')
+          id_var="${prefix}_ID"
+          secret_var="${prefix}_SECRET"
+          client_id="${!id_var:-}"
+          client_secret="${!secret_var:-}"
+          if [ -z "$client_id" ] || [ -z "$client_secret" ]; then
+            echo "::warning::ADP client credential missing from env (expected $id_var and $secret_var from $ADP_CLIENT_SECRET_ID); no review will be posted."
             exit 1
           fi
-          status=$(printf '%s' "$ADP_PRIV_CLIENT_SECRET" | curl -sS --request POST \
+          status=$(printf '%s' "$client_secret" | curl -sS --request POST \
             --connect-timeout 10 --max-time 30 \
             --retry 3 --retry-all-errors --retry-delay 2 \
             --output "$RUNNER_TEMP/adp_token.json" --write-out '%{http_code}' \
             --url "$TOKEN_URL" \
             --header 'content-type: application/x-www-form-urlencoded' \
             --data grant_type=client_credentials \
-            --data-urlencode client_id="$ADP_PRIV_CLIENT_ID" \
+            --data-urlencode client_id="$client_id" \
             --data-urlencode client_secret@- \
             --data audience="$TOKEN_AUDIENCE") || status=000
           token=$(jq -r '.access_token // empty' "$RUNNER_TEMP/adp_token.json" 2>/dev/null || true)
