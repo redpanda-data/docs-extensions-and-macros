@@ -156,11 +156,13 @@ Create a `property-overrides.json` file to customize extracted documentation:
 
 *Override fields:*
 
-* `description` - Replace auto-extracted description with custom text
+* `description` - Replace the auto-extracted description. Either a string, or an array of paragraphs when one of them belongs to a single docs build: an array entry may carry a `cloud-only:` / `self-managed-only:` prefix and the generator wraps it in the matching conditional. Use the array form rather than writing `ifdef::env-cloud[]` into the string. See <<Keeping a description upstreamable>>.
+* `links` - Inline links, keyed by the literal text to find in the prose and valued by the target. See <<Adding links without forking the source prose>>.
+* `includes` - Shared partials to pull into the property's entry, as Antora resource IDs. See <<Pulling in a shared partial>>.
 * `example` - Add usage example in AsciiDoc format
 * `example_file` - Load example from external file
 * `version` - Document when property was introduced
-* `see_also` - Array of related links. Each item is either a plain string (shown in every build) or an object `{content, cloud_only}` / `{content, self_hosted_only}` (shown only in that build, wrapped with `ifdef::env-cloud[]`/`ifndef::env-cloud[]` at generation time). Setting both `cloud_only` and `self_hosted_only` on the same item is rejected by the schema — it would wrap the item in both directives at once, so it renders in neither build.
+* `see_also` - Array of related links. Each item is either a plain string (shown in every build) or an object `{content, cloud_only}` / `{content, self_managed_only}` (shown only in that build, wrapped with `ifdef::env-cloud[]`/`ifndef::env-cloud[]` at generation time). Setting both `cloud_only` and `self_managed_only` on the same item is rejected by the schema — it would wrap the item in both directives at once, so it renders in neither build.
 * `related_topics` - Deprecated predecessor to `see_also`. An array of plain strings, optionally prefixed `cloud-only:` / `self-managed-only:` for the same conditional behavior — that prefix is free text with no validation, which is why `see_also` replaced it. Existing `related_topics` entries keep working; new entries should use `see_also`.
 
 Validate an overrides file against its schema (`docs-data/property-overrides.schema.json`) before generating docs:
@@ -169,6 +171,94 @@ Validate an overrides file against its schema (`docs-data/property-overrides.sch
 ----
 npx doc-tools validate property-overrides --overrides docs-data/property-overrides.json
 ----
+
+==== Adding links without forking the source prose
+
+A property description is plain prose, and the links in it are declared separately:
+
+[,json]
+----
+{
+  "properties": {
+    "advertised_rpc_api": {
+      "description": "Address of RPC endpoint published to other cluster members. If not set, the `rpc_server` broker property is used.",
+      "links": {
+        "`rpc_server`": "#rpc_server"
+      }
+    },
+    "recovery_mode_enabled": {
+      "description": "If `true`, start Redpanda in recovery mode, where user partitions are not loaded.",
+      "links": {
+        "recovery mode": "self-managed-only: xref:manage:recovery-mode.adoc"
+      }
+    }
+  }
+}
+----
+
+Each key is the literal text to find in the prose, backticks included, as written. Only the first occurrence is linked, so a property named four times links once. The longest key wins, so `+`cloud_storage_enabled`+` cannot be stolen by `+`cloud_storage`+`.
+
+Two target forms:
+
+`#<property_name>`:: Emits a `prop` macro. The macro resolves the reference page itself and renders plain code in a build that does not publish the target, so a property link needs no conditional and cannot dangle. A name that is not a known property is refused with a warning rather than emitted, because an unverifiable `prop` call publishes as literal macro text.
+`xref:<target>`:: Emits a literal xref with the key as its link text. Property-page targets are canonicalized to `xref:reference:properties/<page>.adoc`.
+`glossterm`:: Wraps the key in a glossary tooltip. The macro takes the term as its target and looks the definition up in the glossary, so the key is the term. Use `glossterm:<Term>` when the prose says something other than the term's own name.
+
+A target may carry a `cloud-only:` / `self-managed-only:` prefix, in which case the containing paragraph is emitted twice: linked in that branch, plain in the other. AsciiDoc preprocessor directives have to start a line, so they cannot bracket an inline span; the paragraph is the smallest thing that can be wrapped. A scoped link that matches inside a delimited block is refused with a warning, since duplicating that paragraph would split the block across both branches.
+
+The generator reports every key that matched no text. A link key that matches nothing is silent link rot: the override looks maintained and the page has no link.
+
+Links are applied at generation time, so they reach the rendered partials but not the published `redpanda-properties-<tag>.json`. That file is the machine-readable data surface, and its descriptions drive hover tooltips, where an inline link is not wanted.
+
+==== Pulling in a shared partial
+
+Some entries end with a shared block: the "internal use only" warning, or the HTTP Proxy ephemeral-credentials breaking-change notice. Those are block-level docs structure, so they go in `includes` rather than into the description string:
+
+[,json]
+----
+{
+  "properties": {
+    "data_transforms_read_buffer_memory_percentage": {
+      "description": "The percentage of available memory in the transform subsystem to use for read buffers.",
+      "includes": ["reference:partial$internal-use-property.adoc"]
+    }
+  }
+}
+----
+
+Each entry is an Antora resource ID, rendered as an `include::` directive immediately after the description, which is where these were previously written by hand. An entry may carry a `cloud-only:` / `self-managed-only:` prefix, and its own `[attrs]` if it needs them; without brackets the generator adds the empty pair the directive requires. A value that does not look like a resource ID is emitted as given, with a warning, because an include with no family segment resolves to nothing at build time and does it silently.
+
+==== Keeping a description upstreamable
+
+`links`, `includes`, `see_also` and `admonitions` all exist so that a description can carry docs-site structure without mixing markup into the sentence. That is not a style preference. It is what makes the override retirable. `doc-tools overrides audit` compares an override's prose against the C++ doc string to decide whether it is redundant, upstreamable, or has to stay. Markup in the sentence makes the two incomparable, so an enriched description could never be retired or sent upstream. A hand-written `ifdef::env-cloud[]` does the same thing, which is why the array form exists.
+
+An audience-scoped paragraph is docs-only by definition, because the source string has no audience, so the audit compares only the unconditional paragraphs and never puts scoped text into an upstream candidate.
+
+==== Conditional admonitions
+
+An `admonitions` entry takes the same `cloud_only` / `self_managed_only` booleans as a `see_also` object, wrapping the whole block:
+
+[,json]
+----
+{
+  "admonitions": [
+    { "type": "note", "text": "Applies to every build." },
+    { "type": "tip", "text": "Cloud readers only.", "cloud_only": true }
+  ]
+}
+----
+
+==== One name per concept
+
+The audience flags are `cloud-only:` / `self-managed-only:` as a string prefix, and `cloud_only` / `self_managed_only` as object booleans. The hyphens and underscores differ because one is prose and the other is a JSON key in a snake_case file, but the *word* is the same in both: self-managed, matching the product name.
+
+`self_hosted_only` was the old spelling of that boolean, so the same concept went by two different words depending on how you wrote it. It still parses, and normalizes to `self_managed_only`, so nothing emits it. `docs-data/rpk-overrides.json` still spells its equivalent `selfHostedOnly` (camelCase, to match that file's own key style) and carries 34 live entries, so it needs its own rename.
+
+==== Conditionals and blank lines
+
+Every conditional the generator emits has a blank line before it and after its `endif::[]`. This is load-bearing. A conditional is resolved by the preprocessor, so one glued to neighbouring prose leaves those lines adjacent and Asciidoctor merges them into a single paragraph. Worse, when the conditional wraps a delimited block it merges them in only one branch, so a self-managed preview can look correct while Cloud loses its paragraph breaks. Nothing errors and no text goes missing, so only a structural assertion on rendered HTML catches it.
+
+The generator warns about any conditional it finds glued, including one an override still writes by hand. `__tests__/tools/property-extractor/conditional-rendering.test.js` pins the measured behaviour and proves both detectors fire; `property-corpus-rendering.test.js` runs the whole live overrides corpus through Asciidoctor in both builds.
 
 This catches malformed `see_also` items and unrecognized override keys — including a typo that would otherwise be silently dropped, since applying an override to an *existing* property has no catch-all pass-through (only overrides that create a new property from scratch do).
 
@@ -1129,6 +1219,55 @@ npx jest __tests__/tools/topic_property_extractor.test.js
 # Run with coverage
 npm test -- --coverage
 ----
+
+==== The live overrides corpus
+
+`__tests__/tools/property-extractor/property-corpus-rendering.test.js` runs the real
+overrides file, not a fixture, because a fixture passes while the live 438-entry corpus
+breaks. Two files feed it, both mirrors of the `docs` repo:
+
+`__tests__/docs-data/property-overrides.json`:: A byte copy of `docs-data/property-overrides.json`.
+`__tests__/docs-data/property-snapshot.json`:: Every extracted property, reduced to the
+fields the rendering and link layers read. `cloud_supported` is the point: it is what
+makes the "no Cloud link to a property Cloud does not publish" assertion real rather
+than assumed. Descriptions are deliberately absent, because the corpus test drives prose from
+the overrides file, and a full copy would be 695 KB of text that rots.
+
+Keep the overrides copy a faithful mirror. It previously doubled as
+`property-docs-overrides.test.js`'s fixture, someone hand-edited an `admin` entry into
+it that never existed in the `docs` repo, and refreshing it would then have broken that
+test, so it sat three months and 114 entries behind. That test now has its own
+`property-overrides-admin-fixture.json`; put new fixture data there or in the test
+itself, never in the mirror.
+
+Refresh both from a `docs` checkout:
+
+[,bash]
+----
+DOCS=../docs   # path to your docs repo checkout
+
+git -C "$DOCS" show origin/main:docs-data/property-overrides.json \
+  > __tests__/docs-data/property-overrides.json
+
+git -C "$DOCS" show origin/main:modules/reference/attachments/redpanda-properties-v26.2.2.json \
+  | node -e '
+    const fs = require("fs");
+    const src = JSON.parse(fs.readFileSync(0, "utf8"));
+    const keep = ["name","config_scope","type","cloud_supported","cloud_editable",
+                  "cloud_readonly","cloud_byoc_only","is_deprecated","nullable"];
+    const properties = {};
+    for (const [k, v] of Object.entries(src.properties || {})) {
+      properties[k] = Object.fromEntries(keep.filter((f) => f in v).map((f) => [f, v[f]]));
+    }
+    const out = JSON.parse(fs.readFileSync("__tests__/docs-data/property-snapshot.json", "utf8"));
+    out.properties = properties;
+    fs.writeFileSync("__tests__/docs-data/property-snapshot.json", JSON.stringify(out, null, 1));
+  '
+----
+
+The `docs` repo fails its own CI when the overrides mirror drifts, following the
+`sync-schemas --check` pattern; this repo's CI has no `docs` checkout, so the check
+cannot live here.
 
 === Making changes
 

@@ -1,0 +1,98 @@
+---
+# Reports when the property test corpus falls behind redpanda-data/docs.
+#
+# __tests__/docs-data/property-overrides.json and property-snapshot.json mirror
+# that repo. property-corpus-rendering.test.js renders the real overrides file
+# rather than a fixture, because a fixture passes while the live corpus breaks;
+# that only holds while the mirror is current.
+#
+# Scheduled rather than PR-triggered on purpose: an overrides change lands in
+# the docs repo with no file change in THIS repo at all, so no PR check here
+# would ever see it. That is how the mirror previously fell three months and
+# 114 entries behind.
+#
+# Reports rather than blocks. A stale mirror means the corpus test covers older
+# data, which is a coverage gap and not a broken build, so failing unrelated
+# PRs here over a merge in another repo would be the wrong trade. The script
+# opens one issue and comments on it thereafter.
+#
+# The bash lives in .github/scripts/property-corpus-drift.sh, which the last
+# step runs from the checkout; __tests__/workflows/property-corpus-drift.test.js
+# asserts that and exercises every exit path against a stubbed gh.
+name: Property corpus drift
+
+on:
+  schedule:
+    # Mondays 07:00 UTC, an hour after the Kapa drift check so the two never
+    # contend for the same bot token.
+    - cron: '0 7 * * 1'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '__tests__/docs-data/property-overrides.json'
+      - '__tests__/docs-data/property-snapshot.json'
+      - '.github/scripts/property-corpus-drift.sh'
+      - '.github/workflows/property-corpus-drift.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  drift:
+    name: Check property test corpus
+    runs-on: ubuntu-latest
+    # A fork PR gets no secrets and a read-only token, so the OIDC step cannot
+    # assume the role: the account id expands to empty and the action errors
+    # out, leaving an external contributor a permanently red check they cannot
+    # fix. Skipped rather than failed, because this needs a credential a fork
+    # PR is not allowed to have. Same shape as kapa-source-groups-drift.yml.
+    #
+    # Schedule and workflow_dispatch always run: head.repo is unset for those.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.RP_AWS_CRED_REGION }}
+          role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
+
+      - name: Get secrets from AWS Secrets Manager
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            ,sdlc/prod/github/actions_bot_token
+          parse-json-secrets: true
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # redpanda-data/docs is private, so the default Actions token cannot read
+      # it and an unauthenticated raw.githubusercontent fetch 404s. The bot
+      # token above is what makes both the fetch and the issue report possible.
+      - name: Check corpus against the docs repo
+        env:
+          GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
+          # A PR that updates the corpus is ahead of docs main on purpose, so a
+          # PR run reports in the log and files nothing. Left to itself it filed
+          # an issue against its own branch's work.
+          FILE_ISSUE: ${{ github.event_name != 'pull_request' }}
+        run: |
+          set -euo pipefail
+          # Exit 1 means drift was found and reported, which is not a build
+          # failure here; exit 2 means the check could not run at all, which is.
+          # Distinguished explicitly so a token or network problem cannot pass
+          # as "no drift".
+          rc=0
+          bash .github/scripts/property-corpus-drift.sh || rc=$?
+          case "$rc" in
+            0) echo "Corpus is current." ;;
+            1) echo "::notice::Corpus drift reported in an issue." ;;
+            *) echo "::error::The corpus drift check could not run."; exit 1 ;;
+          esac

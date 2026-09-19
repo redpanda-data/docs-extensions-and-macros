@@ -3,7 +3,10 @@ const path = require('path');
 const os = require('os');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const overridesFile = path.join(repoRoot, '__tests__', 'docs-data', 'property-overrides.json');
+// This test's own fixture, not the shared corpus. property-overrides.json is a
+// faithful mirror of the docs repo's live overrides file; pointing this test at
+// it made the mirror unrefreshable, so it fell 114 entries behind.
+const overridesFile = path.join(repoRoot, '__tests__', 'docs-data', 'property-overrides-admin-fixture.json');
 
 describe('property-docs description override', () => {
   let tempDir;

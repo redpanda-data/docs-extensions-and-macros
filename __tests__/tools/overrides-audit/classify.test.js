@@ -16,6 +16,11 @@ function sourceProp (fields = {}) {
     type: 'integer',
     default: 100,
     defined_in: 'src/v/config/configuration.cc',
+    // Every property the extractor finds a description for reports the line it
+    // sits on. Its absence is the signal that the source has no description
+    // slot at all, so the default has to carry it or every case here reads as
+    // that one.
+    line_start: 1000,
     ...fields
   }
 }
@@ -311,5 +316,129 @@ describe('audience prefixes never reach an upstream candidate', () => {
       { related_topics: ['self-managed-only:xref:manage:tiered.adoc[Tiered Storage]'] },
       source)
     expect(row.class).toBe(CLASSES.KEEP)
+  })
+})
+
+describe('declared links and audience-scoped descriptions', () => {
+  it('keeps a links override by design rather than calling it unrecognized', () => {
+    const row = classify.classifyField('p', 'links', { links: { '`x`': '#x' } }, sourceProp())
+    // Links are docs-site structure the C++ doc string cannot carry, same as
+    // related_topics. Before this they landed in the "unrecognized field"
+    // bucket: still KEEP, so the burn-down never deleted them, but the audit
+    // report gave the wrong reason.
+    expect(row.class).toBe(CLASSES.KEEP)
+    expect(row.note).not.toMatch(/Unrecognized/)
+  })
+
+  it('keeps see_also and admonitions by design too', () => {
+    for (const field of ['see_also', 'admonitions']) {
+      const row = classify.classifyField('p', field, { [field]: [] }, sourceProp())
+      expect(row.class).toBe(CLASSES.KEEP)
+      expect(row.note).not.toMatch(/Unrecognized/)
+    }
+  })
+
+  describe('unconditionalProse', () => {
+    it('returns a string description unchanged, so existing rows cannot shift', () => {
+      expect(classify.unconditionalProse('The source description.'))
+        .toEqual({ prose: 'The source description.', scoped: 0, scopedParagraphs: [] })
+    })
+
+    it('drops audience-scoped paragraphs and counts them', () => {
+      expect(classify.unconditionalProse(['One.', 'cloud-only: Cloud bit.', 'Two.']))
+        .toEqual({
+          prose: 'One.\n\nTwo.',
+          scoped: 1,
+          scopedParagraphs: ['cloud-only: Cloud bit.']
+        })
+    })
+
+    it('handles a description that is neither string nor array', () => {
+      expect(classify.unconditionalProse(undefined)).toEqual({ prose: '', scoped: 0, scopedParagraphs: [] })
+    })
+  })
+
+  it('treats an array description of only unconditional paragraphs like the string form', () => {
+    const src = sourceProp({ description: 'One. Two.' })
+    const row = classify.classifyDescription('p', { description: ['One.', 'Two.'] }, src)
+    // normalizeText collapses the paragraph break to a space, so this is the
+    // same REDUNDANT verdict the equivalent string would get.
+    expect(row.class).toBe(CLASSES.REDUNDANT)
+  })
+
+  it('keeps an override whose prose matches source but which carries a scoped paragraph', () => {
+    const src = sourceProp({ description: 'The source description.' })
+    const row = classify.classifyDescription(
+      'p',
+      { description: ['The source description.', 'cloud-only: Cloud requires at least 3.'] },
+      src
+    )
+    // Retiring it would delete the scoped paragraph with it, because
+    // `description` replaces wholesale rather than merging.
+    expect(row.class).toBe(CLASSES.KEEP)
+    expect(row.note).toMatch(/1 audience-scoped paragraph/)
+    expect(row.upstream_candidate_text).toBeUndefined()
+    // Shown to a reviewer, never handed to the upstreaming workflow: the C++
+    // doc string is one string for every audience, so upstreaming a scoped
+    // paragraph leaks it to the wrong readers and duplicates it for the right
+    // ones, because the override keeps its copy.
+    expect(row.audience_scoped_text).toEqual(['cloud-only: Cloud requires at least 3.'])
+  })
+
+  it('splits when the prose is upstreamable but a scoped paragraph must stay', () => {
+    const src = sourceProp({ description: 'Terse source text.' })
+    const row = classify.classifyDescription(
+      'p',
+      { description: ['A fuller, better description.', 'cloud-only: Cloud requires at least 3.'] },
+      src
+    )
+    expect(row.class).toBe(CLASSES.KEEP_UNTIL_UPSTREAMED)
+    // The scoped paragraph must never reach the upstream candidate: the C++
+    // doc string has no audience.
+    expect(row.upstream_candidate_text).toBe('A fuller, better description.')
+    expect(row.upstream_candidate_text).not.toMatch(/Cloud requires/)
+    expect(row.upstream_candidate_text).not.toMatch(/cloud-only/)
+    expect(row.audience_scoped_text).toEqual(['cloud-only: Cloud requires at least 3.'])
+  })
+
+  it('still upstreams a markup-free array description with no scoped paragraphs', () => {
+    const src = sourceProp({ description: 'Terse source text.' })
+    const row = classify.classifyDescription('p', { description: ['A fuller description.'] }, src)
+    expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+    expect(row.upstream_candidate_text).toBe('A fuller description.')
+  })
+})
+
+describe('a source property with no description slot', () => {
+  it('is REVIEW, not UPSTREAMABLE, when the source has no line to edit', () => {
+    // The topic extractor reports a name constant and an empty description, so
+    // without this the audit proposes upstreaming prose into a header that has
+    // nowhere to put it. The upstreaming workflow would hand that to Claude.
+    const src = sourceProp({ description: '', defined_in: 'src/v/kafka/protocol/topic_properties.h' })
+    delete src.line_start
+    const row = classify.classifyDescription('cleanup.policy', { description: 'A real description.' }, src)
+
+    expect(row.class).toBe(CLASSES.REVIEW)
+    expect(row.note).toMatch(/carries no description for it/)
+    expect(row.note).toMatch(/topic_properties\.h/)
+    expect(row.upstream_candidate_text).toBeUndefined()
+  })
+
+  it('still upstreams when the source has a line, even if its description is empty', () => {
+    // An empty description in a file that does have a slot is a real gap worth
+    // filling, so that case must keep flowing to the upstreaming workflow.
+    const row = classify.classifyDescription(
+      'a_cluster_property',
+      { description: 'A real description.' },
+      sourceProp({ description: '', line_start: 1038, defined_in: 'src/v/config/configuration.cc' })
+    )
+    expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+    expect(row.upstream_candidate_text).toBe('A real description.')
+  })
+
+  it('leaves a missing property on the existing REVIEW path', () => {
+    const row = classify.classifyDescription('gone', { description: 'x' }, null)
+    expect(row.class).toBe(CLASSES.REVIEW)
+    expect(row.note).toMatch(/not present in extracted source JSON/)
   })
 })

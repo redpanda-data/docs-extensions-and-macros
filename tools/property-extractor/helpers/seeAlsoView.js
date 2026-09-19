@@ -1,12 +1,14 @@
 'use strict';
 
+const parseAudience = require('./audienceScope.js');
+
 /**
  * Normalizes a property's related-topics data into one shape for the
  * templates to render, regardless of which field or convention the override
  * author used:
  *
  *   - see_also (current): array of items, each either a plain string (shown
- *     everywhere) or {content, cloud_only, self_hosted_only} (shown only in
+ *     everywhere) or {content, cloud_only, self_managed_only} (shown only in
  *     the named build). Schema-validated — see docs-data/property-overrides.schema.json.
  *   - related_topics (deprecated, still read for back-compat with existing
  *     override files): array of strings, optionally prefixed with
@@ -14,8 +16,11 @@
  *     behaviour. That prefix was free text with no validation; see_also
  *     replaces it with data a schema can check.
  *
+ * Both spellings are read by the shared helpers/audienceScope.js parser, which
+ * every audience-scoped override field uses, so they cannot drift apart.
+ *
  * @param {object} property - A property record, as extracted or overridden.
- * @returns {Array<{content: string, cloudOnly: boolean, selfHostedOnly: boolean}>}
+ * @returns {Array<{content: string, cloudOnly: boolean, selfManagedOnly: boolean}>}
  */
 function normalizeSeeAlso(property) {
   if (!property) return [];
@@ -26,26 +31,7 @@ function normalizeSeeAlso(property) {
       : [];
 
   return rawItems
-    .map((item) => {
-      if (typeof item === 'string') {
-        const trimmed = item.trim();
-        if (trimmed.startsWith('cloud-only:')) {
-          return { content: trimmed.slice('cloud-only:'.length).trim(), cloudOnly: true, selfHostedOnly: false };
-        }
-        if (trimmed.startsWith('self-managed-only:')) {
-          return { content: trimmed.slice('self-managed-only:'.length).trim(), cloudOnly: false, selfHostedOnly: true };
-        }
-        return { content: trimmed, cloudOnly: false, selfHostedOnly: false };
-      }
-      if (item && typeof item === 'object' && typeof item.content === 'string') {
-        return {
-          content: item.content.trim(),
-          cloudOnly: item.cloud_only === true,
-          selfHostedOnly: item.self_hosted_only === true,
-        };
-      }
-      return null;
-    })
+    .map((item) => parseAudience(item))
     .filter((item) => item && item.content);
 }
 
@@ -56,7 +42,7 @@ function normalizeSeeAlso(property) {
  * once instead of duplicated per item.
  *
  * sectionType is 'cloud' only when every item is cloud-only, 'self-managed'
- * only when every item is self-hosted-only, and 'normal' otherwise (a mix of
+ * only when every item is self-managed-only, and 'normal' otherwise (a mix of
  * conditional and/or unconditional items, each wrapped individually).
  *
  * @param {object} property - A property record, as extracted or overridden.
@@ -67,7 +53,7 @@ function seeAlsoView(property) {
   let sectionType = 'normal';
   if (items.length > 0) {
     if (items.every((item) => item.cloudOnly)) sectionType = 'cloud';
-    else if (items.every((item) => item.selfHostedOnly)) sectionType = 'self-managed';
+    else if (items.every((item) => item.selfManagedOnly)) sectionType = 'self-managed';
   }
   return { items, sectionType };
 }
