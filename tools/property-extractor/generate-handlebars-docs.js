@@ -495,6 +495,25 @@ function generateAllDocs(inputFile, outputDir) {
     }
   }
 
+  // Count the declarative enrichment so the caller can report what this run
+  // did, rather than a writer having to read a diff of generated AsciiDoc to
+  // find out. Counted here, after the link pass, while the override-derived
+  // fields are still on the property objects.
+  const enrichment = { declaredLinks: 0, appliedLinks: linkResult.applied, unmatchedLinks: linkResult.unmatched, includes: 0, audienceScopedParagraphs: 0 };
+  for (const prop of Object.values(properties)) {
+    if (!prop) continue;
+    if (prop.links) enrichment.declaredLinks += Object.keys(prop.links).length;
+    if (Array.isArray(prop.includes)) enrichment.includes += prop.includes.length;
+    // Counted from the emitted directives, not from the paragraph array:
+    // applyPropertyLinks has already flattened an array description into a
+    // string by this point, so the array is gone. Counting the output also
+    // catches a legacy description that carries a hand-written conditional.
+    if (typeof prop.description === 'string') {
+      const conditionals = prop.description.match(/^ifn?def::env-cloud\[\]$/gm);
+      if (conditionals) enrichment.audienceScopedParagraphs += conditionals.length;
+    }
+  }
+
   registerPartials();
 
   let partialsCount = 0;
@@ -534,13 +553,35 @@ function generateAllDocs(inputFile, outputDir) {
     console.log('Ignored:\n   ' + errors.undocumented_properties.join('\n   '));
   }
 
-  return {
+  const summary = {
     totalProperties,
     generatedPartials: partialsCount,
     undocumentedProperties: errors.undocumented_properties,
     deprecatedProperties: deprecatedCount,
-    percentageRendered: pctRendered
+    percentageRendered: pctRendered,
+    enrichment
   };
+
+  // Opt-in machine-readable summary. The re-render workflows set this to a
+  // path outside the checkout and turn the file into the PR body, so a writer
+  // sees what the run did without reading a diff of generated AsciiDoc.
+  //
+  // Opt-in, and never defaulted to outputDir: that directory is inside the
+  // docs checkout, and the re-render workflow commits every change in the
+  // tree, so a default would commit a generated artefact into the repo on
+  // every run. Best-effort, because a summary that cannot be written must not
+  // fail a generation that otherwise succeeded.
+  const summaryPath = process.env.PROPERTY_DOCS_SUMMARY_PATH;
+  if (summaryPath) {
+    try {
+      fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2) + '\n');
+      console.log(`Wrote run summary to ${summaryPath}`);
+    } catch (err) {
+      console.warn(`Warning: could not write ${summaryPath}: ${err.message}`);
+    }
+  }
+
+  return summary;
 }
 
 
