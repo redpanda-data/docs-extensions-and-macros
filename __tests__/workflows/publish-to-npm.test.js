@@ -55,9 +55,27 @@ describe('publish-to-npm workflow: tag step (executed)', () => {
     PKG: '@redpanda-data/docs-extensions-and-macros', VERSION: '5.37.0' }
   // npm answers `view` with a scripted body and exit; gh logs every call and
   // answers `release view` per scenario; sleep is a no-op so retries are instant.
-  const stubs = ({ npmOut, npmExit, releaseExists }) => ({
+  //
+  // `release view` is answered per CALL, not once: the script views before
+  // creating and again after a failed create, and the whole point of the
+  // recheck is that the answer can change between the two. A single fixed
+  // answer cannot express "it appeared while we were creating it".
+  // createFails makes `release create` exit non-zero; existsAfterCreate is
+  // what the recheck sees, defaulting to the pre-check answer.
+  const stubs = ({ npmOut, npmExit, releaseExists, createFails = false, existsAfterCreate = null }) => ({
     npm: `printf '%s' '${npmOut}'; exit ${npmExit}`,
-    gh: `echo "gh $*" >> "$HOME/gh.log"; if [ "$1 $2" = "release view" ]; then exit ${releaseExists ? 0 : 1}; fi; exit 0`,
+    gh: `
+echo "gh $*" >> "$HOME/gh.log"
+if [ "$1 $2" = "release view" ]; then
+  n=$(cat "$HOME/view.count" 2>/dev/null || echo 0)
+  echo $((n + 1)) > "$HOME/view.count"
+  if [ "$n" = "0" ]; then exit ${releaseExists ? 0 : 1}; fi
+  exit ${(existsAfterCreate === null ? releaseExists : existsAfterCreate) ? 0 : 1}
+fi
+if [ "$1 $2" = "release create" ]; then
+  ${createFails ? 'echo "HTTP 422: already_exists" >&2; exit 1' : 'exit 0'}
+fi
+exit 0`,
     sleep: 'exit 0'
   })
   const created = (r) => (r.read('gh.log') || '').split('\n').some((l) => l.startsWith('gh release create'))
@@ -81,6 +99,35 @@ describe('publish-to-npm workflow: tag step (executed)', () => {
     expect(r.status).toBe(0)
     expect(created(r)).toBe(false)
     expect(r.all).toMatch(/is not on npm; nothing to tag/)
+  })
+
+  test('create losing the race to a concurrent run is success, not a failed job', () => {
+    // The gap the recheck exists for, and previously unexercised because the
+    // gh stub always succeeded on create. Two runs for the same version can
+    // both pass the pre-check; the loser's create fails on already_exists. If
+    // that took the job down, a release that DOES exist would show as a red
+    // run, and the dispatch job after it would be skipped.
+    const r = execRun(step, {
+      env,
+      stubs: stubs({ npmOut: '5.37.0', npmExit: 0, releaseExists: false, createFails: true, existsAfterCreate: true })
+    })
+    expect(r.status).toBe(0)
+    expect(created(r)).toBe(true)
+    expect(r.all).toMatch(/already existed by the time we created it/)
+  })
+
+  test('a create that fails for any other reason fails the job and reports why', () => {
+    // The other side of the same branch: when the recheck finds no release,
+    // the failure is real and must not be swallowed, or a version would be
+    // published to npm with no tag and a green run.
+    const r = execRun(step, {
+      env,
+      stubs: stubs({ npmOut: '5.37.0', npmExit: 0, releaseExists: false, createFails: true, existsAfterCreate: false })
+    })
+    expect(r.status).toBe(1)
+    expect(r.all).toMatch(/::error::Failed to create release v5\.37\.0/)
+    // The underlying gh message is surfaced, not discarded.
+    expect(r.all).toMatch(/already_exists/)
   })
 
   test('a registry error that is not a 404 retries, then fails loudly', () => {
