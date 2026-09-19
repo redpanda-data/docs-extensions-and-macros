@@ -76,6 +76,11 @@ programCli
  * - Node.js and npm
  * - Python 3.9 or higher
  * - Docker (for some dependencies)
+ * - Network access to https://rpk.redpanda.com (rpk is downloaded from the
+ *   rpk distribution CDN and checksum-verified; no GitHub token needed).
+ *   Optional: RPK_VERSION=vX.Y.Z pins the rpk version. Without it, the
+ *   newest GA is resolved from streaming-enterprise tags when a GitHub token
+ *   is available, otherwise from latest/ on the CDN.
  */
 programCli
   .command('install-test-dependencies')
@@ -1358,6 +1363,10 @@ automation
  * - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
  *   access to redpanda-data/streaming-enterprise, which is private (not
  *   needed when --from-source points at an existing local checkout)
+ * - --plugin refreshes need none of the above when the snapshot's rpk_version
+ *   is a published GA or RC tag: the rpk binary is downloaded from
+ *   https://rpk.redpanda.com and checksum-verified. Go, Git and the token are
+ *   only used as a fallback when the CDN has no build for that tag.
  */
 automation
   .command('rpk-docs')
@@ -1467,6 +1476,9 @@ automation
  * parsing `-X list` text for rpk versions that predate it. Hidden -X options
  * appear in neither source, so they are excluded automatically.
  *
+ * The table is sectioned by the API group rpk reports for each option, and is
+ * a single flat table on rpk versions that report no groups.
+ *
  * The main rpk-docs pipeline also writes this partial from the tree it
  * already holds; this standalone command is for targeted refreshes without
  * a full generation run.
@@ -1483,7 +1495,7 @@ automation
  */
 automation
   .command('rpk-env-partial')
-  .description('Generate the -X -> RPK_* env var mapping partial from rpk -X list output.')
+  .description('Generate the -X -> RPK_* env var mapping partial from rpk itself.')
   .option('-r, --ref <ref>', 'Git branch or tag to build rpk from (e.g., dev, v26.2.1). Clones from GitHub.')
   .option('--from-source <path>', 'Path to local rpk source (src/go/rpk directory)')
   .option('--rpk-bin <path>', 'Path to an existing rpk binary (skips clone and build)')
@@ -2733,6 +2745,55 @@ programCli
   .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
   .action((options) => {
     const { runCli } = require('../tools/lint-strings')
+    runCli(options)
+  })
+
+/**
+ * lint-screenshots
+ *
+ * @description
+ * Deterministic checks from the docs screenshot standard, run against the
+ * .adoc pages under modules/ in a docs repo: every image macro (block and
+ * inline) has alt text, the alt text is at most 125 characters, does not
+ * start with "screenshot of" / "image of" / "picture of", and has no
+ * unquoted comma (Asciidoctor would split it into width/height); the
+ * referenced image file exists and is at most 100KB. Those are errors and
+ * exit 1. Warnings (exit 0 unless --warnings-as-errors) cover the rest of
+ * the standard: images above the 50KB target, JPEG/WebP where PNG or SVG
+ * belongs, captures wider than 1920px, and - in --files mode - changed
+ * images nothing references. Commented-out macros are skipped.
+ *
+ * @why
+ * cloud-docs enforced these rules on every PR and its daily screenshot cron
+ * with a repo-local script; the other docs repos had nothing. One command
+ * in doc-tools lets every docs repo and the shared PR review pipeline run
+ * the same checks, so no two jobs disagree about the same 100KB limit.
+ *
+ * @example
+ * # Whole repo (from the docs repo root): what the cloud-docs PR check runs
+ * npx doc-tools lint-screenshots
+ *
+ * # PR mode: only pages changed in the PR, plus pages that use a changed image
+ * gh pr diff 123 --name-only > changed.txt
+ * npx doc-tools lint-screenshots --files changed.txt --format json --output review-output/screenshot-lint.json
+ *
+ * # Adopt the stricter items as blocking
+ * npx doc-tools lint-screenshots --warnings-as-errors
+ */
+programCli
+  .command('lint-screenshots')
+  .description('Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)')
+  .option('--root <path>', 'Docs repo root, the directory that holds modules/ (default: current directory)')
+  .option('--files <path>', 'Changed-files list (one repo-relative path per line, for example from `gh pr diff --name-only`): lint only listed .adoc files and pages that reference a listed image')
+  .option('--format <format>', 'Output format: human or json', 'human')
+  .option('--output <path>', 'Also write the JSON result to this file')
+  .option('--max-alt-length <n>', 'Alt text character limit', String(require('../tools/lint-screenshots').DEFAULTS.maxAltLength))
+  .option('--max-bytes <n>', 'Image size ceiling in bytes (error above this)', String(require('../tools/lint-screenshots').DEFAULTS.maxBytes))
+  .option('--target-bytes <n>', 'Image size target in bytes (warning above this)', String(require('../tools/lint-screenshots').DEFAULTS.targetBytes))
+  .option('--max-width <n>', 'Intrinsic image width limit in pixels (warning above this)', String(require('../tools/lint-screenshots').DEFAULTS.maxWidth))
+  .option('--warnings-as-errors', 'Exit 1 on warnings too')
+  .action((options) => {
+    const { runCli } = require('../tools/lint-screenshots')
     runCli(options)
   })
 
