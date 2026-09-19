@@ -479,6 +479,30 @@ function generateAllDocs(inputFile, outputDir) {
   // sentence is what the overrides audit cannot compare against the source
   // string, so an enriched description could never be retired or upstreamed;
   // keeping the enrichment in its own fields keeps the prose comparable.
+  // Audience scopes that will not take effect, checked BEFORE the link pass:
+  // applyPropertyLinks flattens an array description into one string, after
+  // which a per-paragraph prefix can no longer be attributed to its paragraph.
+  //
+  // This is a louder failure than an unmatched link. An unmatched link key is
+  // simply not applied, so the page reads correctly minus a link. An
+  // unrecognised audience prefix is PUBLISHED: `cloud_only: Cloud clusters
+  // require...` renders as that literal string, prefix and all, in both
+  // builds. A misspelled audience boolean is silent the other way round, with
+  // the value rendering in both builds instead of the one it was scoped to.
+  const scopeProblems = helpers.findAudienceScopeProblems(properties);
+  if (scopeProblems.length > 0) {
+    console.warn(
+      `Warning: ${scopeProblems.length} audience scope(s) will not take effect:`
+    );
+    for (const p of scopeProblems) {
+      console.warn(
+        p.problem === 'unrecognized-prefix'
+          ? `   ${p.property}: ${p.field} starts with "${p.detail}:", which is not a recognized audience prefix, so it will publish as literal text. Use "cloud-only:" or "self-managed-only:".`
+          : `   ${p.property}: ${p.field} carries "${p.detail}", which is not a recognized audience flag, so the value will render in both builds. Use cloud_only or self_managed_only.`
+      );
+    }
+  }
+
   const linkResult = helpers.applyPropertyLinks(properties);
   if (linkResult.applied > 0) {
     console.log(`Applied ${linkResult.applied} declared link(s) from the overrides file.`);
@@ -499,7 +523,18 @@ function generateAllDocs(inputFile, outputDir) {
   // did, rather than a writer having to read a diff of generated AsciiDoc to
   // find out. Counted here, after the link pass, while the override-derived
   // fields are still on the property objects.
-  const enrichment = { declaredLinks: 0, appliedLinks: linkResult.applied, unmatchedLinks: linkResult.unmatched, includes: 0, audienceScopedParagraphs: 0 };
+  const enrichment = {
+    declaredLinks: 0,
+    appliedLinks: linkResult.applied,
+    unmatchedLinks: linkResult.unmatched,
+    // Everything else the link pass rejected: an empty key, a missing
+    // target, a #target naming no property, a glossterm with no term.
+    // Console-only until now, so it never reached a reviewer.
+    linkWarnings: linkResult.warnings,
+    audienceScopeProblems: scopeProblems,
+    includes: 0,
+    audienceScopedParagraphs: 0
+  };
   for (const prop of Object.values(properties)) {
     if (!prop) continue;
     if (prop.links) enrichment.declaredLinks += Object.keys(prop.links).length;
