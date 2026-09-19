@@ -39,6 +39,7 @@ display help for command
 * `sync-schemas` - Sync this package's docs-data/*.schema.json into a content repo's docs-data/
 * `mcp-version` - Show MCP server version and configuration information
 * `lint-strings` - Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)
+* `lint-screenshots` - Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)
 * `preview-string` - Render one embedded doc string (property, rpk command/flag, metric, helm key, CRD field, connect field) as it will publish
 * `generate` - Run docs automations
 * `validate` - Validate docs data against internal sources of truth
@@ -82,6 +83,11 @@ npx doc-tools install-test-dependencies
 - Node.js and npm
 - Python 3.9 or higher
 - Docker (for some dependencies)
+- Network access to https://rpk.redpanda.com (rpk is downloaded from the
+  rpk distribution CDN and checksum-verified; no GitHub token needed).
+  Optional: RPK_VERSION=vX.Y.Z pins the rpk version. Without it, the
+  newest GA is resolved from streaming-enterprise tags when a GitHub token
+  is available, otherwise from latest/ on the CDN.
 
 == get-redpanda-version
 
@@ -621,6 +627,68 @@ npx doc-tools lint-strings --repo ~/redpanda --surface properties --format json
 npx doc-tools lint-strings --repo ~/redpanda --diff origin/dev
 ----
 
+== lint-screenshots
+
+Deterministic checks from the docs screenshot standard, run against the .adoc pages under modules/ in a docs repo: every image macro (block and inline) has alt text, the alt text is at most 125 characters, does not start with "screenshot of" / "image of" / "picture of", and has no unquoted comma (Asciidoctor would split it into width/height); the referenced image file exists and is at most 100KB. Those are errors and exit 1. Warnings (exit 0 unless --warnings-as-errors) cover the rest of the standard: images above the 50KB target, JPEG/WebP where PNG or SVG belongs, captures wider than 1920px, and - in --files mode - changed images nothing references. Commented-out macros are skipped.
+
+*Why use it:*
+
+cloud-docs enforced these rules on every PR and its daily screenshot cron with a repo-local script; the other docs repos had nothing. One command in doc-tools lets every docs repo and the shared PR review pipeline run the same checks, so no two jobs disagree about the same 100KB limit.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools lint-screenshots [options]
+----
+
+*Options:*
+
+`--root <path>`::
+Docs repo root, the directory that holds modules/ (default: current directory)
+
+`--files <path>`::
+Changed-files list (one repo-relative path per line, for example from `gh pr diff --name-only`): lint only listed .adoc files and pages that reference a listed image
+
+`--format <format>`::
+Output format: human or json (default: "human")
+
+`--output <path>`::
+Also write the JSON result to this file
+
+`--max-alt-length <n>`::
+Alt text character limit (default: "125")
+
+`--max-bytes <n>`::
+Image size ceiling in bytes (error above this) (default: "102400")
+
+`--target-bytes <n>`::
+Image size target in bytes (warning above this) (default: "51200")
+
+`--max-width <n>`::
+Intrinsic image width limit in pixels (warning above this) (default: "1920")
+
+`--warnings-as-errors`::
+Exit 1 on warnings too
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Whole repo (from the docs repo root): what the cloud-docs PR check runs
+npx doc-tools lint-screenshots
+
+# PR mode: only pages changed in the PR, plus pages that use a changed image
+gh pr diff 123 --name-only > changed.txt
+npx doc-tools lint-screenshots --files changed.txt --format json --output review-output/screenshot-lint.json
+
+# Adopt the stricter items as blocking
+npx doc-tools lint-screenshots --warnings-as-errors
+----
+
 == preview-string
 
 Render ONE doc-string declaration from local engineering source to the final published snippet: properties through the real extractor + Handlebars template (two panes when --overrides shows a docs-repo override masking the source string), rpk through the real formatDescription() transformer, and metrics/helm/crd/connect in their published output shapes.
@@ -692,7 +760,7 @@ display help for command
 * `migrate-property-refs` - One-time migration of `property_name` prose mentions to prop:property_name[] macros. Dry run unless --write is given.
 * `property-docs` - Generate JSON and consolidated AsciiDoc partials for Redpanda configuration properties. Defaults to branch "dev" if neither --tag nor --branch is specified.
 * `rpk-docs` - Generate rpk CLI documentation from source. Builds rpk and parses source for platform detection.
-* `rpk-env-partial` - Generate the -X -> RPK_* env var mapping partial from rpk -X list output.
+* `rpk-env-partial` - Generate the -X -> RPK_* env var mapping partial from rpk itself.
 * `rpk-plugin-stubs` - Reconcile single-source stub pages and nav against the docs repo's rpk plugin partials. Run from the consumer repo root.
 * `helm-spec` - Generate AsciiDoc documentation for Helm charts. Requires either --tag or --branch for GitHub URLs.
 * `cloud-regions` - Generate Markdown table of cloud regions and tiers from GitHub YAML file
@@ -1204,10 +1272,14 @@ npx doc-tools generate rpk-docs --ref dev --overrides custom-overrides.json
 - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
   access to redpanda-data/streaming-enterprise, which is private (not
   needed when --from-source points at an existing local checkout)
+- --plugin refreshes need none of the above when the snapshot's rpk_version
+  is a published GA or RC tag: the rpk binary is downloaded from
+  https://rpk.redpanda.com and checksum-verified. Go, Git and the token are
+  only used as a fallback when the CDN has no build for that tag.
 
 === generate rpk-env-partial
 
-Generates the -X option -> RPK_* environment variable mapping table as an AsciiDoc partial from rpk's own -X option data, so the table cannot drift from the CLI. Prefers the structured x_options array in `rpk --print-tree` (which carries the env var names rpk itself derives) and falls back to parsing `-X list` text for rpk versions that predate it. Hidden -X options appear in neither source, so they are excluded automatically. The main rpk-docs pipeline also writes this partial from the tree it already holds; this standalone command is for targeted refreshes without a full generation run.
+Generates the -X option -> RPK_* environment variable mapping table as an AsciiDoc partial from rpk's own -X option data, so the table cannot drift from the CLI. Prefers the structured x_options array in `rpk --print-tree` (which carries the env var names rpk itself derives) and falls back to parsing `-X list` text for rpk versions that predate it. Hidden -X options appear in neither source, so they are excluded automatically. The table is sectioned by the API group rpk reports for each option, and is a single flat table on rpk versions that report no groups. The main rpk-docs pipeline also writes this partial from the tree it already holds; this standalone command is for targeted refreshes without a full generation run.
 
 *Usage:*
 

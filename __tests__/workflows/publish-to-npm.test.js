@@ -35,7 +35,17 @@ describe('publish-to-npm workflow: static contracts', () => {
   })
 
   test('runs are serialized so two publishes cannot race on the same tag', () => {
-    expect(workflow.concurrency).toMatchObject({ group: 'publish-to-npm', 'cancel-in-progress': false })
+    // Scoped to the release job and keyed by version, not workflow-wide.
+    // GitHub keeps one PENDING run per group and cancels the previously
+    // pending one, so a workflow-wide group could drop the middle of three
+    // quick merges entirely: neither published nor tagged.
+    expect(workflow.concurrency).toBeUndefined()
+    expect(workflow.jobs.release.concurrency).toMatchObject({
+      group: 'release-${{ needs.publish.outputs.version }}',
+      'cancel-in-progress': false
+    })
+    // Keyed by version, so two runs for the same version still serialise.
+    expect(workflow.jobs.release.concurrency.group).toContain('needs.publish.outputs.version')
   })
 })
 
