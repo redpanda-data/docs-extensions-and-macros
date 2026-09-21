@@ -176,10 +176,15 @@ describe('substitution behaviour', () => {
       links: { 'recovery mode': 'self-managed-only: xref:manage:recovery-mode.adoc' },
     });
     applyPropertyLinks(props);
+    // A blank line separates the two directive pairs, not just the whole
+    // block from its neighbours: paragraphBounds treats an unbroken run of
+    // conditional directives as one paragraph, which is exactly what let a
+    // second scoped link's duplication nest inside a first one's own
+    // ifdef/ifndef pair (see the nested-conditional regression test below).
     expect(props.subject.description).toBe(
       'Leading paragraph.\n\n' +
       '\nifdef::env-cloud[]\nStart in recovery mode.\nendif::[]\n' +
-      'ifndef::env-cloud[]\nStart in xref:manage:recovery-mode.adoc[recovery mode].\nendif::[]\n' +
+      '\nifndef::env-cloud[]\nStart in xref:manage:recovery-mode.adoc[recovery mode].\nendif::[]\n' +
       '\n\nTrailing paragraph.'
     );
   });
@@ -430,5 +435,150 @@ describe('an unscoped link is applied to both branches of a scoped duplication',
     expect(cloud).toContain('prop:admin_api')
     expect(selfManaged).not.toContain('prop:admin_api')
     expect(selfManaged).toContain('admin_api')
+  })
+})
+
+describe('multiple scoped links sharing one paragraph do not nest', () => {
+  // The live regression: default_redpanda_storage_mode declares three
+  // self-managed-only links, two of which share one bullet-list paragraph.
+  // Each scoped spec used to duplicate the paragraph it matched, so the
+  // second spec's duplication treated the FIRST spec's already-emitted
+  // ifdef/ifndef pair as its own "paragraph" (paragraphBounds sees an
+  // unbroken run of conditional directives as one paragraph), nesting one
+  // conditional inside the other. The nested branch is one neither build's
+  // attribute state ever satisfies, so the link inside it rendered in
+  // NEITHER audience -- silently: applied, warnings and unmatched all
+  // reported success.
+  //
+  // Asciidoctor here has no `prop:` macro registered (that is a
+  // build-time Antora extension, macros/prop.js), so a prop: call is left
+  // as literal text rather than rendered to <a href>. Assertions below
+  // check for that literal macro call in the right branch, which is
+  // exactly what matters for this bug: whether the substitution landed in
+  // the branch it should have, not whether prop: itself renders.
+  const asciidoctor = require('@asciidoctor/core')()
+  const strip = (html) => html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+
+  it('applies both same-scope links in one paragraph with no nested directive pair', () => {
+    const props = corpus({
+      description: 'Intro.\n\n* one: mentions `alpha` and `beta` together.\n* two: unrelated.',
+      links: {
+        '`alpha`': 'self-managed-only: #rpc_server',
+        '`beta`': 'self-managed-only: #hidden_target'
+      }
+    }, { hidden_target: { name: 'hidden_target', config_scope: 'broker' } })
+
+    const result = applyPropertyLinks(props)
+
+    expect(result.applied).toBe(2)
+    expect(result.warnings).toEqual([])
+    const description = props.subject.description
+    // Exactly one ifdef/ifndef pair for this paragraph, not one per link.
+    expect(description.match(/^ifdef::env-cloud\[\]$/gm)).toHaveLength(1)
+    expect(description.match(/^ifndef::env-cloud\[\]$/gm)).toHaveLength(1)
+    // No directive pair sits inside another: walking the directive lines in
+    // order must alternate open, close, open, close -- never two opens
+    // before a close, which is what nesting looks like.
+    const directiveLines = description.match(/^(?:ifn?def::env-cloud\[\]|endif::\[\])$/gm) || []
+    let depth = 0
+    for (const line of directiveLines) {
+      if (line === 'endif::[]') depth -= 1
+      else depth += 1
+      expect(depth).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('renders both links to the self-managed reader and neither to Cloud', () => {
+    const props = corpus({
+      description: 'Intro.\n\n* one: mentions `alpha` and `beta` together.\n* two: unrelated.',
+      links: {
+        '`alpha`': 'self-managed-only: #rpc_server',
+        '`beta`': 'self-managed-only: #hidden_target'
+      }
+    }, { hidden_target: { name: 'hidden_target', config_scope: 'broker' } })
+    applyPropertyLinks(props)
+    const description = props.subject.description
+
+    const selfManaged = strip(asciidoctor.convert(description, { safe: 'safe' }))
+    const cloud = strip(asciidoctor.convert(description, { safe: 'safe', attributes: { 'env-cloud': '' } }))
+
+    expect(selfManaged).toContain('prop:rpc_server[link=true,text=alpha]')
+    expect(selfManaged).toContain('prop:hidden_target[link=true,text=beta]')
+    expect(cloud).not.toContain('prop:rpc_server')
+    expect(cloud).not.toContain('prop:hidden_target')
+    expect(cloud).toContain('alpha')
+    expect(cloud).toContain('beta')
+  })
+
+  it('handles a mix of cloud-only and self-managed-only specs in the same paragraph', () => {
+    const props = corpus({
+      description: 'Intro.\n\nOne paragraph mentions `alpha` and `beta` together.',
+      links: {
+        '`alpha`': 'cloud-only: #rpc_server',
+        '`beta`': 'self-managed-only: #hidden_target'
+      }
+    }, { hidden_target: { name: 'hidden_target', config_scope: 'broker' } })
+
+    const result = applyPropertyLinks(props)
+    expect(result.applied).toBe(2)
+    const description = props.subject.description
+
+    const selfManaged = strip(asciidoctor.convert(description, { safe: 'safe' }))
+    const cloud = strip(asciidoctor.convert(description, { safe: 'safe', attributes: { 'env-cloud': '' } }))
+
+    // Cloud gets its own link and plain "beta"; self-managed the reverse.
+    expect(cloud).toContain('prop:rpc_server[link=true,text=alpha]')
+    expect(cloud).not.toContain('prop:hidden_target')
+    expect(selfManaged).toContain('prop:hidden_target[link=true,text=beta]')
+    expect(selfManaged).not.toContain('prop:rpc_server')
+  })
+})
+
+describe('a longer key\'s emitted markup cannot be corrupted by a shorter sibling key', () => {
+  // "Longest key first" (resolveLinkSpecs) stops a substring key from
+  // stealing a longer key's own match, but it does not stop the reverse: a
+  // longer key's rendered macro can contain a shorter key as a literal
+  // substring of its own visible text, and without a guard the shorter
+  // key's substitution fires a SECOND time inside that markup.
+  it('does not nest an xref inside a sibling xref it shares a prefix with', () => {
+    const props = corpus({
+      description: 'Topics on Tiered Storage v2 use a different path. Tiered Storage must be enabled first.',
+      links: {
+        'Tiered Storage': 'xref:manage:tiered-storage.adoc',
+        'Tiered Storage v2': 'xref:manage:tiered-storage.adoc#tiered-storage-versions'
+      }
+    })
+
+    const result = applyPropertyLinks(props)
+
+    expect(result.applied).toBe(2)
+    expect(result.warnings).toEqual([])
+    const description = props.subject.description
+    // Neither xref's link text contains a nested xref: the corruption shape
+    // was `xref:...[xref:...[Tiered Storage] v2]`.
+    expect(description).not.toMatch(/xref:[^[]*\[xref:/)
+    expect(description).toContain('xref:manage:tiered-storage.adoc#tiered-storage-versions[Tiered Storage v2]')
+    expect(description).toContain('xref:manage:tiered-storage.adoc[Tiered Storage]')
+  })
+
+  it('does not corrupt a prop macro\'s text= attribute with a substring sibling key', () => {
+    const props = corpus({
+      description: 'Set the region and bucket before deploying.',
+      links: {
+        region: '#hidden_target',
+        'cloud_storage_bucket': '#rpc_server'
+      }
+    }, { hidden_target: { name: 'hidden_target', config_scope: 'broker' } })
+    // Neither key is literally present as written above except "region",
+    // so use a description where a longer key's own rendered text= value
+    // reuses the shorter key's spelling.
+    props.subject.description = 'Set the cloud_storage_region before deploying, or the bucket by name.'
+    props.subject.links = { cloud_storage_region: '#hidden_target', bucket: '#rpc_server' }
+
+    const result = applyPropertyLinks(props)
+
+    expect(result.applied).toBe(2)
+    const description = props.subject.description
+    expect(description).not.toMatch(/prop:\w+\[[^\]]*prop:/)
   })
 })

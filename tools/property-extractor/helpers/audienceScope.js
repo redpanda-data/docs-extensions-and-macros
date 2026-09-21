@@ -90,11 +90,21 @@ function wrapForAudience(content, scope) {
  */
 function wrapBothAudiences(cloudContent, selfManagedContent) {
   if (cloudContent === selfManagedContent) return cloudContent;
+  // A blank line between the two directive pairs, not just around the
+  // whole block. Nothing downstream of this function currently calls it
+  // twice for overlapping text (applyLinksToText groups every scoped spec
+  // matching one paragraph into a single call), so nothing today depends on
+  // this specific line -- but paragraphBounds treats an unbroken run of
+  // conditional directives as ONE paragraph, exactly the mechanism that let
+  // a second duplication nest inside a first one's endif::[]/ifndef::[]
+  // pair with no blank line to stop it. Kept here too, defensively, so a
+  // future caller of this function alone does not have to rediscover that.
   return [
     '',
     'ifdef::env-cloud[]',
     cloudContent,
     'endif::[]',
+    '',
     'ifndef::env-cloud[]',
     selfManagedContent,
     'endif::[]',

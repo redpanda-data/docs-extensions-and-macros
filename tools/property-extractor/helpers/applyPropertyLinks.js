@@ -180,6 +180,39 @@ function applyLinksToText(text, specs, propName, surface) {
   const warnings = [];
   if (typeof text !== 'string' || !text || !specs.length) return { text, applied, warnings };
 
+  // Ranges of `out` that are markup THIS call has already emitted, in `out`'s
+  // own coordinates, shifted after every splice. "Longest key first" (see the
+  // sort in resolveLinkSpecs) stops a substring key from stealing a longer
+  // key's match, but it does not stop the REVERSE: a longer key's rendered
+  // macro can contain a SHORTER key as a literal substring of its own link
+  // text (an xref's label, a prop macro's text= attribute), and without this
+  // guard the shorter key's substitution fires a second time INSIDE that
+  // markup and corrupts it -- e.g. a key "Tiered Storage" matching inside the
+  // xref label a sibling key "Tiered Storage v2" just emitted, producing
+  // `xref:...[xref:...[Tiered Storage] v2]`. Not reachable from today's
+  // corpus (checked: no key is a substring of another key's emitted markup
+  // on any one property), but the ordering guarantee should hold regardless
+  // of what a future override adds.
+  const protectedRanges = [];
+  const shiftRangesFrom = (fromIndex, delta) => {
+    for (const range of protectedRanges) {
+      if (range.start >= fromIndex) {
+        range.start += delta;
+        range.end += delta;
+      }
+    }
+  };
+  const findUnprotectedIndex = (haystack, key) => {
+    let from = 0;
+    for (;;) {
+      const idx = haystack.indexOf(key, from);
+      if (idx === -1) return -1;
+      const overlapsMarkup = protectedRanges.some((r) => idx < r.end && idx + key.length > r.start);
+      if (!overlapsMarkup) return idx;
+      from = idx + 1;
+    }
+  };
+
   // Two passes, unscoped first. A scoped spec duplicates the paragraph it
   // matches into an ifdef/ifndef pair, and every later substitution uses
   // indexOf, which finds only the FIRST copy. So an unscoped link sharing a
@@ -195,18 +228,37 @@ function applyLinksToText(text, specs, propName, surface) {
 
   let out = text;
   for (const spec of ordered) {
-    const index = out.indexOf(spec.key);
+    if (spec.scope.cloudOnly || spec.scope.selfManagedOnly) break; // scoped specs handled below
+    const index = findUnprotectedIndex(out, spec.key);
     if (index === -1) continue;
 
     const link = renderLink(spec);
-    const scoped = spec.scope.cloudOnly || spec.scope.selfManagedOnly;
+    out = out.slice(0, index) + link + out.slice(index + spec.key.length);
+    shiftRangesFrom(index + spec.key.length, link.length - spec.key.length);
+    protectedRanges.push({ start: index, end: index + link.length });
+    applied.push(spec.key);
+  }
 
-    if (!scoped) {
-      out = out.slice(0, index) + link + out.slice(index + spec.key.length);
-      applied.push(spec.key);
-      continue;
-    }
-
+  // Scoped specs: located against the fully-unscoped-substituted `out`
+  // BEFORE any scoped duplication, then grouped by the paragraph each one
+  // matches in. Locating first means one spec's duplication never shifts
+  // where a sibling spec is found; grouping means every spec matching the
+  // SAME paragraph duplicates it exactly ONCE, applying all of them to
+  // their own branch of that one duplication.
+  //
+  // Without the grouping, `default_redpanda_storage_mode`'s three
+  // self-managed-only links -- two of which share one bullet-list paragraph
+  // -- duplicated that paragraph once per spec, so the second spec's
+  // duplication wrapped the FIRST spec's already-emitted ifdef/ifndef pair
+  // as its "paragraph", nesting one conditional inside the other. The
+  // nested branch is one neither build's attribute state ever satisfies, so
+  // the link inside it renders in NEITHER audience, silently, with the run
+  // summary still reporting it as applied.
+  const scopedSpecs = ordered.filter((spec) => spec.scope.cloudOnly || spec.scope.selfManagedOnly);
+  const located = [];
+  for (const spec of scopedSpecs) {
+    const index = findUnprotectedIndex(out, spec.key);
+    if (index === -1) continue;
     if (insideDelimitedBlock(out, index)) {
       // Splitting a listing or example block across two conditional branches
       // would break the block in both. Leave the text plain and say so.
@@ -216,16 +268,46 @@ function applyLinksToText(text, specs, propName, surface) {
       );
       continue;
     }
+    located.push({ spec, index, bounds: paragraphBounds(out, index) });
+  }
 
-    const { start, end } = paragraphBounds(out, index);
+  const groups = [];
+  for (const item of located) {
+    let group = groups.find((g) => g.bounds.start === item.bounds.start && g.bounds.end === item.bounds.end);
+    if (!group) {
+      group = { bounds: item.bounds, items: [] };
+      groups.push(group);
+    }
+    group.items.push(item);
+  }
+  // Right-to-left, so replacing one group's span never shifts the start
+  // offset of a group still to be processed (groups never overlap, since
+  // they come from paragraphBounds against the same unmodified `out`).
+  groups.sort((a, b) => b.bounds.start - a.bounds.start);
+
+  for (const group of groups) {
+    const { start, end } = group.bounds;
     const paragraph = out.slice(start, end);
-    const relative = index - start;
-    const linked = paragraph.slice(0, relative) + link + paragraph.slice(relative + spec.key.length);
-    const both = spec.scope.cloudOnly
-      ? wrapBothAudiences(linked, paragraph)
-      : wrapBothAudiences(paragraph, linked);
+    let cloudVersion = paragraph;
+    let selfManagedVersion = paragraph;
+    for (const { spec } of group.items) {
+      const link = renderLink(spec);
+      if (spec.scope.cloudOnly) {
+        const idx = cloudVersion.indexOf(spec.key);
+        if (idx === -1) continue;
+        cloudVersion = cloudVersion.slice(0, idx) + link + cloudVersion.slice(idx + spec.key.length);
+        // selfManagedVersion keeps the plain key text: correct, the link is
+        // scoped away from that build.
+      } else {
+        const idx = selfManagedVersion.indexOf(spec.key);
+        if (idx === -1) continue;
+        selfManagedVersion = selfManagedVersion.slice(0, idx) + link + selfManagedVersion.slice(idx + spec.key.length);
+      }
+      applied.push(spec.key);
+    }
+    const both = wrapBothAudiences(cloudVersion, selfManagedVersion);
     out = out.slice(0, start) + both + out.slice(end);
-    applied.push(spec.key);
+    shiftRangesFrom(end, both.length - paragraph.length);
   }
 
   return { text: out, applied, warnings };

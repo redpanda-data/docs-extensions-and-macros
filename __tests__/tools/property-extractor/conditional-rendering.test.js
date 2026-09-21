@@ -154,9 +154,16 @@ describe('the emitters produce blank-line separated output', () => {
     expect(wrapForAudience('body', { cloudOnly: false, selfManagedOnly: false })).toBe('body');
   });
 
-  it('wrapBothAudiences emits the cloud branch first and pads both sides', () => {
+  it('wrapBothAudiences emits the cloud branch first and pads both sides, with a blank line between the two directive pairs', () => {
+    // The blank line between endif::[] and ifndef::[] is load-bearing, not
+    // cosmetic: paragraphBounds (applyPropertyLinks.js) treats an unbroken
+    // run of conditional directives as ONE paragraph, so without it a
+    // second call that duplicates a paragraph overlapping this one's text
+    // would nest its own ifdef/ifndef pair inside this one's endif::[],
+    // publishing a link inside a branch neither build's attribute state
+    // ever satisfies.
     expect(wrapBothAudiences('c', 's').split('\n'))
-      .toEqual(['', 'ifdef::env-cloud[]', 'c', 'endif::[]', 'ifndef::env-cloud[]', 's', 'endif::[]', '']);
+      .toEqual(['', 'ifdef::env-cloud[]', 'c', 'endif::[]', '', 'ifndef::env-cloud[]', 's', 'endif::[]', '']);
   });
 
   it('wrapBothAudiences emits no conditional when the branches are identical', () => {
