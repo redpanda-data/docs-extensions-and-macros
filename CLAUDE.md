@@ -319,9 +319,9 @@ npm run test:coverage
 
 ## Releasing a new version
 
-This package publishes to npm automatically. The `publish-to-npm` GitHub Action runs on every push to `main` and publishes a new release **whenever the `version` in `package.json` is higher than the version already on npm**. There is no separate tag or release step.
+This package publishes to npm automatically. The `publish-to-npm` GitHub Action runs on every push to `main` and publishes a new release **whenever the `version` in `package.json` is higher than the version already on npm**. It then creates a matching `v<version>` git tag and GitHub release, so other repositories can pin the reusable workflows in this repository to a version instead of floating on `main`.
 
-Because of that, a change to the tools only reaches documentation repositories once a new version is published. So when your pull request changes the tools (not just docs), bump the version as part of the same PR:
+Because of that, a change to the tools only reaches documentation repositories once a new version is published, and a change to `.github/workflows/` only reaches version-pinned callers once a new tag is created. So when your pull request changes the tools OR a reusable workflow (not just docs), bump the version as part of the same PR:
 
 ```bash
 # In your branch, after making your changes:
