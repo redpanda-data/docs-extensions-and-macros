@@ -93,7 +93,24 @@ const META_FIELDS = Object.freeze(['upstream_ref', '_comment'])
  */
 function normalizeText (text) {
   if (typeof text !== 'string') return ''
-  return text.replace(/\s+/g, ' ').trim()
+  // Horizontal whitespace collapses; newlines do not. A blank line is a
+  // paragraph break and a newline before a list marker is a list-item
+  // boundary, and both change what AsciiDoc renders -- the C++ source is one
+  // run-on sentence with no newlines at all, so treating \n the same as a
+  // plain space made an override that turns that wording into a real
+  // bulleted list or separate paragraphs compare byte-equal to source once
+  // "normalized". That classified it REDUNDANT, and the retirement step
+  // deletes an override wholesale, replacing a rendered list with a
+  // run-on paragraph carrying literal `*` characters. Verified against
+  // fetch_read_strategy in the live corpus: 2 rendered list items with the
+  // override, 0 (plus two stray asterisks) once "equal to source" deleted
+  // it.
+  return text
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 /**

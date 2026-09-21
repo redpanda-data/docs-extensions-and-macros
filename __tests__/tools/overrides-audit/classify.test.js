@@ -26,13 +26,34 @@ function sourceProp (fields = {}) {
 }
 
 describe('normalizeText', () => {
-  test('collapses whitespace runs and unwraps lines', () => {
-    expect(classify.normalizeText('One  two\nthree\n\n four ')).toBe('One two three four')
+  test('collapses horizontal whitespace runs per line, trims each line', () => {
+    expect(classify.normalizeText('One  two\nthree\n\n four ')).toBe('One two\nthree\n\nfour')
   })
 
   test('returns empty string for non-strings', () => {
     expect(classify.normalizeText(undefined)).toBe('')
     expect(classify.normalizeText(null)).toBe('')
+  })
+
+  test('collapses 3+ blank lines to one, but never removes a genuine paragraph break', () => {
+    expect(classify.normalizeText('a\n\n\n\nb')).toBe('a\n\nb')
+    expect(classify.normalizeText('a\n\nb')).toBe('a\n\nb')
+  })
+
+  test('does NOT unwrap a newline into a space', () => {
+    // The C++ source is one run-on sentence with no newlines at all. Source
+    // and an override that turns the same wording into a real bulleted list
+    // (fetch_read_strategy, live in the corpus) must NOT compare equal, or
+    // the retirement step deletes the override and replaces the rendered
+    // list with a run-on paragraph carrying literal `*` characters.
+    const override = 'Intro.\n\n* one\n* two'
+    const source = 'Intro. * one * two'
+    expect(classify.normalizeText(override)).not.toBe(classify.normalizeText(source))
+  })
+
+  test('still treats pure horizontal-whitespace differences as no-ops', () => {
+    expect(classify.normalizeText('a   b\n\nc')).toBe(classify.normalizeText('a b\n\nc'))
+    expect(classify.normalizeText('a  \nb')).toBe(classify.normalizeText('a\nb'))
   })
 })
 
@@ -113,18 +134,24 @@ describe('stripDocsMarkup', () => {
 })
 
 describe('contentHash', () => {
-  test('is stable across whitespace-only changes and unique per name and text', () => {
+  test('is stable across horizontal-whitespace-only changes and unique per name and text', () => {
+    // Same line structure both sides -- only the spacing within a line
+    // differs -- so this exercises horizontal collapsing, not the
+    // newline-preservation this file's normalizeText now depends on.
     const a = classify.contentHash('prop_a', 'Some  text\nhere.')
     expect(a).toMatch(/^[0-9a-f]{16}$/)
-    expect(classify.contentHash('prop_a', 'Some text here.')).toBe(a)
-    expect(classify.contentHash('prop_b', 'Some text here.')).not.toBe(a)
+    expect(classify.contentHash('prop_a', 'Some text\nhere.')).toBe(a)
+    expect(classify.contentHash('prop_b', 'Some text\nhere.')).not.toBe(a)
     expect(classify.contentHash('prop_a', 'Other text.')).not.toBe(a)
   })
 })
 
 describe('classifyDescription', () => {
   test('REDUNDANT when source matches after normalization', () => {
-    const override = { description: 'The  source\ndescription.' }
+    // Horizontal whitespace only: sourceProp()'s default description is a
+    // single line, so a genuine structural difference (a newline the source
+    // does not have) would no longer classify this REDUNDANT.
+    const override = { description: 'The  source description.' }
     const row = classify.classifyDescription('p', override, sourceProp())
     expect(row.class).toBe(CLASSES.REDUNDANT)
     expect(row.source_file).toBe('src/v/config/configuration.cc')
@@ -359,11 +386,22 @@ describe('declared links and audience-scoped descriptions', () => {
   })
 
   it('treats an array description of only unconditional paragraphs like the string form', () => {
+    // Same wording, but the array form's blank-line paragraph break is a
+    // real structural difference from source's single run-on line --
+    // normalizeText no longer collapses a paragraph break to a space (see
+    // its own tests: doing that is what let fetch_read_strategy's real
+    // bulleted list classify REDUNDANT against a source that has no list at
+    // all), so this is UPSTREAMABLE, carrying the paragraph break with it.
     const src = sourceProp({ description: 'One. Two.' })
     const row = classify.classifyDescription('p', { description: ['One.', 'Two.'] }, src)
-    // normalizeText collapses the paragraph break to a space, so this is the
-    // same REDUNDANT verdict the equivalent string would get.
-    expect(row.class).toBe(CLASSES.REDUNDANT)
+    expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+    expect(row.upstream_candidate_text).toBe('One.\n\nTwo.')
+
+    // The equivalent STRING form, with no structural difference from
+    // source at all, is still REDUNDANT -- the "like the string form"
+    // comparison this test is named for.
+    const flatRow = classify.classifyDescription('p', { description: 'One. Two.' }, src)
+    expect(flatRow.class).toBe(CLASSES.REDUNDANT)
   })
 
   it('keeps an override whose prose matches source but which carries a scoped paragraph', () => {
