@@ -287,9 +287,16 @@ describe('declared links over the live corpus', () => {
     expect(result.applied).toBeGreaterThanOrEqual(declared);
   });
 
-  it('never links a Cloud-published property to one Cloud does not publish', () => {
+  it('never links a Cloud-published property to one Cloud cannot reach', () => {
+    // This filter must match applyPropertyLinks.js's actual wording
+    // ("which Cloud cannot reach"), or it silently matches nothing and this
+    // assertion can never fail regardless of what warnings.js says. The
+    // blanket "reports no other link warnings" test below would still
+    // catch a real cross-audience warning, so this was a naming defect,
+    // not a coverage gap -- but a filter that can never match is worth
+    // fixing on sight.
     const result = applyPropertyLinks(buildCorpus(OVERRIDES));
-    const crossAudience = result.warnings.filter((w) => /which Cloud does not publish/.test(w));
+    const crossAudience = result.warnings.filter((w) => /which Cloud cannot reach/.test(w));
     // Such a link renders as plain code in the Cloud build and makes the prop
     // macro warn on every build. The fix is a self-managed-only: prefix.
     expect(crossAudience).toEqual([]);
