@@ -476,6 +476,80 @@ function generateAllDocs(inputFile, outputDir) {
     if (prop && prop.description) prop.description = convertConfigRefsToProp(prop.description);
   });
 
+  // The published attachment (modules/reference/attachments/redpanda-properties-
+  // <tag>.json) is a DIFFERENT consumer of this same file than the .adoc
+  // partials generated below, and it was never taught the array-form
+  // description this feature introduces. property_extractor.py writes
+  // inputFile with whatever shape the override declared -- an array, for an
+  // audience-scoped description -- and the Makefile then copies inputFile
+  // to that attachment VERBATIM, before this function ever runs. Two real
+  // readers of that attachment assume `description` is always a string:
+  // extensions/render-property-descriptions.js skips anything else with a
+  // bare `continue` (no warning), so the browser-side fallback in docs-ui's
+  // tooltip formatter receives the raw array and does `String([...])`,
+  // which comma-joins it -- publishing the literal token "cloud-only:" and
+  // the Cloud-only sentence to Self-Managed readers, live on the two
+  // properties in today's corpus that use this shape.
+  //
+  // Fixed by snapshotting a flattened, link-free rendering of every
+  // array-form description (and every includes-bearing one, for the
+  // parallel case below) and writing it back into inputFile once partial
+  // generation finishes, so the Makefile's copy picks up a plain string. No
+  // links: the attachment has never carried them (see the comment on
+  // `enhancedOutputPath` near the end of this function), and Antora's own
+  // AsciiDoc loader resolves the ifdef/ifndef pair per SITE when
+  // render-property-descriptions.js converts it -- cloud-docs sets
+  // env-cloud in its antora.yml, so the existing per-site machinery is what
+  // makes this correct rather than anything new here.
+  //
+  // Includes are folded in for the same reason `includes` regressed a
+  // second surface: on origin/main the include:: directive was written
+  // inline into the description string, so the tooltip's Antora-loader
+  // conversion resolved it into a real admonition (an internal-use warning,
+  // or the HTTP Proxy ephemeral-credentials breaking-change notice on
+  // scram_password, scram_username and sasl_mechanism). Moving it to its
+  // own `includes` field fixed the .adoc partial but orphaned the
+  // attachment, since render-property-descriptions.js never reads
+  // `includes`. Appending it back as an inline directive, exactly the shape
+  // it used to be, restores that without teaching the extension a new
+  // field.
+  const attachmentDescriptions = {};
+  for (const [attachName, attachProp] of Object.entries(properties)) {
+    if (!attachProp) continue;
+    const hasArrayDescription = Array.isArray(attachProp.description);
+    const hasIncludes = attachProp.includes !== undefined;
+    if (!hasArrayDescription && !hasIncludes) continue;
+
+    let text = helpers.applyPropertyLinks.flattenDescription(attachProp.description);
+    if (hasIncludes) {
+      // A scratch warnings array: the real applyPropertyLinks call below
+      // normalizes and warns on the same includes once more, and that is
+      // the run's single copy of each warning. Duplicating the call here
+      // only to read the normalized shape must not double them.
+      const items = helpers.applyPropertyLinks.normalizeIncludes(attachName, attachProp.includes, []);
+      for (const item of items) {
+        const directive = `include::${item.target}`;
+        // Idempotency guard: in the real Makefile flow inputFile is fresh
+        // from property_extractor.py every run, so `text` never already
+        // carries this. It CAN already carry it if generateAllDocs runs
+        // twice against the same file without Python re-writing it in
+        // between (a repeated call in a test, or a re-run of just this
+        // step), because the append below is what makes it a string in
+        // the first place, and `includes` itself is never cleared. Without
+        // this check a second run appended the directive a second time.
+        if (text.includes(directive)) continue;
+        if (item.cloud_only) {
+          text += `\n\nifdef::env-cloud[]\n${directive}\nendif::[]`;
+        } else if (item.self_managed_only) {
+          text += `\n\nifndef::env-cloud[]\n${directive}\nendif::[]`;
+        } else {
+          text += `\n\n${directive}`;
+        }
+      }
+    }
+    attachmentDescriptions[attachName] = text;
+  }
+
   // Links and audience-scoped text come out of the overrides as data -- a `links`
   // map and, for a description, an array of optionally scoped paragraphs -- and
   // become AsciiDoc here. Running before the three renderers means the property
@@ -553,6 +627,39 @@ function generateAllDocs(inputFile, outputDir) {
     if (typeof prop.description === 'string') {
       const conditionals = prop.description.match(/^ifn?def::env-cloud\[\]$/gm);
       if (conditionals) enrichment.audienceScopedParagraphs += conditionals.length;
+    }
+  }
+
+  // Write the flattened attachment text back into inputFile, so the
+  // Makefile's later `cp` of this same file to
+  // modules/reference/attachments/ carries a plain string rather than the
+  // array/includes shape that broke the tooltip. Best-effort and re-reads
+  // inputFile fresh rather than serializing the already-mutated
+  // `properties` object, so only the specific properties snapshotted above
+  // change on disk -- every other property, and every field on these two,
+  // is byte-for-byte what property_extractor.py wrote.
+  if (Object.keys(attachmentDescriptions).length > 0) {
+    try {
+      const onDisk = bigIntJson.parse(fs.readFileSync(inputFile, 'utf8'));
+      const onDiskProperties = onDisk.properties || onDisk.topic_properties || {};
+      let flattenedCount = 0;
+      for (const [name, text] of Object.entries(attachmentDescriptions)) {
+        if (onDiskProperties[name]) {
+          onDiskProperties[name].description = text;
+          flattenedCount += 1;
+        }
+      }
+      if (flattenedCount > 0) {
+        // indent 4, matching property_extractor.py's json.dumps(indent=4), so
+        // a real regeneration's diff is the description fields that changed,
+        // not a whole-file reindent.
+        fs.writeFileSync(inputFile, bigIntJson.stringify(onDisk, 4) + '\n');
+        console.log(
+          `Flattened ${flattenedCount} audience-scoped/include-bearing description(s) back into ${inputFile} for the published attachment.`
+        );
+      }
+    } catch (err) {
+      console.warn(`Warning: could not write flattened descriptions back into ${inputFile}: ${err.message}`);
     }
   }
 
