@@ -290,5 +290,44 @@ describe('sync-schemas', () => {
       const shape = { a: { b: { c: [1, 2] } } }
       expect(findDestOnlyPaths(shape, JSON.parse(JSON.stringify(shape)))).toEqual([])
     })
+
+    describe('oneOf/anyOf/allOf, the one array shape that is not opaque', () => {
+      // JSON Schema combinators hold real, named schema objects as array
+      // ELEMENTS -- see_also.items.oneOf[1].properties.cloud_only is
+      // exactly the "destination-only capability" this function exists to
+      // find, and it lives inside an array. Without index-matching into
+      // oneOf/anyOf/allOf specifically, a destination-only audience flag
+      // there was invisible to this function, and a write-mode sync would
+      // delete it silently.
+      it('finds a destination-only property inside a oneOf array element', () => {
+        const source = { oneOf: [{ type: 'string' }, { type: 'object', properties: { content: {} } }] }
+        const dest = { oneOf: [{ type: 'string' }, { type: 'object', properties: { content: {}, cloud_only: { const: true } } }] }
+        expect(findDestOnlyPaths(source, dest)).toEqual(['oneOf[1].properties.cloud_only'])
+      })
+
+      it('recurses the same way for anyOf and allOf', () => {
+        expect(findDestOnlyPaths({ anyOf: [{ properties: {} }] }, { anyOf: [{ properties: { x: {} } }] }))
+          .toEqual(['anyOf[0].properties.x'])
+        expect(findDestOnlyPaths({ allOf: [{ properties: {} }] }, { allOf: [{ properties: { x: {} } }] }))
+          .toEqual(['allOf[0].properties.x'])
+      })
+
+      it('reports a whole destination-only array element when source has fewer', () => {
+        const source = { oneOf: [{ type: 'string' }] }
+        const dest = { oneOf: [{ type: 'string' }, { type: 'object', properties: { x: {} } }] }
+        expect(findDestOnlyPaths(source, dest)).toEqual(['oneOf[1]'])
+      })
+
+      it('reports nothing when both sides carry the same combinator content', () => {
+        const shape = { oneOf: [{ type: 'string' }, { type: 'object', properties: { cloud_only: { const: true } } }] }
+        expect(findDestOnlyPaths(shape, JSON.parse(JSON.stringify(shape)))).toEqual([])
+      })
+
+      it('still treats a non-combinator array (required, enum) as opaque', () => {
+        // The general rule is unchanged: only oneOf/anyOf/allOf recurse.
+        expect(findDestOnlyPaths({ required: ['a'] }, { required: ['a', 'b'] })).toEqual([])
+        expect(findDestOnlyPaths({ enum: [1, 2] }, { enum: [1, 2, 3] })).toEqual([])
+      })
+    })
   })
 })

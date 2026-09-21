@@ -52,16 +52,27 @@ function listPackageSchemas () {
 /**
  * Find object keys present in `dest` but absent from the same path in
  * `source` — the shape of "the destination knows something the source
- * doesn't". Arrays are compared as opaque leaves (JSON Schema's own
- * structure keeps named, distinguishable content in objects — `properties`,
- * `$defs` — not in arrays like `required`/`enum`, so this is where a
- * destination-only capability would actually show up).
+ * doesn't". Most arrays are compared as opaque leaves: `required`/`enum`
+ * hold literal values, not named content, so there is nothing inside one to
+ * be "destination-only" in the sense this function cares about.
+ *
+ * `oneOf`/`anyOf`/`allOf` are the exception, and are recursed into by
+ * matching index. Those are JSON Schema's own combinators, and their array
+ * ELEMENTS are full schema objects that can carry real, named content --
+ * `see_also.items.oneOf[1].properties.cloud_only` is exactly the
+ * distinguishable content this function otherwise only looks for inside a
+ * plain object. Treating them as opaque like `required`/`enum` missed
+ * every audience flag living inside see_also's object variant, and would
+ * let a write-mode sync silently delete a destination-only flag added
+ * there, with no warning and no --force.
  *
  * @param {*} source
  * @param {*} dest
  * @param {string} [pathPrefix]
  * @returns {string[]} Dotted paths that exist in dest but not source.
  */
+const SCHEMA_COMBINATOR_KEYS = new Set(['oneOf', 'anyOf', 'allOf'])
+
 function findDestOnlyPaths (source, dest, pathPrefix = '') {
   if (
     dest === null || typeof dest !== 'object' || Array.isArray(dest) ||
@@ -77,7 +88,20 @@ function findDestOnlyPaths (source, dest, pathPrefix = '') {
       onlyInDest.push(keyPath)
       continue
     }
-    onlyInDest.push(...findDestOnlyPaths(source[key], destValue, keyPath))
+    const sourceValue = source[key]
+    if (SCHEMA_COMBINATOR_KEYS.has(key) && Array.isArray(destValue) && Array.isArray(sourceValue)) {
+      const length = Math.max(destValue.length, sourceValue.length)
+      for (let i = 0; i < length; i++) {
+        const itemPath = `${keyPath}[${i}]`
+        if (i >= sourceValue.length) {
+          onlyInDest.push(itemPath)
+          continue
+        }
+        onlyInDest.push(...findDestOnlyPaths(sourceValue[i], destValue[i], itemPath))
+      }
+      continue
+    }
+    onlyInDest.push(...findDestOnlyPaths(sourceValue, destValue, keyPath))
   }
   return onlyInDest
 }
