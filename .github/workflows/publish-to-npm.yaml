@@ -18,6 +18,7 @@ jobs:
     outputs:
       pkg: ${{ steps.meta.outputs.pkg }}
       version: ${{ steps.meta.outputs.version }}
+      published: ${{ steps.publish.outputs.type }}
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -87,6 +88,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PKG: ${{ needs.publish.outputs.pkg }}
           VERSION: ${{ needs.publish.outputs.version }}
+          PUBLISHED_THIS_RUN: ${{ needs.publish.outputs.published }}
         run: |
           set -euo pipefail
           tag="v${VERSION}"
@@ -97,6 +99,13 @@ jobs:
           # went ahead and told four repositories to pull the new version. A
           # missing pin is exactly the thing this workflow exists to prevent, so
           # it has to be loud. Retry first, since 5xx from the registry is real.
+          #
+          # A 404 gets trusted immediately UNLESS this same run just published
+          # this version (PUBLISHED_THIS_RUN set): the registry sits behind a
+          # CDN, and a stale packument right in the seconds after `npm publish`
+          # would 404 too, which is exactly the silent-skip-with-green-run this
+          # loop exists to close. In that case a 404 is retried like a 5xx, and
+          # persisting after retries fails loudly instead of skipping.
           on_npm=""
           for attempt in 1 2 3; do
             if out=$(npm view "${PKG}@${VERSION}" version 2>&1); then
@@ -104,17 +113,21 @@ jobs:
               echo "Found ${PKG}@${VERSION} on npm (${out})."
               break
             fi
-            if printf '%s' "$out" | grep -q 'E404'; then
+            if printf '%s' "$out" | grep -q 'E404' && [ -z "${PUBLISHED_THIS_RUN:-}" ]; then
               on_npm="no"
               break
             fi
-            echo "::warning::npm view attempt ${attempt} failed (not a 404); retrying."
+            echo "::warning::npm view attempt ${attempt} failed; retrying."
             printf '%s\n' "$out" >&2
             sleep $((attempt * 5))
           done
 
           if [ -z "$on_npm" ]; then
-            echo "::error::Could not determine whether ${PKG}@${VERSION} is on npm."
+            if [ -n "${PUBLISHED_THIS_RUN:-}" ]; then
+              echo "::error::${PKG}@${VERSION} was just published by this run but never appeared on npm after retries."
+            else
+              echo "::error::Could not determine whether ${PKG}@${VERSION} is on npm."
+            fi
             echo "Refusing to guess: a skipped tag looks identical to a healthy run,"
             echo "and callers pinning to v<version> would have nothing to pin to."
             exit 1
@@ -129,10 +142,10 @@ jobs:
             exit 0
           fi
 
-          # The workflow-level concurrency group already serializes runs. This
-          # also tolerates a tag created some other way between the check above
-          # and here, rather than failing the job over a race whose outcome we
-          # wanted anyway.
+          # The job-level concurrency group above already serializes runs for
+          # this version. This also tolerates a tag created some other way
+          # between the check above and here, rather than failing the job over
+          # a race whose outcome we wanted anyway.
           if ! err=$(gh release create "$tag" \
               --target "$GITHUB_SHA" \
               --title "$tag" \

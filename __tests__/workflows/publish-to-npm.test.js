@@ -29,6 +29,12 @@ describe('publish-to-npm workflow: static contracts', () => {
     expect((workflow.permissions || {}).contents).toBe('read')
   })
 
+  test('publish exposes whether IT published, so the release job can tell a fresh 404 from a stale one', () => {
+    expect(workflow.jobs.publish.outputs.published).toBe('${{ steps.publish.outputs.type }}')
+    const tagStep = workflow.jobs.release.steps.find((s) => s.run && /tag/i.test(s.name || ''))
+    expect(tagStep.env.PUBLISHED_THIS_RUN).toBe('${{ needs.publish.outputs.published }}')
+  })
+
   test('publish does not persist the token into the checkout', () => {
     const checkout = workflow.jobs.publish.steps.find((s) => (s.uses || '').startsWith('actions/checkout'))
     expect(checkout.with['persist-credentials']).toBe(false)
@@ -138,5 +144,51 @@ exit 0`,
     expect(created(r)).toBe(false)
     expect((r.all.match(/::warning::npm view attempt/g) || []).length).toBe(3)
     expect(r.all).toMatch(/Could not determine whether/)
+  })
+
+  // A 404 right after this run's own publish is read-after-write lag, not
+  // absence: the registry sits behind a CDN, so trusting the first 404 here
+  // reproduces the exact silent-skip-with-green-run these tests exist to
+  // close, on the run that matters most (the one that just published).
+  const npmCountStub = (failCount) => `
+n=$(cat "$HOME/npm.count" 2>/dev/null || echo 0)
+n=$((n + 1))
+echo $n > "$HOME/npm.count"
+if [ "$n" -le ${failCount} ]; then
+  printf 'npm ERR! code E404'
+  exit 1
+fi
+printf '5.37.0'
+exit 0`
+
+  test("a 404 right after this run's own publish is retried, not trusted immediately", () => {
+    const r = execRun(step, {
+      env: { ...env, PUBLISHED_THIS_RUN: 'patch' },
+      stubs: { ...stubs({ npmOut: '', npmExit: 0, releaseExists: false }), npm: npmCountStub(2) }
+    })
+    expect(r.status).toBe(0)
+    expect(created(r)).toBe(true)
+    expect((r.all.match(/::warning::npm view attempt/g) || []).length).toBe(2)
+  })
+
+  test("a 404 that persists across all retries after this run's own publish fails loudly, not a silent skip", () => {
+    const r = execRun(step, {
+      env: { ...env, PUBLISHED_THIS_RUN: 'patch' },
+      stubs: { ...stubs({ npmOut: '', npmExit: 0, releaseExists: false }), npm: npmCountStub(3) }
+    })
+    expect(r.status).toBe(1)
+    expect(created(r)).toBe(false)
+    expect(r.all).toMatch(/was just published by this run but never appeared on npm/)
+  })
+
+  test('without PUBLISHED_THIS_RUN, a 404 is still trusted immediately (no regression on reruns)', () => {
+    // A rerun of the workflow, or a push that did not bump the version, has no
+    // publish output. The pre-existing fast path for a confirmed absence must
+    // still skip without spending three retries.
+    const r = execRun(step, { env, stubs: stubs({ npmOut: 'npm ERR! code E404', npmExit: 1, releaseExists: false }) })
+    expect(r.status).toBe(0)
+    expect(created(r)).toBe(false)
+    expect((r.all.match(/::warning::npm view attempt/g) || []).length).toBe(0)
+    expect(r.all).toMatch(/is not on npm; nothing to tag/)
   })
 })
