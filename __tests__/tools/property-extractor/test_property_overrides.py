@@ -294,6 +294,31 @@ class TestLinksAndAudienceScopes(unittest.TestCase):
 
         self.assertEqual(result["ghost_property"]["links"], {"`x`": "#x"})
 
+    def test_includes_survive_on_an_existing_property(self):
+        properties = {"real_property": {"name": "real_property", "description": "src"}}
+        overrides = {"properties": {"real_property": {
+            "includes": ["reference:partial$internal-use-property.adoc[]"],
+        }}}
+
+        result = apply_property_overrides(properties, overrides)
+
+        self.assertEqual(
+            result["real_property"]["includes"],
+            ["reference:partial$internal-use-property.adoc[]"],
+        )
+
+    def test_includes_survive_on_a_phantom_stub(self):
+        overrides = {"properties": {"ghost_property": {
+            "includes": ["reference:partial$internal-use-property.adoc[]"],
+        }}}
+
+        result = apply_property_overrides({}, overrides)
+
+        self.assertEqual(
+            result["ghost_property"]["includes"],
+            ["reference:partial$internal-use-property.adoc[]"],
+        )
+
     def test_array_description_is_passed_through_unflattened(self):
         """The generator flattens the array into AsciiDoc, so Python must not
         stringify or reorder it."""
