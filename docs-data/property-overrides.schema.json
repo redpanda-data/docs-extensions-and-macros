@@ -7,7 +7,7 @@
   "properties": {
     "properties": {
       "type": "object",
-      "description": "Keyed by property key or name (see property_extractor.py's name-fallback lookup). An override key that matches neither creates a phantom stub property — see property_extractor.py's report_phantom_stubs().",
+      "description": "Keyed by property key or name (see property_extractor.py's name-fallback lookup). An override key that matches neither creates a phantom stub property \u2014 see property_extractor.py's report_phantom_stubs().",
       "additionalProperties": {
         "$ref": "#/$defs/propertyOverride"
       }
@@ -56,7 +56,7 @@
         },
         "upstream_ref": {
           "type": "string",
-          "description": "The upstream issue or PR (against the engineering repo whose defective string this description patches, either the short form 'redpanda-data/streaming-enterprise#12345' or the full URL) that will make this description override redundant once merged and released. A description override is a stopgap, not a fix: set this so the override is born with a retirement path, and remove both the override and this field once the fix ships. Only meaningful alongside 'description' — has no effect on generation or rendering."
+          "description": "The upstream issue or PR (against the engineering repo whose defective string this description patches, either the short form 'redpanda-data/streaming-enterprise#12345' or the full URL) that will make this description override redundant once merged and released. A description override is a stopgap, not a fix: set this so the override is born with a retirement path, and remove both the override and this field once the fix ships. Only meaningful alongside 'description' \u2014 has no effect on generation or rendering."
         },
         "version": {
           "type": "string",
@@ -72,7 +72,7 @@
           "type": "string"
         },
         "default": {
-          "description": "Replaces the extracted default. Prefer leaving this unset — it silently pins a value the extractor would otherwise keep in sync with the C++ source on every release."
+          "description": "Replaces the extracted default. Prefer leaving this unset \u2014 it silently pins a value the extractor would otherwise keep in sync with the C++ source on every release."
         },
         "type": {
           "type": "string"
@@ -84,7 +84,7 @@
             "topic",
             null
           ],
-          "description": "Almost always inferred automatically from defined_in — see property_extractor.py's add_config_scope(). Only set this for an override-created property (defined_in: 'override'), which has no source file to infer from."
+          "description": "Almost always inferred automatically from defined_in \u2014 see property_extractor.py's add_config_scope(). Only set this for an override-created property (defined_in: 'override'), which has no source file to infer from."
         },
         "exclude_from_docs": {
           "type": "boolean"
@@ -107,7 +107,7 @@
         "related_topics": {
           "type": "array",
           "deprecated": true,
-          "description": "Deprecated — use see_also. A plain string, or one prefixed 'cloud-only:'/'self-managed-only:' for conditional display. The prefix is free text with no validation; still read for existing entries, normalized alongside see_also by seeAlsoView.js.",
+          "description": "Deprecated \u2014 use see_also. A plain string, or one prefixed 'cloud-only:'/'self-managed-only:' for conditional display. The prefix is free text with no validation; still read for existing entries, normalized alongside see_also by seeAlsoView.js.",
           "items": {
             "type": "string"
           }
@@ -130,17 +130,17 @@
                     "description": "The xref link or related-topic text."
                   },
                   "cloud_only": {
-                    "type": "boolean",
-                    "description": "If true, only shown in Cloud docs (wrapped with ifdef::env-cloud[])."
+                    "const": true,
+                    "description": "If true, only shown in Cloud docs (wrapped with ifdef::env-cloud[]). Only `true` is accepted: the emitters test for exactly true, so `false` behaves as if the key were absent while reading as though it meant the opposite audience. Omit the key instead."
                   },
                   "self_hosted_only": {
-                    "type": "boolean",
+                    "const": true,
                     "deprecated": true,
-                    "description": "Deprecated spelling of self_managed_only. Still read, so an override written against the older schema keeps working, but nothing emits it. Use self_managed_only."
+                    "description": "Deprecated spelling of self_managed_only. Still read, so an override written against the older schema keeps working, but nothing emits it. Use self_managed_only. Only `true` is accepted: the emitters test for exactly true, so `false` behaves as if the key were absent while reading as though it meant the opposite audience. Omit the key instead."
                   },
                   "self_managed_only": {
-                    "type": "boolean",
-                    "description": "If true, only shown in self-managed docs (wrapped with ifndef::env-cloud[])."
+                    "const": true,
+                    "description": "If true, only shown in self-managed docs (wrapped with ifndef::env-cloud[]). Only `true` is accepted: the emitters test for exactly true, so `false` behaves as if the key were absent while reading as though it meant the opposite audience. Omit the key instead."
                   }
                 },
                 "required": [
@@ -250,17 +250,17 @@
                 "description": "Optional admonition title, shown in place of the default type label."
               },
               "cloud_only": {
-                "type": "boolean",
-                "description": "Show this admonition only in the Cloud build (wrapped with ifdef::env-cloud[])."
+                "const": true,
+                "description": "Show this admonition only in the Cloud build (wrapped with ifdef::env-cloud[]). Only `true` is accepted: the emitters test for exactly true, so `false` behaves as if the key were absent while reading as though it meant the opposite audience. Omit the key instead."
               },
               "self_managed_only": {
-                "type": "boolean",
-                "description": "Show this admonition only in the self-managed build (wrapped with ifndef::env-cloud[])."
+                "const": true,
+                "description": "Show this admonition only in the self-managed build (wrapped with ifndef::env-cloud[]). Only `true` is accepted: the emitters test for exactly true, so `false` behaves as if the key were absent while reading as though it meant the opposite audience. Omit the key instead."
               },
               "self_hosted_only": {
-                "type": "boolean",
+                "const": true,
                 "deprecated": true,
-                "description": "Deprecated spelling of self_managed_only. Still read, so an override written against the older schema keeps working, but nothing emits it: the product is Self-Managed and the string prefix has always been 'self-managed-only:', so one concept was going by two words depending on whether you wrote it as a prefix or a boolean. Use self_managed_only."
+                "description": "Deprecated spelling of self_managed_only. Still read, so an override written against the older schema keeps working, but nothing emits it: the product is Self-Managed and the string prefix has always been 'self-managed-only:', so one concept was going by two words depending on whether you wrote it as a prefix or a boolean. Use self_managed_only. Only `true` is accepted: the emitters test for exactly true, so `false` behaves as if the key were absent while reading as though it meant the opposite audience. Omit the key instead."
               }
             },
             "allOf": [

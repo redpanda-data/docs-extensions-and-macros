@@ -54,13 +54,24 @@ jobs:
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     steps:
+      # Not on a pull request. This job checks out the PR branch, and the branch
+      # author can edit both the drift script and this workflow, so handing the
+      # step an org-wide write-capable token would turn push access to this
+      # repository into access to that token. FILE_ISSUE=false does not help,
+      # because the code holding the token is the code under change.
+      #
+      # A PR run was only ever informational: the corpus in a refresh PR is
+      # ahead of docs main by design, so it reported drift in the log and filed
+      # nothing. The token-free check below preserves that signal.
       - name: Configure AWS credentials
+        if: github.event_name != 'pull_request'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ vars.RP_AWS_CRED_REGION }}
           role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
 
       - name: Get secrets from AWS Secrets Manager
+        if: github.event_name != 'pull_request'
         uses: aws-actions/aws-secretsmanager-get-secrets@v2
         with:
           secret-ids: |
@@ -77,6 +88,7 @@ jobs:
       # it and an unauthenticated raw.githubusercontent fetch 404s. The bot
       # token above is what makes both the fetch and the issue report possible.
       - name: Check corpus against the docs repo
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ env.ACTIONS_BOT_TOKEN }}
           # A PR that updates the corpus is ahead of docs main on purpose, so a
@@ -96,3 +108,60 @@ jobs:
             1) echo "::notice::Corpus drift reported in an issue." ;;
             *) echo "::error::The corpus drift check could not run."; exit 1 ;;
           esac
+
+      # What a PR can be told without a credential: that the two mirrors are
+      # internally consistent and declare what they mirror. It cannot compare
+      # against docs, which is private, and that comparison is what the
+      # scheduled run is for.
+      # What a PR can be told without a credential: that the two mirrors are
+      # internally consistent and declare what they mirror. It cannot compare
+      # against docs, which is private, and that comparison is what the
+      # scheduled run is for.
+      - name: Check the vendored corpus is well formed
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const dir = "__tests__/docs-data";
+            const problems = [];
+            const readJson = (name) => {
+              try {
+                return JSON.parse(fs.readFileSync(`${dir}/${name}`, "utf8"));
+              } catch (err) {
+                problems.push(`${name} is not valid JSON: ${err.message}`);
+                return null;
+              }
+            };
+
+            const overrides = readJson("property-overrides.json");
+            const snapshot = readJson("property-snapshot.json");
+
+            if (snapshot && !snapshot.source_tag) {
+              problems.push("property-snapshot.json has no source_tag, so the scheduled check cannot tell what it mirrors");
+            }
+
+            const overrideNames = Object.keys((overrides || {}).properties || {});
+            const snapshotNames = Object.keys((snapshot || {}).properties || {});
+            if (overrides && overrideNames.length === 0) problems.push("property-overrides.json mirrors no entries");
+            if (snapshot && snapshotNames.length === 0) problems.push("property-snapshot.json mirrors no properties");
+
+            // Every overridden property must exist in the snapshot, or the
+            // corpus test renders an override against a property it has no
+            // source data for.
+            if (overrideNames.length && snapshotNames.length) {
+              const known = new Set(snapshotNames);
+              const missing = overrideNames.filter((name) => !known.has(name));
+              if (missing.length) {
+                problems.push(`${missing.length} overridden propert(y/ies) absent from the snapshot: ${missing.slice(0, 10).join(", ")}`);
+              }
+            }
+
+            if (problems.length) {
+              for (const problem of problems) console.error(`::error::${problem}`);
+              process.exit(1);
+            }
+
+            console.log(`Corpus is well formed: ${overrideNames.length} overrides, ${snapshotNames.length} properties, mirroring ${snapshot.source_tag}.`);
+            console.log("Drift against the docs repo is checked by the scheduled run, the only path that holds a credential.");
+          '

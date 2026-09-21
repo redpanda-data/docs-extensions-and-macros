@@ -198,7 +198,7 @@ A property description is plain prose, and the links in it are declared separate
 
 Each key is the literal text to find in the prose, backticks included, as written. Only the first occurrence is linked, so a property named four times links once. The longest key wins, so `+`cloud_storage_enabled`+` cannot be stolen by `+`cloud_storage`+`.
 
-Two target forms:
+Three target forms:
 
 `#<property_name>`:: Emits a `prop` macro. The macro resolves the reference page itself and renders plain code in a build that does not publish the target, so a property link needs no conditional and cannot dangle. A name that is not a known property is refused with a warning rather than emitted, because an unverifiable `prop` call publishes as literal macro text.
 `xref:<target>`:: Emits a literal xref with the key as its link text. Property-page targets are canonicalized to `xref:reference:properties/<page>.adoc`.

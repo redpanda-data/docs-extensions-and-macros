@@ -386,3 +386,49 @@ describe('example shape', () => {
     expect(props.subject.example).toContain('prop:rpc_server[link=true]');
   });
 });
+
+describe('an unscoped link is applied to both branches of a scoped duplication', () => {
+  // A scoped spec duplicates its paragraph into an ifdef/ifndef pair, and every
+  // later substitution uses indexOf, which finds only the FIRST copy. So an
+  // unscoped link sharing a paragraph with a scoped one used to be applied to
+  // one branch and left plain in the other, and a reader of that build silently
+  // lost a link. It passed or failed on the order the keys happened to sit in
+  // the overrides JSON, which nothing maintains.
+  const build = (links) => {
+    const properties = {
+      rpc_server: {
+        name: 'rpc_server',
+        description: 'Mentions admin_api and also data_dir in one paragraph.',
+        links
+      },
+      admin_api: { name: 'admin_api', description: 'x' },
+      data_dir: { name: 'data_dir', description: 'y' }
+    }
+    applyPropertyLinks(properties)
+    const out = properties.rpc_server.description
+    const [cloud, selfManaged] = out.split('ifndef::env-cloud[]')
+    return { cloud, selfManaged: selfManaged || '' }
+  }
+
+  const SCOPED_FIRST = { admin_api: 'cloud-only: #admin_api', data_dir: '#data_dir' }
+  const SCOPED_LAST = { data_dir: '#data_dir', admin_api: 'cloud-only: #admin_api' }
+
+  it.each([
+    ['scoped declared first', SCOPED_FIRST],
+    ['scoped declared last', SCOPED_LAST]
+  ])('%s: the unscoped link reaches both branches', (_label, links) => {
+    const { cloud, selfManaged } = build(links)
+    expect(cloud).toContain('prop:data_dir')
+    expect(selfManaged).toContain('prop:data_dir')
+  })
+
+  it.each([
+    ['scoped declared first', SCOPED_FIRST],
+    ['scoped declared last', SCOPED_LAST]
+  ])('%s: the scoped link stays in its own branch only', (_label, links) => {
+    const { cloud, selfManaged } = build(links)
+    expect(cloud).toContain('prop:admin_api')
+    expect(selfManaged).not.toContain('prop:admin_api')
+    expect(selfManaged).toContain('admin_api')
+  })
+})

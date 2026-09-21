@@ -397,6 +397,22 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
     })
   }
 
+  // A description made ENTIRELY of audience-scoped paragraphs has no
+  // unconditional prose, so overrideText is the empty string. Without this
+  // guard it fell through to the SPLIT branch below and published an empty
+  // upstream_candidate_text -- which the upstream workflow selects, because
+  // the SPLIT note is part of its filter, and would then hand the model an
+  // empty string to write into an engineering doc string, blanking it.
+  if (overrideText.length === 0) {
+    return row({
+      ...common,
+      class: CLASSES.REVIEW,
+      note: scopedCount > 0
+        ? `Every paragraph of this description is audience-scoped (${scopedCount}), so there is no unconditional prose to upstream. Decide whether the scoped text belongs in source at all, or whether the property needs unconditional prose written for it.`
+        : 'The override sets an empty description. Decide whether it should be removed or given prose.'
+    })
+  }
+
   const markupKinds = detectDocsMarkup(overrideText, attrAllowlist)
   if (markupKinds.length === 0) {
     if (scopedCount > 0) {

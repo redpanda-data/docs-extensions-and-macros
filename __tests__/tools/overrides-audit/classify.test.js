@@ -442,3 +442,44 @@ describe('a source property with no description slot', () => {
     expect(row.note).toMatch(/not present in extracted source JSON/)
   })
 })
+
+describe('a description with no unconditional prose never produces a candidate', () => {
+  // A description made entirely of audience-scoped paragraphs has no
+  // unconditional prose, so the candidate text was the empty string. That fell
+  // through to the SPLIT branch, and the upstream workflow's filter selects
+  // SPLIT rows, so the model would have been handed an empty string to write
+  // into an engineering doc string, blanking a published description.
+  const sourceProp = {
+    defined_in: 'src/v/config/configuration.cc',
+    line_start: 100,
+    description: 'Source prose.'
+  }
+
+  it.each([
+    ['every paragraph scoped', ['cloud-only: Cloud only.', 'self-managed-only: Self-Managed only.']],
+    ['a single scoped paragraph', ['cloud-only: Cloud only.']],
+    ['an empty string description', '']
+  ])('%s classifies REVIEW with no candidate', (_label, description) => {
+    const row = classify.classifyDescription('p', { description }, sourceProp)
+    expect(row.class).toBe('REVIEW')
+    expect(row.upstream_candidate_text).toBeUndefined()
+  })
+
+  it('and is therefore not selectable by the upstream workflow filter', () => {
+    const row = classify.classifyDescription('p', { description: ['cloud-only: Cloud only.'] }, sourceProp)
+    const selected = row.class === 'UPSTREAMABLE' ||
+      (row.class === 'KEEP_UNTIL_UPSTREAMED' && (row.note || '').startsWith('SPLIT:'))
+    expect(selected).toBe(false)
+  })
+
+  it('leaves a genuine SPLIT, which has real prose, still upstreamable', () => {
+    const row = classify.classifyDescription(
+      'p',
+      { description: ['Real unconditional prose here.', 'cloud-only: Cloud only.'] },
+      sourceProp
+    )
+    expect(row.class).toBe('KEEP_UNTIL_UPSTREAMED')
+    expect(row.note).toMatch(/^SPLIT:/)
+    expect(row.upstream_candidate_text).toBe('Real unconditional prose here.')
+  })
+})

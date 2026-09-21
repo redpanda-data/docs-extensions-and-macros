@@ -439,6 +439,13 @@ function generateErrorReports(properties, documentedProperties = []) {
  * backticked property name is redundant; anything else becomes text=.
  */
 function convertConfigRefsToProp(text) {
+  // An array is the audience-scoped paragraph form of a description, and it
+  // reaches here BEFORE applyPropertyLinks flattens it. Without this the
+  // `typeof text !== 'string'` guard below returned the array untouched, so a
+  // config_ref inside a scoped paragraph survived into the published page as
+  // literal text -- contradicting this pass's own contract of emitting the
+  // prop macro regardless of what the input or the overrides carry.
+  if (Array.isArray(text)) return text.map(convertConfigRefsToProp);
   if (!text || typeof text !== 'string') return text;
   return text.replace(/config_ref:([^[,]+)(?:,([^[,]*))?(?:,([^[,]*))?\[([^\]]*)\]/g, (match, name, isLink, _path, payload) => {
     const trimmed = name.trim();
@@ -609,7 +616,12 @@ function generateAllDocs(inputFile, outputDir) {
   const summaryPath = process.env.PROPERTY_DOCS_SUMMARY_PATH;
   if (summaryPath) {
     try {
-      fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2) + '\n');
+      // bigIntJson.stringify, not JSON.stringify: this file parses property
+      // data with bigIntJson.parse, so a uint64 limit arrives as a real
+      // BigInt. Plain JSON.stringify throws on one, and the throw lands in
+      // the catch below -- a warning and no summary file, which is exactly
+      // the silent degradation this summary exists to remove.
+      fs.writeFileSync(summaryPath, bigIntJson.stringify(summary, 2) + '\n');
       console.log(`Wrote run summary to ${summaryPath}`);
     } catch (err) {
       console.warn(`Warning: could not write ${summaryPath}: ${err.message}`);

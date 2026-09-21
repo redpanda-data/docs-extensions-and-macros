@@ -59,16 +59,24 @@ fetch "docs-data/property-overrides.json" "$tmp/overrides.json"
 
 # The tag the snapshot mirrors, read from the corpus itself rather than
 # hardcoded, so bumping the tag in one place is enough.
-SOURCE_TAG="$(node -e '
+# Exit 2, not 1, when this cannot be read: exit 1 is reserved for "drift found
+# and reported". Letting the node failure propagate as 1 made the workflow log
+# "drift reported in an issue" on a green run, with no issue filed and no
+# comparison having happened.
+if ! SOURCE_TAG="$(node -e '
   const fs = require("fs");
   const doc = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   if (!doc.source_tag) { console.error("property-snapshot.json has no source_tag"); process.exit(1); }
   process.stdout.write(doc.source_tag);
-' "${CORPUS_DIR}/property-snapshot.json")"
+' "${CORPUS_DIR}/property-snapshot.json")"; then
+  echo "could not read source_tag from ${CORPUS_DIR}/property-snapshot.json" >&2
+  exit 2
+fi
 
 fetch "modules/reference/attachments/redpanda-properties-${SOURCE_TAG}.json" "$tmp/attachment.json"
 
-DRIFT="$(node -e '
+# Inconclusive, not clean and not drift, for the same reason as above.
+if ! DRIFT="$(node -e '
   const fs = require("fs");
   const [overridesLive, attachmentLive, corpusDir] = process.argv.slice(1);
   const read = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
@@ -113,7 +121,10 @@ DRIFT="$(node -e '
   }
 
   process.stdout.write(report.join("\n"));
-' "$tmp/overrides.json" "$tmp/attachment.json" "$CORPUS_DIR")"
+' "$tmp/overrides.json" "$tmp/attachment.json" "$CORPUS_DIR")"; then
+  echo "the corpus comparison failed to run" >&2
+  exit 2
+fi
 
 if [ -z "$DRIFT" ]; then
   echo "Property test corpus matches ${DOCS_REPO}@${DOCS_REF}."

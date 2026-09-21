@@ -180,8 +180,21 @@ function applyLinksToText(text, specs, propName, surface) {
   const warnings = [];
   if (typeof text !== 'string' || !text || !specs.length) return { text, applied, warnings };
 
+  // Two passes, unscoped first. A scoped spec duplicates the paragraph it
+  // matches into an ifdef/ifndef pair, and every later substitution uses
+  // indexOf, which finds only the FIRST copy. So an unscoped link sharing a
+  // paragraph with a scoped one would be applied to one branch and left as
+  // plain text in the other, and a reader of that build silently loses a link
+  // they should have. Applying every unscoped spec before any duplication
+  // makes the result independent of the order the keys happen to sit in the
+  // overrides JSON -- which is what it depended on before.
+  const ordered = [
+    ...specs.filter((spec) => !(spec.scope.cloudOnly || spec.scope.selfManagedOnly)),
+    ...specs.filter((spec) => spec.scope.cloudOnly || spec.scope.selfManagedOnly)
+  ];
+
   let out = text;
-  for (const spec of specs) {
+  for (const spec of ordered) {
     const index = out.indexOf(spec.key);
     if (index === -1) continue;
 
