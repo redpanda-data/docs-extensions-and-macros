@@ -508,10 +508,19 @@ function applyPropertyLinks(properties) {
       prop.example = run(prop.example.join('\n'), 'example');
     }
     if (Array.isArray(prop.admonitions)) {
-      prop.admonitions.forEach((item, i) => {
+      // A new array of new objects, never a mutation of the admonition
+      // objects themselves: a caller that builds several property maps by
+      // copying fields BY REFERENCE from one parsed overrides file (as the
+      // corpus test's buildCorpus does) shares these exact objects across
+      // every copy. Mutating item.text in place meant a second call against
+      // a second copy saw text that already had a link applied, so its own
+      // key no longer matched -- 12 links that were correctly applied on
+      // the first call reported as unmatched on the second and third.
+      prop.admonitions = prop.admonitions.map((item, i) => {
         if (item && typeof item.text === 'string') {
-          item.text = run(item.text, `admonitions[${i}].text`);
+          return { ...item, text: run(item.text, `admonitions[${i}].text`) };
         }
+        return item;
       });
     }
 

@@ -582,3 +582,36 @@ describe('a longer key\'s emitted markup cannot be corrupted by a shorter siblin
     expect(description).not.toMatch(/prop:\w+\[[^\]]*prop:/)
   })
 })
+
+describe('applyPropertyLinks does not mutate a shared admonition object', () => {
+  // buildCorpus-style callers copy override fields BY REFERENCE from one
+  // parsed overrides file into several property maps, so the same
+  // admonition object can be the input to more than one call. Mutating
+  // item.text in place meant a second call against a second copy saw text
+  // that already had the link applied, so its own key no longer matched --
+  // 12 links correctly applied on the first call reported as unmatched on
+  // the second and third.
+  it('reports the same applied/unmatched counts across repeated calls sharing an admonition object', () => {
+    const sharedAdmonition = { type: 'NOTE', text: 'See `rpc_server` for details.' }
+    const build = () => ({
+      subject: { name: 'subject', links: { '`rpc_server`': '#rpc_server' }, admonitions: [sharedAdmonition] },
+      rpc_server: { name: 'rpc_server' }
+    })
+
+    for (let call = 1; call <= 3; call++) {
+      const props = build()
+      const result = applyPropertyLinks(props)
+      expect(result.applied).toBe(1)
+      expect(result.unmatched).toEqual([])
+    }
+  })
+
+  it('never mutates the original admonition object at all', () => {
+    const sharedAdmonition = { type: 'NOTE', text: 'See `rpc_server` for details.' }
+    applyPropertyLinks({
+      subject: { name: 'subject', links: { '`rpc_server`': '#rpc_server' }, admonitions: [sharedAdmonition] },
+      rpc_server: { name: 'rpc_server' }
+    })
+    expect(sharedAdmonition.text).toBe('See `rpc_server` for details.')
+  })
+})
