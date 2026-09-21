@@ -101,13 +101,27 @@ jobs:
           # it has to be loud. Retry first, since 5xx from the registry is real.
           #
           # A 404 gets trusted immediately UNLESS this same run just published
-          # this version (PUBLISHED_THIS_RUN set): the registry sits behind a
-          # CDN, and a stale packument right in the seconds after `npm publish`
-          # would 404 too, which is exactly the silent-skip-with-green-run this
-          # loop exists to close. In that case a 404 is retried like a 5xx, and
-          # persisting after retries fails loudly instead of skipping.
+          # this version (PUBLISHED_THIS_RUN set): a stale packument right after
+          # `npm publish` 404s too, which is exactly the silent-skip-with-green-run
+          # this loop exists to close. In that case a 404 is retried instead, and
+          # persisting after retries fails loudly rather than skipping.
+          #
+          # The two cases need different retry budgets. A run that did NOT just
+          # publish is checking for a genuine transient error (5xx, network), so
+          # 3 short retries (5s/10s/15s) is plenty. A run that DID just publish
+          # is instead waiting out real npm registry propagation lag: on v5.46.0
+          # (2026-09-21) `npm view` kept 404ing for 2-4 minutes after a publish
+          # that had already succeeded (job output `type=minor`), and 3 short
+          # retries failed loudly on a version that was, in fact, fine. That
+          # case gets a longer, fixed-interval budget instead.
+          if [ -n "${PUBLISHED_THIS_RUN:-}" ]; then
+            max_attempts=10
+          else
+            max_attempts=3
+          fi
+
           on_npm=""
-          for attempt in 1 2 3; do
+          for attempt in $(seq 1 "$max_attempts"); do
             if out=$(npm view "${PKG}@${VERSION}" version 2>&1); then
               on_npm="yes"
               echo "Found ${PKG}@${VERSION} on npm (${out})."
@@ -117,9 +131,15 @@ jobs:
               on_npm="no"
               break
             fi
-            echo "::warning::npm view attempt ${attempt} failed; retrying."
+            echo "::warning::npm view attempt ${attempt}/${max_attempts} failed; retrying."
             printf '%s\n' "$out" >&2
-            sleep $((attempt * 5))
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              if [ -n "${PUBLISHED_THIS_RUN:-}" ]; then
+                sleep 20
+              else
+                sleep $((attempt * 5))
+              fi
+            fi
           done
 
           if [ -z "$on_npm" ]; then
