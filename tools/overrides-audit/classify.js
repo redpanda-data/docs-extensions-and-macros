@@ -154,6 +154,12 @@ const MARKUP_PATTERNS = Object.freeze([
   { id: 'audience-prefix', re: /\b(?:self-managed-only|cloud-only):/ }
 ])
 
+// Pulled out of MARKUP_PATTERNS by id, rather than re-typed, so the two
+// checks that care about audience-scoping specifically -- the guard below,
+// and MARKUP_PATTERNS' own detection -- cannot silently drift apart.
+const AUDIENCE_PREFIX_RX = MARKUP_PATTERNS.find((p) => p.id === 'audience-prefix').re
+const CONDITIONAL_RX = MARKUP_PATTERNS.find((p) => p.id === 'conditional').re
+
 /**
  * Find unescaped AsciiDoc attribute references (`{attr}`) that are not on
  * the product-attr allowlist. Escaped literals (`\{attr}`) do not count.
@@ -397,6 +403,27 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
     })
   }
 
+  // A STRING description carrying a raw audience prefix or a hand-written
+  // ifdef/ifndef pair was never routed through the array form's
+  // paragraph-level scoping: unconditionalProse only strips a
+  // cloud-only:/self-managed-only: paragraph out of an ARRAY, and returns a
+  // string verbatim. Falling through to stripDocsMarkup below silently
+  // discards the audience information instead of refusing to guess at it: a
+  // raw "cloud-only:" prefix strips to a bare sentence with no trace it was
+  // ever Cloud-specific, and a hand-written ifdef/ifndef pair keeps BOTH
+  // branches' text concatenated as if they were one universal sentence.
+  // Either shape reaching upstream_candidate_text would write
+  // audience-specific or audience-merged prose into a C++ string every
+  // audience reads.
+  if (typeof override.description === 'string' &&
+      (AUDIENCE_PREFIX_RX.test(override.description) || CONDITIONAL_RX.test(override.description))) {
+    return row({
+      ...common,
+      class: CLASSES.REVIEW,
+      note: 'This description is a plain string but contains an audience-scoped prefix or a hand-written conditional. Rewrite it as the array form (one entry per paragraph, prefixed cloud-only:/self-managed-only: where a paragraph is scoped) so the scoped text is never mistaken for universal prose.'
+    })
+  }
+
   // A description made ENTIRELY of audience-scoped paragraphs has no
   // unconditional prose, so overrideText is the empty string. Without this
   // guard it fell through to the SPLIT branch below and published an empty
@@ -434,6 +461,20 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
   }
 
   const stripped = stripDocsMarkup(overrideText)
+  // An include-only (or otherwise entirely-markup) description strips to
+  // nothing. Without this the SPLIT branch below would publish an empty
+  // upstream_candidate_text, which the upstream workflow selects (its
+  // filter matches on class and a SPLIT note, not on the text being
+  // non-empty) and would hand the model an empty string to write into a
+  // source description -- blanking it. The same failure the
+  // all-scoped-paragraphs guard above exists to prevent for the array form.
+  if (stripped.trim().length === 0) {
+    return row({
+      ...common,
+      class: CLASSES.REVIEW,
+      note: `Stripping docs-only markup (${markupKinds.join(', ')}) leaves no prose at all, so there is nothing to upstream. Decide whether the source needs a real description written for it.`
+    })
+  }
   if (normalizeText(stripped) === sourceText) {
     return row({
       ...common,

@@ -483,3 +483,90 @@ describe('a description with no unconditional prose never produces a candidate',
     expect(row.upstream_candidate_text).toBe('Real unconditional prose here.')
   })
 })
+
+describe('audience markup written into a plain string never reaches upstream', () => {
+  // unconditionalProse only strips a cloud-only:/self-managed-only: paragraph
+  // out of the ARRAY form; a STRING description is returned verbatim. Without
+  // this guard the string fell through to stripDocsMarkup, which discards
+  // the audience information instead of refusing to guess at it.
+  it('a bare cloud-only: prefix on a string description is REVIEW, not the bare sentence upstreamed', () => {
+    const row = classify.classifyDescription(
+      'p',
+      { description: 'cloud-only: Cloud clusters require a replication factor of at least 3.' },
+      sourceProp({ description: 'Some other source prose.' })
+    )
+    expect(row.class).toBe(CLASSES.REVIEW)
+    expect(row.upstream_candidate_text).toBeUndefined()
+    expect(row.note).toMatch(/array form/)
+  })
+
+  it('a hand-written ifdef/ifndef pair on a string description is REVIEW, not both sentences merged', () => {
+    const row = classify.classifyDescription(
+      'p',
+      {
+        description:
+          'ifdef::env-cloud[]\nCloud sentence.\nendif::[]\nifndef::env-cloud[]\nSelf-Managed sentence.\nendif::[]'
+      },
+      sourceProp({ description: 'Some other source prose.' })
+    )
+    expect(row.class).toBe(CLASSES.REVIEW)
+    expect(row.upstream_candidate_text).toBeUndefined()
+  })
+
+  it('an include-only string description is REVIEW, not an empty candidate', () => {
+    const row = classify.classifyDescription(
+      'p',
+      { description: 'include::reference:partial$internal-use-property.adoc[]' },
+      sourceProp({ description: 'Some other source prose.' })
+    )
+    expect(row.class).toBe(CLASSES.REVIEW)
+    expect(row.upstream_candidate_text).toBeUndefined()
+    expect(row.note).toMatch(/no prose at all/)
+  })
+
+  it('none of the three are selectable by the upstream workflow filter', () => {
+    const selectable = (row) =>
+      row.class === CLASSES.UPSTREAMABLE ||
+      (row.class === CLASSES.KEEP_UNTIL_UPSTREAMED && (row.note || '').startsWith('SPLIT:'))
+
+    for (const description of [
+      'cloud-only: Cloud clusters require a replication factor of at least 3.',
+      'ifdef::env-cloud[]\nCloud sentence.\nendif::[]\nifndef::env-cloud[]\nSM sentence.\nendif::[]',
+      'include::reference:partial$internal-use-property.adoc[]'
+    ]) {
+      const row = classify.classifyDescription('p', { description }, sourceProp({ description: 'Other.' }))
+      expect(selectable(row)).toBe(false)
+    }
+  })
+
+  it('a genuinely markup-free string description is unaffected', () => {
+    const row = classify.classifyDescription('p', { description: 'Genuinely new prose.' }, sourceProp({ description: 'Other.' }))
+    expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+    expect(row.upstream_candidate_text).toBe('Genuinely new prose.')
+  })
+
+  it('a legitimate array-form SPLIT still upstreams its real unconditional prose', () => {
+    const row = classify.classifyDescription(
+      'p',
+      { description: ['Real new prose.', 'cloud-only: Cloud sentence.'] },
+      sourceProp({ description: 'Other.' })
+    )
+    expect(row.class).toBe(CLASSES.KEEP_UNTIL_UPSTREAMED)
+    expect(row.note).toMatch(/^SPLIT:/)
+    expect(row.upstream_candidate_text).toBe('Real new prose.')
+  })
+})
+
+describe('markup that strips to nothing is REVIEW, not an empty candidate', () => {
+  it('an xref that is the entire description strips to an empty string and is REVIEW', () => {
+    // xref: is stripped to its label or a derived segment, not removed
+    // outright, so build the case with a construct that DOES strip to
+    // nothing on its own: an include directive with no other prose.
+    const row = classify.classifyDescription(
+      'p',
+      { description: 'include::reference:partial$x.adoc[]' },
+      sourceProp({ description: 'Other.' })
+    )
+    expect(row.class).toBe(CLASSES.REVIEW)
+  })
+})
