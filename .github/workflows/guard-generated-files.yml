@@ -19,7 +19,7 @@
 #       # fails the PR instead of checking it.
 #       permissions:
 #         pull-requests: read
-#       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/guard-generated-files.yml@main
+#       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/guard-generated-files.yml@<commit-sha>  # or @v<version>
 #       with:
 #         generated-paths: |
 #           modules/reference/partials/generated/
@@ -36,9 +36,11 @@
 # * The guard reads the pull request through the API and needs no checkout, so it
 #   compares paths only, never content. See the header of
 #   .github/scripts/guard-generated-files.sh.
-# * `@main` means a push to this repo changes the gate in every adopting repo at
-#   once. Pin the `uses:` line to a commit SHA in any repo where this is a
-#   required check.
+# * Pin the `uses:` line to a commit SHA or a `v<version>` tag, not `@main`:
+#   `@main` means a push to this repo changes the gate in every adopting repo
+#   at once, with no review in that repo, which matters most where this is a
+#   required check. `docs-extensions-and-macros` tags every version it
+#   publishes to npm; see CONTRIBUTING.adoc's Releases section.
 # * Roll out as a non-required check first and watch it report on real pull
 #   requests before making it required anywhere.
 # * The guard runs on pull_request events only and fails loudly on any other
