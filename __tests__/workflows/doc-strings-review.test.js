@@ -31,7 +31,10 @@ const workflow = YAML.parse(fs.readFileSync(WORKFLOW_PATH, 'utf8'))
 const job = workflow.jobs['doc-strings-review']
 const pkgJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8'))
 
-const PKG_DEFAULT = workflow.on.workflow_call.inputs.doc_tools_package.default
+// The doc_tools_package input defaults to empty; the Resolve step derives the
+// real spec from the workflow's own ref. Lint-step tests run with a
+// representative resolved spec, the shape the resolver emits.
+const RESOLVED_PKG = `${pkgJson.name}@${pkgJson.version}`
 
 function stepNamed (name) {
   const step = job.steps.find((s) => s.name === name)
@@ -72,7 +75,8 @@ function execRun (step, { env = {}, stubs = {}, expressions = {}, files = {} } =
     '${{ github.repository }}': env.GITHUB_REPOSITORY || 'redpanda-data/redpanda',
     '${{ github.event.pull_request.number }}': env.PR || '7',
     '${{ github.event.pull_request.html_url }}': 'https://github.com/redpanda-data/redpanda/pull/7',
-    '${{ inputs.doc_tools_package }}': env.PKG || PKG_DEFAULT,
+    '${{ inputs.doc_tools_package }}': env.PKG || RESOLVED_PKG,
+    '${{ steps.pkg.outputs.pkg }}': env.PKG || RESOLVED_PKG,
     '${{ inputs.surfaces }}': env.SURFACES || '',
     '${{ inputs.dispatch_repo }}': env.DISPATCH_REPO || 'redpanda-data/docs-site',
     ...expressions
@@ -190,12 +194,49 @@ describe('doc-strings-review workflow: static contracts', () => {
     for (const ref of refs) expect(ref).not.toMatch(/^v\d/)
   })
 
-  test('doc_tools_package pins a version, and the pin matches this package', () => {
-    // An unpinned spec floats to whatever `latest` is at run time inside
-    // engineering repos. Asserting it equals THIS package's version means a
-    // release bump cannot silently leave the pin behind.
-    expect(PKG_DEFAULT).toBe(`${pkgJson.name}@${pkgJson.version}`)
-    expect(PKG_DEFAULT).toMatch(/@\d+\.\d+\.\d+$/)
+  test('doc_tools_package defaults to empty so the resolver decides', () => {
+    // The version is derived from the workflow's own ref by the Resolve step;
+    // a non-empty default here would silently shadow that and reintroduce the
+    // hand-maintained pin this design removed. The input must still exist as
+    // an explicit override.
+    expect(workflow.on.workflow_call.inputs.doc_tools_package.default).toBe('')
+  })
+
+  test('the lint step consumes the resolver output, not the raw input', () => {
+    // Wiring the input straight into the lint step would bypass the
+    // ref-derived resolution for every caller that leaves the override empty.
+    const lint = stepNamed('Lint doc strings in the diff')
+    expect(lint.env.PKG).toBe('${{ steps.pkg.outputs.pkg }}')
+    const cache = stepNamed('Cache the doc-tools npx install and extractor bootstrap')
+    expect(cache.with.key).toContain('${{ steps.pkg.outputs.pkg }}')
+  })
+
+  test('the resolver reads its own commit from job.workflow_sha, not an OIDC claim', () => {
+    // github.job_workflow_sha is a claim in the OIDC token, not a property of
+    // the github context; as a ${{ }} expression it evaluates to the empty
+    // string, so the resolver would silently fall through on every reusable
+    // call. job.workflow_sha names the commit of the workflow file defining
+    // the current job, which is this repository's.
+    const step = stepNamed('Resolve the doc-tools package')
+    expect(step.env.JOB_WF_SHA).toBe('${{ job.workflow_sha }}')
+    expect(JSON.stringify(step.env)).not.toMatch(/github\.job_workflow_sha/)
+  })
+
+  test('the review gate conditions on declarations or removals, never on a finding count', () => {
+    // A string can pass every mechanical rule and still tell an operator
+    // nothing, and a deletion produces no findings at all, so gating the
+    // review on a finding count would skip exactly the PRs the prose and
+    // published-content passes exist for.
+    const gated = job.steps.filter((s) => (s.if || '').includes('steps.lint.outputs'))
+    expect(gated.length).toBeGreaterThan(0)
+    for (const s of gated) {
+      expect(s.if).toMatch(/steps\.lint\.outputs\.declarations/)
+      expect(s.if).toMatch(/steps\.lint\.outputs\.removals/)
+      expect(s.if).not.toMatch(/steps\.lint\.outputs\.count/)
+    }
+    // And the review itself is one of them.
+    const review = job.steps.find((s) => s.name === 'Claude review with suggestions')
+    expect(review.if).toMatch(/declarations != '0' \|\| steps\.lint\.outputs\.removals != '0'/)
   })
 
   test('the caller contract documents the permissions a caller must grant', () => {
@@ -207,66 +248,91 @@ describe('doc-strings-review workflow: static contracts', () => {
 
 describe('doc-strings-review workflow: lint step (executed)', () => {
   const step = stepNamed('Lint doc strings in the diff')
-  const baseEnv = { BASE: 'deadbeef', SURFACES: '', PKG: PKG_DEFAULT }
+  const baseEnv = { BASE: 'deadbeef', SURFACES: '', PKG: RESOLVED_PKG }
+
+  // These assert on `declarations` and `removals`, which are what the review,
+  // credential and dispatch steps actually condition on. An earlier version of
+  // this suite asserted a `count` output instead. That output gated nothing,
+  // so the fail-closed paths below were only ever verified by proxy and the
+  // real gate had no coverage at all.
+  const JSON_2 = '{"findings":[{"a":1},{"b":2}],"summary":{"totalDeclarations":2,"removedSurfaceLines":0}}'
 
   test('invokes the CLI through --package= so npx can resolve the doc-tools bin', () => {
     const r = execRun(step, {
-      env: { ...baseEnv, LINT_JSON: '{"findings":[{"a":1},{"b":2}]}' },
+      env: { ...baseEnv, LINT_JSON: JSON_2 },
       stubs: { npx: NPX_STUB }
     })
     const argv = fs.readFileSync(path.join(r.dir, 'npx-argv'), 'utf8').split('\n')
-    expect(argv).toContain(`--package=${PKG_DEFAULT}`)
+    expect(argv).toContain(`--package=${RESOLVED_PKG}`)
     // and the spec is NOT handed to npx as a bare positional, which is the
     // form that cannot resolve either declared bin.
-    expect(argv).not.toContain(PKG_DEFAULT)
+    expect(argv).not.toContain(RESOLVED_PKG)
     expect(argv).toContain('lint-strings')
     expect(r.status).toBe(0)
-    expect(r.outputs.count).toBe('2')
+    expect(r.outputs.declarations).toBe('2')
   })
 
-  test('the bare npx form would produce count=0, not an empty count', () => {
+  test('the bare npx form leaves the gate at 0, never empty', () => {
     // Drive the same body with a stub that refuses to resolve a bin, which is
     // exactly what the shipped `npx --yes <pkg> doc-tools` form did: exit 1,
-    // zero bytes. The gate must read 0 and annotate, never ''.
+    // zero bytes. '' would read as truthy in `!= '0'` and open the gate over
+    // an absent findings file, so both outputs must be a literal 0.
     const r = execRun(step, {
       env: { ...baseEnv, LINT_EXIT: '1' },
       stubs: {
         npx: '#!/bin/bash\necho \'npm error could not determine executable to run\' >&2\nexit 1\n'
       }
     })
-    expect(r.outputs.count).toBe('0')
-    expect(r.outputs.count).not.toBe('')
+    expect(r.outputs.declarations).toBe('0')
+    expect(r.outputs.removals).toBe('0')
+    expect(r.outputs.declarations).not.toBe('')
+    expect(r.outputs.removals).not.toBe('')
     expect(r.all).toMatch(/::warning::/)
     expect(r.status).toBe(0)
   })
 
-  test('a zero-byte findings file yields count=0 (jq prints nothing there)', () => {
+  test('a zero-byte findings file closes the gate (jq prints nothing there)', () => {
     const r = execRun(step, { env: baseEnv, stubs: { npx: NPX_STUB } })
     expect(r.size('lint-findings.json')).toBe(0)
-    expect(r.outputs.count).toBe('0')
+    expect(r.outputs.declarations).toBe('0')
+    expect(r.outputs.removals).toBe('0')
     expect(r.all).toMatch(/::warning::/)
   })
 
-  test('non-JSON output yields count=0 rather than a non-numeric gate value', () => {
+  test('non-JSON output closes the gate rather than emitting a non-numeric value', () => {
     const r = execRun(step, {
       env: { ...baseEnv, LINT_JSON: 'this is not json' },
       stubs: { npx: NPX_STUB }
     })
-    expect(r.outputs.count).toBe('0')
+    expect(r.outputs.declarations).toBe('0')
+    expect(r.outputs.removals).toBe('0')
     expect(r.all).toMatch(/::warning::/)
   })
 
-  test('a clean lint reports count=0 and a dirty lint reports the real count', () => {
+  test('a lint with zero findings still opens the gate, so clean strings reach the review', () => {
+    // The whole point of gating on declarations rather than findings: the lint
+    // is mechanical, and a string can pass every rule while telling an
+    // operator nothing. A PR whose strings are all mechanically clean must
+    // still get the prose pass.
     const clean = execRun(step, {
-      env: { ...baseEnv, LINT_JSON: '{"findings":[]}' },
+      env: { ...baseEnv, LINT_JSON: '{"findings":[],"summary":{"totalDeclarations":4,"removedSurfaceLines":0}}' },
       stubs: { npx: NPX_STUB }
     })
-    expect(clean.outputs.count).toBe('0')
-    const dirty = execRun(step, {
-      env: { ...baseEnv, LINT_JSON: '{"findings":[{},{},{}]}' },
+    expect(clean.outputs.declarations).toBe('4')
+    expect(clean.outputs.removals).toBe('0')
+  })
+
+  test('a deletion-only PR opens the gate through removals', () => {
+    // Declarations are extracted from HEAD, so a PR that only removes a
+    // property reports totalDeclarations 0 and would skip every step below,
+    // including the published-content check that treats a removed surface as
+    // high impact. removals is the second half of the gate for that case.
+    const deleted = execRun(step, {
+      env: { ...baseEnv, LINT_JSON: '{"findings":[],"summary":{"totalDeclarations":0,"removedSurfaceLines":12}}' },
       stubs: { npx: NPX_STUB }
     })
-    expect(dirty.outputs.count).toBe('3')
+    expect(deleted.outputs.declarations).toBe('0')
+    expect(deleted.outputs.removals).toBe('12')
   })
 
   test('an empty surfaces input does not abort the step under errexit', () => {
@@ -546,5 +612,303 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
   test('no report and no token both skip quietly', () => {
     expect(dispatch(null).status).toBe(0)
     expect(dispatch(valid, { GH_TOKEN: '' }).status).toBe(0)
+  })
+})
+
+describe('doc-strings-review workflow: ADP mint (executed)', () => {
+  // A curl stub that records its own argv and writes a token file, so the
+  // assertions are about what the mint ACTUALLY sends rather than about the
+  // YAML's text.
+  const CURL_STUB = `#!/bin/bash
+printf '%s\\n' "$@" > "$HOME/curl-argv"
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--output" ]; then out="$a"; fi
+  prev="$a"
+done
+[ -n "$out" ] && printf '{"access_token":"tok-abc"}' > "$out"
+printf '200'
+exit 0
+`
+  const JQ_STUB = `#!/bin/bash
+# Only the one query this step makes.
+f="\${!#}"
+grep -o '"access_token":"[^"]*"' "$f" 2>/dev/null | sed 's/.*:"//;s/"$//'
+exit 0
+`
+
+  function mint ({ secretId, tokenUrl, audience, credEnv }) {
+    const step = stepNamed('Mint the ADP gateway token')
+    // RUNNER_TEMP and GITHUB_ENV are runner-provided; without them
+    // `set -u` aborts the step before curl is ever reached. Pointing
+    // RUNNER_TEMP at the cwd keeps the token file inside the temp dir.
+    const dirEnv = {
+      CLIENT_SECRET_ID: secretId,
+      TOKEN_URL: tokenUrl,
+      TOKEN_AUDIENCE: audience,
+      RUNNER_TEMP: '.',
+      GITHUB_ENV: 'github_env',
+      ...credEnv
+    }
+    return execRun(step, {
+      env: dirEnv,
+      stubs: { curl: CURL_STUB, jq: JQ_STUB }
+    })
+  }
+
+  const IDP = 'https://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/oauth/idp/token'
+  const CLOUD = 'https://auth.prd.cloud.redpanda.com/oauth/token'
+
+  test('the agent path sends NO audience parameter', () => {
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs_doc_strings_client',
+      tokenUrl: IDP,
+      audience: '',
+      credEnv: {
+        DOCS_DOC_STRINGS_CLIENT_ID: 'serviceaccounts/doc-strings-review',
+        DOCS_DOC_STRINGS_CLIENT_SECRET: 's3cret'
+      }
+    })
+    const argv = r.read('curl-argv') || ''
+    expect(r.status).toBe(0)
+    expect(argv).toContain(IDP)
+    // The whole point: not `audience=` either, which satisfies neither endpoint.
+    expect(argv).not.toMatch(/audience/)
+  })
+
+  test('a standalone service account can still send an audience', () => {
+    const r = mint({
+      secretId: 'sdlc/prod/github/adp_priv_client',
+      tokenUrl: CLOUD,
+      audience: 'cloudv2-production.redpanda.cloud',
+      credEnv: { ADP_PRIV_CLIENT_ID: 'opaque', ADP_PRIV_CLIENT_SECRET: 's3cret' }
+    })
+    const argv = r.read('curl-argv') || ''
+    expect(r.status).toBe(0)
+    expect(argv).toContain(CLOUD)
+    expect(argv).toContain('audience=cloudv2-production.redpanda.cloud')
+  })
+
+  test('a non-https token endpoint is rejected before curl runs', () => {
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs_doc_strings_client',
+      tokenUrl: 'http://aigw.d6kjl4h19241bg3ek3h0.clusters.rdpa.co/oauth/idp/token',
+      audience: '',
+      credEnv: {
+        DOCS_DOC_STRINGS_CLIENT_ID: 'serviceaccounts/doc-strings-review',
+        DOCS_DOC_STRINGS_CLIENT_SECRET: 's3cret'
+      }
+    })
+    expect(r.status).not.toBe(0)
+    expect(r.all).toContain('must be https')
+    expect(r.exists('curl-argv')).toBe(false)
+  })
+
+  test('the credential env names follow the secret id, not a fixed prefix', () => {
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs_doc_strings_client',
+      tokenUrl: IDP,
+      audience: '',
+      credEnv: {
+        DOCS_DOC_STRINGS_CLIENT_ID: 'serviceaccounts/doc-strings-review',
+        DOCS_DOC_STRINGS_CLIENT_SECRET: 's3cret'
+      }
+    })
+    expect(r.read('curl-argv') || '').toContain('client_id=serviceaccounts/doc-strings-review')
+  })
+
+  test('the OLD fixed names no longer satisfy the new default secret', () => {
+    // The regression #302 fixed, asserted from the other side: a caller that
+    // supplies adp_priv_client's env names while pointing at the docs secret
+    // gets a warning and no mint, not a silent fail-open.
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs_doc_strings_client',
+      tokenUrl: IDP,
+      audience: '',
+      credEnv: { ADP_PRIV_CLIENT_ID: 'opaque', ADP_PRIV_CLIENT_SECRET: 's3cret' }
+    })
+    expect(r.status).not.toBe(0)
+    expect(r.all).toContain('DOCS_DOC_STRINGS_CLIENT_ID')
+    expect(r.exists('curl-argv')).toBe(false)
+  })
+
+  test('a hyphenated secret segment is sanitised the way the secrets action does it', () => {
+    // aws-secretsmanager-get-secrets upper-cases and replaces every
+    // non-alphanumeric with _, so the JSON keys of a secret named
+    // .../docs-doc-strings-client arrive as DOCS_DOC_STRINGS_CLIENT_*. A prefix
+    // that only upper-cased produced DOCS-DOC-STRINGS-CLIENT_ID, an invalid
+    // bash name, and the indirect expansion aborted under set -u before the
+    // warning could print.
+    const r = mint({
+      secretId: 'sdlc/prod/github/docs-doc-strings-client',
+      tokenUrl: IDP,
+      audience: '',
+      credEnv: {
+        DOCS_DOC_STRINGS_CLIENT_ID: 'serviceaccounts/doc-strings-review',
+        DOCS_DOC_STRINGS_CLIENT_SECRET: 's3cret'
+      }
+    })
+    expect(r.status).toBe(0)
+    expect(r.read('curl-argv') || '').toContain('client_id=serviceaccounts/doc-strings-review')
+  })
+
+  test('the scrub step derives the credential env names exactly as the mint does', () => {
+    const derive = (run) => (run.match(/prefix=\$\(printf '%s' "\$CLIENT_SECRET_ID" \| [^\n]*\)/) || [])[0]
+    const mintLine = derive(stepNamed('Mint the ADP gateway token').run)
+    const scrubLine = derive(stepNamed('Drop fetched credentials from the review\'s environment').run)
+    expect(mintLine).toBeTruthy()
+    expect(scrubLine).toBe(mintLine)
+  })
+
+  test('the workflow defaults are the agent path', () => {
+    const inputs = workflow.on.workflow_call.inputs
+    expect(inputs.adp_client_secret_id.default).toBe('sdlc/prod/github/docs_doc_strings_client')
+    expect(inputs.adp_token_url.default).toBe(IDP)
+    expect(inputs.adp_token_audience.default).toBe('')
+  })
+})
+
+describe('doc-strings-review workflow: package resolution (executed)', () => {
+  const step = stepNamed('Resolve the doc-tools package')
+  const NAME = '@redpanda-data/docs-extensions-and-macros'
+
+  // Every gh stub below counts its invocations, because the retry loop is
+  // only observable through the call count: a stub that merely succeeds or
+  // fails cannot distinguish "read once" from "read three times".
+  const COUNT = 'n=$(cat "$HOME/gh-calls" 2>/dev/null || echo 0); echo $((n+1)) > "$HOME/gh-calls"\n'
+
+  // gh stub emulating `gh api <url> --jq .content`: records argv, prints the
+  // base64 content a real contents-API call returns. base64 -d and jq run for
+  // real downstream, so the decode path is exercised, not assumed.
+  const b64Package = (version) =>
+    Buffer.from(JSON.stringify({ name: NAME, version })).toString('base64')
+  const ghContents = (version) =>
+    `#!/bin/bash\n${COUNT}printf '%s\\n' "$@" >> "$HOME/gh-argv"\nprintf '%s' '${b64Package(version)}'\n`
+  // Fails the first attempt with a 500, then serves the real content: the
+  // transient-blip shape the retry exists for.
+  const ghFailThenContents = (version) =>
+    `#!/bin/bash\n${COUNT}if [ "$(cat "$HOME/gh-calls")" -lt 2 ]; then echo "gh: HTTP 500" >&2; exit 1; fi\nprintf '%s' '${b64Package(version)}'\n`
+  const GH_ALWAYS_FAILS = `#!/bin/bash\n${COUNT}echo "gh: HTTP 500" >&2\nexit 1\n`
+  // The backoff is real seconds in the runner; stub it so the suite does not
+  // pay them, and record the delays so the backoff itself stays assertable.
+  const SLEEP_STUB = '#!/bin/bash\nprintf \'%s\\n\' "$@" >> "$HOME/sleep-argv"\n'
+  const NPM_OK = '#!/bin/bash\nprintf \'%s\\n\' "$@" >> "$HOME/npm-argv"\necho 5.30.0\n'
+  const NPM_MISSING = '#!/bin/bash\necho \'npm error code E404\' >&2\nexit 1\n'
+  const baseEnv = { OVERRIDE: '', JOB_WF_SHA: '', WF_SHA: '', GH_TOKEN: 't' }
+
+  test('an explicit override is used verbatim and nothing is resolved', () => {
+    const r = execRun(step, {
+      env: { ...baseEnv, OVERRIDE: `${NAME}@9.9.9` },
+      stubs: { gh: '#!/bin/bash\ntouch "$HOME/gh-called"\nexit 1\n' }
+    })
+    expect(r.status).toBe(0)
+    expect(r.outputs.pkg).toBe(`${NAME}@9.9.9`)
+    expect(r.exists('gh-called')).toBe(false)
+  })
+
+  test('resolves the version committed at the reusable workflow ref', () => {
+    const r = execRun(step, {
+      env: { ...baseEnv, JOB_WF_SHA: 'cafe123' },
+      stubs: { gh: ghContents('5.30.0'), npm: NPM_OK }
+    })
+    expect(r.status).toBe(0)
+    expect(r.outputs.pkg).toBe(`${NAME}@5.30.0`)
+    const argv = r.read('gh-argv')
+    expect(argv).toMatch(/package\.json\?ref=cafe123/)
+    // and the resolved spec was verified against the registry before use
+    expect(r.read('npm-argv')).toMatch(/@5\.30\.0/)
+  })
+
+  test('falls back to workflow_sha for a same-repo (non-reusable) run', () => {
+    const r = execRun(step, {
+      env: { ...baseEnv, WF_SHA: 'beef456' },
+      stubs: { gh: ghContents('5.30.0'), npm: NPM_OK }
+    })
+    expect(r.outputs.pkg).toBe(`${NAME}@5.30.0`)
+    expect(r.read('gh-argv')).toMatch(/ref=beef456/)
+  })
+
+  test('a failed contents read is retried three times, then falls open to @latest', () => {
+    const r = execRun(step, {
+      env: { ...baseEnv, JOB_WF_SHA: 'cafe123' },
+      stubs: { gh: GH_ALWAYS_FAILS, sleep: SLEEP_STUB }
+    })
+    expect(r.status).toBe(0)
+    expect(r.outputs.pkg).toBe(`${NAME}@latest`)
+    expect(r.all).toMatch(/::warning::/)
+    // Retried, not abandoned on the first error, and bounded so a hard 404
+    // cannot spin: exactly three reads with two backoffs between them.
+    expect(r.read('gh-calls').trim()).toBe('3')
+    expect(r.read('sleep-argv').trim().split('\n')).toEqual(['2', '4'])
+  })
+
+  test('a transient read failure is retried and the pinned version still wins', () => {
+    // The defect this guards: one flaky read swapped @latest into a caller
+    // that pinned a ref precisely to freeze what runs inside its PRs, and the
+    // only signal was a ::warning:: in someone else's workflow log.
+    const r = execRun(step, {
+      env: { ...baseEnv, JOB_WF_SHA: 'cafe123' },
+      stubs: { gh: ghFailThenContents('5.30.0'), npm: NPM_OK, sleep: SLEEP_STUB }
+    })
+    expect(r.status).toBe(0)
+    expect(r.outputs.pkg).toBe(`${NAME}@5.30.0`)
+    expect(r.read('gh-calls').trim()).toBe('2')
+    expect(r.all).toMatch(/::notice::.*retrying/)
+    // and it stopped as soon as the read succeeded
+    expect(r.read('sleep-argv').trim().split('\n')).toEqual(['2'])
+  })
+
+  test('a settled answer is not retried', () => {
+    // A package.json that parses to a non-version is not a transient fault,
+    // so retrying it only delays the fall-open. Reading it again would also
+    // mask a genuinely broken ref behind three round trips.
+    const r = execRun(step, {
+      env: { ...baseEnv, JOB_WF_SHA: 'cafe123' },
+      stubs: { gh: ghContents('not-a-version'), npm: NPM_OK, sleep: SLEEP_STUB }
+    })
+    expect(r.outputs.pkg).toBe(`${NAME}@latest`)
+    expect(r.read('gh-calls').trim()).toBe('1')
+    expect(r.exists('sleep-argv')).toBe(false)
+  })
+
+  test('a non-semver version in package.json falls open to @latest', () => {
+    // jq -r over a malformed document prints null/garbage rather than failing;
+    // the guard has to catch the value, not the exit status.
+    const r = execRun(step, {
+      env: { ...baseEnv, JOB_WF_SHA: 'cafe123' },
+      stubs: { gh: ghContents('not-a-version'), npm: NPM_OK }
+    })
+    expect(r.outputs.pkg).toBe(`${NAME}@latest`)
+    expect(r.all).toMatch(/::warning::/)
+  })
+
+  test('a resolved version missing from npm falls open to @latest', () => {
+    // The publish window: main already carries the new version but the
+    // publish job has not finished. @latest is simply the previous release.
+    const r = execRun(step, {
+      env: { ...baseEnv, JOB_WF_SHA: 'cafe123' },
+      stubs: { gh: ghContents('5.30.0'), npm: NPM_MISSING }
+    })
+    expect(r.outputs.pkg).toBe(`${NAME}@latest`)
+    expect(r.all).toMatch(/publish in flight/)
+  })
+
+  test('no ref at all falls open to @latest without calling gh', () => {
+    const r = execRun(step, {
+      env: baseEnv,
+      stubs: { gh: '#!/bin/bash\ntouch "$HOME/gh-called"\nexit 1\n' }
+    })
+    expect(r.status).toBe(0)
+    expect(r.outputs.pkg).toBe(`${NAME}@latest`)
+    expect(r.exists('gh-called')).toBe(false)
+  })
+
+  test('a hostile override cannot execute a command', () => {
+    const r = execRun(step, {
+      env: { ...baseEnv, OVERRIDE: 'x; touch PWNED; true' },
+      stubs: { gh: '#!/bin/bash\nexit 0\n' }
+    })
+    expect(r.exists('PWNED')).toBe(false)
   })
 })

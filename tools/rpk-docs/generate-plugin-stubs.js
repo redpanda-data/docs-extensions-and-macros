@@ -17,6 +17,8 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { spawnSync } = require('child_process')
+const { getGitHubToken } = require('../../cli-utils/github-token')
+const { gitAuthEnv, redactCredentials } = require('../../cli-utils/git-credential-env')
 
 /**
  * Read command titles from generated partials. The title line is
@@ -78,21 +80,35 @@ function fetchPartialsDir({ docsRepo, docsRef, plugin, sourcePath }) {
   // both carry the single-source tag, so either family can be stubbed
   const sparsePath = sourcePath || `modules/reference/partials/rpk-${plugin}`
 
-  console.log(`Fetching ${sparsePath} from ${docsRepo}@${docsRef}...`)
+  // The docs repo is private, so authenticate when the environment offers a
+  // token (GIT_CREDENTIALS in Antora builds; ACTIONS_BOT_TOKEN, GITHUB_TOKEN,
+  // and friends in workflows). Clone anonymously otherwise, and say so, so a
+  // failed run in CI names the missing piece instead of a bare git prompt.
+  const token = getGitHubToken()
+  // gitAuthEnv keeps the token in the subprocess environment only: never in
+  // argv, never in the remote URL, never in the clone's .git/config.
+  const env = gitAuthEnv(token)
+  const authNote = token ? '' : ' (no GitHub token found; cloning anonymously)'
+  console.log(`Fetching ${sparsePath} from ${docsRepo}@${docsRef}${authNote}...`)
   const cloneResult = spawnSync('git', [
     'clone', '--depth', '1', '--filter=blob:none', '--sparse',
     '--branch', docsRef,
     `https://github.com/${docsRepo}.git`, repoDir
-  ], { encoding: 'utf8', timeout: 180000 })
+  ], { encoding: 'utf8', timeout: 180000, env })
   if (cloneResult.status !== 0) {
-    throw new Error(`Failed to clone ${docsRepo}@${docsRef}: ${cloneResult.stderr}`)
+    const hint = token
+      ? ''
+      : `\nIf ${docsRepo} is private, set ACTIONS_BOT_TOKEN, GITHUB_TOKEN, REDPANDA_GITHUB_TOKEN, or GIT_CREDENTIALS so the clone can authenticate.`
+    throw new Error(`Failed to clone ${docsRepo}@${docsRef}: ${redactCredentials(cloneResult.stderr)}${hint}`)
   }
 
+  // --filter=blob:none deferred the blobs, so the sparse checkout pulls them
+  // now and needs the same credential helper as the clone.
   const sparseResult = spawnSync('git', ['sparse-checkout', 'set', sparsePath], {
-    cwd: repoDir, encoding: 'utf8', timeout: 60000
+    cwd: repoDir, encoding: 'utf8', timeout: 60000, env
   })
   if (sparseResult.status !== 0) {
-    throw new Error(`Failed sparse checkout of ${sparsePath}: ${sparseResult.stderr}`)
+    throw new Error(`Failed sparse checkout of ${sparsePath}: ${redactCredentials(sparseResult.stderr)}`)
   }
 
   const partialsDir = path.join(repoDir, sparsePath)

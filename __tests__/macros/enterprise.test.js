@@ -27,7 +27,6 @@ features:
     scope: redpanda
     xref: manage:tiered-storage.adoc
     xref-kubernetes: manage:kubernetes/tiered-storage/k-tiered-storage.adoc
-    xref-cloud: cloud-data-platform:manage:tiered-storage.adoc
     description: |
       Enables data storage in cloud object storage.
     expiration: |
@@ -738,6 +737,20 @@ features:
       warn.mockRestore()
     })
 
+    test('renders an unknown feature name plain, not styled with a generic fallback', () => {
+      // A typo has nothing behind it to style -- no xref, no real tooltip, no
+      // licence terms. Styling it anyway (a generic fallback tooltip and a
+      // link to the licensing page) let a typo pass for a real feature with
+      // nothing on the page to show a reader it was wrong. Mirrors prop:'s
+      // plain fallback for an unrecognized property name.
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Warp Drive[]', { catalog: fakeCatalog() })
+      expect(html).toContain('Warp Drive')
+      expect(html).not.toContain('class="enterprise-feature"')
+      expect(html).not.toContain('licensing')
+      warn.mockRestore()
+    })
+
     test('fails the conversion in error mode', () => {
       expect(() => convert('enterprise:Warp Drive[]', {
         catalog: fakeCatalog(),
@@ -770,10 +783,13 @@ features:
       expect(catalog.findBy).toHaveBeenCalledTimes(1)
     })
 
-    test('renders unvalidated without a catalog (graceful degradation)', () => {
+    test('renders plain with no catalog to check against', () => {
+      // Nothing to validate means nothing to assert, so no styling, tooltip,
+      // or link rather than an unchecked one -- mirrors prop:'s plain
+      // fallback for the same reason.
       const html = convert('enterprise:Anything Goes[]', {})
       expect(html).toContain('Anything Goes')
-      expect(html).toContain('class="enterprise-feature"')
+      expect(html).not.toContain('class="enterprise-feature"')
     })
 
     test('renders the feature table through the block macro', () => {
@@ -792,18 +808,9 @@ features:
       expect(html).toContain('k-tiered-storage')
     })
 
-    test('uses the Cloud feature page when env-cloud is set', () => {
-      const html = convert('enterprise:Tiered Storage[]', {
-        catalog: fakeCatalog(),
-        attributes: { 'env-cloud': '' },
-      })
-      expect(html).toContain('cloud-data-platform')
-    })
-
     test('falls back to the default xref without env attributes', () => {
       const html = convert('enterprise:Tiered Storage[]', { catalog: fakeCatalog() })
       expect(html).not.toContain('k-tiered-storage')
-      expect(html).not.toContain('cloud-data-platform')
       expect(html).toContain('tiered-storage')
     })
 
@@ -823,6 +830,104 @@ features:
       const emptyCatalog = { findBy: jest.fn(() => []) }
       const html = convert('enterprise_features::redpanda[]', { catalog: emptyCatalog })
       expect(html).toContain('cannot be rendered')
+    })
+  })
+
+  describe('Cloud pages', () => {
+    // Redpanda Cloud has no Enterprise Edition license, so both macros treat
+    // a page with env-cloud set as having no enterprise feature to mark or
+    // list at all -- regardless of what the registry says, and regardless of
+    // whether the mention was written directly on a Cloud page or arrives
+    // there via single-sourced self-managed prose (which convert()'s
+    // attributes option stands in for: env-cloud on the document is exactly
+    // what a Cloud stub page sets, whichever file the content came from).
+    test('renders plain text for a registered feature, with no styling, tooltip, or link', () => {
+      const html = convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '' },
+      })
+      expect(html).toContain('Tiered Storage')
+      expect(html).not.toContain('class="enterprise-feature"')
+      expect(html).not.toContain('Enterprise Edition license')
+      expect(html).not.toContain('tiered-storage.adoc')
+    })
+
+    test('warns by default, naming the page', () => {
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+      convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '' },
+        filePath: 'modules/cloud/pages/stub.adoc',
+      })
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('modules/cloud/pages/stub.adoc'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('no Enterprise Edition license'))
+    })
+
+    test('fails the conversion in error mode', () => {
+      expect(() => convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '', 'enterprise-validate': 'error' },
+      })).toThrow(/no Enterprise Edition license/)
+    })
+
+    test('stays silent in off mode', () => {
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+      convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '', 'enterprise-validate': 'off' },
+      })
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    test('never validates the target against the registry', () => {
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+      const html = convert('enterprise:Not A Real Feature[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '' },
+      })
+      expect(html).toContain('Not A Real Feature')
+      const registryWarnings = warn.mock.calls.filter(([msg]) => String(msg).includes('does not match'))
+      expect(registryWarnings).toHaveLength(0)
+    })
+
+    test('env-cloud: false is not treated as Cloud', () => {
+      const html = convert('enterprise:Tiered Storage[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': 'false' },
+      })
+      expect(html).toContain('class="enterprise-feature"')
+    })
+
+    test('renders NOTHING for the block macro, with the diagnostic in the log', () => {
+      // Not an admonition. enterprise-validate defaults to warn in all three
+      // docs-site playbooks, so an admonition would ship to
+      // docs.redpanda.com and explain an internal macro to a reader. The
+      // writer gets the message in the build log instead, and this keeps the
+      // inline and block macros behaving the same way on Cloud, which is what
+      // PROPERTY_AND_ENTERPRISE_REFERENCES.adoc claims.
+      const warn = jest.spyOn(require('@antora/logger')(), 'warn').mockImplementation(() => {})
+      const html = convert('enterprise_features::redpanda[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '' },
+      })
+      expect(html).not.toContain('Tiered Storage')
+      expect(html).not.toContain('no Enterprise Edition license')
+      expect(html).not.toMatch(/admonitionblock|WARNING/)
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('enterprise_features::redpanda[]'))
+    })
+
+    test('still throws on the block macro when enterprise-validate is error', () => {
+      // Rendering nothing must not soften the strict mode: a Cloud page that
+      // calls the block macro under enterprise-validate: error still fails.
+      expect(() => convert('enterprise_features::redpanda[]', {
+        catalog: fakeCatalog(),
+        attributes: { 'env-cloud': '', 'enterprise-validate': 'error' },
+      })).toThrow(/no Enterprise Edition license/)
+    })
+
+    test('rejects cloud as a scope on the block macro', () => {
+      expect(() => convert('enterprise_features::cloud[]', { catalog: fakeCatalog() }))
+        .toThrow(/needs a scope/)
     })
   })
 
