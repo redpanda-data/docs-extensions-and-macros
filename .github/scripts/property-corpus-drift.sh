@@ -73,58 +73,88 @@ if ! SOURCE_TAG="$(node -e '
   exit 2
 fi
 
-fetch "modules/reference/attachments/redpanda-properties-${SOURCE_TAG}.json" "$tmp/attachment.json"
+ATTACHMENT_PATH="modules/reference/attachments/redpanda-properties-${SOURCE_TAG}.json"
+
+# Not the shared fetch(): a 404 here is not "could not tell", it is itself
+# drift. docs' own regen renames this file forward on every release (there is
+# never more than one live copy per tracked line), so the moment docs moves
+# past SOURCE_TAG, the exact file this corpus is pinned to stops existing at
+# all -- not "changed", gone. Treating that as exit 2 (inconclusive) is why
+# this check could go red every week from here on without ever filing the
+# issue that would get someone to refresh the pin: exit 2 never files one.
+attachment_err="$tmp/attachment.err"
+if gh api "repos/${DOCS_REPO}/contents/${ATTACHMENT_PATH}?ref=${DOCS_REF}" \
+     -H 'Accept: application/vnd.github.raw' > "$tmp/attachment.json" 2>"$attachment_err"; then
+  ATTACHMENT_STALE=false
+elif grep -q "HTTP 404" "$attachment_err"; then
+  ATTACHMENT_STALE=true
+else
+  echo "::error::Could not fetch ${ATTACHMENT_PATH} from ${DOCS_REPO}@${DOCS_REF}, so drift could not be determined. The token needs read access to that private repo. $(cat "$attachment_err")" >&2
+  exit 2
+fi
 
 # Inconclusive, not clean and not drift, for the same reason as above.
-if ! DRIFT="$(node -e '
+if ! OVERRIDES_DRIFT="$(node -e '
   const fs = require("fs");
-  const [overridesLive, attachmentLive, corpusDir] = process.argv.slice(1);
+  const [overridesLive, corpusDir] = process.argv.slice(1);
   const read = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
-  const report = [];
 
   const liveOverrides = read(overridesLive);
   const mirrorOverrides = read(`${corpusDir}/property-overrides.json`);
-  if (JSON.stringify(liveOverrides) !== JSON.stringify(mirrorOverrides)) {
-    const live = Object.keys(liveOverrides.properties || {});
-    const mirror = Object.keys(mirrorOverrides.properties || {});
-    const missing = live.filter((k) => !mirror.includes(k));
-    const extra = mirror.filter((k) => !live.includes(k));
-    let detail = "";
-    if (missing.length) detail += `, ${missing.length} missing here`;
-    if (extra.length) detail += `, ${extra.length} no longer in the docs repo`;
-    if (!detail) {
-      // Same keys on both sides, so the difference is inside the entries. Name
-      // a few, because "438 live, 438 in the mirror" on its own says nothing.
-      const changed = live.filter((k) => JSON.stringify(liveOverrides.properties[k]) !== JSON.stringify(mirrorOverrides.properties[k]));
-      detail = ` (same entries, ${changed.length} of them differing in content`
-        + (changed.length ? `: ${changed.slice(0, 5).join(", ")}${changed.length > 5 ? ", ..." : ""}` : "")
-        + ")";
-    }
-    report.push(`- \`property-overrides.json\`: ${live.length} entries live, ${mirror.length} in the mirror${detail}`);
-  }
+  if (JSON.stringify(liveOverrides) === JSON.stringify(mirrorOverrides)) process.exit(0);
 
-  // The snapshot is a reduction, so re-derive it the same way the refresh
-  // instructions in tools/property-extractor/README.adoc do, then compare.
-  const keep = ["name","config_scope","type","description","cloud_supported","cloud_editable",
-                "cloud_readonly","cloud_byoc_only","is_deprecated","nullable"];
-  const liveProps = read(attachmentLive).properties || {};
-  const derived = {};
-  for (const [k, v] of Object.entries(liveProps)) {
-    derived[k] = Object.fromEntries(keep.filter((f) => f in v).map((f) => [f, v[f]]));
+  const live = Object.keys(liveOverrides.properties || {});
+  const mirror = Object.keys(mirrorOverrides.properties || {});
+  const missing = live.filter((k) => !mirror.includes(k));
+  const extra = mirror.filter((k) => !live.includes(k));
+  let detail = "";
+  if (missing.length) detail += `, ${missing.length} missing here`;
+  if (extra.length) detail += `, ${extra.length} no longer in the docs repo`;
+  if (!detail) {
+    // Same keys on both sides, so the difference is inside the entries. Name
+    // a few, because "438 live, 438 in the mirror" on its own says nothing.
+    const changed = live.filter((k) => JSON.stringify(liveOverrides.properties[k]) !== JSON.stringify(mirrorOverrides.properties[k]));
+    detail = ` (same entries, ${changed.length} of them differing in content`
+      + (changed.length ? `: ${changed.slice(0, 5).join(", ")}${changed.length > 5 ? ", ..." : ""}` : "")
+      + ")";
   }
-  const mirrorSnapshot = read(`${corpusDir}/property-snapshot.json`);
-  if (JSON.stringify(derived) !== JSON.stringify(mirrorSnapshot.properties)) {
-    const liveKeys = Object.keys(derived);
-    const mirrorKeys = Object.keys(mirrorSnapshot.properties || {});
-    report.push(`- \`property-snapshot.json\`: ${liveKeys.length} properties live, ${mirrorKeys.length} in the mirror`
-      + (liveKeys.length === mirrorKeys.length ? " (same count, so the difference is in the field values)" : ""));
-  }
-
-  process.stdout.write(report.join("\n"));
-' "$tmp/overrides.json" "$tmp/attachment.json" "$CORPUS_DIR")"; then
-  echo "the corpus comparison failed to run" >&2
+  process.stdout.write(`- \`property-overrides.json\`: ${live.length} entries live, ${mirror.length} in the mirror${detail}`);
+' "$tmp/overrides.json" "$CORPUS_DIR")"; then
+  echo "the overrides comparison failed to run" >&2
   exit 2
 fi
+
+if [ "$ATTACHMENT_STALE" = "true" ]; then
+  SNAPSHOT_DRIFT="- \`property-snapshot.json\` pins \`${SOURCE_TAG}\`, but \`${ATTACHMENT_PATH}\` no longer exists on ${DOCS_REPO}@${DOCS_REF} -- docs' regen has renamed that tag's attachment forward since. The corpus cannot be compared against a tag that no longer has a live file; refresh the pin to a current tag."
+else
+  # The snapshot is a reduction, so re-derive it the same way the refresh
+  # instructions in tools/property-extractor/README.adoc do, then compare.
+  if ! SNAPSHOT_DRIFT="$(node -e '
+    const fs = require("fs");
+    const [attachmentLive, corpusDir] = process.argv.slice(1);
+    const read = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
+
+    const keep = ["name","config_scope","type","description","cloud_supported","cloud_editable",
+                  "cloud_readonly","cloud_byoc_only","is_deprecated","nullable"];
+    const liveProps = read(attachmentLive).properties || {};
+    const derived = {};
+    for (const [k, v] of Object.entries(liveProps)) {
+      derived[k] = Object.fromEntries(keep.filter((f) => f in v).map((f) => [f, v[f]]));
+    }
+    const mirrorSnapshot = read(`${corpusDir}/property-snapshot.json`);
+    if (JSON.stringify(derived) === JSON.stringify(mirrorSnapshot.properties)) process.exit(0);
+
+    const liveKeys = Object.keys(derived);
+    const mirrorKeys = Object.keys(mirrorSnapshot.properties || {});
+    process.stdout.write(`- \`property-snapshot.json\`: ${liveKeys.length} properties live, ${mirrorKeys.length} in the mirror`
+      + (liveKeys.length === mirrorKeys.length ? " (same count, so the difference is in the field values)" : ""));
+  ' "$tmp/attachment.json" "$CORPUS_DIR")"; then
+    echo "the snapshot comparison failed to run" >&2
+    exit 2
+  fi
+fi
+
+DRIFT="$(printf '%s\n%s' "$OVERRIDES_DRIFT" "$SNAPSHOT_DRIFT" | sed '/^$/d')"
 
 if [ -z "$DRIFT" ]; then
   echo "Property test corpus matches ${DOCS_REPO}@${DOCS_REF}."
