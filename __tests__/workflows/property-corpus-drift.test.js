@@ -51,7 +51,13 @@ beforeAll(() => {
     '  if [ "$GH_STUB_API_FAIL" = "1" ]; then exit 1; fi',
     '  case "$2" in',
     '    *property-overrides.json*) cat "$GH_STUB_LIVE/property-overrides.json"; exit 0 ;;',
-    '    *redpanda-properties-*) cat "$GH_STUB_LIVE/attachment.json"; exit 0 ;;',
+    '    *redpanda-properties-*)',
+    // Real gh writes exactly this on a 404, and nothing else it can fail with
+    // matches "HTTP 404" -- the script greps for that string to tell "this
+    // tag has been renamed forward" apart from "the fetch is broken".
+    '      if [ "$GH_STUB_ATTACHMENT_404" = "1" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi',
+    '      if [ "$GH_STUB_ATTACHMENT_FAIL" = "1" ]; then echo "gh: some other error" >&2; exit 1; fi',
+    '      cat "$GH_STUB_LIVE/attachment.json"; exit 0 ;;',
     '  esac',
     '  exit 1',
     'fi',
@@ -153,6 +159,40 @@ describe('property-corpus-drift.sh', () => {
     expect(status).toBe(1);
     expect(stdout).toMatch(/property-snapshot\.json/);
     expect(stdout).toMatch(/same count, so the difference is in the field values/);
+  });
+
+  it('reports drift, not exit 2, when the pinned tag has been renamed forward on the docs side', () => {
+    // docs' regen renames the attachment file forward on every release, so
+    // any tag the corpus is still pinned to eventually 404s. That is drift in
+    // its own right -- the corpus cannot be compared against a tag with no
+    // live file -- and must reach an issue, not just a red Actions run: exit 2
+    // never files one, which is exactly how this went unnoticed before.
+    setLive({ matching: true });
+    const { status, stdout, ghCalls } = run({ GH_STUB_ATTACHMENT_404: '1' });
+    expect(status).toBe(1);
+    expect(stdout).toMatch(/Drift found/);
+    expect(stdout).toMatch(/no longer exists on redpanda-data\/docs@main/);
+    expect(stdout).toMatch(/refresh the pin to a current tag/);
+    expect(ghCalls).toMatch(/issue create/);
+  });
+
+  it('still reports the overrides drift alongside a renamed-forward tag', () => {
+    setLive({ matching: false, dropEntries: 3 });
+    const { status, stdout } = run({ GH_STUB_ATTACHMENT_404: '1', FILE_ISSUE: 'false' });
+    expect(status).toBe(1);
+    expect(stdout).toMatch(/property-overrides\.json/);
+    expect(stdout).toMatch(/no longer exists on redpanda-data\/docs@main/);
+  });
+
+  it('still fails closed with 2 when the attachment fetch fails for a reason other than 404', () => {
+    // A renamed-forward tag is drift; a broken token or network is not --
+    // collapsing the two would turn every transient fetch failure into a
+    // filed issue telling someone to refresh a pin that was never stale.
+    setLive({ matching: true });
+    const { status, stderr, ghCalls } = run({ GH_STUB_ATTACHMENT_FAIL: '1' });
+    expect(status).toBe(2);
+    expect(stderr).toMatch(/could not be determined/);
+    expect(ghCalls).not.toMatch(/issue (create|comment)/);
   });
 
   it('comments on an existing issue instead of opening a duplicate', () => {
