@@ -225,8 +225,18 @@ function compareProperties(oldData, newData, oldVersion, newVersion) {
         });
       }
       
-      // Check for description changes
-      if (oldProp.description !== newProp.description) {
+      // Check for description changes. deepEqual, not !==: an array-form
+      // description (audience-scoped paragraphs) is a fresh array on both
+      // sides of every comparison, since each side comes from parsing its
+      // own attachment JSON, so reference inequality reported EVERY
+      // property carrying one as changed, forever, with identical old and
+      // new text -- permanent noise in the one section of the release PR a
+      // reviewer reads to spot real engineering wording changes. In
+      // practice this attachment is flattened to a string before it ships
+      // (see generate-handlebars-docs.js), so deepEqual and !== agree on a
+      // real release comparison; this guards the case where compare runs
+      // against a pre-flatten JSON, or the flatten step is ever skipped.
+      if (!deepEqual(oldProp.description, newProp.description)) {
         report.changedDescriptions.push({
           name,
           oldDescription: oldProp.description || 'No description',

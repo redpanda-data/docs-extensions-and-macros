@@ -59,6 +59,10 @@ const PRODUCT_ATTR_ALLOWLIST = Object.freeze([])
  */
 const KEEP_BY_DESIGN_FIELDS = Object.freeze([
   'related_topics',
+  'see_also',
+  'admonitions',
+  'links',
+  'includes',
   'category',
   'config_scope',
   'version',
@@ -89,7 +93,59 @@ const META_FIELDS = Object.freeze(['upstream_ref', '_comment'])
  */
 function normalizeText (text) {
   if (typeof text !== 'string') return ''
-  return text.replace(/\s+/g, ' ').trim()
+  // Horizontal whitespace collapses; newlines do not. A blank line is a
+  // paragraph break and a newline before a list marker is a list-item
+  // boundary, and both change what AsciiDoc renders -- the C++ source is one
+  // run-on sentence with no newlines at all, so treating \n the same as a
+  // plain space made an override that turns that wording into a real
+  // bulleted list or separate paragraphs compare byte-equal to source once
+  // "normalized". That classified it REDUNDANT, and the retirement step
+  // deletes an override wholesale, replacing a rendered list with a
+  // run-on paragraph carrying literal `*` characters. Verified against
+  // fetch_read_strategy in the live corpus: 2 rendered list items with the
+  // override, 0 (plus two stray asterisks) once "equal to source" deleted
+  // it.
+  return text
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/**
+ * Separate a description's unconditional prose from its audience-scoped
+ * paragraphs.
+ *
+ * A description is either a plain string or an array of paragraphs, each
+ * optionally prefixed `cloud-only:` / `self-managed-only:`. Only the
+ * unconditional paragraphs are comparable to the source string: a paragraph
+ * written for one docs build is docs-only by definition and must never reach an
+ * upstream candidate, because the C++ doc string has no audience.
+ *
+ * The string form is returned unchanged, so every existing classification is
+ * byte-for-byte what it was before the array form existed.
+ *
+ * @param {string|Array<string>} description - Override description, either form.
+ * @returns {{prose: string, scoped: number, scopedParagraphs: string[]}} The
+ *   unconditional prose, how many paragraphs were scoped away, and their text.
+ *   The text is returned so a row can show a reviewer what it is holding back
+ *   rather than dropping it silently.
+ */
+function unconditionalProse (description) {
+  if (typeof description === 'string') return { prose: description, scoped: 0, scopedParagraphs: [] }
+  if (!Array.isArray(description)) return { prose: '', scoped: 0, scopedParagraphs: [] }
+  const kept = []
+  const scopedParagraphs = []
+  for (const paragraph of description) {
+    if (typeof paragraph !== 'string' || !paragraph.trim()) continue
+    if (/^\s*(?:cloud-only|self-managed-only):/.test(paragraph)) {
+      scopedParagraphs.push(paragraph.trim())
+      continue
+    }
+    kept.push(paragraph.trim())
+  }
+  return { prose: kept.join('\n\n'), scoped: scopedParagraphs.length, scopedParagraphs }
 }
 
 // Docs-only markup detectors. `<<anchor>>` cross-references are included
@@ -114,6 +170,12 @@ const MARKUP_PATTERNS = Object.freeze([
   // C++. Anchored at a word boundary so it cannot match inside prose.
   { id: 'audience-prefix', re: /\b(?:self-managed-only|cloud-only):/ }
 ])
+
+// Pulled out of MARKUP_PATTERNS by id, rather than re-typed, so the two
+// checks that care about audience-scoping specifically -- the guard below,
+// and MARKUP_PATTERNS' own detection -- cannot silently drift apart.
+const AUDIENCE_PREFIX_RX = MARKUP_PATTERNS.find((p) => p.id === 'audience-prefix').re
+const CONDITIONAL_RX = MARKUP_PATTERNS.find((p) => p.id === 'conditional').re
 
 /**
  * Find unescaped AsciiDoc attribute references (`{attr}`) that are not on
@@ -264,7 +326,7 @@ function deepEqual (a, b) {
  */
 function row (fields) {
   const base = { name: fields.name, field: fields.field, class: fields.class }
-  for (const key of ['upstream_candidate_text', 'upstream_ref', 'content_hash', 'source_file', 'source_line', 'note']) {
+  for (const key of ['upstream_candidate_text', 'audience_scoped_text', 'upstream_ref', 'content_hash', 'source_file', 'source_line', 'note']) {
     if (fields[key] !== undefined) base[key] = fields[key]
   }
   return base
@@ -281,7 +343,15 @@ function row (fields) {
  */
 function classifyDescription (name, override, sourceProp, opts = {}) {
   const attrAllowlist = opts.attrAllowlist || PRODUCT_ATTR_ALLOWLIST
-  const overrideText = override.description
+  // Audience-scoped paragraphs are filtered out here rather than inside
+  // stripDocsMarkup, which must keep stripping a prefix and retaining the
+  // content: for a see_also item the prefixed value IS the link, and dropping
+  // it there would silently empty every conditional related-topics entry.
+  const {
+    prose: overrideText,
+    scoped: scopedCount,
+    scopedParagraphs: scopedText
+  } = unconditionalProse(override.description)
   const common = {
     name,
     field: 'description',
@@ -290,6 +360,13 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
     source_line: sourceProp && sourceProp.line_start !== undefined ? sourceProp.line_start : undefined
   }
   if (override.upstream_ref !== undefined) common.upstream_ref = override.upstream_ref
+  // Shown, never upstreamed. A scoped paragraph exists precisely so the other
+  // audience does not see it, and the C++ doc string is one string for every
+  // audience, so upstreaming it would both leak it to the wrong readers and
+  // duplicate it for the right ones (the override keeps its copy). Putting the
+  // text on the row lets a reviewer decide to upstream it and delete the
+  // paragraph in one deliberate change, instead of the audit deciding for them.
+  if (scopedText && scopedText.length > 0) common.audience_scoped_text = scopedText
 
   if (!sourceProp) {
     return row({
@@ -299,10 +376,43 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
     })
   }
 
+  // A source property with no line_start has no description to replace. The
+  // topic extractor reports a name constant (topic_properties.h,
+  // handlers/topics/types.h) and fills description with an empty string, so a
+  // naive comparison reads "override differs from source" and proposes
+  // upstreaming prose into a file that has nowhere to put it. Measured against
+  // dev: 45 of 216 candidates, and not one of them in a .cc file, while every
+  // row the upstreaming workflow can actually edit carries a line.
+  //
+  // This is REVIEW rather than KEEP because the right answer is a judgement
+  // call: give the property a real doc string upstream, or accept that docs are
+  // the only place it is described. Never UPSTREAMABLE, which would hand the
+  // upstreaming workflow work it cannot do.
+  if (sourceProp.line_start === undefined) {
+    return row({
+      ...common,
+      class: CLASSES.REVIEW,
+      note:
+        'Source defines this property\'s name but carries no description for it (' +
+        (sourceProp.defined_in || 'unknown file') +
+        '), so there is nothing to upstream into. Decide whether the source should gain one.'
+    })
+  }
+
   const sourceText = normalizeText(sourceProp.description)
   const overrideNormalized = normalizeText(overrideText)
 
   if (overrideNormalized === sourceText) {
+    if (scopedCount > 0) {
+      // Retiring this would delete the audience-scoped paragraphs with it,
+      // because `description` replaces wholesale rather than merging. The
+      // redundant prose cannot be dropped on its own.
+      return row({
+        ...common,
+        class: CLASSES.KEEP,
+        note: `Unconditional prose already matches source, but ${scopedCount} audience-scoped paragraph(s) are docs-only and would be lost with it. Nothing to upstream.`
+      })
+    }
     return row({
       ...common,
       class: CLASSES.REDUNDANT,
@@ -310,8 +420,55 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
     })
   }
 
+  // A STRING description carrying a raw audience prefix or a hand-written
+  // ifdef/ifndef pair was never routed through the array form's
+  // paragraph-level scoping: unconditionalProse only strips a
+  // cloud-only:/self-managed-only: paragraph out of an ARRAY, and returns a
+  // string verbatim. Falling through to stripDocsMarkup below silently
+  // discards the audience information instead of refusing to guess at it: a
+  // raw "cloud-only:" prefix strips to a bare sentence with no trace it was
+  // ever Cloud-specific, and a hand-written ifdef/ifndef pair keeps BOTH
+  // branches' text concatenated as if they were one universal sentence.
+  // Either shape reaching upstream_candidate_text would write
+  // audience-specific or audience-merged prose into a C++ string every
+  // audience reads.
+  if (typeof override.description === 'string' &&
+      (AUDIENCE_PREFIX_RX.test(override.description) || CONDITIONAL_RX.test(override.description))) {
+    return row({
+      ...common,
+      class: CLASSES.REVIEW,
+      note: 'This description is a plain string but contains an audience-scoped prefix or a hand-written conditional. Rewrite it as the array form (one entry per paragraph, prefixed cloud-only:/self-managed-only: where a paragraph is scoped) so the scoped text is never mistaken for universal prose.'
+    })
+  }
+
+  // A description made ENTIRELY of audience-scoped paragraphs has no
+  // unconditional prose, so overrideText is the empty string. Without this
+  // guard it fell through to the SPLIT branch below and published an empty
+  // upstream_candidate_text -- which the upstream workflow selects, because
+  // the SPLIT note is part of its filter, and would then hand the model an
+  // empty string to write into an engineering doc string, blanking it.
+  if (overrideText.length === 0) {
+    return row({
+      ...common,
+      class: CLASSES.REVIEW,
+      note: scopedCount > 0
+        ? `Every paragraph of this description is audience-scoped (${scopedCount}), so there is no unconditional prose to upstream. Decide whether the scoped text belongs in source at all, or whether the property needs unconditional prose written for it.`
+        : 'The override sets an empty description. Decide whether it should be removed or given prose.'
+    })
+  }
+
   const markupKinds = detectDocsMarkup(overrideText, attrAllowlist)
   if (markupKinds.length === 0) {
+    if (scopedCount > 0) {
+      // The prose is upstreamable but the override still has to stay, to carry
+      // the scoped paragraphs -- which is exactly the SPLIT case.
+      return row({
+        ...common,
+        class: CLASSES.KEEP_UNTIL_UPSTREAMED,
+        upstream_candidate_text: overrideText,
+        note: `SPLIT: unconditional prose differs from source and is markup-free, but ${scopedCount} audience-scoped paragraph(s) must stay in the override. Keep it until the prose ships.`
+      })
+    }
     return row({
       ...common,
       class: CLASSES.UPSTREAMABLE,
@@ -321,6 +478,20 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
   }
 
   const stripped = stripDocsMarkup(overrideText)
+  // An include-only (or otherwise entirely-markup) description strips to
+  // nothing. Without this the SPLIT branch below would publish an empty
+  // upstream_candidate_text, which the upstream workflow selects (its
+  // filter matches on class and a SPLIT note, not on the text being
+  // non-empty) and would hand the model an empty string to write into a
+  // source description -- blanking it. The same failure the
+  // all-scoped-paragraphs guard above exists to prevent for the array form.
+  if (stripped.trim().length === 0) {
+    return row({
+      ...common,
+      class: CLASSES.REVIEW,
+      note: `Stripping docs-only markup (${markupKinds.join(', ')}) leaves no prose at all, so there is nothing to upstream. Decide whether the source needs a real description written for it.`
+    })
+  }
   if (normalizeText(stripped) === sourceText) {
     return row({
       ...common,
@@ -530,6 +701,7 @@ function summarize (manifest) {
 module.exports = {
   CLASSES,
   PRODUCT_ATTR_ALLOWLIST,
+  unconditionalProse,
   KEEP_BY_DESIGN_FIELDS,
   TYPO_KEYS,
   normalizeText,

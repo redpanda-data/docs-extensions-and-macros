@@ -1243,15 +1243,43 @@ def _normalize_admonitions(admonitions):
                 continue
             if entry["title"]:
                 normalized_entry["title"] = entry["title"]
+        # The entry is rebuilt rather than copied, so every field the templates
+        # read has to be carried across explicitly. These two scope the whole
+        # admonition block to one docs build; setting both would wrap it in
+        # ifdef and ifndef at once so it rendered in neither, which the schema
+        # rejects and the generator drops with a warning.
+        if entry.get("cloud_only") is True:
+            normalized_entry["cloud_only"] = True
+        # self_hosted_only is the deprecated spelling of self_managed_only, read
+        # so an override written against the older schema still scopes, and
+        # normalized to the current name so only one spelling reaches the
+        # templates.
+        if entry.get("self_managed_only") is True or entry.get("self_hosted_only") is True:
+            normalized_entry["self_managed_only"] = True
         normalized.append(normalized_entry)
     return normalized
 
 
 def _apply_override_to_existing_property(property_dict, override, overrides_file_path):
     """Apply overrides to an existing property."""
-    # Apply description override
+    # Apply description override. Either a plain string or, when a paragraph has
+    # to be scoped to one docs build, an array of paragraphs; the generator
+    # flattens the array into AsciiDoc so the audience conditional never has to
+    # be hand-written into the JSON string.
     if "description" in override:
         property_dict["description"] = override["description"]
+
+    # Declared links: {"<text in the prose>": "<target>"}. Carried through as
+    # data and turned into AsciiDoc by the generator, which is what keeps the
+    # description itself plain prose the overrides audit can compare to source.
+    if "links" in override:
+        property_dict["links"] = override["links"]
+
+    # Shared partials pulled into the property entry (the "internal use only"
+    # warning, the HTTP Proxy breaking-change notice). Carried as data so the
+    # description stays prose the overrides audit can compare against source.
+    if "includes" in override:
+        property_dict["includes"] = override["includes"]
     
     # Apply version override (introduced in version)
     if "version" in override:
@@ -1282,7 +1310,7 @@ def _apply_override_to_existing_property(property_dict, override, overrides_file
             logger.warning(f"related_topics for property must be an array")
 
     # Apply see_also override. Structural shape (plain string, or an object
-    # naming exactly one of cloud_only/self_hosted_only) is enforced by
+    # naming exactly one of cloud_only/self_managed_only) is enforced by
     # docs-data/property-overrides.schema.json via `doc-tools validate
     # property-overrides`, not here — this just passes the data through for
     # seeAlsoView.js to normalize at render time.

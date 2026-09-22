@@ -16,18 +16,44 @@ function sourceProp (fields = {}) {
     type: 'integer',
     default: 100,
     defined_in: 'src/v/config/configuration.cc',
+    // Every property the extractor finds a description for reports the line it
+    // sits on. Its absence is the signal that the source has no description
+    // slot at all, so the default has to carry it or every case here reads as
+    // that one.
+    line_start: 1000,
     ...fields
   }
 }
 
 describe('normalizeText', () => {
-  test('collapses whitespace runs and unwraps lines', () => {
-    expect(classify.normalizeText('One  two\nthree\n\n four ')).toBe('One two three four')
+  test('collapses horizontal whitespace runs per line, trims each line', () => {
+    expect(classify.normalizeText('One  two\nthree\n\n four ')).toBe('One two\nthree\n\nfour')
   })
 
   test('returns empty string for non-strings', () => {
     expect(classify.normalizeText(undefined)).toBe('')
     expect(classify.normalizeText(null)).toBe('')
+  })
+
+  test('collapses 3+ blank lines to one, but never removes a genuine paragraph break', () => {
+    expect(classify.normalizeText('a\n\n\n\nb')).toBe('a\n\nb')
+    expect(classify.normalizeText('a\n\nb')).toBe('a\n\nb')
+  })
+
+  test('does NOT unwrap a newline into a space', () => {
+    // The C++ source is one run-on sentence with no newlines at all. Source
+    // and an override that turns the same wording into a real bulleted list
+    // (fetch_read_strategy, live in the corpus) must NOT compare equal, or
+    // the retirement step deletes the override and replaces the rendered
+    // list with a run-on paragraph carrying literal `*` characters.
+    const override = 'Intro.\n\n* one\n* two'
+    const source = 'Intro. * one * two'
+    expect(classify.normalizeText(override)).not.toBe(classify.normalizeText(source))
+  })
+
+  test('still treats pure horizontal-whitespace differences as no-ops', () => {
+    expect(classify.normalizeText('a   b\n\nc')).toBe(classify.normalizeText('a b\n\nc'))
+    expect(classify.normalizeText('a  \nb')).toBe(classify.normalizeText('a\nb'))
   })
 })
 
@@ -108,18 +134,24 @@ describe('stripDocsMarkup', () => {
 })
 
 describe('contentHash', () => {
-  test('is stable across whitespace-only changes and unique per name and text', () => {
+  test('is stable across horizontal-whitespace-only changes and unique per name and text', () => {
+    // Same line structure both sides -- only the spacing within a line
+    // differs -- so this exercises horizontal collapsing, not the
+    // newline-preservation this file's normalizeText now depends on.
     const a = classify.contentHash('prop_a', 'Some  text\nhere.')
     expect(a).toMatch(/^[0-9a-f]{16}$/)
-    expect(classify.contentHash('prop_a', 'Some text here.')).toBe(a)
-    expect(classify.contentHash('prop_b', 'Some text here.')).not.toBe(a)
+    expect(classify.contentHash('prop_a', 'Some text\nhere.')).toBe(a)
+    expect(classify.contentHash('prop_b', 'Some text\nhere.')).not.toBe(a)
     expect(classify.contentHash('prop_a', 'Other text.')).not.toBe(a)
   })
 })
 
 describe('classifyDescription', () => {
   test('REDUNDANT when source matches after normalization', () => {
-    const override = { description: 'The  source\ndescription.' }
+    // Horizontal whitespace only: sourceProp()'s default description is a
+    // single line, so a genuine structural difference (a newline the source
+    // does not have) would no longer classify this REDUNDANT.
+    const override = { description: 'The  source description.' }
     const row = classify.classifyDescription('p', override, sourceProp())
     expect(row.class).toBe(CLASSES.REDUNDANT)
     expect(row.source_file).toBe('src/v/config/configuration.cc')
@@ -311,5 +343,268 @@ describe('audience prefixes never reach an upstream candidate', () => {
       { related_topics: ['self-managed-only:xref:manage:tiered.adoc[Tiered Storage]'] },
       source)
     expect(row.class).toBe(CLASSES.KEEP)
+  })
+})
+
+describe('declared links and audience-scoped descriptions', () => {
+  it('keeps a links override by design rather than calling it unrecognized', () => {
+    const row = classify.classifyField('p', 'links', { links: { '`x`': '#x' } }, sourceProp())
+    // Links are docs-site structure the C++ doc string cannot carry, same as
+    // related_topics. Before this they landed in the "unrecognized field"
+    // bucket: still KEEP, so the burn-down never deleted them, but the audit
+    // report gave the wrong reason.
+    expect(row.class).toBe(CLASSES.KEEP)
+    expect(row.note).not.toMatch(/Unrecognized/)
+  })
+
+  it('keeps see_also and admonitions by design too', () => {
+    for (const field of ['see_also', 'admonitions']) {
+      const row = classify.classifyField('p', field, { [field]: [] }, sourceProp())
+      expect(row.class).toBe(CLASSES.KEEP)
+      expect(row.note).not.toMatch(/Unrecognized/)
+    }
+  })
+
+  describe('unconditionalProse', () => {
+    it('returns a string description unchanged, so existing rows cannot shift', () => {
+      expect(classify.unconditionalProse('The source description.'))
+        .toEqual({ prose: 'The source description.', scoped: 0, scopedParagraphs: [] })
+    })
+
+    it('drops audience-scoped paragraphs and counts them', () => {
+      expect(classify.unconditionalProse(['One.', 'cloud-only: Cloud bit.', 'Two.']))
+        .toEqual({
+          prose: 'One.\n\nTwo.',
+          scoped: 1,
+          scopedParagraphs: ['cloud-only: Cloud bit.']
+        })
+    })
+
+    it('handles a description that is neither string nor array', () => {
+      expect(classify.unconditionalProse(undefined)).toEqual({ prose: '', scoped: 0, scopedParagraphs: [] })
+    })
+  })
+
+  it('treats an array description of only unconditional paragraphs like the string form', () => {
+    // Same wording, but the array form's blank-line paragraph break is a
+    // real structural difference from source's single run-on line --
+    // normalizeText no longer collapses a paragraph break to a space (see
+    // its own tests: doing that is what let fetch_read_strategy's real
+    // bulleted list classify REDUNDANT against a source that has no list at
+    // all), so this is UPSTREAMABLE, carrying the paragraph break with it.
+    const src = sourceProp({ description: 'One. Two.' })
+    const row = classify.classifyDescription('p', { description: ['One.', 'Two.'] }, src)
+    expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+    expect(row.upstream_candidate_text).toBe('One.\n\nTwo.')
+
+    // The equivalent STRING form, with no structural difference from
+    // source at all, is still REDUNDANT -- the "like the string form"
+    // comparison this test is named for.
+    const flatRow = classify.classifyDescription('p', { description: 'One. Two.' }, src)
+    expect(flatRow.class).toBe(CLASSES.REDUNDANT)
+  })
+
+  it('keeps an override whose prose matches source but which carries a scoped paragraph', () => {
+    const src = sourceProp({ description: 'The source description.' })
+    const row = classify.classifyDescription(
+      'p',
+      { description: ['The source description.', 'cloud-only: Cloud requires at least 3.'] },
+      src
+    )
+    // Retiring it would delete the scoped paragraph with it, because
+    // `description` replaces wholesale rather than merging.
+    expect(row.class).toBe(CLASSES.KEEP)
+    expect(row.note).toMatch(/1 audience-scoped paragraph/)
+    expect(row.upstream_candidate_text).toBeUndefined()
+    // Shown to a reviewer, never handed to the upstreaming workflow: the C++
+    // doc string is one string for every audience, so upstreaming a scoped
+    // paragraph leaks it to the wrong readers and duplicates it for the right
+    // ones, because the override keeps its copy.
+    expect(row.audience_scoped_text).toEqual(['cloud-only: Cloud requires at least 3.'])
+  })
+
+  it('splits when the prose is upstreamable but a scoped paragraph must stay', () => {
+    const src = sourceProp({ description: 'Terse source text.' })
+    const row = classify.classifyDescription(
+      'p',
+      { description: ['A fuller, better description.', 'cloud-only: Cloud requires at least 3.'] },
+      src
+    )
+    expect(row.class).toBe(CLASSES.KEEP_UNTIL_UPSTREAMED)
+    // The scoped paragraph must never reach the upstream candidate: the C++
+    // doc string has no audience.
+    expect(row.upstream_candidate_text).toBe('A fuller, better description.')
+    expect(row.upstream_candidate_text).not.toMatch(/Cloud requires/)
+    expect(row.upstream_candidate_text).not.toMatch(/cloud-only/)
+    expect(row.audience_scoped_text).toEqual(['cloud-only: Cloud requires at least 3.'])
+  })
+
+  it('still upstreams a markup-free array description with no scoped paragraphs', () => {
+    const src = sourceProp({ description: 'Terse source text.' })
+    const row = classify.classifyDescription('p', { description: ['A fuller description.'] }, src)
+    expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+    expect(row.upstream_candidate_text).toBe('A fuller description.')
+  })
+})
+
+describe('a source property with no description slot', () => {
+  it('is REVIEW, not UPSTREAMABLE, when the source has no line to edit', () => {
+    // The topic extractor reports a name constant and an empty description, so
+    // without this the audit proposes upstreaming prose into a header that has
+    // nowhere to put it. The upstreaming workflow would hand that to Claude.
+    const src = sourceProp({ description: '', defined_in: 'src/v/kafka/protocol/topic_properties.h' })
+    delete src.line_start
+    const row = classify.classifyDescription('cleanup.policy', { description: 'A real description.' }, src)
+
+    expect(row.class).toBe(CLASSES.REVIEW)
+    expect(row.note).toMatch(/carries no description for it/)
+    expect(row.note).toMatch(/topic_properties\.h/)
+    expect(row.upstream_candidate_text).toBeUndefined()
+  })
+
+  it('still upstreams when the source has a line, even if its description is empty', () => {
+    // An empty description in a file that does have a slot is a real gap worth
+    // filling, so that case must keep flowing to the upstreaming workflow.
+    const row = classify.classifyDescription(
+      'a_cluster_property',
+      { description: 'A real description.' },
+      sourceProp({ description: '', line_start: 1038, defined_in: 'src/v/config/configuration.cc' })
+    )
+    expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+    expect(row.upstream_candidate_text).toBe('A real description.')
+  })
+
+  it('leaves a missing property on the existing REVIEW path', () => {
+    const row = classify.classifyDescription('gone', { description: 'x' }, null)
+    expect(row.class).toBe(CLASSES.REVIEW)
+    expect(row.note).toMatch(/not present in extracted source JSON/)
+  })
+})
+
+describe('a description with no unconditional prose never produces a candidate', () => {
+  // A description made entirely of audience-scoped paragraphs has no
+  // unconditional prose, so the candidate text was the empty string. That fell
+  // through to the SPLIT branch, and the upstream workflow's filter selects
+  // SPLIT rows, so the model would have been handed an empty string to write
+  // into an engineering doc string, blanking a published description.
+  const sourceProp = {
+    defined_in: 'src/v/config/configuration.cc',
+    line_start: 100,
+    description: 'Source prose.'
+  }
+
+  it.each([
+    ['every paragraph scoped', ['cloud-only: Cloud only.', 'self-managed-only: Self-Managed only.']],
+    ['a single scoped paragraph', ['cloud-only: Cloud only.']],
+    ['an empty string description', '']
+  ])('%s classifies REVIEW with no candidate', (_label, description) => {
+    const row = classify.classifyDescription('p', { description }, sourceProp)
+    expect(row.class).toBe('REVIEW')
+    expect(row.upstream_candidate_text).toBeUndefined()
+  })
+
+  it('and is therefore not selectable by the upstream workflow filter', () => {
+    const row = classify.classifyDescription('p', { description: ['cloud-only: Cloud only.'] }, sourceProp)
+    const selected = row.class === 'UPSTREAMABLE' ||
+      (row.class === 'KEEP_UNTIL_UPSTREAMED' && (row.note || '').startsWith('SPLIT:'))
+    expect(selected).toBe(false)
+  })
+
+  it('leaves a genuine SPLIT, which has real prose, still upstreamable', () => {
+    const row = classify.classifyDescription(
+      'p',
+      { description: ['Real unconditional prose here.', 'cloud-only: Cloud only.'] },
+      sourceProp
+    )
+    expect(row.class).toBe('KEEP_UNTIL_UPSTREAMED')
+    expect(row.note).toMatch(/^SPLIT:/)
+    expect(row.upstream_candidate_text).toBe('Real unconditional prose here.')
+  })
+})
+
+describe('audience markup written into a plain string never reaches upstream', () => {
+  // unconditionalProse only strips a cloud-only:/self-managed-only: paragraph
+  // out of the ARRAY form; a STRING description is returned verbatim. Without
+  // this guard the string fell through to stripDocsMarkup, which discards
+  // the audience information instead of refusing to guess at it.
+  it('a bare cloud-only: prefix on a string description is REVIEW, not the bare sentence upstreamed', () => {
+    const row = classify.classifyDescription(
+      'p',
+      { description: 'cloud-only: Cloud clusters require a replication factor of at least 3.' },
+      sourceProp({ description: 'Some other source prose.' })
+    )
+    expect(row.class).toBe(CLASSES.REVIEW)
+    expect(row.upstream_candidate_text).toBeUndefined()
+    expect(row.note).toMatch(/array form/)
+  })
+
+  it('a hand-written ifdef/ifndef pair on a string description is REVIEW, not both sentences merged', () => {
+    const row = classify.classifyDescription(
+      'p',
+      {
+        description:
+          'ifdef::env-cloud[]\nCloud sentence.\nendif::[]\nifndef::env-cloud[]\nSelf-Managed sentence.\nendif::[]'
+      },
+      sourceProp({ description: 'Some other source prose.' })
+    )
+    expect(row.class).toBe(CLASSES.REVIEW)
+    expect(row.upstream_candidate_text).toBeUndefined()
+  })
+
+  it('an include-only string description is REVIEW, not an empty candidate', () => {
+    const row = classify.classifyDescription(
+      'p',
+      { description: 'include::reference:partial$internal-use-property.adoc[]' },
+      sourceProp({ description: 'Some other source prose.' })
+    )
+    expect(row.class).toBe(CLASSES.REVIEW)
+    expect(row.upstream_candidate_text).toBeUndefined()
+    expect(row.note).toMatch(/no prose at all/)
+  })
+
+  it('none of the three are selectable by the upstream workflow filter', () => {
+    const selectable = (row) =>
+      row.class === CLASSES.UPSTREAMABLE ||
+      (row.class === CLASSES.KEEP_UNTIL_UPSTREAMED && (row.note || '').startsWith('SPLIT:'))
+
+    for (const description of [
+      'cloud-only: Cloud clusters require a replication factor of at least 3.',
+      'ifdef::env-cloud[]\nCloud sentence.\nendif::[]\nifndef::env-cloud[]\nSM sentence.\nendif::[]',
+      'include::reference:partial$internal-use-property.adoc[]'
+    ]) {
+      const row = classify.classifyDescription('p', { description }, sourceProp({ description: 'Other.' }))
+      expect(selectable(row)).toBe(false)
+    }
+  })
+
+  it('a genuinely markup-free string description is unaffected', () => {
+    const row = classify.classifyDescription('p', { description: 'Genuinely new prose.' }, sourceProp({ description: 'Other.' }))
+    expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+    expect(row.upstream_candidate_text).toBe('Genuinely new prose.')
+  })
+
+  it('a legitimate array-form SPLIT still upstreams its real unconditional prose', () => {
+    const row = classify.classifyDescription(
+      'p',
+      { description: ['Real new prose.', 'cloud-only: Cloud sentence.'] },
+      sourceProp({ description: 'Other.' })
+    )
+    expect(row.class).toBe(CLASSES.KEEP_UNTIL_UPSTREAMED)
+    expect(row.note).toMatch(/^SPLIT:/)
+    expect(row.upstream_candidate_text).toBe('Real new prose.')
+  })
+})
+
+describe('markup that strips to nothing is REVIEW, not an empty candidate', () => {
+  it('an xref that is the entire description strips to an empty string and is REVIEW', () => {
+    // xref: is stripped to its label or a derived segment, not removed
+    // outright, so build the case with a construct that DOES strip to
+    // nothing on its own: an include directive with no other prose.
+    const row = classify.classifyDescription(
+      'p',
+      { description: 'include::reference:partial$x.adoc[]' },
+      sourceProp({ description: 'Other.' })
+    )
+    expect(row.class).toBe(CLASSES.REVIEW)
   })
 })

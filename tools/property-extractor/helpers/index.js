@@ -17,6 +17,9 @@ module.exports = {
   normalizePropertyAnchors: require('./normalizePropertyAnchors.js'),
   canonicalizePropertyXrefs: require('./canonicalizePropertyXrefs.js'),
   seeAlsoView: require('./seeAlsoView.js'),
+  audienceScope: require('./audienceScope.js'),
+  applyPropertyLinks: require('./applyPropertyLinks.js'),
+  findAudienceScopeProblems: require('./findAudienceScopeProblems.js'),
   capitalize: require('./capitalize.js'),
   length: require('./length.js'),
 };

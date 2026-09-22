@@ -489,7 +489,7 @@ Copy this package's docs-data/*.schema.json files into a content repo's own docs
 
 *Why use it:*
 
-Nothing keeps a content repo's schema copy in sync with this package's copy today, in either direction. A content repo's copy can legitimately be ahead of this package's (confirmed happening in practice: the docs repo's rpk-overrides.schema.json documents a real, working `asPartial` override field that this package's own copy is missing) — overwriting it in that case would delete real, correct documentation, not fix drift. This only overwrites when this package's copy is a strict superset of the destination; otherwise it reports which keys only the destination has and leaves the file alone (status 'diverged') unless --force is passed. --check never writes, for a CI gate.
+Nothing keeps a content repo's schema copy in sync with this package's copy today, in either direction. A content repo's copy can legitimately be ahead of this package's (confirmed happening in practice: the docs repo's rpk-overrides.schema.json documents a real, working `asPartial` override field that this package's own copy is missing) — overwriting it in that case would delete real, correct documentation, not fix drift. This only overwrites when this package's copy is a strict superset of the destination; otherwise it reports which keys only the destination has and leaves the file alone (status 'diverged') unless --force is passed. --check never writes, for a CI gate. A schema is also only synced into a repo that is plausibly its home: one that already has the schema, or that has the *.json the schema documents. Anything else is reported as 'not for this repo' and skipped, and never counts as drift. kapa-source-groups.json is the reason: it is generated into this package and read from node_modules by an Antora extension, so it never lives in a content repo at all, and planting its schema in redpanda-data/docs would leave a file describing data that repo will never have, with --check reporting its absence as drift on every run afterwards.
 
 *Usage:*
 
@@ -1922,7 +1922,7 @@ with a local path option.
 
 === validate property-overrides
 
-Validates docs-data/property-overrides.json against its JSON Schema: unknown keys (a typo that would otherwise be silently dropped by the extractor), and the see_also shape (a plain string, or an object naming exactly one of cloud_only/self_hosted_only).
+Validates docs-data/property-overrides.json against its JSON Schema: unknown keys (a typo that would otherwise be silently dropped by the extractor), and the see_also shape (a plain string, or an object naming exactly one of cloud_only/self_managed_only).
 
 *Why use it:*
 

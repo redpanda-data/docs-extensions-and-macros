@@ -558,7 +558,15 @@ programCli
  * copy is a strict superset of the destination; otherwise it reports which
  * keys only the destination has and leaves the file alone (status
  * 'diverged') unless --force is passed. --check never writes, for a CI
- * gate.
+ * gate. A schema is also only synced into a repo that is plausibly its
+ * home: one that already has the schema, or that has the *.json the schema
+ * documents. Anything else is reported as 'not for this repo' and skipped,
+ * and never counts as drift. kapa-source-groups.json is the reason: it is
+ * generated into this package and read from node_modules by an Antora
+ * extension, so it never lives in a content repo at all, and planting its
+ * schema in redpanda-data/docs would leave a file describing data that repo
+ * will never have, with --check reporting its absence as drift on every run
+ * afterwards.
  * @example
  * # Sync into ./docs-data (writes any missing or out-of-date schema)
  * npx doc-tools sync-schemas
@@ -604,8 +612,13 @@ programCli
           created: '+ created',
           updated: '↻ updated',
           diverged: options.force ? '↻ updated (forced)' : '⚠ diverged, left alone',
+          'not-applicable': '- not for this repo',
         }[status]
         console.log(`  ${label}  ${name}`)
+        if (status === 'not-applicable') {
+          // Said out loud, because a silently missing schema looks like a bug.
+          console.log(`      no ${name.replace(/\.schema\.json$/, '.json')} here, so this schema has no data file to document`)
+        }
         if (status === 'diverged' && !options.force) {
           hasUnresolvedDivergence = true
           for (const p of destOnlyPaths) console.log(`      only in the destination: ${p}`)
@@ -2630,7 +2643,7 @@ validation
  * Validates docs-data/property-overrides.json against its JSON Schema:
  * unknown keys (a typo that would otherwise be silently dropped by the
  * extractor), and the see_also shape (a plain string, or an object naming
- * exactly one of cloud_only/self_hosted_only).
+ * exactly one of cloud_only/self_managed_only).
  *
  * @why
  * property-overrides.json has no catch-all pass-through when an override
