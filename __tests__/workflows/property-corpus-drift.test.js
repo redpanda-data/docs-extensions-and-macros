@@ -17,6 +17,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
+const YAML = require('yaml');
 
 const repoRoot = path.join(__dirname, '..', '..');
 const SCRIPT_PATH = path.join(repoRoot, '.github', 'scripts', 'property-corpus-drift.sh');
@@ -241,5 +242,46 @@ describe('property-corpus-drift.yml', () => {
 
   it('passes the bot token, since the docs repo is private', () => {
     expect(workflow()).toMatch(/GH_TOKEN: \$\{\{ env\.ACTIONS_BOT_TOKEN \}\}/);
+  });
+
+  // A plain `github.event_name != 'pull_request'` guard, on its own, also
+  // admits workflow_dispatch on ANY branch -- and checkout below has no
+  // explicit ref, so it checks out whatever branch that dispatch selected.
+  // GitHub lets any user with write access dispatch a workflow against a
+  // branch they chose, so a contributor could edit this script or this
+  // workflow on their own branch, dispatch that branch, and receive the
+  // org-wide write-capable bot token running their own code.
+  describe('credentialed steps are restricted to the default branch, not just non-PR events', () => {
+    const doc = YAML.parse(workflow());
+    const steps = Object.values(doc.jobs)[0].steps;
+    const stepNamed = (name) => {
+      const step = steps.find((s) => s.name === name);
+      if (!step) throw new Error(`no step named ${name}`);
+      return step;
+    };
+
+    it.each([
+      'Configure AWS credentials',
+      'Get secrets from AWS Secrets Manager',
+      'Check corpus against the docs repo',
+    ])('%s runs only when github.ref is the default branch', (name) => {
+      expect(stepNamed(name).if).toBe("github.ref == 'refs/heads/main'");
+    });
+
+    it('the token-free fallback runs in every OTHER case, so nothing silently does no check at all', () => {
+      expect(stepNamed('Check the vendored corpus is well formed').if).toBe("github.ref != 'refs/heads/main'");
+    });
+
+    it('the two conditions are complementary across every real trigger shape', () => {
+      const credentialed = stepNamed('Configure AWS credentials').if;
+      const tokenFree = stepNamed('Check the vendored corpus is well formed').if;
+      const refs = ['refs/heads/main', 'refs/heads/some-feature-branch', 'refs/pull/123/merge'];
+      for (const ref of refs) {
+        // eslint-disable-next-line no-eval -- evaluating GitHub Actions'
+        // own expression syntax against a stand-in context, not user input.
+        const evalCond = (expr) => eval(expr.replace(/github\.ref/g, JSON.stringify(ref)));
+        expect(evalCond(credentialed)).toBe(!evalCond(tokenFree));
+      }
+    });
   });
 });
