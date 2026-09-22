@@ -290,18 +290,39 @@ function applyLinksToText(text, specs, propName, surface) {
     const paragraph = out.slice(start, end);
     let cloudVersion = paragraph;
     let selfManagedVersion = paragraph;
+    // Each branch's own protected ranges. Two specs sharing a SCOPE within
+    // one group both substitute into the SAME version string (two
+    // self-managed-only specs both edit selfManagedVersion), so the same
+    // substring-in-emitted-markup hazard the top-level pass guards against
+    // applies here too -- and it was not guarded here. "Tiered Storage" and
+    // "Tiered Storage v2" as two self-managed-only keys on one paragraph
+    // produced `xref:...[xref:...[Tiered Storage] v2]` with zero warnings.
+    const cloudRanges = [];
+    const selfManagedRanges = [];
+    const findUnprotectedIndexIn = (haystack, key, ranges) => {
+      let from = 0;
+      for (;;) {
+        const idx = haystack.indexOf(key, from);
+        if (idx === -1) return -1;
+        const overlapsMarkup = ranges.some((r) => idx < r.end && idx + key.length > r.start);
+        if (!overlapsMarkup) return idx;
+        from = idx + 1;
+      }
+    };
     for (const { spec } of group.items) {
       const link = renderLink(spec);
       if (spec.scope.cloudOnly) {
-        const idx = cloudVersion.indexOf(spec.key);
+        const idx = findUnprotectedIndexIn(cloudVersion, spec.key, cloudRanges);
         if (idx === -1) continue;
         cloudVersion = cloudVersion.slice(0, idx) + link + cloudVersion.slice(idx + spec.key.length);
+        cloudRanges.push({ start: idx, end: idx + link.length });
         // selfManagedVersion keeps the plain key text: correct, the link is
         // scoped away from that build.
       } else {
-        const idx = selfManagedVersion.indexOf(spec.key);
+        const idx = findUnprotectedIndexIn(selfManagedVersion, spec.key, selfManagedRanges);
         if (idx === -1) continue;
         selfManagedVersion = selfManagedVersion.slice(0, idx) + link + selfManagedVersion.slice(idx + spec.key.length);
+        selfManagedRanges.push({ start: idx, end: idx + link.length });
       }
       applied.push(spec.key);
     }

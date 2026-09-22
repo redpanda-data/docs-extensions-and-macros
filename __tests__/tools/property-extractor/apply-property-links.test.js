@@ -615,3 +615,73 @@ describe('applyPropertyLinks does not mutate a shared admonition object', () => 
     expect(sharedAdmonition.text).toBe('See `rpc_server` for details.')
   })
 })
+
+describe('the same substring-corruption hazard also applies inside a scoped paragraph group', () => {
+  // Found in review (Kat, PR 325): the top-level protectedRanges guard above
+  // only covers the unscoped pass and the step that LOCATES each scoped
+  // spec's first match. Once specs land in the same paragraph group, the
+  // per-branch substitution loop used a plain indexOf against cloudVersion/
+  // selfManagedVersion, with no equivalent guard -- so two SAME-SCOPE keys
+  // sharing a paragraph could still corrupt each other, exactly like the
+  // unscoped case above, just one loop further in.
+  const asciidoctor = require('@asciidoctor/core')()
+
+  it('does not nest an xref inside a sibling xref when both are scoped to the same audience', () => {
+    const props = corpus({
+      description: 'Topics on Tiered Storage v2 use a different path. Tiered Storage must be enabled first.',
+      links: {
+        'Tiered Storage': 'self-managed-only: xref:manage:tiered-storage.adoc',
+        'Tiered Storage v2': 'self-managed-only: xref:manage:tiered-storage.adoc#tiered-storage-versions'
+      }
+    })
+
+    const result = applyPropertyLinks(props)
+
+    expect(result.applied).toBe(2)
+    expect(result.warnings).toEqual([])
+    const description = props.subject.description
+    expect(description).not.toMatch(/xref:[^[\]]*\[[^\]]*xref:/)
+    expect(description).toContain('xref:manage:tiered-storage.adoc#tiered-storage-versions[Tiered Storage v2]')
+    expect(description).toContain('xref:manage:tiered-storage.adoc[Tiered Storage]')
+  })
+
+  it('renders both links correctly for the self-managed reader, and neither for Cloud', () => {
+    const props = corpus({
+      description: 'Topics on Tiered Storage v2 use a different path. Tiered Storage must be enabled first.',
+      links: {
+        'Tiered Storage': 'self-managed-only: xref:manage:tiered-storage.adoc',
+        'Tiered Storage v2': 'self-managed-only: xref:manage:tiered-storage.adoc#tiered-storage-versions'
+      }
+    })
+    applyPropertyLinks(props)
+    const description = props.subject.description
+
+    // Raw HTML, not stripped: the link target lives in the href attribute,
+    // which a tag-stripping helper (used elsewhere in this file to check
+    // visible TEXT) would remove along with the tag.
+    const selfManagedHtml = asciidoctor.convert(description, { safe: 'safe' })
+    const cloudHtml = asciidoctor.convert(description, { safe: 'safe', attributes: { 'env-cloud': '' } })
+
+    expect(selfManagedHtml).toContain('href="manage:tiered-storage.html"')
+    expect(selfManagedHtml).toContain('href="manage:tiered-storage.html#tiered-storage-versions"')
+    expect(cloudHtml).not.toContain('tiered-storage.html')
+    expect(cloudHtml).toContain('Tiered Storage v2')
+    expect(cloudHtml).toContain('Tiered Storage')
+  })
+
+  it('does not corrupt a prop macro inside a scoped group either', () => {
+    const props = corpus({
+      description: 'Set the cloud_storage_region before deploying, or the bucket by name.',
+      links: {
+        cloud_storage_region: 'self-managed-only: #hidden_target',
+        bucket: 'self-managed-only: #rpc_server'
+      }
+    }, { hidden_target: { name: 'hidden_target', config_scope: 'broker' } })
+
+    const result = applyPropertyLinks(props)
+
+    expect(result.applied).toBe(2)
+    const description = props.subject.description
+    expect(description).not.toMatch(/prop:\w+\[[^\]]*prop:/)
+  })
+})
