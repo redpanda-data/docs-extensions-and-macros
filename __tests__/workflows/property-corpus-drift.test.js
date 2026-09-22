@@ -106,8 +106,13 @@ function setLive ({ matching = true, dropEntries = 0, changeField = false, chang
   // own properties already carry exactly the kept fields.
   const attachment = { properties: JSON.parse(JSON.stringify(snapshot.properties)) };
   if (!matching && changeField) {
+    // cloud_supported, not description: description is deliberately not in
+    // the keep list (see the script), so perturbing it would prove nothing
+    // once that list is correct -- this needs a field the reduction actually
+    // keeps, to prove the reduction-based comparison catches ITS OWN
+    // invisible-to-a-count-check case, same as changeEntry does for overrides.
     const first = Object.keys(attachment.properties)[0];
-    attachment.properties[first].description = 'a description only the live repo has';
+    attachment.properties[first].cloud_supported = !attachment.properties[first].cloud_supported;
   }
 
   fs.writeFileSync(path.join(liveDir, 'property-overrides.json'), JSON.stringify(overrides));

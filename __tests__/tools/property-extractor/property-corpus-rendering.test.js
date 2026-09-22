@@ -271,15 +271,26 @@ describe('declared includes and glossary terms over the live corpus', () => {
 describe('declared links over the live corpus', () => {
   it('applies every declared link and leaves none unmatched', () => {
     const corpus = buildCorpus(OVERRIDES);
-    const declared = Object.values(OVERRIDES.properties)
-      .filter((o) => o.links)
-      .reduce((n, o) => n + Object.keys(o.links).length, 0);
+    // A links-only override (no description of its own) targets the
+    // property's real extracted description, which the snapshot deliberately
+    // excludes -- see the corpus refresh instructions in README.adoc, "a full
+    // copy would be 695 KB of text that rots." This harness has no ground
+    // truth for that case, so it is excluded from both the count and the
+    // unmatched assertion below: asserting on it would be testing this
+    // harness's own gap, not whether the real generator applies the link.
+    // The real generator always has the extracted description, so this never
+    // widens what actually ships unlinked.
+    const hasDescription = (name) => typeof corpus[name]?.description === 'string';
+    const declared = Object.entries(OVERRIDES.properties)
+      .filter(([name, o]) => o.links && hasDescription(name))
+      .reduce((n, [, o]) => n + Object.keys(o.links).length, 0);
 
     const result = applyPropertyLinks(corpus);
+    const unmatched = result.unmatched.filter(({ property }) => hasDescription(property));
 
     // A link key that matches no prose is silent link rot: the override looks
     // maintained and the rendered page has no link.
-    expect(result.unmatched).toEqual([]);
+    expect(unmatched).toEqual([]);
     // "First occurrence" is per surface, not per property, so a key naming a
     // property in both the description and an example bullet links in both.
     // That is what the pre-#1965 pages did: advertised_kafka_api carried the

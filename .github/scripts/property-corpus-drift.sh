@@ -134,7 +134,14 @@ else
     const [attachmentLive, corpusDir] = process.argv.slice(1);
     const read = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
 
-    const keep = ["name","config_scope","type","description","cloud_supported","cloud_editable",
+    // No "description": tools/property-extractor/README.adoc keeps the
+    // snapshot description-free on purpose ("a full copy would be 695 KB of
+    // text that rots"), so a keep list that includes it can never match a
+    // mirror refreshed by following that recipe. This is why: every real run
+    // before the tag-404 fix above hit that 404 and exited 2 before ever
+    // reaching this comparison, so a mismatched keep list here never once
+    // got exercised against live data.
+    const keep = ["name","config_scope","type","cloud_supported","cloud_editable",
                   "cloud_readonly","cloud_byoc_only","is_deprecated","nullable"];
     const liveProps = read(attachmentLive).properties || {};
     const derived = {};
