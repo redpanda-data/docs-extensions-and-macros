@@ -177,7 +177,9 @@ function renderStub({ title, file, description, includePrefix, attributes, hasMe
  * @param {string} params.navFile - Consumer nav.adoc path
  * @param {string} params.plugin - Plugin command name (e.g. ai)
  * @param {string} params.includePrefix - Antora resource prefix for includes
- * @param {Array<string>} [params.attributes] - Page attributes for new stubs
+ * @param {Array<string>} [params.attributes] - Page attributes for new stubs.
+ *   Defaults to none: a page's maturity is a documentation-team decision, so
+ *   a consumer that wants a label on new stubs passes it with --attribute.
  * @param {boolean} [params.dryRun]
  * @returns {Object} { created, deleted, keptNonStub, navUpdated, renameCandidates }
  */
@@ -187,7 +189,7 @@ function reconcileStubs({
   navFile,
   plugin,
   includePrefix,
-  attributes = [':page-preview: true'],
+  attributes = [],
   dryRun = false
 }) {
   const managedStubRe = new RegExp(`include::[^\\[]*(?:partial|page)\\$[^\\[]*rpk-${plugin}/([\\w.-]+\\.adoc)\\[`)
