@@ -109,16 +109,23 @@ describe('kapa drift: the workflow runs the script file', () => {
     expect(check.env.EVENT_NAME).toBe('${{ github.event_name }}');
   });
 
-  test('the bot token is fetched only for events that can file an issue', () => {
+  test('the bot token is fetched only on the default branch', () => {
     // A pull_request run exits before any gh call, and same-repo PRs execute
     // the PR branch's workflow file, so the org token must not be in that job.
+    //
+    // Restricted to github.ref, not just event_name: workflow_dispatch can be
+    // aimed at any branch a user with write access selects, and checkout has
+    // no explicit ref, so a plain "not pull_request" guard still handed the
+    // token to whatever kapa-source-groups-drift.sh a dispatched branch
+    // carried. github.ref is never refs/heads/main for a pull_request (its
+    // ref is the PR's head or merge ref), so this subsumes that exclusion too.
     const kapa = steps.find((st) => st.with && /sdlc\/prod\/github\/kapa/.test(st.with['secret-ids']));
     const bot = steps.find((st) => st.with && /actions_bot_token/.test(st.with['secret-ids']));
     expect(kapa).toBeDefined();
     expect(bot).toBeDefined();
     expect(kapa).not.toBe(bot);
     expect(kapa.if).toBeUndefined();
-    expect(String(bot.if)).toMatch(/github\.event_name != 'pull_request'/);
+    expect(String(bot.if)).toBe("github.ref == 'refs/heads/main'");
     expect(kapa.with['secret-ids']).not.toMatch(/actions_bot_token/);
   });
 
