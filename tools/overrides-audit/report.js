@@ -71,7 +71,12 @@ function buildUpstreamSection (candidates) {
     parts.push([
       heading(row.name),
       row.agent_reason,
-      'This PR ports that into the source description; once merged and released, the docs override becomes redundant and retires itself automatically.'
+      // A SPLIT row's override also carries audience-scoped paragraphs or
+      // docs-only markup that the candidate text leaves out, so porting the
+      // prose alone does not make the override redundant.
+      row.class === 'KEEP_UNTIL_UPSTREAMED'
+        ? 'This PR ports that into the source description. The docs override stays after it ships, because it also carries audience-scoped paragraphs or docs-only markup that source does not; that content needs handling separately before the override can retire.'
+        : 'This PR ports that into the source description; once merged and released, the docs override becomes redundant and retires itself automatically.'
     ].join('\n\n'))
   }
   return parts.join('\n\n')

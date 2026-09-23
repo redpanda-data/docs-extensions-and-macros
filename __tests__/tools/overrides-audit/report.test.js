@@ -60,6 +60,15 @@ describe('buildUpstreamSection', () => {
     expect(out).not.toContain('failed_prop')
     expect(out.toLowerCase()).toMatch(/nothing/)
   })
+
+  test('a SPLIT row says the override stays after the prose ships', () => {
+    const split = triaged({ name: 'split_prop', class: 'KEEP_UNTIL_UPSTREAMED', agent_verdict: 'UPSTREAM_OVERRIDE' })
+    const plain = triaged({ name: 'plain_prop', class: 'UPSTREAMABLE', agent_verdict: 'UPSTREAM_OVERRIDE' })
+    const splitOut = report.buildUpstreamSection([split])
+    expect(splitOut).toContain('The docs override stays after it ships')
+    expect(splitOut).not.toContain('retires itself automatically')
+    expect(report.buildUpstreamSection([plain])).toContain('retires itself automatically')
+  })
 })
 
 describe('buildRetirementSection', () => {
