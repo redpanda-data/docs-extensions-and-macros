@@ -147,9 +147,14 @@ exit 0`,
   })
 
   // A 404 right after this run's own publish is read-after-write lag, not
-  // absence: the registry sits behind a CDN, so trusting the first 404 here
-  // reproduces the exact silent-skip-with-green-run these tests exist to
-  // close, on the run that matters most (the one that just published).
+  // absence: trusting the first 404 here reproduces the exact
+  // silent-skip-with-green-run these tests exist to close, on the run that
+  // matters most (the one that just published). On v5.46.0 (2026-09-21) this
+  // lag ran 2-4 minutes on a real publish, which is why the budget below is
+  // 13 attempts (12 sleeps of 20s, covering the full 4-minute end of that
+  // range), not 3: the first shipped version of this retry only budgeted
+  // ~30s total, and the second only covered 3 minutes, each failing loudly
+  // on a version that had, in fact, published.
   const npmCountStub = (failCount) => `
 n=$(cat "$HOME/npm.count" 2>/dev/null || echo 0)
 n=$((n + 1))
@@ -171,14 +176,29 @@ exit 0`
     expect((r.all.match(/::warning::npm view attempt/g) || []).length).toBe(2)
   })
 
-  test("a 404 that persists across all retries after this run's own publish fails loudly, not a silent skip", () => {
+  test("a 404 that persists across all 13 retries after this run's own publish fails loudly, not a silent skip", () => {
     const r = execRun(step, {
       env: { ...env, PUBLISHED_THIS_RUN: 'patch' },
-      stubs: { ...stubs({ npmOut: '', npmExit: 0, releaseExists: false }), npm: npmCountStub(3) }
+      stubs: stubs({ npmOut: 'npm ERR! code E404', npmExit: 1, releaseExists: false })
     })
     expect(r.status).toBe(1)
     expect(created(r)).toBe(false)
+    expect((r.all.match(/::warning::npm view attempt/g) || []).length).toBe(13)
     expect(r.all).toMatch(/was just published by this run but never appeared on npm/)
+  })
+
+  test("a 404 that clears on attempt 13 of 13 after this run's own publish still gets tagged", () => {
+    // Recovery right at the last attempt, not with a margin to spare: this is
+    // what proves the loop actually reaches the full 4-minute end of the
+    // observed lag (12 sleeps of 20s) rather than giving up a minute short of
+    // it, the gap the previous 10-attempt/9-of-10 version of this test missed.
+    const r = execRun(step, {
+      env: { ...env, PUBLISHED_THIS_RUN: 'patch' },
+      stubs: { ...stubs({ npmOut: '', npmExit: 0, releaseExists: false }), npm: npmCountStub(12) }
+    })
+    expect(r.status).toBe(0)
+    expect(created(r)).toBe(true)
+    expect((r.all.match(/::warning::npm view attempt/g) || []).length).toBe(12)
   })
 
   test('without PUBLISHED_THIS_RUN, a 404 is still trusted immediately (no regression on reruns)', () => {
