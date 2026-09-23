@@ -2954,7 +2954,15 @@ overridesGroup
     const { triageCandidate } = require('../tools/overrides-audit/triage')
     try {
       const candidate = JSON.parse(fs.readFileSync(path.resolve(options.candidate), 'utf8'))
-      const rawResponse = fs.readFileSync(path.resolve(options.response), 'utf8')
+      // A triage call that failed before writing its output leaves no
+      // response file. Treat that as an empty response so it reaches the
+      // AMBIGUOUS fallback instead of failing the command.
+      let rawResponse = ''
+      try {
+        rawResponse = fs.readFileSync(path.resolve(options.response), 'utf8')
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err
+      }
       console.log(JSON.stringify(triageCandidate(candidate, rawResponse), null, 2))
     } catch (err) {
       fail(err.message)
