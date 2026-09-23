@@ -424,11 +424,17 @@ function normalizeIncludes(propName, raw, warnings) {
  *
  * Two separate reasons, and only the first was obvious. `cloud_supported: false`
  * says the control plane does not expose the property to customers. But
- * cloud-docs also publishes no broker properties page and no topic properties
- * page at all, so a link to any broker- or topic-scope property dangles there
- * however the install pack feels about it. That case cannot be read off
- * `cloud_supported`: cloud_config.py annotates cluster scope only and leaves the
- * field absent elsewhere, because "absent" means no opinion rather than false.
+ * cloud-docs also publishes no broker properties page at all, so a link to any
+ * broker-scope property dangles there however the install pack feels about it.
+ * That case cannot be read off `cloud_supported`: cloud_config.py annotates
+ * cluster scope only and leaves the field absent elsewhere, because "absent"
+ * means no opinion rather than false.
+ *
+ * Topic scope is not in that case. cloud-docs publishes a topic properties page
+ * that includes the docs topic-properties partial with the same tags as the docs
+ * page (every category, minus deprecated and exclude-from-docs), so a topic
+ * property missing from Cloud is missing from self-managed too, and
+ * `self-managed-only:` would only strip a working link.
  *
  * @param {Object} target - The property being linked to.
  * @returns {string|null} A short reason, or null when the target is reachable.
@@ -436,7 +442,6 @@ function normalizeIncludes(propName, raw, warnings) {
 function cloudUnreachable(target) {
   if (target.cloud_supported === false) return 'cloud_supported: false';
   if (target.config_scope === 'broker') return 'Cloud publishes no broker properties page';
-  if (target.config_scope === 'topic') return 'Cloud publishes no topic properties page';
   return null;
 }
 
