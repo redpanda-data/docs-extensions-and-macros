@@ -37,7 +37,7 @@
 #     id-token: write
 #   jobs:
 #     review:
-#       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/doc-strings-review.yml@<commit-sha>  # or @v<version>
+#       uses: redpanda-data/docs-extensions-and-macros/.github/workflows/doc-strings-review.yml@<commit-sha> # v<version>
 #       with:
 #         # Engineering repos: the bot token is not a GitHub secret, it lives in
 #         # Secrets Manager behind an OIDC role. Pass these three and the
@@ -58,14 +58,16 @@
 # have silently floated, and a merge here would change what runs there with no
 # review there.
 #
-# Prefer the commit SHA. publish-to-npm.yaml creates a `v<version>` tag and
-# GitHub release for every version that reaches npm, and `@v<version>` is
-# easier to read. But a tag is a movable pointer and no ruleset restricts `v*`
-# in this repository, so anyone with push access can re-point or delete one
-# with no review, where `main` requires a reviewed PR. That makes a tag pin
-# weaker than it looks, so pin the SHA the tag points at. Deliberate, not a
-# gap waiting on someone: the SHA is the recommendation, and `@v<version>` is
-# for callers who would rather read a version than a hash.
+# Prefer the commit SHA, annotated with its tag for a human to read. This
+# repo now tags every version that reaches npm, and a "Protect releases"
+# ruleset on `refs/tags/v*` blocks deletion, update, and non-fast-forward
+# on those tags with no bypass actors -- so an ordinary push can no longer
+# re-point one. But the ruleset is scoped to this one repository, so any
+# admin here can disable or edit it and then move a tag, with no review
+# on the caller's side; `main` requires a reviewed PR to change, and a
+# tag pin has no equivalent gate protecting the thing that protects it.
+# `@v<version>` remains available for a caller who accepts that gap for
+# readability.
 #
 # Use `pull_request`, not `pull_request_target`. On `pull_request_target`,
 # actions/checkout without an explicit ref checks out the BASE commit, so the
