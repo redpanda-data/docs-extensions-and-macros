@@ -53,6 +53,13 @@ describe('buildUpstreamSection', () => {
     expect(out).toContain('prop_b')
     expect(out).not.toContain('prop_c')
   })
+
+  test('excludes a triage_failed row even when its agent_verdict is UPSTREAM_OVERRIDE', () => {
+    const row = triaged({ name: 'failed_prop', agent_verdict: 'UPSTREAM_OVERRIDE', triage_failed: true })
+    const out = report.buildUpstreamSection([row])
+    expect(out).not.toContain('failed_prop')
+    expect(out.toLowerCase()).toMatch(/nothing/)
+  })
 })
 
 describe('buildRetirementSection', () => {
@@ -87,6 +94,13 @@ describe('buildRetirementSection', () => {
     expect(out).toContain('prop_a')
     expect(out).toContain('prop_b')
     expect(out).not.toContain('prop_c')
+  })
+
+  test('excludes a triage_failed row even when its agent_verdict is RETIRE_OVERRIDE', () => {
+    const row = triaged({ name: 'failed_prop', agent_verdict: 'RETIRE_OVERRIDE', triage_failed: true })
+    const out = report.buildRetirementSection([row])
+    expect(out).not.toContain('failed_prop')
+    expect(out.toLowerCase()).toMatch(/nothing/)
   })
 })
 

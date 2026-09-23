@@ -61,7 +61,7 @@ function nothingThisRun (noun) {
  * @returns {string} Markdown section, always non-empty.
  */
 function buildUpstreamSection (candidates) {
-  const rows = (candidates || []).filter((c) => c.agent_verdict === 'UPSTREAM_OVERRIDE')
+  const rows = (candidates || []).filter((c) => c.agent_verdict === 'UPSTREAM_OVERRIDE' && c.triage_failed !== true)
   if (rows.length === 0) return nothingThisRun('property descriptions to upstream')
 
   const parts = [
@@ -87,7 +87,7 @@ function buildUpstreamSection (candidates) {
  * @returns {string} Markdown section, always non-empty.
  */
 function buildRetirementSection (candidates) {
-  const rows = (candidates || []).filter((c) => c.agent_verdict === 'RETIRE_OVERRIDE')
+  const rows = (candidates || []).filter((c) => c.agent_verdict === 'RETIRE_OVERRIDE' && c.triage_failed !== true)
   if (rows.length === 0) return nothingThisRun('overrides to retire')
 
   const parts = [
