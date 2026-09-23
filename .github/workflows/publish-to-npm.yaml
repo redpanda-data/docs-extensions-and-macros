@@ -113,9 +113,11 @@ jobs:
           # (2026-09-21) `npm view` kept 404ing for 2-4 minutes after a publish
           # that had already succeeded (job output `type=minor`), and 3 short
           # retries failed loudly on a version that was, in fact, fine. That
-          # case gets a longer, fixed-interval budget instead.
+          # case gets a longer, fixed-interval budget instead: 13 attempts is
+          # 12 sleeps of 20s, so the loop covers the full 4-minute end of the
+          # observed range before giving up, not just the 2-minute end.
           if [ -n "${PUBLISHED_THIS_RUN:-}" ]; then
-            max_attempts=10
+            max_attempts=13
           else
             max_attempts=3
           fi
