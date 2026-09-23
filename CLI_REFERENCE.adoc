@@ -764,6 +764,7 @@ display help for command
 * `rpk-plugin-stubs` - Reconcile single-source stub pages and nav against the docs repo's rpk plugin partials. Run from the consumer repo root.
 * `helm-spec` - Generate AsciiDoc documentation for Helm charts. Requires either --tag or --branch for GitHub URLs.
 * `cloud-regions` - Generate Markdown table of cloud regions and tiers from GitHub YAML file
+* `redpanda-release-notes` - Generate a Self-Managed release-notes section from an rpchangelog release body
 * `crd-spec` - Generate Asciidoc documentation for Kubernetes CRD references. Requires either --tag or --branch.
 * `bundle-openapi` - Bundle Redpanda OpenAPI fragments for admin and connect APIs. Requires either --tag or --branch.
 * `update-connect-version` - Update the Redpanda Connect version in antora.yml
@@ -1523,6 +1524,62 @@ npx doc-tools generate cloud-regions --ref staging
 - GitHub token with access to redpanda-data/cloudv2-infra repository
 - Token is resolved from REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, GH_TOKEN, or GIT_CREDENTIALS, in that priority order (an API call, so the git credential is the last resort)
 - Internet connection to access GitHub API
+
+=== generate redpanda-release-notes
+
+Converts a Self-Managed rpchangelog release body into a candidate AsciiDoc section and inserts it into the Redpanda Release Notes page, newest-first. Applies the mechanical guards: GA tags only (a prerelease is a no-op), the `:earliest-tracked-version:` floor, and idempotency (an already-present version is a no-op). The section carries de-noised source prose as plain bullets — it is a CANDIDATE for the curation step that rewrites voice, adds `Area::` labels, normalizes units, and phrases CVEs.
+
+*Why use it:*
+
+Release notes are the one reference surface whose source of truth is engineer-authored prose rather than code, so the deterministic part (parsing, de-noising, de-duplicating backports, ordering, insertion) is split from the editorial part. This command is the deterministic half; it is unit-tested and makes no editorial change.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate redpanda-release-notes [options]
+----
+
+*Options:*
+
+`--tag <tag>`::
+GA release tag, such as v26.2.3
+
+`--date <date>`::
+Authored release date as YYYY-MM-DD (confirmed on the PR)
+
+`--body <file>`::
+Path to the rpchangelog release body markdown (relative to repo root, must stay inside the repository)
+
+`--page <file>`::
+Target release-notes page (relative to repo root, must stay inside the repository) (default: "modules/reference/pages/releases/redpanda.adoc")
+
+`--section-only`::
+Print only the candidate section rather than the full page
+
+`--dry-run`::
+Print output to stdout instead of writing the page
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+# Preview just the candidate section from a saved release body
+npx doc-tools generate redpanda-release-notes \
+  --tag v26.2.3 --date 2026-09-15 --body /tmp/v26.2.3-body.md --section-only --dry-run
+
+# Insert the section into the page
+npx doc-tools generate redpanda-release-notes \
+  --tag v26.2.3 --date 2026-09-15 --body /tmp/v26.2.3-body.md
+----
+
+*Requirements:*
+
+- A release body file passed with --body. Fetching the body from the private
+  streaming-enterprise release is wired by the docs-repo workflow, not here.
 
 === generate crd-spec
 

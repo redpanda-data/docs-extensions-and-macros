@@ -2002,6 +2002,93 @@ automation
   })
 
 /**
+ * generate redpanda-release-notes
+ *
+ * @description
+ * Converts a Self-Managed rpchangelog release body into a candidate AsciiDoc
+ * section and inserts it into the Redpanda Release Notes page, newest-first.
+ * Applies the mechanical guards: GA tags only (a prerelease is a no-op), the
+ * `:earliest-tracked-version:` floor, and idempotency (an already-present
+ * version is a no-op). The section carries de-noised source prose as plain
+ * bullets — it is a CANDIDATE for the curation step that rewrites voice, adds
+ * `Area::` labels, normalizes units, and phrases CVEs.
+ *
+ * @why
+ * Release notes are the one reference surface whose source of truth is
+ * engineer-authored prose rather than code, so the deterministic part
+ * (parsing, de-noising, de-duplicating backports, ordering, insertion) is
+ * split from the editorial part. This command is the deterministic half; it is
+ * unit-tested and makes no editorial change.
+ *
+ * @example
+ * # Preview just the candidate section from a saved release body
+ * npx doc-tools generate redpanda-release-notes \
+ *   --tag v26.2.3 --date 2026-09-15 --body /tmp/v26.2.3-body.md --section-only --dry-run
+ *
+ * # Insert the section into the page
+ * npx doc-tools generate redpanda-release-notes \
+ *   --tag v26.2.3 --date 2026-09-15 --body /tmp/v26.2.3-body.md
+ *
+ * @requirements
+ * - A release body file passed with --body. Fetching the body from the private
+ *   streaming-enterprise release is wired by the docs-repo workflow, not here.
+ */
+automation
+  .command('redpanda-release-notes')
+  .description('Generate a Self-Managed release-notes section from an rpchangelog release body')
+  .requiredOption('--tag <tag>', 'GA release tag, such as v26.2.3')
+  .requiredOption('--date <date>', 'Authored release date as YYYY-MM-DD (confirmed on the PR)')
+  .requiredOption('--body <file>', 'Path to the rpchangelog release body markdown (relative to repo root, must stay inside the repository)')
+  .option('--page <file>', 'Target release-notes page (relative to repo root, must stay inside the repository)', 'modules/reference/pages/releases/redpanda.adoc')
+  .option('--section-only', 'Print only the candidate section rather than the full page')
+  .option('--dry-run', 'Print output to stdout instead of writing the page')
+  .action(async (options) => {
+    const { generateReleaseNotes } = require('../tools/redpanda-release-notes/generate-release-notes.js')
+    try {
+      const repoRoot = findRepoRoot()
+      const bodyPath = resolveInsideRepo(repoRoot, options.body, '--body')
+      const pagePath = resolveInsideRepo(repoRoot, options.page, '--page')
+      if (!fs.existsSync(bodyPath)) {
+        throw new Error(`Release body not found: ${bodyPath}`)
+      }
+      if (!fs.existsSync(pagePath)) {
+        throw new Error(`Release-notes page not found: ${pagePath}`)
+      }
+      const body = fs.readFileSync(bodyPath, 'utf8')
+      const pageContent = fs.readFileSync(pagePath, 'utf8')
+      const result = generateReleaseNotes({ body, tag: options.tag, date: options.date, pageContent })
+
+      if (result.status === 'skipped') {
+        // A guard miss is a clean no-op, not an error: the workflow runs this on
+        // every release and most runs have nothing to add.
+        console.log(`[release-notes] Skipped: ${result.reason}`)
+        return
+      }
+
+      if (options.sectionOnly) {
+        if (options.dryRun) {
+          process.stdout.write(result.section)
+          console.log(`\nDone: (dry-run) candidate section for ${options.tag} printed to stdout.`)
+        } else {
+          console.log(result.section)
+        }
+        return
+      }
+
+      if (options.dryRun) {
+        process.stdout.write(result.content)
+        console.log(`\nDone: (dry-run) updated page for ${options.tag} printed to stdout.`)
+      } else {
+        fs.writeFileSync(pagePath, result.content, 'utf8')
+        console.log(`Done: Inserted the ${options.tag} section into ${pagePath}`)
+      }
+    } catch (err) {
+      console.error(`Error: Failed to generate release notes: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
  * generate crd-spec
  *
  * @description
