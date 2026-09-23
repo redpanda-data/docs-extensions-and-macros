@@ -95,8 +95,26 @@ describe('path -> surface routing', () => {
     expect(routeFile('charts/redpanda/chart/values.yaml')).toBe('helm')
     expect(routeFile('operator/api/redpanda/v1alpha2/redpanda_types.go')).toBe('crd')
     expect(routeFile('internal/impl/kafka/input.go')).toBe('connect')
-    expect(routeFile('src/v/raft/consensus.cc')).toBeNull()
     expect(routeFile('README.md')).toBeNull()
+  })
+
+  test('metrics route by content, not file name', () => {
+    // Metrics registered outside *probe.cc files used to route nowhere, so a
+    // bad description in any of these reported zero declarations.
+    for (const file of [
+      'src/v/raft/consensus.cc',
+      'src/v/cluster/rm_stm.cc',
+      'src/v/net/probes.cc',
+      'src/v/kafka/server/kafka_probe.h'
+    ]) {
+      expect(routeFile(file)).toBe('metrics')
+    }
+    // Test sources stay out, as in the whole-repo scan, and config/ is
+    // still properties.
+    expect(routeFile('src/v/raft/tests/consensus_test.cc')).toBeNull()
+    expect(routeFile('src/v/cluster/test/fixture.h')).toBeNull()
+    expect(routeFile('src/v/config/node_config.cc')).toBe('properties')
+    expect(routeFile('src/v/raft/BUILD')).toBeNull()
   })
 
   test('classifyDiff groups changed files by surface', () => {

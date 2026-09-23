@@ -228,18 +228,18 @@ function removedFilesFor (declarations) {
 }
 
 /**
- * Materialize the merge-base version of the directories holding `files`
- * into a scratch tree, so a surface extractor can read the pre-image. Whole
- * directories rather than single files: the properties extractor pairs
- * each .cc with its .h.
+ * Materialize the merge-base version of `files` into a scratch tree, so a
+ * surface extractor can read the pre-image. A surface that declares
+ * baseScope 'directory' gets the whole directories instead: the properties
+ * extractor pairs each .cc with its .h.
  */
-function materializeBase (repoPath, diffBase, files) {
+function materializeBase (repoPath, diffBase, files, scope = 'file') {
   const mb = spawnSync('git', ['merge-base', diffBase, 'HEAD'], { cwd: repoPath, encoding: 'utf8' })
   if (mb.status !== 0) throw new Error(`git merge-base ${diffBase} HEAD failed: ${mb.stderr}`)
   const base = mb.stdout.trim()
-  const dirs = [...new Set(files.map((f) => path.dirname(f)))]
+  const paths = scope === 'directory' ? [...new Set(files.map((f) => path.dirname(f)))] : files
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-base-'))
-  const archive = spawnSync('git', ['archive', '--format=tar', base, '--', ...dirs], { cwd: repoPath, maxBuffer: 1024 * 1024 * 1024 })
+  const archive = spawnSync('git', ['archive', '--format=tar', base, '--', ...paths], { cwd: repoPath, maxBuffer: 1024 * 1024 * 1024 })
   if (archive.status !== 0) {
     fs.rmSync(scratch, { recursive: true, force: true })
     throw new Error(`git archive ${base} failed: ${archive.stderr}`)
@@ -289,7 +289,7 @@ function collectRemovals ({ repoPath, diffBase, removed, surfaces, requested, he
 
     let scratch = null
     try {
-      scratch = materializeBase(repoPath, diffBase, [...files.keys()])
+      scratch = materializeBase(repoPath, diffBase, [...files.keys()], surface.baseScope)
       log(`[${surfaceName}] ${files.size} file(s) lost lines; extracting declarations at the merge base...`)
       const baseDecls = surface.extract({ repo: scratch, files: new Set(files.keys()), log })
       const headNames = new Set((headBySurface[surfaceName] ||
