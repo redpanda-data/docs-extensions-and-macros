@@ -1249,7 +1249,21 @@ DOCS=../docs   # path to your docs repo checkout
 git -C "$DOCS" show origin/main:docs-data/property-overrides.json \
   > __tests__/docs-data/property-overrides.json
 
-git -C "$DOCS" show origin/main:modules/reference/attachments/redpanda-properties-v26.2.2.json \
+# docs' own regen renames this file forward on every release (see
+# property-corpus-drift.sh's header), so there is no fixed filename to
+# git-show -- a tag pinned here today 404s the moment docs regenerates again.
+# Discover the tag docs main is actually on: the highest version among
+# whatever is currently in modules/reference/attachments/. An old RC/beta
+# cycle's last file, if one is still sitting there, sorts lower and is
+# skipped -- see the property-extractor helpers for why more than one file
+# can exist at once.
+TAG="$(git -C "$DOCS" ls-tree origin/main --name-only -- modules/reference/attachments/ \
+  | grep -oE 'redpanda-properties-(v[0-9]+\.[0-9]+\.[0-9]+[^.]*)\.json' \
+  | sed -E 's/redpanda-properties-(.*)\.json/\1/' \
+  | sort -V | tail -1)"
+echo "Refreshing against $TAG"
+
+git -C "$DOCS" show "origin/main:modules/reference/attachments/redpanda-properties-${TAG}.json" \
   | node -e '
     const fs = require("fs");
     const src = JSON.parse(fs.readFileSync(0, "utf8"));
@@ -1261,8 +1275,9 @@ git -C "$DOCS" show origin/main:modules/reference/attachments/redpanda-propertie
     }
     const out = JSON.parse(fs.readFileSync("__tests__/docs-data/property-snapshot.json", "utf8"));
     out.properties = properties;
-    fs.writeFileSync("__tests__/docs-data/property-snapshot.json", JSON.stringify(out, null, 1));
-  '
+    out.source_tag = process.argv[1];
+    fs.writeFileSync("__tests__/docs-data/property-snapshot.json", JSON.stringify(out, null, 1) + "\n");
+  ' "$TAG"
 ----
 
 The `docs` repo fails its own CI when the overrides mirror drifts, following the

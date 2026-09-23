@@ -21,11 +21,7 @@
         "* `<external-broker-hostname>`: The externally accessible hostname or IP address that clients use to connect to this broker",
         "* `<admin-api-port>`: The port number for the Admin API endpoint"
       ],
-      "description": "Network address for the Admin API server.",
-      "links": {
-        "`admin_api_tls`": "#admin_api_tls",
-        "Admin API": "glossterm"
-      },
+      "description": "Network address for the glossterm:Admin API[] server.",
       "config_scope": "broker",
       "category": "redpanda"
     },
@@ -55,16 +51,10 @@
         "* `<path-to-truststore-file>`: Full path to the Certificate Authority file"
       ],
       "config_scope": "broker",
-      "category": "redpanda",
-      "links": {
-        "`admin`": "#admin"
-      }
+      "category": "redpanda"
     },
     "advertised_kafka_api": {
       "description": "Address of the Kafka API published to the clients. If not set, the `kafka_api` broker property is used. When behind a load balancer or in containerized environments, this should be the externally-accessible address that clients use to connect.",
-      "links": {
-        "`kafka_api`": "#kafka_api"
-      },
       "example": [
         "[,yaml]",
         "----",
@@ -86,14 +76,10 @@
     },
     "advertised_pandaproxy_api": {
       "config_scope": "broker",
-      "category": "pandaproxy",
-      "description": "Network address for the HTTP Proxy API server to publish to clients."
+      "category": "pandaproxy"
     },
     "advertised_rpc_api": {
       "description": "Address of RPC endpoint published to other cluster members. If not set, the `rpc_server` broker property is used. This should be the address other brokers can use to communicate with this broker.",
-      "links": {
-        "`rpc_server`": "#rpc_server"
-      },
       "example": [
         "[,yaml]",
         "----",
@@ -112,7 +98,6 @@
       "category": "redpanda"
     },
     "aggregate_metrics": {
-      "description": "Enable aggregation of metrics returned by the `/metrics` endpoint. Aggregation can simplify monitoring by providing summarized data instead of raw, per-instance metrics. Metric aggregation is performed by summing the values of samples by labels and is done when it makes sense by the shard and/or partition labels.",
       "related_topics": [
         "xref:reference:internal-metrics-reference.adoc[`/metrics`]"
       ],
@@ -128,7 +113,6 @@
       "config_scope": "cluster"
     },
     "audit_log_num_partitions": {
-      "description": "Defines the number of partitions used by a newly-created audit topic. This configuration applies only to the audit log topic and may be different from the cluster or other topic configurations. This cannot be altered for existing audit log topics.",
       "config_scope": "cluster"
     },
     "audit_use_rpc": {
@@ -136,22 +120,25 @@
       "config_scope": "cluster"
     },
     "auto_create_topics_enabled": {
-      "description": "Allow automatic topic creation. To prevent excess topics, this property is not supported on Redpanda Cloud BYOC and Dedicated clusters. You should explicitly manage topic creation for these Redpanda Cloud clusters.\n\nIf you produce to a topic that doesn't exist, the topic will be created with defaults if this property is enabled.",
-      "config_scope": "cluster"
+      "config_scope": "cluster",
+      "description": "Allow automatic topic creation. To prevent excess topics, this property is not supported on Redpanda Cloud BYOC and Dedicated clusters. You should explicitly manage topic creation for these Redpanda Cloud clusters.\n\nIf you produce to a topic that doesn't exist, the topic will be created with defaults if this property is enabled."
     },
     "broker_tls": {
       "config_scope": "broker",
-      "category": "pandaproxy-client",
-      "description": "TLS configuration for the Kafka API servers to which the HTTP Proxy client should connect."
+      "category": "pandaproxy-client"
     },
     "brokers": {
       "config_scope": "broker",
-      "category": "pandaproxy-client",
-      "description": "Network addresses of the Kafka API servers to which the HTTP Proxy client should connect."
+      "category": "pandaproxy-client"
     },
     "cleanup.policy": {
-      "description": "The cleanup policy to apply for log segments of a topic.\nWhen `cleanup.policy` is set, it overrides the cluster property `log_cleanup_policy` for the topic.\n\n**Values**:\n\n- `delete` - Deletes data according to size-based or time-based retention limits, or both.\n- `compact` - Deletes data according to a key-based retention policy, discarding all but the latest value for each key.\n- `compact,delete` - The latest values are kept for each key, while the remaining data is deleted according to retention limits.",
-      "accepted_values": ["none", "delete", "compact", "compact,delete"],
+      "description": "The cleanup policy to apply for log segments of a topic.\nWhen `cleanup.policy` is set, it overrides the cluster property `log_cleanup_policy` for the topic.\n\n**Values**:\n\n- `none` - No cleanup runs. Segments are neither deleted by retention limits nor compacted, so data is retained until you change the policy or delete the topic.\n- `delete` - Deletes data according to size-based or time-based retention limits, or both.\n- `compact` - Deletes data according to a key-based retention policy, discarding all but the latest value for each key.\n- `compact,delete` - The latest values are kept for each key, while the remaining data is deleted according to retention limits.",
+      "accepted_values": [
+        "none",
+        "delete",
+        "compact",
+        "compact,delete"
+      ],
       "related_topics": [
         "self-managed-only: xref:reference:properties/cluster-properties.adoc#log_cleanup_policy[`log_cleanup_policy`]",
         "self-managed-only: xref:manage:cluster-maintenance/disk-utilization.adoc#configure-segment-size[Configure segment size]",
@@ -161,16 +148,13 @@
     },
     "client_cache_max_size": {
       "config_scope": "broker",
-      "category": "pandaproxy",
-      "description": "The maximum number of Kafka client connections that Redpanda can cache in the LRU (least recently used) cache. The LRU cache helps optimize resource utilization by keeping the most recently used clients in memory, facilitating quicker reconnections for frequent clients while limiting memory usage."
+      "category": "pandaproxy"
     },
     "client_identifier": {
       "config_scope": "broker",
-      "category": "pandaproxy-client",
-      "description": "Custom identifier to include in the Kafka request header for the HTTP Proxy client. This identifier can help debug or monitor client activities."
+      "category": "pandaproxy-client"
     },
     "client_keep_alive": {
-      "description": "Time, in milliseconds, that an idle client connection may remain open to the HTTP Proxy API.",
       "config_scope": "broker",
       "category": "pandaproxy"
     },
@@ -181,70 +165,41 @@
       "version": "v26.2.1"
     },
     "cloud_storage_access_key": {
-      "description": "AWS or GCP access key. This access key is part of the credentials that Redpanda requires to authenticate with object storage services for Tiered Storage. This access key is used with the `cloud_storage_secret_key` to form the complete credentials required for authentication.\nTo authenticate using IAM roles, see `cloud_storage_credentials_source`.",
-      "links": {
-        "`cloud_storage_secret_key`": "#cloud_storage_secret_key",
-        "`cloud_storage_credentials_source`": "#cloud_storage_credentials_source"
-      }
+      "description": "AWS or GCP access key. This access key is part of the credentials that Redpanda requires to authenticate with object storage services for Tiered Storage. This access key is used with the `cloud_storage_secret_key` to form the complete credentials required for authentication.\nTo authenticate using IAM roles, see `cloud_storage_credentials_source`."
     },
     "cloud_storage_api_endpoint": {
-      "description": "Optional API endpoint. The only instance in which you must set this value is when using a custom domain with your object storage service.\n\n- AWS: If not set, this is automatically generated using region and bucket. Otherwise, this uses the value assigned.\n- GCP: If not set, this is automatically generated using `storage.googleapis.com` and bucket.\n- Azure: If not set, this is automatically generated using `blob.core.windows.net` and `cloud_storage_azure_storage_account`. If you have enabled hierarchical namespaces for your storage account and use a custom endpoint, use `cloud_storage_azure_adls_endpoint`.",
-      "links": {
-        "region": "#cloud_storage_region",
-        "bucket": "#cloud_storage_bucket",
-        "`cloud_storage_azure_storage_account`": "#cloud_storage_azure_storage_account",
-        "`cloud_storage_azure_adls_endpoint`": "#cloud_storage_azure_adls_endpoint"
-      }
+      "description": "Optional API endpoint. The only instance in which you must set this value is when using a custom domain with your object storage service.\n\n- AWS: If not set, this is automatically generated using region and bucket. Otherwise, this uses the value assigned.\n- GCP: If not set, this is automatically generated using `storage.googleapis.com` and bucket.\n- Azure: If not set, this is automatically generated using `blob.core.windows.net` and `cloud_storage_azure_storage_account`. If you have enabled hierarchical namespaces for your storage account and use a custom endpoint, use `cloud_storage_azure_adls_endpoint`."
     },
     "cloud_storage_azure_adls_endpoint": {
       "description": "Azure Data Lake Storage v2 endpoint override. Use when hierarchical namespaces are enabled on your storage account and you have set up a custom endpoint.\n\nIf not set, this is automatically generated using `dfs.core.windows.net` and `cloud_storage_azure_storage_account`.",
-      "links": {
-        "`cloud_storage_azure_storage_account`": "#cloud_storage_azure_storage_account"
-      },
       "related_topics": [
         "xref:reference:properties/object-storage-properties.adoc#cloud_storage_azure_storage_account[`cloud_storage_azure_storage_account`]"
       ]
     },
     "cloud_storage_azure_adls_port": {
-      "description": "Azure Data Lake Storage v2 port override. See also: `cloud_storage_azure_adls_endpoint`. Use when hierarchical namespaces are enabled on your storage account and you have set up a custom endpoint.",
-      "links": {
-        "`cloud_storage_azure_adls_endpoint`": "#cloud_storage_azure_adls_endpoint"
-      }
+      "description": "Azure Data Lake Storage v2 port override. See also: `cloud_storage_azure_adls_endpoint`. Use when hierarchical namespaces are enabled on your storage account and you have set up a custom endpoint."
     },
     "cloud_storage_azure_container": {
       "description": "The name of the Azure container to use with Tiered Storage. If `null`, the property is disabled."
     },
     "cloud_storage_azure_hierarchical_namespace_enabled": {
-      "description": "Force Redpanda to use or not use an Azure Data Lake Storage (ADLS) Gen2 hierarchical namespace-compliant client in `cloud_storage_azure_storage_account`. \n\nWhen this property is not set, `cloud_storage_azure_shared_key` must be set, and each broker checks at startup if a hierarchical namespace is enabled. \n\nWhen set to `true`, this property disables the check and assumes a hierarchical namespace is enabled. \n\nWhen set to `false`, this property disables the check and assumes a hierarchical namespace is not enabled. \n\nThis setting should be used only in emergencies where Redpanda fails to detect the correct a hierarchical namespace status.",
-      "links": {
-        "`cloud_storage_azure_storage_account`": "#cloud_storage_azure_storage_account",
-        "`cloud_storage_azure_shared_key`": "#cloud_storage_azure_shared_key"
-      }
+      "description": "Force Redpanda to use or not use an Azure Data Lake Storage (ADLS) Gen2 hierarchical namespace-compliant client in `cloud_storage_azure_storage_account`. \n\nWhen this property is not set, `cloud_storage_azure_shared_key` must be set, and each broker checks at startup if a hierarchical namespace is enabled. \n\nWhen set to `true`, this property disables the check and assumes a hierarchical namespace is enabled. \n\nWhen set to `false`, this property disables the check and assumes a hierarchical namespace is not enabled. \n\nThis setting should be used only in emergencies where Redpanda fails to detect the correct a hierarchical namespace status."
     },
     "cloud_storage_azure_managed_identity_id": {
       "related_topics": [
         "xref:manage:security/iam-roles.adoc[IAM Roles]"
       ],
-      "config_scope": "cluster",
-      "links": {
-        "`cloud_storage_credentials_source`": "#cloud_storage_credentials_source"
-      }
+      "config_scope": "cluster"
     },
     "cloud_storage_azure_shared_key": {
       "config_scope": "cluster",
       "description": "The account access key to be used for Azure Shared Key authentication with the Azure storage account configured by `cloud_storage_azure_storage_account`. If `null`, the property is disabled.",
-      "links": {
-        "`cloud_storage_azure_storage_account`": "#cloud_storage_azure_storage_account"
-      },
       "admonitions": [
         {
           "type": "note",
           "text": "Redpanda expects this key string to be Base64 encoded."
         }
       ]
-    },
-    "cloud_storage_backend": {
-      "description": "Optional object storage backend variant used to select API capabilities. If not supplied, this will be inferred from other configuration properties."
     },
     "cloud_storage_bucket": {
       "description": "AWS or GCP bucket that should be used to store data.",
@@ -272,26 +227,14 @@
       "config_scope": "broker",
       "category": "redpanda"
     },
-    "cloud_storage_cache_max_objects": {
-      "description": "Maximum number of objects that may be held in the Tiered Storage cache. This applies simultaneously with `cloud_storage_cache_size`, and whichever limit is hit first will trigger trimming of the cache.",
-      "links": {
-        "`cloud_storage_cache_size`": "#cloud_storage_cache_size"
-      }
-    },
     "cloud_storage_cache_size": {
-      "description": "Maximum size of the object storage cache, in bytes.\n\nThis property works together with `cloud_storage_cache_size_percent` to define cache behavior:\n\n- When both properties are set, Redpanda uses the smaller calculated value of the two, in bytes.\n\n- If one of these properties is set to `0`, Redpanda uses the non-zero value.\n\n- These properties cannot both be `0`.\n\n- `cloud_storage_cache_size` cannot be `0` while `cloud_storage_cache_size_percent` is `null`.",
-      "links": {
-        "`cloud_storage_cache_size_percent`": "#cloud_storage_cache_size_percent"
-      }
+      "description": "Maximum size of the object storage cache, in bytes.\n\nThis property works together with `cloud_storage_cache_size_percent` to define cache behavior:\n\n- When both properties are set, Redpanda uses the smaller calculated value of the two, in bytes.\n\n- If one of these properties is set to `0`, Redpanda uses the non-zero value.\n\n- These properties cannot both be `0`.\n\n- `cloud_storage_cache_size` cannot be `0` while `cloud_storage_cache_size_percent` is `null`."
     },
     "cloud_storage_cache_size_percent": {
       "related_topics": [
         "xref:reference:properties/cluster-properties.adoc#disk_reservation_percent[`disk_reservation_percent`]"
       ],
       "description": "Maximum size of the cache as a percentage, minus the space that Redpanda avoids using defined by the `disk_reservation_percent` cluster property. This is calculated at startup and dynamically updated if either this property, `disk_reservation_percent`, or `cloud_storage_cache_size` changes.\n\nThis property works together with `cloud_storage_cache_size` to define cache behavior:\n\n- When both properties are set, Redpanda uses the smaller calculated value of the two, in bytes.\n\n- If one of these properties is set to `0`, Redpanda uses the non-zero value.\n\n- These properties cannot both be `0`.\n\n- `cloud_storage_cache_size` cannot be `0` while `cloud_storage_cache_size_percent` is `null`.",
-      "links": {
-        "`cloud_storage_cache_size`": "#cloud_storage_cache_size"
-      },
       "config_scope": "cluster"
     },
     "cloud_storage_cache_trim_threshold_percent_objects": {
@@ -320,29 +263,15 @@
       "config_scope": "cluster"
     },
     "cloud_storage_credentials_host": {
-      "description": "The hostname to connect to for retrieving role based credentials. Derived from `cloud_storage_credentials_source` if not set. Only required when using IAM role based access. To authenticate using access keys, see `cloud_storage_access_key`.",
-      "links": {
-        "`cloud_storage_credentials_source`": "#cloud_storage_credentials_source",
-        "`cloud_storage_access_key`": "#cloud_storage_access_key"
-      }
+      "description": "The hostname to connect to for retrieving role based credentials. Derived from `cloud_storage_credentials_source` if not set. Only required when using IAM role based access. To authenticate using access keys, see `cloud_storage_access_key`."
     },
     "cloud_storage_credentials_source": {
-      "description": "The source of credentials used to authenticate to object storage services.\nRequired for AWS or GCP authentication with IAM roles.\n\nTo authenticate using access keys, see `cloud_storage_access_key`.",
-      "links": {
-        "`cloud_storage_access_key`": "#cloud_storage_access_key"
-      }
-    },
-    "cloud_storage_crl_file": {
-      "description": "Path to certificate revocation list for `cloud_storage_trust_file`.",
-      "links": {
-        "`cloud_storage_trust_file`": "#cloud_storage_trust_file"
-      }
+      "description": "The source of credentials used to authenticate to object storage services.\nRequired for AWS or GCP authentication with IAM roles.\n\nTo authenticate using access keys, see `cloud_storage_access_key`."
     },
     "cloud_storage_disable_archival_stm_rw_fence": {
       "description": "Disables the concurrency control mechanism in Tiered Storage. This safety feature keeps data organized and correct when multiple processes access it simultaneously. Disabling it can cause data consistency problems, so use this setting only for testing, never in production systems."
     },
     "cloud_storage_disable_archiver_manager": {
-      "description": "Use legacy upload mode and do not start archiver_manager.",
       "config_scope": "cluster"
     },
     "cloud_storage_disable_chunk_reads": {
@@ -389,9 +318,6 @@
     },
     "cloud_storage_enable_segment_uploads": {
       "description": "Controls the upload of log segments to Tiered Storage. If set to `false`, this property temporarily pauses all log segment uploads from the Redpanda cluster. When the uploads are paused, the `cloud_storage_enable_remote_allow_gaps` cluster configuration and `redpanda.remote.allowgaps` topic properties control local retention behavior.",
-      "links": {
-        "`cloud_storage_enable_remote_allow_gaps`": "#cloud_storage_enable_remote_allow_gaps"
-      },
       "related_topics": [
         "xref:reference:properties/topic-properties.adoc#redpanda-remote-allowgaps[`redpanda.remote.allowgaps`]"
       ]
@@ -405,9 +331,9 @@
     "cloud_storage_gc_max_segments_per_run": {
       "version": "v25.3.11",
       "description": "Maximum number of log segments to delete from object storage during each housekeeping run. This limits the rate of object deletions to prevent overwhelming the object storage API. Each segment requires 2-3 object storage delete operations (for the data file, index file, and optionally a transaction manifest), so this value directly controls API request rate.",
-      "links": {
-        "housekeeping run": "self-managed-only: xref:manage:tiered-storage.adoc#object-storage-housekeeping"
-      }
+      "related_topics": [
+        "self-managed-only: xref:manage:tiered-storage.adoc#object-storage-housekeeping[Object storage housekeeping]"
+      ]
     },
     "cloud_storage_graceful_transfer_timeout_ms": {
       "description": "Time limit on waiting for uploads to complete before a leadership transfer.  If this is `null`, leadership transfers proceed without waiting."
@@ -465,21 +391,15 @@
     },
     "cloud_storage_metadata_sync_timeout_ms": {
       "description": "Timeout for Tiered Storage metadata synchronization.",
-      "links": {
-        "Tiered Storage": "self-managed-only: xref:manage:tiered-storage.adoc"
-      }
+      "related_topics": [
+        "self-managed-only: xref:manage:tiered-storage.adoc[Tiered Storage]"
+      ]
     },
     "cloud_storage_prefetch_segments_max": {
       "version": "v26.1.1"
     },
     "cloud_storage_readreplica_manifest_sync_timeout_ms": {
       "description": "Timeout to check if new data is available for partitions in object storage for read replicas."
-    },
-    "cloud_storage_recovery_topic_validation_depth": {
-      "description": "Number of metadata segments to validate, from newest to oldest, when `cloud_storage_recovery_topic_validation_mode` is set to `check_manifest_and_segment_metadata`.",
-      "links": {
-        "`cloud_storage_recovery_topic_validation_mode`": "#cloud_storage_recovery_topic_validation_mode"
-      }
     },
     "cloud_storage_recovery_topic_validation_mode": {
       "description": "Validation performed before recovering a topic from object storage. In case of failure, the reason for the failure appears as `ERROR` lines in the Redpanda application log. For each topic, this reports errors for all partitions, but for each partition, only the first error is reported.\n\nThis property accepts the following parameters:\n\n- `no_check`: Skips the checks for topic recovery.\n- `check_manifest_existence`:  Runs an existence check on each `partition_manifest`. Fails if there are connection issues to the object storage.\n- `check_manifest_and_segment_metadata`: Downloads the manifest and runs a consistency check, comparing the metadata with the cloud storage objects. The process fails if metadata references any missing cloud storage objects.\n\nExample: Redpanda validates the topic `kafka/panda-topic-recovery-NOT-OK` and stops due to a fatal error on partition 0:\n\n```bash\nERROR 2024-04-24 21:29:08,166 [shard 1:main] cluster - [fiber11|0|299996ms recovery validation of {kafka/panda-topic-recovery-NOT-OK/0}/24] - manifest metadata check: missing segment, validation not ok\nERROR 2024-04-24 21:29:08,166 [shard 1:main] cluster - topics_frontend.cc:519 - Stopping recovery of {kafka/panda-topic-recovery-NOT-OK} due to validation error\n```\n\nEach failing partition error message has the following format:\n\n```bash\nERROR .... [... recovery validation of {<namespace/topic/partition>}...] - <failure-reason>, validation not ok\n```\n\nAt the end of the process, Redpanda outputs a final ERROR message: \n\n```bash\nERROR ... ... - Stopping recovery of {<namespace/topic>} due to validation error\n```"
@@ -705,7 +625,6 @@
       "version": "v26.1.1"
     },
     "cluster_id": {
-      "description": "Cluster identifier.",
       "config_scope": "cluster"
     },
     "code_hugepages_enabled": {
@@ -745,9 +664,6 @@
     },
     "confluent.value.schema.validation": {
       "description": "Enable validation of the schema ID for values on a record. This is a compatibility alias for `redpanda.value.schema.id.validation`. When enabled, Redpanda validates that the schema ID encoded in the record's value is registered in the Schema Registry according to the configured subject name strategy.",
-      "links": {
-        "`redpanda.value.schema.id.validation`": "#redpanda.value.schema.id.validation"
-      },
       "config_scope": "topic",
       "related_topics": [
         "xref:manage:schema-reg/schema-id-validation.adoc[Server-Side Schema ID Validation]"
@@ -755,9 +671,6 @@
     },
     "confluent.value.subject.name.strategy": {
       "description": "The subject name strategy for values when `confluent.value.schema.validation` is enabled. This is a compatibility alias for `redpanda.value.subject.name.strategy`. This determines how the topic and schema are mapped to a subject name in the Schema Registry.",
-      "links": {
-        "`redpanda.value.subject.name.strategy`": "#redpanda.value.subject.name.strategy"
-      },
       "config_scope": "topic",
       "related_topics": [
         "xref:manage:schema-reg/schema-id-validation.adoc[Server-Side Schema ID Validation]"
@@ -765,47 +678,36 @@
     },
     "consumer_group_lag_collection_interval_sec": {
       "description": "How often to run the collection loop when `enable_consumer_group_metrics` contains `consumer_lag`.\n\nReducing the value of `consumer_group_lag_collection_interval_sec` increases the metric collection frequency, which may raise resource utilization. In most environments, this impact is minimal, but it's best practice to monitor broker resource usage in high-scale settings.",
-      "links": {
-        "`enable_consumer_group_metrics`": "#enable_consumer_group_metrics"
-      },
       "config_scope": "cluster"
     },
     "consumer_heartbeat_interval_ms": {
-      "description": "Interval (in milliseconds) for consumer heartbeats.",
       "config_scope": "broker",
       "category": "pandaproxy-client"
     },
     "consumer_instance_timeout_ms": {
-      "description": "How long to wait for an idle consumer before removing it. A consumer is considered idle when it's not making requests or heartbeats.",
       "config_scope": "broker",
       "category": "pandaproxy"
     },
     "consumer_offsets_topic_batch_cache_enabled": {
-      "description": "This property lets you enable the batch cache for the consumer offsets topic. By default, the cache for consumer offsets topic is disabled. Changing this property is not recommended in production systems, as it may affect performance. The change is applied only after the restart.",
       "config_scope": "cluster"
     },
     "consumer_rebalance_timeout_ms": {
-      "description": "Timeout (in milliseconds) for consumer rebalance.",
       "config_scope": "broker",
       "category": "pandaproxy-client"
     },
     "consumer_request_max_bytes": {
-      "description": "Maximum bytes to fetch per request.",
       "config_scope": "broker",
       "category": "pandaproxy-client"
     },
     "consumer_request_min_bytes": {
-      "description": "Minimum bytes to fetch per request.",
       "config_scope": "broker",
       "category": "pandaproxy-client"
     },
     "consumer_request_timeout_ms": {
-      "description": "Interval (in milliseconds) for consumer request timeout.",
       "config_scope": "broker",
       "category": "pandaproxy-client"
     },
     "consumer_session_timeout_ms": {
-      "description": "Timeout (in milliseconds) for consumer session.",
       "config_scope": "broker",
       "category": "pandaproxy-client"
     },
@@ -819,10 +721,9 @@
     },
     "controller_log_learner_recovery_rate_enabled": {
       "version": "v26.1.11",
-      "description": "Whether the controller raft group (raft0) honors `raft_learner_recovery_rate`. When `false` (default) the controller log replicates to new learners without throttling. When `true`, controller-log recovery is subject to the same per-node recovery bucket as user partitions.",
-      "links": {
-        "`raft_learner_recovery_rate`": "#raft_learner_recovery_rate"
-      }
+      "related_topics": [
+        "xref:reference:properties/cluster-properties.adoc#raft_learner_recovery_rate[`raft_learner_recovery_rate`]"
+      ]
     },
     "core_balancing_continuous": {
       "related_topics": [],
@@ -834,16 +735,10 @@
     "crash_loop_limit": {
       "config_scope": "broker",
       "category": "redpanda",
-      "description": "A limit on the number of consecutive times a broker can crash within one hour before its crash-tracking logic is reset. This limit prevents a broker from getting stuck in an infinite cycle of crashes.\n\nIf `null`, the property is disabled and no limit is applied.\n\nThe crash-tracking logic is reset (to zero consecutive crashes) by any of the following conditions:\n\n* The broker shuts down cleanly.\n* One hour passes since the last crash.\n* The `redpanda.yaml` broker configuration file is updated.\n* The `startup_log` file in the broker's `data_directory` broker property is manually deleted.",
-      "links": {
-        "`data_directory`": "#data_directory"
-      }
+      "description": "A limit on the number of consecutive times a broker can crash within one hour before its crash-tracking logic is reset. This limit prevents a broker from getting stuck in an infinite cycle of crashes.\n\nIf `null`, the property is disabled and no limit is applied.\n\nThe crash-tracking logic is reset (to zero consecutive crashes) by any of the following conditions:\n\n* The broker shuts down cleanly.\n* One hour passes since the last crash.\n* The `redpanda.yaml` broker configuration file is updated.\n* The `startup_log` file in the broker's `data_directory` broker property is manually deleted."
     },
     "crash_loop_sleep_sec": {
       "description": "The amount of time the broker sleeps before terminating when the limit on consecutive broker crashes (`crash_loop_limit`) is reached. This property provides a debugging window for you to access the broker before it terminates, and is particularly useful in Kubernetes environments.\n\nIf `null`, the property is disabled, and the broker terminates immediately after reaching the crash loop limit.\n\nFor information about how to reset the crash loop limit, see the `crash_loop_limit` broker property.",
-      "links": {
-        "`crash_loop_limit`": "#crash_loop_limit"
-      },
       "version": "v24.3.4",
       "config_scope": "broker",
       "category": "redpanda"
@@ -853,47 +748,39 @@
       "category": "redpanda"
     },
     "data_transforms_binary_max_size": {
-      "description": "The maximum size for a deployable WebAssembly binary that the broker can store.",
       "config_scope": "cluster"
     },
     "data_transforms_per_core_memory_reservation": {
-      "description": "The amount of memory to reserve per core for data transform (Wasm) virtual machines. Memory is reserved on boot. The maximum number of functions that can be deployed to a cluster is equal to `data_transforms_per_core_memory_reservation` / `data_transforms_per_function_memory_limit`.",
       "config_scope": "cluster"
     },
     "data_transforms_per_function_memory_limit": {
-      "description": "The amount of memory to give an instance of a data transform (Wasm) virtual machine. The maximum number of functions that can be deployed to a cluster is equal to `data_transforms_per_core_memory_reservation` / `data_transforms_per_function_memory_limit`.",
       "config_scope": "cluster"
     },
     "data_transforms_read_buffer_memory_percentage": {
-      "description": "The percentage of available memory in the transform subsystem to use for read buffers.",
-      "includes": [
-        "reference:partial$internal-use-property.adoc[]"
-      ],
+      "description": "The percentage of available memory in the transform subsystem to use for read buffers.\n\ninclude::reference:partial$internal-use-property.adoc[]",
       "config_scope": "cluster"
     },
     "data_transforms_write_buffer_memory_percentage": {
-      "description": "The percentage of available memory in the transform subsystem to use for write buffers.",
-      "includes": [
-        "reference:partial$internal-use-property.adoc[]"
-      ],
+      "description": "The percentage of available memory in the transform subsystem to use for write buffers.\n\ninclude::reference:partial$internal-use-property.adoc[]",
       "config_scope": "cluster"
     },
     "datalake_coordinator_max_bytes_per_commit": {
-      "version": "v26.2.2"
+      "version": "v26.2.2",
+      "default": 33554432
     },
     "datalake_coordinator_max_files_per_commit": {
       "description": "Target maximum number of pending data files that Redpanda commits to an Iceberg table in a single commit. When the backlog of pending files exceeds this value, Redpanda commits it across multiple passes to limit the memory used per commit. Redpanda may slightly exceed this limit to avoid splitting files that share a commit offset.",
       "version": "v26.1.13"
     },
     "datalake_coordinator_max_pending_bytes": {
-      "version": "v26.2.2"
+      "version": "v26.2.2",
+      "default": 33554432
     },
     "datalake_coordinator_max_pending_files": {
       "description": "Maximum number of pending data files that a datalake coordinator accumulates across all of its topics. When the backlog exceeds this limit, the coordinator sheds load by rejecting new files and offset requests until it commits enough of the backlog. This limit bounds the memory that the coordinator uses to track pending files.",
       "version": "v26.1.13"
     },
     "datalake_coordinator_snapshot_max_delay_secs": {
-      "description": "Maximum amount of time the coordinator waits to snapshot after a command appears in the log.",
       "config_scope": "cluster"
     },
     "datalake_disk_space_monitor_enable": {
@@ -920,11 +807,6 @@
     },
     "default_redpanda_storage_mode": {
       "description": "Set the default storage mode for new topics. This value applies to any topic created without an explicit `redpanda.storage.mode` setting (that is, when the topic's `redpanda.storage.mode` is `unset`).\n\nAccepted values:\n\n* `unset`: Defer to the legacy `redpanda.remote.read` and `redpanda.remote.write` topic properties for Tiered Storage configuration.\n* `local`: Store data only on local disks, with no object storage involvement.\n* `tiered`: Store data on local disks and replicate it to object storage using Tiered Storage. Equivalent to setting `redpanda.remote.read` and `redpanda.remote.write` to `true`.\n* `cloud`: Store data primarily in object storage using Cloud Topics.",
-      "links": {
-        "`redpanda.storage.mode`": "self-managed-only: #redpanda.storage.mode",
-        "`redpanda.remote.read`": "self-managed-only: #cloud_storage_enable_remote_read",
-        "`redpanda.remote.write`": "self-managed-only: #cloud_storage_enable_remote_write"
-      },
       "related_topics": [
         "self-managed-only: xref:manage:tiered-storage.adoc[Tiered Storage]",
         "self-managed-only: xref:develop:manage-topics/cloud-topics.adoc[Manage Cloud Topics]",
@@ -948,22 +830,15 @@
       "config_scope": "cluster"
     },
     "delete.retention.ms": {
-      "description": "The retention time for tombstone records in a compacted topic. Redpanda removes tombstone records after the retention limit is exceeded.\n\nFor topics that use Tiered Storage v1, tombstone removal is silently skipped while Tiered Storage is enabled and `redpanda.remote.read` or `redpanda.remote.write` is set for the topic: the configuration is accepted, but tombstones are not removed for the topic.\nThis restriction does not apply to topics that use Tiered Storage v2, available starting in Redpanda v26.2.\n\nIf both `delete.retention.ms` and the cluster property `tombstone_retention_ms` are set, `delete.retention.ms` overrides the cluster level tombstone retention for an individual topic.\n\nThis property supports three states:\n\n* Positive value: Sets the milliseconds to retain tombstone records before removal.\n* 0: Tombstone records are immediately eligible for removal.\n* Negative value: Disables tombstone removal entirely for this topic.",
-      "links": {
-        "`redpanda.remote.read`": "#redpanda.remote.read",
-        "`redpanda.remote.write`": "#redpanda.remote.write",
-        "Tiered Storage v2": "self-managed-only: xref:manage:tiered-storage.adoc#tiered-storage-versions",
-        "`tombstone_retention_ms`": "#tombstone_retention_ms"
-      },
+      "description": "The retention time for tombstone records in a compacted topic. Redpanda removes tombstone records after the retention limit is exceeded.\n\nFor topics that use Tiered Storage v1, tombstone removal is silently skipped while Tiered Storage is enabled and `redpanda.remote.read` or `redpanda.remote.write` is set for the topic: the configuration is accepted, but tombstones are not removed for the topic.\nThis restriction does not apply to topics that use Tiered Storage v2, available starting in Redpanda v26.2.\n\nIf both `delete.retention.ms` and the cluster property prop:tombstone_retention_ms[link=true] are set, `delete.retention.ms` overrides the cluster level tombstone retention for an individual topic.\n\nThis property supports three states:\n\n* Positive value: Sets the milliseconds to retain tombstone records before removal.\n* 0: Tombstone records are immediately eligible for removal.\n* Negative value: Disables tombstone removal entirely for this topic.",
       "related_topics": [
         "self-managed-only: xref:reference:properties/cluster-properties.adoc#tombstone_retention_ms[`tombstone_retention_ms`]",
-        "self-managed-only: xref:manage:cluster-maintenance/compaction-settings.adoc#tombstone-record-removal[Tombstone record removal]"
+        "self-managed-only: xref:manage:cluster-maintenance/compaction-settings.adoc#tombstone-record-removal[Tombstone record removal]",
+        "self-managed-only: xref:manage:tiered-storage.adoc#tiered-storage-versions[Tiered Storage v2]"
       ],
       "config_scope": "topic"
     },
     "delete_topic_enable": {
-      "type": "boolean",
-      "default": true,
       "description": "Controls whether topics can be deleted through the Kafka DeleteTopics API. When set to `false`, all topic deletion requests are rejected for all users, including superusers. Use this as a cluster-wide safety setting to prevent accidental topic deletion in production environments.\n\nFor per-topic deletion protection, see `kafka_nodelete_topics`.",
       "related_topics": [
         "xref:reference:properties/cluster-properties.adoc#kafka_nodelete_topics[`kafka_nodelete_topics`]",
@@ -983,24 +858,18 @@
       ]
     },
     "disable_cluster_recovery_loop_for_tests": {
-      "description": "Disables the cluster recovery loop. This property is used to simplify testing and should not be set in production.",
-      "includes": [
-        "reference:partial$internal-use-property.adoc[]"
-      ],
+      "description": "Disables the cluster recovery loop. This property is used to simplify testing and should not be set in production.\n\ninclude::reference:partial$internal-use-property.adoc[]",
       "config_scope": "cluster"
     },
     "disk_reservation_percent": {
-      "description": "The percentage of total disk capacity that Redpanda will avoid using. This applies both when cloud cache and log data share a disk, as well \nas when cloud cache uses a dedicated disk. \n\nIt is recommended to not run disks near capacity to avoid blocking I/O due to low disk space, as well as avoiding performance issues associated with SSD garbage collection.",
-      "config_scope": "cluster"
+      "config_scope": "cluster",
+      "description": "The percentage of total disk capacity that Redpanda will avoid using. This applies both when cloud cache and log data share a disk, as well \nas when cloud cache uses a dedicated disk. \n\nIt is recommended to not run disks near capacity to avoid blocking I/O due to low disk space, as well as avoiding performance issues associated with SSD garbage collection."
     },
     "election_timeout_ms": {
       "description": "Raft election timeout expressed in milliseconds.",
-      "type": "integer",
-      "default": 1500,
       "config_scope": "cluster"
     },
     "emergency_disable_data_transforms": {
-      "description": "Override the cluster property `data_transforms_enabled` and disable Wasm-powered data transforms. This is an emergency shutoff button.",
       "related_topics": [
         "xref:reference:properties/cluster-properties.adoc#data_transforms_enabled[`data_transforms_enabled`]"
       ],
@@ -1009,9 +878,6 @@
     },
     "empty_seed_starts_cluster": {
       "description": "Controls how a new cluster is formed. All brokers in a cluster must have the same value.\n\nThe `empty_seed_starts_cluster` and `seed_servers` broker properties work together to form a cluster.",
-      "links": {
-        "`seed_servers`": "#seed_servers"
-      },
       "config_scope": "broker",
       "category": "redpanda",
       "admonitions": [
@@ -1022,7 +888,6 @@
       ]
     },
     "enable_cluster_metadata_upload_loop": {
-      "description": "Enables cluster metadata uploads. Required for whole cluster restore.",
       "related_topics": [
         "xref:manage:whole-cluster-restore.adoc[whole cluster restore]"
       ],
@@ -1059,9 +924,6 @@
     },
     "enable_metrics_reporter": {
       "description": "Enable the cluster metrics reporter. If `true`, the metrics reporter collects and exports to Redpanda Data a set of customer usage metrics at the interval set by `metrics_reporter_report_interval`.",
-      "links": {
-        "`metrics_reporter_report_interval`": "#metrics_reporter_report_interval"
-      },
       "related_topics": [
         "xref:manage:monitoring.adoc[monitoring metrics]"
       ],
@@ -1074,10 +936,6 @@
       ]
     },
     "enable_sasl": {
-      "description": "Enable SASL authentication for Kafka connections. Authorization is required to modify this property. See also `kafka_enable_authorization`.",
-      "links": {
-        "`kafka_enable_authorization`": "#kafka_enable_authorization"
-      },
       "config_scope": "cluster"
     },
     "enable_schema_id_validation": {
@@ -1105,8 +963,8 @@
       "version": "v25.3.3"
     },
     "fetch_read_strategy": {
-      "description": "The strategy used to fulfill fetch requests.\n\n* `polling`: If `fetch_reads_debounce_timeout` is set to its default value, then this acts exactly like `non_polling`; otherwise, it acts like `non_polling_with_debounce` (deprecated).\n* `non_polling`: The backend is signaled when a partition has new data, so Redpanda does not need to repeatedly read from every partition in the fetch. Redpanda Data recommends using this value for most workloads, because it can improve fetch latency and CPU utilization.\n* `non_polling_with_debounce`: This option behaves like `non_polling`, but it includes a debounce mechanism with a fixed delay specified by `fetch_reads_debounce_timeout` at the start of each fetch. By introducing this delay, Redpanda can accumulate more data before processing, leading to fewer fetch operations and returning larger amounts of data. Enabling this option reduces reactor utilization, but it may also increase end-to-end latency.",
-      "config_scope": "cluster"
+      "config_scope": "cluster",
+      "description": "The strategy used to fulfill fetch requests.\n\n* `polling`: If `fetch_reads_debounce_timeout` is set to its default value, then this acts exactly like `non_polling`; otherwise, it acts like `non_polling_with_debounce` (deprecated).\n* `non_polling`: The backend is signaled when a partition has new data, so Redpanda does not need to repeatedly read from every partition in the fetch. Redpanda Data recommends using this value for most workloads, because it can improve fetch latency and CPU utilization.\n* `non_polling_with_debounce`: This option behaves like `non_polling`, but it includes a debounce mechanism with a fixed delay specified by `fetch_reads_debounce_timeout` at the start of each fetch. By introducing this delay, Redpanda can accumulate more data before processing, leading to fewer fetch operations and returning larger amounts of data. Enabling this option reduces reactor utilization, but it may also increase end-to-end latency."
     },
     "fips_mode": {
       "config_scope": "broker",
@@ -1147,9 +1005,6 @@
     },
     "iceberg_catalog_type": {
       "description": "Iceberg catalog type that Redpanda will use to commit table metadata updates. Supported types: `rest`, `object_storage`.",
-      "links": {
-        "`iceberg_rest_catalog_endpoint`": "#iceberg_rest_catalog_endpoint"
-      },
       "config_scope": "cluster",
       "admonitions": [
         {
@@ -1237,11 +1092,9 @@
       "config_scope": "cluster"
     },
     "iceberg_rest_catalog_base_location": {
-      "description": "Base URI for the Iceberg REST catalog. If unset, the REST catalog server determines the location. Some REST catalogs, like AWS Glue, require the client to set this. After Iceberg is enabled, do not change this value.",
       "config_scope": "cluster"
     },
     "iceberg_rest_catalog_client_id": {
-      "description": "Iceberg REST catalog user ID. This ID is used to query the catalog API for the OAuth token. Required if catalog type is set to `rest` and `iceberg_rest_catalog_authentication_mode` is set to `oauth2`.",
       "config_scope": "cluster"
     },
     "iceberg_rest_catalog_client_secret": {
@@ -1258,15 +1111,11 @@
       "config_scope": "cluster"
     },
     "iceberg_rest_catalog_crl": {
-      "description": "The contents of a certificate revocation list for `iceberg_rest_catalog_trust`. Takes precedence over `iceberg_rest_catalog_crl_file`.",
       "config_scope": "cluster"
     },
     "iceberg_rest_catalog_endpoint": {
       "config_scope": "cluster",
       "description": "URL of Iceberg REST catalog endpoint.",
-      "links": {
-        "`iceberg_catalog_type`": "#iceberg_catalog_type"
-      },
       "admonitions": [
         {
           "type": "note",
@@ -1275,20 +1124,13 @@
       ]
     },
     "iceberg_rest_catalog_oauth2_scope": {
-      "description": "The OAuth scope used to retrieve access tokens for Iceberg catalog authentication. Only meaningful when `iceberg_rest_catalog_authentication_mode` is set to `oauth2`",
       "config_scope": "cluster"
     },
     "iceberg_rest_catalog_request_timeout_ms": {
-      "description": "Maximum length of time that Redpanda waits for a response from the REST catalog before aborting the request",
       "config_scope": "cluster"
     },
     "iceberg_rest_catalog_token": {
       "description": "Token used to access the REST Iceberg catalog. If the token is present, Redpanda ignores credentials stored in the properties `iceberg_rest_catalog_client_id`  and `iceberg_rest_catalog_client_secret`.\n\nRequired if `iceberg_rest_catalog_authentication_mode` is set to `bearer`.",
-      "links": {
-        "`iceberg_rest_catalog_client_id`": "#iceberg_rest_catalog_client_id",
-        "`iceberg_rest_catalog_client_secret`": "#iceberg_rest_catalog_client_secret",
-        "`iceberg_rest_catalog_authentication_mode`": "#iceberg_rest_catalog_authentication_mode"
-      },
       "config_scope": "cluster"
     },
     "iceberg_rest_catalog_trust": {
@@ -1435,10 +1277,7 @@
         "NOTE: Set `require_client_auth: true` for mutual TLS (mTLS) authentication, or `false` for server-side TLS only."
       ],
       "config_scope": "broker",
-      "category": "redpanda",
-      "links": {
-        "`kafka_api`": "#kafka_api"
-      }
+      "category": "redpanda"
     },
     "kafka_batch_max_bytes": {
       "related_topics": [
@@ -1477,9 +1316,6 @@
     },
     "kafka_enable_authorization": {
       "description": "Flag to require authorization for Kafka connections. If `null`, the property is disabled, and authorization is instead enabled by `enable_sasl`.\n\n* `null`: Ignored. Authorization is enabled with `enable_sasl`: `true`\n* `true`: authorization is required.\n* `false`: authorization is disabled.",
-      "links": {
-        "`enable_sasl`": "#enable_sasl"
-      },
       "config_scope": "cluster"
     },
     "kafka_fetch_read_coalescing_enabled": {
@@ -1509,7 +1345,6 @@
       "version": "v26.2.1"
     },
     "kafka_produce_batch_validation": {
-      "description": "Controls the level of validation performed on batches produced to Redpanda. When set to `legacy`, there is minimal validation performed on the produce path. When set to `relaxed`, full validation is performed on uncompressed batches and on compressed batches with the `max_timestamp` value left unset. When set to `strict`, full validation of uncompressed and compressed batches is performed. This should be the default in environments where producing clients are not trusted.",
       "config_scope": "cluster"
     },
     "kafka_qdc_max_depth": {
@@ -1571,17 +1406,13 @@
       "config_scope": "cluster"
     },
     "leader_balancer_mute_timeout": {
-      "description": "The length of time that a Raft group is muted after a leadership rebalance operation. Any group that has been moved, regardless of whether the move succeeded or failed, undergoes a cooling-off period. This prevents Raft groups from repeatedly experiencing leadership rebalance operations in a short time frame, which can lead to instability in the cluster.\n\nThe leader balancer maintains a list of muted groups and reevaluates muted status at the start of each balancing iteration. Muted groups still contribute to overall cluster balance calculations although they can't themselves be moved until the mute period is over.\n\nThis timeout also determines how long a broker that hasn't sent a heartbeat is considered muted. Muted brokers are not targeted for leadership transfers when the cluster rebalances, for example, because of unreliable network connectivity.",
-      "links": {
-        "Raft": "glossterm"
-      },
+      "description": "The length of time that a glossterm:Raft[] group is muted after a leadership rebalance operation. Any group that has been moved, regardless of whether the move succeeded or failed, undergoes a cooling-off period. This prevents Raft groups from repeatedly experiencing leadership rebalance operations in a short time frame, which can lead to instability in the cluster.\n\nThe leader balancer maintains a list of muted groups and reevaluates muted status at the start of each balancing iteration. Muted groups still contribute to overall cluster balance calculations although they can't themselves be moved until the mute period is over.\n\nThis timeout also determines how long a broker that hasn't sent a heartbeat is considered muted. Muted brokers are not targeted for leadership transfers when the cluster rebalances, for example, because of unreliable network connectivity.",
       "config_scope": "cluster"
     },
     "leader_balancer_node_mute_timeout": {
       "version": "v26.2.2"
     },
     "log_cleanup_policy": {
-      "description": "Default cleanup policy for topic logs.\n\nThe topic property `cleanup.policy` overrides the value of `log_cleanup_policy` at the topic level.",
       "related_topics": [
         "xref:reference:properties/topic-properties.adoc#cleanup-policy[`cleanup.policy`]"
       ],
@@ -1591,7 +1422,8 @@
         "delete",
         "compact",
         "compact,delete"
-      ]
+      ],
+      "description": "Default cleanup policy for topic logs.\n\nThe topic property `cleanup.policy` overrides the value of `log_cleanup_policy` at the topic level."
     },
     "log_compaction_disable_tx_batch_removal": {
       "description": "Prevents log compaction from removing transaction metadata. Only set this to `true` if you experience stability issues related to transaction cleanup during compaction.",
@@ -1630,28 +1462,20 @@
       "related_topics": [
         "xref:reference:properties/topic-properties.adoc#message-timestamp-after-max-ms[`message.timestamp.after.max.ms`]"
       ],
-      "description": "The maximum allowed time difference when a record's timestamp is in the future compared to the broker's clock. For topics using `CreateTime` timestamps, Redpanda rejects records with timestamps that are too far in the future. This property has no effect on topics using `AppendTime` timestamps. The topic property `message.timestamp.after.max.ms` overrides this cluster-level setting.",
-      "links": {
-        "`CreateTime`": "#log_message_timestamp_type",
-        "`AppendTime`": "#log_message_timestamp_type"
-      }
+      "description": "The maximum allowed time difference when a record's timestamp is in the future compared to the broker's clock. For topics using `CreateTime` timestamps, Redpanda rejects records with timestamps that are too far in the future. This property has no effect on topics using `AppendTime` timestamps. The topic property `message.timestamp.after.max.ms` overrides this cluster-level setting."
     },
     "log_message_timestamp_before_max_ms": {
       "related_topics": [
         "xref:reference:properties/topic-properties.adoc#message-timestamp-before-max-ms[`message.timestamp.before.max.ms`]"
       ],
-      "description": "The maximum allowed time difference when a record's timestamp is in the past compared to the broker's clock. For topics using `CreateTime` timestamps, Redpanda rejects records with timestamps that are too far in the past. This property has no effect on topics using `AppendTime` timestamps. The topic property `message.timestamp.before.max.ms` overrides this cluster-level setting.",
-      "links": {
-        "`CreateTime`": "#log_message_timestamp_type",
-        "`AppendTime`": "#log_message_timestamp_type"
-      }
+      "description": "The maximum allowed time difference when a record's timestamp is in the past compared to the broker's clock. For topics using `CreateTime` timestamps, Redpanda rejects records with timestamps that are too far in the past. This property has no effect on topics using `AppendTime` timestamps. The topic property `message.timestamp.before.max.ms` overrides this cluster-level setting."
     },
     "log_message_timestamp_type": {
-      "description": "Default timestamp type for topic messages (CreateTime or LogAppendTime).\n\nThe topic property `message.timestamp.type` overrides the value of `log_message_timestamp_type` at the topic level.",
       "related_topics": [
         "xref:reference:properties/topic-properties.adoc#message-timestamp-type[`message.timestamp.type`]"
       ],
-      "config_scope": "cluster"
+      "config_scope": "cluster",
+      "description": "Default timestamp type for topic messages (CreateTime or LogAppendTime).\n\nThe topic property `message.timestamp.type` overrides the value of `log_message_timestamp_type` at the topic level."
     },
     "log_retention_ms": {
       "config_scope": "cluster",
@@ -1685,10 +1509,7 @@
       "config_scope": "topic"
     },
     "max.message.bytes": {
-      "description": "The maximum size of a message or batch of a topic. If a compression type is enabled, `max.message.bytes` sets the maximum size of the compressed message or batch.\n\nIf `max.message.bytes` is set to a positive value, it overrides the cluster property `kafka_batch_max_bytes` for the topic.\n\nSet an upper limit for `max.message.bytes` using the cluster property `kafka_max_message_size_upper_limit_bytes`.",
-      "links": {
-        "`kafka_max_message_size_upper_limit_bytes`": "#kafka_max_message_size_upper_limit_bytes"
-      },
+      "description": "The maximum size of a message or batch of a topic. If a compression type is enabled, `max.message.bytes` sets the maximum size of the compressed message or batch.\n\nIf `max.message.bytes` is set to a positive value, it overrides the cluster property `kafka_batch_max_bytes` for the topic.\n\nSet an upper limit for `max.message.bytes` using the cluster property prop:kafka_max_message_size_upper_limit_bytes[link=true].",
       "related_topics": [
         "self-managed-only: xref:reference:properties/cluster-properties.adoc#kafka_batch_max_bytes[`kafka_batch_max_bytes`]",
         "xref:develop:produce-data/configure-producers.adoc#message-batching[Message batching]",
@@ -1726,13 +1547,11 @@
     },
     "memory_allocation_warning_threshold": {
       "config_scope": "broker",
-      "category": "redpanda",
-      "description": "Threshold for log messages that contain a larger memory allocation than specified."
+      "category": "redpanda"
     },
     "message.timestamp.after.max.ms": {
       "description": "The maximum allowable timestamp difference between the broker's timestamp and a record's timestamp. For topics with `message.timestamp.type` set to `CreateTime`, Redpanda rejects records that have timestamps later than the broker timestamp and exceed this difference. Redpanda ignores this property for topics with `message.timestamp.type` set to `AppendTime`.",
       "config_scope": "topic",
-      "type": "integer",
       "related_topics": [
         "self-managed-only: xref:reference:properties/cluster-properties.adoc#log_message_timestamp_after_max_ms[`log_message_timestamp_after_max_ms`]"
       ]
@@ -1740,7 +1559,6 @@
     "message.timestamp.before.max.ms": {
       "description": "The maximum allowable timestamp difference between the broker's timestamp and a record's timestamp. For topics with `message.timestamp.type` set to `CreateTime`, Redpanda rejects records that have timestamps earlier than the broker timestamp and exceed this difference. Redpanda ignores this property for topics with `message.timestamp.type` set to `AppendTime`.",
       "config_scope": "topic",
-      "type": "integer",
       "related_topics": [
         "self-managed-only: xref:reference:properties/cluster-properties.adoc#log_message_timestamp_before_max_ms[`log_message_timestamp_before_max_ms`]"
       ]
@@ -1783,7 +1601,8 @@
     },
     "mode_mutability": {
       "config_scope": "broker",
-      "category": "schema-registry"
+      "category": "schema-registry",
+      "description": "Enable modifications to the read-only `mode` of the Schema Registry. When set to `true`, the entire Schema Registry or its subjects can be switched to `READONLY` or `READWRITE`. This property is useful for preventing unwanted changes to the entire Schema Registry or specific subjects."
     },
     "nested_group_behavior": {
       "version": "v26.1.1"
@@ -1832,11 +1651,9 @@
       "category": "redpanda"
     },
     "oidc_clock_skew_tolerance": {
-      "description": "The amount of time (in seconds) to allow for when validating the expiry claim in the token.",
       "config_scope": "cluster"
     },
     "oidc_discovery_url": {
-      "description": "The URL pointing to the well-known discovery endpoint for the OIDC provider.",
       "config_scope": "cluster"
     },
     "oidc_group_claim_path": {
@@ -1855,7 +1672,6 @@
       "description": "Username for HTTP Basic authentication to the OIDC forward proxy (`oidc_http_proxy_url`). Leave unset for an unauthenticated proxy. Both username and password must be set for credentials to be sent."
     },
     "oidc_principal_mapping": {
-      "description": "Rule for mapping JWT payload claim to a Redpanda user principal.",
       "related_topics": [
         "self-managed-only: xref:manage:security/authentication.adoc#oidc[OpenID Connect authentication]",
         "cloud-only: xref:security:cloud-authentication.adoc[Authentication]",
@@ -1864,7 +1680,6 @@
       "config_scope": "cluster"
     },
     "oidc_token_audience": {
-      "description": "A string representing the intended recipient of the token.",
       "config_scope": "cluster"
     },
     "openssl_config_file": {
@@ -1917,9 +1732,6 @@
       ],
       "config_scope": "cluster",
       "description": "When the disk usage of a node exceeds this threshold, it triggers Redpanda to move partitions off of the node.\n\n*Unit*: percent of disk used",
-      "links": {
-        "`partition_autobalancing_mode`": "#partition_autobalancing_mode"
-      },
       "admonitions": [
         {
           "type": "note",
@@ -1931,13 +1743,11 @@
       "related_topics": [
         "xref:manage:cluster-maintenance/cluster-balancing.adoc[partition balancing]",
         "xref:manage:cluster-maintenance/continuous-data-balancing.adoc[Configure Continuous Data Balancing]",
-        "xref:get-started:licensing/index.adoc[enterprise license]"
+        "xref:get-started:licensing/index.adoc[enterprise license]",
+        "xref:reference:properties/cluster-properties.adoc#partition_autobalancing_node_availability_timeout_sec[`partition_autobalancing_node_availability_timeout_sec`]",
+        "xref:reference:properties/cluster-properties.adoc#partition_autobalancing_max_disk_usage_percent[`partition_autobalancing_max_disk_usage_percent`]"
       ],
       "description": "Controls when and how Redpanda automatically rebalances partition replicas across brokers.\n\nValues:\n\n* `continuous`: Partition balancing happens automatically to maintain optimal performance and availability, based on continuous monitoring for node changes (same as `node_add`) and also high disk usage. This option requires an enterprise license, and it is customized by `partition_autobalancing_node_availability_timeout_sec` and `partition_autobalancing_max_disk_usage_percent` properties.\n* `node_add`: Partition balancing happens when a node is added.\n* `off`: Partition balancing is disabled. This option is not recommended for production clusters.",
-      "links": {
-        "`partition_autobalancing_node_availability_timeout_sec`": "#partition_autobalancing_node_availability_timeout_sec",
-        "`partition_autobalancing_max_disk_usage_percent`": "#partition_autobalancing_max_disk_usage_percent"
-      },
       "config_scope": "cluster"
     },
     "partition_autobalancing_node_autodecommission_timeout_sec": {
@@ -1950,7 +1760,6 @@
       "config_scope": "cluster"
     },
     "partition_manager_shutdown_watchdog_timeout": {
-      "description": "A threshold value to detect partitions which might have been stuck while shutting down. After this threshold, a watchdog in partition manager will log information about partition shutdown not making progress.",
       "config_scope": "cluster"
     },
     "pp_sr_smp_max_non_local_requests": {
@@ -1959,11 +1768,9 @@
     },
     "produce_ack_level": {
       "config_scope": "broker",
-      "category": "pandaproxy-client",
-      "description": "Number of acknowledgments the producer requires the leader to have received before considering a request complete."
+      "category": "pandaproxy-client"
     },
     "produce_batch_delay_ms": {
-      "description": "Delay (in milliseconds) to wait before sending batch.",
       "config_scope": "broker",
       "category": "pandaproxy-client"
     },
@@ -1977,11 +1784,9 @@
     },
     "produce_compression_type": {
       "config_scope": "broker",
-      "category": "pandaproxy-client",
-      "description": "Enable or disable compression by the Kafka client. Specify `none` to disable compression or one of the supported types [gzip, snappy, lz4, zstd]."
+      "category": "pandaproxy-client"
     },
     "produce_shutdown_delay_ms": {
-      "description": "Delay (in milliseconds) to allow for final flush of buffers before shutting down.",
       "config_scope": "broker",
       "category": "pandaproxy-client"
     },
@@ -1990,8 +1795,7 @@
         "xref:reference:properties/cluster-properties.adoc#enable_rack_awareness[`enable_rack_awareness`]"
       ],
       "config_scope": "broker",
-      "category": "redpanda",
-      "description": "A label that identifies a failure zone. Apply the same label to all brokers in the same failure zone. When `enable_rack_awareness` is set to `true` at the cluster level, the system uses the rack labels to spread partition replicas across different failure zones."
+      "category": "redpanda"
     },
     "raft_max_buffered_follower_append_entries_bytes_per_shard": {
       "description": "The total size of append entry requests that may be cached per shard, using the Raft-buffered protocol. When an entry is cached, the leader can continue serving requests because the ordering of the cached requests cannot change. When the total size of cached requests reaches the set limit, back pressure is applied to throttle producers.",
@@ -2002,10 +1806,7 @@
       "config_scope": "cluster"
     },
     "raft_recovery_throttle_disable_dynamic_mode": {
-      "description": "Disables cross shard sharing used to throttle recovery traffic. Should only be used to debug unexpected problems.",
-      "includes": [
-        "reference:partial$internal-use-property.adoc[]"
-      ],
+      "description": "Disables cross shard sharing used to throttle recovery traffic. Should only be used to debug unexpected problems.\n\ninclude::reference:partial$internal-use-property.adoc[]",
       "config_scope": "cluster"
     },
     "raft_smp_max_non_local_requests": {
@@ -2013,14 +1814,9 @@
       "config_scope": "cluster"
     },
     "reclaim_stable_window": {
-      "description": "If the duration since the last time memory was reclaimed is longer than the amount of time specified in this property, the memory usage of the batch cache is considered stable, so only the minimum size (`reclaim_min_size`) is set to be reclaimed.",
-      "links": {
-        "`reclaim_min_size`": "#reclaim_min_size"
-      },
       "config_scope": "cluster"
     },
     "recovery_mode_enabled": {
-      "description": "If `true`, start Redpanda in recovery mode, where user partitions are not loaded and only administrative operations are allowed.",
       "related_topics": [
         "xref:manage:recovery-mode.adoc[recovery mode]"
       ],
@@ -2029,9 +1825,6 @@
     },
     "redpanda.cloud_topic.enabled": {
       "description": "Enable Cloud Topic storage mode for this topic. When enabled, topic data is stored primarily in object storage with local storage used only as a write buffer.",
-      "links": {
-        "`redpanda.storage.mode`": "#redpanda.storage.mode"
-      },
       "related_topics": [
         "self-managed-only: xref:develop:manage-topics/cloud-topics.adoc[Cloud Topics]",
         "cloud-only: xref:develop:topics/cloud-topics.adoc[Cloud Topics]",
@@ -2087,7 +1880,6 @@
     "redpanda.key.subject.name.strategy": {
       "description": "The subject name strategy for keys when `redpanda.key.schema.id.validation` is enabled. This determines how the topic and schema are mapped to a subject name in the Schema Registry.",
       "config_scope": "topic",
-      "type": "string",
       "accepted_values": [
         "TopicNameStrategy",
         "RecordNameStrategy",
@@ -2099,11 +1891,7 @@
       ]
     },
     "redpanda.leaders.preference": {
-      "description": "The preferred location (rack) for partition leaders of a topic.\n\nThis property inherits the value from the `default_leaders_preference` cluster configuration property. You may override the cluster-wide setting by specifying the value for individual topics.\n\nIf the cluster configuration property `enable_rack_awareness` is set to `false`, Leader Pinning is disabled across the cluster.\n\nAccepted values:\n\n* `none`: Opt out the topic from Leader Pinning.\n* `racks:<rack1>[,<rack2>,...]`: Specify the preferred location (rack) of all topic partition leaders. The list can contain one or more rack IDs. If you specify multiple IDs, Redpanda tries to distribute the partition leader locations equally across brokers in these racks.\n* `ordered_racks:<rack1>[,<rack2>,...]`: Supported in Redpanda v26.1 or later. Specify the preferred racks in priority order. Redpanda places leaders in the first listed rack when available, failing over to each subsequent rack when higher-priority racks are unavailable. If all listed racks are unavailable, leaders fall back to any other available brokers. Brokers with no rack assignment are treated as lowest priority.",
-      "links": {
-        "`default_leaders_preference`": "#default_leaders_preference",
-        "`enable_rack_awareness`": "#enable_rack_awareness"
-      },
+      "description": "The preferred location (rack) for partition leaders of a topic.\n\nThis property inherits the value from the prop:default_leaders_preference[link=true] cluster configuration property. You may override the cluster-wide setting by specifying the value for individual topics.\n\nIf the cluster configuration property prop:enable_rack_awareness[link=true] is set to `false`, Leader Pinning is disabled across the cluster.\n\nAccepted values:\n\n* `none`: Opt out the topic from Leader Pinning.\n* `racks:<rack1>[,<rack2>,...]`: Specify the preferred location (rack) of all topic partition leaders. The list can contain one or more rack IDs. If you specify multiple IDs, Redpanda tries to distribute the partition leader locations equally across brokers in these racks.\n* `ordered_racks:<rack1>[,<rack2>,...]`: Supported in Redpanda v26.1 or later. Specify the preferred racks in priority order. Redpanda places leaders in the first listed rack when available, failing over to each subsequent rack when higher-priority racks are unavailable. If all listed racks are unavailable, leaders fall back to any other available brokers. Brokers with no rack assignment are treated as lowest priority.",
       "related_topics": [
         "xref:develop:produce-data/leader-pinning.adoc[Leader pinning]"
       ],
@@ -2128,24 +1916,17 @@
     },
     "redpanda.remote.read": {
       "description": "A flag for enabling Redpanda to fetch data for a topic from object storage to local storage. When set to `true` together with `redpanda.remote.write`, it enables the Tiered Storage feature.",
-      "links": {
-        "`redpanda.remote.write`": "#redpanda.remote.write"
-      },
       "related_topics": [
         "self-managed-only: xref:manage:tiered-storage.adoc[Tiered Storage]"
       ],
       "config_scope": "topic"
     },
     "redpanda.remote.readreplica": {
-      "description": [
-        "The name of the object storage bucket for a Remote Read Replica topic.",
-        "cloud-only: Remote Read Replicas are available on BYOC clusters only."
-      ],
+      "description": "The name of the object storage bucket for a Remote Read Replica topic.\n\nifdef::env-cloud[]\nRemote Read Replicas are available on BYOC clusters only.\nendif::[]",
       "related_topics": [
         "xref:manage:remote-read-replicas.adoc[Remote Read Replicas]"
       ],
       "config_scope": "topic",
-      "type": "string",
       "admonitions": [
         {
           "type": "caution",
@@ -2168,9 +1949,6 @@
     },
     "redpanda.remote.write": {
       "description": "A flag for enabling Redpanda to upload data for a topic from local storage to object storage. When set to `true` together with `redpanda.remote.read`, it enables the Tiered Storage feature.",
-      "links": {
-        "`redpanda.remote.read`": "#redpanda.remote.read"
-      },
       "related_topics": [
         "self-managed-only: xref:manage:tiered-storage.adoc[Tiered Storage]"
       ],
@@ -2178,24 +1956,16 @@
     },
     "redpanda.schema.registry.context": {
       "description": "The Schema Registry context Redpanda uses to resolve the schemas for records in this topic, for example when translating the topic to an Iceberg table. Defaults to the Schema Registry default context (`.`).",
-      "links": {
-        "Schema Registry context": "xref:manage:schema-reg/schema-reg-contexts.adoc"
-      },
       "related_topics": [
-        "xref:manage:iceberg/specify-iceberg-schema.adoc#resolve-schemas-within-a-context[Resolve schemas within a Schema Registry context]"
+        "xref:manage:iceberg/specify-iceberg-schema.adoc#resolve-schemas-within-a-context[Resolve schemas within a Schema Registry context]",
+        "xref:manage:schema-reg/schema-reg-contexts.adoc[Schema Registry context]"
       ],
       "config_scope": "topic",
       "category": "schema-registry",
-      "type": "string",
       "default": "."
     },
     "redpanda.storage.mode": {
-      "description": "The storage mode for a topic. Determines how topic data is stored and whether it is eligible for upload to object storage.\n\nAccepted values:\n\n* `local`: Topic data is stored only on the broker's local disk. Object storage upload is disabled for the topic, regardless of cluster-level Tiered Storage settings.\n* `tiered`: Topic data is stored on local disk and also uploaded to object storage. Enables Tiered Storage for the topic.\n* `cloud`: Topic data is stored in object storage using the Cloud Topics architecture. Local storage is used only as a write buffer.\n* `unset`: Specifies that the topic's storage mode is unset, regardless of the cluster default. The topic may still have Tiered Storage enabled through the legacy properties `redpanda.remote.read` and `redpanda.remote.write`.\n\nStarting in Redpanda v26.2, the `tiered` value is an alias that resolves to Tiered Storage v1 or v2 when the topic is created, according to the `default_redpanda_storage_mode_tiered_impl` cluster property. The resolved version is reported by the read-only `redpanda.storage.mode.impl` property, and the storage mode of a topic displays as `tiered` for both versions.\n\nThis property overrides the cluster-wide `default_redpanda_storage_mode` setting for individual topics.",
-      "links": {
-        "`redpanda.storage.mode.impl`": "#redpanda.storage.mode.impl",
-        "`default_redpanda_storage_mode_tiered_impl`": "#default_redpanda_storage_mode_tiered_impl",
-        "`default_redpanda_storage_mode`": "#default_redpanda_storage_mode"
-      },
+      "description": "The storage mode for a topic. Determines how topic data is stored and whether it is eligible for upload to object storage.\n\nAccepted values:\n\n* `local`: Topic data is stored only on the broker's local disk. Object storage upload is disabled for the topic, regardless of cluster-level Tiered Storage settings.\n* `tiered`: Topic data is stored on local disk and also uploaded to object storage. Enables Tiered Storage for the topic.\n* `cloud`: Topic data is stored in object storage using the Cloud Topics architecture. Local storage is used only as a write buffer.\n* `unset`: Specifies that the topic's storage mode is unset, regardless of the cluster default. The topic may still have Tiered Storage enabled through the legacy properties `redpanda.remote.read` and `redpanda.remote.write`.\n\nStarting in Redpanda v26.2, the `tiered` value is an alias that resolves to Tiered Storage v1 or v2 when the topic is created, according to the prop:default_redpanda_storage_mode_tiered_impl[link=true] cluster property. The resolved version is reported by the read-only `redpanda.storage.mode.impl` property, and the storage mode of a topic displays as `tiered` for both versions.\n\nThis property overrides the cluster-wide prop:default_redpanda_storage_mode[link=true] setting for individual topics.",
       "related_topics": [
         "self-managed-only: xref:manage:tiered-storage.adoc[Tiered Storage]",
         "self-managed-only: xref:develop:manage-topics/cloud-topics.adoc[Manage Cloud Topics]",
@@ -2206,11 +1976,7 @@
       "version": "v26.1.1"
     },
     "redpanda.storage.mode.impl": {
-      "description": "The exact implementation of the topic's storage mode. Topics with the `tiered` storage mode report `tiered_v1` (Tiered Storage v1) or `tiered_v2` (Tiered Storage v2); topics with other storage modes mirror the value of `redpanda.storage.mode`.\n\nThis property is read-only after topic creation. To select the Tiered Storage version for a topic explicitly, set this property together with a matching `redpanda.storage.mode` value when you create the topic (both `tiered_v1` and `tiered_v2` correspond to the `tiered` mode). You can omit `redpanda.storage.mode` only if this property matches the version selected by the cluster default. To change a topic's storage mode after creation, alter `redpanda.storage.mode` instead.\n\nIf this property is not set at topic creation, the `tiered` storage mode resolves to the version selected by the `default_redpanda_storage_mode_tiered_impl` cluster property.",
-      "links": {
-        "`redpanda.storage.mode`": "#redpanda.storage.mode",
-        "`default_redpanda_storage_mode_tiered_impl`": "#default_redpanda_storage_mode_tiered_impl"
-      },
+      "description": "The exact implementation of the topic's storage mode. Topics with the `tiered` storage mode report `tiered_v1` (Tiered Storage v1) or `tiered_v2` (Tiered Storage v2); topics with other storage modes mirror the value of `redpanda.storage.mode`.\n\nThis property is read-only after topic creation. To select the Tiered Storage version for a topic explicitly, set this property together with a matching `redpanda.storage.mode` value when you create the topic (both `tiered_v1` and `tiered_v2` correspond to the `tiered` mode). You can omit `redpanda.storage.mode` only if this property matches the version selected by the cluster default. To change a topic's storage mode after creation, alter `redpanda.storage.mode` instead.\n\nIf this property is not set at topic creation, the `tiered` storage mode resolves to the version selected by the prop:default_redpanda_storage_mode_tiered_impl[link=true] cluster property.",
       "accepted_values": [
         "local",
         "tiered_v1",
@@ -2241,7 +2007,6 @@
         "xref:manage:schema-reg/schema-id-validation.adoc[Server-Side Schema ID Validation]"
       ],
       "config_scope": "topic",
-      "type": "string",
       "accepted_values": [
         "TopicNameStrategy",
         "RecordNameStrategy",
@@ -2254,11 +2019,7 @@
       "config_scope": "topic"
     },
     "replication.factor": {
-      "description": [
-        "The number of replicas of a topic to save in different nodes (brokers) of a cluster.",
-        "If `replication.factor` is set to a positive value, it overrides the cluster property `default_topic_replications` for the topic.",
-        "cloud-only: Redpanda Cloud clusters require a replication factor of at least 3; a lower value is rejected."
-      ],
+      "description": "The number of replicas of a topic to save in different nodes (brokers) of a cluster.\n\nIf `replication.factor` is set to a positive value, it overrides the cluster property `default_topic_replications` for the topic.\n\nifdef::env-cloud[]\nRedpanda Cloud clusters require a replication factor of at least 3; a lower value is rejected.\nendif::[]",
       "related_topics": [
         "xref:reference:rpk/rpk-topic/rpk-topic-describe.adoc[`rpk topic describe`]",
         "xref:reference:rpk/rpk-topic/rpk-topic-alter-config.adoc[`rpk topic alter-config`]",
@@ -2284,9 +2045,6 @@
     },
     "retention.local.target.bytes": {
       "description": "A size-based retention limit for Tiered Storage that configures the maximum size that a topic partition in local storage can grow before becoming eligible for cleanup. It applies per partition and is equivalent to `retention.bytes` without Tiered Storage.\n\nThis property supports three states:\n\n* Positive value: Sets the maximum bytes per partition in local storage before cleanup.\n* 0: Data in local storage is immediately eligible for cleanup.\n* Negative value: Disables size-based local retention override for this topic.",
-      "links": {
-        "`retention.bytes`": "#retention.bytes"
-      },
       "related_topics": [
         "self-managed-only: xref:reference:properties/cluster-properties.adoc#retention_local_target_bytes_default[`retention_local_target_bytes`]",
         "self-managed-only: xref:manage:tiered-storage.adoc[Tiered Storage]"
@@ -2295,9 +2053,6 @@
     },
     "retention.local.target.ms": {
       "description": "A time-based retention limit for Tiered Storage that sets the maximum duration that a log's segment file for a topic is retained in local storage before cleanup. It applies per partition and is equivalent to `retention.ms` without Tiered Storage.\n\nThis property supports three states:\n\n* Positive value: Sets the maximum milliseconds to retain data in local storage.\n* 0: Data in local storage is immediately eligible for cleanup.\n* Negative value: Disables time-based local retention override for this topic.",
-      "links": {
-        "`retention.ms`": "#retention.ms"
-      },
       "related_topics": [
         "self-managed-only: xref:reference:properties/cluster-properties.adoc#retention_local_target_ms_default[`retention_local_target_ms`]",
         "self-managed-only: xref:manage:tiered-storage.adoc[Tiered Storage]",
@@ -2314,11 +2069,11 @@
       "config_scope": "topic"
     },
     "retention_bytes": {
-      "description": "Default maximum number of bytes per partition on disk before triggering deletion of the oldest messages. If `null` (the default value), no limit is applied.\n\nThe topic property `retention.bytes` overrides the value of `retention_bytes` at the topic level.",
       "related_topics": [
         "self-managed-only: xref:reference:properties/topic-properties.adoc#retention-bytes[`retention.bytes`]"
       ],
-      "config_scope": "cluster"
+      "config_scope": "cluster",
+      "description": "Default maximum number of bytes per partition on disk before triggering deletion of the oldest messages. If `null` (the default value), no limit is applied.\n\nThe topic property `retention.bytes` overrides the value of `retention_bytes` at the topic level."
     },
     "retention_local_target_bytes_default": {
       "related_topics": [
@@ -2335,10 +2090,6 @@
     },
     "retention_local_target_capacity_bytes": {
       "description": "The target capacity (in bytes) that log storage will try to use before additional retention rules take over to trim data to meet the target. When no target is specified, storage usage is unbounded.",
-      "links": {
-        "`retention_local_target_capacity_bytes`": "#retention_local_target_capacity_bytes",
-        "`retention_local_target_capacity_percent`": "#retention_local_target_capacity_percent"
-      },
       "config_scope": "cluster",
       "admonitions": [
         {
@@ -2349,11 +2100,6 @@
     },
     "retention_local_target_capacity_percent": {
       "description": "The target capacity in percent of unreserved space (`disk_reservation_percent`) that log storage will try to use before additional retention rules will take over to trim data in order to meet the target. When no target is specified storage usage is unbounded.",
-      "links": {
-        "`disk_reservation_percent`": "#disk_reservation_percent",
-        "`retention_local_target_capacity_bytes`": "#retention_local_target_capacity_bytes",
-        "`retention_local_target_capacity_percent`": "#retention_local_target_capacity_percent"
-      },
       "config_scope": "cluster",
       "admonitions": [
         {
@@ -2368,10 +2114,6 @@
       ],
       "config_scope": "cluster",
       "description": "Local retention time target for partitions of topics with object storage write enabled.\n\nThis property can be overridden on a per-topic basis by setting `retention.local.target.ms` in each topic enabled for Tiered Storage.",
-      "links": {
-        "`retention_local_target_bytes_default`": "#retention_local_target_bytes_default",
-        "`retention_local_target_ms_default`": "#retention_local_target_ms_default"
-      },
       "admonitions": [
         {
           "type": "note",
@@ -2387,7 +2129,6 @@
       "category": "pandaproxy-client"
     },
     "retry_base_backoff_ms": {
-      "description": "Delay (in milliseconds) for initial retry backoff.",
       "config_scope": "broker",
       "category": "pandaproxy-client"
     },
@@ -2444,13 +2185,7 @@
       "config_scope": "cluster"
     },
     "sasl_mechanism": {
-      "description": "The SASL mechanism to use when the HTTP Proxy client connects to the Kafka API. These credentials are used when the HTTP Proxy API listener has `authentication_method`: `none` but the cluster requires authenticated access to the Kafka API. This property specifies which individual SASL mechanism the HTTP Proxy client should use, while the cluster-wide available mechanisms are configured using the `sasl_mechanisms` cluster property.",
-      "links": {
-        "`authentication_method`": "xref:reference:properties/broker-properties.adoc#http_based_auth_method"
-      },
-      "includes": [
-        "shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]"
-      ],
+      "description": "The SASL mechanism to use when the HTTP Proxy client connects to the Kafka API. These credentials are used when the HTTP Proxy API listener has `authentication_method`: `none` but the cluster requires authenticated access to the Kafka API. This property specifies which individual SASL mechanism the HTTP Proxy client should use, while the cluster-wide available mechanisms are configured using the `sasl_mechanisms` cluster property.\n\ninclude::shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]",
       "related_topics": [
         "xref:reference:properties/cluster-properties.adoc#sasl_mechanisms[`sasl_mechanisms`]"
       ],
@@ -2468,9 +2203,6 @@
     },
     "sasl_mechanisms_overrides": {
       "description": "Configure different SASL authentication mechanisms for specific listeners. This overrides the cluster-wide `sasl_mechanisms` setting for the specified listener. Use this when you need different authentication methods on different listeners, such as SCRAM for internal traffic and OAUTHBEARER for external clients. The same requirements from `sasl_mechanisms` apply.",
-      "links": {
-        "`sasl_mechanisms`": "#sasl_mechanisms"
-      },
       "related_topics": [],
       "config_scope": "cluster"
     },
@@ -2544,24 +2276,12 @@
       "version": "v26.2.1"
     },
     "scram_password": {
-      "description": "Password to use for SCRAM authentication mechanisms when the HTTP Proxy client connects to the Kafka API. This property is required when the HTTP Proxy API listener has `authentication_method`: `none` but the cluster requires authenticated access to the Kafka API.",
-      "links": {
-        "`authentication_method`": "xref:reference:properties/broker-properties.adoc#http_based_auth_method"
-      },
-      "includes": [
-        "shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]"
-      ],
+      "description": "Password to use for SCRAM authentication mechanisms when the HTTP Proxy client connects to the Kafka API. This property is required when the HTTP Proxy API listener has `authentication_method`: `none` but the cluster requires authenticated access to the Kafka API.\n\ninclude::shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]",
       "config_scope": "broker",
       "category": "pandaproxy-client"
     },
     "scram_username": {
-      "description": "Username to use for SCRAM authentication mechanisms when the HTTP Proxy client connects to the Kafka API. This property is required when the HTTP Proxy API listener has `authentication_method`: `none` but the cluster requires authenticated access to the Kafka API.",
-      "links": {
-        "`authentication_method`": "xref:reference:properties/broker-properties.adoc#http_based_auth_method"
-      },
-      "includes": [
-        "shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]"
-      ],
+      "description": "Username to use for SCRAM authentication mechanisms when the HTTP Proxy client connects to the Kafka API. This property is required when the HTTP Proxy API listener has `authentication_method`: `none` but the cluster requires authenticated access to the Kafka API.\n\ninclude::shared:partial$http-proxy-ephemeral-credentials-breaking-change.adoc[]",
       "config_scope": "broker",
       "category": "pandaproxy-client",
       "example": [
@@ -2641,19 +2361,10 @@
       "version": "v26.2.1"
     },
     "storage_compaction_key_map_memory": {
-      "description": "Maximum number of bytes that may be used on each shard by compaction key-offset maps. Only applies when `log_compaction_use_sliding_window` is set to `true`.",
-      "links": {
-        "`log_compaction_use_sliding_window`": "#log_compaction_use_sliding_window"
-      },
       "config_scope": "cluster"
     },
     "storage_compaction_key_map_memory_limit_percent": {
       "description": "Limit on `storage_compaction_key_map_memory`, expressed as a percentage of memory per shard, that bounds the amount of memory used by compaction key-offset maps.",
-      "links": {
-        "`storage_compaction_key_map_memory`": "#storage_compaction_key_map_memory",
-        "`data_transforms_per_core_memory_reservation`": "#data_transforms_per_core_memory_reservation",
-        "`log_compaction_use_sliding_window`": "#log_compaction_use_sliding_window"
-      },
       "config_scope": "cluster",
       "admonitions": [
         {
@@ -2694,7 +2405,6 @@
       "config_scope": "cluster"
     },
     "tls_min_version": {
-      "description": "The minimum TLS version that Redpanda clusters support. This property prevents client applications from negotiating a downgrade to the TLS version when they make a connection to a Redpanda cluster.",
       "config_scope": "cluster"
     },
     "tls_v1_2_cipher_suites": {
@@ -2707,11 +2417,9 @@
     },
     "tombstone_retention_ms": {
       "description": "The retention time for tombstone records and transaction markers in a compacted topic. Redpanda removes them after the retention limit is exceeded.\n\nFor topics that use Tiered Storage v1, tombstone removal is silently skipped while any of `cloud_storage_enabled`, `cloud_storage_enable_remote_read`, or `cloud_storage_enable_remote_write` is enabled: the configuration is accepted, but tombstones are not removed for the topic. This restriction does not apply to topics that use Tiered Storage v2, available starting in Redpanda 26.2.\n\nIf not set, tombstone removal is disabled.",
-      "links": {
-        "Tiered Storage v2": "self-managed-only: xref:manage:tiered-storage.adoc#tiered-storage-versions"
-      },
       "related_topics": [
-        "self-managed-only: xref:manage:cluster-maintenance/compaction-settings.adoc#tombstone-record-removal[Tombstone record removal]"
+        "self-managed-only: xref:manage:cluster-maintenance/compaction-settings.adoc#tombstone-record-removal[Tombstone record removal]",
+        "self-managed-only: xref:manage:tiered-storage.adoc#tiered-storage-versions[Tiered Storage v2]"
       ],
       "config_scope": "cluster"
     },
@@ -2728,9 +2436,6 @@
     },
     "topic_partitions_memory_allocation_percent": {
       "description": "Percentage of total memory to reserve for topic partitions. See `topic_memory_per_partition` for details.",
-      "links": {
-        "`topic_memory_per_partition`": "#topic_memory_per_partition"
-      },
       "config_scope": "cluster"
     },
     "topic_partitions_per_shard": {
@@ -2739,9 +2444,6 @@
     },
     "topic_partitions_reserve_shard0": {
       "description": "Reserved partition slots on shard (CPU core) 0 on each node. If this is greater than or equal to `topic_partitions_per_shard`, no data partitions will be scheduled on shard 0.",
-      "links": {
-        "`topic_partitions_per_shard`": "#topic_partitions_per_shard"
-      },
       "config_scope": "cluster"
     },
     "transaction_coordinator_cleanup_policy": {
@@ -2756,9 +2458,6 @@
     },
     "transaction_coordinator_delete_retention_ms": {
       "description": "Delete segments older than this age. To ensure transaction state is retained for as long as the longest-running transaction, make sure this is greater than or equal to `transactional_id_expiration_ms`.\n\nFor example, if your typical transactions run for one hour, consider setting both `transaction_coordinator_delete_retention_ms` and `transactional_id_expiration_ms` to at least 3600000 (one hour), or a little over.",
-      "links": {
-        "`transactional_id_expiration_ms`": "#transactional_id_expiration_ms"
-      },
       "related_topics": [
         "xref:reference:properties/cluster-properties.adoc#transactional_id_expiration_ms[`transactional_id_expiration_ms`]"
       ],
@@ -2786,7 +2485,6 @@
     "verbose_logging_timeout_sec_max": {
       "config_scope": "broker",
       "category": "redpanda",
-      "description": "Maximum duration in seconds for verbose (`TRACE` or `DEBUG`) logging. Values configured above this will be clamped. If null (the default) there is no limit. Can be overridden in the Admin API on a per-request basis.",
       "example": [
         "[,yaml]",
         "----",
@@ -2805,10 +2503,6 @@
     },
     "write.caching": {
       "description": "The write caching mode to apply to a topic.\n\nWhen `write.caching` is set, it overrides the cluster property `write_caching_default`. Write caching acknowledges a message as soon as it is received and acknowledged on a majority of brokers, without waiting for it to be written to disk. With `acks=all`, this provides lower latency while still ensuring that a majority of brokers acknowledge the write. Fsyncs follow `flush.ms` and `flush.bytes`, whichever is reached first.",
-      "links": {
-        "`flush.ms`": "#flush.ms",
-        "`flush.bytes`": "#flush.bytes"
-      },
       "related_topics": [
         "xref:develop:manage-topics/config-topics.adoc#configure-write-caching[Write caching]",
         "self-managed-only: xref:manage:tiered-storage.adoc[Tiered Storage]",
@@ -2822,11 +2516,7 @@
         "xref:develop:manage-topics/config-topics.adoc#configure-write-caching[Write caching]"
       ],
       "config_scope": "cluster",
-      "description": "The default write caching mode to apply to user topics. Write caching acknowledges a message as soon as it is received and acknowledged on a majority of brokers, without waiting for it to be written to disk. With `acks=all`, this provides lower latency while still ensuring that a majority of brokers acknowledge the write. \n\nFsyncs follow `raft_replica_max_pending_flush_bytes` and `raft_replica_max_flush_delay_ms`, whichever is reached first.\n\nThe `write_caching_default` cluster property can be overridden with the `write.caching` topic property.",
-      "links": {
-        "`raft_replica_max_pending_flush_bytes`": "#raft_replica_max_pending_flush_bytes",
-        "`raft_replica_max_flush_delay_ms`": "#raft_replica_max_flush_delay_ms"
-      }
+      "description": "The default write caching mode to apply to user topics. Write caching acknowledges a message as soon as it is received and acknowledged on a majority of brokers, without waiting for it to be written to disk. With `acks=all`, this provides lower latency while still ensuring that a majority of brokers acknowledge the write. \n\nFsyncs follow `raft_replica_max_pending_flush_bytes` and `raft_replica_max_flush_delay_ms`, whichever is reached first.\n\nThe `write_caching_default` cluster property can be overridden with the `write.caching` topic property."
     }
   }
 }

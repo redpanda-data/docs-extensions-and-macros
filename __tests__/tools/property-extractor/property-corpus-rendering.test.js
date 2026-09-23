@@ -271,9 +271,32 @@ describe('declared includes and glossary terms over the live corpus', () => {
 describe('declared links over the live corpus', () => {
   it('applies every declared link and leaves none unmatched', () => {
     const corpus = buildCorpus(OVERRIDES);
-    const declared = Object.values(OVERRIDES.properties)
-      .filter((o) => o.links)
-      .reduce((n, o) => n + Object.keys(o.links).length, 0);
+    // A links-only override with none of description, example or an
+    // admonition of its own has no prose in this harness's inputs for a link
+    // to match against -- its only prose is the property's real extracted
+    // description, which the snapshot deliberately excludes (see the corpus
+    // refresh instructions in README.adoc, "a full copy would be 695 KB of
+    // text that rots"). Silently excluding that case from the count and the
+    // unmatched assertion below would let a misspelled or obsolete link key
+    // pass unnoticed, which is the exact link rot this test exists to catch
+    // (PR #329 review). So it fails loudly here instead: the property needs
+    // a description, example or admonition override this harness can check
+    // the link against.
+    const hasGroundTruth = (name) => {
+      const p = corpus[name];
+      if (typeof p?.description === 'string') return true;
+      if (typeof p?.example === 'string' || Array.isArray(p?.example)) return true;
+      if (Array.isArray(p?.admonitions) && p.admonitions.some((a) => typeof a?.text === 'string')) return true;
+      return false;
+    };
+    const unvalidatable = Object.entries(OVERRIDES.properties)
+      .filter(([name, o]) => o.links && !hasGroundTruth(name))
+      .map(([name]) => name);
+    expect(unvalidatable).toEqual([]);
+
+    const declared = Object.entries(OVERRIDES.properties)
+      .filter(([, o]) => o.links)
+      .reduce((n, [, o]) => n + Object.keys(o.links).length, 0);
 
     const result = applyPropertyLinks(corpus);
 
