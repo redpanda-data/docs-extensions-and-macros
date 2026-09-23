@@ -231,10 +231,15 @@ describe('deletion-only diff (end-to-end, temp git repo)', () => {
     expect(result.summary.totalDeclarations).toBe(0)
     expect(result.findings).toHaveLength(0)
 
-    // What keeps the gate open.
-    expect(result.summary.removedSurfaceLines).toBe(5)
+    // What keeps the gate open: the declaration itself, found by extracting
+    // the merge-base side. Two of the five deleted lines are its anchors: the
+    // sm::description(...) call and the name literal in make_counter(...).
+    expect(result.summary.removedDeclarations).toEqual([
+      expect.objectContaining({ surface: 'metrics', name: 'records_produced', file: REL })
+    ])
+    expect(result.summary.removedSurfaceLines).toBe(2)
     expect(result.summary.removedSurfaceFiles).toEqual([
-      { surface: 'metrics', file: REL, lines: 5 }
+      { surface: 'metrics', file: REL, lines: 2 }
     ])
   })
 
@@ -256,8 +261,11 @@ describe('deletion-only diff (end-to-end, temp git repo)', () => {
 
       const result = lintStrings({ repo: solo, diffBase: 'HEAD~1', log: () => {} })
       expect(result.summary.totalDeclarations).toBe(0)
+      // Each removed metric's name line plus its sm::description(...) lines.
+      expect(result.summary.removedDeclarations.map((d) => d.name).sort()).toEqual(
+        ['buffer_size', 'committed_offset', 'records_produced', 'start_offset'].sort())
       expect(result.summary.removedSurfaceFiles).toEqual([
-        { surface: 'metrics', file: REL, lines: 41 }
+        { surface: 'metrics', file: REL, lines: 10 }
       ])
     } finally {
       fs.rmSync(solo, { recursive: true, force: true })
@@ -270,5 +278,113 @@ describe('deletion-only diff (end-to-end, temp git repo)', () => {
     const result = lintStrings({ repo, surfaces: ['metrics'], log: () => {} })
     expect(result.summary.removedSurfaceLines).toBe(0)
     expect(result.summary.removedSurfaceFiles).toEqual([])
+  })
+})
+
+// A PR review runs on every push. These pin the two properties that keep it
+// from re-reviewing or waking up for nothing: a deleted line only counts when
+// it belonged to a doc-string declaration, and a string already reviewed on
+// an earlier push is skipped until its text changes.
+describe('review once (end-to-end, temp git repo)', () => {
+  const FIXTURE = path.join(__dirname, '../../../tools/lint-strings/fixtures/metrics/lint_probe.cc')
+  const REL = path.join('src', 'v', 'cluster', 'lint_probe.cc')
+  let repo
+
+  function git (args) {
+    execSync(`git ${args}`, { cwd: repo, stdio: 'pipe' })
+  }
+
+  function commitEdit (from, to, message) {
+    const target = path.join(repo, REL)
+    const content = fs.readFileSync(target, 'utf8')
+    expect(content).toContain(from)
+    fs.writeFileSync(target, content.replace(from, to))
+    git('add .')
+    git(`commit --quiet -m "${message}"`)
+  }
+
+  beforeEach(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-once-'))
+    const target = path.join(repo, REL)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.copyFileSync(FIXTURE, target)
+    git('init --quiet')
+    git('config user.email lint-strings-test@example.invalid')
+    git('config user.name "lint-strings test"')
+    git('add .')
+    git('commit --quiet -m base')
+    git('tag base')
+  })
+
+  afterEach(() => {
+    fs.rmSync(repo, { recursive: true, force: true })
+  })
+
+  test('deleting a line that is not part of a declaration is not a removal', () => {
+    commitEdit('          [this] { return _buffer_size; },\n', '', 'drop a code line')
+    const result = lintStrings({ repo, diffBase: 'base', log: () => {} })
+    expect(result.summary.removedDeclarations).toEqual([])
+    expect(result.summary.removedSurfaceLines).toBe(0)
+    expect(result.summary.removedSurfaceFiles).toEqual([])
+  })
+
+  test('an edited declaration is reviewed, not reported as removed', () => {
+    commitEdit('sm::description("start offset")', 'sm::description("Offset of the first record")', 'reword')
+    const result = lintStrings({ repo, diffBase: 'base', log: () => {} })
+    expect(result.summary.removedDeclarations).toEqual([])
+    expect(result.declarations.map((d) => d.name)).toEqual(['start_offset'])
+  })
+
+  test('a renamed metric is a removal of the old name', () => {
+    commitEdit('"records_produced"', '"records_written"', 'rename')
+    const result = lintStrings({ repo, diffBase: 'base', log: () => {} })
+    expect(result.summary.removedDeclarations.map((d) => d.name)).toEqual(['records_produced'])
+    expect(result.declarations.map((d) => d.name)).toEqual(['records_written'])
+  })
+
+  test('a reviewed fingerprint is skipped until the string changes', () => {
+    commitEdit('sm::description("start offset")', 'sm::description("start offset.")', 'first push')
+    const first = lintStrings({ repo, diffBase: 'base', log: () => {} })
+    expect(first.summary.totalDeclarations).toBe(1)
+    const [pending] = first.declarations
+    expect(pending.fingerprint).toMatch(/^[0-9a-f]{16}$/)
+    expect(first.findings[0].fingerprint).toBe(pending.fingerprint)
+
+    // Second push touches an unrelated line of the same declaration's file
+    // and leaves the string alone: nothing new to review.
+    commitEdit('[this] { return _start_offset; }', '[this] { return _start_offset + 0; }', 'second push')
+    const second = lintStrings({ repo, diffBase: 'base', reviewedFingerprints: new Set([pending.fingerprint]), log: () => {} })
+    expect(second.summary.totalDeclarations).toBe(0)
+    expect(second.findings).toHaveLength(0)
+    expect(second.declarations).toEqual([])
+    expect(second.summary.alreadyReviewed).toBe(1)
+
+    // Third push edits the string: a new fingerprint, reviewed again.
+    commitEdit('sm::description("start offset.")', 'sm::description("Offset of the first record")', 'third push')
+    const third = lintStrings({ repo, diffBase: 'base', reviewedFingerprints: new Set([pending.fingerprint]), log: () => {} })
+    expect(third.summary.totalDeclarations).toBe(1)
+    expect(third.declarations[0].fingerprint).not.toBe(pending.fingerprint)
+  })
+
+  test('a reviewed removal is not reported again', () => {
+    commitEdit('"records_produced"', '"records_written"', 'rename')
+    const first = lintStrings({ repo, diffBase: 'base', log: () => {} })
+    const seen = new Set([...first.summary.removedDeclarations, ...first.declarations].map((d) => d.fingerprint))
+    const again = lintStrings({ repo, diffBase: 'base', reviewedFingerprints: seen, log: () => {} })
+    expect(again.summary.removedDeclarations).toEqual([])
+    expect(again.summary.removedSurfaceLines).toBe(0)
+    expect(again.summary.totalDeclarations).toBe(0)
+    expect(again.summary.alreadyReviewed).toBe(2)
+  })
+})
+
+describe('readFingerprints', () => {
+  const { readFingerprints } = require('../../../tools/lint-strings')
+
+  test('a missing file is an empty set, and non-fingerprint tokens are ignored', () => {
+    expect(readFingerprints(path.join(os.tmpdir(), 'no-such-lint-strings-state'))).toEqual(new Set())
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-fp-')), 'reviewed.txt')
+    fs.writeFileSync(file, '0123456789abcdef\nnot-a-fingerprint, fedcba9876543210\n\nABCDEF0123456789\n')
+    expect(readFingerprints(file)).toEqual(new Set(['0123456789abcdef', 'fedcba9876543210']))
   })
 })

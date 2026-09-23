@@ -1,7 +1,10 @@
 'use strict'
 
+const crypto = require('crypto')
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
+const { spawnSync } = require('child_process')
 
 const { runRules, mergeResults } = require('./engine')
 const { getDiffLines, classifyDiff, spanIntersects, SURFACE_ROUTES } = require('./diff')
@@ -54,6 +57,9 @@ function rulesFor (surface) {
  *   only declarations whose span intersects lines changed since this ref
  * @param {string[]} [options.skipRules]
  * @param {string[]} [options.onlyRules]
+ * @param {Set<string>} [options.reviewedFingerprints] - Diff mode: skip
+ *   declarations (and removals) whose fingerprint is in this set, so a PR
+ *   review sees each string once across pushes
  * @param {Function} [options.log] - Progress logger (stderr by default)
  * @returns {Object} { findings, summary, unsupported_surfaces }
  */
@@ -64,6 +70,7 @@ function lintStrings (options) {
     diffBase = null,
     skipRules = [],
     onlyRules = null,
+    reviewedFingerprints = null,
     log = (msg) => process.stderr.write(`${msg}\n`)
   } = options
 
@@ -83,12 +90,16 @@ function lintStrings (options) {
 
   const results = []
   const unsupportedSurfaces = []
-  let removedSurfaceFiles = []
+  const reviewed = reviewedFingerprints || new Set()
+  const pending = []
+  let alreadyReviewed = 0
+  let removal = { rawFiles: [], declarations: [] }
 
   if (diffBase) {
     const { changed, removed } = getDiffLines(repoPath, diffBase)
     const classified = classifyDiff(changed)
-    removedSurfaceFiles = collectRemovals(removed, surfaces)
+    const removedBySurface = classifyDiff(removed)
+    const headBySurface = {}
 
     for (const [surfaceName, files] of Object.entries(classified)) {
       if (!SURFACES[surfaceName]) {
@@ -101,13 +112,31 @@ function lintStrings (options) {
 
       const surface = SURFACES[surfaceName]
       log(`[${surfaceName}] ${files.size} changed file(s) in diff; extracting declarations at HEAD...`)
-      const fileSet = new Set(files.keys())
-      const declarations = surface
-        .extract({ repo: repoPath, files: fileSet, log })
-        .filter((decl) => spanIntersects(decl.line_start, decl.line_end, files.get(decl.file)))
-      for (const decl of declarations) decl.in_pr_diff = true
+      // Files that only lost lines are extracted too: a declaration that
+      // still exists at HEAD, in any touched file, was edited or moved, not
+      // removed.
+      const removedFiles = removedBySurface[surfaceName] ? [...removedBySurface[surfaceName].keys()] : []
+      const head = surface.extract({ repo: repoPath, files: new Set([...files.keys(), ...removedFiles]), log })
+      headBySurface[surfaceName] = head
+      const declarations = []
+      for (const decl of head) {
+        if (!touches(decl, files.get(decl.file))) continue
+        decl.in_pr_diff = true
+        decl.fingerprint = fingerprint(decl)
+        if (reviewed.has(decl.fingerprint)) {
+          alreadyReviewed++
+          continue
+        }
+        declarations.push(decl)
+        pending.push(pendingEntry(decl))
+      }
       results.push(runRules(declarations, rulesFor(surface), { skipRules, onlyRules }))
     }
+
+    removal = collectRemovals({ repoPath, diffBase, removed: removedBySurface, surfaces, requested, headBySurface, log })
+    const kept = removal.declarations.filter((decl) => !reviewed.has(decl.fingerprint))
+    alreadyReviewed += removal.declarations.length - kept.length
+    removal.declarations = kept
   } else {
     for (const surfaceName of requested) {
       const surface = SURFACES[surfaceName]
@@ -119,34 +148,178 @@ function lintStrings (options) {
   }
 
   const merged = mergeResults(results)
+  for (const finding of merged.findings) {
+    if (finding.in_pr_diff) finding.fingerprint = fingerprint(finding)
+  }
   merged.findings.sort((a, b) =>
     a.surface.localeCompare(b.surface) || a.file.localeCompare(b.file) || (a.line_start || 0) - (b.line_start || 0))
   merged.unsupported_surfaces = unsupportedSurfaces
+  if (diffBase) {
+    merged.declarations = pending
+    merged.summary.alreadyReviewed = alreadyReviewed
+  }
+  merged.summary.removedDeclarations = removal.declarations.map(pendingEntry)
+  const removedSurfaceFiles = [...removal.rawFiles, ...removedFilesFor(removal.declarations)]
+    .sort((a, b) => a.surface.localeCompare(b.surface) || a.file.localeCompare(b.file))
   merged.summary.removedSurfaceFiles = removedSurfaceFiles
   merged.summary.removedSurfaceLines = removedSurfaceFiles.reduce((sum, entry) => sum + entry.lines, 0)
   return merged
 }
 
 /**
- * Deletions in files that route to a doc-string surface, so a deletion-only PR
- * still registers as touching a surface. Reported separately from
- * totalDeclarations because a removed declaration is absent from HEAD and
- * therefore cannot be extracted or linted.
- *
- * Surfaces routed without a registered extractor are included: the gate cares
- * that documented content went away, not whether we can lint what replaced it.
- *
- * @param {Map<string, Set<number>>} removed - From getDiffLines().removed
- * @param {string[]|null} surfaces - Explicit --surface narrowing, if any
+ * A declaration's anchor lines: its span, plus any lines a surface records
+ * separately because the declared name lives outside it (metrics names sit
+ * in the enclosing make_*() call).
  */
-function collectRemovals (removed, surfaces) {
-  const only = surfaces && surfaces.length > 0 ? new Set(surfaces) : null
-  const entries = []
-  for (const [surface, files] of Object.entries(classifyDiff(removed))) {
-    if (only && !only.has(surface)) continue
-    for (const [file, lines] of files) entries.push({ surface, file, lines: lines.size })
+function spansOf (decl) {
+  const spans = [[decl.line_start, decl.line_end]]
+  const extra = decl.meta && decl.meta.name_lines
+  if (extra) spans.push(extra)
+  return spans
+}
+
+function inSpans (decl, line) {
+  return spansOf(decl).some(([start, end]) => start != null && line >= start && line <= end)
+}
+
+function touches (decl, lineSet) {
+  return spansOf(decl).some(([start, end]) => spanIntersects(start, end, lineSet))
+}
+
+/**
+ * Stable identity for one version of one doc string. A PR review records the
+ * fingerprints it has seen, and a later push skips any declaration whose
+ * surface, name and text are unchanged, so rebases, moves and unrelated edits
+ * never re-review a string. Editing the string changes the fingerprint.
+ */
+function fingerprint (decl) {
+  return crypto.createHash('sha256')
+    .update(JSON.stringify([decl.surface, decl.name, decl.string == null ? null : decl.string]))
+    .digest('hex')
+    .slice(0, 16)
+}
+
+function removalFingerprint (decl) {
+  return crypto.createHash('sha256')
+    .update(JSON.stringify(['removed', decl.surface, decl.name]))
+    .digest('hex')
+    .slice(0, 16)
+}
+
+function pendingEntry (decl) {
+  return {
+    surface: decl.surface,
+    name: decl.name,
+    file: decl.file,
+    line_start: decl.line_start,
+    line_end: decl.line_end,
+    fingerprint: decl.fingerprint
   }
-  return entries.sort((a, b) => a.surface.localeCompare(b.surface) || a.file.localeCompare(b.file))
+}
+
+function removedFilesFor (declarations) {
+  const byFile = new Map()
+  for (const decl of declarations) {
+    const key = `${decl.surface}\0${decl.file}`
+    const lines = (decl.removed_lines || 0)
+    byFile.set(key, { surface: decl.surface, file: decl.file, lines: (byFile.has(key) ? byFile.get(key).lines : 0) + lines })
+  }
+  return [...byFile.values()].sort((a, b) => a.surface.localeCompare(b.surface) || a.file.localeCompare(b.file))
+}
+
+/**
+ * Materialize the merge-base version of the directories holding `files`
+ * into a scratch tree, so a surface extractor can read the pre-image. Whole
+ * directories rather than single files: the properties extractor pairs
+ * each .cc with its .h.
+ */
+function materializeBase (repoPath, diffBase, files) {
+  const mb = spawnSync('git', ['merge-base', diffBase, 'HEAD'], { cwd: repoPath, encoding: 'utf8' })
+  if (mb.status !== 0) throw new Error(`git merge-base ${diffBase} HEAD failed: ${mb.stderr}`)
+  const base = mb.stdout.trim()
+  const dirs = [...new Set(files.map((f) => path.dirname(f)))]
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-base-'))
+  const archive = spawnSync('git', ['archive', '--format=tar', base, '--', ...dirs], { cwd: repoPath, maxBuffer: 1024 * 1024 * 1024 })
+  if (archive.status !== 0) {
+    fs.rmSync(scratch, { recursive: true, force: true })
+    throw new Error(`git archive ${base} failed: ${archive.stderr}`)
+  }
+  const untar = spawnSync('tar', ['-x', '-C', scratch], { input: archive.stdout })
+  if (untar.status !== 0) {
+    fs.rmSync(scratch, { recursive: true, force: true })
+    throw new Error(`tar failed: ${untar.stderr}`)
+  }
+  return scratch
+}
+
+/**
+ * Doc-string declarations the diff removed or renamed.
+ *
+ * A deleted line only matters when it belonged to a declaration: removing an
+ * include, a struct field or a checksum from a surface file is not a removed
+ * surface. So the old side of each affected file is extracted at the merge
+ * base, and a declaration counts as removed when its span there lost lines
+ * and its name no longer appears at HEAD in any file the diff touched (still
+ * present means it was edited or moved, and HEAD-side review covers it).
+ *
+ * Declarations are absent from HEAD by construction, so they cannot be linted;
+ * they are reported for the published-content check instead.
+ *
+ * Surfaces routed without a registered extractor, and any base extraction
+ * that fails, fall back to counting raw deleted lines: without an extractor
+ * there is no way to tell, and the gate should err toward reviewing.
+ *
+ * @returns {{ rawFiles: Array, declarations: Array }}
+ */
+function collectRemovals ({ repoPath, diffBase, removed, surfaces, requested, headBySurface, log }) {
+  const only = surfaces && surfaces.length > 0 ? new Set(surfaces) : null
+  const rawFiles = []
+  const declarations = []
+
+  for (const [surfaceName, files] of Object.entries(removed)) {
+    if (only && !only.has(surfaceName)) continue
+    const surface = SURFACES[surfaceName]
+    const raw = () => {
+      for (const [file, lines] of files) rawFiles.push({ surface: surfaceName, file, lines: lines.size })
+    }
+    if (!surface || !requested.includes(surfaceName)) {
+      raw()
+      continue
+    }
+
+    let scratch = null
+    try {
+      scratch = materializeBase(repoPath, diffBase, [...files.keys()])
+      log(`[${surfaceName}] ${files.size} file(s) lost lines; extracting declarations at the merge base...`)
+      const baseDecls = surface.extract({ repo: scratch, files: new Set(files.keys()), log })
+      const headNames = new Set((headBySurface[surfaceName] ||
+        surface.extract({ repo: repoPath, files: new Set(files.keys()), log })).map((d) => d.name))
+      for (const decl of baseDecls) {
+        const lost = files.get(decl.file)
+        if (!touches(decl, lost)) continue
+        if (headNames.has(decl.name)) continue
+        let count = 0
+        for (const line of lost) if (inSpans(decl, line)) count++
+        declarations.push({
+          surface: surfaceName,
+          name: decl.name,
+          file: decl.file,
+          line_start: decl.line_start,
+          line_end: decl.line_end,
+          string: decl.string,
+          removed_lines: count,
+          fingerprint: removalFingerprint({ surface: surfaceName, name: decl.name })
+        })
+      }
+    } catch (err) {
+      log(`[${surfaceName}] could not extract the merge-base side (${err.message}); counting raw deleted lines instead`)
+      raw()
+    } finally {
+      if (scratch) fs.rmSync(scratch, { recursive: true, force: true })
+    }
+  }
+
+  return { rawFiles, declarations }
 }
 
 /**
@@ -175,9 +348,15 @@ function formatHuman (result) {
   lines.push('='.repeat(60))
   lines.push(`Declarations checked: ${summary.totalDeclarations}`)
   lines.push(`Declarations flagged: ${summary.flaggedDeclarations}`)
-  if (summary.removedSurfaceLines) {
+  if (summary.alreadyReviewed) {
+    lines.push(`Already reviewed on an earlier push (skipped): ${summary.alreadyReviewed}`)
+  }
+  for (const decl of summary.removedDeclarations || []) {
+    lines.push(`Removed or renamed: ${decl.name} (${decl.surface}, ${decl.file})`)
+  }
+  if (summary.removedSurfaceLines && !(summary.removedDeclarations || []).length) {
     lines.push(`Lines deleted from doc-string surfaces: ${summary.removedSurfaceLines} ` +
-      `(${summary.removedSurfaceFiles.length} file(s); removed declarations cannot be extracted from HEAD)`)
+      `(${summary.removedSurfaceFiles.length} file(s) with no extractor, so every deleted line counts)`)
   }
   lines.push(`Errors: ${summary.errors}  Warnings: ${summary.warnings}  Info: ${summary.info}`)
   if (Object.keys(summary.byRule).length > 0) {
@@ -203,6 +382,22 @@ function formatHuman (result) {
 }
 
 /**
+ * Read a --reviewed file: fingerprints separated by whitespace or commas.
+ * Anything that is not a 16-hex-digit fingerprint is ignored, and a missing
+ * file is an empty set, so a first run and a corrupted cache both mean
+ * "review everything" rather than an error.
+ */
+function readFingerprints (file) {
+  let text = ''
+  try {
+    text = fs.readFileSync(file, 'utf8')
+  } catch {
+    return new Set()
+  }
+  return new Set(text.split(/[\s,]+/).filter((token) => /^[0-9a-f]{16}$/.test(token)))
+}
+
+/**
  * CLI entry point shared by bin/doc-tools.js and direct invocation
  * (node tools/lint-strings --repo <path> ...).
  *
@@ -217,7 +412,8 @@ function runCli (options) {
       surfaces: options.surface ? String(options.surface).split(',').map((s) => s.trim()).filter(Boolean) : null,
       diffBase: options.diff || null,
       skipRules: options.skipRules ? String(options.skipRules).split(',').map((s) => s.trim()).filter(Boolean) : [],
-      onlyRules: options.onlyRules ? String(options.onlyRules).split(',').map((s) => s.trim()).filter(Boolean) : null
+      onlyRules: options.onlyRules ? String(options.onlyRules).split(',').map((s) => s.trim()).filter(Boolean) : null,
+      reviewedFingerprints: options.reviewed ? readFingerprints(options.reviewed) : null
     })
   } catch (err) {
     console.error(`Error: ${err.message}`)
@@ -234,7 +430,7 @@ function runCli (options) {
   process.exit(0)
 }
 
-module.exports = { lintStrings, formatHuman, runCli, SURFACES, rulesFor }
+module.exports = { lintStrings, formatHuman, runCli, SURFACES, rulesFor, fingerprint, readFingerprints }
 
 // Direct usage: node tools/lint-strings --repo <path> [--surface a,b]
 //   [--diff <base>] [--format json|human] [--strict]
@@ -249,10 +445,11 @@ if (require.main === module) {
     else if (arg === '--format') options.format = args[++i]
     else if (arg === '--skip-rules') options.skipRules = args[++i]
     else if (arg === '--only-rules') options.onlyRules = args[++i]
+    else if (arg === '--reviewed') options.reviewed = args[++i]
     else if (arg === '--strict') options.strict = true
     else {
       console.error(`Unknown argument: ${arg}`)
-      console.error('Usage: node tools/lint-strings --repo <path> [--surface a,b] [--diff <base>] [--format json|human] [--skip-rules a,b] [--only-rules a,b] [--strict]')
+      console.error('Usage: node tools/lint-strings --repo <path> [--surface a,b] [--diff <base>] [--format json|human] [--skip-rules a,b] [--only-rules a,b] [--reviewed <file>] [--strict]')
       process.exit(2)
     }
   }
