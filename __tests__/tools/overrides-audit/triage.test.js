@@ -151,4 +151,20 @@ describe('triageCandidate', () => {
     // Original candidate fields survive the merge.
     expect(result.name).toBe('test_property')
   })
+
+  test('routes a RETIRE_OVERRIDE verdict on a SPLIT candidate to AMBIGUOUS', () => {
+    const raw = JSON.stringify({ verdict: 'RETIRE_OVERRIDE', reason: 'Source has caught up.' })
+    const result = triage.triageCandidate(candidate({ class: 'KEEP_UNTIL_UPSTREAMED' }), raw)
+    expect(result.agent_verdict).toBe('AMBIGUOUS')
+    expect(result.triage_failed).toBe(false)
+    expect(result.agent_reason).toContain('Source has caught up.')
+    expect(result.agent_reason).toMatch(/cannot be retired whole/)
+  })
+
+  test('keeps RETIRE_OVERRIDE for a non-SPLIT candidate and UPSTREAM_OVERRIDE for a SPLIT one', () => {
+    const retire = JSON.stringify({ verdict: 'RETIRE_OVERRIDE', reason: 'Source has caught up.' })
+    const upstream = JSON.stringify({ verdict: 'UPSTREAM_OVERRIDE', reason: 'Override is clearer.' })
+    expect(triage.triageCandidate(candidate({ class: 'UPSTREAMABLE' }), retire).agent_verdict).toBe('RETIRE_OVERRIDE')
+    expect(triage.triageCandidate(candidate({ class: 'KEEP_UNTIL_UPSTREAMED' }), upstream).agent_verdict).toBe('UPSTREAM_OVERRIDE')
+  })
 })

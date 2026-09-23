@@ -196,10 +196,22 @@ function parseTriageResponse (rawText) {
  *
  * @param {Object} candidate - A classify.js manifest row.
  * @param {string} rawAgentResponse - Raw text returned by the LLM triage call.
+ * A RETIRE_OVERRIDE verdict on a SPLIT (KEEP_UNTIL_UPSTREAMED) candidate is
+ * downgraded to AMBIGUOUS, because retiring that override would also delete
+ * its audience-scoped or docs-only content.
+ *
  * @returns {Object} `candidate` merged with `agent_verdict`, `agent_reason`, `triage_failed`.
  */
 function triageCandidate (candidate, rawAgentResponse) {
-  const { verdict, reason, triageFailed } = parseTriageResponse(rawAgentResponse)
+  let { verdict, reason, triageFailed } = parseTriageResponse(rawAgentResponse)
+  // A SPLIT (KEEP_UNTIL_UPSTREAMED) override also carries audience-scoped
+  // paragraphs or docs-only markup that the candidate text leaves out.
+  // Retiring the whole override would delete that content, so even when
+  // source prose has caught up, route the row to a human instead.
+  if (verdict === VERDICTS.RETIRE_OVERRIDE && candidate && candidate.class === 'KEEP_UNTIL_UPSTREAMED') {
+    verdict = VERDICTS.AMBIGUOUS
+    reason = `${reason} This override also carries audience-scoped paragraphs or docs-only markup that source does not, so it cannot be retired whole. Decide what to do with that content.`
+  }
   return {
     ...candidate,
     agent_verdict: verdict,
