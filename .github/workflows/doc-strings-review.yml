@@ -78,7 +78,7 @@
 # `github.event.pull_request.head.repo.full_name == github.repository`.
 #
 # This workflow reviews OTHER repos' PRs, so treat changes to it as review
-# infrastructure: callers should pin a release tag, not @main. The doc-tools
+# infrastructure: callers should pin a commit SHA, not @main. The doc-tools
 # CLI version is resolved at run time from the workflow's OWN ref (the
 # package.json committed alongside this file), so the workflow and the CLI it
 # runs always come from the same commit: a caller pinned to a ref gets that
