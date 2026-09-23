@@ -98,7 +98,10 @@ describe('parseTriageResponse', () => {
       ['valid JSON with missing verdict', JSON.stringify({ reason: 'No verdict field at all.' })],
       ['valid JSON with missing reason', JSON.stringify({ verdict: 'AMBIGUOUS' })],
       ['valid JSON with empty-string reason', JSON.stringify({ verdict: 'AMBIGUOUS', reason: '' })],
-      ['valid JSON with non-string reason', JSON.stringify({ verdict: 'AMBIGUOUS', reason: 42 })]
+      ['valid JSON with non-string reason', JSON.stringify({ verdict: 'AMBIGUOUS', reason: 42 })],
+      ['JSON object embedded in contradictory prose', 'I cannot decide this one. {"verdict": "RETIRE_OVERRIDE", "reason": "Source is sufficient."}'],
+      ['JSON object followed by trailing prose', '{"verdict": "UPSTREAM_OVERRIDE", "reason": "Clearer."} Though I am not sure.'],
+      ['fenced JSON with prose outside the fence', 'Here you go:\n```json\n{"verdict": "RETIRE_OVERRIDE", "reason": "Same."}\n```']
     ])('%s', (_label, raw) => {
       const result = triage.parseTriageResponse(raw)
       expect(result.verdict).toBe(VERDICTS.AMBIGUOUS)

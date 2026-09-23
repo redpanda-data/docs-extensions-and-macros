@@ -98,16 +98,16 @@ Respond with strict JSON only. Do not use markdown code fences. Do not include a
 }
 
 /**
- * Extract a JSON object from raw agent response text, tolerating the most
- * common ways a model fails to follow "strict JSON only": markdown code
- * fences around an otherwise-valid object, and leading/trailing prose
- * wrapped around it. Does not attempt to repair genuinely malformed or
- * truncated JSON - that is a real failure this function must surface, not
- * paper over.
+ * Extract a JSON value from raw agent response text. Accepts only a whole
+ * JSON response or one wrapped in a single pair of markdown code fences, the
+ * one common way a model fails to follow "strict JSON only" without changing
+ * what it said. Prose around the JSON is rejected rather than stripped: that
+ * prose can contradict the embedded verdict (for example "I cannot decide"
+ * followed by a RETIRE_OVERRIDE object), so it is not safe to trust the object.
  *
  * @param {string} text - Raw response text.
  * @returns {*} The parsed value.
- * @throws {Error} When no parseable JSON object/array can be found.
+ * @throws {Error} When the (unfenced) response is not valid JSON.
  */
 function extractJson (text) {
   let candidate = text.trim()
@@ -116,21 +116,7 @@ function extractJson (text) {
   const fenceMatch = candidate.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
   if (fenceMatch) candidate = fenceMatch[1].trim()
 
-  try {
-    return JSON.parse(candidate)
-  } catch {
-    // Fall through: the response may have prose wrapped around the JSON
-    // despite instructions not to. Take the outermost {...} span and retry
-    // once, rather than looping over substrings, so genuinely broken JSON
-    // (unbalanced braces, truncation) still throws instead of matching a
-    // fragment that happens to parse.
-    const start = candidate.indexOf('{')
-    const end = candidate.lastIndexOf('}')
-    if (start === -1 || end === -1 || end < start) {
-      throw new Error('no JSON object found in response')
-    }
-    return JSON.parse(candidate.slice(start, end + 1))
-  }
+  return JSON.parse(candidate)
 }
 
 /**
@@ -147,10 +133,10 @@ function ambiguousFallback (reason) {
 /**
  * Defensively parse whatever text an LLM triage call returned.
  *
- * The response may be clean JSON, JSON wrapped in markdown fences, JSON
- * surrounded by stray prose, empty, truncated, or JSON that parses but
- * carries an invalid or missing verdict or reason. Every one of those is
- * treated as a triage failure and mapped to the same safe AMBIGUOUS
+ * Clean JSON and JSON wrapped in markdown fences are accepted. JSON
+ * surrounded by stray prose, an empty or truncated response, or JSON that
+ * parses but carries an invalid or missing verdict or reason is treated as
+ * a triage failure and mapped to the same safe AMBIGUOUS
  * fallback: this function's job is to never let a malformed response be
  * mistaken for a real UPSTREAM_OVERRIDE or RETIRE_OVERRIDE call.
  *
