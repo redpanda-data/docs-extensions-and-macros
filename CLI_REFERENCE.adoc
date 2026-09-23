@@ -2025,6 +2025,9 @@ display help for command
 *Commands:*
 
 * `audit` - Classify each override field as redundant, upstreamable, or keep against extracted source strings
+* `triage-prompt` - Build the triage prompt for one UPSTREAMABLE/SPLIT candidate
+* `triage-parse` - Merge an LLM triage response into a candidate row
+* `report` - Build a plain-English markdown report section from triaged candidates
 * `help` - display help for command
 
 === overrides audit
@@ -2057,6 +2060,69 @@ Redpanda checkout to extract raw source strings from (alternative to --extracted
 
 `--output <path>`::
 Also write the JSON result to this file
+
+`-h, --help`::
+display help for command
+
+=== overrides triage-prompt
+
+Build the triage prompt for one UPSTREAMABLE/SPLIT candidate
+
+*Usage:*
+
+[,bash]
+----
+doc-tools overrides triage-prompt [options]
+----
+
+*Options:*
+
+`--candidate <path>`::
+Path to a single candidate row JSON file (one object, not an array)
+
+`-h, --help`::
+display help for command
+
+=== overrides triage-parse
+
+Merge an LLM triage response into a candidate row
+
+*Usage:*
+
+[,bash]
+----
+doc-tools overrides triage-parse [options]
+----
+
+*Options:*
+
+`--candidate <path>`::
+Path to the candidate row JSON file this response answers
+
+`--response <path>`::
+Path to the raw text file the LLM triage call returned
+
+`-h, --help`::
+display help for command
+
+=== overrides report
+
+Build a plain-English markdown report section from triaged candidates
+
+*Usage:*
+
+[,bash]
+----
+doc-tools overrides report [options]
+----
+
+*Options:*
+
+`--candidates <path>`::
+Path to a JSON array of triaged candidate rows
+
+`--section <section>`::
+Which report section to build (choices: "upstream", "retirement", "ambiguous")
 
 `-h, --help`::
 display help for command
