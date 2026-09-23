@@ -558,11 +558,146 @@ jobs:
           echo "ticket=$TICKET" >> "$GITHUB_OUTPUT"
 
   # ──────────────────────────────────────────────────────────────────────
+  # §4a — deterministic style lint. Informational: it never fails the review.
+  # Runs docs-team-standards' style lint (its Vale rules plus xref and image
+  # target checks) from the pinned plugin, on the lines this PR changed.
+  # Findings become the "Style lint" row, all as suggestions, and adoc_review
+  # is handed the same output so Claude neither re-derives nor repeats it.
+  # Every failure path here writes a "did not run" note instead of failing,
+  # and the aggregate treats a missing result as informational too.
+  # ──────────────────────────────────────────────────────────────────────
+  style_lint:
+    needs: [gate, classify]
+    if: needs.classify.outputs.has_adoc == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    timeout-minutes: 15
+    env:
+      VALE_VERSION: 3.22.0
+      ASCIIDOCTOR_VERSION: 2.0.26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ inputs.pr_number }}/head
+          persist-credentials: false
+
+      # Same read-only App token and pin as the plugin checkout in claude-skill,
+      # so the lint and the skills that consume its output version together.
+      - name: Mint a read-only token for the plugin checkout
+        id: standards_token
+        if: inputs.docs_app_id != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.docs_app_id }}
+          private-key: ${{ secrets.docs_app_private_key }}
+          owner: redpanda-data
+          repositories: docs-team-standards
+          permission-contents: read
+
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: redpanda-data/docs-team-standards
+          ref: ${{ inputs.plugin_ref }}
+          path: .standards
+          token: ${{ steps.standards_token.outputs.token || github.token }}
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        continue-on-error: true
+        with:
+          ruby-version: '3.3'
+
+      - name: Install Vale and Asciidoctor
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          tarball="vale_${VALE_VERSION}_Linux_64-bit.tar.gz"
+          base="https://github.com/vale-cli/vale/releases/download/v${VALE_VERSION}"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/$tarball"
+          curl -fsSL "$base/vale_${VALE_VERSION}_checksums.txt" | grep " $tarball\$" | sha256sum -c -
+          mkdir -p bin && tar -xzf "$tarball" -C bin vale
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          gem install --no-document asciidoctor -v "$ASCIIDOCTOR_VERSION"
+
+      # The diff comes from the API because the checkout is shallow: there is
+      # no merge base to diff against locally. Fetched in its own step so the
+      # token isn't in the environment that parses the PR's pages.
+      - name: Fetch the PR diff
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          R: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/style-lint"
+          gh pr diff "$PR" --repo "$R" > "$RUNNER_TEMP/style-lint/pr.diff"
+          gh pr diff "$PR" --repo "$R" --name-only > "$RUNNER_TEMP/style-lint/changed.txt"
+
+      - name: Run the style lint on the lines this PR changed
+        run: |
+          set -uo pipefail
+          OUT="$RUNNER_TEMP/style-lint"; mkdir -p "$OUT"
+          # One way out for every "could not lint" case: a pass verdict with
+          # the reason as its only suggestion, and the same reason at the top
+          # of findings.txt for the prose review to read.
+          skip() {
+            jq -n --arg n "Style lint did not run: $1" '{verdict:"pass", blocking:[], suggestions:[$n]}' > "$OUT/verdict.json"
+            printf '# style lint did not run: %s\n' "$1" > "$OUT/findings.txt"
+            echo "style-lint: skipped ($1)"
+            exit 0
+          }
+          [[ -d modules ]] || skip "no modules/ directory, so this isn't an Antora content repo"
+          [[ -f .standards/scripts/style-lint.sh ]] || skip "the pinned docs-team-standards (plugin_ref) predates the style lint"
+          [[ -s "$OUT/pr.diff" ]] || skip "the PR diff could not be fetched"
+          FILES=()
+          while IFS= read -r f; do FILES+=("$f"); done < <(grep '\.adoc$' "$OUT/changed.txt" || true)
+          if [[ ${#FILES[@]} -eq 0 ]]; then
+            jq -n '{verdict:"pass", blocking:[], suggestions:[]}' > "$OUT/verdict.json"
+            printf '# style lint ran: no changed .adoc files\n' > "$OUT/findings.txt"
+            exit 0
+          fi
+          bash .standards/scripts/style-lint.sh --format json --diff-file "$OUT/pr.diff" "${FILES[@]}" \
+            > "$OUT/result.json" 2> "$OUT/stderr.txt"
+          rc=$?
+          if [[ $rc -eq 2 ]] || ! jq -e 'type == "array"' "$OUT/result.json" > /dev/null 2>&1; then
+            skip "$(tr '\n' ' ' < "$OUT/stderr.txt" | head -c 300)"
+          fi
+          n=$(jq 'length' "$OUT/result.json")
+          { printf '# style lint ran: %s finding(s) on lines this PR changed\n' "$n"
+            jq -r '.[] | "\(.file):\(.line):\(.col) \(.severity) \(.rule) \(.message)"' "$OUT/result.json"
+          } > "$OUT/findings.txt"
+          # Errors, then warnings, all as suggestions: the lint informs the
+          # review and never blocks it. Suggestion-level hits (future tense,
+          # weak modifiers) stay in findings.txt for the prose review only.
+          jq '{verdict: "pass", blocking: [],
+               suggestions: ([.[] | select(.severity == "error")] + [.[] | select(.severity == "warning")]
+                             | map("\(.file):\(.line) \(.message) (`\(.rule)`)"))}' \
+            "$OUT/result.json" > "$OUT/verdict.json"
+          jq -r '"style-lint: \(.suggestions | length) finding(s) reported as suggestions"' "$OUT/verdict.json"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: style-lint
+          path: |
+            ${{ runner.temp }}/style-lint/verdict.json
+            ${{ runner.temp }}/style-lint/findings.txt
+          if-no-files-found: ignore
+
+  # ──────────────────────────────────────────────────────────────────────
   # §4 — /docs-team-standards:pr-review over the .adoc changes.
   # ──────────────────────────────────────────────────────────────────────
   adoc_review:
-    needs: [gate, classify]
-    if: needs.classify.outputs.has_adoc == 'true'
+    needs: [gate, classify, style_lint]
+    # Not skipped when style_lint fails: the lint is informational, so the
+    # prose review runs either way and checks by hand if it has no output.
+    if: ${{ !cancelled() && needs.classify.result == 'success' && needs.classify.outputs.has_adoc == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -570,6 +705,14 @@ jobs:
       id-token: write   # OIDC role for the ADP gateway credential
     timeout-minutes: 45
     steps:
+      # Under RUNNER_TEMP: the claude-skill action's checkout runs git clean in
+      # the workspace. continue-on-error: no artifact means the prose review
+      # falls back to checking the lint's rules by hand.
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: style-lint
+          path: ${{ runner.temp }}/style-lint
       - uses: redpanda-data/docs-extensions-and-macros/.github/actions/claude-skill@main # PIN-ME(step 2): replace with this repo's merge SHA — see TWO-STEP PIN in the header
         id: claude
         with:
@@ -598,7 +741,16 @@ jobs:
             rules that apply only to this repo: apply them alongside the
             plugin's skills, and where a repo-local rule is more specific
             than a plugin rule, the repo-local rule wins. If Jira is
-            unreachable, note that in the findings instead of failing. Write human-readable
+            unreachable, note that in the findings instead of failing.
+            The pipeline already ran the style lint on the lines this PR
+            changed: read ${{ runner.temp }}/style-lint/findings.txt. Its first
+            line says whether it ran. If it ran, use it as the caller-provided
+            lint output the review skill describes and do not run
+            style-lint.sh yourself. The pipeline reports those findings in its
+            own non-blocking row, so do not repeat them in your findings or
+            verdict, and never make the verdict fail for anything the lint
+            covers, including when you check those rules by hand because the
+            file is missing or says it did not run. Write human-readable
             findings to review-output/findings.md and a machine verdict to
             review-output/verdict.json with the exact schema
             {"verdict":"pass"|"fail","blocking":["..."],"suggestions":["..."]}
@@ -996,7 +1148,7 @@ jobs:
   # §6 — one verdict, one upserted comment, final informational status.
   # ──────────────────────────────────────────────────────────────────────
   aggregate:
-    needs: [gate, classify, adoc_review, json_validation, code_review, screenshot_gate, ticket_delta]
+    needs: [gate, classify, style_lint, adoc_review, json_validation, code_review, screenshot_gate, ticket_delta]
     if: always() && needs.gate.outputs.run_review == 'true'
     runs-on: ubuntu-latest
     # 25, not 15: preview-links.sh now waits up to 10 minutes for the
@@ -1061,6 +1213,7 @@ jobs:
           SME_MODE: ${{ needs.gate.outputs.sme_mode }}
           TICKET: ${{ needs.classify.outputs.ticket }}
           RESULT_ADOC: ${{ needs.adoc_review.result }}
+          RESULT_LINT: ${{ needs.style_lint.result }}
           RESULT_JSON: ${{ needs.json_validation.result }}
           RESULT_CODE: ${{ needs.code_review.result }}
           RESULT_SHOTS: ${{ needs.screenshot_gate.result }}
