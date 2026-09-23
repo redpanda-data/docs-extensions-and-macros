@@ -183,9 +183,16 @@ class ConstexprCache:
         for search_dir in search_dirs:
             if not os.path.exists(search_dir):
                 continue
-                
+
             for root, dirs, files in os.walk(search_dir):
-                for file in files:
+                # Deterministic traversal, same reasoning as get_file_pairs:
+                # constexpr_cache and function_cache below are plain dict
+                # assignment, last-write-wins, and an identifier redefined in
+                # more than one file would otherwise resolve to whichever
+                # file the filesystem's own directory order happened to
+                # visit last.
+                dirs.sort()
+                for file in sorted(files):
                     if file.endswith(('.h', '.cc', '.hpp', '.cpp')):
                         file_path = os.path.join(root, file)
                         try:
@@ -616,9 +623,13 @@ def resolve_constexpr_identifier(identifier):
         if not os.path.exists(search_dir):
             continue
             
-        # Walk through the directory recursively
+        # Walk through the directory recursively. Deterministic order, same
+        # reasoning as the ConstantResolver scan above: this feeds a
+        # last-write-wins dict, so an identifier defined in more than one
+        # file would otherwise resolve non-deterministically.
         for root, dirs, files in os.walk(search_dir):
-            for file in files:
+            dirs.sort()
+            for file in sorted(files):
                 # Check both .h and .cc files since definitions can be in either
                 if file.endswith(('.h', '.cc', '.hpp', '.cpp')):
                     file_path = os.path.join(root, file)
@@ -686,7 +697,17 @@ def get_file_pairs(options):
 
     file_pairs = []
 
-    for i in file_iter:
+    # Sorted, not raw rglob/glob order: iteration order reflects the
+    # filesystem's own directory-entry order, which is not guaranteed stable
+    # across clones or machines. A property name registered in more than one
+    # file (api_doc_dir, in both pandaproxy/rest/ and
+    # pandaproxy/schema_registry/) hits the "different defined_in" branch in
+    # transform_files_with_properties below, which keeps whichever file was
+    # processed last -- non-deterministically, without the sort, since that
+    # depends on this exact order. Confirmed live: two regenerations of the
+    # same overrides-unchanged tag six minutes apart produced different
+    # defined_in values for api_doc_dir.
+    for i in sorted(file_iter):
         if os.path.exists(i.with_suffix(".cc")):
             file_pairs.append(FilePair(i.resolve(), i.with_suffix(".cc").resolve()))
 
