@@ -426,8 +426,10 @@ function runCli (options) {
     console.log(formatHuman(result))
   }
 
-  if (options.strict && result.summary.errors > 0) process.exit(1)
-  process.exit(0)
+  // exitCode, not process.exit(): exiting immediately drops whatever part of
+  // a large report is still buffered when stdout is a pipe, so a caller
+  // piping --format json into another process got truncated JSON.
+  process.exitCode = options.strict && result.summary.errors > 0 ? 1 : 0
 }
 
 module.exports = { lintStrings, formatHuman, runCli, SURFACES, rulesFor, fingerprint, readFingerprints }

@@ -406,3 +406,29 @@ describe('readFingerprints', () => {
     expect(readFingerprints(file)).toEqual(new Set(['0123456789abcdef', 'fedcba9876543210']))
   })
 })
+
+describe('CLI output through a pipe', () => {
+  test('a report larger than the pipe buffer arrives whole', () => {
+    // runCli used to call process.exit() right after console.log, which
+    // drops buffered output when stdout is a pipe: anything past the first
+    // 64 KiB of a JSON report never reached the reader.
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-pipe-'))
+    try {
+      const file = path.join(repo, 'src', 'v', 'cluster', 'big_probe.cc')
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      const metrics = []
+      for (let i = 0; i < 1500; i++) {
+        metrics.push(`        sm::make_gauge("m${i}", [] { return 0; }, sm::description("m${i}."), labels),`)
+      }
+      fs.writeFileSync(file, `void f() {\n  _metrics.add_group("g", {\n${metrics.join('\n')}\n  });\n}\n`)
+      const cli = path.join(__dirname, '../../../tools/lint-strings/index.js')
+      const r = require('child_process').spawnSync(process.execPath, [cli, '--repo', repo, '--surface', 'metrics', '--format', 'json'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+      expect(r.status).toBe(0)
+      expect(r.stdout.length).toBeGreaterThan(256 * 1024)
+      const report = JSON.parse(r.stdout)
+      expect(report.summary.totalDeclarations).toBe(1500)
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true })
+    }
+  })
+})
