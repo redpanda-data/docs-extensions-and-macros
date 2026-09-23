@@ -1,0 +1,23 @@
+== v26.2.3 (2026-09-17)
+
+=== Improvements
+
+* Harden the reconnection logic when inter-broker heartbeat requests experience a connection timeout.
+* Iceberg Topics will now persist stats in the Iceberg manifests, allowing for more efficient pruning during queries.
+* Iceberg translation now honors several table properties that configure how Parquet is written, including compression and Bloom filters.
+* Optimize the `batch_cache` reclamation path and avoid reactor stalls in this area
+* The `operations-stretch` dashboard gains a **Kubernetes cluster** picker that filters on the opt-in `redpanda_k8s_cluster` label set by the Redpanda operator chart's `monitoring.clusterLabel`, for deployments where the operators of a stretch cluster share one query view.
+* The internal HTTP client now fails requests with a timeout when the connection makes no I/O progress for a configurable period (default 120s), instead of stalling until TCP retransmission gives up (~15 minutes) when a remote endpoint hangs.
+* `rpk -v` now logs where each configuration value came from: the loaded config files, the selected profile and what selected it, and any values overridden by environment variables or `-X` flags (secret values are never logged).
+
+=== Bug fixes
+
+* Fix JSON Schema compatibility checks for schemas that use fragment-only or fragment-bearing `$id` values, which could resolve `$ref`s against the wrong subschema. Compatibility verdicts for affected schemas may change.
+* Fix a crash during JSON Schema compatibility checks for schemas whose `$ref` targets a boolean or a non-schema value.
+* Fix potential memory fragmentation on the usage reporting admin API endpoint.
+* Fix the cloud topics write request scheduler consuming a full CPU core on shards whose backlog cannot be uploaded.
+* Fixed `rpk cloud login` failing with `unable to find resource group` for users with only cluster-level permissions; rpk now falls back to the resource group ID when the name is not readable.
+* Fixed an out-of-bounds read in the internal HTTP client's URI decoding on inputs ending with a truncated percent-escape.
+* Iceberg producer throttling should use `max_kafka_throttle_delay_ms` as the throttle ceiling and `quota_manager_gc_sec` as the producer GC window. Fix an issue where these configs were flipped at the point of use.
+* Produce requests are now rejected if any schema-ID-validated key or value in the batch is invalid. Previously a batch could be accepted when its last validated component was valid, persisting the invalid records.
+* The `operations-stretch` Grafana dashboard (`rpk generate grafana-dashboard --dashboard operations-stretch`) no longer mixes other operators' controllers into its reconcile, queue and worker panels. `controller_runtime_*` and `workqueue_*` are exported by every controller-runtime operator on a cluster, so on a cluster-wide Prometheus those panels also showed Karpenter, Flux, cert-manager and Trivy. Every panel is now filtered by new **Namespace** and **Job** pickers, whose values come from a metric only the Redpanda operator exports.

@@ -6,6 +6,8 @@ const {
   stripAttribution,
   stripLeadingIssueRef,
   cleanEntry,
+  normalizeUnits,
+  escapeAsciiDocBraces,
   KIND_FEATURE,
   KIND_IMPROVEMENT,
   KIND_FIX,
@@ -63,6 +65,30 @@ describe('cleanEntry', () => {
   });
   it('collapses whitespace from joined wrapped lines', () => {
     expect(cleanEntry('Fix the registered config name for  `x`.')).toBe('Fix the registered config name for `x`.');
+  });
+  it('normalizes data-size units and escapes braces', () => {
+    expect(cleanEntry('`GET /schemas/ids/{id}` returned 403.')).toBe('`GET /schemas/ids/\\{id\\}` returned 403.');
+    expect(cleanEntry('offset up to one interval (`4_MiB` of records).')).toBe('offset up to one interval (`4 MiB` of records).');
+  });
+});
+
+describe('normalizeUnits', () => {
+  it('rewrites underscore data sizes to readable units', () => {
+    expect(normalizeUnits('4_MiB')).toBe('4 MiB');
+    expect(normalizeUnits('512_KiB and 2_GB')).toBe('512 KiB and 2 GB');
+  });
+  it('leaves identifiers with underscores alone', () => {
+    expect(normalizeUnits('s3_fifo')).toBe('s3_fifo');
+    expect(normalizeUnits('last_offset_delta')).toBe('last_offset_delta');
+  });
+});
+
+describe('escapeAsciiDocBraces', () => {
+  it('escapes unescaped braces, including inside backticks', () => {
+    expect(escapeAsciiDocBraces('`GET /schemas/ids/{id}`')).toBe('`GET /schemas/ids/\\{id\\}`');
+  });
+  it('does not double-escape already-escaped braces', () => {
+    expect(escapeAsciiDocBraces('\\{id\\}')).toBe('\\{id\\}');
   });
 });
 

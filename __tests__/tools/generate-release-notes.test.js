@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   generateReleaseNotes,
+  buildReleaseSection,
   insertReleaseSection,
   compareVersions,
   isGaTag,
@@ -9,10 +10,8 @@ const {
   hasVersionSection,
 } = require('../../tools/redpanda-release-notes/generate-release-notes');
 
-const BODY = fs.readFileSync(
-  path.join(__dirname, '../fixtures/release-notes/v26.2.2-streaming-enterprise.md'),
-  'utf8'
-);
+const FIXTURES = path.join(__dirname, '../fixtures/release-notes');
+const BODY = fs.readFileSync(path.join(FIXTURES, 'v26.2.2-streaming-enterprise.md'), 'utf8');
 
 // A page shaped like modules/reference/pages/releases/redpanda.adoc.
 function page({ floor = '26.2.2', withV2622 = true } = {}) {
@@ -111,5 +110,25 @@ describe('generateReleaseNotes (real fixture, newer tag)', () => {
 
   it('leaves the older-versions footer intact', () => {
     expect(res.content).toContain('== Release notes for older versions');
+  });
+});
+
+// Deterministic candidate goldens: exact-match the committed expected section for
+// each real release body. These lock down parse/strip/dedup/order/transforms.
+// They are NOT the curated page — curation (Area:: labels, present-tense voice,
+// dropping bodyless and out-of-scope entries) is a separate, judgment-bearing
+// step with its own future golden. Regenerate with:
+//   node -e "const fs=require('fs');const {buildReleaseSection}=require('./tools/redpanda-release-notes/generate-release-notes');\
+//   for(const [t,d] of [['v26.2.2','2026-08-21'],['v26.2.3','2026-09-17']]) fs.writeFileSync(\
+//   '__tests__/fixtures/release-notes/expected/'+t+'-candidate.adoc',\
+//   buildReleaseSection({body:fs.readFileSync('__tests__/fixtures/release-notes/'+t+'-streaming-enterprise.md','utf8'),version:t,date:d}))"
+describe('candidate goldens', () => {
+  it.each([
+    ['v26.2.2', '2026-08-21'],
+    ['v26.2.3', '2026-09-17'],
+  ])('matches the expected candidate for %s', (tag, date) => {
+    const body = fs.readFileSync(path.join(FIXTURES, `${tag}-streaming-enterprise.md`), 'utf8');
+    const expected = fs.readFileSync(path.join(FIXTURES, `expected/${tag}-candidate.adoc`), 'utf8');
+    expect(buildReleaseSection({ body, version: tag, date })).toBe(expected);
   });
 });

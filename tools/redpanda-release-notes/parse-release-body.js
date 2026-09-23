@@ -79,7 +79,10 @@ function stripLeadingIssueRef(text) {
 /**
  * Cleans one bullet: remove attribution and leading issue ref, unescape
  * backslash-escaped backticks (`\`` -> `` ` ``) that survive from the PR body,
- * and collapse whitespace introduced by joining wrapped lines.
+ * collapse whitespace introduced by joining wrapped lines, and apply the two
+ * context-free mechanical normalizations — AsciiDoc brace escaping and the
+ * standard-mandated unit notation. House-style spelling and voice are left to
+ * the editorial curation step.
  *
  * @param {string} raw - The joined raw bullet text.
  * @return {string} The cleaned entry text.
@@ -89,7 +92,35 @@ function cleanEntry(raw) {
   text = stripLeadingIssueRef(text);
   text = stripAttribution(text);
   text = text.replace(/\\`/g, '`');
+  text = normalizeUnits(text);
+  text = escapeAsciiDocBraces(text);
   return text.trim();
+}
+
+/**
+ * Rewrites the source's underscore data-size notation to the readable unit the
+ * standard requires (`4_MiB` -> `4 MiB`). Only a digit followed by `_` and a
+ * size unit is touched, so identifiers such as `s3_fifo` or `last_offset_delta`
+ * are left alone.
+ *
+ * @param {string} text - The entry text.
+ * @return {string} The text with data-size units normalized.
+ */
+function normalizeUnits(text) {
+  return text.replace(/(\d)_((?:[KMGT]i?)?B)\b/g, '$1 $2');
+}
+
+/**
+ * Escapes AsciiDoc attribute-reference braces so a literal `{id}` in the source
+ * renders as text rather than an (empty) attribute substitution. Braces already
+ * escaped are left as-is. AsciiDoc substitutes attributes even inside inline
+ * monospace, so this applies everywhere in the entry, including within backticks.
+ *
+ * @param {string} text - The entry text.
+ * @return {string} The text with unescaped braces escaped.
+ */
+function escapeAsciiDocBraces(text) {
+  return text.replace(/(?<!\\)([{}])/g, '\\$1');
 }
 
 /**
@@ -197,6 +228,8 @@ module.exports = {
   stripAttribution,
   stripLeadingIssueRef,
   cleanEntry,
+  normalizeUnits,
+  escapeAsciiDocBraces,
   PAGE_ORDER,
   PAGE_TITLE,
   KIND_FEATURE,
