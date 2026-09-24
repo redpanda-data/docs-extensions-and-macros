@@ -93,14 +93,14 @@ describe('escapeAsciiDocBraces', () => {
 });
 
 describe('parseReleaseBody (crafted)', () => {
-  it('orders sections Features -> Improvements -> Bug fixes regardless of source order', () => {
+  it('orders sections Features -> Bug fixes -> Improvements regardless of source order', () => {
     const body = [
       '## Features', '* F1 by @a in [#1](https://e/pull/1)',
-      '## Bug Fixes', '* B1 by @b in [#2](https://e/pull/2)',
       '## Improvements', '* I1 by @c in [#3](https://e/pull/3)',
+      '## Bug Fixes', '* B1 by @b in [#2](https://e/pull/2)',
     ].join('\n');
     const { sections } = parseReleaseBody(body);
-    expect(sections.map((s) => s.title)).toEqual(['Features', 'Improvements', 'Bug fixes']);
+    expect(sections.map((s) => s.title)).toEqual(['Features', 'Bug fixes', 'Improvements']);
   });
 
   it('joins wrapped bullet lines into one entry', () => {
@@ -148,7 +148,7 @@ describe('parseReleaseBody (real v26.2.2 fixture)', () => {
   const allEntries = sections.flatMap((s) => s.entries);
 
   it('produces all three categories in page order', () => {
-    expect(sections.map((s) => s.title)).toEqual(['Features', 'Improvements', 'Bug fixes']);
+    expect(sections.map((s) => s.title)).toEqual(['Features', 'Bug fixes', 'Improvements']);
   });
 
   it('strips every author handle, PR/issue link, and markdown link from entries', () => {

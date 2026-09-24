@@ -2,8 +2,8 @@ const { renderReleaseSection, normalizeVersion } = require('../../tools/redpanda
 
 const sampleSections = [
   { kind: 'feature', title: 'Features', entries: ['X now supports Y.'] },
-  { kind: 'improvement', title: 'Improvements', entries: ['Z is faster.', 'W uses less memory.'] },
   { kind: 'fix', title: 'Bug fixes', entries: ['V no longer crashes.'] },
+  { kind: 'improvement', title: 'Improvements', entries: ['Z is faster.', 'W uses less memory.'] },
 ];
 
 describe('normalizeVersion', () => {
@@ -22,11 +22,11 @@ describe('renderReleaseSection', () => {
   it('emits the three subsections in order with plain bullets', () => {
     const out = renderReleaseSection({ version: '26.2.3', date: '2026-09-15', sections: sampleSections });
     const featuresIdx = out.indexOf('=== Features');
-    const improvementsIdx = out.indexOf('=== Improvements');
     const fixesIdx = out.indexOf('=== Bug fixes');
+    const improvementsIdx = out.indexOf('=== Improvements');
     expect(featuresIdx).toBeGreaterThan(-1);
-    expect(improvementsIdx).toBeGreaterThan(featuresIdx);
-    expect(fixesIdx).toBeGreaterThan(improvementsIdx);
+    expect(fixesIdx).toBeGreaterThan(featuresIdx);
+    expect(improvementsIdx).toBeGreaterThan(fixesIdx);
     expect(out).toContain('* X now supports Y.');
     expect(out).toContain('* W uses less memory.');
   });

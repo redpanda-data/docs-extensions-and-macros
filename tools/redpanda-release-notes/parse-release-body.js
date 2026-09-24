@@ -15,13 +15,16 @@
 
 const LOG_TAG = '[release-notes]';
 
-// Canonical page order and headings (fixes last), independent of source order
-// (rpchangelog emits Features -> Bug Fixes -> Improvements).
+// Canonical page order and headings: Features, then Bug fixes, then Improvements
+// (improvements last — they are usually internal detail, least relevant to a
+// reader scanning what changed). This matches rpchangelog's raw source order
+// (Features -> Bug Fixes -> Improvements), so the reorder only recases the
+// "Bug Fixes" heading. It deliberately differs from ADP, which puts fixes last.
 const KIND_FEATURE = 'feature';
 const KIND_IMPROVEMENT = 'improvement';
 const KIND_FIX = 'fix';
 
-const PAGE_ORDER = [KIND_FEATURE, KIND_IMPROVEMENT, KIND_FIX];
+const PAGE_ORDER = [KIND_FEATURE, KIND_FIX, KIND_IMPROVEMENT];
 const PAGE_TITLE = {
   [KIND_FEATURE]: 'Features',
   [KIND_IMPROVEMENT]: 'Improvements',
