@@ -3,6 +3,7 @@ const path = require('path');
 const {
   generateReleaseNotes,
   buildReleaseSection,
+  assertSectionMatchesTag,
   insertReleaseSection,
   compareVersions,
   isGaTag,
@@ -69,6 +70,50 @@ describe('insertReleaseSection', () => {
   it('inserts before the older-versions footer when there are no version sections yet', () => {
     const out = insertReleaseSection(page({ withV2622: false }), '== v26.2.3 (2026-09-15)\n\n* New.\n');
     expect(out.indexOf('== v26.2.3')).toBeLessThan(out.indexOf('== Release notes for older versions'));
+  });
+
+  // Finding 3: descending-version order for out-of-sequence (backfill) inserts.
+  const multi = [
+    '= Redpanda Release Notes',
+    ':earliest-tracked-version: 26.2.0',
+    '',
+    'Intro.',
+    '',
+    '== v26.2.5 (2026-10-01)', '', '=== Features', '', '* Five.', '',
+    '== v26.2.2 (2026-08-21)', '', '=== Features', '', '* Two.', '',
+    '== Release notes for older versions', '', 'GitHub.', '',
+  ].join('\n');
+
+  it('places a backfilled middle version between the newer and older sections', () => {
+    const out = insertReleaseSection(multi, '== v26.2.3 (2026-09-15)\n\n=== Features\n\n* Three.\n');
+    expect(out.indexOf('== v26.2.5')).toBeLessThan(out.indexOf('== v26.2.3'));
+    expect(out.indexOf('== v26.2.3')).toBeLessThan(out.indexOf('== v26.2.2'));
+  });
+
+  it('places a version older than all present above the footer, below the last section', () => {
+    const out = insertReleaseSection(multi, '== v26.2.1 (2026-08-01)\n\n=== Features\n\n* One.\n');
+    expect(out.indexOf('== v26.2.2')).toBeLessThan(out.indexOf('== v26.2.1'));
+    expect(out.indexOf('== v26.2.1')).toBeLessThan(out.indexOf('== Release notes for older versions'));
+  });
+
+  it('places a version newer than all present at the top', () => {
+    const out = insertReleaseSection(multi, '== v26.2.9 (2026-11-01)\n\n=== Features\n\n* Nine.\n');
+    expect(out.indexOf('== v26.2.9')).toBeLessThan(out.indexOf('== v26.2.5'));
+  });
+});
+
+describe('assertSectionMatchesTag (finding 1)', () => {
+  it('accepts a section whose single heading matches the tag', () => {
+    expect(() => assertSectionMatchesTag('== v26.2.3 (2026-09-15)\n\n=== Features\n\n* X.\n', '26.2.3')).not.toThrow();
+  });
+  it('rejects a heading whose version does not match the tag', () => {
+    expect(() => assertSectionMatchesTag('== v99.9.9 (2026-09-15)\n\n* X.\n', '26.2.3')).toThrow(/does not match/);
+  });
+  it('rejects a section with no release heading', () => {
+    expect(() => assertSectionMatchesTag('=== Features\n\n* X.\n', '26.2.3')).toThrow(/exactly one/);
+  });
+  it('rejects a section with several release headings', () => {
+    expect(() => assertSectionMatchesTag('== v26.2.3 (2026-09-15)\n\n== v26.2.4 (2026-09-16)\n', '26.2.3')).toThrow(/exactly one/);
   });
 });
 
@@ -149,6 +194,12 @@ describe('generateReleaseNotes phase 2 (insert a curated section)', () => {
   it('throws when neither body nor section is given', () => {
     expect(() => generateReleaseNotes({ tag: 'v26.2.3', pageContent: page() }))
       .toThrow(/either body .* or section/i);
+  });
+
+  it('throws when the curated section heading does not match the tag (finding 1)', () => {
+    const mismatched = '== v99.9.9 (2026-09-15)\n\n=== Features\n\nrpk:: X.\n';
+    expect(() => generateReleaseNotes({ section: mismatched, tag: 'v26.2.3', pageContent: page() }))
+      .toThrow(/does not match/);
   });
 });
 

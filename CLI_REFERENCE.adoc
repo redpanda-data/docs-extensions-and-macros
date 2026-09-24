@@ -1570,9 +1570,10 @@ display help for command
 
 [,bash]
 ----
-# Phase 1: build the candidate the curation skill will edit (no page touched)
+# Phase 1: build the candidate the curation skill will edit (no page touched).
+# Paths must stay inside the repository; write the fetched body somewhere local.
 npx doc-tools generate redpanda-release-notes \
-  --tag v26.2.3 --date 2026-09-15 --body /tmp/v26.2.3-body.md --section-only > candidate.adoc
+  --tag v26.2.3 --date 2026-09-15 --body docs-data/v26.2.3-body.md --section-only > candidate.adoc
 
 # (the sm-release-notes skill curates candidate.adoc into curated.adoc)
 

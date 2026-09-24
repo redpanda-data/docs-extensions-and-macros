@@ -31,4 +31,14 @@ describe('generate redpanda-release-notes flags', () => {
     expect(res.status).not.toBe(0);
     expect(res.stderr).toMatch(/--date is required with --body/);
   });
+
+  it('treats a non-GA tag under --section-only as a clean skip, not an error (finding 4)', () => {
+    const res = run([
+      '--tag', 'v26.2.3-rc1', '--date', '2026-09-15', '--section-only',
+      '--body', '__tests__/fixtures/release-notes/v26.2.3-streaming-enterprise.md',
+    ]);
+    expect(res.status).toBe(0);
+    expect(`${res.stdout}${res.stderr}`).toMatch(/Skipped: not a GA tag/);
+    expect(res.stdout).not.toContain('== v'); // no section emitted
+  });
 });

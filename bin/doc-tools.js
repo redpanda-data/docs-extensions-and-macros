@@ -2021,9 +2021,10 @@ automation
  * unit-tested and makes no editorial change.
  *
  * @example
- * # Phase 1: build the candidate the curation skill will edit (no page touched)
+ * # Phase 1: build the candidate the curation skill will edit (no page touched).
+ * # Paths must stay inside the repository; write the fetched body somewhere local.
  * npx doc-tools generate redpanda-release-notes \
- *   --tag v26.2.3 --date 2026-09-15 --body /tmp/v26.2.3-body.md --section-only > candidate.adoc
+ *   --tag v26.2.3 --date 2026-09-15 --body docs-data/v26.2.3-body.md --section-only > candidate.adoc
  *
  * # (the sm-release-notes skill curates candidate.adoc into curated.adoc)
  *
@@ -2050,6 +2051,7 @@ automation
     const {
       generateReleaseNotes,
       buildReleaseSection,
+      isGaTag,
     } = require('../tools/redpanda-release-notes/generate-release-notes.js')
     try {
       const repoRoot = findRepoRoot()
@@ -2075,6 +2077,12 @@ automation
       // page is read or written — this is the LLM step's input, nothing else.
       if (options.sectionOnly) {
         if (!hasBody) throw new Error('--section-only applies to --body (candidate generation).')
+        // Same GA-only contract as the insert path: a non-GA tag is a clean
+        // no-op, not an "invalid version" throw from buildReleaseSection.
+        if (!isGaTag(options.tag)) {
+          console.log(`[release-notes] Skipped: not a GA tag: ${options.tag}`)
+          return
+        }
         const body = fs.readFileSync(readInside(options.body, '--body'), 'utf8')
         const section = buildReleaseSection({ body, version: options.tag, date: options.date })
         process.stdout.write(section)

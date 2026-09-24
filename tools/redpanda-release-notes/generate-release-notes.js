@@ -64,9 +64,13 @@ function hasVersionSection(pageContent, version) {
 }
 
 /**
- * Inserts a rendered section into the page newest-first: immediately before the
- * first existing `== vX.Y.Z` version heading; failing that, before the
- * "Release notes for older versions" footer; failing that, at the end.
+ * Inserts a rendered section into the page in descending-version order: before
+ * the first existing `== vX.Y.Z` heading OLDER than the section, so a later
+ * backfill of an older release lands below the newer ones already present
+ * rather than jumping to the top. If nothing older exists (the section is the
+ * oldest, or there are no version sections yet), it goes before the
+ * "Release notes for older versions" footer; failing that, before the first
+ * version heading; failing that, at the end.
  *
  * @param {string} pageContent - The target page content.
  * @param {string} sectionText - The rendered section (ending in a newline).
@@ -75,13 +79,26 @@ function hasVersionSection(pageContent, version) {
 function insertReleaseSection(pageContent, sectionText) {
   const lines = String(pageContent).split('\n');
   const sectionLines = sectionText.replace(/\n+$/, '').split('\n');
+  const versionHeading = /^==\s+v(\d+\.\d+\.\d+)\s*\(/;
+  const newVer = (sectionText.match(versionHeading) || [])[1];
 
-  const firstVersionIdx = lines.findIndex((l) => /^==\s+v\d+\.\d+\.\d+\s*\(/.test(l));
-  const footerIdx = lines.findIndex((l) => /^==\s+Release notes for older versions/i.test(l));
-
-  let idx = firstVersionIdx !== -1 ? firstVersionIdx : footerIdx;
+  let idx = -1;
+  if (newVer) {
+    // Keep newest-first: insert before the first section older than this one.
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(versionHeading);
+      if (m && compareVersions(newVer, m[1]) > 0) { idx = i; break; }
+    }
+  }
   if (idx === -1) {
-    // No anchor: append at end with a blank-line separator.
+    // Older than everything present (or no version parsed): sit after the last
+    // version section — before the older-versions footer — else before the
+    // first version heading, else at the end.
+    const footerIdx = lines.findIndex((l) => /^==\s+Release notes for older versions/i.test(l));
+    idx = footerIdx !== -1 ? footerIdx : lines.findIndex((l) => versionHeading.test(l));
+  }
+  if (idx === -1) {
+    // No anchor at all: append at end with a blank-line separator.
     const tail = lines[lines.length - 1] === '' ? [] : [''];
     return [...lines, ...tail, ...sectionLines, ''].join('\n');
   }
@@ -104,6 +121,30 @@ function insertReleaseSection(pageContent, sectionText) {
 function buildReleaseSection({ body, version, date }) {
   const { sections } = parseReleaseBody(body);
   return renderReleaseSection({ version, date, sections });
+}
+
+/**
+ * Asserts that an externally-produced (curated) section carries exactly one
+ * `== vX.Y.Z (date)` heading whose version matches the requested tag. Phase 2
+ * inserts the section verbatim, and the idempotency guard keys off the tag, so
+ * a heading that disagrees with the tag would defeat idempotency and let
+ * reruns insert duplicates. This is malformed input, so it throws (fail loud)
+ * rather than returning a skip.
+ *
+ * @param {string} section - The curated section text.
+ * @param {string} version - The bare `X.Y.Z` version the tag resolved to.
+ * @throws {Error} If the section has zero or several release headings, or one
+ *   whose version does not match.
+ */
+function assertSectionMatchesTag(section, version) {
+  const headings = String(section).match(/^==\s+v\d+\.\d+\.\d+\s*\(/gm) || [];
+  if (headings.length !== 1) {
+    throw new Error(`Curated section must contain exactly one "== vX.Y.Z (date)" heading; found ${headings.length}.`);
+  }
+  const found = String(section).match(/^==\s+v(\d+\.\d+\.\d+)\s*\(/m)[1];
+  if (found !== version) {
+    throw new Error(`Curated section heading (v${found}) does not match the requested tag (v${version}).`);
+  }
 }
 
 /**
@@ -148,7 +189,13 @@ function generateReleaseNotes({ body, section, tag, date, pageContent }) {
     return { status: 'skipped', reason: `page already has a section for v${version}` };
   }
 
-  const finalSection = section != null ? section : buildReleaseSection({ body, version, date });
+  let finalSection;
+  if (section != null) {
+    assertSectionMatchesTag(section, version);
+    finalSection = section;
+  } else {
+    finalSection = buildReleaseSection({ body, version, date });
+  }
   const content = insertReleaseSection(pageContent, finalSection);
   return { status: 'ok', section: finalSection, content };
 }
@@ -156,6 +203,7 @@ function generateReleaseNotes({ body, section, tag, date, pageContent }) {
 module.exports = {
   generateReleaseNotes,
   buildReleaseSection,
+  assertSectionMatchesTag,
   insertReleaseSection,
   compareVersions,
   isGaTag,
