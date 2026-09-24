@@ -202,6 +202,23 @@ on:
 jobs:
   doc-strings-review:
     runs-on: ubuntu-24.04
+    # One review at a time per PR. Each run restores the state the previous
+    # run saved and recovers fingerprints from comments already posted, so two
+    # runs in parallel would both see the same state, review the same strings
+    # and post duplicate suggestions. Queued, not cancelled: cancelling a run
+    # while it posts leaves half a review and skips the state save. While one
+    # runs, GitHub keeps only the newest queued run, so a burst of pushes
+    # still ends in one review of the latest commit.
+    #
+    # In a called workflow the github context is the caller's, so this is the
+    # caller's repository and PR. The group deliberately leaves out
+    # github.workflow: two shims in one repo share this PR's review state, so
+    # they must queue behind each other too. It is also named so a caller's
+    # own workflow-level concurrency group cannot collide with it, which would
+    # deadlock the called job behind its own workflow run.
+    concurrency:
+      group: doc-strings-review-${{ github.repository }}-pr-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: false
     permissions:
       contents: read
       pull-requests: write

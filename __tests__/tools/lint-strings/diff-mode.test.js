@@ -396,6 +396,144 @@ describe('review once (end-to-end, temp git repo)', () => {
   })
 })
 
+// Names repeat within a surface: two proto messages both have `name` and
+// `enabled`, two CRD structs both have `enabled`. Deleting one copy while the
+// other survives is still a removal, so matching has to use the declaration's
+// place (message path, struct) and not the bare name.
+describe('removal detection with repeated names (end-to-end, temp git repo)', () => {
+  const PROTO = path.join('proto', 'redpanda', 'api', 'dataplane', 'v1', 'lint_dupe.proto')
+  const GO = path.join('operator', 'api', 'redpanda', 'v1alpha2', 'lint_dupe_types.go')
+  const PROTO_SOURCE = [
+    'syntax = "proto3";',
+    '',
+    'package redpanda.api.dataplane.v1;',
+    '',
+    '// A user account.',
+    'message User {',
+    '  // The user name.',
+    '  string name = 1;',
+    '  // Whether the user can sign in.',
+    '  bool enabled = 2;',
+    '}',
+    '',
+    '// A topic.',
+    'message Topic {',
+    '  // The topic name.',
+    '  string name = 1;',
+    '  // Whether the topic accepts writes.',
+    '  bool enabled = 2;',
+    '}',
+    ''
+  ].join('\n')
+  const GO_SOURCE = [
+    'package v1alpha2',
+    '',
+    '// ClusterSpec configures a cluster.',
+    'type ClusterSpec struct {',
+    '\t// Turns the cluster on.',
+    '\tEnabled bool `json:"enabled"`',
+    '}',
+    '',
+    '// ConsoleSpec configures Console.',
+    'type ConsoleSpec struct {',
+    '\t// Turns Console on.',
+    '\tEnabled bool `json:"enabled"`',
+    '}',
+    ''
+  ].join('\n')
+  let repo
+
+  function git (args) {
+    execSync(`git ${args}`, { cwd: repo, stdio: 'pipe' })
+  }
+
+  function commitEdit (rel, from, to, message) {
+    const target = path.join(repo, rel)
+    const content = fs.readFileSync(target, 'utf8')
+    expect(content).toContain(from)
+    fs.writeFileSync(target, content.replace(from, to))
+    git('add .')
+    git(`commit --quiet -m "${message}"`)
+  }
+
+  beforeEach(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-dupe-'))
+    for (const [rel, source] of [[PROTO, PROTO_SOURCE], [GO, GO_SOURCE]]) {
+      fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true })
+      fs.writeFileSync(path.join(repo, rel), source)
+    }
+    git('init --quiet')
+    git('config user.email lint-strings-test@example.invalid')
+    git('config user.name "lint-strings test"')
+    git('add .')
+    git('commit --quiet -m base')
+    git('tag base')
+  })
+
+  afterEach(() => {
+    fs.rmSync(repo, { recursive: true, force: true })
+  })
+
+  test('api: deleting one of two same-name fields is a removal', () => {
+    commitEdit(PROTO, '  // Whether the topic accepts writes.\n  bool enabled = 2;\n', '', 'drop Topic.enabled')
+    const result = lintStrings({ repo, diffBase: 'base', surfaces: ['api'], log: () => {} })
+    expect(result.summary.totalDeclarations).toBe(0)
+    expect(result.summary.removedDeclarations.map((d) => [d.name, d.line_start])).toEqual([['enabled', 17]])
+  })
+
+  test('api: deleting both same-name fields reports two removals with distinct fingerprints', () => {
+    commitEdit(PROTO, '  // Whether the user can sign in.\n  bool enabled = 2;\n', '', 'drop User.enabled')
+    commitEdit(PROTO, '  // Whether the topic accepts writes.\n  bool enabled = 2;\n', '', 'drop Topic.enabled')
+    const result = lintStrings({ repo, diffBase: 'base', surfaces: ['api'], log: () => {} })
+    const removed = result.summary.removedDeclarations
+    expect(removed.map((d) => d.name)).toEqual(['enabled', 'enabled'])
+    expect(new Set(removed.map((d) => d.fingerprint)).size).toBe(2)
+  })
+
+  test('api: moving a field within its message is not a removal', () => {
+    commitEdit(PROTO, '  // The topic name.\n  string name = 1;\n  // Whether the topic accepts writes.\n  bool enabled = 2;\n',
+      '  // Whether the topic accepts writes.\n  bool enabled = 2;\n  // The topic name.\n  string name = 1;\n', 'reorder Topic')
+    const result = lintStrings({ repo, diffBase: 'base', surfaces: ['api'], log: () => {} })
+    expect(result.summary.removedDeclarations).toEqual([])
+  })
+
+  test('crd: deleting one of two same-name struct fields is a removal', () => {
+    commitEdit(GO, '\t// Turns Console on.\n\tEnabled bool `json:"enabled"`\n', '', 'drop ConsoleSpec.enabled')
+    const result = lintStrings({ repo, diffBase: 'base', surfaces: ['crd'], log: () => {} })
+    expect(result.summary.totalDeclarations).toBe(0)
+    expect(result.summary.removedDeclarations.map((d) => [d.name, d.line_start])).toEqual([['enabled', 11]])
+  })
+
+  test('metrics: deleting one of two same-name metrics in one file is a removal', () => {
+    const rel = path.join('src', 'v', 'cluster', 'lint_dupe_probe.cc')
+    fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true })
+    fs.writeFileSync(path.join(repo, rel), [
+      'void probe::setup() {',
+      '  _metrics.add_group("produce", {',
+      '    sm::make_counter("requests", [this] { return _produce; }, sm::description("Produce requests.")),',
+      '  });',
+      '  _metrics.add_group("fetch", {',
+      '    sm::make_counter("requests", [this] { return _fetch; }, sm::description("Fetch requests.")),',
+      '  });',
+      '}',
+      ''
+    ].join('\n'))
+    git('add .')
+    git('commit --quiet -m "add probe"')
+    git('tag -f base')
+    commitEdit(rel, '    sm::make_counter("requests", [this] { return _fetch; }, sm::description("Fetch requests.")),\n', '', 'drop fetch requests')
+    const result = lintStrings({ repo, diffBase: 'base', surfaces: ['metrics'], log: () => {} })
+    expect(result.summary.removedDeclarations.map((d) => [d.name, d.line_start])).toEqual([['requests', 6]])
+  })
+
+  test('crd: an edited field is reviewed, not reported as removed', () => {
+    commitEdit(GO, '\t// Turns Console on.\n', '\t// Turns on Console.\n', 'reword ConsoleSpec.enabled')
+    const result = lintStrings({ repo, diffBase: 'base', surfaces: ['crd'], log: () => {} })
+    expect(result.summary.removedDeclarations).toEqual([])
+    expect(result.declarations.map((d) => d.name)).toEqual(['enabled'])
+  })
+})
+
 describe('readFingerprints', () => {
   const { readFingerprints } = require('../../../tools/lint-strings')
 

@@ -218,11 +218,23 @@ const RULES = [
   }
 ]
 
+/**
+ * Where a declaration lives, for removal matching. Field names (`url`,
+ * `topic`, `enabled`) repeat across components, and a component name repeats
+ * across its input and output, so the key is the file, the kind and the name.
+ * Same-file repeats (nested object fields) are handled by counting in the
+ * caller.
+ */
+function identity (decl) {
+  return [decl.file, (decl.meta && decl.meta.kind) || null, decl.name]
+}
+
 module.exports = {
   name: 'connect',
   convention: CONVENTION,
   extract,
   scanFile,
+  identity,
   rules: RULES,
   // A connect description is the AsciiDoc page body, not a table cell:
   // bare | is legitimate table syntax there, and missing prose is handled

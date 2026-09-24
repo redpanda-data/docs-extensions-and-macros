@@ -375,10 +375,21 @@ const RULES = [
   }
 ]
 
+/**
+ * Where a declaration lives, for removal matching. The extracted name is the
+ * make_*() argument without its add_group() prefix, so the same name repeats
+ * across groups; the file narrows it. Same-file repeats are handled by
+ * counting in the caller.
+ */
+function identity (decl) {
+  return [decl.file, decl.name]
+}
+
 module.exports = {
   name: 'metrics',
   convention: CONVENTION,
   extract,
   scanFile,
+  identity,
   rules: RULES
 }

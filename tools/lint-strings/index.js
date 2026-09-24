@@ -199,11 +199,21 @@ function fingerprint (decl) {
     .slice(0, 16)
 }
 
-function removalFingerprint (decl) {
+function removalFingerprint (surfaceName, identity) {
   return crypto.createHash('sha256')
-    .update(JSON.stringify(['removed', decl.surface, decl.name]))
+    .update(JSON.stringify(['removed', surfaceName, identity]))
     .digest('hex')
     .slice(0, 16)
+}
+
+/**
+ * Where a declaration lives, for matching the merge-base side against HEAD.
+ * Bare names repeat on most surfaces (a `name` field in many proto messages,
+ * `enabled` in many CRD structs, the same flag on many rpk commands), so each
+ * surface supplies a contextual identity; without one, the name is used.
+ */
+function identityOf (surface, decl) {
+  return surface.identity ? surface.identity(decl) : decl.name
 }
 
 function pendingEntry (decl) {
@@ -259,8 +269,11 @@ function materializeBase (repoPath, diffBase, files, scope = 'file') {
  * include, a struct field or a checksum from a surface file is not a removed
  * surface. So the old side of each affected file is extracted at the merge
  * base, and a declaration counts as removed when its span there lost lines
- * and its name no longer appears at HEAD in any file the diff touched (still
- * present means it was edited or moved, and HEAD-side review covers it).
+ * and HEAD, across every file the diff touched, holds fewer declarations with
+ * its identity (see identityOf) than the merge base did. Still present means
+ * it was edited or moved, and HEAD-side review covers it. Counting, rather
+ * than asking whether the identity appears at all, keeps a deletion visible
+ * when another declaration shares the identity and survives.
  *
  * Declarations are absent from HEAD by construction, so they cannot be linted;
  * they are reported for the published-content check instead.
@@ -292,14 +305,36 @@ function collectRemovals ({ repoPath, diffBase, removed, surfaces, requested, he
       scratch = materializeBase(repoPath, diffBase, [...files.keys()], surface.baseScope)
       log(`[${surfaceName}] ${files.size} file(s) lost lines; extracting declarations at the merge base...`)
       const baseDecls = surface.extract({ repo: scratch, files: new Set(files.keys()), log })
-      const headNames = new Set((headBySurface[surfaceName] ||
-        surface.extract({ repo: repoPath, files: new Set(files.keys()), log })).map((d) => d.name))
+      const head = headBySurface[surfaceName] ||
+        surface.extract({ repo: repoPath, files: new Set(files.keys()), log })
+      const keyOf = (decl) => JSON.stringify(identityOf(surface, decl))
+      const headCount = new Map()
+      for (const decl of head) headCount.set(keyOf(decl), (headCount.get(keyOf(decl)) || 0) + 1)
+      const baseCount = new Map()
+      const touched = new Map()
       for (const decl of baseDecls) {
+        const key = keyOf(decl)
+        baseCount.set(key, (baseCount.get(key) || 0) + 1)
         const lost = files.get(decl.file)
         if (!touches(decl, lost)) continue
-        if (headNames.has(decl.name)) continue
         let count = 0
         for (const line of lost) if (inSpans(decl, line)) count++
+        if (!touched.has(key)) touched.set(key, [])
+        touched.get(key).push({ decl, count })
+      }
+      // HEAD lost `deficit` declarations with this identity. When more
+      // touched ones share it than went missing, report the ones that lost
+      // the most lines: a deleted declaration loses its whole span.
+      const gone = new Map()
+      for (const [key, list] of touched) {
+        const deficit = baseCount.get(key) - (headCount.get(key) || 0)
+        if (deficit <= 0) continue
+        const picked = [...list].sort((a, b) => b.count - a.count || a.decl.line_start - b.decl.line_start).slice(0, deficit)
+        for (const entry of picked) gone.set(entry.decl, entry.count)
+      }
+      for (const decl of baseDecls) {
+        if (!gone.has(decl)) continue
+        const count = gone.get(decl)
         declarations.push({
           surface: surfaceName,
           name: decl.name,
@@ -308,7 +343,7 @@ function collectRemovals ({ repoPath, diffBase, removed, surfaces, requested, he
           line_end: decl.line_end,
           string: decl.string,
           removed_lines: count,
-          fingerprint: removalFingerprint({ surface: surfaceName, name: decl.name })
+          fingerprint: removalFingerprint(surfaceName, identityOf(surface, decl))
         })
       }
     } catch (err) {
