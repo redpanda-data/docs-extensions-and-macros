@@ -326,7 +326,7 @@ function deepEqual (a, b) {
  */
 function row (fields) {
   const base = { name: fields.name, field: fields.field, class: fields.class }
-  for (const key of ['upstream_candidate_text', 'audience_scoped_text', 'upstream_ref', 'content_hash', 'source_file', 'source_line', 'note']) {
+  for (const key of ['upstream_candidate_text', 'audience_scoped_text', 'upstream_ref', 'content_hash', 'source_file', 'source_line', 'source_text', 'note']) {
     if (fields[key] !== undefined) base[key] = fields[key]
   }
   return base
@@ -357,7 +357,11 @@ function classifyDescription (name, override, sourceProp, opts = {}) {
     field: 'description',
     content_hash: contentHash(name, overrideText),
     source_file: sourceProp ? sourceProp.defined_in : undefined,
-    source_line: sourceProp && sourceProp.line_start !== undefined ? sourceProp.line_start : undefined
+    source_line: sourceProp && sourceProp.line_start !== undefined ? sourceProp.line_start : undefined,
+    // Raw source description text, carried through so the agent triage layer
+    // (tools/overrides-audit/triage.js) can compare it against the override
+    // candidate text without re-reading the extracted-properties JSON itself.
+    source_text: sourceProp ? normalizeText(sourceProp.description) : undefined
   }
   if (override.upstream_ref !== undefined) common.upstream_ref = override.upstream_ref
   // Shown, never upstreamed. A scoped paragraph exists precisely so the other
