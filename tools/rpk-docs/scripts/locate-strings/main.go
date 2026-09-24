@@ -81,7 +81,6 @@ type funcInfo struct {
 type pkgInfo struct {
 	importPath string
 	files      []*ast.File
-	imports    map[string]string // alias -> import path, per file merged (fine: aliases rarely collide across files in one package)
 }
 
 type analyzer struct {
@@ -90,10 +89,18 @@ type analyzer struct {
 	modulePath  string
 	funcsByPath map[string]map[string]*funcInfo // importPath -> funcName -> info
 	pkgs        map[string]*pkgInfo             // importPath -> info
+	fileImports map[*ast.File]map[string]string // alias -> import path, PER FILE.
+	// Two files in the same package are free to alias two different import
+	// paths to the same short name (a real, observed pattern: e.g. one file
+	// importing a sibling "config" subpackage while another imports the
+	// top-level "config" package under the same default alias). A map
+	// shared across a whole package would let the file processed last by
+	// parseAll silently win for every file, misresolving or dropping
+	// qualified calls in every OTHER file of that package. Scoped per file
+	// instead, matching how Go's own compiler resolves imports.
 
-	visitedFuncs map[*ast.FuncDecl]bool // global re-entrancy guard against pathological cycles
-	results      map[*ast.FuncDecl][]string
-	locations    []CommandLocation
+	callStack map[*ast.FuncDecl]bool // functions on the CURRENT DFS path; a true cycle re-enters one of these
+	locations []CommandLocation
 
 	unresolvedAddCommandArgs int
 	unresolvedUseFields      int
@@ -105,8 +112,8 @@ func newAnalyzer() *analyzer {
 		fset:         token.NewFileSet(),
 		funcsByPath:  map[string]map[string]*funcInfo{},
 		pkgs:         map[string]*pkgInfo{},
-		visitedFuncs: map[*ast.FuncDecl]bool{},
-		results:      map[*ast.FuncDecl][]string{},
+		fileImports:  map[*ast.File]map[string]string{},
+		callStack:    map[*ast.FuncDecl]bool{},
 	}
 }
 
@@ -215,10 +222,11 @@ func (a *analyzer) parseAll() error {
 
 		pkg := a.pkgs[importPath]
 		if pkg == nil {
-			pkg = &pkgInfo{importPath: importPath, imports: map[string]string{}}
+			pkg = &pkgInfo{importPath: importPath}
 			a.pkgs[importPath] = pkg
 		}
 		pkg.files = append(pkg.files, file)
+		fileImports := map[string]string{}
 		for _, imp := range file.Imports {
 			p := strings.Trim(imp.Path.Value, `"`)
 			alias := lastSegment(p)
@@ -228,8 +236,9 @@ func (a *analyzer) parseAll() error {
 			if alias == "_" || alias == "." {
 				continue
 			}
-			pkg.imports[alias] = p
+			fileImports[alias] = p
 		}
+		a.fileImports[file] = fileImports
 
 		relPath, err := filepath.Rel(a.repoRoot, path)
 		if err != nil {
@@ -295,15 +304,22 @@ func findOwnCommandLiteral(fd *ast.FuncDecl) *ast.CompositeLit {
 	if len(found) == 1 {
 		return found[0]
 	}
-	// More than one: prefer whichever is part of a `return &cobra.Command{...}`
-	// or `return cobra.Command{...}` statement, since that is unambiguous
-	// about which literal this function itself hands to its caller.
+	// More than one: unambiguous only when EXACTLY one is part of a `return
+	// &cobra.Command{...}` / `return cobra.Command{...}` statement. Two or
+	// more directly-returned literals means different branches return
+	// different commands (e.g. a cloud vs. self-hosted variant) -- which
+	// one a caller actually gets depends on runtime arguments this static
+	// analysis never sees, so picking either one would silently attribute
+	// a location to the wrong branch's string. Bail out rather than guess.
+	var directlyReturned []*ast.CompositeLit
 	for _, lit := range found {
 		if isReturnedDirectly(fd, lit) {
-			return lit
+			directlyReturned = append(directlyReturned, lit)
 		}
 	}
-	// Otherwise ambiguous: don't guess.
+	if len(directlyReturned) == 1 {
+		return directlyReturned[0]
+	}
 	return nil
 }
 
@@ -401,7 +417,7 @@ func firstToken(s string) string {
 func (a *analyzer) callTarget(fromFile *ast.File, fromPkg *pkgInfo, fd *ast.FuncDecl, expr ast.Expr) *funcInfo {
 	switch e := expr.(type) {
 	case *ast.CallExpr:
-		return a.resolveCall(fromPkg, e)
+		return a.resolveCall(fromFile, fromPkg, e)
 	case *ast.Ident:
 		// A local variable: find its assignment from a call expression
 		// anywhere earlier in the same function body.
@@ -417,7 +433,7 @@ func (a *analyzer) callTarget(fromFile *ast.File, fromPkg *pkgInfo, fd *ast.Func
 					continue
 				}
 				if call, ok := asn.Rhs[i].(*ast.CallExpr); ok {
-					if fi := a.resolveCall(fromPkg, call); fi != nil {
+					if fi := a.resolveCall(fromFile, fromPkg, call); fi != nil {
 						target = fi
 					}
 				}
@@ -431,8 +447,10 @@ func (a *analyzer) callTarget(fromFile *ast.File, fromPkg *pkgInfo, fd *ast.Func
 
 // resolveCall resolves a call expression's target function, whether
 // same-package unqualified (newFooCommand(...)) or cross-package qualified
-// (pkgalias.NewCommand(...)).
-func (a *analyzer) resolveCall(fromPkg *pkgInfo, call *ast.CallExpr) *funcInfo {
+// (pkgalias.NewCommand(...)). Qualified calls resolve the alias against
+// fromFile's OWN imports, never a package-wide map: two files in the same
+// package are free to alias different import paths to the same short name.
+func (a *analyzer) resolveCall(fromFile *ast.File, fromPkg *pkgInfo, call *ast.CallExpr) *funcInfo {
 	switch fun := call.Fun.(type) {
 	case *ast.Ident:
 		if funcs := a.funcsByPath[fromPkg.importPath]; funcs != nil {
@@ -443,7 +461,7 @@ func (a *analyzer) resolveCall(fromPkg *pkgInfo, call *ast.CallExpr) *funcInfo {
 		if !ok {
 			return nil
 		}
-		importPath, ok := fromPkg.imports[ident.Name]
+		importPath, ok := a.fileImports[fromFile][ident.Name]
 		if !ok {
 			return nil
 		}
@@ -457,16 +475,20 @@ func (a *analyzer) resolveCall(fromPkg *pkgInfo, call *ast.CallExpr) *funcInfo {
 // walk performs the call-graph DFS from the root function, emitting one
 // CommandLocation per resolved node.
 func (a *analyzer) walk(fd *ast.FuncDecl, parentPath string) {
-	if a.visitedFuncs[fd] {
-		// A factory reused in more than one place in the tree is legitimate
-		// (cobra allows attaching the same command in two places); this
-		// guard only stops runaway recursion if the call graph ever formed
-		// an actual cycle, which valid command-tree code cannot do.
-		if len(a.results[fd]) > 8 {
-			return
-		}
+	// A factory reused in more than one place in the tree is legitimate
+	// (cobra allows attaching the same command in two places, and command
+	// trees in this codebase do exactly that) -- only re-entering a
+	// function that is already on THIS path's active call stack is an
+	// actual cycle, which valid command-tree code cannot form. Scoped to
+	// the current DFS path (pushed on entry, popped on return), not a
+	// global visit count: a global count can't distinguish "this function
+	// legitimately appears N times, each independently," which the
+	// codebase's own examples show happening well past any small N.
+	if a.callStack[fd] {
+		return
 	}
-	a.visitedFuncs[fd] = true
+	a.callStack[fd] = true
+	defer delete(a.callStack, fd)
 
 	fi := a.funcInfoOf(fd)
 	if fi == nil {
@@ -486,7 +508,6 @@ func (a *analyzer) walk(fd *ast.FuncDecl, parentPath string) {
 	if parentPath != "" {
 		path = parentPath + " " + name
 	}
-	a.results[fd] = append(a.results[fd], path)
 
 	loc := commandDescriptionLocation(a.fset, fi.repoPath, lit)
 	flags := a.findFlagLocations(fi, fd, lit)
@@ -494,6 +515,18 @@ func (a *analyzer) walk(fd *ast.FuncDecl, parentPath string) {
 
 	pkg := a.pkgs[fi.importPath]
 	selfVar := commandVarName(fd, lit)
+	if selfVar == "" {
+		// The command literal was returned directly with no local variable
+		// (e.g. `return &cobra.Command{...}`), so there is no identifier to
+		// scope an AddCommand receiver check to. Without one, ANY
+		// .AddCommand(...) call anywhere else in this function body -- on
+		// a completely unrelated command variable -- would be misattributed
+		// as this command's own child. Skip the scan entirely rather than
+		// scanning unscoped: a function that returns its command directly
+		// has no local variable to attach children to in the first place,
+		// so it can have no children of its own to find here.
+		return
+	}
 	ast.Inspect(fd.Body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -503,10 +536,8 @@ func (a *analyzer) walk(fd *ast.FuncDecl, parentPath string) {
 		if !ok || sel.Sel.Name != "AddCommand" {
 			return true
 		}
-		if selfVar != "" {
-			if recv, ok := sel.X.(*ast.Ident); !ok || recv.Name != selfVar {
-				return true
-			}
+		if recv, ok := sel.X.(*ast.Ident); !ok || recv.Name != selfVar {
+			return true
 		}
 		for _, arg := range call.Args {
 			target := a.callTarget(fi.file, pkg, fd, arg)
@@ -535,20 +566,38 @@ func (a *analyzer) funcInfoOf(fd *ast.FuncDecl) *funcInfo {
 // assigned to, or "" when it's returned directly with no local variable
 // (in which case AddCommand, if any, must be called on it before the return
 // -- not supported; such functions have no children in practice).
+//
+// Matches both `cmd := &cobra.Command{...}` / `cmd = &cobra.Command{...}`
+// (*ast.AssignStmt) and `var cmd *cobra.Command = &cobra.Command{...}`
+// (*ast.GenDecl/*ast.ValueSpec) -- both are real, valid Go for building the
+// same command, and only matching the first silently drops every flag
+// registered on a command built the second way (findFlagLocations requires
+// a non-empty name).
 func commandVarName(fd *ast.FuncDecl, lit *ast.CompositeLit) string {
+	unwrap := func(rhs ast.Expr) ast.Expr {
+		if u, ok := rhs.(*ast.UnaryExpr); ok && u.Op == token.AND {
+			return u.X
+		}
+		return rhs
+	}
 	var name string
 	ast.Inspect(fd.Body, func(n ast.Node) bool {
-		asn, ok := n.(*ast.AssignStmt)
-		if !ok || len(asn.Lhs) != 1 || len(asn.Rhs) != 1 {
-			return true
-		}
-		rhs := asn.Rhs[0]
-		if u, ok := rhs.(*ast.UnaryExpr); ok && u.Op == token.AND {
-			rhs = u.X
-		}
-		if rhs == ast.Node(lit) {
-			if id, ok := asn.Lhs[0].(*ast.Ident); ok {
-				name = id.Name
+		switch decl := n.(type) {
+		case *ast.AssignStmt:
+			if len(decl.Lhs) != 1 || len(decl.Rhs) != 1 {
+				return true
+			}
+			if unwrap(decl.Rhs[0]) == ast.Node(lit) {
+				if id, ok := decl.Lhs[0].(*ast.Ident); ok {
+					name = id.Name
+				}
+			}
+		case *ast.ValueSpec:
+			if len(decl.Names) != 1 || len(decl.Values) != 1 {
+				return true
+			}
+			if unwrap(decl.Values[0]) == ast.Node(lit) {
+				name = decl.Names[0].Name
 			}
 		}
 		return true
