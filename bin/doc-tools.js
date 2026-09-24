@@ -2909,6 +2909,92 @@ overridesGroup
     }
   })
 
+/**
+ * @description Build the plain-text prompt an external LLM triage call
+ * should send for one UPSTREAMABLE or SPLIT KEEP_UNTIL_UPSTREAMED audit row.
+ * Reads a single candidate object (not an array) from --candidate. See
+ * tools/overrides-audit/triage.js for the prompt contract.
+ *
+ * @why Separated from the actual LLM call so the workflow that runs it can
+ * use whatever action/model it wants; this command only builds the prompt.
+ *
+ * @example
+ * npx doc-tools overrides triage-prompt --candidate candidate.json
+ */
+overridesGroup
+  .command('triage-prompt')
+  .description('Build the triage prompt for one UPSTREAMABLE/SPLIT candidate')
+  .requiredOption('--candidate <path>', 'Path to a single candidate row JSON file (one object, not an array)')
+  .action((options) => {
+    const { buildTriagePrompt } = require('../tools/overrides-audit/triage')
+    try {
+      const candidate = JSON.parse(fs.readFileSync(path.resolve(options.candidate), 'utf8'))
+      console.log(buildTriagePrompt(candidate))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
+/**
+ * @description Parse the raw text an LLM triage call returned for one
+ * candidate and merge it into that candidate's manifest row, adding
+ * agent_verdict / agent_reason / triage_failed. Any malformed, empty, or
+ * unexpected response degrades to a safe AMBIGUOUS verdict rather than
+ * throwing — a triage call failing is not a reason to fail the pipeline,
+ * it's a reason to ask a human. See tools/overrides-audit/triage.js.
+ *
+ * @example
+ * npx doc-tools overrides triage-parse --candidate candidate.json --response response.txt
+ */
+overridesGroup
+  .command('triage-parse')
+  .description('Merge an LLM triage response into a candidate row')
+  .requiredOption('--candidate <path>', 'Path to the candidate row JSON file this response answers')
+  .requiredOption('--response <path>', 'Path to the raw text file the LLM triage call returned')
+  .action((options) => {
+    const { triageCandidate } = require('../tools/overrides-audit/triage')
+    try {
+      const candidate = JSON.parse(fs.readFileSync(path.resolve(options.candidate), 'utf8'))
+      // A triage call that failed before writing its output leaves no
+      // response file. Treat that as an empty response so it reaches the
+      // AMBIGUOUS fallback instead of failing the command.
+      let rawResponse = ''
+      try {
+        rawResponse = fs.readFileSync(path.resolve(options.response), 'utf8')
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err
+      }
+      console.log(JSON.stringify(triageCandidate(candidate, rawResponse), null, 2))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
+/**
+ * @description Render one plain-English markdown report section from a
+ * batch of triaged candidate rows (rows already carrying agent_verdict from
+ * triage-parse). See tools/overrides-audit/report.js for what each section
+ * contains and what happens to rows outside the requested verdict.
+ *
+ * @example
+ * npx doc-tools overrides report --candidates triaged.json --section upstream
+ */
+overridesGroup
+  .command('report')
+  .description('Build a plain-English markdown report section from triaged candidates')
+  .requiredOption('--candidates <path>', 'Path to a JSON array of triaged candidate rows')
+  .addOption(new Option('--section <section>', 'Which report section to build').choices(['upstream', 'retirement', 'ambiguous']).makeOptionMandatory())
+  .action((options) => {
+    const { buildUpstreamSection, buildRetirementSection, buildAmbiguousDigest } = require('../tools/overrides-audit/report')
+    const BUILDERS = { upstream: buildUpstreamSection, retirement: buildRetirementSection, ambiguous: buildAmbiguousDigest }
+    try {
+      const candidates = JSON.parse(fs.readFileSync(path.resolve(options.candidates), 'utf8'))
+      console.log(BUILDERS[options.section](candidates))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
 programCli.addCommand(automation)
 /**
  * validate kapa-source-groups
