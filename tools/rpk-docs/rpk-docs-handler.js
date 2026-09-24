@@ -326,8 +326,12 @@ function fetchRpkTreeFromSource(sourcePath) {
     )
   }
 
-  // Check if Go is installed
-  const goCheck = spawnSync('go', ['version'], { encoding: 'utf8', timeout: 5000 })
+  // Check if Go is installed. Run with cwd: sourcePath so Go's own toolchain
+  // resolution (GOTOOLCHAIN=auto, the default since Go 1.21) sees the go.mod
+  // in play and reports the version it will actually use to build -- not
+  // whatever's on PATH outside the module, which can be older and would
+  // otherwise false-reject a build that Go can already auto-upgrade for.
+  const goCheck = spawnSync('go', ['version'], { cwd: sourcePath, encoding: 'utf8', timeout: 30000 })
   if (goCheck.status !== 0) {
     throw new Error(
       'Go is required for --from-source but was not found.\n' +
@@ -1264,7 +1268,9 @@ function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
  * @returns {string} Path to the built binary
  */
 function buildRpkBinary(sourcePath, outPath) {
-  const goCheck = spawnSync('go', ['version'], { encoding: 'utf8', timeout: 5000 })
+  // See fetchRpkTreeFromSource: cwd must be sourcePath so Go's toolchain
+  // resolution reflects go.mod, not whatever's on PATH outside the module.
+  const goCheck = spawnSync('go', ['version'], { cwd: sourcePath, encoding: 'utf8', timeout: 30000 })
   if (goCheck.status !== 0) {
     throw new Error(
       'Go is required to build rpk from source but was not found.\n' +

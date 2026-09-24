@@ -14,6 +14,13 @@
  *     --extracted tools/property-extractor/gen/properties-output.json \
  *     [--surface properties|rpk|connect] [--format json|human] [--output <file>]
  *
+ * For the rpk surface, --repo takes a streaming-enterprise src/go/rpk
+ * checkout (builds rpk and runs --print-tree); --extracted takes an
+ * already-produced { tree: <print-tree output> } JSON file instead. With
+ * neither, rpk falls back to a no-tree mode where every field classifies
+ * REVIEW with a TODO note (properties has no such fallback -- it requires
+ * one of the two).
+ *
  * Also exposed as `doc-tools overrides audit` and the `audit_overrides`
  * MCP tool. See README.adoc in this directory for the classification rules
  * and the upstream_ref policy.
@@ -59,6 +66,31 @@ function runAudit (options) {
     const json = runExtractor(path.resolve(options.repo), (msg) => console.error(msg))
     extractedPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'overrides-audit-')), 'extracted.json')
     fs.writeFileSync(extractedPath, JSON.stringify(json))
+  }
+  if (surface === 'rpk' && !extractedPath && options.repo) {
+    // Unlike properties, rpk has an existing no-tree mode: with neither
+    // --extracted nor --repo, the adapter classifies everything REVIEW with
+    // a TODO note rather than erroring. Only self-extract when --repo was
+    // actually given; leave extractedPath undefined otherwise.
+    //
+    // Build rpk from source and run --print-tree ourselves, reusing the exact
+    // functions `doc-tools generate rpk-docs` already uses for this. Never
+    // audit against a committed rpk-v<ver>.json snapshot: rpk-docs generation
+    // applies rpk-overrides.json before writing those, so every override
+    // would classify REDUNDANT against itself.
+    //
+    // --repo must be the src/go/rpk directory itself (matching
+    // fetchRpkTreeFromSource's own contract), not the streaming-enterprise
+    // repo root: unlike the properties branch above, this never fetches or
+    // checks out anything -- the caller (a CI workflow, typically) already
+    // has the exact commit checked out, and re-fetching here would both
+    // duplicate that work and risk moving off the commit the caller chose.
+    const fs = require('fs')
+    const os = require('os')
+    const { fetchRpkTreeFromSource } = require('../rpk-docs/rpk-docs-handler')
+    const tree = fetchRpkTreeFromSource(path.resolve(options.repo))
+    extractedPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'overrides-audit-')), 'extracted.json')
+    fs.writeFileSync(extractedPath, JSON.stringify({ tree }))
   }
 
   const adapter = adapterFactory()
