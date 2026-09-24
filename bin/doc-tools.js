@@ -2984,10 +2984,10 @@ overridesGroup
   .command('report')
   .description('Build a plain-English markdown report section from triaged candidates')
   .requiredOption('--candidates <path>', 'Path to a JSON array of triaged candidate rows')
-  .addOption(new Option('--section <section>', 'Which report section to build').choices(['upstream', 'retirement', 'ambiguous']).makeOptionMandatory())
+  .addOption(new Option('--section <section>', 'Which report section to build').choices(['upstream', 'retirement', 'ambiguous', 'unlocatable']).makeOptionMandatory())
   .action((options) => {
-    const { buildUpstreamSection, buildRetirementSection, buildAmbiguousDigest } = require('../tools/overrides-audit/report')
-    const BUILDERS = { upstream: buildUpstreamSection, retirement: buildRetirementSection, ambiguous: buildAmbiguousDigest }
+    const { buildUpstreamSection, buildRetirementSection, buildAmbiguousDigest, buildUnlocatableSection } = require('../tools/overrides-audit/report')
+    const BUILDERS = { upstream: buildUpstreamSection, retirement: buildRetirementSection, ambiguous: buildAmbiguousDigest, unlocatable: buildUnlocatableSection }
     try {
       const candidates = JSON.parse(fs.readFileSync(path.resolve(options.candidates), 'utf8'))
       console.log(BUILDERS[options.section](candidates))
