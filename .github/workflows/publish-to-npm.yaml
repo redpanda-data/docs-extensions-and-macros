@@ -189,6 +189,9 @@ jobs:
     # their dependency update. The release job failing is loud on its own.
     needs: publish
     strategy:
+      # Each repository's dispatch is independent: one failing must not
+      # cancel the others while they are still running.
+      fail-fast: false
       matrix:
         repo: ['redpanda-data/docs', 'redpanda-data/cloud-docs', 'redpanda-data/rp-connect-docs', 'redpanda-data/api-docs', 'redpanda-data/adp-docs']
     runs-on: ubuntu-latest
