@@ -242,6 +242,9 @@ const RULES = [
 
 module.exports = {
   name: 'properties',
+  // The extractor pairs each .cc with its .h, so a merge-base extraction needs
+  // the whole directory, not only the files that lost lines.
+  baseScope: 'directory',
   convention: CONVENTION,
   extract,
   mapExtractorJson,
