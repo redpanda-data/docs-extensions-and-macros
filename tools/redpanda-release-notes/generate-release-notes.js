@@ -67,10 +67,13 @@ function hasVersionSection(pageContent, version) {
  * Inserts a rendered section into the page in descending-version order: before
  * the first existing `== vX.Y.Z` heading OLDER than the section, so a later
  * backfill of an older release lands below the newer ones already present
- * rather than jumping to the top. If nothing older exists (the section is the
- * oldest, or there are no version sections yet), it goes before the
- * "Release notes for older versions" footer; failing that, before the first
- * version heading; failing that, at the end.
+ * rather than jumping to the top. When the section is older than every existing
+ * release, it is inserted AFTER the last version section — before the next
+ * top-level heading following it (the older-versions footer or any other), else
+ * at the end — so a footerless page stays ordered. When there are no version
+ * sections yet, it goes before the older-versions footer, else the first
+ * top-level heading, else the end. The section's own version is read with
+ * multiline matching, so a leading blank line or comment does not hide it.
  *
  * @param {string} pageContent - The target page content.
  * @param {string} sectionText - The rendered section (ending in a newline).
@@ -80,33 +83,52 @@ function insertReleaseSection(pageContent, sectionText) {
   const lines = String(pageContent).split('\n');
   const sectionLines = sectionText.replace(/\n+$/, '').split('\n');
   const versionHeading = /^==\s+v(\d+\.\d+\.\d+)\s*\(/;
-  const newVer = (sectionText.match(versionHeading) || [])[1];
+  // Multiline: the curated section may open with a blank line or an AsciiDoc
+  // comment, so the heading is not guaranteed to be at character zero.
+  const newVer = (sectionText.match(/^==\s+v(\d+\.\d+\.\d+)\s*\(/m) || [])[1];
 
-  let idx = -1;
-  if (newVer) {
-    // Keep newest-first: insert before the first section older than this one.
-    for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(versionHeading);
-      if (m && compareVersions(newVer, m[1]) > 0) { idx = i; break; }
-    }
-  }
-  if (idx === -1) {
-    // Older than everything present (or no version parsed): sit after the last
-    // version section — before the older-versions footer — else before the
-    // first version heading, else at the end.
-    const footerIdx = lines.findIndex((l) => /^==\s+Release notes for older versions/i.test(l));
-    idx = footerIdx !== -1 ? footerIdx : lines.findIndex((l) => versionHeading.test(l));
-  }
-  if (idx === -1) {
-    // No anchor at all: append at end with a blank-line separator.
+  const insertAt = (i) => {
+    // The anchor heading is already preceded by a blank line, so the section
+    // plus one blank separator keeps exactly one blank line on each side.
+    lines.splice(i, 0, ...sectionLines, '');
+    return lines.join('\n');
+  };
+  const appendAtEnd = () => {
     const tail = lines[lines.length - 1] === '' ? [] : [''];
     return [...lines, ...tail, ...sectionLines, ''].join('\n');
+  };
+
+  // 1) Descending order: before the first existing section older than this one.
+  //    A new newest release lands at the top this way too.
+  if (newVer) {
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(versionHeading);
+      if (m && compareVersions(newVer, m[1]) > 0) return insertAt(i);
+    }
   }
 
-  // The anchor heading is already preceded by a blank line, so inserting the
-  // section plus one blank separator keeps exactly one blank line on each side.
-  lines.splice(idx, 0, ...sectionLines, '');
-  return lines.join('\n');
+  // 2) Older than every existing section (or version unknown): sit AFTER the
+  //    last version section — before the next top-level heading that follows it
+  //    (the older-versions footer or any other), else at the end. This keeps a
+  //    footerless page ordered correctly instead of jumping to the top.
+  let lastVersionIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (versionHeading.test(lines[i])) lastVersionIdx = i;
+  }
+  if (lastVersionIdx !== -1) {
+    for (let i = lastVersionIdx + 1; i < lines.length; i++) {
+      if (/^==\s/.test(lines[i])) return insertAt(i);
+    }
+    return appendAtEnd();
+  }
+
+  // 3) No version sections at all: before the older-versions footer, else
+  //    before the first top-level heading, else at the end.
+  const footerIdx = lines.findIndex((l) => /^==\s+Release notes for older versions/i.test(l));
+  if (footerIdx !== -1) return insertAt(footerIdx);
+  const firstHeadingIdx = lines.findIndex((l) => /^==\s/.test(l));
+  if (firstHeadingIdx !== -1) return insertAt(firstHeadingIdx);
+  return appendAtEnd();
 }
 
 /**
@@ -137,13 +159,20 @@ function buildReleaseSection({ body, version, date }) {
  *   whose version does not match.
  */
 function assertSectionMatchesTag(section, version) {
-  const headings = String(section).match(/^==\s+v\d+\.\d+\.\d+\s*\(/gm) || [];
-  if (headings.length !== 1) {
-    throw new Error(`Curated section must contain exactly one "== vX.Y.Z (date)" heading; found ${headings.length}.`);
+  // Count heading-ish lines loosely (any `== v<digit>…`) so a single MALFORMED
+  // heading fails as malformed rather than slipping through as "found 0".
+  const headingish = String(section).match(/^==\s+v\d.*$/gm) || [];
+  if (headingish.length !== 1) {
+    throw new Error(`Curated section must contain exactly one "== vX.Y.Z (YYYY-MM-DD)" heading; found ${headingish.length}.`);
   }
-  const found = String(section).match(/^==\s+v(\d+\.\d+\.\d+)\s*\(/m)[1];
-  if (found !== version) {
-    throw new Error(`Curated section heading (v${found}) does not match the requested tag (v${version}).`);
+  // Validate the complete heading: version, a YYYY-MM-DD date, a closing paren,
+  // and nothing trailing.
+  const m = headingish[0].match(/^==\s+v(\d+\.\d+\.\d+)\s+\(\d{4}-\d{2}-\d{2}\)\s*$/);
+  if (!m) {
+    throw new Error(`Malformed release heading ${JSON.stringify(headingish[0])}; expected "== vX.Y.Z (YYYY-MM-DD)".`);
+  }
+  if (m[1] !== version) {
+    throw new Error(`Curated section heading (v${m[1]}) does not match the requested tag (v${version}).`);
   }
 }
 

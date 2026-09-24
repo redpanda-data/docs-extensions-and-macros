@@ -100,6 +100,26 @@ describe('insertReleaseSection', () => {
     const out = insertReleaseSection(multi, '== v26.2.9 (2026-11-01)\n\n=== Features\n\n* Nine.\n');
     expect(out.indexOf('== v26.2.9')).toBeLessThan(out.indexOf('== v26.2.5'));
   });
+
+  // Finding 1: a section that opens with a blank line or comment still orders
+  // correctly (multiline version parse).
+  it('orders a section that opens with a blank line or comment', () => {
+    const out = insertReleaseSection(multi, '\n// generated\n== v26.2.9 (2026-11-01)\n\n=== Features\n\n* Nine.\n');
+    expect(out.indexOf('== v26.2.9')).toBeLessThan(out.indexOf('== v26.2.5'));
+  });
+
+  // Finding 3: older-than-all on a footerless page lands after the last section.
+  it('places an older-than-all backfill after the last section when there is no footer', () => {
+    const footerless = [
+      '= Redpanda Release Notes', ':earliest-tracked-version: 26.2.0', '', 'Intro.', '',
+      '== v26.2.5 (2026-10-01)', '', '=== Features', '', '* Five.', '',
+      '== v26.2.4 (2026-09-20)', '', '=== Features', '', '* Four.', '',
+    ].join('\n');
+    const out = insertReleaseSection(footerless, '== v26.2.1 (2026-08-01)\n\n=== Features\n\n* One.\n');
+    expect(out.indexOf('== v26.2.4')).toBeLessThan(out.indexOf('== v26.2.1'));
+    // and it is the last release section on the page
+    expect(out.lastIndexOf('== v')).toBe(out.indexOf('== v26.2.1'));
+  });
 });
 
 describe('assertSectionMatchesTag (finding 1)', () => {
@@ -114,6 +134,14 @@ describe('assertSectionMatchesTag (finding 1)', () => {
   });
   it('rejects a section with several release headings', () => {
     expect(() => assertSectionMatchesTag('== v26.2.3 (2026-09-15)\n\n== v26.2.4 (2026-09-16)\n', '26.2.3')).toThrow(/exactly one/);
+  });
+  it('rejects malformed headings that only satisfy the prefix (finding 2)', () => {
+    expect(() => assertSectionMatchesTag('== v26.2.3 (\n\n* X.\n', '26.2.3')).toThrow(/Malformed/);
+    expect(() => assertSectionMatchesTag('== v26.2.3 (not-a-date\n\n* X.\n', '26.2.3')).toThrow(/Malformed/);
+    expect(() => assertSectionMatchesTag('== v26.2.3 (2026-09-15) trailing\n\n* X.\n', '26.2.3')).toThrow(/Malformed/);
+  });
+  it('accepts the exact well-formed heading', () => {
+    expect(() => assertSectionMatchesTag('== v26.2.3 (2026-09-15)\n\n* X.\n', '26.2.3')).not.toThrow();
   });
 });
 
