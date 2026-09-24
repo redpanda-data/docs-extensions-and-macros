@@ -2059,7 +2059,10 @@ Override surface to audit (choices: "properties", "rpk", "connect", default: "pr
 Output format (choices: "json", "human", default: "json")
 
 `--repo <path>`::
-Alternative to --extracted: for properties, a redpanda checkout to extract raw source strings from; for rpk, a streaming-enterprise src/go/rpk checkout to build and run --print-tree against
+Alternative to --extracted: for properties, a redpanda checkout to extract raw source strings from; for rpk, a streaming-enterprise src/go/rpk checkout to build and run --print-tree against. For rpk, also runs the source-string locator so UPSTREAMABLE rows carry source_file/source_line, unless --locations was given
+
+`--locations <path>`::
+rpk only: path to an already-produced source-string locator JSON file (see the locate-strings analyzer under tools/rpk-docs/scripts), instead of having --repo compute one
 
 `--output <path>`::
 Also write the JSON result to this file
