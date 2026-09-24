@@ -10,38 +10,6 @@ Shadow Link:: `rpk` now supports Shadow Link role sync in Redpanda Cloud cluster
 
 Shadow Link:: `rpk shadow update` now accepts a `--config-file` flag to apply a configuration file directly.
 
-=== Improvements
-
-Cloud Topics:: Cloud Topics compaction now commits work in chunks, resulting in more stable compaction for partitions with a large amount of data.
-
-Schema Registry:: A new `schema_registry_replay_on_startup` cluster property (default off) hydrates the Schema Registry store at broker start-up rather than lazily on the first request.
-
-Schema Registry:: Some `schema_registry` and `pandaproxy` handler interfaces no longer make oversized allocations.
-
-Admin API:: The `/v1/usage` endpoint no longer causes oversized allocations for clusters with a large number of Iceberg-enabled topics.
-
-HTTP Proxy:: A consumer group now resumes from its committed offset on a fresh consumer instance instead of re-reading from the earliest available offset.
-
-Schema Registry:: The `schema_registry` recovery path now caches references when canonicalizing schemas.
-
-Storage:: The Cloud Topics and local storage compaction implementations now copy fewer records.
-
-Schema Registry:: Schema Registry now logs whether a 403 on `GET /schemas/ids/\{id\}` was caused by a schema ID that does not exist or by missing ACLs. The response returned to clients is unchanged.
-
-Schema Registry:: Schema Registry now replays the internal `_schemas` topic exactly once when recovering on startup, instead of running redundant concurrent replays; cold start of a large registry is significantly faster.
-
-Storage:: The key-value store now terminates the process on unrecoverable I/O errors in its flush path instead of silently stalling writes.
-
-rpk:: The default Redpanda Console image version in `rpk` container commands is now v3.9.0.
-
-rpk:: When producing or consuming with Schema Registry, `rpk topic produce` and `rpk topic consume` now read the topic's `redpanda.schema.registry.context` with a `DescribeConfigs` request (unless `--schema-context` is given).
-
-rpk:: `rpk topic alter-config` now supports a `--regex`/`-r` flag to alter the config of all topics matching one or more regular expressions.
-
-rpk:: `rpk topic produce` and `rpk topic consume` now resolve Schema Registry schemas in the context bound to the topic via `redpanda.schema.registry.context`, and add a `--schema-context` flag to select the context explicitly.
-
-rpk:: `rpk cluster health` now displays any nodes that may be in maintenance mode.
-
 === Bug fixes
 
 Cluster:: The `leader_balancer_node_mute_timeout` property now registers under the correct config name.
@@ -99,3 +67,35 @@ Iceberg:: The Iceberg coordinator's snapshotting mechanism no longer stalls the 
 Cloud Topics:: Replication failures in Cloud Topics no longer trigger a rare crash.
 
 Kafka API:: The Kafka quota manager's garbage collection no longer triggers a use-after-free during shutdown.
+
+=== Improvements
+
+Cloud Topics:: Cloud Topics compaction now commits work in chunks, resulting in more stable compaction for partitions with a large amount of data.
+
+Schema Registry:: A new `schema_registry_replay_on_startup` cluster property (default off) hydrates the Schema Registry store at broker start-up rather than lazily on the first request.
+
+Schema Registry:: Some `schema_registry` and `pandaproxy` handler interfaces no longer make oversized allocations.
+
+Admin API:: The `/v1/usage` endpoint no longer causes oversized allocations for clusters with a large number of Iceberg-enabled topics.
+
+HTTP Proxy:: A consumer group now resumes from its committed offset on a fresh consumer instance instead of re-reading from the earliest available offset.
+
+Schema Registry:: The `schema_registry` recovery path now caches references when canonicalizing schemas.
+
+Storage:: The Cloud Topics and local storage compaction implementations now copy fewer records.
+
+Schema Registry:: Schema Registry now logs whether a 403 on `GET /schemas/ids/\{id\}` was caused by a schema ID that does not exist or by missing ACLs. The response returned to clients is unchanged.
+
+Schema Registry:: Schema Registry now replays the internal `_schemas` topic exactly once when recovering on startup, instead of running redundant concurrent replays; cold start of a large registry is significantly faster.
+
+Storage:: The key-value store now terminates the process on unrecoverable I/O errors in its flush path instead of silently stalling writes.
+
+rpk:: The default Redpanda Console image version in `rpk` container commands is now v3.9.0.
+
+rpk:: When producing or consuming with Schema Registry, `rpk topic produce` and `rpk topic consume` now read the topic's `redpanda.schema.registry.context` with a `DescribeConfigs` request (unless `--schema-context` is given).
+
+rpk:: `rpk topic alter-config` now supports a `--regex`/`-r` flag to alter the config of all topics matching one or more regular expressions.
+
+rpk:: `rpk topic produce` and `rpk topic consume` now resolve Schema Registry schemas in the context bound to the topic via `redpanda.schema.registry.context`, and add a `--schema-context` flag to select the context explicitly.
+
+rpk:: `rpk cluster health` now displays any nodes that may be in maintenance mode.
