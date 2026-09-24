@@ -804,7 +804,10 @@ jobs:
             otherwise"; "The request takes no parameters.", not "Takes no
             parameters." A surface that is a fragment by contract (cobra
             Short, a flag usage, an API rpc summary) still keeps its
-            articles. The rendered page builds its "Default:"
+            articles. Every flag, command, path and URL goes in inline code.
+            In rpk strings write them bare, never in single or double
+            quotes: the generator formats them, and a Long is a Go raw
+            string that cannot hold a backtick. The rendered page builds its "Default:"
             row from structured data, so do not ask for a concrete default
             to be restated in prose; only a sentinel default (null, 0, -1,
             empty) needs its meaning explained. State only behavior the diff

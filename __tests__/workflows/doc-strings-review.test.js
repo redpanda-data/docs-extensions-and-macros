@@ -1092,6 +1092,7 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(review.with.prompt).toMatch(/REVIEW IN CONTEXT/)
       expect(review.with.prompt).toMatch(/Each entry carries context/)
       expect(review.with.prompt).toMatch(/articles and subjects/)
+      expect(review.with.prompt).toMatch(/Every flag, command, path and URL goes in inline code/)
     })
   })
 })
