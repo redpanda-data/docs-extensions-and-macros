@@ -128,7 +128,7 @@ function lintStrings (options) {
           continue
         }
         declarations.push(decl)
-        pending.push(pendingEntry(decl))
+        pending.push({ ...pendingEntry(decl), context: pageContext(decl, head) })
       }
       results.push(runRules(declarations, rulesFor(surface), { skipRules, onlyRules }))
     }
@@ -184,6 +184,52 @@ function inSpans (decl, line) {
 
 function touches (decl, lineSet) {
   return spansOf(decl).some(([start, end]) => spanIntersects(start, end, lineSet))
+}
+
+const CONTEXT_LIMIT = 15
+const CONTEXT_STRING_LIMIT = 600
+
+/**
+ * The other strings a reader sees alongside this one, so a review can judge
+ * a string against its page rather than on its own: a flag's usage next to
+ * its command's Long text and examples, a property that names another
+ * property, the fields around an API field.
+ *
+ * - rpk: every other string declared in the same file, which is the
+ *   command's Short, Long and flags (rpk keeps one command per file).
+ * - api: the declarations nearest by line, which are the enclosing message
+ *   or rpc and its neighbors.
+ * - properties and metrics: declarations whose string names this one, or
+ *   that this string names, plus (metrics) its neighbors in the same group.
+ *
+ * Drawn from declarations already extracted for the diff, so it costs no
+ * extra extraction. Deterministic, capped, and order-stable.
+ */
+function pageContext (decl, all) {
+  const others = all.filter((d) => d !== decl && d.string != null)
+  const byDistance = (d) => Math.abs((d.line_start || 0) - (decl.line_start || 0))
+  const sameFile = others.filter((d) => d.file === decl.file)
+  let picked
+  if (decl.surface === 'rpk') {
+    picked = sameFile.sort((a, b) => (a.line_start || 0) - (b.line_start || 0))
+  } else if (decl.surface === 'api') {
+    picked = sameFile.sort((a, b) => byDistance(a) - byDistance(b)).slice(0, 6)
+  } else {
+    const mentions = (text, name) => Boolean(text && name) &&
+      new RegExp(`(^|[^A-Za-z0-9_])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_])`).test(text)
+    const related = others.filter((d) => mentions(d.string, decl.name) || mentions(decl.string, d.name))
+    const neighbors = decl.surface === 'metrics'
+      ? sameFile.filter((d) => !related.includes(d)).sort((a, b) => byDistance(a) - byDistance(b)).slice(0, 2)
+      : []
+    picked = [...related, ...neighbors]
+  }
+  return picked.slice(0, CONTEXT_LIMIT).map((d) => ({
+    name: d.name,
+    kind: (d.meta && d.meta.kind) || d.surface,
+    file: d.file,
+    line_start: d.line_start,
+    string: d.string.length > CONTEXT_STRING_LIMIT ? `${d.string.slice(0, CONTEXT_STRING_LIMIT)}...` : d.string
+  }))
 }
 
 /**
@@ -467,7 +513,7 @@ function runCli (options) {
   process.exitCode = options.strict && result.summary.errors > 0 ? 1 : 0
 }
 
-module.exports = { lintStrings, formatHuman, runCli, SURFACES, rulesFor, fingerprint, readFingerprints }
+module.exports = { lintStrings, formatHuman, runCli, SURFACES, rulesFor, fingerprint, readFingerprints, pageContext }
 
 // Direct usage: node tools/lint-strings --repo <path> [--surface a,b]
 //   [--diff <base>] [--format json|human] [--strict]

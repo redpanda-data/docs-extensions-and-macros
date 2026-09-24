@@ -20,8 +20,8 @@
 # Actions cache under the PR number, and a later push hands the model only
 # declarations whose fingerprint is new. Editing a string makes it new
 # again; rebases, moves and unrelated edits do not. Each inline suggestion
-# also carries its fingerprint in a hidden marker, so an evicted cache still
-# never produces a second comment on the same string. There is no summary
+# also ends with its fingerprint in a small visible footer, so an evicted
+# cache still never produces a second comment on the same string. There is no summary
 # comment unless the review has something the inline comments cannot carry,
 # and then it is one comment, updated in place.
 #
@@ -368,11 +368,14 @@ jobs:
           path: ${{ runner.temp }}/doc-strings-review-state
           key: doc-strings-review-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: doc-strings-review-${{ github.event.pull_request.number }}-
-      # The cache is evicted after 7 days unused. The inline suggestions carry
-      # their fingerprint in a hidden marker, so recover those from the PR
-      # itself: an evicted cache may re-review a clean string, but never posts
-      # a second suggestion on one. Only bot-authored comments count, so a
-      # human cannot suppress a review by pasting a marker.
+      # The cache is evicted after 7 days unused. The inline suggestions end
+      # with their fingerprint, so recover those from the PR itself: an
+      # evicted cache may re-review a clean string, but never posts a second
+      # suggestion on one. Only bot-authored comments count, so a human
+      # cannot suppress a review by pasting a marker. The footer is visible
+      # (<sub>) because claude-code-action's comment tools strip HTML
+      # comments from everything the model posts, so a hidden marker never
+      # reaches GitHub.
       - name: Recover reviewed fingerprints from earlier suggestions
         continue-on-error: true
         env:
@@ -726,7 +729,10 @@ jobs:
               changes that no earlier push of this PR has reviewed. This is
               the COMPLETE list of what you review. Any other string in the
               diff was already reviewed or is not a doc string; do not
-              comment on it.
+              suggest rewrites of it. Each entry carries context: the other
+              strings a reader sees on the same page (a command's Short,
+              Long and flags; properties that name each other; the fields
+              around an API field).
             - findings: deterministic rule violations for those declarations
               (surface, name, file, line_start/line_end, the current string,
               the exact declaration_text of the span, rules, fingerprint).
@@ -761,12 +767,44 @@ jobs:
               with no period; CRD comments describe the json: tag key (never
               the Go field name) and keep +kubebuilder marker lines
               byte-identical; Helm comments keep the # -- marker conventions.
-            - ends with this line, using the declaration's fingerprint from
-              lint-findings.json:
-              <!-- doc-strings-review:fp=FINGERPRINT -->
+            - ends with this line, exactly, using the declaration's
+              fingerprint from lint-findings.json:
+              <sub>doc-strings-review:fp=FINGERPRINT</sub>
+
+            REVIEW IN CONTEXT: judge each string as the reader of its page,
+            not on its own. Read it together with its context entries and
+            with the code that implements what it describes:
+            - The whole declaration ships, so judge all of it, not only the
+              lines this PR changed, and fix every problem it has in one
+              suggestion.
+            - A string must agree with the strings around it. A flag's usage,
+              its command's Long text and that text's examples describe the
+              same behavior; a change to one that leaves another saying
+              something different is a finding.
+            - Verify a behavior claim where the user sees it. Follow the code
+              to what the command prints or the setting changes (filters
+              applied before output, validation, defaults), not only to the
+              first API it calls, and read any other command the string
+              names before saying anything about it.
+            - When the change makes an untouched string wrong, post one plain
+              comment on the changed line naming that string and what is now
+              wrong, with no suggestion block. It counts toward the 10.
+            - A term the page never explains, and a reader cannot check,
+              needs tying to something they can observe: "internal topics"
+              means little until the page says they are the topics
+              rpk topic list shows only with -i.
+            - Say nothing about a related string that is still correct.
+            - Leave docs-side overrides out of the review entirely; they are
+              reconciled separately.
 
             Rewrites state effect and units where the code shows them and
-            never restate the name. The rendered page builds its "Default:"
+            never restate the name. Write complete sentences with their
+            articles and subjects, even when the surface is terse: "1 when
+            this broker is the leader, otherwise 0", not "1 when leader, 0
+            otherwise"; "The request takes no parameters.", not "Takes no
+            parameters." A surface that is a fragment by contract (cobra
+            Short, a flag usage, an API rpc summary) still keeps its
+            articles. The rendered page builds its "Default:"
             row from structured data, so do not ask for a concrete default
             to be restated in prose; only a sentinel default (null, 0, -1,
             empty) needs its meaning explained. State only behavior the diff
