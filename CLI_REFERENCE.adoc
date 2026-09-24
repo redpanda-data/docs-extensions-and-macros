@@ -2128,7 +2128,7 @@ doc-tools overrides report [options]
 Path to a JSON array of triaged candidate rows
 
 `--section <section>`::
-Which report section to build (choices: "upstream", "retirement", "ambiguous")
+Which report section to build (choices: "upstream", "retirement", "ambiguous", "unlocatable")
 
 `-h, --help`::
 display help for command
