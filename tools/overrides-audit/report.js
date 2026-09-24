@@ -53,6 +53,21 @@ function nothingThisRun (noun) {
 }
 
 /**
+ * Whether a row carries an explicitly successful triage state.
+ *
+ * triageCandidate always emits a boolean triage_failed, so anything other
+ * than exactly false (missing, null, a string, a number) is a row this code
+ * cannot trust. Such a row stays out of the actionable sections and lands in
+ * the ambiguous digest instead.
+ *
+ * @param {Object} row - A triaged candidate row.
+ * @returns {boolean} True only when triage_failed is exactly false.
+ */
+function triageSucceeded (row) {
+  return row.triage_failed === false
+}
+
+/**
  * Build the markdown section listing candidates the agent triage layer
  * decided are genuinely better in the override and should be ported
  * upstream into engineering source (verdict UPSTREAM_OVERRIDE).
@@ -61,7 +76,7 @@ function nothingThisRun (noun) {
  * @returns {string} Markdown section, always non-empty.
  */
 function buildUpstreamSection (candidates) {
-  const rows = (candidates || []).filter((c) => c.agent_verdict === 'UPSTREAM_OVERRIDE' && c.triage_failed !== true)
+  const rows = (candidates || []).filter((c) => c.agent_verdict === 'UPSTREAM_OVERRIDE' && triageSucceeded(c))
   if (rows.length === 0) return nothingThisRun('property descriptions to upstream')
 
   const parts = [
@@ -92,7 +107,7 @@ function buildUpstreamSection (candidates) {
  * @returns {string} Markdown section, always non-empty.
  */
 function buildRetirementSection (candidates) {
-  const rows = (candidates || []).filter((c) => c.agent_verdict === 'RETIRE_OVERRIDE' && c.triage_failed !== true)
+  const rows = (candidates || []).filter((c) => c.agent_verdict === 'RETIRE_OVERRIDE' && triageSucceeded(c))
   if (rows.length === 0) return nothingThisRun('overrides to retire')
 
   const parts = [
@@ -113,8 +128,9 @@ function buildRetirementSection (candidates) {
 /**
  * Build one combined markdown digest of every candidate the agent triage
  * layer could not confidently resolve either way: a real AMBIGUOUS verdict,
- * and a failed/malformed triage response (triage_failed: true) get exactly
- * the same treatment here, because both are equally unresolved from a
+ * a failed/malformed triage response (triage_failed: true), and a row with
+ * no explicit triage state (triage_failed missing or not a boolean) get exactly
+ * the same treatment here, because all three are equally unresolved from a
  * human's point of view - a parse failure is not quietly dropped just
  * because it never produced a real verdict.
  *
@@ -128,7 +144,7 @@ function buildRetirementSection (candidates) {
  * @returns {string} Markdown digest, always non-empty.
  */
 function buildAmbiguousDigest (candidates) {
-  const rows = (candidates || []).filter((c) => c.agent_verdict === 'AMBIGUOUS' || c.triage_failed === true)
+  const rows = (candidates || []).filter((c) => c.agent_verdict === 'AMBIGUOUS' || !triageSucceeded(c))
   if (rows.length === 0) return nothingThisRun('ambiguous property descriptions')
 
   const parts = [

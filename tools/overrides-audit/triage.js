@@ -28,6 +28,7 @@ const VERDICTS = Object.freeze({
 })
 
 const VALID_VERDICTS = new Set(Object.values(VERDICTS))
+const ALLOWED_RESPONSE_KEYS = new Set(['verdict', 'reason'])
 
 /**
  * Build the plain-text prompt an external LLM call should send for one
@@ -135,7 +136,8 @@ function ambiguousFallback (reason) {
  *
  * Clean JSON and JSON wrapped in markdown fences are accepted. JSON
  * surrounded by stray prose, an empty or truncated response, or JSON that
- * parses but carries an invalid or missing verdict or reason is treated as
+ * parses but carries an invalid or missing verdict or reason, or any field
+ * other than verdict and reason, is treated as
  * a triage failure and mapped to the same safe AMBIGUOUS
  * fallback: this function's job is to never let a malformed response be
  * mistaken for a real UPSTREAM_OVERRIDE or RETIRE_OVERRIDE call.
@@ -157,6 +159,15 @@ function parseTriageResponse (rawText) {
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return ambiguousFallback('The triage response was valid JSON but not a JSON object.')
+  }
+
+  // The prompt asks for exactly { verdict, reason }. An extra field such as
+  // needs_human_review or confidence can contradict the verdict, and nothing
+  // downstream reads it, so treat any extra key as a failed triage rather
+  // than silently dropping it.
+  const extraKeys = Object.keys(parsed).filter((key) => !ALLOWED_RESPONSE_KEYS.has(key))
+  if (extraKeys.length > 0) {
+    return ambiguousFallback(`The triage response included unexpected fields: ${extraKeys.join(', ')}.`)
   }
 
   // Case-sensitive on purpose: a case variant (e.g. "upstream_override") is a

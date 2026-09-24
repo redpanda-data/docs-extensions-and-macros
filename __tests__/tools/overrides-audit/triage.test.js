@@ -101,7 +101,9 @@ describe('parseTriageResponse', () => {
       ['valid JSON with non-string reason', JSON.stringify({ verdict: 'AMBIGUOUS', reason: 42 })],
       ['JSON object embedded in contradictory prose', 'I cannot decide this one. {"verdict": "RETIRE_OVERRIDE", "reason": "Source is sufficient."}'],
       ['JSON object followed by trailing prose', '{"verdict": "UPSTREAM_OVERRIDE", "reason": "Clearer."} Though I am not sure.'],
-      ['fenced JSON with prose outside the fence', 'Here you go:\n```json\n{"verdict": "RETIRE_OVERRIDE", "reason": "Same."}\n```']
+      ['fenced JSON with prose outside the fence', 'Here you go:\n```json\n{"verdict": "RETIRE_OVERRIDE", "reason": "Same."}\n```'],
+      ['valid verdict and reason plus extra fields', JSON.stringify({ verdict: 'RETIRE_OVERRIDE', reason: 'Source is adequate', needs_human_review: true, confidence: 0.1 })],
+      ['valid verdict and reason plus one extra field', JSON.stringify({ verdict: 'UPSTREAM_OVERRIDE', reason: 'Clearer.', notes: '' })]
     ])('%s', (_label, raw) => {
       const result = triage.parseTriageResponse(raw)
       expect(result.verdict).toBe(VERDICTS.AMBIGUOUS)
@@ -115,8 +117,9 @@ describe('parseTriageResponse', () => {
       const badJson = triage.parseTriageResponse('not json at all {{{')
       const badVerdict = triage.parseTriageResponse(JSON.stringify({ verdict: 'NOPE', reason: 'x' }))
       const missingReason = triage.parseTriageResponse(JSON.stringify({ verdict: 'AMBIGUOUS' }))
+      const extraFields = triage.parseTriageResponse(JSON.stringify({ verdict: 'AMBIGUOUS', reason: 'x', confidence: 0.1 }))
 
-      const reasons = [noResponse.reason, badJson.reason, badVerdict.reason, missingReason.reason]
+      const reasons = [noResponse.reason, badJson.reason, badVerdict.reason, missingReason.reason, extraFields.reason]
       // Every failure mode gets its own specific explanation, not one generic
       // catch-all string reused everywhere.
       expect(new Set(reasons).size).toBe(reasons.length)
@@ -124,6 +127,7 @@ describe('parseTriageResponse', () => {
       expect(badJson.reason.toLowerCase()).toMatch(/not valid json/)
       expect(badVerdict.reason.toLowerCase()).toMatch(/verdict/)
       expect(missingReason.reason.toLowerCase()).toMatch(/reason/)
+      expect(extraFields.reason).toMatch(/confidence/)
     })
   })
 })

@@ -61,6 +61,19 @@ describe('buildUpstreamSection', () => {
     expect(out.toLowerCase()).toMatch(/nothing/)
   })
 
+  test.each([
+    ['missing', undefined],
+    ['null', null],
+    ['a string', 'false'],
+    ['a number', 0]
+  ])('excludes an UPSTREAM_OVERRIDE row whose triage_failed is %s', (_label, value) => {
+    const row = triaged({ name: 'unknown_state_prop', agent_verdict: 'UPSTREAM_OVERRIDE', triage_failed: value })
+    if (value === undefined) delete row.triage_failed
+    const out = report.buildUpstreamSection([row])
+    expect(out).not.toContain('unknown_state_prop')
+    expect(out.toLowerCase()).toMatch(/nothing/)
+  })
+
   test('a SPLIT row says the override stays after the prose ships', () => {
     const split = triaged({ name: 'split_prop', class: 'KEEP_UNTIL_UPSTREAMED', agent_verdict: 'UPSTREAM_OVERRIDE' })
     const plain = triaged({ name: 'plain_prop', class: 'UPSTREAMABLE', agent_verdict: 'UPSTREAM_OVERRIDE' })
@@ -103,6 +116,19 @@ describe('buildRetirementSection', () => {
     expect(out).toContain('prop_a')
     expect(out).toContain('prop_b')
     expect(out).not.toContain('prop_c')
+  })
+
+  test.each([
+    ['missing', undefined],
+    ['null', null],
+    ['a string', 'false'],
+    ['a number', 0]
+  ])('excludes a RETIRE_OVERRIDE row whose triage_failed is %s', (_label, value) => {
+    const row = triaged({ name: 'unknown_state_prop', agent_verdict: 'RETIRE_OVERRIDE', triage_failed: value })
+    if (value === undefined) delete row.triage_failed
+    const out = report.buildRetirementSection([row])
+    expect(out).not.toContain('unknown_state_prop')
+    expect(out.toLowerCase()).toMatch(/nothing/)
   })
 
   test('excludes a triage_failed row even when its agent_verdict is RETIRE_OVERRIDE', () => {
@@ -172,6 +198,19 @@ describe('buildAmbiguousDigest', () => {
     // callout for the parse-failure case.
     const humanCallCount = out.split('Needs a human call.').length - 1
     expect(humanCallCount).toBe(2)
+  })
+
+  test.each([
+    ['missing', undefined],
+    ['null', null],
+    ['a string', 'false'],
+    ['a number', 0]
+  ])('includes an actionable-verdict row whose triage_failed is %s (an unknown state is unresolved)', (_label, value) => {
+    const row = triaged({ name: 'unknown_state_prop', agent_verdict: 'RETIRE_OVERRIDE', triage_failed: value })
+    if (value === undefined) delete row.triage_failed
+    const out = report.buildAmbiguousDigest([row])
+    expect(out).toContain('unknown_state_prop')
+    expect(out).toContain('Needs a human call.')
   })
 
   test('a triage_failed row with a non-AMBIGUOUS agent_verdict is still included (a failure is always unresolved)', () => {
