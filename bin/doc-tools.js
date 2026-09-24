@@ -2892,7 +2892,8 @@ overridesGroup
   .option('--extracted <path>', 'Path to the extracted source JSON (raw property extractor output, or a raw rpk --print-tree dump; required for properties without --repo. For rpk, omitting both --extracted and --repo classifies every field REVIEW with a TODO note instead of erroring)')
   .addOption(new Option('--surface <surface>', 'Override surface to audit').choices(['properties', 'rpk', 'connect']).default('properties'))
   .addOption(new Option('--format <format>', 'Output format').choices(['json', 'human']).default('json'))
-  .option('--repo <path>', 'Alternative to --extracted: for properties, a redpanda checkout to extract raw source strings from; for rpk, a streaming-enterprise src/go/rpk checkout to build and run --print-tree against')
+  .option('--repo <path>', 'Alternative to --extracted: for properties, a redpanda checkout to extract raw source strings from; for rpk, a streaming-enterprise src/go/rpk checkout to build and run --print-tree against. For rpk, also runs the source-string locator so UPSTREAMABLE rows carry source_file/source_line, unless --locations was given')
+  .option('--locations <path>', 'rpk only: path to an already-produced source-string locator JSON file (see the locate-strings analyzer under tools/rpk-docs/scripts), instead of having --repo compute one')
   .option('--output <path>', 'Also write the JSON result to this file')
   .action((options) => {
     const { runAudit, formatHumanReport } = require('../tools/overrides-audit')

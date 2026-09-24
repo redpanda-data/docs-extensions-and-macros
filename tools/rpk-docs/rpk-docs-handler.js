@@ -399,6 +399,61 @@ function fetchRpkTreeFromSource(sourcePath) {
 }
 
 /**
+ * Statically locate the file:line of every rpk command/flag description in
+ * a src/go/rpk checkout, by parsing the Go source with the standalone
+ * locate-strings analyzer (tools/rpk-docs/scripts/locate-strings). Unlike
+ * `rpk --print-tree` (fetchRpkTreeFromSource above), this never runs rpk --
+ * it only parses source -- because a runtime command tree carries no source
+ * location at all, and grepping per candidate at upstreaming time is the
+ * same turn-budget problem the property-overrides upstreaming workflow hit
+ * before switching to a real AST-based extractor. This is that extractor's
+ * rpk equivalent.
+ *
+ * Coverage is necessarily partial: `ai`, `connect`, and `k8s` (see
+ * KNOWN_PLUGINS above) are managed plugins whose subcommand trees rpk can
+ * enumerate via --print-tree even from a bare source build, but whose
+ * description text does not live anywhere in this checkout -- confirmed by
+ * exhaustive grep across a real streaming-enterprise checkout, not an
+ * assumption. Those paths, and any other construct outside the handful of
+ * mechanical patterns the analyzer understands (a computed Use string, an
+ * AddCommand argument built through a loop rather than a literal call),
+ * come back with no entry at all. Callers must treat a missing path as "no
+ * source location available", never as "command doesn't exist".
+ *
+ * @param {string} sourcePath - Path to rpk Go source directory (src/go/rpk).
+ * @returns {Object} Map keyed by full command path (e.g. "rpk topic
+ *   create"), each value { description: {file, line}|undefined, flags:
+ *   {[flagName]: {file, line}} }.
+ */
+function locateRpkSourceStrings (sourcePath) {
+  const analyzerDir = path.join(__dirname, 'scripts', 'locate-strings')
+  const result = spawnSync('go', ['run', '.', '--repo', path.resolve(sourcePath)], {
+    cwd: analyzerDir,
+    encoding: 'utf8',
+    timeout: 60000,
+    maxBuffer: 50 * 1024 * 1024
+  })
+  if (result.status !== 0) {
+    throw new Error(`Failed to run the rpk source-string locator: ${result.stderr}`)
+  }
+  let entries
+  try {
+    entries = JSON.parse(result.stdout)
+  } catch (err) {
+    throw new Error(`Failed to parse locate-strings output: ${err.message}`)
+  }
+  const byPath = {}
+  for (const entry of entries) {
+    const flags = {}
+    for (const f of entry.flags || []) {
+      flags[f.flag] = { file: f.file, line: f.line }
+    }
+    byPath[entry.path] = { description: entry.description, flags }
+  }
+  return byPath
+}
+
+/**
  * Build rpk from Go source inside a Linux Docker container (optional optimization).
  * Builds rpk binary, installs plugins, then runs --print-tree for complete command coverage.
  * Falls back to native Go build if Docker is unavailable.
@@ -2855,6 +2910,7 @@ function runValidation(outputDir, options = {}) {
 module.exports = {
   handleRpkDocsGeneration,
   fetchRpkTreeFromSource,
+  locateRpkSourceStrings,
   fetchRpkTreeFromLinuxSource,
   acquireRpkBinary,
   buildRpkBinary,

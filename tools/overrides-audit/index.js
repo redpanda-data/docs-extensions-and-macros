@@ -19,7 +19,10 @@
  * already-produced { tree: <print-tree output> } JSON file instead. With
  * neither, rpk falls back to a no-tree mode where every field classifies
  * REVIEW with a TODO note (properties has no such fallback -- it requires
- * one of the two).
+ * one of the two). --repo also runs the source-string locator
+ * (locateRpkSourceStrings) so UPSTREAMABLE rows carry source_file/
+ * source_line; --locations takes an already-produced locator JSON file
+ * instead, for the same reason --extracted exists alongside --repo.
  *
  * Also exposed as `doc-tools overrides audit` and the `audit_overrides`
  * MCP tool. See README.adoc in this directory for the classification rules
@@ -53,6 +56,7 @@ function runAudit (options) {
     throw new Error('Missing required option --overrides <path>')
   }
   let extractedPath = options.extracted ? path.resolve(options.extracted) : undefined
+  let locationsPath = options.locations ? path.resolve(options.locations) : undefined
   if (surface === 'properties' && !extractedPath) {
     if (!options.repo) {
       throw new Error('Provide --extracted <path> (raw extractor JSON, no overrides applied) or --repo <path> (a redpanda checkout to extract from)')
@@ -87,16 +91,37 @@ function runAudit (options) {
     // duplicate that work and risk moving off the commit the caller chose.
     const fs = require('fs')
     const os = require('os')
-    const { fetchRpkTreeFromSource } = require('../rpk-docs/rpk-docs-handler')
+    const { fetchRpkTreeFromSource, locateRpkSourceStrings } = require('../rpk-docs/rpk-docs-handler')
     const tree = fetchRpkTreeFromSource(path.resolve(options.repo))
-    extractedPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'overrides-audit-')), 'extracted.json')
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'overrides-audit-'))
+    extractedPath = path.join(tmpDir, 'extracted.json')
     fs.writeFileSync(extractedPath, JSON.stringify({ tree }))
+
+    // Also locate each description/flag's source file:line, so UPSTREAMABLE
+    // rows can be automatically source-rewritten later. Best-effort: a
+    // locate-strings failure (an analyzer bug, an unexpectedly-shaped
+    // checkout) should not block the audit itself, which works fine on
+    // text comparison alone -- it only means every row's source_file/
+    // source_line stays unset, same as if --repo had located nothing.
+    //
+    // Skipped when --locations was already given explicitly: that's the
+    // caller saying "use this one", not "also compute one".
+    if (!locationsPath) {
+      try {
+        const locations = locateRpkSourceStrings(path.resolve(options.repo))
+        locationsPath = path.join(tmpDir, 'locations.json')
+        fs.writeFileSync(locationsPath, JSON.stringify(locations))
+      } catch (err) {
+        console.error(`Warning: rpk source-string location failed, continuing without it: ${err.message}`)
+      }
+    }
   }
 
   const adapter = adapterFactory()
   return adapter.audit({
     overridesPath: path.resolve(options.overrides),
-    extractedPath
+    extractedPath,
+    locationsPath
   })
 }
 
