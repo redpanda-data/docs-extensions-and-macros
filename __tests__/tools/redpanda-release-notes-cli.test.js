@@ -15,12 +15,20 @@ describe('generate redpanda-release-notes flags', () => {
   it('offers exactly the expected flags', () => {
     const help = run(['--help']);
     const flags = [...help.stdout.matchAll(/^ {2}(--[a-z][a-z-]*)/gm)].map((m) => m[1]);
-    expect(flags.sort()).toEqual(['--body', '--date', '--dry-run', '--page', '--section-only', '--tag']);
+    expect(flags.sort()).toEqual([
+      '--body', '--date', '--dry-run', '--page', '--section-file', '--section-only', '--tag',
+    ]);
   });
 
-  it('fails clearly when a required option is missing', () => {
-    const res = run(['--tag', 'v26.2.3', '--date', '2026-09-15']); // no --body
+  it('fails when neither --body nor --section-file is given', () => {
+    const res = run(['--tag', 'v26.2.3']);
     expect(res.status).not.toBe(0);
-    expect(res.stderr).toMatch(/--body/);
+    expect(res.stderr).toMatch(/exactly one of --body .* or --section-file/);
+  });
+
+  it('fails when --body is given without --date', () => {
+    const res = run(['--tag', 'v26.2.3', '--body', 'nope.md']);
+    expect(res.status).not.toBe(0);
+    expect(res.stderr).toMatch(/--date is required with --body/);
   });
 });

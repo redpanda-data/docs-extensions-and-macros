@@ -12,6 +12,7 @@ const {
 
 const FIXTURES = path.join(__dirname, '../fixtures/release-notes');
 const BODY = fs.readFileSync(path.join(FIXTURES, 'v26.2.2-streaming-enterprise.md'), 'utf8');
+const CURATED_V2623 = fs.readFileSync(path.join(FIXTURES, 'curated/v26.2.3-curated.adoc'), 'utf8');
 
 // A page shaped like modules/reference/pages/releases/redpanda.adoc.
 function page({ floor = '26.2.2', withV2622 = true } = {}) {
@@ -122,6 +123,35 @@ describe('generateReleaseNotes (real fixture, newer tag)', () => {
 //   for(const [t,d] of [['v26.2.2','2026-08-21'],['v26.2.3','2026-09-17']]) fs.writeFileSync(\
 //   '__tests__/fixtures/release-notes/expected/'+t+'-candidate.adoc',\
 //   buildReleaseSection({body:fs.readFileSync('__tests__/fixtures/release-notes/'+t+'-streaming-enterprise.md','utf8'),version:t,date:d}))"
+describe('generateReleaseNotes phase 2 (insert a curated section)', () => {
+  it('inserts a pre-curated section verbatim, newest-first, under the guards', () => {
+    const res = generateReleaseNotes({ section: CURATED_V2623, tag: 'v26.2.3', pageContent: page() });
+    expect(res.status).toBe('ok');
+    expect(res.section).toBe(CURATED_V2623); // used as-is, not rebuilt from a body
+    expect(res.content).toContain('Cluster:: Reconnection logic is hardened');
+    expect(res.content.indexOf('== v26.2.3')).toBeLessThan(res.content.indexOf('== v26.2.2'));
+  });
+
+  it('applies the floor guard on the section path too', () => {
+    const res = generateReleaseNotes({
+      section: '== v26.2.2 (2026-08-21)\n\n=== Features\n\nrpk:: x.\n',
+      tag: 'v26.2.2',
+      pageContent: page({ floor: '26.2.2' }),
+    });
+    expect(res.status).toBe('skipped');
+  });
+
+  it('throws when both body and section are given', () => {
+    expect(() => generateReleaseNotes({ body: BODY, section: CURATED_V2623, tag: 'v26.2.3', pageContent: page() }))
+      .toThrow(/only one/i);
+  });
+
+  it('throws when neither body nor section is given', () => {
+    expect(() => generateReleaseNotes({ tag: 'v26.2.3', pageContent: page() }))
+      .toThrow(/either body .* or section/i);
+  });
+});
+
 describe('candidate goldens', () => {
   it.each([
     ['v26.2.2', '2026-08-21'],

@@ -1545,17 +1545,20 @@ doc-tools generate redpanda-release-notes [options]
 `--tag <tag>`::
 GA release tag, such as v26.2.3
 
-`--date <date>`::
-Authored release date as YYYY-MM-DD (confirmed on the PR)
-
 `--body <file>`::
-Path to the rpchangelog release body markdown (relative to repo root, must stay inside the repository)
+Phase 1: rpchangelog release body markdown to build a candidate from (relative to repo root, must stay inside the repository)
+
+`--section-file <file>`::
+Phase 2: a curated section (from the sm-release-notes skill) to insert (relative to repo root, must stay inside the repository)
+
+`--date <date>`::
+Authored release date as YYYY-MM-DD (required with --body; confirmed on the PR)
 
 `--page <file>`::
 Target release-notes page (relative to repo root, must stay inside the repository) (default: "modules/reference/pages/releases/redpanda.adoc")
 
 `--section-only`::
-Print only the candidate section rather than the full page
+Phase 1 only: print the candidate section and do not read or modify the page
 
 `--dry-run`::
 Print output to stdout instead of writing the page
@@ -1567,19 +1570,22 @@ display help for command
 
 [,bash]
 ----
-# Preview just the candidate section from a saved release body
+# Phase 1: build the candidate the curation skill will edit (no page touched)
 npx doc-tools generate redpanda-release-notes \
-  --tag v26.2.3 --date 2026-09-15 --body /tmp/v26.2.3-body.md --section-only --dry-run
+  --tag v26.2.3 --date 2026-09-15 --body /tmp/v26.2.3-body.md --section-only > candidate.adoc
 
-# Insert the section into the page
+# (the sm-release-notes skill curates candidate.adoc into curated.adoc)
+
+# Phase 2: insert the curated section into the page under the guards
 npx doc-tools generate redpanda-release-notes \
-  --tag v26.2.3 --date 2026-09-15 --body /tmp/v26.2.3-body.md
+  --tag v26.2.3 --section-file curated.adoc
 ----
 
 *Requirements:*
 
-- A release body file passed with --body. Fetching the body from the private
-  streaming-enterprise release is wired by the docs-repo workflow, not here.
+- Phase 1 needs --body (+ --date); phase 2 needs --section-file. Fetching the
+  body from the private streaming-enterprise release, and running the curation
+  skill between the two phases, are wired by the docs-repo workflow, not here.
 
 === generate crd-spec
 

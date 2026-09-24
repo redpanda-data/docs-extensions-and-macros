@@ -111,14 +111,29 @@ function buildReleaseSection({ body, version, date }) {
  * idempotency guards. Never throws for a guard miss: returns a `skipped` status
  * so the workflow can no-op cleanly.
  *
+ * Two phases, because the LLM curation step sits between them:
+ * - Phase 1 (pass `body`): build the de-noised candidate section from the raw
+ *   release body. This candidate is the curation step's input.
+ * - Phase 2 (pass `section`): insert the curated section the skill produced.
+ * Exactly one of `body` or `section` is supplied. The guards apply in both
+ * phases, since they depend on the tag and the page, not on the entries.
+ *
  * @param {Object} options
- * @param {string} options.body - The raw rpchangelog release body markdown.
+ * @param {string} [options.body] - Raw rpchangelog release body (phase 1).
+ * @param {string} [options.section] - A pre-built/curated section to insert (phase 2).
  * @param {string} options.tag - The release tag (`v26.2.3`).
- * @param {string} options.date - The authored release date as `YYYY-MM-DD`.
+ * @param {string} [options.date] - The authored release date as `YYYY-MM-DD` (phase 1 only).
  * @param {string} options.pageContent - The current target page content.
  * @return {{status: 'ok'|'skipped', reason?: string, section?: string, content?: string}}
  */
-function generateReleaseNotes({ body, tag, date, pageContent }) {
+function generateReleaseNotes({ body, section, tag, date, pageContent }) {
+  if (body == null && section == null) {
+    throw new Error('Provide either body (phase 1) or section (phase 2).');
+  }
+  if (body != null && section != null) {
+    throw new Error('Provide only one of body or section, not both.');
+  }
+
   if (!isGaTag(tag)) {
     return { status: 'skipped', reason: `not a GA tag: ${tag}` };
   }
@@ -133,9 +148,9 @@ function generateReleaseNotes({ body, tag, date, pageContent }) {
     return { status: 'skipped', reason: `page already has a section for v${version}` };
   }
 
-  const section = buildReleaseSection({ body, version, date });
-  const content = insertReleaseSection(pageContent, section);
-  return { status: 'ok', section, content };
+  const finalSection = section != null ? section : buildReleaseSection({ body, version, date });
+  const content = insertReleaseSection(pageContent, finalSection);
+  return { status: 'ok', section: finalSection, content };
 }
 
 module.exports = {

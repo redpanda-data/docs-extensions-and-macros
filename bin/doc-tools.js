@@ -2021,57 +2021,80 @@ automation
  * unit-tested and makes no editorial change.
  *
  * @example
- * # Preview just the candidate section from a saved release body
+ * # Phase 1: build the candidate the curation skill will edit (no page touched)
  * npx doc-tools generate redpanda-release-notes \
- *   --tag v26.2.3 --date 2026-09-15 --body /tmp/v26.2.3-body.md --section-only --dry-run
+ *   --tag v26.2.3 --date 2026-09-15 --body /tmp/v26.2.3-body.md --section-only > candidate.adoc
  *
- * # Insert the section into the page
+ * # (the sm-release-notes skill curates candidate.adoc into curated.adoc)
+ *
+ * # Phase 2: insert the curated section into the page under the guards
  * npx doc-tools generate redpanda-release-notes \
- *   --tag v26.2.3 --date 2026-09-15 --body /tmp/v26.2.3-body.md
+ *   --tag v26.2.3 --section-file curated.adoc
  *
  * @requirements
- * - A release body file passed with --body. Fetching the body from the private
- *   streaming-enterprise release is wired by the docs-repo workflow, not here.
+ * - Phase 1 needs --body (+ --date); phase 2 needs --section-file. Fetching the
+ *   body from the private streaming-enterprise release, and running the curation
+ *   skill between the two phases, are wired by the docs-repo workflow, not here.
  */
 automation
   .command('redpanda-release-notes')
   .description('Generate a Self-Managed release-notes section from an rpchangelog release body')
   .requiredOption('--tag <tag>', 'GA release tag, such as v26.2.3')
-  .requiredOption('--date <date>', 'Authored release date as YYYY-MM-DD (confirmed on the PR)')
-  .requiredOption('--body <file>', 'Path to the rpchangelog release body markdown (relative to repo root, must stay inside the repository)')
+  .option('--body <file>', 'Phase 1: rpchangelog release body markdown to build a candidate from (relative to repo root, must stay inside the repository)')
+  .option('--section-file <file>', 'Phase 2: a curated section (from the sm-release-notes skill) to insert (relative to repo root, must stay inside the repository)')
+  .option('--date <date>', 'Authored release date as YYYY-MM-DD (required with --body; confirmed on the PR)')
   .option('--page <file>', 'Target release-notes page (relative to repo root, must stay inside the repository)', 'modules/reference/pages/releases/redpanda.adoc')
-  .option('--section-only', 'Print only the candidate section rather than the full page')
+  .option('--section-only', 'Phase 1 only: print the candidate section and do not read or modify the page')
   .option('--dry-run', 'Print output to stdout instead of writing the page')
   .action(async (options) => {
-    const { generateReleaseNotes } = require('../tools/redpanda-release-notes/generate-release-notes.js')
+    const {
+      generateReleaseNotes,
+      buildReleaseSection,
+    } = require('../tools/redpanda-release-notes/generate-release-notes.js')
     try {
       const repoRoot = findRepoRoot()
-      const bodyPath = resolveInsideRepo(repoRoot, options.body, '--body')
-      const pagePath = resolveInsideRepo(repoRoot, options.page, '--page')
-      if (!fs.existsSync(bodyPath)) {
-        throw new Error(`Release body not found: ${bodyPath}`)
+
+      // Exactly one input: --body (phase 1, build a candidate) XOR --section-file
+      // (phase 2, insert the curated section). Curation sits between them.
+      const hasBody = Boolean(options.body)
+      const hasSection = Boolean(options.sectionFile)
+      if (hasBody === hasSection) {
+        throw new Error('Provide exactly one of --body (phase 1) or --section-file (phase 2).')
       }
-      if (!fs.existsSync(pagePath)) {
-        throw new Error(`Release-notes page not found: ${pagePath}`)
+      if (hasBody && !options.date) {
+        throw new Error('--date is required with --body.')
       }
-      const body = fs.readFileSync(bodyPath, 'utf8')
+
+      const readInside = (rel, label) => {
+        const abs = resolveInsideRepo(repoRoot, rel, label)
+        if (!fs.existsSync(abs)) throw new Error(`File not found for ${label}: ${abs}`)
+        return abs
+      }
+
+      // Phase-1 candidate preview: emit the candidate for the curation step. No
+      // page is read or written — this is the LLM step's input, nothing else.
+      if (options.sectionOnly) {
+        if (!hasBody) throw new Error('--section-only applies to --body (candidate generation).')
+        const body = fs.readFileSync(readInside(options.body, '--body'), 'utf8')
+        const section = buildReleaseSection({ body, version: options.tag, date: options.date })
+        process.stdout.write(section)
+        return
+      }
+
+      const pagePath = readInside(options.page, '--page')
       const pageContent = fs.readFileSync(pagePath, 'utf8')
-      const result = generateReleaseNotes({ body, tag: options.tag, date: options.date, pageContent })
+      const genArgs = { tag: options.tag, date: options.date, pageContent }
+      if (hasBody) {
+        genArgs.body = fs.readFileSync(readInside(options.body, '--body'), 'utf8')
+      } else {
+        genArgs.section = fs.readFileSync(readInside(options.sectionFile, '--section-file'), 'utf8')
+      }
+      const result = generateReleaseNotes(genArgs)
 
       if (result.status === 'skipped') {
         // A guard miss is a clean no-op, not an error: the workflow runs this on
         // every release and most runs have nothing to add.
         console.log(`[release-notes] Skipped: ${result.reason}`)
-        return
-      }
-
-      if (options.sectionOnly) {
-        if (options.dryRun) {
-          process.stdout.write(result.section)
-          console.log(`\nDone: (dry-run) candidate section for ${options.tag} printed to stdout.`)
-        } else {
-          console.log(result.section)
-        }
         return
       }
 
