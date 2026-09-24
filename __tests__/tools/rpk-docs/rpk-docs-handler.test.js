@@ -28,7 +28,8 @@ const {
   getRequiredGoVersion,
   prepareSourceFromRef,
   downloadRpkRelease,
-  acquireRpkBinary
+  acquireRpkBinary,
+  fetchRpkTreeFromSource
 } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
 
 describe('rpk Docs Handler', () => {
@@ -550,6 +551,85 @@ describe('rpk Docs Handler', () => {
     test('handles two-part go version (no patch)', () => {
       fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module example.com/rpk\n\ngo 1.26\n')
       expect(getRequiredGoVersion(tempDir)).toBe('1.26')
+    })
+  })
+
+  describe('fetchRpkTreeFromSource Go-version preflight (ensureGoAvailable)', () => {
+    let tempDir
+
+    beforeEach(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpk-ensure-go-test-'))
+      fs.mkdirSync(path.join(tempDir, 'cmd', 'rpk'), { recursive: true })
+      fs.writeFileSync(path.join(tempDir, 'cmd', 'rpk', 'main.go'), 'package main\n')
+      fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module example.com/rpk\n\ngo 1.27.1\n')
+      spawnSync.mockReset()
+    })
+
+    afterEach(() => {
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    })
+
+    // Distinguishes the bare (no cwd) preflight call from the toolchain-
+    // aware (cwd: sourcePath) one, and from the final build/run call, by
+    // args/options shape rather than call order.
+    const isBareVersionCheck = (cmd, args, opts) => cmd === 'go' && args[0] === 'version' && !opts.cwd
+    const isToolchainVersionCheck = (cmd, args, opts) => cmd === 'go' && args[0] === 'version' && opts.cwd === tempDir
+    const isPrintTreeRun = (cmd, args) => cmd === 'go' && args[0] === 'run'
+
+    test('a sufficient bare-installed version never invokes the network-dependent toolchain check', () => {
+      spawnSync.mockImplementation((cmd, args, opts) => {
+        if (isBareVersionCheck(cmd, args, opts)) return { status: 0, stdout: 'go version go1.27.1 darwin/arm64\n', stderr: '' }
+        if (isPrintTreeRun(cmd, args)) return { status: 0, stdout: '{"name":"rpk","commands":[]}', stderr: '' }
+        throw new Error(`unexpected spawnSync call: ${cmd} ${args.join(' ')}`)
+      })
+      const tree = fetchRpkTreeFromSource(tempDir)
+      expect(tree.name).toBe('rpk')
+      expect(spawnSync.mock.calls.filter(([cmd, args, opts]) => isToolchainVersionCheck(cmd, args, opts))).toHaveLength(0)
+    })
+
+    test('an insufficient bare version that the toolchain check CAN resolve proceeds successfully', () => {
+      spawnSync.mockImplementation((cmd, args, opts) => {
+        if (isBareVersionCheck(cmd, args, opts)) return { status: 0, stdout: 'go version go1.20.0 darwin/arm64\n', stderr: '' }
+        if (isToolchainVersionCheck(cmd, args, opts)) return { status: 0, stdout: 'go version go1.27.1 darwin/arm64\n', stderr: '' }
+        if (isPrintTreeRun(cmd, args)) return { status: 0, stdout: '{"name":"rpk","commands":[]}', stderr: '' }
+        throw new Error(`unexpected spawnSync call: ${cmd} ${args.join(' ')}`)
+      })
+      const tree = fetchRpkTreeFromSource(tempDir)
+      expect(tree.name).toBe('rpk')
+    })
+
+    // Regression: adding cwd to the version preflight made it network-
+    // dependent (Go's own GOTOOLCHAIN=auto toolchain download). Before this
+    // fix, a failed/timed-out toolchain-scoped call was indistinguishable
+    // from "Go isn't installed" and threw that misleading message even
+    // though Go plainly IS installed (the bare check above it succeeded).
+    // The real, accurate diagnosis is a version mismatch, optionally noting
+    // the toolchain download also failed.
+    test('an insufficient bare version whose toolchain check ALSO fails throws the accurate version-mismatch error, not a misleading "not found" one', () => {
+      spawnSync.mockImplementation((cmd, args, opts) => {
+        if (isBareVersionCheck(cmd, args, opts)) return { status: 0, stdout: 'go version go1.20.0 darwin/arm64\n', stderr: '' }
+        if (isToolchainVersionCheck(cmd, args, opts)) return { status: 1, stdout: '', stderr: 'go: downloading go1.27.1 (darwin/arm64)\ndial tcp: i/o timeout\n' }
+        throw new Error(`unexpected spawnSync call: ${cmd} ${args.join(' ')}`)
+      })
+      let thrown
+      try {
+        fetchRpkTreeFromSource(tempDir)
+      } catch (err) {
+        thrown = err
+      }
+      expect(thrown).toBeDefined()
+      expect(thrown.message).toContain('Go version mismatch')
+      expect(thrown.message).toContain('1.20.0')
+      expect(thrown.message).toContain('1.27.1')
+      expect(thrown.message).not.toContain('was not found')
+    })
+
+    test('Go genuinely missing (bare check itself fails) reports "not found", not a version mismatch', () => {
+      spawnSync.mockImplementation((cmd, args, opts) => {
+        if (isBareVersionCheck(cmd, args, opts)) return { status: 1, stdout: '', stderr: 'command not found: go' }
+        throw new Error(`unexpected spawnSync call: ${cmd} ${args.join(' ')}`)
+      })
+      expect(() => fetchRpkTreeFromSource(tempDir)).toThrow(/was not found/)
     })
   })
 
