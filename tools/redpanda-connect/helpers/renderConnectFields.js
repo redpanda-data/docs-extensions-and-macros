@@ -2,7 +2,7 @@ const yaml = require('yaml');
 const renderYamlList = require('./renderYamlList');
 const handlebars = require('handlebars');
 const { connectFieldName } = require('./flattenConnectFields');
-const { escapePlaceholderBraces } = require('./renderConnectDescription');
+const { escapePlaceholderBraces, protectCodeSpans } = require('./renderConnectDescription');
 
 /**
  * Renders the children of a configuration object into AsciiDoc.
@@ -71,7 +71,7 @@ module.exports = function renderConnectFields(children, prefix = '') {
     // --- Beta badge logic (now uses is_beta) ---
     // Escaped before the badge is prepended, not after: the badge's own
     // tooltip={page-beta-text} is a real attribute reference and must survive.
-    let desc = escapePlaceholderBraces(child.description || '');
+    let desc = protectCodeSpans(escapePlaceholderBraces(child.description || ''));
     if (child.is_beta) {
       // Remove any leading "BETA:" label (case-insensitive, trims leading whitespace)
       desc = 'badge::[label=Beta, size=large, tooltip={page-beta-text}]\n\n' + desc.replace(/^\s*BETA:\s*/i, '');
