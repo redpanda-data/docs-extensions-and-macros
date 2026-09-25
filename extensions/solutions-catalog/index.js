@@ -68,6 +68,10 @@ const DEFAULTS = Object.freeze({
   networkChecks: 'auto',
   includeDrafts: false,
   agentCompanion: true,
+  // The solutions repository is private: readers get the code through the
+  // gated download and the public attachments, so its owner/name is not
+  // published unless a playbook says the repository is public.
+  publicRepo: false,
 })
 
 /**
@@ -82,6 +86,7 @@ function resolveConfig (config = {}, env = process.env) {
   const networkChecks = pick('networkChecks', 'network_checks')
   const includeDraftsRaw = pick('includeDrafts', 'include_drafts')
   const agentCompanionRaw = pick('agentCompanion', 'agent_companion')
+  const publicRepoRaw = pick('publicRepo', 'public_repo')
   const envDrafts = env.SOLUTIONS_INCLUDE_DRAFTS
   const includeDrafts = includeDraftsRaw !== undefined
     ? isTrue(includeDraftsRaw)
@@ -92,6 +97,7 @@ function resolveConfig (config = {}, env = process.env) {
     networkChecks: networkChecks === undefined ? DEFAULTS.networkChecks : normalizeTristate(networkChecks),
     includeDrafts,
     agentCompanion: agentCompanionRaw === undefined ? DEFAULTS.agentCompanion : isTrue(agentCompanionRaw),
+    publicRepo: publicRepoRaw === undefined ? DEFAULTS.publicRepo : isTrue(publicRepoRaw),
   }
 }
 
@@ -169,6 +175,23 @@ function makeResolver (contentCatalog) {
     } catch {
       return null
     }
+  }
+}
+
+/**
+ * Look a page up by its published URL path, for the link fragment check.
+ * Built lazily on first use. `/x/` and `/x/index.html` find the same page.
+ */
+function makePageByUrl (contentCatalog) {
+  let byUrl = null
+  return (pathname) => {
+    if (!byUrl) {
+      byUrl = new Map()
+      for (const page of contentCatalog.findBy({ family: 'page' }) || []) {
+        if (page.pub && page.pub.url) byUrl.set(page.pub.url, page)
+      }
+    }
+    return byUrl.get(pathname) || byUrl.get(String(pathname).replace(/index\.html$/, '')) || null
   }
 }
 
@@ -306,6 +329,7 @@ module.exports.register = function ({ config = {} } = {}) {
     }
 
     const resolveDoc = makeResolver(contentCatalog)
+    const pageByUrl = makePageByUrl(contentCatalog)
     const solutionIds = new Set(collected.solutions.map((s) => s.id))
     const errors = []
     const warnings = []
@@ -316,7 +340,7 @@ module.exports.register = function ({ config = {} } = {}) {
     }
 
     for (const record of collected.solutions) {
-      const result = validate.validateSolution(record, { categoryMap, facetVocab, resolveDoc, solutionIds })
+      const result = validate.validateSolution(record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl })
       errors.push(...result.errors)
       warnings.push(...result.warnings)
     }
@@ -432,7 +456,7 @@ module.exports.register = function ({ config = {} } = {}) {
     const publicRecords = []
     for (const record of active) {
       const steps = outputs.buildSteps(record)
-      const publicRecord = outputs.buildPublicRecord(record, { steps, relatedDocs: record.relatedDocs, relatedSolutions: record.relatedSolutions })
+      const publicRecord = outputs.buildPublicRecord(record, { steps, relatedDocs: record.relatedDocs, relatedSolutions: record.relatedSolutions, publicRepo: settings.publicRepo })
       const nav = outputs.buildNav(publicRecord, { homeUrl })
       outputs.applyPageAttributes(record, publicRecord, nav)
       publicRecords.push(publicRecord)
@@ -441,7 +465,7 @@ module.exports.register = function ({ config = {} } = {}) {
     const siteUrl = (playbook && playbook.site && playbook.site.url) || ''
     const generatedAt = new Date().toISOString()
     state.records = active
-    state.catalog = outputs.buildCatalog(publicRecords, { siteUrl, generatedAt })
+    state.catalog = outputs.buildCatalog(publicRecords, { siteUrl, generatedAt, categoryLeaves: new Map(active.map((r) => [r.id, r.categoryLeaves || r.categories])) })
     state.graph = outputs.buildGraph(edges, { siteUrl, generatedAt, maxRelated: settings.maxRelated, minScore: settings.minScore, coverage })
     addAttributeToComponents(contentCatalog, ATTRIBUTE_NAME, JSON.stringify(state.catalog), logger)
 

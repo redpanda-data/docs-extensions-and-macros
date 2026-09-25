@@ -119,10 +119,14 @@ function buildSolutionMetadata(page) {
 
   // `repo` is owner/name; GitHub is the host the release and asset lookups
   // already assume. `ref` is the release tag that exists, <id>/<version>, not
-  // the bare version, so a consumer can check the ref out.
+  // the bare version, so a consumer can check the ref out. The catalog only
+  // publishes `repo` when the repository is public (solutions-catalog
+  // `public_repo`), and without it neither the URL nor the ref is emitted:
+  // both would send an agent to a private repository that returns 404. The
+  // download mode stays, and `files` names what the download serves.
   const repository = assignPresent({}, {
     url: record.repo ? `https://github.com/${record.repo}` : undefined,
-    ref: record.tag,
+    ref: record.repo ? record.tag : undefined,
     download: record.download,
   })
   if (Object.keys(repository).length) block.repository = repository

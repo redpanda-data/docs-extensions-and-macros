@@ -13,7 +13,7 @@ const { parse } = require('node-html-parser')
 const {
   RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, stripVersion,
 } = require('./collect')
-const { normalizeCategories } = require('../../extension-utils/categories')
+const { normalizeCategories, isLeafCategory } = require('../../extension-utils/categories')
 const yaml = require('js-yaml')
 
 const DURATION_MIN = 5
@@ -86,6 +86,81 @@ function attachmentLinkTargets (contents, { pageUrl = '/', attachmentPrefix } = 
 }
 
 /**
+ * Links on a page that carry a `#fragment`, resolved against the page URL.
+ * Off-site links and bare `#` links are dropped.
+ *
+ * @returns {Array<{href: string, pathname: string, fragment: string}>}
+ */
+function fragmentLinks (contents, { pageUrl = '/' } = {}) {
+  const root = parseHtml(contents)
+  const base = new URL(pageUrl, 'https://site.invalid')
+  const links = []
+  root.querySelectorAll('a[href]').forEach((a) => {
+    const href = a.getAttribute('href') || ''
+    if (!href.includes('#')) return
+    let resolved
+    try { resolved = new URL(href, base) } catch { return }
+    if (resolved.origin !== base.origin) return
+    let fragment = resolved.hash.slice(1)
+    try { fragment = decodeURIComponent(fragment) } catch {}
+    if (!fragment) return
+    links.push({ href, pathname: resolved.pathname, fragment })
+  })
+  return links
+}
+
+// Parsed element ids per page, keyed by the page object and invalidated when
+// its contents change, so a target linked from many steps is parsed once.
+const idCache = new WeakMap()
+
+/** Every element id in a page's converted HTML (sections, anchors, blocks). */
+function elementIds (page) {
+  if (!page || !page.contents) return null
+  const cached = idCache.get(page)
+  if (cached && cached.contents === page.contents) return cached.ids
+  const ids = new Set(parseHtml(page.contents).querySelectorAll('[id]').map((el) => el.getAttribute('id')))
+  idCache.set(page, { contents: page.contents, ids })
+  return ids
+}
+
+/**
+ * The id Asciidoctor generates for a heading on this site (idprefix '' and
+ * idseparator '-'), from a fragment written for the defaults ('_' and '_'):
+ * `_production_considerations` -> `production-considerations`.
+ */
+function siteStyleId (fragment) {
+  return String(fragment).replace(/^_+/, '').replace(/_/g, '-')
+}
+
+/**
+ * Fragments on a page's links that match no id in the page they point at.
+ * A link whose target is not a page in this build (an attachment, another
+ * site) is not checked here.
+ *
+ * @param {Object} page - converted page with `contents` and `pub.url`
+ * @param {(pathname: string) => Object|null|undefined} pageByUrl
+ * @returns {Array<{href: string, fragment: string, target: string, suggestion: string|null}>}
+ */
+function brokenFragments (page, pageByUrl) {
+  if (!page || !page.contents || typeof pageByUrl !== 'function') return []
+  const ownUrl = (page.pub && page.pub.url) || '/'
+  const broken = []
+  for (const link of fragmentLinks(page.contents, { pageUrl: ownUrl })) {
+    const target = link.pathname === ownUrl ? page : pageByUrl(link.pathname)
+    const ids = elementIds(target)
+    if (!ids || ids.has(link.fragment)) continue
+    const candidate = siteStyleId(link.fragment)
+    broken.push({
+      href: link.href,
+      fragment: link.fragment,
+      target: (target.pub && target.pub.url) || link.pathname,
+      suggestion: candidate !== link.fragment && ids.has(candidate) ? candidate : null,
+    })
+  }
+  return broken
+}
+
+/**
  * Structural checks that run at contentClassified, before conversion.
  *
  * @param {ReturnType<import('./collect').collectSolutions>} collected
@@ -123,7 +198,9 @@ function isIsoTimestamp (value) {
  * Validate one collected solution record after conversion.
  *
  * Side effect by design: `record.categories` is replaced with the normalized
- * list (parents added) because scoring and the catalog both need it.
+ * list (parents added) because scoring and the catalog both need it, and
+ * `record.categoryLeaves` is set to the authored leaf categories, which is
+ * what the catalog's Category facet counts.
  *
  * @param {Object} record - from collect.js
  * @param {Object} ctx
@@ -132,9 +209,11 @@ function isIsoTimestamp (value) {
  *   ROOT/partials/solution-facets.yml; when absent the two facet axes are not validated
  * @param {(spec: string) => Object|null|undefined} [ctx.resolveDoc] - resolve a page ID to a page
  * @param {Set<string>} [ctx.solutionIds] - all module names in the component
+ * @param {(pathname: string) => Object|null|undefined} [ctx.pageByUrl] - a published URL
+ *   path to its page; when absent, link fragments are not checked
  * @returns {{errors: Array<string>, warnings: Array<string>}}
  */
-function validateSolution (record, { categoryMap, facetVocab, resolveDoc, solutionIds } = {}) {
+function validateSolution (record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl } = {}) {
   const errors = []
   const warnings = []
   const id = record.id
@@ -205,6 +284,12 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
     if (invalid.length) err(`page-categories contains unknown values: ${invalid.join(', ')}. See shared/modules/ROOT/partials/valid-categories.yml`)
     record.categories = categories
   }
+  // The landing page's Category facet: what the author wrote, at leaf level.
+  // Parents that normalizeCategories adds (and broad parents written by hand)
+  // say only "same product area", so they stay out of the facet.
+  record.categoryLeaves = record.categoriesRaw
+    .filter((c) => !categoryMap || categoryMap.categories.has(c) || categoryMap.subcategories.has(c))
+    .filter((c) => isLeafCategory(c, categoryMap))
 
   // Industries and use cases: fatal on an unknown value, for the same reason
   // categories are. These two drive facets, and a facet built from free text
@@ -278,6 +363,21 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
     const pageUrl = (page.pub && page.pub.url) || attachmentPrefix
     for (const name of attachmentLinkTargets(page.contents, { pageUrl, attachmentPrefix })) {
       if (!attachmentNames.has(name)) err(`${pageId}.adoc links to attachment "${name}" which does not exist in the module`)
+    }
+  }
+
+  // Link fragments: a #fragment must name an id in the page it points at.
+  // The link checker only sees that the page returns 200, so a fragment
+  // written for Asciidoctor's default ids (`#_production_considerations`)
+  // silently lands at the top of the page on this site, whose ids have no
+  // prefix and use hyphens. Fatal once published, a warning while a draft.
+  if (pageByUrl) {
+    const report = record.status === 'draft' ? warn : err
+    for (const { id: pageId, page } of pagesToScan) {
+      for (const b of brokenFragments(page, pageByUrl)) {
+        const hint = b.suggestion ? `; use #${b.suggestion}` : ''
+        report(`${pageId}.adoc links to ${b.target}#${b.fragment}, but that page has no id "${b.fragment}"${hint}`)
+      }
     }
   }
 
@@ -395,6 +495,9 @@ module.exports = {
   hasVerifySection,
   attachmentPrefixOf,
   attachmentLinkTargets,
+  fragmentLinks,
+  brokenFragments,
+  siteStyleId,
   validateStructure,
   validateSolution,
   validateRelationships,

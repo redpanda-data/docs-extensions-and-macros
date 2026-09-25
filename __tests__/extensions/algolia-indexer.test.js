@@ -159,6 +159,7 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
           'page-solution-step-id': 'build-leaderboard',
           'page-solution-difficulty': 'intermediate',
           'page-solution-duration': '45',
+          'page-solution-step-duration': '10',
           'page-solution-technologies': 'Go, Protobuf',
           'page-solution-platforms': 'self-managed, cloud',
           'page-solution-status': 'published',
@@ -174,7 +175,7 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
       solutionId: 'leaderboard',
       stepId: 'build-leaderboard',
       difficulty: 'intermediate',
-      duration: 45,
+      duration: 10,
       technologies: ['Go', 'Protobuf'],
       platforms: ['self-managed', 'cloud'],
       status: 'published',
@@ -198,6 +199,102 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
     expect(record.title).toBe('Redpanda Solutions')
     expect(record.intro).toBe('Runnable Redpanda solutions')
     expect(record.stepId).toBe('')
+  })
+
+  const TRAIL = [['/', 'Home'], ['/solutions/', 'Solutions'], ['/solutions/leaderboard/', 'Leaderboard'], ['/solutions/leaderboard/start-environment/', 'Start the environment']]
+  const trailHtml = () => '<nav class="breadcrumbs"><ul>' +
+    TRAIL.map(([u, t]) => `<li><a href="${u}">${t}</a></li>`).join('') + '</ul></nav>'
+  // The layout renders the trail in the toolbar and again inside article.doc.
+  const stepHtml = (h1) => `<html><body><div class="toolbar">${trailHtml()}</div>` +
+    `<article class="doc">${trailHtml()}<h1>${h1}</h1><div class="paragraph"><p>Do it.</p></div></article></body></html>`
+
+  function solutionPage ({ url, relative, attrs, html }) {
+    return makePage(html, {
+      out: { dirname: url.replace(/^\/|\/$/g, ''), basename: 'index.html' },
+      pub: { url },
+      src: { component: 'solutions', version: '', relative, origin: {} },
+      asciidoc: { attributes: attrs }
+    })
+  }
+
+  const RECORD = JSON.stringify({
+    id: 'leaderboard',
+    title: 'Multiplayer game events with a live leaderboard',
+    duration: 50,
+    useCases: ['Event-driven microservices'],
+    industries: ['Gaming']
+  })
+
+  const stepAttrs = (extra = {}) => ({
+    'page-layout': 'solution-step',
+    'page-solution': RECORD,
+    'page-solution-id': 'leaderboard',
+    'page-solution-title': 'Multiplayer game events with a live leaderboard',
+    'page-solution-step-id': 'start-environment',
+    'page-solution-duration': '50',
+    ...extra
+  })
+
+  test('breadcrumbs come from the article only, so the trail is not doubled', () => {
+    const [record] = runSolutions(solutionPage({
+      url: '/solutions/leaderboard/start-environment/',
+      relative: 'start-environment.adoc',
+      attrs: stepAttrs(),
+      html: stepHtml('Start the environment')
+    }))
+    expect(record.breadcrumbs.map((b) => b.t)).toEqual(TRAIL.map(([, t]) => t))
+    expect(record.breadcrumbs.map((b) => b.u)).toEqual(TRAIL.map(([u]) => u.replace(/\/$/, '') || '/'))
+  })
+
+  test('breadcrumbs are not doubled on Doc records either', () => {
+    const [record] = runIndex(makePage(stepHtml('Doc')))
+    expect(record.breadcrumbs).toHaveLength(TRAIL.length)
+  })
+
+  test('step records carry solutionTitle so identical step titles can be told apart', () => {
+    const [record] = runSolutions(solutionPage({
+      url: '/solutions/leaderboard/start-environment/',
+      relative: 'start-environment.adoc',
+      attrs: stepAttrs(),
+      html: stepHtml('Start the environment')
+    }))
+    expect(record.title).toBe('Start the environment')
+    expect(record.solutionTitle).toBe('Multiplayer game events with a live leaderboard')
+  })
+
+  test('a step with no duration of its own gets null, never the solution total', () => {
+    const [record] = runSolutions(solutionPage({
+      url: '/solutions/leaderboard/start-environment/',
+      relative: 'start-environment.adoc',
+      attrs: stepAttrs(),
+      html: stepHtml('Start the environment')
+    }))
+    expect(record.duration).toBeNull()
+  })
+
+  test('the overview record carries useCases and industries, searchable through keywords', () => {
+    const attrs = stepAttrs({ 'page-layout': 'solution' })
+    delete attrs['page-solution-step-id']
+    const html = '<html><head><meta name="keywords" content="leaderboard"><meta name="description" content="Build it"></head>' +
+      '<body><h1>Multiplayer game events with a live leaderboard</h1></body></html>'
+    const [record] = runSolutions(solutionPage({ url: '/solutions/leaderboard/', relative: 'index.adoc', attrs, html }))
+    expect(record.stepId).toBe('')
+    expect(record.duration).toBe(50)
+    expect(record.useCases).toEqual(['Event-driven microservices'])
+    expect(record.industries).toEqual(['Gaming'])
+    expect(record.keywords).toEqual(['leaderboard', 'Event-driven microservices', 'Gaming'])
+  })
+
+  test('step records do not repeat the solution facets', () => {
+    const [record] = runSolutions(solutionPage({
+      url: '/solutions/leaderboard/start-environment/',
+      relative: 'start-environment.adoc',
+      attrs: stepAttrs(),
+      html: stepHtml('Start the environment')
+    }))
+    expect(record.useCases).toBeUndefined()
+    expect(record.industries).toBeUndefined()
+    expect(record.keywords).toEqual([])
   })
 
   test('non-solutions components still produce Doc records', () => {

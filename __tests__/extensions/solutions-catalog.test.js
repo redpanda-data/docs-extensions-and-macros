@@ -259,10 +259,11 @@ describe('solutions-catalog: happy path', () => {
     doc = result.docs[0]
   })
 
-  test('writes page-solution with derived id, repo, tag, asset', () => {
+  test('writes page-solution with derived id, tag, asset, and no private repo', () => {
     const record = json(overview, 'page-solution')
     expect(record.id).toBe('leaderboard')
-    expect(record.repo).toBe('redpanda-data/solutions')
+    // The repository is private by default, so its name is not published.
+    expect(record.repo).toBeUndefined()
     expect(record.tag).toBe('leaderboard/v1.2.3')
     expect(record.asset).toBe('leaderboard-v1.2.3.zip')
     expect(record.version).toBe('v1.2.3')
@@ -350,7 +351,7 @@ describe('solutions-catalog: happy path', () => {
     expect(attr(step, 'page-solution-technologies')).toBe('Go, Protobuf')
     expect(attr(step, 'page-solution-platforms')).toBe('self-managed, cloud')
     expect(attr(step, 'page-solution-asset')).toBe('leaderboard-v1.2.3.zip')
-    expect(attr(step, 'page-solution-repo')).toBe('redpanda-data/solutions')
+    expect(attr(step, 'page-solution-repo')).toBeUndefined()
     // the step keeps its own description
     expect(attr(step, 'description')).toBe('Step start-environment')
     expect(attr(step, 'page-solution-description')).toBe(OVERVIEW_ATTRS.description)
@@ -791,6 +792,47 @@ describe('solutions-catalog: status handling', () => {
     expect(result.siteCatalog.unpublishedPages).not.toContain('/solutions/sandbox/_attachments/docker-compose.yml')
     // a live solution's files are untouched
     for (const file of result.solutions[0].attachments) expect(file.out).toBeDefined()
+  })
+
+  test('archive-attachments skips a draft\'s unpublished attachments instead of crashing the build', async () => {
+    // Regression: with drafts off, solutions-catalog deletes `out` from every
+    // file of a draft module, and archive-attachments (beforePublish) read
+    // `attachment.out.path` on each one and threw a TypeError.
+    const archiveAttachments = require('../../extensions/archive-attachments')
+    const draft = makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft' } })
+    delete draft.pages[0].asciidoc.attributes['page-solution-related-docs']
+    const live = makeSolution('leaderboard')
+    for (const a of [...live.attachments, ...draft.attachments]) if (!a.contents) a.contents = Buffer.from('services: {}\n')
+    const result = await run({ solutions: [live, draft] })
+    for (const file of draft.attachments) expect(file.out).toBeUndefined()
+
+    const handlers = {}
+    const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
+    archiveAttachments.register.call(
+      { getLogger: () => logger, on: (event, handler) => { handlers[event] = handler } },
+      { config: { data: { archives: [{ component: 'solutions', output_archive: 'solutions.tar.gz', file_patterns: ['**/_attachments/**'] }] } } }
+    )
+    const siteCatalog = { addFile: jest.fn() }
+    await expect(handlers.beforePublish({ contentCatalog: result.catalog, siteCatalog })).resolves.toBeUndefined()
+    expect(logger.error).not.toHaveBeenCalled()
+    const archives = siteCatalog.addFile.mock.calls.map(([f]) => f.out.path)
+    expect(archives).toContain('solutions.tar.gz')
+
+    // The archive holds the live solution's files and none of the draft's.
+    const tar = require('tar')
+    const os = require('os')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sol-archive-'))
+    try {
+      const buf = siteCatalog.addFile.mock.calls.find(([f]) => f.out.path === 'solutions.tar.gz')[0].contents
+      const file = path.join(dir, 'a.tar.gz')
+      fs.writeFileSync(file, buf)
+      const entries = []
+      await tar.t({ file, onentry: (e) => entries.push(e.path) })
+      expect(entries.join('\n')).toMatch(/docker-compose\.yml/)
+      expect(entries.join('\n')).not.toMatch(/sandbox/)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test('ensureUnpublished is idempotent and tolerates a missing array', () => {
@@ -1490,9 +1532,9 @@ describe('solutions-catalog: pure helpers', () => {
   })
 
   test('resolveConfig accepts camelCase and snake_case, with defaults and env', () => {
-    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, agentCompanion: true })
-    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true' }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, agentCompanion: true })
-    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, agentCompanion: true })
+    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, publicRepo: false, agentCompanion: true })
+    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true', publicRepo: true }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, publicRepo: true, agentCompanion: true })
+    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false', public_repo: 'true' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, publicRepo: true, agentCompanion: true })
     expect(extension.resolveConfig({ include_drafts: false }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' }).includeDrafts).toBe(false)
     expect(extension.resolveConfig({ max_related: 'lots' }, {}).maxRelated).toBe(3)
   })
@@ -1655,5 +1697,111 @@ describe('solutions-catalog: facets only appear when they discriminate', () => {
 
   test('a one-solution catalogue has nothing to narrow, so every group empties', () => {
     expect(discriminating([{ value: 'a', count: 1 }, { value: 'b', count: 1 }], 1)).toEqual([])
+  })
+})
+
+describe('solutions-catalog: the Category facet', () => {
+  test('counts the authored leaf categories, never the parents normalizeCategories adds', async () => {
+    const a = makeSolution('alpha', { attrs: { 'page-categories': 'Stream Processing, Clients' } })
+    const b = makeSolution('beta', { attrs: { 'page-categories': 'Iceberg, Schema Registry', 'page-solution-featured': 'false' } })
+    const result = await run({ solutions: [a, b] })
+    const catalog = addedFile(result.siteCatalog, 'solutions.json')
+    // The records still carry the parents, so a facet value always filters.
+    expect(catalog.solutions.find((s) => s.id === 'alpha').categories).toEqual(['Stream Processing', 'Clients', 'Development'])
+    expect(catalog.solutions.find((s) => s.id === 'beta').categories).toEqual(['Iceberg', 'Schema Registry', 'Deployment'])
+    const values = catalog.facets.categories.map((f) => f.value)
+    expect(values).toEqual(['Clients', 'Iceberg', 'Schema Registry', 'Stream Processing'])
+    expect(values).not.toContain('Development')
+    expect(values).not.toContain('Deployment')
+  })
+
+  test('a broad parent written by hand stays out of the facet too', async () => {
+    const a = makeSolution('alpha', { attrs: { 'page-categories': 'Development, Clients' } })
+    const b = makeSolution('beta', { attrs: { 'page-categories': 'Iceberg, rpk', 'page-solution-featured': 'false' } })
+    const result = await run({ solutions: [a, b] })
+    const values = addedFile(result.siteCatalog, 'solutions.json').facets.categories.map((f) => f.value)
+    expect(values).toEqual(['Clients', 'Iceberg', 'rpk'])
+  })
+
+  test('buildCatalog falls back to categories when no leaf map is given', () => {
+    const rec = (id, categories) => ({ id, status: 'published', categories, industries: [], useCases: [], technologies: [], platforms: [], difficulty: 'beginner' })
+    const catalog = outputs.buildCatalog([rec('a', ['X', 'P']), rec('b', ['Y', 'P'])])
+    expect(catalog.facets.categories.map((f) => f.value)).toEqual(['X', 'Y'])
+  })
+})
+
+describe('solutions-catalog: repository visibility', () => {
+  test('by default no output names the private repository', async () => {
+    const result = await run()
+    const overview = result.solutions[0].pages[0]
+    const catalogText = result.siteCatalog.addFile.mock.calls.find(([f]) => f.out.path.endsWith('solutions.json'))[0].contents.toString('utf8')
+    expect(catalogText).not.toContain('redpanda-data/solutions')
+    for (const page of result.solutions[0].pages) {
+      expect(attr(page, 'page-solution')).not.toContain('redpanda-data/solutions')
+      expect(attr(page, 'page-solution-repo')).toBeUndefined()
+    }
+    const componentAttr = result.catalog.getComponent('home').versions[0].asciidoc.attributes['solutions-catalog']
+    expect(componentAttr).not.toContain('redpanda-data/solutions')
+    // The download itself still works: id, version, download mode and files are all there.
+    expect(json(overview, 'page-solution')).toMatchObject({ id: 'leaderboard', version: 'v1.2.3', download: 'authenticated' })
+  })
+
+  test('public_repo: true publishes the repository everywhere', async () => {
+    const result = await run({ config: { public_repo: true } })
+    const overview = result.solutions[0].pages[0]
+    expect(json(overview, 'page-solution').repo).toBe('redpanda-data/solutions')
+    expect(attr(result.solutions[0].pages[1], 'page-solution-repo')).toBe('redpanda-data/solutions')
+    expect(addedFile(result.siteCatalog, 'solutions.json').solutions[0].repo).toBe('redpanda-data/solutions')
+  })
+
+  test('the release check still knows the repository when it is private', async () => {
+    const octokit = { rest: { repos: { getReleaseByTag: jest.fn(async () => ({ data: { assets: [{ name: 'leaderboard-v1.2.3.zip' }] } })) } } }
+    const result = await run({ hooks: ['contentClassified', 'documentsConverted'] })
+    const record = collect.collectSolutions(result.catalog).solutions[0]
+    await extension.checkReleases([record], result.logger, octokit)
+    expect(octokit.rest.repos.getReleaseByTag).toHaveBeenCalledWith({ owner: 'redpanda-data', repo: 'solutions', tag: 'leaderboard/v1.2.3' })
+  })
+})
+
+describe('solutions-catalog: link fragments', () => {
+  const withLink = (href, status = 'published') => makeSolution('leaderboard', {
+    attrs: { 'page-solution-status': status },
+    stepHtml: { 'build-leaderboard': STEP_HTML('b', `<h2 id="verify">Verify</h2><p>See <a href="${href}" class="xref page">the table</a>.</p>`) },
+  })
+  const warnings = (result) => result.logger.warn.mock.calls.map((c) => c[0]).join('\n')
+
+  test('a published fragment that matches no id is fatal, with the site-style id as the fix', async () => {
+    await expect(run({ solutions: [withLink('../#_production_considerations')] })).rejects.toThrow(
+      /build-leaderboard\.adoc links to \/solutions\/leaderboard\/#_production_considerations, but that page has no id "_production_considerations"; use #production-considerations/
+    )
+  })
+
+  test('a draft gets the same finding as a warning, and the build goes on', async () => {
+    const result = await run({ solutions: [makeSolution('live'), withLink('../#_production_considerations', 'draft')] })
+    expect(warnings(result)).toMatch(/leaderboard: build-leaderboard\.adoc links to \/solutions\/leaderboard\/#_production_considerations.*use #production-considerations/)
+  })
+
+  test('a fragment that matches a section id passes', async () => {
+    const result = await run({ solutions: [withLink('../#production-considerations')] })
+    expect(warnings(result)).not.toMatch(/has no id/)
+  })
+
+  test('same-page fragments and other pages in the build are checked too', async () => {
+    await expect(run({ solutions: [withLink('#nowhere')] })).rejects.toThrow(/links to \/solutions\/leaderboard\/build-leaderboard\/#nowhere/)
+    await expect(run({ solutions: [withLink('#verify')] })).resolves.toBeTruthy()
+    await expect(run({ solutions: [withLink('/streaming/26.2/develop/consumer-offsets/#gone')] })).rejects.toThrow(/links to \/streaming\/26.2\/develop\/consumer-offsets\/#gone/)
+  })
+
+  test('links that do not land on a page in this build are not checked', async () => {
+    await expect(run({ solutions: [withLink('https://example.com/page/#anything')] })).resolves.toBeTruthy()
+    await expect(run({ solutions: [withLink('/not/a/page/#anything')] })).resolves.toBeTruthy()
+  })
+
+  test('siteStyleId and brokenFragments are pure', () => {
+    expect(validate.siteStyleId('_extend_this_solution')).toBe('extend-this-solution')
+    const target = { pub: { url: '/t/' }, contents: Buffer.from('<h2 id="metrics">Metrics</h2><a id="anchor"></a>') }
+    const page = { pub: { url: '/p/' }, contents: Buffer.from('<a href="../t/#metrics">a</a><a href="../t/#anchor">b</a><a href="../t/#_metrics">c</a>') }
+    const found = validate.brokenFragments(page, (u) => (u === '/t/' ? target : null))
+    expect(found).toEqual([{ href: '../t/#_metrics', fragment: '_metrics', target: '/t/', suggestion: 'metrics' }])
   })
 })

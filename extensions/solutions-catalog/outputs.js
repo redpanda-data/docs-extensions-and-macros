@@ -32,10 +32,15 @@ function buildSteps (record) {
 
 /**
  * The public record for one solution. Same object feeds `page-solution` and
- * solutions.json. `repo` is carried for the download function; the UI never
- * renders it.
+ * solutions.json.
+ *
+ * `repo` (owner/name) is included only with `publicRepo`. The solutions
+ * repository is private, so advertising it sends readers and agents to a 404;
+ * the download endpoint and the public attachments are the way in, and the
+ * download function takes the repository from its own configuration. The
+ * internal record keeps `repo` for the release check either way.
  */
-function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions = [] } = {}) {
+function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions = [], publicRepo = false } = {}) {
   const publicRecord = {
     id: record.id,
     title: record.title,
@@ -44,7 +49,6 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     version: record.version,
     tag: record.tag,
     asset: record.asset,
-    repo: record.repo,
     status: record.status,
     draft: record.status === 'draft',
     featured: Boolean(record.featured),
@@ -66,6 +70,7 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     supersededBy: record.supersededBy || null,
     lastModified: record.lastModified || null,
   }
+  if (publicRepo && record.repo) publicRecord.repo = record.repo
   // Evidence, not a default: no manifest means no key at all.
   if (record.verified) publicRecord.verified = record.verified
   // Only when the companion was generated for this build.
@@ -203,23 +208,31 @@ function countValues (records, pick) {
  * assets/data/solutions.json: published and deprecated solutions plus facets.
  * Drafts only reach this function when include_drafts admitted them, and then
  * they are listed with status 'draft' and draft: true.
+ *
+ * `categoryLeaves` maps a solution id to its authored leaf categories (see
+ * validateSolution). The Category facet counts those, not `categories`, which
+ * also holds the parents normalizeCategories adds: a parent says only "same
+ * product area" and would repeat what the Technology facet already shows.
+ * Every leaf is also in `categories`, so filtering records on a facet value
+ * still works. A solution missing from the map falls back to `categories`.
  */
-function buildCatalog (publicRecords, { siteUrl = '', generatedAt = new Date().toISOString() } = {}) {
+function buildCatalog (publicRecords, { siteUrl = '', generatedAt = new Date().toISOString(), categoryLeaves } = {}) {
   const solutions = publicRecords
     .filter((r) => CATALOG_STATUSES.includes(r.status) || r.draft === true)
     .sort((a, b) => a.id.localeCompare(b.id))
+  const facetCategories = (r) => (categoryLeaves && categoryLeaves.has(r.id) ? categoryLeaves.get(r.id) : r.categories)
   return {
     generatedAt,
     siteUrl,
     solutions,
     // A facet only earns a place when it discriminates. discriminating()
-    // drops values that match every solution (they filter nothing) and drops
-    // a group left with fewer than two values (it filters nothing either), so
-    // the UI needs no change as the catalogue grows from five to fifty.
+    // drops values that match every solution, because they filter nothing, so
+    // the UI needs no change as the catalogue grows from five to fifty. A
+    // group left with no values is still published, as an empty list.
     facets: {
       industries: discriminating(countValues(solutions, (r) => r.industries), solutions.length),
       useCases: discriminating(countValues(solutions, (r) => r.useCases), solutions.length),
-      categories: discriminating(countValues(solutions, (r) => r.categories), solutions.length),
+      categories: discriminating(countValues(solutions, facetCategories), solutions.length),
       technologies: discriminating(countValues(solutions, (r) => r.technologies), solutions.length),
       difficulty: discriminating(countValues(solutions, (r) => [r.difficulty]), solutions.length),
       platforms: discriminating(countValues(solutions, (r) => r.platforms), solutions.length),
