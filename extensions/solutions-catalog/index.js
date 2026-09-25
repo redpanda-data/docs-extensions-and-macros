@@ -173,6 +173,23 @@ function makeResolver (contentCatalog) {
   }
 }
 
+/**
+ * Look a page up by its published URL path, for the link fragment check.
+ * Built lazily on first use. `/x/` and `/x/index.html` find the same page.
+ */
+function makePageByUrl (contentCatalog) {
+  let byUrl = null
+  return (pathname) => {
+    if (!byUrl) {
+      byUrl = new Map()
+      for (const page of contentCatalog.findBy({ family: 'page' }) || []) {
+        if (page.pub && page.pub.url) byUrl.set(page.pub.url, page)
+      }
+    }
+    return byUrl.get(pathname) || byUrl.get(String(pathname).replace(/index\.html$/, '')) || null
+  }
+}
+
 function addAttributeToComponents (contentCatalog, name, value, logger) {
   const components = contentCatalog.getComponents() || []
   components.forEach((component) => {
@@ -278,6 +295,7 @@ module.exports.register = function ({ config = {} } = {}) {
     }
 
     const resolveDoc = makeResolver(contentCatalog)
+    const pageByUrl = makePageByUrl(contentCatalog)
     const solutionIds = new Set(collected.solutions.map((s) => s.id))
     const errors = []
     const warnings = []
@@ -288,7 +306,7 @@ module.exports.register = function ({ config = {} } = {}) {
     }
 
     for (const record of collected.solutions) {
-      const result = validate.validateSolution(record, { categoryMap, facetVocab, resolveDoc, solutionIds })
+      const result = validate.validateSolution(record, { categoryMap, facetVocab, resolveDoc, solutionIds, pageByUrl })
       errors.push(...result.errors)
       warnings.push(...result.warnings)
     }

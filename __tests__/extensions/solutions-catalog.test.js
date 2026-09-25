@@ -1670,3 +1670,46 @@ describe('solutions-catalog: repository visibility', () => {
     expect(octokit.rest.repos.getReleaseByTag).toHaveBeenCalledWith({ owner: 'redpanda-data', repo: 'solutions', tag: 'leaderboard/v1.2.3' })
   })
 })
+
+describe('solutions-catalog: link fragments', () => {
+  const withLink = (href, status = 'published') => makeSolution('leaderboard', {
+    attrs: { 'page-solution-status': status },
+    stepHtml: { 'build-leaderboard': STEP_HTML('b', `<h2 id="verify">Verify</h2><p>See <a href="${href}" class="xref page">the table</a>.</p>`) },
+  })
+  const warnings = (result) => result.logger.warn.mock.calls.map((c) => c[0]).join('\n')
+
+  test('a published fragment that matches no id is fatal, with the site-style id as the fix', async () => {
+    await expect(run({ solutions: [withLink('../#_production_considerations')] })).rejects.toThrow(
+      /build-leaderboard\.adoc links to \/solutions\/leaderboard\/#_production_considerations, but that page has no id "_production_considerations"; use #production-considerations/
+    )
+  })
+
+  test('a draft gets the same finding as a warning, and the build goes on', async () => {
+    const result = await run({ solutions: [makeSolution('live'), withLink('../#_production_considerations', 'draft')] })
+    expect(warnings(result)).toMatch(/leaderboard: build-leaderboard\.adoc links to \/solutions\/leaderboard\/#_production_considerations.*use #production-considerations/)
+  })
+
+  test('a fragment that matches a section id passes', async () => {
+    const result = await run({ solutions: [withLink('../#production-considerations')] })
+    expect(warnings(result)).not.toMatch(/has no id/)
+  })
+
+  test('same-page fragments and other pages in the build are checked too', async () => {
+    await expect(run({ solutions: [withLink('#nowhere')] })).rejects.toThrow(/links to \/solutions\/leaderboard\/build-leaderboard\/#nowhere/)
+    await expect(run({ solutions: [withLink('#verify')] })).resolves.toBeTruthy()
+    await expect(run({ solutions: [withLink('/streaming/26.2/develop/consumer-offsets/#gone')] })).rejects.toThrow(/links to \/streaming\/26.2\/develop\/consumer-offsets\/#gone/)
+  })
+
+  test('links that do not land on a page in this build are not checked', async () => {
+    await expect(run({ solutions: [withLink('https://example.com/page/#anything')] })).resolves.toBeTruthy()
+    await expect(run({ solutions: [withLink('/not/a/page/#anything')] })).resolves.toBeTruthy()
+  })
+
+  test('siteStyleId and brokenFragments are pure', () => {
+    expect(validate.siteStyleId('_extend_this_solution')).toBe('extend-this-solution')
+    const target = { pub: { url: '/t/' }, contents: Buffer.from('<h2 id="metrics">Metrics</h2><a id="anchor"></a>') }
+    const page = { pub: { url: '/p/' }, contents: Buffer.from('<a href="../t/#metrics">a</a><a href="../t/#anchor">b</a><a href="../t/#_metrics">c</a>') }
+    const found = validate.brokenFragments(page, (u) => (u === '/t/' ? target : null))
+    expect(found).toEqual([{ href: '../t/#_metrics', fragment: '_metrics', target: '/t/', suggestion: 'metrics' }])
+  })
+})

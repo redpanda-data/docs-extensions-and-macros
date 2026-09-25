@@ -889,6 +889,8 @@ On a step page: `page-layout` must be `solution-step`; `description` is the step
 
 Published solutions must also pass the section checks on the converted HTML: the overview needs `h2` headings `Architecture`, `Prerequisites`, and `Production considerations` (matched after lower-casing, collapsing whitespace, and dropping trailing punctuation); every step needs an `h2`/`h3` whose text starts with `Verify` or a block with the `solution-verify` role. Every link into this module's own attachments (`link:{attachmentsdir}/...`, or any href that resolves under `/solutions/<slug>/_attachments/` once resolved against the page URL) must point at a file that exists in the module. Links to another module's or another component's attachments are not checked here.
 
+Every link on a solution page that carries a `#fragment` and lands on a page in this build (the same page, another solution page, or a Product Docs page) must name an id in that page's converted HTML. This site renders headings with no id prefix and hyphens (`idprefix` empty, `idseparator` `-`), so `#_production_considerations` misses and `#production-considerations` hits; the message suggests the hyphenated id when the target has it. A miss is fatal for a published or deprecated solution and a warning for a draft. Links to attachments, to URLs that are not pages in the build, and off-site links are not checked.
+
 === Derived attributes
 
 Written on the overview and every step page (complex values are JSON strings, read them with the UI's `parse-json` helper):
