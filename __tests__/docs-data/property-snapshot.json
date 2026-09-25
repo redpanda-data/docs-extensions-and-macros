@@ -407,7 +407,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": true
+   "nullable": true,
+   "description": "The managed identity ID to use for access to the Azure storage account. To use Azure managed identities, you must set `cloud_storage_credentials_source` to `azure_vm_instance_metadata`."
   },
   "cloud_storage_azure_shared_key": {
    "name": "cloud_storage_azure_shared_key",

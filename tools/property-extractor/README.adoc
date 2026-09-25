@@ -1231,7 +1231,11 @@ breaks. Two files feed it, both mirrors of the `docs` repo:
 fields the rendering and link layers read. `cloud_supported` is the point: it is what
 makes the "no Cloud link to a property Cloud does not publish" assertion real rather
 than assumed. Descriptions are deliberately absent, because the corpus test drives prose from
-the overrides file, and a full copy would be 695 KB of text that rots.
+the overrides file, and a full copy would be 695 KB of text that rots. The exception is a
+property whose override declares links but no prose of its own: those links apply to the
+source description, so the snapshot keeps that one description for the test to check them
+against. `.github/scripts/derive-property-snapshot.js` makes that call from the overrides
+file, and both the recipe below and `property-corpus-drift.sh` use it.
 
 Keep the overrides copy a faithful mirror. It previously doubled as
 `property-docs-overrides.test.js`'s fixture, someone hand-edited an `admin` entry into
@@ -1264,17 +1268,13 @@ TAG="$(git -C "$DOCS" ls-tree origin/main --name-only -- modules/reference/attac
 echo "Refreshing against $TAG"
 
 git -C "$DOCS" show "origin/main:modules/reference/attachments/redpanda-properties-${TAG}.json" \
+  > /tmp/redpanda-properties.json
+node .github/scripts/derive-property-snapshot.js /tmp/redpanda-properties.json \
+  __tests__/docs-data/property-overrides.json \
   | node -e '
     const fs = require("fs");
-    const src = JSON.parse(fs.readFileSync(0, "utf8"));
-    const keep = ["name","config_scope","type","cloud_supported","cloud_editable",
-                  "cloud_readonly","cloud_byoc_only","is_deprecated","nullable"];
-    const properties = {};
-    for (const [k, v] of Object.entries(src.properties || {})) {
-      properties[k] = Object.fromEntries(keep.filter((f) => f in v).map((f) => [f, v[f]]));
-    }
     const out = JSON.parse(fs.readFileSync("__tests__/docs-data/property-snapshot.json", "utf8"));
-    out.properties = properties;
+    out.properties = JSON.parse(fs.readFileSync(0, "utf8"));
     out.source_tag = process.argv[1];
     fs.writeFileSync("__tests__/docs-data/property-snapshot.json", JSON.stringify(out, null, 1) + "\n");
   ' "$TAG"

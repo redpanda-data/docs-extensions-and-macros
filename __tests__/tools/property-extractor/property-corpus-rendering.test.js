@@ -272,16 +272,15 @@ describe('declared links over the live corpus', () => {
   it('applies every declared link and leaves none unmatched', () => {
     const corpus = buildCorpus(OVERRIDES);
     // A links-only override with none of description, example or an
-    // admonition of its own has no prose in this harness's inputs for a link
-    // to match against -- its only prose is the property's real extracted
-    // description, which the snapshot deliberately excludes (see the corpus
-    // refresh instructions in README.adoc, "a full copy would be 695 KB of
-    // text that rots"). Silently excluding that case from the count and the
-    // unmatched assertion below would let a misspelled or obsolete link key
-    // pass unnoticed, which is the exact link rot this test exists to catch
-    // (PR #329 review). So it fails loudly here instead: the property needs
-    // a description, example or admonition override this harness can check
-    // the link against.
+    // admonition of its own applies its links to the property's source
+    // description. The snapshot keeps exactly those descriptions
+    // (.github/scripts/derive-property-snapshot.js decides from the
+    // overrides file), so every declared link has prose to match here.
+    // Silently excluding a property with no prose at all would let a
+    // misspelled or obsolete link key pass unnoticed, which is the exact
+    // link rot this test exists to catch (PR #329 review), so a property
+    // that still has none fails loudly: the snapshot was refreshed without
+    // the shared derivation, or the attachment has no description for it.
     const hasGroundTruth = (name) => {
       const p = corpus[name];
       if (typeof p?.description === 'string') return true;
