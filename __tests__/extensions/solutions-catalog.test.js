@@ -791,6 +791,47 @@ describe('solutions-catalog: status handling', () => {
     for (const file of result.solutions[0].attachments) expect(file.out).toBeDefined()
   })
 
+  test('archive-attachments skips a draft\'s unpublished attachments instead of crashing the build', async () => {
+    // Regression: with drafts off, solutions-catalog deletes `out` from every
+    // file of a draft module, and archive-attachments (beforePublish) read
+    // `attachment.out.path` on each one and threw a TypeError.
+    const archiveAttachments = require('../../extensions/archive-attachments')
+    const draft = makeSolution('sandbox', { attrs: { 'page-solution-status': 'draft' } })
+    delete draft.pages[0].asciidoc.attributes['page-solution-related-docs']
+    const live = makeSolution('leaderboard')
+    for (const a of [...live.attachments, ...draft.attachments]) if (!a.contents) a.contents = Buffer.from('services: {}\n')
+    const result = await run({ solutions: [live, draft] })
+    for (const file of draft.attachments) expect(file.out).toBeUndefined()
+
+    const handlers = {}
+    const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
+    archiveAttachments.register.call(
+      { getLogger: () => logger, on: (event, handler) => { handlers[event] = handler } },
+      { config: { data: { archives: [{ component: 'solutions', output_archive: 'solutions.tar.gz', file_patterns: ['**/_attachments/**'] }] } } }
+    )
+    const siteCatalog = { addFile: jest.fn() }
+    await expect(handlers.beforePublish({ contentCatalog: result.catalog, siteCatalog })).resolves.toBeUndefined()
+    expect(logger.error).not.toHaveBeenCalled()
+    const archives = siteCatalog.addFile.mock.calls.map(([f]) => f.out.path)
+    expect(archives).toContain('solutions.tar.gz')
+
+    // The archive holds the live solution's files and none of the draft's.
+    const tar = require('tar')
+    const os = require('os')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sol-archive-'))
+    try {
+      const buf = siteCatalog.addFile.mock.calls.find(([f]) => f.out.path === 'solutions.tar.gz')[0].contents
+      const file = path.join(dir, 'a.tar.gz')
+      fs.writeFileSync(file, buf)
+      const entries = []
+      await tar.t({ file, onentry: (e) => entries.push(e.path) })
+      expect(entries.join('\n')).toMatch(/docker-compose\.yml/)
+      expect(entries.join('\n')).not.toMatch(/sandbox/)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test('ensureUnpublished is idempotent and tolerates a missing array', () => {
     const siteCatalog = {}
     extension.ensureUnpublished(siteCatalog, ['/a/', '/b/'])
