@@ -32,10 +32,15 @@ function buildSteps (record) {
 
 /**
  * The public record for one solution. Same object feeds `page-solution` and
- * solutions.json. `repo` is carried for the download function; the UI never
- * renders it.
+ * solutions.json.
+ *
+ * `repo` (owner/name) is included only with `publicRepo`. The solutions
+ * repository is private, so advertising it sends readers and agents to a 404;
+ * the download endpoint and the public attachments are the way in, and the
+ * download function takes the repository from its own configuration. The
+ * internal record keeps `repo` for the release check either way.
  */
-function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions = [] } = {}) {
+function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions = [], publicRepo = false } = {}) {
   const publicRecord = {
     id: record.id,
     title: record.title,
@@ -44,7 +49,6 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     version: record.version,
     tag: record.tag,
     asset: record.asset,
-    repo: record.repo,
     status: record.status,
     draft: record.status === 'draft',
     featured: Boolean(record.featured),
@@ -66,6 +70,7 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
     supersededBy: record.supersededBy || null,
     lastModified: record.lastModified || null,
   }
+  if (publicRepo && record.repo) publicRecord.repo = record.repo
   // Evidence, not a default: no manifest means no key at all.
   if (record.verified) publicRecord.verified = record.verified
   return publicRecord

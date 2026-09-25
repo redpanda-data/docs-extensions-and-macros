@@ -65,6 +65,10 @@ const DEFAULTS = Object.freeze({
   minScore: 0.6,
   networkChecks: 'auto',
   includeDrafts: false,
+  // The solutions repository is private: readers get the code through the
+  // gated download and the public attachments, so its owner/name is not
+  // published unless a playbook says the repository is public.
+  publicRepo: false,
 })
 
 /**
@@ -78,6 +82,7 @@ function resolveConfig (config = {}, env = process.env) {
   const minScore = Number(pick('minScore', 'min_score'))
   const networkChecks = pick('networkChecks', 'network_checks')
   const includeDraftsRaw = pick('includeDrafts', 'include_drafts')
+  const publicRepoRaw = pick('publicRepo', 'public_repo')
   const envDrafts = env.SOLUTIONS_INCLUDE_DRAFTS
   const includeDrafts = includeDraftsRaw !== undefined
     ? isTrue(includeDraftsRaw)
@@ -87,6 +92,7 @@ function resolveConfig (config = {}, env = process.env) {
     minScore: Number.isFinite(minScore) ? minScore : DEFAULTS.minScore,
     networkChecks: networkChecks === undefined ? DEFAULTS.networkChecks : normalizeTristate(networkChecks),
     includeDrafts,
+    publicRepo: publicRepoRaw === undefined ? DEFAULTS.publicRepo : isTrue(publicRepoRaw),
   }
 }
 
@@ -388,7 +394,7 @@ module.exports.register = function ({ config = {} } = {}) {
     const publicRecords = []
     for (const record of active) {
       const steps = outputs.buildSteps(record)
-      const publicRecord = outputs.buildPublicRecord(record, { steps, relatedDocs: record.relatedDocs, relatedSolutions: record.relatedSolutions })
+      const publicRecord = outputs.buildPublicRecord(record, { steps, relatedDocs: record.relatedDocs, relatedSolutions: record.relatedSolutions, publicRepo: settings.publicRepo })
       const nav = outputs.buildNav(publicRecord, { homeUrl })
       outputs.applyPageAttributes(record, publicRecord, nav)
       publicRecords.push(publicRecord)

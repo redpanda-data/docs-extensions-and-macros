@@ -257,10 +257,11 @@ describe('solutions-catalog: happy path', () => {
     doc = result.docs[0]
   })
 
-  test('writes page-solution with derived id, repo, tag, asset', () => {
+  test('writes page-solution with derived id, tag, asset, and no private repo', () => {
     const record = json(overview, 'page-solution')
     expect(record.id).toBe('leaderboard')
-    expect(record.repo).toBe('redpanda-data/solutions')
+    // The repository is private by default, so its name is not published.
+    expect(record.repo).toBeUndefined()
     expect(record.tag).toBe('leaderboard/v1.2.3')
     expect(record.asset).toBe('leaderboard-v1.2.3.zip')
     expect(record.version).toBe('v1.2.3')
@@ -348,7 +349,7 @@ describe('solutions-catalog: happy path', () => {
     expect(attr(step, 'page-solution-technologies')).toBe('Go, Protobuf')
     expect(attr(step, 'page-solution-platforms')).toBe('self-managed, cloud')
     expect(attr(step, 'page-solution-asset')).toBe('leaderboard-v1.2.3.zip')
-    expect(attr(step, 'page-solution-repo')).toBe('redpanda-data/solutions')
+    expect(attr(step, 'page-solution-repo')).toBeUndefined()
     // the step keeps its own description
     expect(attr(step, 'description')).toBe('Step start-environment')
     expect(attr(step, 'page-solution-description')).toBe(OVERVIEW_ATTRS.description)
@@ -1439,9 +1440,9 @@ describe('solutions-catalog: pure helpers', () => {
   })
 
   test('resolveConfig accepts camelCase and snake_case, with defaults and env', () => {
-    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false })
-    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true' }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true })
-    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true })
+    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, publicRepo: false })
+    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true', publicRepo: true }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, publicRepo: true })
+    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false', public_repo: 'true' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, publicRepo: true })
     expect(extension.resolveConfig({ include_drafts: false }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' }).includeDrafts).toBe(false)
     expect(extension.resolveConfig({ max_related: 'lots' }, {}).maxRelated).toBe(3)
   })
@@ -1634,5 +1635,38 @@ describe('solutions-catalog: the Category facet', () => {
     const rec = (id, categories) => ({ id, status: 'published', categories, industries: [], useCases: [], technologies: [], platforms: [], difficulty: 'beginner' })
     const catalog = outputs.buildCatalog([rec('a', ['X', 'P']), rec('b', ['Y', 'P'])])
     expect(catalog.facets.categories.map((f) => f.value)).toEqual(['X', 'Y'])
+  })
+})
+
+describe('solutions-catalog: repository visibility', () => {
+  test('by default no output names the private repository', async () => {
+    const result = await run()
+    const overview = result.solutions[0].pages[0]
+    const catalogText = result.siteCatalog.addFile.mock.calls.find(([f]) => f.out.path.endsWith('solutions.json'))[0].contents.toString('utf8')
+    expect(catalogText).not.toContain('redpanda-data/solutions')
+    for (const page of result.solutions[0].pages) {
+      expect(attr(page, 'page-solution')).not.toContain('redpanda-data/solutions')
+      expect(attr(page, 'page-solution-repo')).toBeUndefined()
+    }
+    const componentAttr = result.catalog.getComponent('home').versions[0].asciidoc.attributes['solutions-catalog']
+    expect(componentAttr).not.toContain('redpanda-data/solutions')
+    // The download itself still works: id, version, download mode and files are all there.
+    expect(json(overview, 'page-solution')).toMatchObject({ id: 'leaderboard', version: 'v1.2.3', download: 'authenticated' })
+  })
+
+  test('public_repo: true publishes the repository everywhere', async () => {
+    const result = await run({ config: { public_repo: true } })
+    const overview = result.solutions[0].pages[0]
+    expect(json(overview, 'page-solution').repo).toBe('redpanda-data/solutions')
+    expect(attr(result.solutions[0].pages[1], 'page-solution-repo')).toBe('redpanda-data/solutions')
+    expect(addedFile(result.siteCatalog, 'solutions.json').solutions[0].repo).toBe('redpanda-data/solutions')
+  })
+
+  test('the release check still knows the repository when it is private', async () => {
+    const octokit = { rest: { repos: { getReleaseByTag: jest.fn(async () => ({ data: { assets: [{ name: 'leaderboard-v1.2.3.zip' }] } })) } } }
+    const result = await run({ hooks: ['contentClassified', 'documentsConverted'] })
+    const record = collect.collectSolutions(result.catalog).solutions[0]
+    await extension.checkReleases([record], result.logger, octokit)
+    expect(octokit.rest.repos.getReleaseByTag).toHaveBeenCalledWith({ owner: 'redpanda-data', repo: 'solutions', tag: 'leaderboard/v1.2.3' })
   })
 })

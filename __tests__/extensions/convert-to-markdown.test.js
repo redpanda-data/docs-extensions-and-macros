@@ -477,8 +477,22 @@ describe('solution metadata in Markdown frontmatter', () => {
       status: 'published',
       difficulty: 'beginner',
       duration_minutes: 15,
-      repository: { ref: 'minimal/v0.1.0', download: 'none' },
+      repository: { download: 'none' },
     })
+  })
+
+  test('a private repository is not advertised: no url and no ref, the download mode stays', () => {
+    // The catalog publishes no `repo` unless the playbook sets public_repo, so
+    // the record reaches this emitter without one.
+    const { repo, ...privateRecord } = RECORD
+    const frontmatter = generateFrontmatter(makePage({ record: privateRecord }))
+    const parsed = parse(frontmatter)
+    expect(parsed.solution.repository).toEqual({ download: 'authenticated' })
+    expect(frontmatter).not.toContain('github.com')
+    expect(frontmatter).not.toContain('multiplayer-gaming/v1.0.0')
+    // The way in is still described: the download allowlist travels as files.
+    const withFiles = parse(generateFrontmatter(makePage({ record: { ...privateRecord, files: ['app/main.go'] } })))
+    expect(withFiles.solution.files).toEqual(['app/main.go'])
   })
 })
 
