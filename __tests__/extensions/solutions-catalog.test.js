@@ -1606,3 +1606,33 @@ describe('solutions-catalog: facets only appear when they discriminate', () => {
     expect(discriminating([{ value: 'a', count: 1 }, { value: 'b', count: 1 }], 1)).toEqual([])
   })
 })
+
+describe('solutions-catalog: the Category facet', () => {
+  test('counts the authored leaf categories, never the parents normalizeCategories adds', async () => {
+    const a = makeSolution('alpha', { attrs: { 'page-categories': 'Stream Processing, Clients' } })
+    const b = makeSolution('beta', { attrs: { 'page-categories': 'Iceberg, Schema Registry', 'page-solution-featured': 'false' } })
+    const result = await run({ solutions: [a, b] })
+    const catalog = addedFile(result.siteCatalog, 'solutions.json')
+    // The records still carry the parents, so a facet value always filters.
+    expect(catalog.solutions.find((s) => s.id === 'alpha').categories).toEqual(['Stream Processing', 'Clients', 'Development'])
+    expect(catalog.solutions.find((s) => s.id === 'beta').categories).toEqual(['Iceberg', 'Schema Registry', 'Deployment'])
+    const values = catalog.facets.categories.map((f) => f.value)
+    expect(values).toEqual(['Clients', 'Iceberg', 'Schema Registry', 'Stream Processing'])
+    expect(values).not.toContain('Development')
+    expect(values).not.toContain('Deployment')
+  })
+
+  test('a broad parent written by hand stays out of the facet too', async () => {
+    const a = makeSolution('alpha', { attrs: { 'page-categories': 'Development, Clients' } })
+    const b = makeSolution('beta', { attrs: { 'page-categories': 'Iceberg, rpk', 'page-solution-featured': 'false' } })
+    const result = await run({ solutions: [a, b] })
+    const values = addedFile(result.siteCatalog, 'solutions.json').facets.categories.map((f) => f.value)
+    expect(values).toEqual(['Clients', 'Iceberg', 'rpk'])
+  })
+
+  test('buildCatalog falls back to categories when no leaf map is given', () => {
+    const rec = (id, categories) => ({ id, status: 'published', categories, industries: [], useCases: [], technologies: [], platforms: [], difficulty: 'beginner' })
+    const catalog = outputs.buildCatalog([rec('a', ['X', 'P']), rec('b', ['Y', 'P'])])
+    expect(catalog.facets.categories.map((f) => f.value)).toEqual(['X', 'Y'])
+  })
+})

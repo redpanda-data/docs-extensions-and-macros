@@ -397,7 +397,7 @@ module.exports.register = function ({ config = {} } = {}) {
     const siteUrl = (playbook && playbook.site && playbook.site.url) || ''
     const generatedAt = new Date().toISOString()
     state.records = active
-    state.catalog = outputs.buildCatalog(publicRecords, { siteUrl, generatedAt })
+    state.catalog = outputs.buildCatalog(publicRecords, { siteUrl, generatedAt, categoryLeaves: new Map(active.map((r) => [r.id, r.categoryLeaves || r.categories])) })
     state.graph = outputs.buildGraph(edges, { siteUrl, generatedAt, maxRelated: settings.maxRelated, minScore: settings.minScore, coverage })
     addAttributeToComponents(contentCatalog, ATTRIBUTE_NAME, JSON.stringify(state.catalog), logger)
 

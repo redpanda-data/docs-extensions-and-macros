@@ -13,7 +13,7 @@ const { parse } = require('node-html-parser')
 const {
   RESERVED_IDS, LAYOUTS, ENUMS, SLUG_RX, VERSION_RX, VERIFICATION_FILE, stripVersion,
 } = require('./collect')
-const { normalizeCategories } = require('../../extension-utils/categories')
+const { normalizeCategories, isLeafCategory } = require('../../extension-utils/categories')
 const yaml = require('js-yaml')
 
 const DURATION_MIN = 5
@@ -123,7 +123,9 @@ function isIsoTimestamp (value) {
  * Validate one collected solution record after conversion.
  *
  * Side effect by design: `record.categories` is replaced with the normalized
- * list (parents added) because scoring and the catalog both need it.
+ * list (parents added) because scoring and the catalog both need it, and
+ * `record.categoryLeaves` is set to the authored leaf categories, which is
+ * what the catalog's Category facet counts.
  *
  * @param {Object} record - from collect.js
  * @param {Object} ctx
@@ -205,6 +207,12 @@ function validateSolution (record, { categoryMap, facetVocab, resolveDoc, soluti
     if (invalid.length) err(`page-categories contains unknown values: ${invalid.join(', ')}. See shared/modules/ROOT/partials/valid-categories.yml`)
     record.categories = categories
   }
+  // The landing page's Category facet: what the author wrote, at leaf level.
+  // Parents that normalizeCategories adds (and broad parents written by hand)
+  // say only "same product area", so they stay out of the facet.
+  record.categoryLeaves = record.categoriesRaw
+    .filter((c) => !categoryMap || categoryMap.categories.has(c) || categoryMap.subcategories.has(c))
+    .filter((c) => isLeafCategory(c, categoryMap))
 
   // Industries and use cases: fatal on an unknown value, for the same reason
   // categories are. These two drive facets, and a facet built from free text
