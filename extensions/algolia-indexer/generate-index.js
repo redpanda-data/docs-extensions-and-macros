@@ -99,9 +99,14 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
       keywords = kwContent ? kwContent.split(/,\s*/) : []
     }
 
-    // Gather page breadcrumbs
+    // Gather page breadcrumbs. The layout renders the trail more than once (in
+    // the toolbar and again inside article.doc), so reading every
+    // nav.breadcrumbs on the page doubles it. Take the article's trail, and
+    // only when the page has no article (landing layouts) the first trail on
+    // the page.
     const breadcrumbs = []
-    root.querySelectorAll('nav.breadcrumbs > ul > li a')
+    const breadcrumbNav = root.querySelector('article.doc nav.breadcrumbs') || root.querySelector('nav.breadcrumbs')
+    ;(breadcrumbNav ? breadcrumbNav.querySelectorAll('ul > li a') : [])
       .forEach((elem) => {
         const url = path.resolve(
           path.join('/', page.out.dirname),
@@ -331,18 +336,37 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
         // the overview and the landing page. Facet fields come from the
         // attributes the solutions-catalog extension validated and mirrored.
         const attrs = page.asciidoc?.attributes || {}
+        const solution = parseSolutionRecord(attrs['page-solution'])
         indexItem.product = 'Solutions'
         indexItem.type = 'Solution'
         indexItem._tags = ['Solutions']
         indexItem.breadcrumbs = breadcrumbs
         indexItem.solutionId = attrs['page-solution-id'] || ''
         indexItem.stepId = attrs['page-solution-step-id'] || ''
+        // Step titles repeat across solutions ("Start the environment"), so
+        // every record names the solution it belongs to.
+        indexItem.solutionTitle = attrs['page-solution-title'] || (solution && solution.title) || ''
         indexItem.difficulty = attrs['page-solution-difficulty'] || ''
-        indexItem.duration = attrs['page-solution-duration'] ? Number(attrs['page-solution-duration']) : null
+        // A step record carries the step's own duration, never the whole
+        // solution's: "50 min" on a five-minute step is wrong. A step with no
+        // duration of its own gets null rather than the solution's total.
+        const durationAttr = indexItem.stepId ? attrs['page-solution-step-duration'] : attrs['page-solution-duration']
+        indexItem.duration = durationAttr !== undefined && durationAttr !== '' && Number.isFinite(Number(durationAttr))
+          ? Number(durationAttr)
+          : null
         indexItem.technologies = parseCategoryList(attrs['page-solution-technologies'])
         indexItem.platforms = parseCategoryList(attrs['page-solution-platforms'])
         indexItem.status = attrs['page-solution-status'] || ''
-        // Displayed on the result, never faceted on.
+        // The landing page's two facet axes. They describe the solution, so
+        // they go on the overview record only: on every step they would turn
+        // a search for an industry into a list of the solution's steps.
+        // Appending them to `keywords` makes them searchable under the index's
+        // existing searchable attributes, with no index settings change.
+        if (indexItem.solutionId && !indexItem.stepId) {
+          indexItem.useCases = listOf(solution && solution.useCases, attrs['page-solution-use-cases'])
+          indexItem.industries = listOf(solution && solution.industries, attrs['page-solution-industries'])
+          indexItem.keywords = [...new Set([...keywords, ...indexItem.useCases, ...indexItem.industries])]
+        }
       } else if (component.name !== 'labs') {
         indexItem.product = component.title
         indexItem.breadcrumbs = breadcrumbs
@@ -362,6 +386,30 @@ function generateIndex (playbook, contentCatalog, { indexLatestOnly = false, exc
 
   logger.info(`Indexed ${algoliaCount} pages`)
   return algolia
+}
+
+/**
+ * The `page-solution` record the solutions-catalog extension writes on every
+ * solution page, or null when it is absent or not JSON.
+ *
+ * @param {string|Object|undefined} raw
+ * @returns {Object|null}
+ */
+function parseSolutionRecord (raw) {
+  if (!raw) return null
+  if (typeof raw === 'object') return raw
+  try {
+    const record = JSON.parse(raw)
+    return record && typeof record === 'object' ? record : null
+  } catch {
+    return null
+  }
+}
+
+/** A list from the record when it has one, else from the comma-list attribute. */
+function listOf (fromRecord, attribute) {
+  if (Array.isArray(fromRecord)) return fromRecord.map((v) => String(v).trim()).filter(Boolean)
+  return parseCategoryList(attribute)
 }
 
 /**
