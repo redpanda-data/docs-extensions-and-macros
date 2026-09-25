@@ -97,6 +97,7 @@ function buildSolutionMetadata(page) {
     // The files an agent may fetch: the same allowlist the download endpoint
     // enforces, so reading the .md is enough to know what is available.
     files: record.files,
+    agent_companion: record.agentCompanion,
   })
 
   if (stepId) {
