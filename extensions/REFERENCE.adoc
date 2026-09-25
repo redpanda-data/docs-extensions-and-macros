@@ -1267,6 +1267,7 @@ The `convert-llms-to-txt` extension generates AI-optimized documentation exports
 - Generates `llms.txt` from a curated `llms.adoc` page in the home component
 - Creates `llms-full.txt` with all documentation pages
 - Generates component-specific exports (e.g., `ROOT-full.txt`, `cloud-full.txt`)
+- Generates a page index (`llms.txt`) for every published component version, linked from the root `llms.txt`
 - Unpublishes the HTML version of llms.adoc
 - Replaces site-url attribute dynamically for preview builds
 
@@ -1290,7 +1291,8 @@ Create `modules/home/pages/llms.adoc` in your docs repository with curated docum
 2. Place `llms.txt` at site root
 3. Generate `llms-full.txt` with all pages
 4. Generate component-specific full.txt files
-5. Unpublish the HTML version
+5. Generate a page index for every published component version and link each one from `llms.txt`
+6. Unpublish the HTML version
 
 === Generated files
 
@@ -1299,6 +1301,15 @@ Create `modules/home/pages/llms.adoc` in your docs repository with curated docum
 - `{site-url}/ROOT-full.txt` - Self-Managed docs only
 - `{site-url}/cloud-full.txt` - Cloud docs only
 - `{site-url}/redpanda-connect-full.txt` - Connect docs only
+- `{site-url}/<component>/<version>/llms.txt` - Page index for one component version
+
+=== Page indexes
+
+Each page index lists every published page in one component version as a markdown link to the page's `.md` URL, followed by the page description when it has one. Older versions get their own indexes, which say which version they cover and name the latest version.
+
+An index that would exceed 45,000 characters is split by URL directory, for example `streaming/current/manage/llms.txt`. A directory that is still too large on its own is split into numbered parts (`llms.txt`, `llms-2.txt`, and so on). The Agent-Friendly Documentation Spec passes an `llms.txt` at 50,000 characters or less and recommends this kind of split for large sites.
+
+The root `llms.txt` links to every page index in a *Page indexes* section. The index list is never truncated, because an index missing from the root leaves its pages unreachable from `llms.txt`. Page indexes do not link to other page indexes, so every page is one hop from the root.
 
 === Attributes
 

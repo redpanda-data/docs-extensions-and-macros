@@ -3,7 +3,13 @@
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 const { toMarkdownUrl } = require('../extension-utils/url-utils');
-const { stripMarkdownMetadata, componentsWithExports } = require('../extension-utils/llms-utils');
+const {
+  stripMarkdownMetadata,
+  componentsWithExports,
+  buildPageIndexes,
+  renderPageIndexSection,
+  unlinkSelfReferences,
+} = require('../extension-utils/llms-utils');
 
 /**
  * Extracts markdown from llms.adoc page and generates AI-friendly documentation exports.
@@ -18,6 +24,9 @@ const { stripMarkdownMetadata, componentsWithExports } = require('../extension-u
  * 5. Places llms.txt (markdown) at site root
  * 6. Generates llms-full.txt with markdown from latest versions of all components
  * 7. Generates component-specific full.txt files (e.g., redpanda-full.txt, cloud-full.txt)
+ * 8. Generates page index files (<version root>/llms.txt) for every published component
+ *    version, split by URL directory to stay under the size limit, and links each
+ *    one from the root llms.txt so every page is one hop from the root index
  *
  * Must run after convert-to-markdown extension to access page.markdownContents.
  */
@@ -109,6 +118,8 @@ module.exports.register = function () {
           delete llmsPage.out;
           logger.info('Unpublished llms HTML page');
         }
+
+        content = unlinkSelfReferences(content, siteUrl);
 
         // Store cleaned markdown content for adding after llms-full.txt
         llmsPage.llmsTxtContent = content;
@@ -282,6 +293,23 @@ module.exports.register = function () {
       logger.info(`Generated ${componentName}-full.txt with ${componentPages.length} pages`);
     });
 
+    // Generate page index files for every published version (not only the latest),
+    // so the llms.txt tree lists every page the sitemap lists.
+    const pageIndexes = buildPageIndexes({
+      pages: allPages,
+      components,
+      siteUrl,
+      toMarkdownUrl,
+    });
+    pageIndexes.forEach((index) => {
+      siteCatalog.addFile({
+        contents: Buffer.from(index.contents, 'utf8'),
+        out: { path: index.path },
+      });
+    });
+    const indexedPageCount = pageIndexes.reduce((n, index) => n + index.pageCount, 0);
+    logger.info(`Generated ${pageIndexes.length} page index files covering ${indexedPageCount} pages`);
+
     // Add llms.txt to site root (using content extracted earlier)
     if (llmsPage && llmsPage.llmsTxtContent) {
       logger.info('Adding llms.txt to site root');
@@ -295,6 +323,15 @@ module.exports.register = function () {
         logger.warn(`Base llms.txt content (${llmsTxtContent.length} chars) exceeds ${MAX_LLMS_TXT_CHARS} char limit, truncating`);
         // Truncate at last newline before limit to avoid cutting mid-line or mid-URL
         llmsTxtContent = truncateAtNewline(llmsTxtContent, MAX_LLMS_TXT_CHARS - 100) + '\n\n[Content truncated due to size limits]';
+      }
+
+      // The page index list is never truncated: an index missing from the root
+      // leaves its pages unreachable from llms.txt.
+      if (pageIndexes.length) {
+        llmsTxtContent = llmsTxtContent + '\n\n' + renderPageIndexSection(pageIndexes, components);
+        if (llmsTxtContent.length >= MAX_LLMS_TXT_CHARS) {
+          logger.warn(`llms.txt with page index list is ${llmsTxtContent.length} chars, over the ${MAX_LLMS_TXT_CHARS} char target. Shorten the llms page or raise the per-index size limit.`);
+        }
       }
 
       // Generate navigation section with component sitemaps and key sections
@@ -350,6 +387,10 @@ module.exports.register = function () {
           }
         });
 
+        pageIndexes.forEach((index) => {
+          if (index.lastModified) gitDates.set(index.path, index.lastModified);
+        });
+
         addToSitemap(contentCatalog, siteCatalog, siteUrl, gitDates, logger);
       } catch (err) {
         logger.warn(`Failed to add llms.txt to sitemap: ${err.message}`);
@@ -398,7 +439,8 @@ function addToSitemap(contentCatalog, siteCatalog, siteUrl, gitDates, logger) {
       const filename = file.out.path;
       return filename === 'llms.txt' ||
              filename === 'llms-full.txt' ||
-             filename.endsWith('-full.txt');
+             filename.endsWith('-full.txt') ||
+             /(^|\/)llms(-\d+)?\.txt$/.test(filename);
     })
     .map(file => file.out.path)
     .sort(); // Sort for consistent ordering
