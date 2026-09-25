@@ -1093,6 +1093,10 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(review.with.prompt).toMatch(/Each entry carries context/)
       expect(review.with.prompt).toMatch(/articles and subjects/)
       expect(review.with.prompt).toMatch(/Every flag, command, path and URL goes in inline code/)
+      // The related-string comment is the named exception to the
+      // suggestion-block rule, and still carries the fingerprint footer.
+      expect(review.with.prompt).toMatch(/one exception to the suggestion rules above/)
+      expect(review.with.prompt).toMatch(/still ends with the changed declaration's\s+fingerprint footer/)
     })
   })
 })

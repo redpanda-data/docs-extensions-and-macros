@@ -631,3 +631,72 @@ describe('page context for a pending declaration', () => {
     }
   })
 })
+
+describe('page context: cap and scope', () => {
+  const lint = require('../../../tools/lint-strings')
+  const d = (surface, name, file, line, string, kind) => ({ surface, name, file, line_start: line, line_end: line, string, meta: kind ? { kind } : {} })
+
+  test('a late rpk flag keeps Short, Long and its nearest flags under the cap', () => {
+    const file = 'cli/topic/produce.go'
+    const target = d('rpk', 'late', file, 200, 'Late flag', 'flag')
+    const early = Array.from({ length: 20 }, (_, i) => d('rpk', `early${i}`, file, 100 + i, 'Early flag', 'flag'))
+    const near = [d('rpk', 'before', file, 199, 'Neighbor', 'flag'), d('rpk', 'after', file, 201, 'Neighbor', 'flag')]
+    const text = [d('rpk', 'produce', file, 10, 'Produce records', 'short'), d('rpk', 'produce', file, 11, 'Long text', 'long')]
+    const ctx = lint.pageContext(target, [...text, ...early, target, ...near])
+    const names = ctx.map((c) => `${c.kind}:${c.name}`)
+    expect(ctx).toHaveLength(15)
+    expect(names).toEqual(expect.arrayContaining(['short:produce', 'long:produce', 'flag:before', 'flag:after']))
+    // Source order in the output, whatever the selection order was.
+    const lines = ctx.map((c) => c.line_start)
+    expect(lines).toEqual([...lines].sort((a, b) => a - b))
+  })
+
+  describe('a surface that extracts everything supplies cross-file context', () => {
+    let repo
+    const original = lint.SURFACES.properties
+    const A = 'src/v/config/a.cc'
+    const B = 'src/v/config/b.cc'
+    const all = (repoPath) => {
+      const text = fs.readFileSync(path.join(repoPath, A), 'utf8')
+      return [
+        { ...d('properties', 'changed_prop', A, 1, text.trim()), convention: original.convention },
+        { ...d('properties', 'other_prop', B, 1, 'Only applies when `changed_prop` is set.'), convention: original.convention }
+      ]
+    }
+    const stub = (contextScope) => ({
+      ...original,
+      contextScope,
+      extract: ({ repo: r, files = null }) => all(r).filter((x) => !files || files.has(x.file))
+    })
+
+    beforeAll(() => {
+      repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-strings-scope-'))
+      const run = (args) => execSync(`git ${args}`, { cwd: repo, stdio: 'pipe' })
+      fs.mkdirSync(path.join(repo, 'src', 'v', 'config'), { recursive: true })
+      fs.writeFileSync(path.join(repo, A), 'Enables the thing.\n')
+      fs.writeFileSync(path.join(repo, B), 'untouched\n')
+      run('init --quiet'); run('config user.email t@example.invalid'); run('config user.name t')
+      run('add .'); run('commit --quiet -m base')
+      fs.writeFileSync(path.join(repo, A), 'Enables the thing, now differently.\n')
+      run('commit --quiet -am edit')
+    })
+
+    afterAll(() => {
+      lint.SURFACES.properties = original
+      fs.rmSync(repo, { recursive: true, force: true })
+    })
+
+    test('with contextScope surface, a related property in an untouched file is in context', () => {
+      lint.SURFACES.properties = stub('surface')
+      const result = lint.lintStrings({ repo, surfaces: ['properties'], diffBase: 'HEAD~1', log: () => {} })
+      expect(result.declarations.map((x) => x.name)).toEqual(['changed_prop'])
+      expect(result.declarations[0].context.map((c) => c.name)).toEqual(['other_prop'])
+    })
+
+    test('without it, context stops at the touched files', () => {
+      lint.SURFACES.properties = stub(undefined)
+      const result = lint.lintStrings({ repo, surfaces: ['properties'], diffBase: 'HEAD~1', log: () => {} })
+      expect(result.declarations[0].context).toEqual([])
+    })
+  })
+})

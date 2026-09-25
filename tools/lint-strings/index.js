@@ -116,7 +116,16 @@ function lintStrings (options) {
       // still exists at HEAD, in any touched file, was edited or moved, not
       // removed.
       const removedFiles = removedBySurface[surfaceName] ? [...removedBySurface[surfaceName].keys()] : []
-      const head = surface.extract({ repo: repoPath, files: new Set([...files.keys(), ...removedFiles]), log })
+      const touchedFiles = new Set([...files.keys(), ...removedFiles])
+      // A surface whose extraction covers the whole surface anyway (the
+      // properties extractor parses every config file on each run) supplies
+      // context from all of it, so a property in an untouched file that
+      // names, or is named by, a changed one is still on its page. Review
+      // scope stays the touched files either way.
+      const everything = surface.contextScope === 'surface' ? surface.extract({ repo: repoPath, log }) : null
+      const head = everything
+        ? everything.filter((d) => touchedFiles.has(d.file))
+        : surface.extract({ repo: repoPath, files: touchedFiles, log })
       headBySurface[surfaceName] = head
       const declarations = []
       for (const decl of head) {
@@ -128,7 +137,7 @@ function lintStrings (options) {
           continue
         }
         declarations.push(decl)
-        pending.push({ ...pendingEntry(decl), context: pageContext(decl, head) })
+        pending.push({ ...pendingEntry(decl), context: pageContext(decl, everything || head) })
       }
       results.push(runRules(declarations, rulesFor(surface), { skipRules, onlyRules }))
     }
@@ -211,7 +220,14 @@ function pageContext (decl, all) {
   const sameFile = others.filter((d) => d.file === decl.file)
   let picked
   if (decl.surface === 'rpk') {
-    picked = sameFile.sort((a, b) => (a.line_start || 0) - (b.line_start || 0))
+    // The command's Short and Long always, then the flags nearest this
+    // declaration, so a changed flag late in a long command keeps its
+    // neighbors when the cap applies. Shown in source order.
+    const isText = (d) => d.meta && (d.meta.kind === 'short' || d.meta.kind === 'long')
+    const text = sameFile.filter(isText)
+    const flags = sameFile.filter((d) => !isText(d)).sort((a, b) => byDistance(a) - byDistance(b))
+    picked = [...text, ...flags].slice(0, CONTEXT_LIMIT)
+      .sort((a, b) => (a.line_start || 0) - (b.line_start || 0))
   } else if (decl.surface === 'api') {
     picked = sameFile.sort((a, b) => byDistance(a) - byDistance(b)).slice(0, 6)
   } else {

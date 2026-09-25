@@ -755,7 +755,8 @@ jobs:
             never more than one per declaration. Choose in this order: lint
             errors, lint warnings, then prose-quality problems; within a
             tier, the strings that would mislead an operator most. An
-            info-level finding alone never warrants a comment. Each comment:
+            info-level finding alone never warrants a comment. Each
+            suggestion comment:
             - opens with one or two plain sentences naming the problem and
               the rule or standard section it breaks. No headings, no
               bullet inventories, no account of what you checked.
@@ -788,7 +789,10 @@ jobs:
               names before saying anything about it.
             - When the change makes an untouched string wrong, post one plain
               comment on the changed line naming that string and what is now
-              wrong, with no suggestion block. It counts toward the 10.
+              wrong. It is the one exception to the suggestion rules above: no
+              suggestion block, because the string to fix is not in the
+              changed span, but it still ends with the changed declaration's
+              fingerprint footer. It counts toward the 10.
             - A term the page never explains, and a reader cannot check,
               needs tying to something they can observe: "internal topics"
               means little until the page says they are the topics
