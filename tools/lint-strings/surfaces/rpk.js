@@ -37,7 +37,15 @@ const CONVENTION = {
   case: 'sentence',
   terminal_period: false,
   verbatim_asciidoc: false,
-  transformer: 'formatDescription'
+  transformer: 'formatDescription',
+  // Code values formatDescription wraps in inline code by itself, so a bare
+  // one in the source is not a finding. Long is a Go raw string and cannot
+  // hold a backtick at all, which is why the generator does this. Keep in
+  // step with the auto-backtick passes in tools/rpk-docs/generate-rpk-docs.js.
+  auto_inline_code: {
+    kinds: ['flag'],
+    path_prefixes: ['/etc/', '/var/', '/usr/', '/home/', '/tmp/', '~/.']
+  }
 }
 
 // Composite literal only: gofmt writes `cobra.Command{` with no space, while

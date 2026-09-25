@@ -147,3 +147,25 @@ describe('rpk surface end-to-end (fixture file)', () => {
     expect(trailing.declaration_text).toContain('"trailing-period"')
   })
 })
+
+describe('missing-inline-code on rpk strings', () => {
+  const { runRules } = require('../../../tools/lint-strings/engine')
+  const { rulesFor, SURFACES } = require('../../../tools/lint-strings')
+  const decl = (string) => ({
+    surface: 'rpk', name: 'delete', file: 'cli/topic/delete.go', line_start: 1, line_end: 1,
+    string, convention: SURFACES.rpk.convention, meta: { kind: 'long' }
+  })
+  const ids = (string) => runRules([decl(string)], rulesFor(SURFACES.rpk), { onlyRules: ['missing-inline-code'] }).findings
+
+  test('flags and paths the generator formats itself are not findings', () => {
+    // Long is a Go raw string, so these cannot be backticked in source, and
+    // formatDescription wraps them anyway.
+    expect(ids('The --regex flag reads /etc/redpanda/redpanda.yaml and ~/.config/rpk/rpk.yaml.')).toEqual([])
+  })
+
+  test('code values the generator leaves alone still are', () => {
+    const [finding] = ids('Defaults to default_topic_partitions, served from /v1/brokers.')
+    expect(finding.rules[0].message).toMatch(/`default_topic_partitions`/)
+    expect(finding.rules[0].message).toMatch(/`\/v1\/brokers`/)
+  })
+})
