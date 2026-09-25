@@ -1461,3 +1461,31 @@ describe('intro.hbs shares the renderer with the description partial', () => {
     expect(out).toContain('Paragraph.\n\n== Operators');
   });
 });
+
+describe('protectCodeSpans', () => {
+  const { protectCodeSpans, escapePlaceholderBraces } = require('../../tools/redpanda-connect/helpers/renderConnectDescription.js');
+  const escape = (text) => protectCodeSpans(escapePlaceholderBraces(text));
+
+  test('wraps code spans holding unconstrained markers in a passthrough', () => {
+    expect(escape('custom objects end with `__c`; Big Objects end with `__b`'))
+      .toBe('custom objects end with `+__c+`; Big Objects end with `+__b+`');
+    expect(escape("exclude `'.git/**', '**/*.png'`")).toBe("exclude `+'.git/**', '**/*.png'+`");
+  });
+
+  test('leaves ordinary spans, existing passthroughs, and verbatim blocks alone', () => {
+    const text = 'plain `snake_case` and `+__c+`\n\n----\nkey: `__c`\n----';
+    expect(escape(text)).toBe(text);
+  });
+
+  test('removes the brace escape inside a wrapped span, where it would render literally', () => {
+    expect(escape('a `__$x {name}` span')).toBe('a `+__$x {name}+` span');
+  });
+
+  renderTest('renders the markers literally instead of as emphasis', () => {
+    const html = asciidoctor.convert(escape('ends with `__c`; Big Objects end with `__b`; match `**/*.md`'));
+    expect(html).toContain('<code>__c</code>');
+    expect(html).toContain('<code>__b</code>');
+    expect(html).toContain('<code>**/*.md</code>');
+    expect(html).not.toMatch(/<(em|strong)>/);
+  });
+});
