@@ -12,6 +12,28 @@ const DEFAULTS = {
   githubRepo: 'connect'
 }
 
+// Connector pages include the generated field reference from the connect repo
+// (see the modify-connect-tag-playbook extension). If a playbook has the
+// Connect pages but none of those partials, every connector page would publish
+// without its fields, and Antora only logs the missing includes. Fail the
+// build instead so the playbook gets fixed before anything is published.
+function assertConnectReferencePresent (contentCatalog) {
+  const component = contentCatalog.getComponents().find((c) => c.name === 'connect')
+  if (!component) return
+  const pages = contentCatalog.findBy({ component: 'connect', module: 'components', family: 'page' })
+  if (!pages.length) return
+  const fields = contentCatalog.findBy({ component: 'connect', module: 'components', family: 'partial' })
+    .filter((f) => f.src.relative.startsWith('fields/'))
+  if (fields.length) return
+  throw new Error(
+    'The connect component has connector pages but no generated field partials (components:partial$fields/*). ' +
+    'Add the connect repository as a content source (url: https://github.com/redpanda-data/connect, tags: latest, start_path: docs) ' +
+    'and register the modify-connect-tag-playbook extension, or check that the latest Connect release includes docs/modules/components.'
+  )
+}
+
+module.exports.assertConnectReferencePresent = assertConnectReferencePresent
+
 module.exports.register = function ({ config }) {
   raiseListenerLimit(this)
   const logger = this.getLogger('redpanda-connect-info-extension')
@@ -38,6 +60,7 @@ module.exports.register = function ({ config }) {
 
   // Use 'on' and return the promise so Antora waits for async completion
   this.on('contentClassified', ({ contentCatalog }) => {
+    assertConnectReferencePresent(contentCatalog)
     return processContent(contentCatalog)
   })
 

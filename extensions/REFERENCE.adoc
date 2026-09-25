@@ -404,13 +404,28 @@ You can optionally display pages only if they match the component and version of
 
 == Redpanda Connect tag modifier
 
-This extension updates the playbook to use the latest release tag for the Redpanda Connect documentation. It ensures that the Redpanda Connect documentation is always pulled from the latest release tag available on GitHub.
+This extension sources the Redpanda Connect reference partials (field reference, examples, metadata, descriptions, config snippets, and the Bloblang reference) from the `docs/` directory of the connect repository, at the latest Connect release.
+
+Add the connect repository as a content source next to rp-connect-docs:
+
+```yaml
+content:
+  sources:
+  - url: https://github.com/redpanda-data/connect
+    tags: latest # replaced with the latest release tag at build time
+    start_path: docs
+```
+
+At build time the extension:
+
+* Pins a source that sets `tags: latest` to the latest Connect release tag and clears its branches (a source with any other refs, such as a PR branch for a preview, is left as configured), so the site never shows fields from unreleased code on connect's `main` branch. It asks the GitHub API for the latest release and falls back to the highest stable `vX.Y.Z` tag from `git ls-remote`. If neither works, the build stops with an error.
+* Keeps only the `modules/components/partials/` and `modules/components/examples/` files of the `connect` component from that source. Any file that another source, such as rp-connect-docs, already provides is skipped, and so is content from older Connect tags that name their component `redpanda-connect`. Antora fails the build on a duplicate page or partial, so you can add the source to a playbook before or after rp-connect-docs stops committing its own generated copies.
+
+A local clone whose directory is named `connect` is filtered the same way but not pinned, so a local playbook can use `branches: HEAD` to test uncommitted changes.
 
 === Environment variables
 
-- `REDPANDA_GITHUB_TOKEN` (optional): A Personal access token (PAT) that has `repo` permissions for the `redpanda-data` GitHub organization.
-
-NOTE: If you don't set the environment variable, the latest version of Redpanda Connect may not be fetched. When the environment variable is not set, the extension sends unauthenticated requests to GitHub. Unauthenticated requests may result in hitting the API rate limit and cause GitHub to reject the request. In this case the fallback version is used. This version is defined in the playbook where the extension is registered.
+- `REDPANDA_GITHUB_TOKEN` (optional): A GitHub token for the release lookup. Without it, the extension sends unauthenticated API requests, which GitHub can rate limit. The `git ls-remote` fallback needs no token.
 
 === Configuration options
 
