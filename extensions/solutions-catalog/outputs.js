@@ -68,6 +68,8 @@ function buildPublicRecord (record, { steps, relatedDocs = [], relatedSolutions 
   }
   // Evidence, not a default: no manifest means no key at all.
   if (record.verified) publicRecord.verified = record.verified
+  // Only when the companion was generated for this build.
+  if (record.agentCompanion) publicRecord.agentCompanion = record.agentCompanion
   return publicRecord
 }
 

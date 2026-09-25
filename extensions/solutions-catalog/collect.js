@@ -293,6 +293,39 @@ function buildRecord (mod, modulePages, moduleAttachments, { version }) {
   }
 }
 
+/**
+ * The raw AsciiDoc of every solution module, read for the agent companion.
+ *
+ * Call it at contentClassified: that is the last point where page contents are
+ * still AsciiDoc (the converter replaces them with HTML and drops the source
+ * unless keepSource is on). A page that is not AsciiDoc any more is skipped, so
+ * a module whose overview is not readable yields no entry and no companion.
+ * scripts/verify.sh is reached as an example resource through the module's
+ * `examples` symlink onto solutions/<slug>/.
+ *
+ * @returns {Map<string, { pages: Object<string,string>, verifyScript: string }>}
+ */
+function collectCompanionSources (contentCatalog, { component = COMPONENT } = {}) {
+  const sources = new Map()
+  const comp = contentCatalog.getComponent(component)
+  if (!comp) return sources
+  const latest = comp.latest || (comp.versions && comp.versions[0])
+  const version = latest ? latest.version : ''
+  const isAsciiDoc = (f) => f && f.contents && f.mediaType === 'text/asciidoc'
+  for (const page of contentCatalog.findBy({ component, family: 'page', version })) {
+    const mod = page.src.module
+    if (NON_SOLUTION_MODULES.includes(mod) || !isAsciiDoc(page)) continue
+    if (!sources.has(mod)) sources.set(mod, { pages: {}, verifyScript: '' })
+    sources.get(mod).pages[stepIdOf(page)] = page.contents.toString('utf8')
+  }
+  for (const [mod, entry] of sources) {
+    if (!entry.pages.index) { sources.delete(mod); continue }
+    const script = contentCatalog.findBy({ component, version, module: mod, family: 'example', relative: 'scripts/verify.sh' })[0]
+    if (script && script.contents) entry.verifyScript = script.contents.toString('utf8')
+  }
+  return sources
+}
+
 module.exports = {
   COMPONENT,
   RESERVED_IDS,
@@ -313,4 +346,5 @@ module.exports = {
   stepIdOf,
   plainTitle,
   collectSolutions,
+  collectCompanionSources,
 }

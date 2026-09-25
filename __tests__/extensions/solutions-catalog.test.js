@@ -211,9 +211,10 @@ async function run ({
   env = {},
   hooks = ['contentClassified', 'documentsConverted', 'navigationBuilt', 'beforePublish'],
   beforeNavigationBuilt,
+  afterContentClassified,
 } = {}) {
   const pages = [...(landing ? [landing] : []), ...solutions.flatMap((s) => s.pages), ...docs]
-  const attachments = solutions.flatMap((s) => s.attachments)
+  const attachments = [...solutions.flatMap((s) => s.attachments), ...solutions.flatMap((s) => s.examples || [])]
   const partials = [
     ...(relationshipsText === null ? [] : [makePartial({ relative: 'relationships.yml', text: relationshipsText })]),
     ...(facetsText === null ? [] : [makePartial({ relative: 'solution-facets.yml', text: facetsText })]),
@@ -227,6 +228,7 @@ async function run ({
   try {
     const { handlers, logger } = createContext(config)
     if (hooks.includes('contentClassified')) await handlers.contentClassified({ contentCatalog: catalog, siteCatalog, playbook })
+    if (afterContentClassified) afterContentClassified(catalog)
     if (hooks.includes('documentsConverted')) await handlers.documentsConverted({ contentCatalog: catalog, siteCatalog, playbook })
     if (beforeNavigationBuilt) beforeNavigationBuilt(siteCatalog)
     if (hooks.includes('navigationBuilt')) await handlers.navigationBuilt({ contentCatalog: catalog, siteCatalog, playbook })
@@ -1354,6 +1356,96 @@ describe('solutions-catalog: snippet allowlist', () => {
 // The provenance attributes exist only when Antora attaches block source
 // locations, so the extension turns sourcemap on itself rather than relying on
 // every consuming playbook to set it.
+describe('solutions-catalog: agent companion', () => {
+  // Antora hands extensions AsciiDoc at contentClassified and HTML afterwards.
+  // Give a solution's pages their source for the first hook, then convert them.
+  const SOURCES = {
+    index: [
+      '= Solution leaderboard',
+      ':page-layout: solution',
+      ':page-solution-version: v1.2.3',
+      ':page-solution-steps: start-environment, build-leaderboard, verify-end-to-end',
+      '',
+      'Scores must be live.',
+      '',
+      '== What you build',
+      '',
+      'A leaderboard.',
+    ].join('\n'),
+    'start-environment': '= Start\n:page-layout: solution-step\n\n== Why\n\nDemo stack.\n',
+    'build-leaderboard': [
+      '= Build the leaderboard',
+      ':page-layout: solution-step',
+      ':page-solution-rule: Publish absolute state, never deltas.',
+      ':page-solution-adapt: Find consumers that aggregate.',
+      '',
+      '== Why',
+      '',
+      'A total is a fact. See xref:streaming:develop:consume-data/consumer-offsets.adoc[offsets].',
+    ].join('\n'),
+    'verify-end-to-end': '= Verify\n:page-layout: solution-step\n\n== Why\n\nIt agrees.\n',
+  }
+
+  function withSources (solution, id) {
+    const html = new Map()
+    for (const page of solution.pages) {
+      const stem = page.src.relative.replace(/\.adoc$/, '')
+      html.set(page, page.contents)
+      page.contents = Buffer.from(SOURCES[stem])
+      page.mediaType = 'text/asciidoc'
+    }
+    solution.examples = [{
+      src: { component: 'solutions', version: '', module: id, relative: 'scripts/verify.sh', family: 'example' },
+      contents: Buffer.from('#!/usr/bin/env bash\n# 1. The board agrees with the database.\ncheck\n'),
+    }]
+    const convert = () => {
+      for (const [page, contents] of html) { page.contents = contents; page.mediaType = 'text/html' }
+    }
+    return { solution, convert }
+  }
+
+  const companionCall = (siteCatalog) => siteCatalog.addFile.mock.calls.map(([f]) => f).find((f) => f.out.path.endsWith('agent-companion.md'))
+
+  test('publishes solutions/<slug>/agent-companion.md from the pages and verify.sh, and links it from the record', async () => {
+    const { solution, convert } = withSources(makeSolution('leaderboard'), 'leaderboard')
+    const { siteCatalog, pages } = await run({ solutions: [solution], afterContentClassified: convert })
+    const file = companionCall(siteCatalog)
+    expect(file.out.path).toBe('solutions/leaderboard/agent-companion.md')
+    const md = file.contents.toString('utf8')
+    expect(md).toMatch(/^# Agent companion: Solution leaderboard\n/)
+    expect(md).toContain('## Rules\n\nEvery rule must hold in the target system.\n\n1. Publish absolute state, never deltas. (from [Build the leaderboard](https://docs.redpanda.com/solutions/leaderboard/build-leaderboard/))')
+    expect(md).toContain('- [ ] Rule 1: Find consumers that aggregate.')
+    expect(md).toContain('[offsets](https://docs.redpanda.com/streaming/current/develop/consume-data/consumer-offsets/)')
+    expect(md).toContain('1. The board agrees with the database.')
+    expect(md).toContain('#### Start')
+
+    const overview = pages.find((p) => p.src.module === 'leaderboard' && p.src.relative === 'index.adoc')
+    expect(json(overview, 'page-solution').agentCompanion).toBe('/solutions/leaderboard/agent-companion.md')
+    expect(addedFile(siteCatalog, 'solutions.json').solutions[0].agentCompanion).toBe('/solutions/leaderboard/agent-companion.md')
+  })
+
+  test('a draft that is not built gets no companion', async () => {
+    const { solution, convert } = withSources(makeSolution('leaderboard', { attrs: { 'page-solution-status': 'draft' } }), 'leaderboard')
+    const { siteCatalog } = await run({ solutions: [solution], afterContentClassified: convert })
+    expect(companionCall(siteCatalog)).toBeUndefined()
+  })
+
+  test('agent_companion: false turns it off, record key included', async () => {
+    const { solution, convert } = withSources(makeSolution('leaderboard'), 'leaderboard')
+    const { siteCatalog, pages } = await run({ solutions: [solution], afterContentClassified: convert, config: { agent_companion: false } })
+    expect(companionCall(siteCatalog)).toBeUndefined()
+    const overview = pages.find((p) => p.src.module === 'leaderboard' && p.src.relative === 'index.adoc')
+    expect(json(overview, 'page-solution')).not.toHaveProperty('agentCompanion')
+  })
+
+  test('pages that are no longer AsciiDoc at contentClassified yield no companion and no link', async () => {
+    const { siteCatalog, pages } = await run()
+    expect(companionCall(siteCatalog)).toBeUndefined()
+    const overview = pages.find((p) => p.src.module === 'leaderboard' && p.src.relative === 'index.adoc')
+    expect(json(overview, 'page-solution')).not.toHaveProperty('agentCompanion')
+  })
+})
+
 describe('solutions-catalog: sourcemap', () => {
   test('enables asciidoc sourcemap before documents are converted', async () => {
     const { handlers } = createContext()
@@ -1398,9 +1490,9 @@ describe('solutions-catalog: pure helpers', () => {
   })
 
   test('resolveConfig accepts camelCase and snake_case, with defaults and env', () => {
-    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false })
-    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true' }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true })
-    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true })
+    expect(extension.resolveConfig({}, {})).toEqual({ maxRelated: 3, minScore: 0.6, networkChecks: 'auto', includeDrafts: false, agentCompanion: true })
+    expect(extension.resolveConfig({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: 'true' }, {})).toEqual({ maxRelated: 5, minScore: 0.5, networkChecks: true, includeDrafts: true, agentCompanion: true })
+    expect(extension.resolveConfig({ max_related: '2', network_checks: 'false' }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' })).toEqual({ maxRelated: 2, minScore: 0.6, networkChecks: false, includeDrafts: true, agentCompanion: true })
     expect(extension.resolveConfig({ include_drafts: false }, { SOLUTIONS_INCLUDE_DRAFTS: 'true' }).includeDrafts).toBe(false)
     expect(extension.resolveConfig({ max_related: 'lots' }, {}).maxRelated).toBe(3)
   })
