@@ -243,24 +243,56 @@ async function checkReleases (records, logger, octokitClient) {
 
 /**
  * Generate one solution's agent companion from the sources captured at
- * contentClassified. Returns null, with a warning, when it cannot be built; a
- * companion never fails the build.
+ * contentClassified. Returns null, with a warning, when it cannot be built.
+ *
+ * A solution with no `page-solution-rule` still gets a companion, but it gives
+ * an agent no invariants to apply, so it is reported: a warning while the
+ * solution is a draft, and an entry in `errors` (fatal, like every other
+ * catalog error) once it is published.
+ *
+ * @param {Object} record
+ * @param {Object} sources - from collect.collectCompanionSources
+ * @param {Object} logger
+ * @param {Object} [options]
+ * @param {(resourceId: string) => string|undefined} [options.titleOf] - target page title for empty xref text
+ * @param {Array<string>} [options.errors] - collects the published zero-rules error
  */
-function buildCompanion (record, sources, logger) {
+function buildCompanion (record, sources, logger, { titleOf, errors } = {}) {
   const overview = record.overview
   if (!sources || !overview || !overview.out || !overview.out.path) return null
   let result
   try {
-    result = companion.generateAgentCompanion({ slug: record.id, pages: sources.pages, verifyScript: sources.verifyScript })
+    result = companion.generateAgentCompanion({ slug: record.id, pages: sources.pages, verifyScript: sources.verifyScript, titleOf })
   } catch (err) {
     logger.warn(`solutions-catalog: ${record.id}: agent companion not generated: ${err.message}`)
     return null
   }
   if (result.leaks.length) logger.warn(`solutions-catalog: ${record.id}: AsciiDoc left in the agent companion (${result.leaks.join(', ')})`)
-  if (!result.rules.length) logger.info(`solutions-catalog: ${record.id}: no step sets page-solution-rule, so the agent companion has no Rules section`)
+  if (!result.rules.some((r) => r.rule)) {
+    const message = `${record.id}: no step sets page-solution-rule, so the agent companion has no Rules, Design contract rules, or Acceptance for an agent to apply`
+    if (record.status === 'published' && errors) errors.push(message)
+    else logger.warn(`solutions-catalog: ${message}`)
+  }
   const dir = overview.out.path.replace(/[^/]*$/, '')
   const base = (record.url || `/${dir}`).replace(/[^/]*$/, '')
   return { id: record.id, path: `${dir}${companion.FILE_NAME}`, url: `${base}${companion.FILE_NAME}`, markdown: result.markdown }
+}
+
+/**
+ * Title of the page a resource ID names, resolved from inside a solution
+ * module the way Antora resolves that solution's own xrefs.
+ */
+function makeTitleOf (contentCatalog, record) {
+  return (resourceId) => {
+    if (typeof contentCatalog.resolveResource !== 'function') return undefined
+    try {
+      const page = contentCatalog.resolveResource(resourceId, { component: collect.COMPONENT, version: record.componentVersion, module: record.module }, 'page', ['page'])
+      const title = page && page.asciidoc && collect.plainTitle(page.asciidoc.doctitle)
+      return title || undefined
+    } catch {
+      return undefined
+    }
+  }
 }
 
 module.exports.register = function ({ config = {} } = {}) {
@@ -444,12 +476,17 @@ module.exports.register = function ({ config = {} } = {}) {
     // Agent companions, generated here so the record can link one only when it
     // exists; published at beforePublish.
     state.companions = []
+    const companionErrors = []
     for (const record of active) {
-      const built = buildCompanion(record, state.companionSources.get(record.module), logger)
+      const built = buildCompanion(record, state.companionSources.get(record.module), logger, {
+        titleOf: makeTitleOf(contentCatalog, record),
+        errors: companionErrors,
+      })
       if (!built) continue
       record.agentCompanion = built.url
       state.companions.push(built)
     }
+    if (companionErrors.length) throw new Error(validate.formatErrors(companionErrors))
 
     // Page attributes and the catalog
     const homeUrl = collected.landing && collected.landing.pub && collected.landing.pub.url

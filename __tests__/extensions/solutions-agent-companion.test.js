@@ -225,6 +225,22 @@ describe('agent companion: solutions without rules', () => {
     expect(r.markdown).toContain('## What the system must do\n\n- Do one thing')
   })
 
+  test('no rules: the intro does not send the agent to sections that are not there', () => {
+    const r = generateAgentCompanion({ slug: 'tiny', pages: { index, one: step('One'), two: step('Two') } })
+    const intro = sectionOf(r.markdown, '## How to use this')
+    expect(intro).not.toMatch(/Start with the Rules|Work through Adapt|Design contract|Acceptance is the finish line/)
+    expect(intro).toContain('This solution states no rules yet')
+    expect(intro).toContain('Reference build describes')
+  })
+
+  test('an xref with empty text takes the title titleOf gives, else a label from its path', () => {
+    const one = step('One', '') + '\nSee xref:streaming:develop:consumer-offsets.adoc[] and xref:connect:guides:other.adoc[].\n'
+    const titleOf = (id) => (id === 'streaming:develop:consumer-offsets.adoc' ? 'Consumer offsets' : undefined)
+    const r = generateAgentCompanion({ slug: 'tiny', pages: { index, one, two: step('Two') }, titleOf })
+    expect(r.markdown).toContain('[Consumer offsets](https://docs.redpanda.com/streaming/current/develop/consumer-offsets/)')
+    expect(r.markdown).toContain('[other](https://docs.redpanda.com/connect/guides/other/)')
+  })
+
   test('an adapt line without a rule is kept but not numbered', () => {
     const r = generateAgentCompanion({
       slug: 'tiny',

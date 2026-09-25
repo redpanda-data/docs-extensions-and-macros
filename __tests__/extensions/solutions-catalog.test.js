@@ -1480,6 +1480,54 @@ describe('solutions-catalog: agent companion', () => {
     expect(json(overview, 'page-solution')).not.toHaveProperty('agentCompanion')
   })
 
+  const withoutRules = (solution) => {
+    // Same sources with the one rule and adapt line removed.
+    const saved = SOURCES['build-leaderboard']
+    SOURCES['build-leaderboard'] = saved.split('\n').filter((l) => !/^:page-solution-(rule|adapt):/.test(l)).join('\n')
+    try { return withSources(solution, solution.pages[0].src.module) } finally { SOURCES['build-leaderboard'] = saved }
+  }
+
+  test('a published solution with no rules fails the build', async () => {
+    const { solution, convert } = withoutRules(makeSolution('leaderboard'))
+    await expect(run({ solutions: [solution], afterContentClassified: convert })).rejects.toThrow(
+      /leaderboard: no step sets page-solution-rule, so the agent companion has no Rules/
+    )
+  })
+
+  test('a draft with no rules warns, and its companion does not tell the agent to start with Rules', async () => {
+    const { solution, convert } = withoutRules(makeSolution('leaderboard', { attrs: { 'page-solution-status': 'draft' } }))
+    const { siteCatalog, logger } = await run({ solutions: [solution], afterContentClassified: convert, config: { include_drafts: true } })
+    expect(logger.warn.mock.calls.map((c) => c[0]).join('\n')).toMatch(/solutions-catalog: leaderboard: no step sets page-solution-rule/)
+    const md = companionCall(siteCatalog).contents.toString('utf8')
+    expect(md).not.toMatch(/Start with the Rules|Acceptance is the finish line/)
+    expect(md).toContain('This solution states no rules yet')
+    expect(md).not.toMatch(/^## (Rules|Acceptance)$/m)
+  })
+
+  test('with rules the intro still points the agent at them', async () => {
+    const { solution, convert } = withSources(makeSolution('leaderboard'), 'leaderboard')
+    const { siteCatalog, logger } = await run({ solutions: [solution], afterContentClassified: convert })
+    const md = companionCall(siteCatalog).contents.toString('utf8')
+    expect(md).toContain('Start with the Rules')
+    expect(md).toContain('Work through Adapt to find where each rule lands in the target repository.')
+    expect(logger.warn.mock.calls.map((c) => c[0]).join('\n')).not.toMatch(/page-solution-rule/)
+  })
+
+  test('an xref with empty text is labeled with the target page title, not its slug', async () => {
+    const saved = SOURCES['build-leaderboard']
+    SOURCES['build-leaderboard'] = saved.replace('xref:streaming:develop:consume-data/consumer-offsets.adoc[offsets]', 'xref:streaming:develop:consumer-offsets.adoc[]')
+    let prepared
+    try { prepared = withSources(makeSolution('leaderboard'), 'leaderboard') } finally { SOURCES['build-leaderboard'] = saved }
+    const { siteCatalog } = await run({
+      solutions: [prepared.solution],
+      afterContentClassified: prepared.convert,
+      docs: [makeDoc({ title: 'Consumer <code>offsets</code> &amp; groups' })],
+    })
+    const md = companionCall(siteCatalog).contents.toString('utf8')
+    expect(md).toContain('[Consumer offsets & groups](https://docs.redpanda.com/streaming/current/develop/consumer-offsets/)')
+    expect(md).not.toContain('[consumer offsets]')
+  })
+
   test('pages that are no longer AsciiDoc at contentClassified yield no companion and no link', async () => {
     const { siteCatalog, pages } = await run()
     expect(companionCall(siteCatalog)).toBeUndefined()

@@ -73,11 +73,15 @@ function inline (s, ctx) {
     .replace(/xref:([^[\s]+)\[([^\]]*)\]/g, (_, id, text) => {
       const url = resourceUrl(id, ctx)
       const stem = id.replace(/\.adoc.*$/, '')
-      // A page of this solution is labeled with its title when the text is empty.
+      // An xref with no text is labeled with the target page's title: this
+      // solution's own pages from their source, any other page through
+      // ctx.titleOf (the content catalog, in the extension). Only a target
+      // nobody can name falls back to a label made from its path.
       const own = /^[^:@]+$/.test(stem) ? titles[stem] : undefined
+      const resolved = !text && !own && ctx && typeof ctx.titleOf === 'function' ? ctx.titleOf(id.replace(/#.*$/, '')) : undefined
       const parts = stem.split(/[:/]/)
       const last = parts.pop()
-      const label = text || own || (last === 'index' && parts.length ? parts.pop() : last).replace(/-/g, ' ')
+      const label = text || own || resolved || (last === 'index' && parts.length ? parts.pop() : last).replace(/-/g, ' ')
       return url ? `[${label}](${url})` : `${label} (\`${id}\`)`
     })
     .replace(/<<([^,>]+),([^>]+)>>/g, '$2')
@@ -255,9 +259,11 @@ function findLeaks (markdown) {
  * @param {Object<string,string>} input.pages - AsciiDoc source by page stem: `index` and every step id
  * @param {string} [input.verifyScript] - scripts/verify.sh source
  * @param {string} [input.siteUrl] - origin of the live links (default https://docs.redpanda.com)
+ * @param {(resourceId: string) => string|undefined} [input.titleOf] - title of a page outside this
+ *   solution, for labeling an xref written with empty text
  * @returns {{ markdown: string, rules: Array<{step, title, rule, adapt}>, referenceSteps: string[], missingSteps: string[], leaks: string[] }}
  */
-function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_SITE_URL }) {
+function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_SITE_URL, titleOf }) {
   if (!slug) throw new Error('agent-companion: slug is required')
   if (!pages || !pages.index) throw new Error(`agent-companion: ${slug} has no index page`)
   siteUrl = String(siteUrl || DEFAULT_SITE_URL).replace(/\/+$/, '')
@@ -270,7 +276,7 @@ function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_
     steps.push({ id, page: parsePage(pages[id]) })
   }
   const titles = Object.fromEntries(steps.map((s) => [s.id, s.page.title]))
-  const ctx = { slug, siteUrl, titles }
+  const ctx = { slug, siteUrl, titles, titleOf }
   const solutionUrl = `${siteUrl}/solutions/${slug}/`
   const stepUrl = (id) => `${solutionUrl}${id}/`
 
@@ -297,18 +303,37 @@ function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_
   const arch = section(index, 'Architecture')
   const prod = section(index, 'Production considerations')
 
+  const adapts = rules.filter((r) => r.adapt)
+  const contract = steps.filter((s) => s.rule || s.adapt)
+  const checks = verifyChecks(verifyScript)
+  const failures = steps.map((s) => [s, failureModes((section(s.page, 'Verify') || { lines: [] }).lines, ctx)]).filter(([, f]) => f)
+  const detail = steps.filter((s) => referenceSteps.includes(s.id))
+  const hasReference = Boolean(checks.length || failures.length || detail.length)
+
   const md = []
   md.push(`# Agent companion: ${index.title}`, '')
   md.push(`Generated from the ${slug} solution (${index.attrs['page-solution-version'] || 'unversioned'}). Human guide: ${solutionUrl}`, '')
   md.push('## How to use this', '')
-  md.push(
-    'This file is for a coding agent applying this design to an existing codebase. Do not copy the reference system. ' +
-    'Start with the Rules: each is an invariant the design depends on, stated so that it holds in any codebase. ' +
-    'Work through Adapt to find where each rule lands in the target repository, and read the Design contract for why each rule exists and what it relies on. ' +
-    'Where the target differs from the reference, keep the reason for a rule, not its literal form. ' +
-    'Acceptance is the finish line. Reference build describes how the reference system proves itself: its numbers and failure modes belong to that system, not to the target.',
-    '',
-  )
+  // The intro names only the sections this companion has: telling an agent
+  // to start with Rules that do not exist sends it looking for nothing.
+  const intro = ['This file is for a coding agent applying this design to an existing codebase. Do not copy the reference system.']
+  if (numbered.length) {
+    intro.push('Start with the Rules: each is an invariant the design depends on, stated so that it holds in any codebase.')
+  } else {
+    intro.push('This solution states no rules yet, so there is no list of invariants to check. Work from the problem, what the system must do, and the architecture.')
+  }
+  if (adapts.length) {
+    intro.push(numbered.length
+      ? 'Work through Adapt to find where each rule lands in the target repository.'
+      : 'Work through Adapt to find what to inspect in the target repository.')
+  }
+  if (contract.length) intro.push('Read the Design contract for why each entry exists and what it relies on.')
+  if (numbered.length) {
+    intro.push('Where the target differs from the reference, keep the reason for a rule, not its literal form.')
+    intro.push('Acceptance is the finish line.')
+  }
+  if (hasReference) intro.push('Reference build describes how the reference system proves itself: its numbers and failure modes belong to that system, not to the target.')
+  md.push(intro.join(' '), '')
   if (problem && problem.trim()) md.push('## The problem', '', problem.trim(), '')
   if (outcomes && outcomes.trim()) md.push('## What the system must do', '', outcomes.trim(), '')
 
@@ -317,7 +342,6 @@ function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_
     for (const r of numbered) md.push(`${r.number}. ${r.rule} (from ${link(r)})`)
     md.push('')
   }
-  const adapts = rules.filter((r) => r.adapt)
   if (adapts.length) {
     md.push('## Adapt', '', 'Inspect the target repository before changing it. Answer each item with what you found there.', '')
     for (const r of adapts) md.push(`- [ ] ${r.number ? `Rule ${r.number}: ` : ''}${r.adapt}`)
@@ -333,7 +357,6 @@ function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_
     if (why) md.push('### Platform capabilities the design depends on', '', why, '')
   }
 
-  const contract = steps.filter((s) => s.rule || s.adapt)
   if (contract.length) {
     md.push('## Design contract', '', 'One entry per rule, in build order: the rule, where to look in the target, why the problem requires it, and what it depends on.', '')
     for (const s of contract) {
@@ -368,10 +391,7 @@ function generateAgentCompanion ({ slug, pages, verifyScript, siteUrl = DEFAULT_
   }
 
   // Reference build: how the reference proves itself. Demo-specific by design.
-  const checks = verifyChecks(verifyScript)
-  const failures = steps.map((s) => [s, failureModes((section(s.page, 'Verify') || { lines: [] }).lines, ctx)]).filter(([, f]) => f)
-  const detail = steps.filter((s) => referenceSteps.includes(s.id))
-  if (checks.length || failures.length || detail.length) {
+  if (hasReference) {
     md.push('## Reference build', '')
     md.push('How the reference system proves itself. Everything in this section belongs to that system (its seeded data, fixed counts, and local stack): use it to see what each rule protects, not as checks to copy into the target.', '')
     if (detail.length) {
