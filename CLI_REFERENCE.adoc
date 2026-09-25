@@ -902,6 +902,9 @@ Optional JSON file with overrides (default: "docs-data/overrides.json")
 `--include-bloblang`::
 Include Bloblang functions and methods in generation
 
+`--no-partials`::
+Skip the generated partials, config snippets, and Bloblang reference because the connect repo publishes them. What's new, diffs, drafts, nav, and the version bump still run
+
 `--prune-orphaned-descriptions`::
 Allow the description-partial orphan sweep to blank more than 10% of the tree. Only use this when the connector dataset is confirmed complete: an incomplete dataset looks identical to a mass upstream deletion and the sweep blanks published content
 
