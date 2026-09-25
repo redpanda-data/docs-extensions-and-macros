@@ -198,6 +198,28 @@ describe('classifyDescription', () => {
   })
 })
 
+describe('source_text on description rows', () => {
+  test('UPSTREAMABLE rows carry the normalized raw source description text', () => {
+    const src = sourceProp({ description: 'The  source   description.' })
+    const row = classify.classifyDescription('p', { description: 'A corrected, markup-free description.' }, src)
+    expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+    expect(row.source_text).toBe('The source description.')
+  })
+
+  test('SPLIT (KEEP_UNTIL_UPSTREAMED) rows carry the normalized raw source description text', () => {
+    const src = sourceProp({ description: 'The  source   description.' })
+    const override = { description: 'A corrected description. See xref:manage:tiered-storage.adoc[Tiered Storage].' }
+    const row = classify.classifyDescription('p', override, src)
+    expect(row.class).toBe(CLASSES.KEEP_UNTIL_UPSTREAMED)
+    expect(row.source_text).toBe('The source description.')
+  })
+
+  test('is undefined when there is no source property', () => {
+    const row = classify.classifyDescription('p', { description: 'Anything.' }, null)
+    expect(row.source_text).toBeUndefined()
+  })
+})
+
 describe('classifyField', () => {
   test('example classifies UPSTREAMABLE_SLOT, flagging block markup', () => {
     const plain = classify.classifyField('p', 'example', { example: '`tiered_v2`' }, sourceProp())

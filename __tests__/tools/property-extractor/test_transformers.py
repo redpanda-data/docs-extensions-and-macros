@@ -33,6 +33,53 @@ class TestEnterpriseTransformer(unittest.TestCase):
         self.transformer = EnterpriseTransformer()
         self.file_pair = MagicMock()
 
+    def test_scalar_restriction_ahead_of_name_with_enum_set_vector(self):
+        """
+        enterprise<enum_set_property<T>> puts a scalar restriction before the
+        name and ends with the allowed-values vector, for example
+        http_authentication("OIDC", "http_authentication", ..., std::vector{...}).
+        The trailing vector must not win as sanctioned_only, which left "OIDC"
+        in the name position.
+        """
+        info = {
+            "is_enterprise": True,
+            "name_in_file": "http_authentication",
+            "type": "enterprise<enum_set_property<ss::sstring>>",
+            "params": [
+                {"value": "OIDC", "type": "string_literal"},
+                {"value": "http_authentication", "type": "string_literal"},
+                {"value": "A list of supported HTTP authentication mechanisms.", "type": "string_literal"},
+                {"value": "meta{...}", "type": "initializer_list"},
+                {"value": "std::vector<ss::sstring>{\"BASIC\"}", "type": "initializer_list"},
+                {"value": "validate_http_authn_mechanisms", "type": "identifier"},
+                {"value": "std::vector<ss::sstring>{supported.begin(), supported.end()}", "type": "initializer_list"},
+            ],
+        }
+        result = self.transformer.parse(PropertyBag(), info, self.file_pair)
+        self.assertEqual(result["enterprise_constructor"], "restricted_only")
+        self.assertEqual(result["enterprise_restricted_value"], ["OIDC"])
+        self.assertEqual(info["params"][0]["value"], "http_authentication")
+        # The allowed-values vector stays for TypeTransformer.
+        self.assertIn("supported.begin()", info["params"][-1]["value"])
+
+    def test_scalar_ahead_of_other_name_is_not_taken_as_restriction(self):
+        """The branch is anchored on the member name; a mismatch leaves the old behavior."""
+        info = {
+            "is_enterprise": True,
+            "name_in_file": "some_member",
+            "type": "enterprise<property<std::vector<ss::sstring>>>",
+            "params": [
+                {"value": "some_member", "type": "string_literal"},
+                {"value": "A description of the property.", "type": "string_literal"},
+                {"value": "meta{...}", "type": "initializer_list"},
+                {"value": "{}", "type": "initializer_list"},
+                {"value": "std::vector<ss::sstring>{a, b}", "type": "initializer_list"},
+            ],
+        }
+        result = self.transformer.parse(PropertyBag(), info, self.file_pair)
+        self.assertEqual(result["enterprise_constructor"], "sanctioned_only")
+        self.assertEqual(info["params"][0]["value"], "some_member")
+
     def test_restricted_only_with_enum_vector(self):
         """
         Test that properties with restricted values + enum definition are classified as restricted_only.

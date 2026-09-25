@@ -365,11 +365,22 @@ const RULES = [
   }
 ]
 
+/**
+ * Where a declaration lives, for removal matching. Flag names (`format`,
+ * `brokers`) and command names (`list`, `create`) repeat across the command
+ * tree, which the extractor does not resolve, so the key is the file, the
+ * kind and the name. Same-file repeats are handled by counting in the caller.
+ */
+function identity (decl) {
+  return [decl.file, (decl.meta && decl.meta.kind) || null, decl.name]
+}
+
 module.exports = {
   name: 'rpk',
   convention: CONVENTION,
   extract,
   scanFile,
+  identity,
   rules: RULES,
   // Shorts and flag usages are one-liners by convention; the generic
   // too-short prose rule would flag nearly every conforming declaration.

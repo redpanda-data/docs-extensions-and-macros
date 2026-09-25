@@ -206,25 +206,39 @@ describe('substitution behaviour', () => {
     ]);
   });
 
-  it('warns when a Cloud-published property links to a topic or broker property', () => {
+  it('warns when a Cloud-published property links to a broker property', () => {
     // Not readable off cloud_supported: the install pack annotates cluster
-    // scope only, so a topic or broker property has no such field. Cloud
-    // publishes neither page, so the link dangles there regardless.
-    for (const scope of ['topic', 'broker']) {
-      const props = {
-        other: { name: 'other', config_scope: scope },
-        subject: {
-          name: 'subject',
-          config_scope: 'cluster',
-          cloud_supported: true,
-          description: 'Overridden per topic by `other`.',
-          links: { '`other`': '#other' },
-        },
-      };
-      expect(applyPropertyLinks(props).warnings).toEqual([
-        expect.stringContaining(`Cloud publishes no ${scope} properties page`),
-      ]);
-    }
+    // scope only, so a broker property has no such field. Cloud publishes no
+    // broker properties page, so the link dangles there regardless.
+    const props = {
+      other: { name: 'other', config_scope: 'broker' },
+      subject: {
+        name: 'subject',
+        config_scope: 'cluster',
+        cloud_supported: true,
+        description: 'Set per broker by `other`.',
+        links: { '`other`': '#other' },
+      },
+    };
+    expect(applyPropertyLinks(props).warnings).toEqual([
+      expect.stringContaining('Cloud publishes no broker properties page'),
+    ]);
+  });
+
+  it('does not warn when a Cloud-published property links to a topic property', () => {
+    // cloud-docs publishes a topic properties page built from the same
+    // partial and tags as the docs page, so the link resolves there.
+    const props = {
+      other: { name: 'other', config_scope: 'topic' },
+      subject: {
+        name: 'subject',
+        config_scope: 'cluster',
+        cloud_supported: true,
+        description: 'Overridden per topic by `other`.',
+        links: { '`other`': '#other' },
+      },
+    };
+    expect(applyPropertyLinks(props).warnings).toEqual([]);
   });
 
   it('does not warn when the referring property is not Cloud-published', () => {
