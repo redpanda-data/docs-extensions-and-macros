@@ -805,7 +805,10 @@ jobs:
             {"findings":[{"surface","name","change_kind","affected_pages":
             ["url"],"summary"}],"proposed_ticket":{"title","body"}}. Every
             affected_pages entry must be an absolute
-            https://docs.redpanda.com/ URL. Only high-impact entries,
+            https://docs.redpanda.com/ URL. In proposed_ticket.body and each
+            summary, put code identifiers in backticks, start bullet lines
+            with "- ", and write links as bare URLs; Jira renders only those
+            three, so use no other Markdown. Only high-impact entries,
             maximum 10; write NO file when there are none. A report that
             does not match that shape is discarded before dispatch.
 
