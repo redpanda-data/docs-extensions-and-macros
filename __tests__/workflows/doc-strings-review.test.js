@@ -557,6 +557,21 @@ describe('doc-strings-review workflow: doc-impact dispatch (executed)', () => {
     expect(payload.client_payload.impact.findings).toHaveLength(1)
   })
 
+  test('the base and default branch travel with the payload so the router can flag a stacked PR', () => {
+    const r = dispatch(valid, { BASE_REF: 'CORE-1-parent', DEFAULT_BRANCH: 'dev' })
+    const payload = JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8'))
+    expect(payload.client_payload.base_ref).toBe('CORE-1-parent')
+    expect(payload.client_payload.default_branch).toBe('dev')
+  })
+
+  test('a hostile base branch name is carried as data, not executed', () => {
+    const r = dispatch(valid, { BASE_REF: '$(touch PWNED)"; touch PWNED2; "', DEFAULT_BRANCH: 'dev' })
+    expect(r.exists('PWNED')).toBe(false)
+    expect(r.exists('PWNED2')).toBe(false)
+    const payload = JSON.parse(fs.readFileSync(path.join(r.dir, 'gh-stdin'), 'utf8'))
+    expect(payload.client_payload.base_ref).toBe('$(touch PWNED)"; touch PWNED2; "')
+  })
+
   test.each([
     ['a finding missing required fields', { findings: [{ surface: 'properties' }], proposed_ticket: { title: 't', body: 'b' } }],
     ['an off-site affected_pages URL', {
