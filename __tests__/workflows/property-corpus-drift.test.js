@@ -138,6 +138,22 @@ function run (env = {}) {
 }
 
 describe('property-corpus-drift.sh', () => {
+  test('runs from the relative path the workflow uses', () => {
+    // The workflow runs `bash .github/scripts/property-corpus-drift.sh` from
+    // the checkout, so BASH_SOURCE is relative. The snapshot derivation is
+    // required from next to the script, and a bare relative path handed to
+    // require() resolves as a package name, not a file.
+    setLive({ matching: true });
+    fs.writeFileSync(ghCallLog, '');
+    const result = spawnSync('bash', [path.relative(repoRoot, SCRIPT_PATH)], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: { PATH: hermeticPath, HOME: harnessDir, GH_STUB_CALL: ghCallLog, GH_STUB_LIVE: liveDir, GH_STUB_EXISTING: '', CORPUS_DIR },
+    });
+    expect(result.stderr).not.toMatch(/Cannot find module/);
+    expect(result.status).toBe(0);
+  });
+
   it('exits 0 and files nothing when the mirror matches the docs repo', () => {
     setLive({ matching: true });
     const { status, stdout, ghCalls } = run();
