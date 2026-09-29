@@ -1546,6 +1546,17 @@ describe('inline code for paths and URLs in help prose', () => {
     expect(formatDescription('Query https://host/p?a=1&b=2, then stop.')).toBe('Query `https://host/p?a=1&b=2`, then stop.')
   })
 
+  // Every later pass matches inside a URL it has not yet seen as one: the path
+  // passes took /tmp/file out of the first, the short-flag pass took -a out of
+  // the second, and the issue-link pass rewrote the anchor in the third.
+  test('a URL is one span whatever it contains', () => {
+    expect(formatDescription('Open https://host/tmp/file for details.')).toBe('Open `https://host/tmp/file` for details.')
+    expect(formatDescription('See https://host/etc/redpanda.yaml.')).toBe('See `https://host/etc/redpanda.yaml`.')
+    expect(formatDescription('See https://host/foo-a/bar now.')).toBe('See `https://host/foo-a/bar` now.')
+    expect(formatDescription('See https://host/page#12345 now.')).toBe('See `https://host/page#12345` now.')
+    expect(formatDescription('Set https://host/$HOME/x now.')).toBe('Set `https://host/$HOME/x` now.')
+  })
+
   test('a bare command and the flags right after it form one span', () => {
     const { registerKnownCommandPaths } = require('../../../tools/rpk-docs/generate-rpk-docs.js')
     registerKnownCommandPaths(['rpk', 'rpk topic', 'rpk topic list'])

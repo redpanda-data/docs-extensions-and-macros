@@ -1569,6 +1569,26 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     return placeholder
   })
 
+  // Bare URLs become inline code: endpoints (http://localhost:9644) and links
+  // alike are code values, and an unformatted URL in help prose reads as
+  // broken markup. Not trailing sentence punctuation, and not a URL that is
+  // already an AsciiDoc link macro (url[text]), which backticks would break.
+  //
+  // Protected as a placeholder straight away, before any other pass runs.
+  // Every later pass matches inside a URL it does not know is one: the path
+  // passes backticked /tmp/file out of https://host/tmp/file, the short-flag
+  // pass took -a out of /foo-a/, and the issue-reference pass rewrote #NNNN
+  // anchors into link macros.
+  protectedDesc = protectedDesc.replace(/(?<![`\w/]|\]\()https?:\/\/[^\s`<>"'()[\]]+/g, (url, offset, whole) => {
+    if (whole[offset + url.length] === '[') return url // AsciiDoc link macro
+    const trail = url.match(/[.,;:!?]+$/)
+    const core = trail ? url.slice(0, -trail[0].length) : url
+    if (core.length <= 'https://'.length) return url
+    const placeholder = `__INLINE_CODE_${inlineCode.length}__`
+    inlineCode.push(`\`${decodeHtmlEntities(core)}\``)
+    return placeholder + (trail ? trail[0] : '')
+  })
+
   // Known top-level rpk subcommands (for accurate command detection)
   const rpkSubcommands = new Set([
     'ai', 'check', 'cloud', 'cluster', 'connect', 'container', 'debug',
@@ -1749,19 +1769,6 @@ function formatDescription(desc, customTransformations = null, options = {}) {
 
   // Add backticks around home directory paths (~/.bashrc, ~/.zshrc, ~/.config/...)
   result = result.replace(/(?<![`\w])(~\/\.(?:[^\s,;:)`]*[^\s,;:)`.!?])?)/g, '`$1`')
-
-  // Add backticks around bare URLs: endpoints (http://localhost:9644) and
-  // links alike are code values, and an unformatted URL in help prose reads
-  // as broken markup. Not trailing sentence punctuation, and not a URL that
-  // is already an AsciiDoc link macro (url[text]), which backticks would
-  // break. Runs before the GitHub issue-reference step below, which emits
-  // link macros of its own.
-  result = result.replace(/(?<![`\w/]|\]\()https?:\/\/[^\s`<>"'()[\]]+/g, (url, offset, whole) => {
-    if (whole[offset + url.length] === '[') return url // AsciiDoc link macro
-    const trail = url.match(/[.,;:!?]+$/)
-    const core = trail ? url.slice(0, -trail[0].length) : url
-    return core.length > 'https://'.length ? `\`${core}\`${trail ? trail[0] : ''}` : url
-  })
 
   // Add backticks around common package names
   result = result.replace(/(?<![`\w-])(bash-completion)(?![`\w-])/g, '`$1`')
