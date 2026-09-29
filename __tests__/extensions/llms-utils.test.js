@@ -112,6 +112,28 @@ describe('buildPageIndexes', () => {
     expect(buildPageIndexes({ pages: [rootPage], components, siteUrl, toMarkdownUrl })[0].path).toBe('streaming/26.1/llms.txt')
   })
 
+  it('derives the version root of index pages published with .html URLs', () => {
+    const indexPage = (module, relative, url) => ({
+      src: { component: 'streaming', version: '26.1', module, relative, stem: 'index' },
+      pub: { url }, out: {}, asciidoc: { doctitle: 'Index' },
+    })
+    for (const p of [
+      indexPage('ROOT', 'index.adoc', '/streaming/26.1/index.html'),
+      indexPage('manage', 'index.adoc', '/streaming/26.1/manage/index.html'),
+      indexPage('manage', 'tiered/index.adoc', '/streaming/26.1/manage/tiered/index.html'),
+    ]) {
+      expect(buildPageIndexes({ pages: [p], components, siteUrl, toMarkdownUrl })[0].path).toBe('streaming/26.1/llms.txt')
+    }
+  })
+
+  it('percent-encodes characters that would end a link destination early', () => {
+    const odd = [page('streaming', '26.1', '/streaming/26.1/manage/a-(b)/', 'Odd')]
+    const indexes = buildPageIndexes({ pages: odd, components, siteUrl, toMarkdownUrl })
+    expect(indexes[0].contents).toContain('(https://docs.example.com/streaming/26.1/manage/a-%28b%29.md)')
+    const section = renderPageIndexSection([{ ...indexes[0], url: 'https://docs.example.com/x (y)/llms.txt' }], components)
+    expect(section).toContain('](https://docs.example.com/x%20%28y%29/llms.txt)')
+  })
+
   it('writes one index per component version at the version root, including older versions', () => {
     const indexes = buildPageIndexes({ pages, components, siteUrl, toMarkdownUrl })
     expect(indexes.map((i) => i.path)).toEqual([

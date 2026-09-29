@@ -136,6 +136,16 @@ function escapeLinkText(text) {
 }
 
 /**
+ * A URL made safe as a Markdown link destination. An unmatched `)` ends the
+ * destination early, and a space or `<` ends it outright, so those are
+ * percent-encoded. Encoding keeps the plain `[text](url)` shape llms.txt
+ * readers expect, where an angle-bracket destination would not.
+ */
+function linkDestination(url) {
+  return String(url).replace(/[()<> ]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+/**
  * Longest shared directory of a set of URL paths, always ending in `/`.
  * `/streaming/26.1/manage/a/` and `/streaming/26.1/deploy/b/` share `/streaming/26.1/`.
  */
@@ -155,16 +165,24 @@ function commonDirectory(urls) {
  * URL of the component version's root, derived from how Antora built the page
  * URL: the version root, then the module name (omitted for ROOT), then the
  * page's relative path (index pages drop their own segment). Works for both
- * indexified (`/a/b/`) and `.html` URLs, since the page is one segment either way.
+ * indexified (`/a/b/`) and `.html` URLs, since the page is one segment either
+ * way, except an index page, whose `.html` URL has an `index.html` segment
+ * that its indexified URL does not.
  * Returns null when the page lacks the source fields needed.
  */
 function versionRootOf(page) {
   const { module: moduleName, relative } = page.src || {};
   if (!relative || !moduleName) return null;
   const relSegments = relative.replace(/\.adoc$/, '').split('/').filter(Boolean);
-  if (relSegments[relSegments.length - 1] === 'index') relSegments.pop();
-  const tailCount = relSegments.length + (moduleName === 'ROOT' ? 0 : 1);
   const urlSegments = page.pub.url.split('/').filter(Boolean);
+  if (relSegments[relSegments.length - 1] === 'index') {
+    relSegments.pop();
+    // An index page keeps an `index.html` segment of its own when URLs are
+    // not indexified (`/streaming/26.1/index.html`), and has none when they
+    // are (`/streaming/26.1/`).
+    if (urlSegments[urlSegments.length - 1] === 'index.html') urlSegments.pop();
+  }
+  const tailCount = relSegments.length + (moduleName === 'ROOT' ? 0 : 1);
   if (tailCount > urlSegments.length) return null;
   const rootSegments = urlSegments.slice(0, urlSegments.length - tailCount);
   return rootSegments.length ? `/${rootSegments.join('/')}/` : '/';
@@ -280,7 +298,7 @@ function buildPageIndexes({ pages, components, siteUrl, toMarkdownUrl, maxChars 
         const title = page.asciidoc && (page.asciidoc.doctitle || page.asciidoc.navtitle);
         const description = page.asciidoc && page.asciidoc.attributes && page.asciidoc.attributes.description;
         const mdUrl = `${siteUrl}${toMarkdownUrl(page.pub.url)}`;
-        let line = `- [${escapeLinkText(title || page.src.stem)}](${mdUrl})`;
+        let line = `- [${escapeLinkText(title || page.src.stem)}](${linkDestination(mdUrl)})`;
         if (description) line += `: ${truncateDescription(description)}`;
         const modified = page.asciidoc && page.asciidoc.attributes && page.asciidoc.attributes['page-git-modified-date'];
         return { url: page.pub.url, line, modified };
@@ -405,7 +423,7 @@ function renderPageIndexSection(indexes, components) {
       olderHeadingShown = true;
       out += `\nOlder versions:\n\n`;
     }
-    out += `- [${escapeLinkText(index.title)}](${index.url}): ${index.pageCount} ${index.pageCount === 1 ? 'page' : 'pages'}\n`;
+    out += `- [${escapeLinkText(index.title)}](${linkDestination(index.url)}): ${index.pageCount} ${index.pageCount === 1 ? 'page' : 'pages'}\n`;
   });
   return out;
 }
@@ -416,6 +434,7 @@ module.exports = {
   SOURCE_COMMENT_REGEX,
   MAX_INDEX_CHARS,
   formatLlmsDirective,
+  linkDestination,
   stripMarkdownMetadata,
   componentsWithExports,
   buildPageIndexes,

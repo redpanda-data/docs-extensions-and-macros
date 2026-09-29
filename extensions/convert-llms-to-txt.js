@@ -153,145 +153,151 @@ module.exports.register = function () {
       return latestVersions.has(pageKey);
     });
 
-    if (!pages.length) {
-      logger.warn('No pages with markdown content found in latest versions, skipping llms-full.txt generation');
+    if (!allPages.length) {
+      logger.warn('No pages with markdown content found, skipping llms.txt generation');
       return;
     }
 
-    logger.info(`Filtered to ${pages.length} pages from ${latestVersions.size} latest component versions (from ${allPages.length} total pages)`);
-
-    let fullContent = `# Redpanda Documentation - Full Markdown Export\n\n`;
-    fullContent += `> This file contains all documentation pages in markdown format for AI agent consumption.\n`;
-    fullContent += `> Generated from ${pages.length} pages on ${new Date().toISOString()}\n`;
-    fullContent += `> Site: ${siteUrl}\n\n`;
-    fullContent += `## About This Export\n\n`;
-    fullContent += `This export includes only the **latest version** of each component's documentation:\n`;
-    components.forEach(component => {
-      const latest = component.latest || component.versions[0];
-      if (latest) {
-        fullContent += `- **${component.title}**: version ${latest.version}\n`;
-      }
-    });
-    fullContent += `\n`;
-    fullContent += `### AI-Friendly Documentation Formats\n\n`;
-    fullContent += `We provide multiple formats optimized for AI consumption:\n\n`;
-    fullContent += `- **${siteUrl}/llms.txt**: Curated overview following the llms.txt standard - start here for a quick introduction\n`;
-    fullContent += `- **${siteUrl}/llms-full.txt**: Complete documentation export (this file) - comprehensive reference with all pages\n`;
-    fullContent += `- **Component-specific exports**: Focused documentation for individual products:\n`;
-    // Only advertise exports for components that actually have pages — a
-    // `<name>-full.txt` is generated per component below, so listing corpus-less
-    // landing/utility components (e.g. data-platform, self-managed, search) would
-    // point the AI index at a 404.
-    componentsWithExports(components, pages).forEach(component => {
-      fullContent += `  - \`${siteUrl}/${component.name}-full.txt\`: ${component.title}\n`;
-    });
-    fullContent += `- **Individual markdown pages**: Each HTML page has a corresponding .md file (e.g., \`/docs/page.html\` → \`/docs/page.md\`)\n\n`;
-    fullContent += `### Accessing Versioned Content\n\n`;
-    fullContent += `For components with versioned documentation (like Redpanda Self-Managed), older versions can be accessed by replacing the version segment in the URL:\n`;
-    fullContent += `- Latest: \`${siteUrl}/current/page-path\`\n`;
-    fullContent += `- Specific version: \`${siteUrl}/24.3/page-path\`, \`${siteUrl}/25.1/page-path\`, etc.\n\n`;
-    fullContent += `Available versioned components: ${components.filter(c => c.versions.length > 1).map(c => c.name).join(', ')}\n\n`;
-    fullContent += `---\n\n`;
-
-    // Sort pages by URL for consistent ordering
-    pages.sort((a, b) => {
-      const urlA = a.pub?.url || '';
-      const urlB = b.pub?.url || '';
-      return urlA.localeCompare(urlB);
-    });
-
-    pages.forEach((page, index) => {
-      const mdUrl = page.pub?.url ? toMarkdownUrl(page.pub.url) : '';
-      const pageUrl = mdUrl ? `${siteUrl}${mdUrl}` : 'unknown';
-      const pageTitle = page.asciidoc?.doctitle || page.src?.stem || 'Untitled';
-
-      fullContent += `# Page ${index + 1}: ${pageTitle}\n\n`;
-      fullContent += `**URL**: ${pageUrl}\n\n`;
-      fullContent += `---\n\n`;
-      // Strip metadata (directive, source comments) from page content
-      fullContent += stripMarkdownMetadata(page.markdownContents);
-      fullContent += `\n\n---\n\n`;
-    });
-
-    // Add llms-full.txt to site root
-    siteCatalog.addFile({
-      contents: Buffer.from(fullContent, 'utf8'),
-      out: { path: 'llms-full.txt' },
-    });
-    logger.info(`Generated llms-full.txt with ${pages.length} pages`);
-
-    // Generate component-specific full.txt files
-    logger.info('Generating component-specific full.txt files...');
+    // The full exports cover the latest versions only, but page indexes cover
+    // every published version, so an empty latest set skips only the exports.
     const componentGroups = new Map();
+    if (!pages.length) {
+      logger.warn('No pages with markdown content found in latest versions, skipping llms-full.txt generation');
+    } else {
+      logger.info(`Filtered to ${pages.length} pages from ${latestVersions.size} latest component versions (from ${allPages.length} total pages)`);
 
-    // Group pages by component
-    pages.forEach(page => {
-      const componentName = page.src.component;
-      if (!componentGroups.has(componentName)) {
-        componentGroups.set(componentName, []);
-      }
-      componentGroups.get(componentName).push(page);
-    });
-
-    // Generate a full.txt file for each component
-    componentGroups.forEach((componentPages, componentName) => {
-      const component = components.find(c => c.name === componentName);
-      if (!component) return;
-
-      const latest = component.latest || component.versions[0];
-      if (!latest) return;
+      let fullContent = `# Redpanda Documentation - Full Markdown Export\n\n`;
+      fullContent += `> This file contains all documentation pages in markdown format for AI agent consumption.\n`;
+      fullContent += `> Generated from ${pages.length} pages on ${new Date().toISOString()}\n`;
+      fullContent += `> Site: ${siteUrl}\n\n`;
+      fullContent += `## About This Export\n\n`;
+      fullContent += `This export includes only the **latest version** of each component's documentation:\n`;
+      components.forEach(component => {
+        const latest = component.latest || component.versions[0];
+        if (latest) {
+          fullContent += `- **${component.title}**: version ${latest.version}\n`;
+        }
+      });
+      fullContent += `\n`;
+      fullContent += `### AI-Friendly Documentation Formats\n\n`;
+      fullContent += `We provide multiple formats optimized for AI consumption:\n\n`;
+      fullContent += `- **${siteUrl}/llms.txt**: Curated overview following the llms.txt standard - start here for a quick introduction\n`;
+      fullContent += `- **${siteUrl}/llms-full.txt**: Complete documentation export (this file) - comprehensive reference with all pages\n`;
+      fullContent += `- **Component-specific exports**: Focused documentation for individual products:\n`;
+      // Only advertise exports for components that actually have pages — a
+      // `<name>-full.txt` is generated per component below, so listing corpus-less
+      // landing/utility components (e.g. data-platform, self-managed, search) would
+      // point the AI index at a 404.
+      componentsWithExports(components, pages).forEach(component => {
+        fullContent += `  - \`${siteUrl}/${component.name}-full.txt\`: ${component.title}\n`;
+      });
+      fullContent += `- **Individual markdown pages**: Each HTML page has a corresponding .md file (e.g., \`/docs/page.html\` → \`/docs/page.md\`)\n\n`;
+      fullContent += `### Accessing Versioned Content\n\n`;
+      fullContent += `For components with versioned documentation (like Redpanda Self-Managed), older versions can be accessed by replacing the version segment in the URL:\n`;
+      fullContent += `- Latest: \`${siteUrl}/current/page-path\`\n`;
+      fullContent += `- Specific version: \`${siteUrl}/24.3/page-path\`, \`${siteUrl}/25.1/page-path\`, etc.\n\n`;
+      fullContent += `Available versioned components: ${components.filter(c => c.versions.length > 1).map(c => c.name).join(', ')}\n\n`;
+      fullContent += `---\n\n`;
 
       // Sort pages by URL for consistent ordering
-      componentPages.sort((a, b) => {
+      pages.sort((a, b) => {
         const urlA = a.pub?.url || '';
         const urlB = b.pub?.url || '';
         return urlA.localeCompare(urlB);
       });
 
-      let componentContent = `# ${component.title} - Full Markdown Export\n\n`;
-      componentContent += `> This file contains all ${component.title} documentation pages in markdown format for AI agent consumption.\n`;
-      componentContent += `> Generated from ${componentPages.length} pages on ${new Date().toISOString()}\n`;
-      componentContent += `> Component: ${component.name} | Version: ${latest.version}\n`;
-      componentContent += `> Site: ${siteUrl}\n\n`;
-      componentContent += `## About This Export\n\n`;
-      componentContent += `This export includes the **latest version** (${latest.version}) of the ${component.title} documentation.\n\n`;
-      componentContent += `### AI-Friendly Documentation Formats\n\n`;
-      componentContent += `We provide multiple formats optimized for AI consumption:\n\n`;
-      componentContent += `- **${siteUrl}/llms.txt**: Curated overview of all Redpanda documentation\n`;
-      componentContent += `- **${siteUrl}/llms-full.txt**: Complete documentation export with all components\n`;
-      componentContent += `- **${siteUrl}/${componentName}-full.txt**: This file - ${component.title} documentation only\n`;
-      componentContent += `- **Individual markdown pages**: Each HTML page has a corresponding .md file\n\n`;
-
-      if (component.versions.length > 1) {
-        componentContent += `### Accessing Older Versions\n\n`;
-        componentContent += `This component has versioned documentation. Older versions can be accessed by replacing the version segment in the URL:\n`;
-        componentContent += `- Latest: \`${siteUrl}/current/page-path\`\n`;
-        componentContent += `- Specific version: \`${siteUrl}/24.3/page-path\`, \`${siteUrl}/25.1/page-path\`, etc.\n\n`;
-      }
-
-      componentContent += `---\n\n`;
-
-      // Add all pages
-      componentPages.forEach((page, index) => {
+      pages.forEach((page, index) => {
         const mdUrl = page.pub?.url ? toMarkdownUrl(page.pub.url) : '';
         const pageUrl = mdUrl ? `${siteUrl}${mdUrl}` : 'unknown';
         const pageTitle = page.asciidoc?.doctitle || page.src?.stem || 'Untitled';
 
-        componentContent += `# Page ${index + 1}: ${pageTitle}\n\n`;
-        componentContent += `**URL**: ${pageUrl}\n\n`;
-        componentContent += `---\n\n`;
+        fullContent += `# Page ${index + 1}: ${pageTitle}\n\n`;
+        fullContent += `**URL**: ${pageUrl}\n\n`;
+        fullContent += `---\n\n`;
         // Strip metadata (directive, source comments) from page content
-        componentContent += stripMarkdownMetadata(page.markdownContents);
-        componentContent += `\n\n---\n\n`;
+        fullContent += stripMarkdownMetadata(page.markdownContents);
+        fullContent += `\n\n---\n\n`;
       });
 
-      // Add component-specific full.txt file to site root
+      // Add llms-full.txt to site root
       siteCatalog.addFile({
-        contents: Buffer.from(componentContent, 'utf8'),
-        out: { path: `${componentName}-full.txt` },
+        contents: Buffer.from(fullContent, 'utf8'),
+        out: { path: 'llms-full.txt' },
       });
-      logger.info(`Generated ${componentName}-full.txt with ${componentPages.length} pages`);
-    });
+      logger.info(`Generated llms-full.txt with ${pages.length} pages`);
+
+      // Generate component-specific full.txt files
+      logger.info('Generating component-specific full.txt files...');
+
+      // Group pages by component
+      pages.forEach(page => {
+        const componentName = page.src.component;
+        if (!componentGroups.has(componentName)) {
+          componentGroups.set(componentName, []);
+        }
+        componentGroups.get(componentName).push(page);
+      });
+
+      // Generate a full.txt file for each component
+      componentGroups.forEach((componentPages, componentName) => {
+        const component = components.find(c => c.name === componentName);
+        if (!component) return;
+
+        const latest = component.latest || component.versions[0];
+        if (!latest) return;
+
+        // Sort pages by URL for consistent ordering
+        componentPages.sort((a, b) => {
+          const urlA = a.pub?.url || '';
+          const urlB = b.pub?.url || '';
+          return urlA.localeCompare(urlB);
+        });
+
+        let componentContent = `# ${component.title} - Full Markdown Export\n\n`;
+        componentContent += `> This file contains all ${component.title} documentation pages in markdown format for AI agent consumption.\n`;
+        componentContent += `> Generated from ${componentPages.length} pages on ${new Date().toISOString()}\n`;
+        componentContent += `> Component: ${component.name} | Version: ${latest.version}\n`;
+        componentContent += `> Site: ${siteUrl}\n\n`;
+        componentContent += `## About This Export\n\n`;
+        componentContent += `This export includes the **latest version** (${latest.version}) of the ${component.title} documentation.\n\n`;
+        componentContent += `### AI-Friendly Documentation Formats\n\n`;
+        componentContent += `We provide multiple formats optimized for AI consumption:\n\n`;
+        componentContent += `- **${siteUrl}/llms.txt**: Curated overview of all Redpanda documentation\n`;
+        componentContent += `- **${siteUrl}/llms-full.txt**: Complete documentation export with all components\n`;
+        componentContent += `- **${siteUrl}/${componentName}-full.txt**: This file - ${component.title} documentation only\n`;
+        componentContent += `- **Individual markdown pages**: Each HTML page has a corresponding .md file\n\n`;
+
+        if (component.versions.length > 1) {
+          componentContent += `### Accessing Older Versions\n\n`;
+          componentContent += `This component has versioned documentation. Older versions can be accessed by replacing the version segment in the URL:\n`;
+          componentContent += `- Latest: \`${siteUrl}/current/page-path\`\n`;
+          componentContent += `- Specific version: \`${siteUrl}/24.3/page-path\`, \`${siteUrl}/25.1/page-path\`, etc.\n\n`;
+        }
+
+        componentContent += `---\n\n`;
+
+        // Add all pages
+        componentPages.forEach((page, index) => {
+          const mdUrl = page.pub?.url ? toMarkdownUrl(page.pub.url) : '';
+          const pageUrl = mdUrl ? `${siteUrl}${mdUrl}` : 'unknown';
+          const pageTitle = page.asciidoc?.doctitle || page.src?.stem || 'Untitled';
+
+          componentContent += `# Page ${index + 1}: ${pageTitle}\n\n`;
+          componentContent += `**URL**: ${pageUrl}\n\n`;
+          componentContent += `---\n\n`;
+          // Strip metadata (directive, source comments) from page content
+          componentContent += stripMarkdownMetadata(page.markdownContents);
+          componentContent += `\n\n---\n\n`;
+        });
+
+        // Add component-specific full.txt file to site root
+        siteCatalog.addFile({
+          contents: Buffer.from(componentContent, 'utf8'),
+          out: { path: `${componentName}-full.txt` },
+        });
+        logger.info(`Generated ${componentName}-full.txt with ${componentPages.length} pages`);
+      });
+    }
 
     // Generate page index files for every published version (not only the latest),
     // so the llms.txt tree lists every page the sitemap lists.

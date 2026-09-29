@@ -1302,6 +1302,7 @@ Create `modules/home/pages/llms.adoc` in your docs repository with curated docum
 - `{site-url}/cloud-full.txt` - Cloud docs only
 - `{site-url}/redpanda-connect-full.txt` - Connect docs only
 - `{site-url}/<component>/<version>/llms.txt` - Page index for one component version
+- `{site-url}/<component>/llms.txt` - Page index for a component without versions, such as `connect/llms.txt`
 
 === Page indexes
 
