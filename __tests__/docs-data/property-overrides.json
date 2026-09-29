@@ -278,7 +278,6 @@
       ]
     },
     "cloud_storage_cache_max_objects": {
-      "description": "Maximum number of objects that may be held in the Tiered Storage cache. This applies simultaneously with `cloud_storage_cache_size`, and whichever limit is hit first will trigger trimming of the cache.",
       "links": {
         "`cloud_storage_cache_size`": "#cloud_storage_cache_size"
       }
@@ -352,7 +351,6 @@
       ]
     },
     "cloud_storage_crl_file": {
-      "description": "Path to certificate revocation list for `cloud_storage_trust_file`.",
       "links": {
         "`cloud_storage_trust_file`": "#cloud_storage_trust_file"
       }
@@ -503,7 +501,6 @@
       "description": "Timeout to check if new data is available for partitions in object storage for read replicas."
     },
     "cloud_storage_recovery_topic_validation_depth": {
-      "description": "Number of metadata segments to validate, from newest to oldest, when `cloud_storage_recovery_topic_validation_mode` is set to `check_manifest_and_segment_metadata`.",
       "links": {
         "`cloud_storage_recovery_topic_validation_mode`": "#cloud_storage_recovery_topic_validation_mode"
       }
@@ -843,7 +840,6 @@
       "config_scope": "cluster"
     },
     "controller_log_learner_recovery_rate_enabled": {
-      "description": "Whether the controller raft group (raft0) honors `raft_learner_recovery_rate`. When `false` (default) the controller log replicates to new learners without throttling. When `true`, controller-log recovery is subject to the same per-node recovery bucket as user partitions.",
       "see_also": [
         "xref:reference:properties/cluster-properties.adoc#raft_learner_recovery_rate[`raft_learner_recovery_rate`]"
       ],
@@ -889,14 +885,12 @@
       "config_scope": "cluster"
     },
     "data_transforms_read_buffer_memory_percentage": {
-      "description": "The percentage of available memory in the transform subsystem to use for read buffers.",
       "includes": [
         "reference:partial$internal-use-property.adoc[]"
       ],
       "config_scope": "cluster"
     },
     "data_transforms_write_buffer_memory_percentage": {
-      "description": "The percentage of available memory in the transform subsystem to use for write buffers.",
       "includes": [
         "reference:partial$internal-use-property.adoc[]"
       ],
@@ -988,7 +982,11 @@
       ]
     },
     "delete.retention.ms": {
-      "description": "The retention time for tombstone records in a compacted topic. Redpanda removes tombstone records after the retention limit is exceeded.\n\nFor topics that use Tiered Storage v1, tombstone removal is silently skipped while Tiered Storage is enabled and `redpanda.remote.read` or `redpanda.remote.write` is set for the topic: the configuration is accepted, but tombstones are not removed for the topic.\nThis restriction does not apply to topics that use Tiered Storage v2, available starting in Redpanda v26.2.\n\nIf both `delete.retention.ms` and the cluster property `tombstone_retention_ms` are set, `delete.retention.ms` overrides the cluster level tombstone retention for an individual topic.\n\nThis property supports three states:\n\n* Positive value: Sets the milliseconds to retain tombstone records before removal.\n* 0: Tombstone records are immediately eligible for removal.\n* Negative value: Disables tombstone removal entirely for this topic.",
+      "description": [
+        "The retention time for tombstone records in a compacted topic. Redpanda removes tombstone records after the retention limit is exceeded.\n\nFor topics that use Tiered Storage v1, tombstone removal is silently skipped while Tiered Storage is enabled and `redpanda.remote.read` or `redpanda.remote.write` is set for the topic: the configuration is accepted, but tombstones are not removed for the topic.\nThis restriction does not apply to topics that use Tiered Storage v2, available starting in Redpanda v26.2.",
+        "self-managed-only: If both `delete.retention.ms` and the cluster property `tombstone_retention_ms` are set, `delete.retention.ms` overrides the cluster level tombstone retention for an individual topic.",
+        "This property supports three states:\n\n* Positive value: Sets the milliseconds to retain tombstone records before removal.\n* 0: Tombstone records are immediately eligible for removal.\n* Negative value: Disables tombstone removal entirely for this topic."
+      ],
       "see_also": [
         {
           "content": "xref:reference:properties/cluster-properties.adoc#tombstone_retention_ms[`tombstone_retention_ms`]",
@@ -1031,7 +1029,6 @@
       ]
     },
     "disable_cluster_recovery_loop_for_tests": {
-      "description": "Disables the cluster recovery loop. This property is used to simplify testing and should not be set in production.",
       "includes": [
         "reference:partial$internal-use-property.adoc[]"
       ],
@@ -1127,7 +1124,6 @@
       ]
     },
     "enable_sasl": {
-      "description": "Enable SASL authentication for Kafka connections. Authorization is required to modify this property. See also `kafka_enable_authorization`.",
       "links": {
         "`kafka_enable_authorization`": "#kafka_enable_authorization"
       },
@@ -1357,7 +1353,6 @@
       "config_scope": "cluster"
     },
     "iceberg_rest_catalog_trust": {
-      "description": "The contents of a certificate chain to trust for the REST Iceberg catalog. Takes precedence over `iceberg_rest_catalog_trust_file`.",
       "links": {
         "`iceberg_rest_catalog_trust_file`": "self-managed-only: #iceberg_rest_catalog_trust_file"
       },
@@ -1797,7 +1792,10 @@
       ]
     },
     "max.message.bytes": {
-      "description": "The maximum size of a message or batch of a topic. If a compression type is enabled, `max.message.bytes` sets the maximum size of the compressed message or batch.\n\nIf `max.message.bytes` is set to a positive value, it overrides the cluster property `kafka_batch_max_bytes` for the topic.\n\nSet an upper limit for `max.message.bytes` using the cluster property `kafka_max_message_size_upper_limit_bytes`.",
+      "description": [
+        "The maximum size of a message or batch of a topic. If a compression type is enabled, `max.message.bytes` sets the maximum size of the compressed message or batch.\n\nIf `max.message.bytes` is set to a positive value, it overrides the cluster property `kafka_batch_max_bytes` for the topic.",
+        "self-managed-only: Set an upper limit for `max.message.bytes` using the cluster property `kafka_max_message_size_upper_limit_bytes`."
+      ],
       "see_also": [
         {
           "content": "xref:reference:properties/cluster-properties.adoc#kafka_batch_max_bytes[`kafka_batch_max_bytes`]",
@@ -2137,7 +2135,6 @@
       "config_scope": "cluster"
     },
     "raft_recovery_throttle_disable_dynamic_mode": {
-      "description": "Disables cross shard sharing used to throttle recovery traffic. Should only be used to debug unexpected problems.",
       "includes": [
         "reference:partial$internal-use-property.adoc[]"
       ],
@@ -2148,7 +2145,6 @@
       "config_scope": "cluster"
     },
     "reclaim_stable_window": {
-      "description": "If the duration since the last time memory was reclaimed is longer than the amount of time specified in this property, the memory usage of the batch cache is considered stable, so only the minimum size (`reclaim_min_size`) is set to be reclaimed.",
       "links": {
         "`reclaim_min_size`": "#reclaim_min_size"
       },
@@ -2241,7 +2237,11 @@
       ]
     },
     "redpanda.leaders.preference": {
-      "description": "The preferred location (rack) for partition leaders of a topic.\n\nThis property inherits the value from the `default_leaders_preference` cluster configuration property. You may override the cluster-wide setting by specifying the value for individual topics.\n\nIf the cluster configuration property `enable_rack_awareness` is set to `false`, Leader Pinning is disabled across the cluster.\n\nAccepted values:\n\n* `none`: Opt out the topic from Leader Pinning.\n* `racks:<rack1>[,<rack2>,...]`: Specify the preferred location (rack) of all topic partition leaders. The list can contain one or more rack IDs. If you specify multiple IDs, Redpanda tries to distribute the partition leader locations equally across brokers in these racks.\n* `ordered_racks:<rack1>[,<rack2>,...]`: Supported in Redpanda v26.1 or later. Specify the preferred racks in priority order. Redpanda places leaders in the first listed rack when available, failing over to each subsequent rack when higher-priority racks are unavailable. If all listed racks are unavailable, leaders fall back to any other available brokers. Brokers with no rack assignment are treated as lowest priority.",
+      "description": [
+        "The preferred location (rack) for partition leaders of a topic.",
+        "self-managed-only: This property inherits the value from the `default_leaders_preference` cluster configuration property. You may override the cluster-wide setting by specifying the value for individual topics.\n\nIf the cluster configuration property `enable_rack_awareness` is set to `false`, Leader Pinning is disabled across the cluster.",
+        "Accepted values:\n\n* `none`: Opt out the topic from Leader Pinning.\n* `racks:<rack1>[,<rack2>,...]`: Specify the preferred location (rack) of all topic partition leaders. The list can contain one or more rack IDs. If you specify multiple IDs, Redpanda tries to distribute the partition leader locations equally across brokers in these racks.\n* `ordered_racks:<rack1>[,<rack2>,...]`: Supported in Redpanda v26.1 or later. Specify the preferred racks in priority order. Redpanda places leaders in the first listed rack when available, failing over to each subsequent rack when higher-priority racks are unavailable. If all listed racks are unavailable, leaders fall back to any other available brokers. Brokers with no rack assignment are treated as lowest priority."
+      ],
       "see_also": [
         "xref:develop:produce-data/leader-pinning.adoc[Leader pinning]"
       ],
@@ -2859,7 +2859,6 @@
       "version": "v26.2.1"
     },
     "storage_compaction_key_map_memory": {
-      "description": "Maximum number of bytes that may be used on each shard by compaction key-offset maps. Only applies when `log_compaction_use_sliding_window` is set to `true`.",
       "links": {
         "`log_compaction_use_sliding_window`": "#log_compaction_use_sliding_window"
       },

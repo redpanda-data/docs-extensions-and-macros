@@ -283,7 +283,7 @@ describe('declared links over the live corpus', () => {
     // the shared derivation, or the attachment has no description for it.
     const hasGroundTruth = (name) => {
       const p = corpus[name];
-      if (typeof p?.description === 'string') return true;
+      if (typeof p?.description === 'string' || Array.isArray(p?.description)) return true;
       if (typeof p?.example === 'string' || Array.isArray(p?.example)) return true;
       if (Array.isArray(p?.admonitions) && p.admonitions.some((a) => typeof a?.text === 'string')) return true;
       return false;
