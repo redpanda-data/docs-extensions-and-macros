@@ -407,7 +407,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": true
+   "nullable": true,
+   "description": "The managed identity ID to use for access to the Azure storage account. To use Azure managed identities, you must set `cloud_storage_credentials_source` to `azure_vm_instance_metadata`."
   },
   "cloud_storage_azure_shared_key": {
    "name": "cloud_storage_azure_shared_key",
@@ -502,7 +503,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": false
+   "nullable": false,
+   "description": "Maximum number of objects that may be held in the Tiered Storage cache.  This applies simultaneously with `cloud_storage_cache_size`, and whichever limit is hit first will trigger trimming of the cache."
   },
   "cloud_storage_cache_num_buckets": {
    "name": "cloud_storage_cache_num_buckets",
@@ -700,7 +702,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": true
+   "nullable": true,
+   "description": "Path to certificate revocation list for `cloud_storage_trust_file`."
   },
   "cloud_storage_disable_archival_stm_rw_fence": {
    "name": "cloud_storage_disable_archival_stm_rw_fence",
@@ -1268,7 +1271,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": false
+   "nullable": false,
+   "description": "Number of metadata segments to validate, from newest to oldest, when `cloud_storage_recovery_topic_validation_mode` is set to `check_manifest_and_segment_metadata`."
   },
   "cloud_storage_recovery_topic_validation_mode": {
    "name": "cloud_storage_recovery_topic_validation_mode",
@@ -2409,7 +2413,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": false
+   "nullable": false,
+   "description": "Whether the controller raft group (raft0) honors `raft_learner_recovery_rate`. When `false` (default) the controller log replicates to new learners without throttling. When `true`, controller-log recovery is subject to the same per-node recovery bucket as user partitions."
   },
   "controller_snapshot_max_age_sec": {
    "name": "controller_snapshot_max_age_sec",
@@ -2609,7 +2614,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": false
+   "nullable": false,
+   "description": "The percentage of available memory in the transform subsystem to use for read buffers."
   },
   "data_transforms_runtime_limit_ms": {
    "name": "data_transforms_runtime_limit_ms",
@@ -2631,7 +2637,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": false
+   "nullable": false,
+   "description": "The percentage of available memory in the transform subsystem to use for write buffers."
   },
   "datalake_coordinator_max_bytes_per_commit": {
    "name": "datalake_coordinator_max_bytes_per_commit",
@@ -2941,7 +2948,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": false
+   "nullable": false,
+   "description": "Disables the cluster recovery loop. This property is used to simplify testing and should not be set in production."
   },
   "disable_metrics": {
    "name": "disable_metrics",
@@ -3159,7 +3167,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": false
+   "nullable": false,
+   "description": "Enable SASL authentication for Kafka connections. Authorization is required to modify this property. See also `kafka_enable_authorization`."
   },
   "enable_schema_id_validation": {
    "name": "enable_schema_id_validation",
@@ -3849,7 +3858,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": true,
    "is_deprecated": false,
-   "nullable": true
+   "nullable": true,
+   "description": "The contents of a certificate chain to trust for the REST Iceberg catalog. Takes precedence over `iceberg_rest_catalog_trust_file`."
   },
   "iceberg_rest_catalog_trust_file": {
    "name": "iceberg_rest_catalog_trust_file",
@@ -5693,7 +5703,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": false
+   "nullable": false,
+   "description": "Disables cross shard sharing used to throttle recovery traffic. Should only be used to debug unexpected problems."
   },
   "raft_replica_max_flush_delay_ms": {
    "name": "raft_replica_max_flush_delay_ms",
@@ -5836,7 +5847,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": false
+   "nullable": false,
+   "description": "If the duration since the last time memory was reclaimed is longer than the amount of time specified in this property, the memory usage of the batch cache is considered stable, so only the minimum size (`reclaim_min_size`) is set to be reclaimed."
   },
   "recovery_mode_enabled": {
    "name": "recovery_mode_enabled",
@@ -6594,7 +6606,8 @@
    "cloud_readonly": false,
    "cloud_byoc_only": false,
    "is_deprecated": false,
-   "nullable": false
+   "nullable": false,
+   "description": "Maximum number of bytes that may be used on each shard by compaction key-offset maps. Only applies when `log_compaction_use_sliding_window` is set to `true`."
   },
   "storage_compaction_key_map_memory_limit_percent": {
    "name": "storage_compaction_key_map_memory_limit_percent",
