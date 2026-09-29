@@ -1569,6 +1569,26 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     return placeholder
   })
 
+  // Bare URLs become inline code: endpoints (http://localhost:9644) and links
+  // alike are code values, and an unformatted URL in help prose reads as
+  // broken markup. Not trailing sentence punctuation, and not a URL that is
+  // already an AsciiDoc link macro (url[text]), which backticks would break.
+  //
+  // Protected as a placeholder straight away, before any other pass runs.
+  // Every later pass matches inside a URL it does not know is one: the path
+  // passes backticked /tmp/file out of https://host/tmp/file, the short-flag
+  // pass took -a out of /foo-a/, and the issue-reference pass rewrote #NNNN
+  // anchors into link macros.
+  protectedDesc = protectedDesc.replace(/(?<![`\w/]|\]\()https?:\/\/[^\s`<>"'()[\]]+/g, (url, offset, whole) => {
+    if (whole[offset + url.length] === '[') return url // AsciiDoc link macro
+    const trail = url.match(/[.,;:!?]+$/)
+    const core = trail ? url.slice(0, -trail[0].length) : url
+    if (core.length <= 'https://'.length) return url
+    const placeholder = `__INLINE_CODE_${inlineCode.length}__`
+    inlineCode.push(`\`${decodeHtmlEntities(core)}\``)
+    return placeholder + (trail ? trail[0] : '')
+  })
+
   // Known top-level rpk subcommands (for accurate command detection)
   const rpkSubcommands = new Set([
     'ai', 'check', 'cloud', 'cluster', 'connect', 'container', 'debug',
@@ -1713,6 +1733,17 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   }).join('`')
   result = result.replace(/(?<!`|-)(-[a-zA-Z])(?![a-zA-Z-])/g, '`$1`')
 
+  // A bare command followed by its flags ("run rpk topic list -r") is one
+  // command, but the passes above wrap the command path and each flag
+  // separately. Merge flag spans into the command span before them:
+  // `rpk topic list` `-r` -> `rpk topic list -r`. The quoted form never
+  // splits, because its whole span is protected before flags are wrapped.
+  let merged
+  do {
+    merged = result
+    result = result.replace(/`(rpk(?: [a-z][-a-z0-9]*)+(?: -{1,2}[a-zA-Z][-a-zA-Z0-9]*)*)` `(-{1,2}[a-zA-Z][-a-zA-Z0-9]*)`/g, '`$1 $2`')
+  } while (result !== merged)
+
   // Add backticks around environment variables
   result = result.replace(/(?<!`)(\$[A-Z_][A-Z0-9_]*)/g, '`$1`')
 
@@ -1729,12 +1760,15 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   result = result.replace(/`(\$[A-Z_][A-Z0-9_]*)`(\/(?:[^\s`]*[^\s`).,;:!?])?)/g, '`$1$2`')
 
   // Add backticks around file paths (but not if already backticked)
-  // Must check both the slash and the path aren't already inside backticks
-  result = result.replace(/(?<![`/])(\/(?:etc|var|usr|home|tmp)\/[^\s,)`]+)/g, '`$1`')
-  result = result.replace(/(?<![`/])((?:etc|var|usr|home|tmp)\/[^\s,)`]+)/g, '`$1`')
+  // Must check both the slash and the path aren't already inside backticks.
+  // Like the $HOME merge above, a path may not END in sentence punctuation,
+  // so "...in ~/.config/rpk/rpk.yaml." puts the period outside the span
+  // instead of publishing `~/.config/rpk/rpk.yaml.`.
+  result = result.replace(/(?<![`/])(\/(?:etc|var|usr|home|tmp)\/(?:[^\s,)`]*[^\s,)`.;:!?])?)/g, '`$1`')
+  result = result.replace(/(?<![`/])((?:etc|var|usr|home|tmp)\/(?:[^\s,)`]*[^\s,)`.;:!?])?)/g, '`$1`')
 
   // Add backticks around home directory paths (~/.bashrc, ~/.zshrc, ~/.config/...)
-  result = result.replace(/(?<![`\w])(~\/\.[^\s,;:)`]+)/g, '`$1`')
+  result = result.replace(/(?<![`\w])(~\/\.(?:[^\s,;:)`]*[^\s,;:)`.!?])?)/g, '`$1`')
 
   // Add backticks around common package names
   result = result.replace(/(?<![`\w-])(bash-completion)(?![`\w-])/g, '`$1`')

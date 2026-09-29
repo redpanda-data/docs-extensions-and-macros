@@ -116,7 +116,16 @@ function lintStrings (options) {
       // still exists at HEAD, in any touched file, was edited or moved, not
       // removed.
       const removedFiles = removedBySurface[surfaceName] ? [...removedBySurface[surfaceName].keys()] : []
-      const head = surface.extract({ repo: repoPath, files: new Set([...files.keys(), ...removedFiles]), log })
+      const touchedFiles = new Set([...files.keys(), ...removedFiles])
+      // A surface whose extraction covers the whole surface anyway (the
+      // properties extractor parses every config file on each run) supplies
+      // context from all of it, so a property in an untouched file that
+      // names, or is named by, a changed one is still on its page. Review
+      // scope stays the touched files either way.
+      const everything = surface.contextScope === 'surface' ? surface.extract({ repo: repoPath, log }) : null
+      const head = everything
+        ? everything.filter((d) => touchedFiles.has(d.file))
+        : surface.extract({ repo: repoPath, files: touchedFiles, log })
       headBySurface[surfaceName] = head
       const declarations = []
       for (const decl of head) {
@@ -128,7 +137,7 @@ function lintStrings (options) {
           continue
         }
         declarations.push(decl)
-        pending.push(pendingEntry(decl))
+        pending.push({ ...pendingEntry(decl), context: pageContext(decl, everything || head) })
       }
       results.push(runRules(declarations, rulesFor(surface), { skipRules, onlyRules }))
     }
@@ -184,6 +193,59 @@ function inSpans (decl, line) {
 
 function touches (decl, lineSet) {
   return spansOf(decl).some(([start, end]) => spanIntersects(start, end, lineSet))
+}
+
+const CONTEXT_LIMIT = 15
+const CONTEXT_STRING_LIMIT = 600
+
+/**
+ * The other strings a reader sees alongside this one, so a review can judge
+ * a string against its page rather than on its own: a flag's usage next to
+ * its command's Long text and examples, a property that names another
+ * property, the fields around an API field.
+ *
+ * - rpk: every other string declared in the same file, which is the
+ *   command's Short, Long and flags (rpk keeps one command per file).
+ * - api: the declarations nearest by line, which are the enclosing message
+ *   or rpc and its neighbors.
+ * - properties and metrics: declarations whose string names this one, or
+ *   that this string names, plus (metrics) its neighbors in the same group.
+ *
+ * Drawn from declarations already extracted for the diff, so it costs no
+ * extra extraction. Deterministic, capped, and order-stable.
+ */
+function pageContext (decl, all) {
+  const others = all.filter((d) => d !== decl && d.string != null)
+  const byDistance = (d) => Math.abs((d.line_start || 0) - (decl.line_start || 0))
+  const sameFile = others.filter((d) => d.file === decl.file)
+  let picked
+  if (decl.surface === 'rpk') {
+    // The command's Short and Long always, then the flags nearest this
+    // declaration, so a changed flag late in a long command keeps its
+    // neighbors when the cap applies. Shown in source order.
+    const isText = (d) => d.meta && (d.meta.kind === 'short' || d.meta.kind === 'long')
+    const text = sameFile.filter(isText)
+    const flags = sameFile.filter((d) => !isText(d)).sort((a, b) => byDistance(a) - byDistance(b))
+    picked = [...text, ...flags].slice(0, CONTEXT_LIMIT)
+      .sort((a, b) => (a.line_start || 0) - (b.line_start || 0))
+  } else if (decl.surface === 'api') {
+    picked = sameFile.sort((a, b) => byDistance(a) - byDistance(b)).slice(0, 6)
+  } else {
+    const mentions = (text, name) => Boolean(text && name) &&
+      new RegExp(`(^|[^A-Za-z0-9_])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_])`).test(text)
+    const related = others.filter((d) => mentions(d.string, decl.name) || mentions(decl.string, d.name))
+    const neighbors = decl.surface === 'metrics'
+      ? sameFile.filter((d) => !related.includes(d)).sort((a, b) => byDistance(a) - byDistance(b)).slice(0, 2)
+      : []
+    picked = [...related, ...neighbors]
+  }
+  return picked.slice(0, CONTEXT_LIMIT).map((d) => ({
+    name: d.name,
+    kind: (d.meta && d.meta.kind) || d.surface,
+    file: d.file,
+    line_start: d.line_start,
+    string: d.string.length > CONTEXT_STRING_LIMIT ? `${d.string.slice(0, CONTEXT_STRING_LIMIT)}...` : d.string
+  }))
 }
 
 /**
@@ -467,7 +529,7 @@ function runCli (options) {
   process.exitCode = options.strict && result.summary.errors > 0 ? 1 : 0
 }
 
-module.exports = { lintStrings, formatHuman, runCli, SURFACES, rulesFor, fingerprint, readFingerprints }
+module.exports = { lintStrings, formatHuman, runCli, SURFACES, rulesFor, fingerprint, readFingerprints, pageContext }
 
 // Direct usage: node tools/lint-strings --repo <path> [--surface a,b]
 //   [--diff <base>] [--format json|human] [--strict]

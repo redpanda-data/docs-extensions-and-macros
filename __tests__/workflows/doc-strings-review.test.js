@@ -930,7 +930,9 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       fs.mkdirSync(path.join(dir, 'state'))
       fs.writeFileSync(path.join(dir, 'state', 'reviewed.txt'), 'aaaaaaaaaaaaaaaa\n')
       const comments = [
-        { id: 1, user: { login: 'claude[bot]', type: 'Bot' }, body: 'Fix it.\n<!-- doc-strings-review:fp=bbbbbbbbbbbbbbbb -->' },
+        // The footer as it actually reaches GitHub: claude-code-action strips
+        // HTML comments, so the marker is a visible <sub> line.
+        { id: 1, user: { login: 'claude[bot]', type: 'Bot' }, body: 'Fix it.\n<sub>doc-strings-review:fp=bbbbbbbbbbbbbbbb</sub>' },
         { id: 2, user: { login: 'someone', type: 'User' }, body: '<!-- doc-strings-review:fp=cccccccccccccccc -->' }
       ]
       const r = execRun(step, { env: env(dir), stubs: { gh: ghCommentsStub }, files: { 'comments.json': JSON.stringify(comments) } })
@@ -1080,8 +1082,21 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
 
     test('the prompt caps inline comments and tells the model to mark each one', () => {
       expect(review.with.prompt).toMatch(/AT MOST 10 inline comments/)
-      expect(review.with.prompt).toMatch(/doc-strings-review:fp=FINGERPRINT/)
+      // Visible, because the action's comment tools strip HTML comments.
+      expect(review.with.prompt).toMatch(/<sub>doc-strings-review:fp=FINGERPRINT<\/sub>/)
+      expect(review.with.prompt).not.toMatch(/<!-- doc-strings-review:fp/)
       expect(review.with.prompt).not.toMatch(/Finish with one summary comment/)
+    })
+
+    test('the prompt reviews strings in their page context and keeps articles', () => {
+      expect(review.with.prompt).toMatch(/REVIEW IN CONTEXT/)
+      expect(review.with.prompt).toMatch(/Each entry carries context/)
+      expect(review.with.prompt).toMatch(/articles and subjects/)
+      expect(review.with.prompt).toMatch(/Every flag, command, path and URL goes in inline code/)
+      // The related-string comment is the named exception to the
+      // suggestion-block rule, and still carries the fingerprint footer.
+      expect(review.with.prompt).toMatch(/one exception to the suggestion rules above/)
+      expect(review.with.prompt).toMatch(/still ends with the changed declaration's\s+fingerprint footer/)
     })
   })
 })
