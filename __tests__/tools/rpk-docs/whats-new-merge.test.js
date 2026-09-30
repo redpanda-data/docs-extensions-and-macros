@@ -214,4 +214,26 @@ describe('filterDiffForWhatsNew (rpk ai exclusion)', () => {
     const out = filterDiffForWhatsNew(diff, ['rpk check'])
     expect(out.details.newCommands.map(c => c.path)).toEqual(['rpk ai llm-provider create'])
   })
+
+  test('drops asPartial subtrees from the overrides and keeps the rest', () => {
+    const sqlDiff = {
+      summary: {},
+      details: {
+        newCommands: [
+          { path: 'rpk sql', name: 'sql', description: 'x' },
+          { path: 'rpk sql debug bundle', name: 'bundle', description: 'x' },
+          { path: 'rpk sqlx', name: 'sqlx', description: 'prefix must respect word boundary' },
+          { path: 'rpk cloud byoc install', name: 'install', description: 'cloud is not asPartial' },
+        ],
+        newFlags: [
+          { commandPath: 'rpk sql debug bundle', flagName: 'admin-hosts' },
+          { commandPath: 'rpk topic produce', flagName: 'schema-context' },
+        ],
+      },
+    }
+    const overrides = { commands: { 'rpk sql': { asPartial: true } } }
+    const out = filterDiffForWhatsNew(sqlDiff, [], overrides)
+    expect(out.details.newCommands.map(c => c.path)).toEqual(['rpk sqlx', 'rpk cloud byoc install'])
+    expect(out.details.newFlags.map(f => f.commandPath)).toEqual(['rpk topic produce'])
+  })
 })

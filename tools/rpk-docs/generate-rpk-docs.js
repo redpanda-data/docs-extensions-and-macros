@@ -2848,14 +2848,20 @@ async function generateRpkDocs(options = {}) {
     // Build subcommands with correct xref paths
     // Filter out excluded and asPartial subcommands — excluded have no file,
     // asPartial ones live in the partials directory with no linkable xref.
+    // The exception is a parent that is itself asPartial: its partial is
+    // included by a stub in the component that publishes the whole subtree
+    // (rpk sql in cloud-docs, rpk ai in adp-docs), so relative xrefs to its
+    // children resolve there, the same way rpk cloud partials link.
     // rpk cloud and rpk security secret rows stay in the table: their pages
     // are routed to the cloud partials directory and published by
     // cloud-docs, so the xref below links across to the cloud component
     // instead of dropping the row (which hid the subcommand entirely).
+    const parentIsPartial = shouldUsePartialDir(resolvedOverrides, commandPath)
     const subcommands = (command.commands || [])
       .filter(sub => {
         const subPath = `${commandPath} ${sub.name}`
-        return !shouldExcludeCommand(resolvedOverrides, subPath) && !shouldUsePartialDir(resolvedOverrides, subPath)
+        return !shouldExcludeCommand(resolvedOverrides, subPath) &&
+          (parentIsPartial || !shouldUsePartialDir(resolvedOverrides, subPath))
       })
       .map(sub => {
         const subPath = `${commandPath} ${sub.name}`
