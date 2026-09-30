@@ -76,7 +76,13 @@ function triageSucceeded (row) {
  * @returns {string} Markdown section, always non-empty.
  */
 function buildUpstreamSection (candidates) {
-  const rows = (candidates || []).filter((c) => c.agent_verdict === 'UPSTREAM_OVERRIDE' && triageSucceeded(c))
+  // source_file is required here, not just carried along: every row this
+  // section describes is claimed to be part of THIS PR's diff, and a row
+  // with no source location (see buildUnlocatableSection) never reaches the
+  // rewrite step at all -- including it here would describe a change the
+  // PR doesn't actually make. Harmless on properties, where every row
+  // already has one (its extractor is a real AST parser).
+  const rows = (candidates || []).filter((c) => c.agent_verdict === 'UPSTREAM_OVERRIDE' && triageSucceeded(c) && c.source_file)
   if (rows.length === 0) return nothingThisRun('property descriptions to upstream')
 
   const parts = [
@@ -162,8 +168,46 @@ function buildAmbiguousDigest (candidates) {
   return parts.join('\n\n')
 }
 
+/**
+ * Build the markdown section listing candidates the agent triage layer
+ * judged UPSTREAM_OVERRIDE, but for which no static source location was
+ * found (row.source_file unset) -- currently only possible on the rpk
+ * surface (see tools/rpk-docs/scripts/locate-strings): `ai`, `connect`, and
+ * `k8s` subcommands are managed plugins whose text is not defined anywhere
+ * in src/go/rpk, so no automated source-rewrite could ever act on them.
+ * The properties surface always has a location (its extractor is a real
+ * AST parser), so this section is empty there.
+ *
+ * Deliberately separate from buildAmbiguousDigest: these rows are not
+ * ambiguous -- the agent was confident -- they are just outside what
+ * automation can reach, which is a different thing for a human reviewer to
+ * know before deciding what to do next.
+ *
+ * @param {Object[]} candidates - Triaged rows (from triage.js's triageCandidate).
+ * @returns {string} Markdown section, always non-empty.
+ */
+function buildUnlocatableSection (candidates) {
+  const rows = (candidates || []).filter((c) => c.agent_verdict === 'UPSTREAM_OVERRIDE' && triageSucceeded(c) && !c.source_file)
+  if (rows.length === 0) return nothingThisRun('upstreamable candidates without a source location')
+
+  const parts = [
+    `${rows.length} candidate${rows.length === 1 ? '' : 's'} the agent judged worth upstreaming, but no static source location was found for -- likely a managed plugin (ai, connect, k8s) whose text is not defined in src/go/rpk. These need a manual PR against whichever repo actually owns the text.`
+  ]
+  for (const row of rows) {
+    parts.push([
+      heading(row.name),
+      row.agent_reason,
+      quotedBlock('Override text:', row.upstream_candidate_text),
+      quotedBlock('Source text:', row.source_text),
+      'Needs a manual upstream PR; automation cannot locate this text in src/go/rpk.'
+    ].join('\n\n'))
+  }
+  return parts.join('\n\n')
+}
+
 module.exports = {
   buildUpstreamSection,
   buildRetirementSection,
-  buildAmbiguousDigest
+  buildAmbiguousDigest,
+  buildUnlocatableSection
 }

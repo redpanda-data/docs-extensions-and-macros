@@ -301,6 +301,63 @@ function prepareSourceFromRef(sourceRef, sourcePath = null) {
 }
 
 /**
+ * Verify Go is installed and satisfies sourcePath's go.mod requirement,
+ * logging the effective version. Throws with an actionable message
+ * otherwise.
+ *
+ * Checks in two steps so a network-dependent failure can never be
+ * mistaken for "Go is not installed":
+ * 1. A bare `go version` with no cwd -- fast, purely local, no network.
+ *    If this fails, Go genuinely isn't on PATH.
+ * 2. Only if the bare-installed version is insufficient on its own: retry
+ *    with cwd: sourcePath, so Go's own toolchain resolution
+ *    (GOTOOLCHAIN=auto, the default since Go 1.21) sees the go.mod in play
+ *    and can auto-fetch a sufficient version. This is the only step that
+ *    can hit the network, and only runs when the bare check already
+ *    established there's a real version shortfall to begin with -- so a
+ *    blocked/slow download here is reported as ADDED CONTEXT on an
+ *    already-real version-mismatch error, never as its own misleading
+ *    "Go not found".
+ *
+ * @param {string} sourcePath - Path to rpk Go source directory (src/go/rpk).
+ * @param {string} notFoundVerb - Verb phrase for the "not found" message
+ *   ("for --from-source" or "to build rpk from source").
+ */
+function ensureGoAvailable (sourcePath, notFoundVerb) {
+  const bareGoCheck = spawnSync('go', ['version'], { encoding: 'utf8', timeout: 5000 })
+  if (bareGoCheck.status !== 0) {
+    throw new Error(
+      `Go is required ${notFoundVerb} but was not found.\n` +
+      'Install Go from https://go.dev/ and ensure it\'s in your PATH.'
+    )
+  }
+
+  const installedGoVersion = parseGoVersion(bareGoCheck.stdout)
+  const requiredGoVersion = getRequiredGoVersion(sourcePath)
+  const bareSufficient = !installedGoVersion || !requiredGoVersion || checkGoVersionSufficient(installedGoVersion, requiredGoVersion)
+  if (bareSufficient) {
+    console.log(`Go version: ${bareGoCheck.stdout.trim()}`)
+    return
+  }
+
+  const toolchainCheck = spawnSync('go', ['version'], { cwd: sourcePath, encoding: 'utf8', timeout: 30000 })
+  const resolvedVersion = toolchainCheck.status === 0 ? parseGoVersion(toolchainCheck.stdout) : null
+  if (resolvedVersion && checkGoVersionSufficient(resolvedVersion, requiredGoVersion)) {
+    console.log(`Go version: ${toolchainCheck.stdout.trim()} (auto-resolved from ${installedGoVersion})`)
+    return
+  }
+
+  const toolchainNote = toolchainCheck.status !== 0
+    ? ` Go's own toolchain auto-download also failed (this needs network access to proxy.golang.org): ${(toolchainCheck.stderr || '').trim().split('\n')[0]}`
+    : ''
+  throw new Error(
+    `Go version mismatch: installed ${installedGoVersion}, required >= ${requiredGoVersion}\n` +
+    `The rpk source (go.mod) requires Go ${requiredGoVersion} or newer.${toolchainNote}\n` +
+    'Update Go: brew upgrade go (macOS) or download from https://go.dev/dl/'
+  )
+}
+
+/**
  * Fetch rpk tree by running from Go source code
  * Useful for pre-releases before Docker images are published
  * @param {string} sourcePath - Path to rpk Go source directory (e.g., ~/redpanda/src/go/rpk)
@@ -326,30 +383,8 @@ function fetchRpkTreeFromSource(sourcePath) {
     )
   }
 
-  // Check if Go is installed
-  const goCheck = spawnSync('go', ['version'], { encoding: 'utf8', timeout: 5000 })
-  if (goCheck.status !== 0) {
-    throw new Error(
-      'Go is required for --from-source but was not found.\n' +
-      'Install Go from https://go.dev/ and ensure it\'s in your PATH.'
-    )
-  }
-
   console.log(`Building and running rpk from source at ${sourcePath}...`)
-  console.log(`Go version: ${goCheck.stdout.trim()}`)
-
-  // Check Go version meets go.mod requirements
-  const installedGoVersion = parseGoVersion(goCheck.stdout)
-  const requiredGoVersion = getRequiredGoVersion(sourcePath)
-  if (installedGoVersion && requiredGoVersion) {
-    if (!checkGoVersionSufficient(installedGoVersion, requiredGoVersion)) {
-      throw new Error(
-        `Go version mismatch: installed ${installedGoVersion}, required >= ${requiredGoVersion}\n` +
-        `The rpk source (go.mod) requires Go ${requiredGoVersion} or newer.\n` +
-        'Update Go: brew upgrade go (macOS) or download from https://go.dev/dl/'
-      )
-    }
-  }
+  ensureGoAvailable(sourcePath, 'for --from-source')
 
   // Run rpk directly from source using go run
   const result = spawnSync('go', ['run', 'cmd/rpk/main.go', '--print-tree'], {
@@ -392,6 +427,61 @@ function fetchRpkTreeFromSource(sourcePath) {
       'This may indicate a version mismatch or corrupted source.'
     )
   }
+}
+
+/**
+ * Statically locate the file:line of every rpk command/flag description in
+ * a src/go/rpk checkout, by parsing the Go source with the standalone
+ * locate-strings analyzer (tools/rpk-docs/scripts/locate-strings). Unlike
+ * `rpk --print-tree` (fetchRpkTreeFromSource above), this never runs rpk --
+ * it only parses source -- because a runtime command tree carries no source
+ * location at all, and grepping per candidate at upstreaming time is the
+ * same turn-budget problem the property-overrides upstreaming workflow hit
+ * before switching to a real AST-based extractor. This is that extractor's
+ * rpk equivalent.
+ *
+ * Coverage is necessarily partial: `ai`, `connect`, and `k8s` (see
+ * KNOWN_PLUGINS above) are managed plugins whose subcommand trees rpk can
+ * enumerate via --print-tree even from a bare source build, but whose
+ * description text does not live anywhere in this checkout -- confirmed by
+ * exhaustive grep across a real streaming-enterprise checkout, not an
+ * assumption. Those paths, and any other construct outside the handful of
+ * mechanical patterns the analyzer understands (a computed Use string, an
+ * AddCommand argument built through a loop rather than a literal call),
+ * come back with no entry at all. Callers must treat a missing path as "no
+ * source location available", never as "command doesn't exist".
+ *
+ * @param {string} sourcePath - Path to rpk Go source directory (src/go/rpk).
+ * @returns {Object} Map keyed by full command path (e.g. "rpk topic
+ *   create"), each value { description: {file, line}|undefined, flags:
+ *   {[flagName]: {file, line}} }.
+ */
+function locateRpkSourceStrings (sourcePath) {
+  const analyzerDir = path.join(__dirname, 'scripts', 'locate-strings')
+  const result = spawnSync('go', ['run', '.', '--repo', path.resolve(sourcePath)], {
+    cwd: analyzerDir,
+    encoding: 'utf8',
+    timeout: 60000,
+    maxBuffer: 50 * 1024 * 1024
+  })
+  if (result.status !== 0) {
+    throw new Error(`Failed to run the rpk source-string locator: ${result.stderr}`)
+  }
+  let entries
+  try {
+    entries = JSON.parse(result.stdout)
+  } catch (err) {
+    throw new Error(`Failed to parse locate-strings output: ${err.message}`)
+  }
+  const byPath = {}
+  for (const entry of entries) {
+    const flags = {}
+    for (const f of entry.flags || []) {
+      flags[f.flag] = { file: f.file, line: f.line }
+    }
+    byPath[entry.path] = { description: entry.description, flags }
+  }
+  return byPath
 }
 
 /**
@@ -1264,25 +1354,8 @@ function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
  * @returns {string} Path to the built binary
  */
 function buildRpkBinary(sourcePath, outPath) {
-  const goCheck = spawnSync('go', ['version'], { encoding: 'utf8', timeout: 5000 })
-  if (goCheck.status !== 0) {
-    throw new Error(
-      'Go is required to build rpk from source but was not found.\n' +
-      'Install Go from https://go.dev/ and ensure it\'s in your PATH.'
-    )
-  }
-
-  const installedGoVersion = parseGoVersion(goCheck.stdout)
-  const requiredGoVersion = getRequiredGoVersion(sourcePath)
-  if (installedGoVersion && requiredGoVersion &&
-      !checkGoVersionSufficient(installedGoVersion, requiredGoVersion)) {
-    throw new Error(
-      `Go version mismatch: installed ${installedGoVersion}, required >= ${requiredGoVersion}\n` +
-      `The rpk source (go.mod) requires Go ${requiredGoVersion} or newer.`
-    )
-  }
-
   console.log(`Building rpk from source at ${sourcePath}...`)
+  ensureGoAvailable(sourcePath, 'to build rpk from source')
   const buildResult = spawnSync('go', ['build', '-o', outPath, './cmd/rpk'], {
     cwd: sourcePath,
     encoding: 'utf8',
@@ -2849,6 +2922,7 @@ function runValidation(outputDir, options = {}) {
 module.exports = {
   handleRpkDocsGeneration,
   fetchRpkTreeFromSource,
+  locateRpkSourceStrings,
   fetchRpkTreeFromLinuxSource,
   acquireRpkBinary,
   buildRpkBinary,

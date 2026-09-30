@@ -171,6 +171,51 @@ describe('overrides-audit adapters', () => {
       expect(byKey['rpk topic create --partitions|flags.description'].note).toContain('TODO')
     })
 
+    test('UPSTREAMABLE rows carry source_file/source_line when --locations resolves one', () => {
+      const result = runAudit({
+        overrides: writeFixture('rpk-overrides-diff.json', {
+          commands: {
+            'rpk topic create': {
+              description: 'Create one or more topics.',
+              flags: { partitions: { description: 'How many partitions to create.' } }
+            }
+          }
+        }),
+        extracted: writeFixture('rpk-extracted.json', rpkExtracted),
+        locations: writeFixture('rpk-locations.json', {
+          'rpk topic create': {
+            description: { file: 'pkg/cli/topic/create.go', line: 40 },
+            flags: { partitions: { file: 'pkg/cli/topic/create.go', line: 141 } }
+          }
+        }),
+        surface: 'rpk'
+      })
+      const byKey = Object.fromEntries(result.manifest.map((row) => [`${row.name}|${row.field}`, row]))
+      const desc = byKey['rpk topic create|description']
+      expect(desc.class).toBe(CLASSES.UPSTREAMABLE)
+      expect(desc.source_file).toBe('pkg/cli/topic/create.go')
+      expect(desc.source_line).toBe(40)
+      const flag = byKey['rpk topic create --partitions|flags.description']
+      expect(flag.class).toBe(CLASSES.UPSTREAMABLE)
+      expect(flag.source_file).toBe('pkg/cli/topic/create.go')
+      expect(flag.source_line).toBe(141)
+    })
+
+    test('UPSTREAMABLE row with no matching location gets an explanatory note, not a guess', () => {
+      const result = runAudit({
+        overrides: writeFixture('rpk-overrides-diff2.json', {
+          commands: { 'rpk topic create': { description: 'Create one or more topics.' } }
+        }),
+        extracted: writeFixture('rpk-extracted.json', rpkExtracted),
+        locations: writeFixture('rpk-locations-empty.json', {}),
+        surface: 'rpk'
+      })
+      const row = result.manifest[0]
+      expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+      expect(row.source_file).toBeUndefined()
+      expect(row.note).toContain('No static source location was found')
+    })
+
     test('flag not found on an otherwise-found command stays REVIEW', () => {
       const result = runAudit({
         overrides: writeFixture('rpk-overrides-stale-flag.json', {

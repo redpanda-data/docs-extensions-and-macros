@@ -134,6 +134,41 @@ function reviewRow (name, field, text, upstreamRef, note) {
   return row
 }
 
+// Shared note appended when a command classifies UPSTREAMABLE (or the SPLIT
+// variant of KEEP_UNTIL_UPSTREAMED) but no static source location was
+// found. Confirmed by exhaustive grep against a real streaming-enterprise
+// checkout: ai/connect/k8s (see KNOWN_PLUGINS in rpk-docs-handler.js) are
+// managed plugins whose help text --print-tree can still enumerate, but
+// which is not defined anywhere in src/go/rpk -- so no source-rewrite
+// automation scoped to this repo could ever act on it. Anything else with
+// no location hit a construct locate-strings deliberately won't guess at
+// (a computed Use string, an AddCommand argument built through a loop).
+const NO_LOCATION_SUFFIX = ' No static source location was found for this command/flag (it may come from a managed plugin such as ai, connect, or k8s, whose text is not defined in src/go/rpk source), so it cannot be included in an automated source-rewrite batch.'
+
+/**
+ * Attach {source_file, source_line} to a manifest row when the location
+ * index resolved one, and append NO_LOCATION_SUFFIX to the row's note
+ * otherwise. Only meaningful for rows classify.js/classifyProse already
+ * marked UPSTREAMABLE or KEEP_UNTIL_UPSTREAMED (SPLIT): anything else has no
+ * upstream_candidate_text an automated rewrite would ever act on.
+ *
+ * @param {Object} row - Manifest row from classifyProse.
+ * @param {Object|undefined} location - {file, line}, or undefined when not found.
+ * @returns {Object} The same row, mutated in place, for convenience.
+ */
+function attachLocation (row, location) {
+  const isUpstreamCandidate = row.class === classify.CLASSES.UPSTREAMABLE ||
+    (row.class === classify.CLASSES.KEEP_UNTIL_UPSTREAMED && typeof row.note === 'string' && row.note.startsWith('SPLIT:'))
+  if (!isUpstreamCandidate) return row
+  if (location) {
+    row.source_file = location.file
+    row.source_line = location.line
+  } else {
+    row.note = (row.note || '') + NO_LOCATION_SUFFIX
+  }
+  return row
+}
+
 /**
  * Classify override prose against the already-formatted source text it
  * would replace, mirroring classify.js's classifyDescription: equal after
@@ -221,9 +256,11 @@ function classifyProse (name, field, overrideText, formattedSource, upstreamRef,
  * @param {Object|null} tree - Extracted tree root, or null when none was given.
  * @param {Object|null} node - This command's tree node, or null when not found.
  * @param {Object|null} textTransformations - rpk-overrides.json's top-level textTransformations.
+ * @param {Object|undefined} location - This command's {file, line} from the
+ *   source-string locator, or undefined when none was given/found.
  * @returns {Object} Manifest row.
  */
-function commandDescriptionRow (commandName, text, upstreamRef, tree, node, textTransformations) {
+function commandDescriptionRow (commandName, text, upstreamRef, tree, node, textTransformations, location) {
   if (!tree) return reviewRow(commandName, 'description', text, upstreamRef, NO_TREE_NOTE)
   if (!node) {
     return reviewRow(commandName, 'description', text, upstreamRef,
@@ -240,8 +277,8 @@ function commandDescriptionRow (commandName, text, upstreamRef, tree, node, text
   const formattedSource = mainDescription.trim()
     ? ensurePeriod(formatDescription(mainDescription, textTransformations))
     : ''
-  return classifyProse(commandName, 'description', text, formattedSource, upstreamRef,
-    `Source's main description for '${commandName}' is empty once section headers (FIELDS, USAGE, ...) are parsed out; nothing to compare the override against.`)
+  return attachLocation(classifyProse(commandName, 'description', text, formattedSource, upstreamRef,
+    `Source's main description for '${commandName}' is empty once section headers (FIELDS, USAGE, ...) are parsed out; nothing to compare the override against.`), location)
 }
 
 /**
@@ -257,9 +294,11 @@ function commandDescriptionRow (commandName, text, upstreamRef, tree, node, text
  * @param {Object|null} tree - Extracted tree root, or null when none was given.
  * @param {Object|null} commandNode - This flag's owning command node, or null when not found.
  * @param {Object|null} textTransformations - rpk-overrides.json's top-level textTransformations.
+ * @param {Object|undefined} location - This flag's {file, line} from the
+ *   source-string locator, or undefined when none was given/found.
  * @returns {Object} Manifest row.
  */
-function flagDescriptionRow (fullName, flagName, text, upstreamRef, tree, commandNode, textTransformations) {
+function flagDescriptionRow (fullName, flagName, text, upstreamRef, tree, commandNode, textTransformations, location) {
   if (!tree) return reviewRow(fullName, 'flags.description', text, upstreamRef, NO_TREE_NOTE)
   if (!commandNode) {
     return reviewRow(fullName, 'flags.description', text, upstreamRef,
@@ -276,17 +315,22 @@ function flagDescriptionRow (fullName, flagName, text, upstreamRef, tree, comman
   const formattedSource = rawDesc.trim()
     ? ensurePeriod(formatDescription(rawDesc, textTransformations))
     : ''
-  return classifyProse(fullName, 'flags.description', text, formattedSource, upstreamRef,
-    `Source flag has no description text for '${fullName}'; nothing to compare the override against.`)
+  return attachLocation(classifyProse(fullName, 'flags.description', text, formattedSource, upstreamRef,
+    `Source flag has no description text for '${fullName}'; nothing to compare the override against.`), location)
 }
 
 /**
  * Run the audit for the rpk surface.
  *
- * @param {Object} args - { overridesPath, extractedPath }.
+ * @param {Object} args - { overridesPath, extractedPath, locationsPath }.
+ *   locationsPath, when given, points to the JSON a source-string locator
+ *   run produced (see rpk-docs-handler.js's locateRpkSourceStrings): a map
+ *   of full command path -> {description, flags}. Optional -- without it,
+ *   every UPSTREAMABLE/SPLIT row simply has no source_file/source_line, the
+ *   same as before this existed.
  * @returns {Object} { surface, manifest, summary }.
  */
-function audit ({ overridesPath, extractedPath }) {
+function audit ({ overridesPath, extractedPath, locationsPath }) {
   const overridesDoc = loadJson(overridesPath, 'rpk overrides')
   const commands = overridesDoc.commands
   if (!commands || typeof commands !== 'object') {
@@ -302,15 +346,23 @@ function audit ({ overridesPath, extractedPath }) {
     tree = extractedDoc.raw_tree || extractedDoc.tree || null
   }
 
+  let locations = null
+  if (locationsPath) {
+    locations = loadJson(locationsPath, 'rpk source-string locations')
+  }
+
   const manifest = []
   for (const [commandName, entry] of Object.entries(commands)) {
     if (typeof entry !== 'object' || entry === null) continue
 
     const node = tree ? findCommandNode(tree, commandName) : null
 
+    const commandLocation = locations ? locations[commandName] : null
+
     for (const [field, value] of Object.entries(entry)) {
       if (field === 'description') {
-        manifest.push(commandDescriptionRow(commandName, value, entry.upstream_ref, tree, node, textTransformations))
+        manifest.push(commandDescriptionRow(commandName, value, entry.upstream_ref, tree, node, textTransformations,
+          commandLocation ? commandLocation.description : undefined))
       } else if (field === 'flags' && value && typeof value === 'object') {
         for (const [flagName, flagEntry] of Object.entries(value)) {
           if (flagEntry && typeof flagEntry.description === 'string') {
@@ -321,7 +373,8 @@ function audit ({ overridesPath, extractedPath }) {
               flagEntry.upstream_ref,
               tree,
               node,
-              textTransformations
+              textTransformations,
+              commandLocation && commandLocation.flags ? commandLocation.flags[flagName] : undefined
             ))
           }
         }
