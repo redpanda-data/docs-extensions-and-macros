@@ -20,7 +20,14 @@ const { spawnSync } = require('child_process')
  */
 const SURFACE_ROUTES = [
   { surface: 'properties', pattern: /^src\/v\/config\// },
-  { surface: 'metrics', pattern: /(^|\/)[^/]*probe\.cc$|^src\/v\/metrics\// },
+  // Metrics are registered wherever a component exposes them, not in files
+  // with a predictable name: raft/consensus.cc, cluster/rm_stm.cc and
+  // headers such as kafka/server/kafka_probe.h all call sm::description. So
+  // route every non-test C++ source under src/v (config/ has already matched
+  // properties above) and let the scanner, which skips any file with no
+  // description() call, decide what is a declaration. Test directories are
+  // excluded the same way the whole-repo scan excludes them.
+  { surface: 'metrics', pattern: /^src\/v\/(?!(?:.*\/)?tests?\/).*\.(?:cc|h)$/ },
   { surface: 'rpk', pattern: /^src\/go\/rpk\/pkg\/cli\// },
   // Both chart layouts ship: charts/<name>/chart/values.yaml (redpanda,
   // console) and charts/<name>/values.yaml (connectors).

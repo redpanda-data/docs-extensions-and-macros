@@ -4,7 +4,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
-const { listPackageSchemas, syncSchemas, findDestOnlyPaths, PACKAGE_SCHEMA_DIR } = require('../../cli-utils/sync-schemas')
+const { listPackageSchemas, syncSchemas, findDestOnlyPaths, dataFileFor, PACKAGE_SCHEMA_DIR } = require('../../cli-utils/sync-schemas')
 
 describe('sync-schemas', () => {
   describe('listPackageSchemas', () => {
@@ -32,6 +32,13 @@ describe('sync-schemas', () => {
 
     beforeEach(() => {
       tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-schemas-'))
+      // A schema is only synced into a destination that is plausibly its home:
+      // one that already has the schema, or has the *.json it documents. These
+      // cases are about sync behaviour, so give the destination the data files
+      // and let the applicability rule have its own describe block below.
+      for (const { name } of listPackageSchemas()) {
+        fs.writeFileSync(path.join(tempDir, name.replace(/\.schema\.json$/, '.json')), '{}')
+      }
     })
 
     afterEach(() => {
@@ -182,6 +189,90 @@ describe('sync-schemas', () => {
     })
   })
 
+  describe('applicability: a schema only goes where its data file lives', () => {
+    let tempDir
+
+    beforeEach(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-schemas-na-'))
+    })
+
+    afterEach(() => {
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    })
+
+    it('skips a schema whose data file the destination does not have', () => {
+      // kapa-source-groups.json is generated into this package and read from
+      // node_modules by an Antora extension, so it never lives in a content
+      // repo. Copying its schema into redpanda-data/docs would leave a file
+      // describing data that repo will never have.
+      const { results, drift } = syncSchemas({ destDir: tempDir })
+
+      expect(results.every((r) => r.status === 'not-applicable')).toBe(true)
+      for (const { name } of listPackageSchemas()) {
+        expect(fs.existsSync(path.join(tempDir, name))).toBe(false)
+      }
+      // And it must not read as drift, or `--check` fails forever on a repo
+      // that is correctly not hosting that schema.
+      expect(drift).toBe(false)
+    })
+
+    it('--check agrees, and exits clean', () => {
+      const { results, drift } = syncSchemas({ destDir: tempDir, check: true })
+      expect(results.every((r) => r.status === 'not-applicable')).toBe(true)
+      expect(drift).toBe(false)
+    })
+
+    it('syncs a schema once the destination has the data file it documents', () => {
+      const schema = listPackageSchemas()[0]
+      fs.writeFileSync(path.join(tempDir, dataFileFor(schema.name)), '{}')
+
+      const { results } = syncSchemas({ destDir: tempDir })
+
+      expect(results.find((r) => r.name === schema.name).status).toBe('created')
+      expect(fs.existsSync(path.join(tempDir, schema.name))).toBe(true)
+      // The others are still not this repo's business.
+      expect(results.filter((r) => r.name !== schema.name).every((r) => r.status === 'not-applicable')).toBe(true)
+    })
+
+    it('keeps an already-present schema up to date even with no data file', () => {
+      // A repo can legitimately carry the schema before creating the data
+      // file, or generate that data at build time. Once the schema is there,
+      // it is this repo's and stays current.
+      const schema = listPackageSchemas()[0]
+      // An empty object, so the package copy is a strict superset and this is
+      // an ordinary update rather than a divergence.
+      fs.writeFileSync(path.join(tempDir, schema.name), '{}')
+
+      const { results, drift } = syncSchemas({ destDir: tempDir })
+
+      expect(results.find((r) => r.name === schema.name).status).toBe('updated')
+      expect(drift).toBe(true)
+      expect(fs.readFileSync(path.join(tempDir, schema.name), 'utf8'))
+        .toBe(fs.readFileSync(schema.sourcePath, 'utf8'))
+    })
+
+    it('still refuses a diverged schema it is keeping up to date', () => {
+      // Applicability decides whether the schema belongs here at all. It does
+      // not override the superset rule that protects destination-only content.
+      const schema = listPackageSchemas()[0]
+      fs.writeFileSync(path.join(tempDir, schema.name), '{"aFieldOnlyTheRepoKnows": true}')
+
+      const { results } = syncSchemas({ destDir: tempDir })
+      const row = results.find((r) => r.name === schema.name)
+
+      expect(row.status).toBe('diverged')
+      expect(row.destOnlyPaths).toEqual(['aFieldOnlyTheRepoKnows'])
+      expect(JSON.parse(fs.readFileSync(path.join(tempDir, schema.name), 'utf8')).aFieldOnlyTheRepoKnows).toBe(true)
+    })
+  })
+
+  describe('dataFileFor', () => {
+    it('maps a schema name to the data file it documents', () => {
+      expect(dataFileFor('property-overrides.schema.json')).toBe('property-overrides.json')
+      expect(dataFileFor('rpk-overrides.schema.json')).toBe('rpk-overrides.json')
+    })
+  })
+
   describe('findDestOnlyPaths', () => {
     it('returns an empty array when the destination has nothing the source lacks', () => {
       expect(findDestOnlyPaths({ a: { b: 1 } }, { a: { b: 2 } })).toEqual([])
@@ -198,6 +289,45 @@ describe('sync-schemas', () => {
     it('does not false-positive when source and destination are identical', () => {
       const shape = { a: { b: { c: [1, 2] } } }
       expect(findDestOnlyPaths(shape, JSON.parse(JSON.stringify(shape)))).toEqual([])
+    })
+
+    describe('oneOf/anyOf/allOf, the one array shape that is not opaque', () => {
+      // JSON Schema combinators hold real, named schema objects as array
+      // ELEMENTS -- see_also.items.oneOf[1].properties.cloud_only is
+      // exactly the "destination-only capability" this function exists to
+      // find, and it lives inside an array. Without index-matching into
+      // oneOf/anyOf/allOf specifically, a destination-only audience flag
+      // there was invisible to this function, and a write-mode sync would
+      // delete it silently.
+      it('finds a destination-only property inside a oneOf array element', () => {
+        const source = { oneOf: [{ type: 'string' }, { type: 'object', properties: { content: {} } }] }
+        const dest = { oneOf: [{ type: 'string' }, { type: 'object', properties: { content: {}, cloud_only: { const: true } } }] }
+        expect(findDestOnlyPaths(source, dest)).toEqual(['oneOf[1].properties.cloud_only'])
+      })
+
+      it('recurses the same way for anyOf and allOf', () => {
+        expect(findDestOnlyPaths({ anyOf: [{ properties: {} }] }, { anyOf: [{ properties: { x: {} } }] }))
+          .toEqual(['anyOf[0].properties.x'])
+        expect(findDestOnlyPaths({ allOf: [{ properties: {} }] }, { allOf: [{ properties: { x: {} } }] }))
+          .toEqual(['allOf[0].properties.x'])
+      })
+
+      it('reports a whole destination-only array element when source has fewer', () => {
+        const source = { oneOf: [{ type: 'string' }] }
+        const dest = { oneOf: [{ type: 'string' }, { type: 'object', properties: { x: {} } }] }
+        expect(findDestOnlyPaths(source, dest)).toEqual(['oneOf[1]'])
+      })
+
+      it('reports nothing when both sides carry the same combinator content', () => {
+        const shape = { oneOf: [{ type: 'string' }, { type: 'object', properties: { cloud_only: { const: true } } }] }
+        expect(findDestOnlyPaths(shape, JSON.parse(JSON.stringify(shape)))).toEqual([])
+      })
+
+      it('still treats a non-combinator array (required, enum) as opaque', () => {
+        // The general rule is unchanged: only oneOf/anyOf/allOf recurse.
+        expect(findDestOnlyPaths({ required: ['a'] }, { required: ['a', 'b'] })).toEqual([])
+        expect(findDestOnlyPaths({ enum: [1, 2] }, { enum: [1, 2, 3] })).toEqual([])
+      })
     })
   })
 })

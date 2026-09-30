@@ -215,3 +215,30 @@ describe('canonicalizePropertyXrefs', () => {
     expect(result.text.match(/xref:reference:properties\//g)).toHaveLength(2)
   })
 })
+
+describe('propertyPageFor', () => {
+  const { propertyPageFor } = require('../../../tools/property-extractor/generate-handlebars-docs')
+
+  it('routes a cluster property to the cluster page', () => {
+    expect(propertyPageFor({ name: 'abort_index_segment_size', config_scope: 'cluster' })).toBe('cluster')
+  })
+
+  it('routes an object-storage-named cluster property to the object-storage page', () => {
+    for (const name of ['cloud_storage_bucket', 's3_region', 'azure_adls_port', 'gcs_x', 'archival_y', 'remote_z', 'tiered_w']) {
+      expect(propertyPageFor({ name, config_scope: 'cluster' })).toBe('object-storage')
+    }
+  })
+
+  it('routes broker and topic properties to their own pages', () => {
+    expect(propertyPageFor({ name: 'admin', config_scope: 'broker' })).toBe('broker')
+    expect(propertyPageFor({ name: 'cleanup.policy', config_scope: 'topic' })).toBe('topic')
+  })
+
+  it('returns null for a property that is not rendered at all', () => {
+    // generatePropertyPartials skips these, so a link must not claim a page for
+    // them either -- which is the whole reason both callers share this function.
+    expect(propertyPageFor({ name: 'x' })).toBeNull()
+    expect(propertyPageFor({ name: 'x', config_scope: 'nonsense' })).toBeNull()
+    expect(propertyPageFor(null)).toBeNull()
+  })
+})

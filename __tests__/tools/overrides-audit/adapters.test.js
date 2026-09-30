@@ -35,8 +35,10 @@ describe('overrides-audit adapters', () => {
   describe('properties surface', () => {
     const extracted = {
       properties: {
-        prop_redundant: { name: 'prop_redundant', description: 'Same text.', type: 'string', defined_in: 'src/v/config/configuration.cc' },
-        prop_upstreamable: { name: 'prop_upstreamable', description: 'Old text.', type: 'string', defined_in: 'src/v/config/configuration.cc' }
+        // line_start is what says the source has a description to replace; without
+        // it the audit correctly reports there is nothing to upstream into.
+        prop_redundant: { name: 'prop_redundant', description: 'Same text.', type: 'string', defined_in: 'src/v/config/configuration.cc', line_start: 10 },
+        prop_upstreamable: { name: 'prop_upstreamable', description: 'Old text.', type: 'string', defined_in: 'src/v/config/configuration.cc', line_start: 20 }
       }
     }
     const overrides = {

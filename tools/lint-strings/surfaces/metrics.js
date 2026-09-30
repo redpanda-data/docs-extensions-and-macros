@@ -197,7 +197,7 @@ function unescapeCpp (text) {
  * preceding make_* call that still encloses it, then read its first argument
  * if that argument is a string literal (adjacent literals concatenated).
  */
-function resolveMetricName (content, descIndex) {
+function resolveMetricName (content, descIndex, where = null) {
   const candidates = []
   MAKE_CALL.lastIndex = 0
   let match
@@ -213,6 +213,8 @@ function resolveMetricName (content, descIndex) {
     let i = openIndex + 1
     let name = ''
     let sawLiteral = false
+    let firstLiteral = -1
+    let lastLiteralEnd = -1
     while (i < content.length) {
       const ch = content[i]
       if (/\s/.test(ch)) {
@@ -228,10 +230,16 @@ function resolveMetricName (content, descIndex) {
         const end = skipLiteral(content, i)
         name += unescapeCpp(content.slice(i + 1, end - 1))
         sawLiteral = true
+        if (firstLiteral === -1) firstLiteral = i
+        lastLiteralEnd = end - 1
         i = end
         continue
       }
       break
+    }
+    if (sawLiteral && where) {
+      where.start = firstLiteral
+      where.end = lastLiteralEnd
     }
     return sawLiteral ? name : null
   }
@@ -268,16 +276,24 @@ function scanFile (content, file) {
     if (closeIndex === -1) continue
 
     const { verifiable, value } = parseArgument(masked.slice(openIndex + 1, closeIndex))
+    // The name literal sits in the enclosing make_*() call, outside the
+    // description span. Its lines are recorded so a rename counts as touching
+    // the declaration without widening the span a suggestion replaces.
+    const where = {}
+    const name = resolveMetricName(masked, match.index, where)
     declarations.push({
       surface: 'metrics',
-      name: resolveMetricName(masked, match.index),
+      name,
       file,
       line_start: lineOf(masked, match.index),
       line_end: lineOf(masked, closeIndex),
       string: value,
       declaration_text: null,
       convention: CONVENTION,
-      meta: { unverifiable: !verifiable }
+      meta: {
+        unverifiable: !verifiable,
+        name_lines: where.start != null ? [lineOf(masked, where.start), lineOf(masked, where.end)] : null
+      }
     })
     DESCRIPTION_CALL.lastIndex = closeIndex + 1
   }
@@ -359,10 +375,21 @@ const RULES = [
   }
 ]
 
+/**
+ * Where a declaration lives, for removal matching. The extracted name is the
+ * make_*() argument without its add_group() prefix, so the same name repeats
+ * across groups; the file narrows it. Same-file repeats are handled by
+ * counting in the caller.
+ */
+function identity (decl) {
+  return [decl.file, decl.name]
+}
+
 module.exports = {
   name: 'metrics',
   convention: CONVENTION,
   extract,
   scanFile,
+  identity,
   rules: RULES
 }

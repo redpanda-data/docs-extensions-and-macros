@@ -28,9 +28,33 @@ endif::[]
 No description available.
 
 {{/if}}
+{{#if includes}}
+{{#each includes}}
+
+{{#if cloud_only}}
+ifdef::env-cloud[]
+{{/if}}
+{{#if self_managed_only}}
+ifndef::env-cloud[]
+{{/if}}
+include::{{{target}}}
+{{#if cloud_only}}
+endif::[]
+{{/if}}
+{{#if self_managed_only}}
+endif::[]
+{{/if}}
+{{/each}}
+{{/if}}
 {{#if admonitions}}
 {{#each admonitions}}
 
+{{#if cloud_only}}
+ifdef::env-cloud[]
+{{/if}}
+{{#if self_managed_only}}
+ifndef::env-cloud[]
+{{/if}}
 {{#if title}}
 .{{{title}}}
 {{/if}}
@@ -38,6 +62,12 @@ No description available.
 ====
 {{{text}}}
 ====
+{{#if cloud_only}}
+endif::[]
+{{/if}}
+{{#if self_managed_only}}
+endif::[]
+{{/if}}
 {{/each}}
 {{/if}}
 {{#if is_enterprise}}
@@ -222,7 +252,7 @@ endif::[]
 ifdef::env-cloud[]
 * {{{content}}}
 endif::[]
-{{else if selfHostedOnly}}
+{{else if selfManagedOnly}}
 ifndef::env-cloud[]
 * {{{content}}}
 endif::[]
@@ -236,7 +266,7 @@ endif::[]
 ifdef::env-cloud[]
 {{{content}}}
 endif::[]
-{{else if selfHostedOnly}}
+{{else if selfManagedOnly}}
 ifndef::env-cloud[]
 {{{content}}}
 endif::[]

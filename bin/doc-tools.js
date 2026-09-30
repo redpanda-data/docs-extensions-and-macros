@@ -558,7 +558,15 @@ programCli
  * copy is a strict superset of the destination; otherwise it reports which
  * keys only the destination has and leaves the file alone (status
  * 'diverged') unless --force is passed. --check never writes, for a CI
- * gate.
+ * gate. A schema is also only synced into a repo that is plausibly its
+ * home: one that already has the schema, or that has the *.json the schema
+ * documents. Anything else is reported as 'not for this repo' and skipped,
+ * and never counts as drift. kapa-source-groups.json is the reason: it is
+ * generated into this package and read from node_modules by an Antora
+ * extension, so it never lives in a content repo at all, and planting its
+ * schema in redpanda-data/docs would leave a file describing data that repo
+ * will never have, with --check reporting its absence as drift on every run
+ * afterwards.
  * @example
  * # Sync into ./docs-data (writes any missing or out-of-date schema)
  * npx doc-tools sync-schemas
@@ -604,8 +612,13 @@ programCli
           created: '+ created',
           updated: '↻ updated',
           diverged: options.force ? '↻ updated (forced)' : '⚠ diverged, left alone',
+          'not-applicable': '- not for this repo',
         }[status]
         console.log(`  ${label}  ${name}`)
+        if (status === 'not-applicable') {
+          // Said out loud, because a silently missing schema looks like a bug.
+          console.log(`      no ${name.replace(/\.schema\.json$/, '.json')} here, so this schema has no data file to document`)
+        }
         if (status === 'diverged' && !options.force) {
           hasUnresolvedDivergence = true
           for (const p of destOnlyPaths) console.log(`      only in the destination: ${p}`)
@@ -2630,7 +2643,7 @@ validation
  * Validates docs-data/property-overrides.json against its JSON Schema:
  * unknown keys (a typo that would otherwise be silently dropped by the
  * extractor), and the see_also shape (a plain string, or an object naming
- * exactly one of cloud_only/self_hosted_only).
+ * exactly one of cloud_only/self_managed_only).
  *
  * @why
  * property-overrides.json has no catch-all pass-through when an override
@@ -2742,6 +2755,7 @@ programCli
   .option('--format <format>', 'Output format: human or json', 'human')
   .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
   .option('--only-rules <list>', 'Comma-separated rule ids to run exclusively')
+  .option('--reviewed <file>', 'Diff mode: skip declarations whose fingerprint is listed in <file> (already reviewed on an earlier push)')
   .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
   .action((options) => {
     const { runCli } = require('../tools/lint-strings')
@@ -2890,6 +2904,92 @@ overridesGroup
         console.error(`JSON result written to ${options.output}`)
       }
       console.log(options.format === 'human' ? formatHumanReport(result) : JSON.stringify(result, null, 2))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
+/**
+ * @description Build the plain-text prompt an external LLM triage call
+ * should send for one UPSTREAMABLE or SPLIT KEEP_UNTIL_UPSTREAMED audit row.
+ * Reads a single candidate object (not an array) from --candidate. See
+ * tools/overrides-audit/triage.js for the prompt contract.
+ *
+ * @why Separated from the actual LLM call so the workflow that runs it can
+ * use whatever action/model it wants; this command only builds the prompt.
+ *
+ * @example
+ * npx doc-tools overrides triage-prompt --candidate candidate.json
+ */
+overridesGroup
+  .command('triage-prompt')
+  .description('Build the triage prompt for one UPSTREAMABLE/SPLIT candidate')
+  .requiredOption('--candidate <path>', 'Path to a single candidate row JSON file (one object, not an array)')
+  .action((options) => {
+    const { buildTriagePrompt } = require('../tools/overrides-audit/triage')
+    try {
+      const candidate = JSON.parse(fs.readFileSync(path.resolve(options.candidate), 'utf8'))
+      console.log(buildTriagePrompt(candidate))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
+/**
+ * @description Parse the raw text an LLM triage call returned for one
+ * candidate and merge it into that candidate's manifest row, adding
+ * agent_verdict / agent_reason / triage_failed. Any malformed, empty, or
+ * unexpected response degrades to a safe AMBIGUOUS verdict rather than
+ * throwing — a triage call failing is not a reason to fail the pipeline,
+ * it's a reason to ask a human. See tools/overrides-audit/triage.js.
+ *
+ * @example
+ * npx doc-tools overrides triage-parse --candidate candidate.json --response response.txt
+ */
+overridesGroup
+  .command('triage-parse')
+  .description('Merge an LLM triage response into a candidate row')
+  .requiredOption('--candidate <path>', 'Path to the candidate row JSON file this response answers')
+  .requiredOption('--response <path>', 'Path to the raw text file the LLM triage call returned')
+  .action((options) => {
+    const { triageCandidate } = require('../tools/overrides-audit/triage')
+    try {
+      const candidate = JSON.parse(fs.readFileSync(path.resolve(options.candidate), 'utf8'))
+      // A triage call that failed before writing its output leaves no
+      // response file. Treat that as an empty response so it reaches the
+      // AMBIGUOUS fallback instead of failing the command.
+      let rawResponse = ''
+      try {
+        rawResponse = fs.readFileSync(path.resolve(options.response), 'utf8')
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err
+      }
+      console.log(JSON.stringify(triageCandidate(candidate, rawResponse), null, 2))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
+/**
+ * @description Render one plain-English markdown report section from a
+ * batch of triaged candidate rows (rows already carrying agent_verdict from
+ * triage-parse). See tools/overrides-audit/report.js for what each section
+ * contains and what happens to rows outside the requested verdict.
+ *
+ * @example
+ * npx doc-tools overrides report --candidates triaged.json --section upstream
+ */
+overridesGroup
+  .command('report')
+  .description('Build a plain-English markdown report section from triaged candidates')
+  .requiredOption('--candidates <path>', 'Path to a JSON array of triaged candidate rows')
+  .addOption(new Option('--section <section>', 'Which report section to build').choices(['upstream', 'retirement', 'ambiguous']).makeOptionMandatory())
+  .action((options) => {
+    const { buildUpstreamSection, buildRetirementSection, buildAmbiguousDigest } = require('../tools/overrides-audit/report')
+    const BUILDERS = { upstream: buildUpstreamSection, retirement: buildRetirementSection, ambiguous: buildAmbiguousDigest }
+    try {
+      const candidates = JSON.parse(fs.readFileSync(path.resolve(options.candidates), 'utf8'))
+      console.log(BUILDERS[options.section](candidates))
     } catch (err) {
       fail(err.message)
     }

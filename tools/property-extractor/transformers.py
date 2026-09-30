@@ -2124,6 +2124,32 @@ class EnterpriseTransformer:
             restricted_vals = self._extract_list_items(params[0]["value"])
             info["params"] = params[1:]
 
+        # --- restricted scalar ahead of the name, with a trailing vector ---
+        # Pattern: (restricted, name, description, meta, default, ..., vector)
+        # enterprise<enum_set_property<T>> takes this shape: http_authentication
+        # is ("OIDC", "http_authentication", ...) ending in its allowed values.
+        # Without this branch the trailing vector wins as sanctioned_only and
+        # the restricted value is left where the name belongs. Anchored on the
+        # member name, so a scalar is only taken as a restriction when the
+        # argument after it is the property's own name.
+        elif (
+            len(params) >= 5
+            and "std::vector" in str(params[-1]["value"])
+            and params[0]["type"] in ("true", "false", "integer_literal", "string_literal", "qualified_identifier")
+            and self._clean_value(params[1]["value"]) == info.get("name_in_file")
+            and self._clean_value(params[0]["value"]) != info.get("name_in_file")
+        ):
+            restricted_vals = [self._clean_value(params[0]["value"])]
+            if "enum" in str(info.get("type") or ""):
+                # The trailing vector is the enum's allowed values; keep it for
+                # TypeTransformer.
+                enterprise_constructor = "restricted_only"
+                info["params"] = params[1:]
+            else:
+                enterprise_constructor = "restricted_with_sanctioned"
+                sanctioned_vals = self._extract_list_items(params[-1]["value"])
+                info["params"] = params[1:-1]
+
         # --- sanctioned_only (vector form) ---
         elif len(params) >= 5 and "std::vector" in str(params[-1]["value"]):
             enterprise_constructor = "sanctioned_only"
