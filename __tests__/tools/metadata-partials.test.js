@@ -688,3 +688,20 @@ describe('resolvePageTypeDir', () => {
     expect(resolvePageTypeDir(root, '')).toBe('');
   });
 });
+
+describe('normalize-metadata: lists and nested parentheses', () => {
+  test('inline-codes a field name whose description nests parentheses', () => {
+    const out = normalizeMetadataBlock('== Metadata\n\n- lsn (The commit LSN. Not present on snapshot (`read`) messages.)');
+    expect(out).toContain('- `lsn` (The commit LSN. Not present on snapshot (`read`) messages.)');
+  });
+
+  test('separates a list from the paragraph directly above it', () => {
+    const out = normalizeMetadataBlock('== Metadata\n\nIf HTTPS is enabled, the following fields are added as well:\n- `tls_version`\n- `tls_subject`');
+    expect(out).toBe('== Metadata\n\nIf HTTPS is enabled, the following fields are added as well:\n\n- `tls_version`\n- `tls_subject`');
+  });
+
+  test('does not split a list at a wrapped bullet line', () => {
+    const block = '== Metadata\n\n- `a` (first line\n  continues)\n- `b`';
+    expect(normalizeMetadataBlock(block)).toBe(block);
+  });
+});

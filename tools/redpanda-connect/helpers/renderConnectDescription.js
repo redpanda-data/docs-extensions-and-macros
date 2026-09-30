@@ -58,7 +58,7 @@ function hasMarkdownHeadings (body) {
 module.exports = function renderConnectDescription (item) {
   const body = descriptionWithMetadataInclude(item);
   if (!body || !body.trim()) return '';
-  return escapePlaceholderBraces(ensureHeadingSeparation(body.trim()));
+  return protectCodeSpans(escapePlaceholderBraces(ensureHeadingSeparation(body.trim())));
 };
 
 /**
@@ -106,6 +106,34 @@ function escapePlaceholderBraces (body) {
   )).join('\n');
 }
 
+// Doubled characters that Asciidoctor treats as unconstrained emphasis, bold
+// and highlight markers. They apply inside a backtick code span and pair up
+// across spans, so `__c` and `__b` on one line render as <em> between them,
+// and a glob like `'**/*.md'` renders as <strong> (live on the salesforce and
+// git inputs).
+const UNCONSTRAINED_MARKERS = /__|\*\*|##/;
+
+/**
+ * Wrap inline code spans that contain unconstrained formatting markers in a
+ * `+...+` passthrough, so the span renders literally. Spans are left alone
+ * when they are already passthroughs or start or end with whitespace (which
+ * only happens when backticks on a line don't pair up as code spans).
+ *
+ * Runs after escapePlaceholderBraces: a passthrough applies no attribute
+ * substitution, so the `\{` escape it added inside the span would render as a
+ * literal backslash and is removed again. Listing blocks and fences are
+ * verbatim and stay untouched.
+ */
+function protectCodeSpans (body) {
+  return annotateVerbatimLines(body).map(({ line, verbatim }) => (
+    verbatim ? line : line.replace(/`([^`\n]+)`/g, (span, content) => {
+      if (!UNCONSTRAINED_MARKERS.test(content)) return span;
+      if (/^\+|\+$/.test(content) || /^\s|\s$/.test(content)) return span;
+      return `\`+${content.replace(/\\\{/g, '{')}+\``;
+    })
+  )).join('\n');
+}
+
 /**
  * Depth of the first structural heading (AsciiDoc `=` or markdown-compat
  * `#`) outside listing blocks and fences, or null when the body has none.
@@ -126,6 +154,7 @@ function firstHeadingDepth (body) {
 module.exports.hasStructuralHeadings = hasStructuralHeadings;
 module.exports.hasMarkdownHeadings = hasMarkdownHeadings;
 module.exports.escapePlaceholderBraces = escapePlaceholderBraces;
+module.exports.protectCodeSpans = protectCodeSpans;
 module.exports.ensureHeadingSeparation = ensureHeadingSeparation;
 module.exports.firstHeadingDepth = firstHeadingDepth;
 module.exports.LONG_HEADINGLESS_THRESHOLD = LONG_HEADINGLESS_THRESHOLD;

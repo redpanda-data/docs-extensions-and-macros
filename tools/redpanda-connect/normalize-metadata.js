@@ -5,7 +5,7 @@
  * metadata partials are consistent regardless of how each connector authored
  * its metadata section upstream.
  *
- * Two inconsistencies are normalized:
+ * Three inconsistencies are normalized:
  *   1. Some connectors wrap their field list in a fenced code block
  *      (```text ... ``` or ``` ... ```) of bare names; others use an AsciiDoc
  *      bullet list with the field name in inline code. We strip the fences
@@ -14,6 +14,9 @@
  *      identifier) is wrapped in inline code. Descriptive bullets such as
  *      "All headers (only first values are taken)" are left as prose, and
  *      bullets that already contain inline code are left untouched.
+ * *   3. A list glued to the paragraph above it ("…added as well:" directly
+ *      followed by "- field") renders as one paragraph with literal dashes,
+ *      so a blank line is inserted before it.
  *
  * Everything else (intro sentences, notes, `===` subheadings that legitimately
  * group metadata by operation, non-field-list fenced blocks, and AsciiDoc
@@ -34,7 +37,9 @@ const { BLOCK_DELIMITER } = require('./metadata-utils.js');
 // description separated by ":" or " - ". This distinguishes real field bullets
 // from descriptive ones like "All headers ..." (which start with a capital).
 // The description may itself contain inline code, so it is matched loosely.
-const FIELD_BULLET = /^([a-z][a-z0-9_]*)((?:\s*\([^)]*\))?(?:\s*(?::|-)\s.*)?)$/s;
+// A parenthetical description may nest its own parentheses, for example
+// "lsn (... Not present on snapshot (`read`) messages.)".
+const FIELD_BULLET = /^([a-z][a-z0-9_]*)((?:\s*\(.*\))?(?:\s*(?::|-)\s.*)?)$/s;
 
 function normalizeBullet (prefix, content) {
   // Skip only when the field name itself is already inline-coded; a backtick
@@ -68,6 +73,20 @@ function normalizeMetadataBlock (block) {
   if (!block || typeof block !== 'string') return block;
   const lines = block.split('\n');
   const out = [];
+  // True while the lines since the last blank line belong to a list, so a
+  // bullet after a wrapped bullet line continues the list instead of starting
+  // a new one.
+  let inList = false;
+  const pushBullet = (text) => {
+    const prev = out.length ? out[out.length - 1] : '';
+    if (!inList && prev.trim() !== '' && !/^[=/+]/.test(prev)) out.push('');
+    inList = true;
+    out.push(text);
+  };
+  const pushLine = (text) => {
+    if (text.trim() === '') inList = false;
+    out.push(text);
+  };
 
   for (let i = 0; i < lines.length; i++) {
     // AsciiDoc literal/listing block: pass the whole `----` … `----` region
@@ -100,7 +119,8 @@ function normalizeMetadataBlock (block) {
         // Drop the fences and render the fields as a normal bullet list.
         for (const c of content) {
           const b = c.match(BULLET);
-          out.push(b ? normalizeBullet(b[1], b[2]) : c);
+          if (b) pushBullet(normalizeBullet(b[1], b[2]));
+          else pushLine(c);
         }
       } else {
         // Not a field list (e.g. a YAML example) — keep verbatim.
@@ -112,7 +132,8 @@ function normalizeMetadataBlock (block) {
     } else {
       // Bare bullet outside a fence: normalize the field name too.
       const b = lines[i].match(BULLET);
-      out.push(b ? normalizeBullet(b[1], b[2]) : lines[i]);
+      if (b) pushBullet(normalizeBullet(b[1], b[2]));
+      else pushLine(lines[i]);
     }
   }
 
