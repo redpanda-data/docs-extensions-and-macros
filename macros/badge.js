@@ -1,5 +1,7 @@
 'use strict';
 
+const { escapeHtml } = require('../extension-utils/html-utils');
+
 /**
  * Build the HTML for a badge.
  *
@@ -34,12 +36,7 @@ function buildBadgeHtml ({ label, size, tooltip } = {}) {
   // handlers). The label needs it as much as the tooltip -- it lands in the
   // class attribute and in the text content, and escaping only the tooltip left
   // `badge:x[label=x" onmouseover="...]` free to break out of the class.
-  const escapeAttr = (value) => String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-  const className = `badge--${escapeAttr(text.toLowerCase().replace(/\s+/g, '-'))}`;
+  const className = `badge--${escapeHtml(text.toLowerCase().replace(/\s+/g, '-'))}`;
   // hasOwnProperty, not a bare index: `label=constructor` and `label=__proto__`
   // are already lowercase, so a bare lookup shipped
   // `function Object() { [native code] }` to readers as hover text. prop.js
@@ -49,12 +46,12 @@ function buildBadgeHtml ({ label, size, tooltip } = {}) {
     ? DEFAULT_TOOLTIPS[labelKey]
     : undefined;
   const hoverText = tooltip || defaultTooltip;
-  const tooltipAttr = hoverText ? ` data-tooltip="${escapeAttr(hoverText)}"` : '';
+  const tooltipAttr = hoverText ? ` data-tooltip="${escapeHtml(hoverText)}"` : '';
 
   // Add brackets if not large. The brackets matter beyond styling: they are
   // real text content, so the label survives an HTML-to-Markdown conversion as
   // "(beta)" rather than vanishing with the CSS class.
-  const renderedLabel = isLarge ? escapeAttr(text) : `(${escapeAttr(text)})`;
+  const renderedLabel = isLarge ? escapeHtml(text) : `(${escapeHtml(text)})`;
 
   return `<span class="badge ${className} ${sizeClass}"${tooltipAttr}>${renderedLabel}</span>`;
 }
