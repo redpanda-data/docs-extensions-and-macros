@@ -131,23 +131,15 @@ else
   # instructions in tools/property-extractor/README.adoc do, then compare.
   if ! SNAPSHOT_DRIFT="$(node -e '
     const fs = require("fs");
-    const [attachmentLive, corpusDir] = process.argv.slice(1);
+    const [attachmentLive, corpusDir, overridesLive, deriveScript] = process.argv.slice(1);
     const read = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
 
-    // No "description": tools/property-extractor/README.adoc keeps the
-    // snapshot description-free on purpose ("a full copy would be 695 KB of
-    // text that rots"), so a keep list that includes it can never match a
-    // mirror refreshed by following that recipe. This is why: every real run
-    // before the tag-404 fix above hit that 404 and exited 2 before ever
-    // reaching this comparison, so a mismatched keep list here never once
-    // got exercised against live data.
-    const keep = ["name","config_scope","type","cloud_supported","cloud_editable",
-                  "cloud_readonly","cloud_byoc_only","is_deprecated","nullable"];
-    const liveProps = read(attachmentLive).properties || {};
-    const derived = {};
-    for (const [k, v] of Object.entries(liveProps)) {
-      derived[k] = Object.fromEntries(keep.filter((f) => f in v).map((f) => [f, v[f]]));
-    }
+    // The same derivation the refresh recipe in
+    // tools/property-extractor/README.adoc runs, so a mirror refreshed by
+    // following it always matches here. Descriptions are kept only for
+    // links-only overrides, decided from the live overrides file.
+    const { deriveSnapshot } = require(require("path").resolve(deriveScript));
+    const derived = deriveSnapshot(read(attachmentLive), read(overridesLive));
     const mirrorSnapshot = read(`${corpusDir}/property-snapshot.json`);
     if (JSON.stringify(derived) === JSON.stringify(mirrorSnapshot.properties)) process.exit(0);
 
@@ -155,7 +147,7 @@ else
     const mirrorKeys = Object.keys(mirrorSnapshot.properties || {});
     process.stdout.write(`- \`property-snapshot.json\`: ${liveKeys.length} properties live, ${mirrorKeys.length} in the mirror`
       + (liveKeys.length === mirrorKeys.length ? " (same count, so the difference is in the field values)" : ""));
-  ' "$tmp/attachment.json" "$CORPUS_DIR")"; then
+  ' "$tmp/attachment.json" "$CORPUS_DIR" "$tmp/overrides.json" "${BASH_SOURCE[0]%/*}/derive-property-snapshot.js")"; then
     echo "the snapshot comparison failed to run" >&2
     exit 2
   fi

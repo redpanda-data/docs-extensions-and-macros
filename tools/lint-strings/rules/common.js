@@ -100,7 +100,9 @@ function maskNonProse (text) {
 const CODE_TOKEN_PATTERNS = Object.freeze([
   { id: 'identifier', re: /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g },
   { id: 'flag', re: /(?<![\w-])--[a-z][a-z0-9]*(?:-[a-z0-9]+)*\b/g },
-  { id: 'path', re: /(?<![\w/])\/[a-z][a-zA-Z0-9_.-]*(?:\/[a-zA-Z0-9_.{}-]+)+\/?/g }
+  // A path may not end in a period, so "served from /v1/brokers." reports
+  // `/v1/brokers`, not the sentence's full stop with it.
+  { id: 'path', re: /(?<![\w/])\/[a-z][a-zA-Z0-9_.-]*(?:\/[a-zA-Z0-9_.{}-]*[a-zA-Z0-9_{}-])+\/?/g }
 ])
 
 /**
@@ -276,7 +278,12 @@ const COMMON_RULES = [
     description: 'Code value or field name in prose without inline code',
     severity: 'warning',
     check: (decl) => {
-      const bare = findBareCodeTokens(decl.string, decl.name)
+      // A surface whose generator formats some code values itself declares
+      // which (convention.auto_inline_code); those are not findings there.
+      const auto = (decl.convention && decl.convention.auto_inline_code) || null
+      const bare = findBareCodeTokens(decl.string, decl.name).filter((b) => !auto ||
+        !((auto.kinds || []).includes(b.kind) ||
+          (b.kind === 'path' && (auto.path_prefixes || []).some((prefix) => b.token.startsWith(prefix)))))
       if (bare.length === 0) return []
       const list = bare.map((b) => `\`${b.token}\``).join(', ')
       return [{
