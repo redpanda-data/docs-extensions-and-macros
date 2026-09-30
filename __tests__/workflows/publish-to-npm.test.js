@@ -13,6 +13,7 @@
 const fs = require('fs')
 const path = require('path')
 const YAML = require('yaml')
+const { execRun } = require('./helpers/exec-run')
 
 const ROOT = path.join(__dirname, '..', '..')
 const WORKFLOW_PATH = path.join(ROOT, '.github', 'workflows', 'publish-to-npm.yaml')
@@ -37,9 +38,29 @@ describe('publish-to-npm workflow: static contracts', () => {
     expect(rp.outputs.release_created).toBe('${{ steps.release.outputs.release_created }}')
   })
 
-  test('publish runs only when release-please created a release', () => {
+  test("release-please's own token needs no write scope", () => {
+    // The action does its pushes, PR edits, tags and releases with the bot
+    // token, so write scopes on GITHUB_TOKEN would be unused.
+    expect(rp.permissions).toEqual({ contents: 'read', 'id-token': 'write' })
+  })
+
+  test('two quick merges do not run release-please concurrently', () => {
+    expect(rp.concurrency).toEqual({ group: 'release-please', 'cancel-in-progress': false })
+  })
+
+  test('publish runs only when release-please created a release, or for a recovery tag', () => {
     expect(publish.needs).toBe('release-please')
-    expect(publish.if).toBe("needs.release-please.outputs.release_created == 'true'")
+    expect(publish.if).toBe("needs.release-please.outputs.release_created == 'true' || inputs.tag != ''")
+    expect(workflow.on.workflow_dispatch.inputs.tag).toMatchObject({ type: 'string', default: '' })
+  })
+
+  test('publish checks out the commit release-please tagged, not the event commit', () => {
+    // They differ when a later push tags a release PR that an earlier, failed
+    // run merged. Publishing github.sha would ship unreleased code under the
+    // tag's version.
+    expect(rp.outputs.sha).toBe('${{ steps.release.outputs.sha }}')
+    const checkout = publish.steps.find((s) => (s.uses || '').startsWith('actions/checkout'))
+    expect(checkout.with.ref).toBe('${{ inputs.tag || needs.release-please.outputs.sha }}')
   })
 
   test('publish cannot write to the repository', () => {
@@ -55,8 +76,11 @@ describe('publish-to-npm workflow: static contracts', () => {
     expect(publish.steps.some((s) => (s.uses || '').startsWith('JS-DevTools/npm-publish@'))).toBe(true)
   })
 
-  test('dispatch waits for a publish', () => {
+  test('dispatch waits for a publish and names the published commit', () => {
     expect(dispatch.needs).toBe('publish')
+    const step = dispatch.steps.find((s) => (s.uses || '').startsWith('peter-evans/repository-dispatch'))
+    expect(step.with['client-payload']).toContain('${{ needs.publish.outputs.sha }}')
+    expect(publish.outputs.sha).toBe('${{ steps.ref.outputs.sha }}')
   })
 
   test('there is no hand-rolled tag job left to race release-please for the tag', () => {
@@ -96,5 +120,36 @@ describe('release-please config', () => {
     const run = titleWorkflow.jobs.title.steps[0].run
     const types = run.match(/\^\(([a-z|]+)\)/)[1].split('|').sort()
     expect(root['changelog-sections'].map((s) => s.type).sort()).toEqual(types)
+  })
+})
+
+describe('publish workflow: release check (executed)', () => {
+  const step = workflow.jobs.publish.steps.find((s) => s.id === 'ref')
+  const run = ({ tag = '', version = '', pkgVersion }) => execRun(step, {
+    env: { TAG: tag, VERSION: version },
+    files: { 'package.json': JSON.stringify({ version: pkgVersion }) },
+    stubs: { git: 'echo abc123' }
+  })
+
+  test('a normal release publishes when package.json matches release-please', () => {
+    const r = run({ version: '5.51.1', pkgVersion: '5.51.1' })
+    expect(r.status).toBe(0)
+    expect(r.outputs.sha).toBe('abc123')
+  })
+
+  test('a recovery tag publishes when package.json matches the tag', () => {
+    const r = run({ tag: 'v5.51.1', pkgVersion: '5.51.1' })
+    expect(r.status).toBe(0)
+  })
+
+  test('a recovery tag whose package.json disagrees is refused', () => {
+    const r = run({ tag: 'v5.51.2', pkgVersion: '5.51.1' })
+    expect(r.status).toBe(1)
+    expect(r.all).toMatch(/says 5\.51\.1, expected 5\.51\.2/)
+  })
+
+  test('a checkout that is not the release is refused', () => {
+    const r = run({ version: '5.51.1', pkgVersion: '5.51.0' })
+    expect(r.status).toBe(1)
   })
 })

@@ -302,7 +302,7 @@ npm test
 
 Pull requests do not change `version` in `package.json`. https://github.com/googleapis/release-please[release-please] sets it, from the titles of the pull requests merged to `main` since the last release. The `pr-conventions` workflow fails any pull request that changes the version, or whose title is not a conventional commit.
 
-Pull requests are squash-merged, so the title becomes the commit that release-please reads:
+Pull requests are squash-merged with the PR title as the commit subject and the PR description as the commit body, so the title is what release-please reads. If you edit the title in the merge box, keep it conventional:
 
 [cols="1,1"]
 |===
@@ -331,8 +331,15 @@ After each merge to `main`, release-please opens or updates one pull request tit
 . Publishes that version to npm.
 . Dispatches `trigger-npm-update` to the docs repositories.
 
-If `publish` fails, the tag and release already exist. Open the failed run and use *Re-run failed jobs*. That keeps release-please's outputs and publishes the same commit. Re-running the whole workflow does not publish, because release-please reports no new release on the second run.
+If `publish` fails, the tag and release already exist, and the tag cannot be deleted to try again. To recover:
+
+* Open the failed run and use *Re-run failed jobs*. That keeps release-please's outputs and publishes the same commit. Do not use *Re-run all jobs*: release-please reports no new release on a second run, so `publish` is skipped.
+* If that is no longer possible, run the `publish-to-npm` workflow manually with the `tag` input set to the release, for example `v5.52.0`. It checks out that tag, refuses to publish if `package.json` there names a different version, and publishes. A version already on npm is skipped, so running it twice is harmless.
 
 === Permissions
 
-The `release-please` job holds `contents: write` and `pull-requests: write` to push the release branch, open the release pull request, and create the tag. The "Protect releases" ruleset on `+refs/tags/v*+` blocks updating and deleting those tags, so that token can create a tag but cannot move one. The `publish` job, which runs `npm install` lifecycle scripts and a third-party publish action, has only `contents: read`. The release pull request is opened with the actions bot token rather than `GITHUB_TOKEN`, because a pull request opened with `GITHUB_TOKEN` triggers no workflows and would get no test run.
+release-please pushes the release branch, opens the release pull request, and creates the tag and release with the actions bot token, not `GITHUB_TOKEN`. A pull request opened with `GITHUB_TOKEN` triggers no workflows, so the release pull request would get no test run. The job's own `GITHUB_TOKEN` is read-only. The "Protect releases" ruleset on `+refs/tags/v*+` blocks updating and deleting those tags, so the bot can create a tag but cannot move one. The `publish` job, which runs `npm install` lifecycle scripts and a third-party publish action, has only `contents: read`.
+
+=== Pinning a reusable workflow
+
+Pin to the commit a `v<version>` tag points at. The `doc-strings-review` workflow resolves its CLI version from the `package.json` in the same commit, and between releases that still names the previous release, so a caller pinned to an untagged commit gets that commit's workflow with the previous release's CLI.

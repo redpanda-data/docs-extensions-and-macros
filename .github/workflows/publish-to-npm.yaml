@@ -14,6 +14,14 @@
 name: publish-to-npm
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Recovery only: an existing v<version> tag to publish, when its
+          publish failed and "Re-run failed jobs" is no longer an option.
+          Leave empty for a normal run.
+        type: string
+        default: ''
   push:
     branches: [main]
 permissions:
@@ -21,18 +29,30 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
-    # contents: write to push the release branch and create the tag,
-    # pull-requests: write to open and update the release PR, id-token: write
-    # for the AWS role that holds the bot token. The "Protect releases" ruleset
-    # on refs/tags/v* blocks updating and deleting tags with no bypass actors,
-    # so this token can create a new `v*` tag but cannot move an existing one.
+    # The action does everything (push the release branch, open the release
+    # PR, create the tag and release) with the bot token below, never with
+    # GITHUB_TOKEN, so this job's own token only needs id-token: write for the
+    # AWS role that holds the bot token. The "Protect releases" ruleset on
+    # refs/tags/v* blocks updating and deleting tags with no bypass actors, so
+    # the bot can create a new `v*` tag but cannot move an existing one.
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
       id-token: write
+    # Two quick merges would otherwise run two instances against the same
+    # release branch. Not cancelled: a run that GitHub drops from the pending
+    # slot is harmless, because the next run tags any merged release PR that
+    # is still untagged, and publish follows the SHA it reports.
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       version: ${{ steps.release.outputs.version }}
+      # The commit release-please tagged. Usually github.sha, but not when this
+      # run is tagging a release PR that an earlier, failed run merged: then
+      # github.sha is a later commit whose package.json still says the
+      # released version, and publishing it would ship unreleased code.
+      sha: ${{ steps.release.outputs.sha }}
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -56,9 +76,10 @@ jobs:
 
   publish:
     needs: release-please
-    # Only the push that merges a release PR publishes. Every other push to
-    # main leaves package.json at the last released version.
-    if: needs.release-please.outputs.release_created == 'true'
+    # Only the run that tags a release publishes, or a manual recovery run
+    # naming a tag. Every other push to main leaves package.json at the last
+    # released version.
+    if: needs.release-please.outputs.release_created == 'true' || inputs.tag != ''
     runs-on: ubuntu-latest
     # No contents: write. This job runs `npm install`, which runs dependency
     # lifecycle scripts, and a third-party publish action; neither needs to be
@@ -66,6 +87,8 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    outputs:
+      sha: ${{ steps.ref.outputs.sha }}
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -73,9 +96,28 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.RP_AWS_CRED_ACCOUNT_ID }}:role/${{ vars.RP_AWS_CRED_BASE_ROLE_NAME }}${{ github.event.repository.name }}
       - uses: actions/checkout@v5
         with:
+          ref: ${{ inputs.tag || needs.release-please.outputs.sha }}
           # Don't leave the token in .git/config for later steps to find.
           # OIDC publishing does not need it and nothing here pushes.
           persist-credentials: false
+      # The tarball has to be the tagged commit. For a recovery run, refuse a
+      # tag whose package.json names a different version.
+      - name: Check the checkout is the release
+        id: ref
+        env:
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          set -euo pipefail
+          actual=$(jq -r .version package.json)
+          expected="${TAG#v}"
+          expected="${expected:-$VERSION}"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::package.json at the checked-out commit says $actual, expected $expected."
+            exit 1
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Publishing $actual from $(git rev-parse HEAD)."
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -83,7 +125,9 @@ jobs:
       - run: npm install
       # If this fails, the tag and release already exist. Use "Re-run failed
       # jobs" on this run: it keeps release-please's outputs, so publish runs
-      # again against the same commit.
+      # again against the same commit. Otherwise run this workflow manually
+      # with the tag input. npm-publish skips a version npm already has, so a
+      # recovery run for a version that did publish is a no-op.
       - uses: JS-DevTools/npm-publish@v4
 
   dispatch:
@@ -115,4 +159,4 @@ jobs:
           token: ${{ env.ACTIONS_BOT_TOKEN }}
           repository: ${{ matrix.repo }}
           event-type: trigger-npm-update
-          client-payload: '{"commit_sha": "${{ github.sha }}"}'
+          client-payload: '{"commit_sha": "${{ needs.publish.outputs.sha }}"}'

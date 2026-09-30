@@ -64,12 +64,14 @@ describe('title check (executed)', () => {
 describe('no-version-bump check (executed)', () => {
   const step = workflow.jobs['no-version-bump'].steps[0]
   const b64 = (v) => Buffer.from(JSON.stringify({ name: 'x', version: v })).toString('base64')
-  // gh answers `api repos/<repo>/contents/package.json?ref=<sha>` with the
-  // version for that sha, base64-encoded the way the contents API returns it.
-  const stubs = (versions) => ({
+  // gh answers `api repos/<repo>/compare/<base>...<head>` with the merge
+  // base, and `api repos/<repo>/contents/package.json?ref=<sha>` with the
+  // version at that sha, base64-encoded the way the contents API returns it.
+  const stubs = (versions, mergeBase = 'mb1') => ({
     gh: `
 echo "gh $*" >> "$HOME/gh.log"
 case "$2" in
+  */compare/*) echo '${mergeBase}' ;;
 ${Object.entries(versions).map(([sha, v]) => `  *ref=${sha}) echo '${b64(v)}' ;;`).join('\n')}
   *) echo "unexpected: $*" >&2; exit 1 ;;
 esac`
@@ -85,13 +87,22 @@ esac`
   })
 
   test('an unchanged version passes', () => {
-    const r = execRun(step, { env: env(), stubs: stubs({ base1: '5.51.0', head1: '5.51.0' }) })
+    const r = execRun(step, { env: env(), stubs: stubs({ mb1: '5.51.0', head1: '5.51.0' }) })
     expect(r.status).toBe(0)
     expect(r.all).toMatch(/Version unchanged \(5\.51\.0\)/)
   })
 
+  test('a PR that is behind main after a release passes', () => {
+    // main (base.sha) is at 5.51.1 after the release PR merged; the branch
+    // started from 5.51.0 and never touched package.json.
+    const r = execRun(step, { env: env(), stubs: stubs({ base1: '5.51.1', mb1: '5.51.0', head1: '5.51.0' }) })
+    expect(r.status).toBe(0)
+    expect(r.read('gh.log')).toMatch(/compare\/base1\.\.\.head1/)
+    expect(r.read('gh.log')).not.toMatch(/ref=base1/)
+  })
+
   test('a bumped version fails and says how to undo it', () => {
-    const r = execRun(step, { env: env(), stubs: stubs({ base1: '5.51.0', head1: '5.52.0' }) })
+    const r = execRun(step, { env: env(), stubs: stubs({ mb1: '5.51.0', head1: '5.52.0' }) })
     expect(r.status).toBe(1)
     expect(r.all).toMatch(/from 5\.51\.0 to 5\.52\.0/)
     expect(r.all).toMatch(/npm install --package-lock-only/)
@@ -106,13 +117,13 @@ esac`
   test('a fork branch named like the release branch gets no exemption', () => {
     const r = execRun(step, {
       env: env({ HEAD_REF: 'release-please--branches--main--components--docs-extensions-and-macros', HEAD_REPO: 'someone/docs-extensions-and-macros' }),
-      stubs: stubs({ base1: '5.51.0', head1: '9.0.0' })
+      stubs: stubs({ mb1: '5.51.0', head1: '9.0.0' })
     })
     expect(r.status).toBe(1)
   })
 
   test('an API failure fails the check instead of passing it', () => {
-    const r = execRun(step, { env: env({ HEAD_SHA: 'missing' }), stubs: stubs({ base1: '5.51.0' }) })
+    const r = execRun(step, { env: env({ HEAD_SHA: 'missing' }), stubs: stubs({ mb1: '5.51.0' }) })
     expect(r.status).not.toBe(0)
   })
 })

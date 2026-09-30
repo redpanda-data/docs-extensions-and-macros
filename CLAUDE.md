@@ -321,7 +321,7 @@ npm run test:coverage
 
 Do not bump `version` in `package.json` in your pull request. A check (`pr-conventions`) fails any PR that changes it. The version is set by [release-please](https://github.com/googleapis/release-please), which reads the title of every PR merged to `main` since the last release.
 
-PRs are squash-merged, so the PR title becomes the commit that release-please reads. Give it a conventional-commit type. The `pr-conventions` check enforces this:
+PRs are squash-merged with the PR title as the commit subject, so the PR title is what release-please reads. If you edit the title in the merge box, keep it conventional. Give it a conventional-commit type. The `pr-conventions` check enforces this:
 
 | Title starts with | Effect |
 |---|---|
@@ -338,7 +338,7 @@ After each merge to `main`, release-please opens or updates a single release PR 
 2. Publishes that version to npm.
 3. Tells the docs repositories to update their `@redpanda-data/docs-extensions-and-macros` dependency.
 
-If publishing fails after the tag exists, open the failed `publish-to-npm` run and use **Re-run failed jobs**.
+If publishing fails after the tag exists, open the failed `publish-to-npm` run and use **Re-run failed jobs** (not **Re-run all jobs**, which skips publishing). If that is no longer possible, run `publish-to-npm` manually with the `tag` input set to the release, for example `v5.52.0`.
 
 ### If your change touched a docs-data/*.schema.json file
 

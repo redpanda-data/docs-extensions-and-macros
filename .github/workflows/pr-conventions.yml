@@ -60,7 +60,12 @@ jobs:
           read_version() {
             gh api "repos/$1/contents/package.json?ref=$2" --jq .content | base64 -d | jq -r .version
           }
-          base=$(read_version "$BASE_REPO" "$BASE_SHA")
+          # Compare against the merge base, not base.sha. base.sha is main's
+          # tip, so once a release lands there every PR that is behind main
+          # would look like it changed the version. The merge base is what
+          # this PR's diff is taken from.
+          merge_base=$(gh api "repos/$BASE_REPO/compare/$BASE_SHA...$HEAD_SHA" --jq .merge_base_commit.sha)
+          base=$(read_version "$BASE_REPO" "$merge_base")
           head=$(read_version "$HEAD_REPO" "$HEAD_SHA")
           if [ "$base" = "$head" ]; then
             echo "Version unchanged ($base)."
@@ -69,6 +74,7 @@ jobs:
           echo "::error::This PR changes package.json version from $base to $head."
           echo "Leave the version alone. release-please sets it in the release PR,"
           echo "from the conventional-commit type in this PR's title."
-          echo "To fix: set version back to $base in package.json, then run"
+          echo "To fix: set version back to $base in package.json (the version where"
+          echo "this branch started), then run"
           echo "  npm install --package-lock-only"
           exit 1
