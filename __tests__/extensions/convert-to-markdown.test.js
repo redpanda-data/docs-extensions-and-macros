@@ -567,3 +567,22 @@ describe('solution files in Markdown frontmatter', () => {
     expect(buildSolutionMetadata(page(BASE)).files).toBeUndefined()
   })
 })
+
+// An agent that lands on a solution's .md can find the companion written for it.
+describe('agent companion link in Markdown frontmatter', () => {
+  const { buildSolutionMetadata } = require('../../extensions/convert-to-markdown')
+  const page = (record) => ({
+    src: { component: 'solutions', version: '' },
+    asciidoc: { doctitle: 'T', attributes: { 'page-solution': JSON.stringify(record) } },
+  })
+  const BASE = { id: 'mg', version: 'v1.0.0', tag: 'mg/v1.0.0', status: 'published', difficulty: 'beginner', duration: 15, steps: [] }
+
+  test('emits agent_companion when the build generated one', () => {
+    const block = buildSolutionMetadata(page({ ...BASE, agentCompanion: '/solutions/mg/agent-companion.md' }))
+    expect(block.agent_companion).toBe('/solutions/mg/agent-companion.md')
+  })
+
+  test('omits it otherwise', () => {
+    expect(buildSolutionMetadata(page(BASE)).agent_companion).toBeUndefined()
+  })
+})

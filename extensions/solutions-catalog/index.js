@@ -28,7 +28,8 @@
  *                        `solutions-catalog` (set here, not at beforePublish,
  *                        because pages are composed before beforePublish fires)
  *   beforePublish        assets/data/solutions.json, assets/data/solutions-graph.json,
- *                        optional GitHub release check (network_checks)
+ *                        solutions/<slug>/agent-companion.md per built solution
+ *                        (agent_companion), optional GitHub release check (network_checks)
  *
  * When the build has no `solutions` component every hook is a no-op, so the
  * extension can ship to docs-site before the content source exists.
@@ -41,6 +42,7 @@ const collect = require('./collect')
 const validate = require('./validate')
 const relationships = require('./relationships')
 const outputs = require('./outputs')
+const companion = require('./agent-companion')
 
 const ATTRIBUTE_NAME = 'solutions-catalog'
 const ASSET_DIR = 'assets/data'
@@ -65,6 +67,7 @@ const DEFAULTS = Object.freeze({
   minScore: 0.6,
   networkChecks: 'auto',
   includeDrafts: false,
+  agentCompanion: true,
   // The solutions repository is private: readers get the code through the
   // gated download and the public attachments, so its owner/name is not
   // published unless a playbook says the repository is public.
@@ -82,6 +85,7 @@ function resolveConfig (config = {}, env = process.env) {
   const minScore = Number(pick('minScore', 'min_score'))
   const networkChecks = pick('networkChecks', 'network_checks')
   const includeDraftsRaw = pick('includeDrafts', 'include_drafts')
+  const agentCompanionRaw = pick('agentCompanion', 'agent_companion')
   const publicRepoRaw = pick('publicRepo', 'public_repo')
   const envDrafts = env.SOLUTIONS_INCLUDE_DRAFTS
   const includeDrafts = includeDraftsRaw !== undefined
@@ -92,6 +96,7 @@ function resolveConfig (config = {}, env = process.env) {
     minScore: Number.isFinite(minScore) ? minScore : DEFAULTS.minScore,
     networkChecks: networkChecks === undefined ? DEFAULTS.networkChecks : normalizeTristate(networkChecks),
     includeDrafts,
+    agentCompanion: agentCompanionRaw === undefined ? DEFAULTS.agentCompanion : isTrue(agentCompanionRaw),
     publicRepo: publicRepoRaw === undefined ? DEFAULTS.publicRepo : isTrue(publicRepoRaw),
   }
 }
@@ -236,6 +241,60 @@ async function checkReleases (records, logger, octokitClient) {
   }
 }
 
+/**
+ * Generate one solution's agent companion from the sources captured at
+ * contentClassified. Returns null, with a warning, when it cannot be built.
+ *
+ * A solution with no `page-solution-rule` still gets a companion, but it gives
+ * an agent no invariants to apply, so it is reported: a warning while the
+ * solution is a draft, and an entry in `errors` (fatal, like every other
+ * catalog error) once it is published.
+ *
+ * @param {Object} record
+ * @param {Object} sources - from collect.collectCompanionSources
+ * @param {Object} logger
+ * @param {Object} [options]
+ * @param {(resourceId: string) => string|undefined} [options.titleOf] - target page title for empty xref text
+ * @param {Array<string>} [options.errors] - collects the published zero-rules error
+ */
+function buildCompanion (record, sources, logger, { titleOf, errors } = {}) {
+  const overview = record.overview
+  if (!sources || !overview || !overview.out || !overview.out.path) return null
+  let result
+  try {
+    result = companion.generateAgentCompanion({ slug: record.id, pages: sources.pages, verifyScript: sources.verifyScript, titleOf })
+  } catch (err) {
+    logger.warn(`solutions-catalog: ${record.id}: agent companion not generated: ${err.message}`)
+    return null
+  }
+  if (result.leaks.length) logger.warn(`solutions-catalog: ${record.id}: AsciiDoc left in the agent companion (${result.leaks.join(', ')})`)
+  if (!result.rules.some((r) => r.rule)) {
+    const message = `${record.id}: no step sets page-solution-rule, so the agent companion has no Rules, Design contract rules, or Acceptance for an agent to apply`
+    if (record.status === 'published' && errors) errors.push(message)
+    else logger.warn(`solutions-catalog: ${message}`)
+  }
+  const dir = overview.out.path.replace(/[^/]*$/, '')
+  const base = (record.url || `/${dir}`).replace(/[^/]*$/, '')
+  return { id: record.id, path: `${dir}${companion.FILE_NAME}`, url: `${base}${companion.FILE_NAME}`, markdown: result.markdown }
+}
+
+/**
+ * Title of the page a resource ID names, resolved from inside a solution
+ * module the way Antora resolves that solution's own xrefs.
+ */
+function makeTitleOf (contentCatalog, record) {
+  return (resourceId) => {
+    if (typeof contentCatalog.resolveResource !== 'function') return undefined
+    try {
+      const page = contentCatalog.resolveResource(resourceId, { component: collect.COMPONENT, version: record.componentVersion, module: record.module }, 'page', ['page'])
+      const title = page && page.asciidoc && collect.plainTitle(page.asciidoc.doctitle)
+      return title || undefined
+    } catch {
+      return undefined
+    }
+  }
+}
+
 module.exports.register = function ({ config = {} } = {}) {
   raiseListenerLimit(this)
   const logger = this.getLogger('solutions-catalog-extension')
@@ -247,6 +306,10 @@ module.exports.register = function ({ config = {} } = {}) {
     records: [],
     draftUrls: [],
     facetsFile: null,
+    // Raw AsciiDoc per solution module, captured at contentClassified for the
+    // agent companion, and the generated companions waiting for beforePublish.
+    companionSources: new Map(),
+    companions: [],
   }
   let validator = null
   const getValidator = () => (validator = validator || relationships.createRelationshipsValidator())
@@ -277,6 +340,9 @@ module.exports.register = function ({ config = {} } = {}) {
     }
 
     if (errors.length) throw new Error(validate.formatErrors(errors))
+
+    // Last hook where page contents are still AsciiDoc.
+    if (settings.agentCompanion) state.companionSources = collect.collectCompanionSources(contentCatalog)
   })
 
   this.on('documentsConverted', ({ contentCatalog, siteCatalog, playbook }) => {
@@ -407,6 +473,21 @@ module.exports.register = function ({ config = {} } = {}) {
     }
     logger.info(`solutions-catalog: ${decorated} doc pages decorated, ${coverage.uncategorizedEligiblePages} eligible doc pages without categories`)
 
+    // Agent companions, generated here so the record can link one only when it
+    // exists; published at beforePublish.
+    state.companions = []
+    const companionErrors = []
+    for (const record of active) {
+      const built = buildCompanion(record, state.companionSources.get(record.module), logger, {
+        titleOf: makeTitleOf(contentCatalog, record),
+        errors: companionErrors,
+      })
+      if (!built) continue
+      record.agentCompanion = built.url
+      state.companions.push(built)
+    }
+    if (companionErrors.length) throw new Error(validate.formatErrors(companionErrors))
+
     // Page attributes and the catalog
     const homeUrl = collected.landing && collected.landing.pub && collected.landing.pub.url
     const publicRecords = []
@@ -455,6 +536,10 @@ module.exports.register = function ({ config = {} } = {}) {
     siteCatalog.addFile({ contents: outputs.toJsonBuffer(state.catalog), out: { path: `${ASSET_DIR}/${CATALOG_FILENAME}` } })
     siteCatalog.addFile({ contents: outputs.toJsonBuffer(state.graph), out: { path: `${ASSET_DIR}/${GRAPH_FILENAME}` } })
     logger.info(`solutions-catalog: published ${ASSET_DIR}/${CATALOG_FILENAME} and ${ASSET_DIR}/${GRAPH_FILENAME}`)
+    for (const { path, markdown } of state.companions) {
+      siteCatalog.addFile({ contents: Buffer.from(markdown, 'utf8'), out: { path } })
+    }
+    if (state.companions.length) logger.info(`solutions-catalog: published ${state.companions.length} agent companion${state.companions.length === 1 ? '' : 's'}`)
 
     if (shouldRunNetworkChecks(settings.networkChecks)) {
       await checkReleases(state.records, logger)
