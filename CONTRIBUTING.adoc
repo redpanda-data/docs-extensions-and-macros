@@ -300,10 +300,39 @@ npm test
 
 == Releases
 
-Every pull request that changes published code bumps `version` in `package.json`. When it merges, `.github/workflows/publish-to-npm.yaml` publishes that version to npm and then creates a matching `v<version>` git tag and GitHub release, with generated notes. The tag exists so that other repositories can pin the reusable workflows and actions in this repository to a version instead of to `main`; a workflow that runs inside another repository's job must not float.
+Pull requests do not change `version` in `package.json`. https://github.com/googleapis/release-please[release-please] sets it, from the titles of the pull requests merged to `main` since the last release. The `pr-conventions` workflow fails any pull request that changes the version, or whose title is not a conventional commit.
 
-This applies to changes in `.github/workflows/` too, not only to code that ships in the npm package. A workflow-only change with no version bump publishes nothing, so no new tag is created, so no tag contains that change and callers pinning a tag never receive it. If you edit a reusable workflow, bump the version in the same pull request.
+Pull requests are squash-merged, so the title becomes the commit that release-please reads:
 
-There is nothing to do by hand. If the tag for a published version is ever missing, re-run the failed `release` job (not the whole workflow): it checks npm for the version and creates the tag if it is absent, and leaves an existing release alone. Re-running the whole workflow also re-fires `dispatch`, telling all four docs repositories to pull the version again for no reason.
+[cols="1,1"]
+|===
+|Title starts with |Effect
 
-Tags are created by a dedicated `release` job that holds `contents: write` on its own. The `publish` job stays read-only, so the token that can move a `v*` tag is never available to `npm install` lifecycle scripts or to the third-party publish action.
+|`feat:` or `feat(<scope>):`
+|Minor release
+
+|`fix:`, `perf:`, `revert:`, `ci:`
+|Patch release
+
+|Any type followed by `!`, for example `feat!:`
+|Major release
+
+|`docs:`, `chore:`, `test:`, `refactor:`, `build:`, `style:`
+|No release
+|===
+
+A change to a reusable workflow in `.github/workflows/` needs a release as much as a code change does. Other repositories pin the workflows and actions in this repository to a `v<version>` tag, or better, to the commit that tag points at, so callers only receive a workflow change once a tag contains it. Title those pull requests `ci:` or `fix:`.
+
+=== Cutting a release
+
+After each merge to `main`, release-please opens or updates one pull request titled `chore(main): release <version>`. It carries the version bump in `package.json` and `package-lock.json` and the new `CHANGELOG.md` entry. To release, review and merge it. On that push, `.github/workflows/publish-to-npm.yaml`:
+
+. Creates the `v<version>` tag and GitHub release, with the changelog entry as notes.
+. Publishes that version to npm.
+. Dispatches `trigger-npm-update` to the docs repositories.
+
+If `publish` fails, the tag and release already exist. Open the failed run and use *Re-run failed jobs*. That keeps release-please's outputs and publishes the same commit. Re-running the whole workflow does not publish, because release-please reports no new release on the second run.
+
+=== Permissions
+
+The `release-please` job holds `contents: write` and `pull-requests: write` to push the release branch, open the release pull request, and create the tag. The "Protect releases" ruleset on `+refs/tags/v*+` blocks updating and deleting those tags, so that token can create a tag but cannot move one. The `publish` job, which runs `npm install` lifecycle scripts and a third-party publish action, has only `contents: read`. The release pull request is opened with the actions bot token rather than `GITHUB_TOKEN`, because a pull request opened with `GITHUB_TOKEN` triggers no workflows and would get no test run.

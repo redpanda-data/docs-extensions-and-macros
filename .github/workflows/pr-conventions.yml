@@ -1,0 +1,74 @@
+---
+# Two checks that release-please depends on.
+#
+# PRs are squash-merged, so the PR title becomes the commit subject that
+# release-please reads to decide whether to release and how far to bump. A
+# title without a conventional prefix is invisible to it: a fix merged as
+# "Fix the thing" never reaches npm.
+#
+# The version is set by the release PR only. A feature PR that bumps it
+# brings back the conflicts this setup removed, and a number it picks can
+# collide with the one release-please proposes.
+#
+# The PR title reaches bash through env, never through ${{ }} in the run body:
+# a title is attacker-controlled text and textual substitution would run it.
+name: pr-conventions
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the PR title is a conventional commit
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          pattern='^(feat|fix|perf|revert|ci|docs|chore|test|refactor|build|style)(\([^)]+\))?!?: .+'
+          if [[ "$TITLE" =~ $pattern ]]; then
+            echo "Title OK: $TITLE"
+            exit 0
+          fi
+          echo "::error::PR title must start with a conventional-commit type, for example 'fix(macros): ...' or 'feat: ...'."
+          echo "Types that release: feat (minor), fix, perf, revert, ci (patch). Add ! after the type for a breaking change (major)."
+          echo "Types that do not release: docs, chore, test, refactor, build, style."
+          echo "Got: $TITLE"
+          exit 1
+
+  no-version-bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the PR leaves the version alone
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_REPO: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          # release-please opens its PR from release-please--branches--<base>--components--<package>.
+          # That PR is the one place the version is meant to change.
+          if [[ "$HEAD_REF" == release-please--* && "$HEAD_REPO" == "$BASE_REPO" ]]; then
+            echo "Release PR; the version change is expected."
+            exit 0
+          fi
+          read_version() {
+            gh api "repos/$1/contents/package.json?ref=$2" --jq .content | base64 -d | jq -r .version
+          }
+          base=$(read_version "$BASE_REPO" "$BASE_SHA")
+          head=$(read_version "$HEAD_REPO" "$HEAD_SHA")
+          if [ "$base" = "$head" ]; then
+            echo "Version unchanged ($base)."
+            exit 0
+          fi
+          echo "::error::This PR changes package.json version from $base to $head."
+          echo "Leave the version alone. release-please sets it in the release PR,"
+          echo "from the conventional-commit type in this PR's title."
+          echo "To fix: set version back to $base in package.json, then run"
+          echo "  npm install --package-lock-only"
+          exit 1
