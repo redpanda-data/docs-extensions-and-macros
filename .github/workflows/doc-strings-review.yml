@@ -89,13 +89,15 @@
 # `github.event.pull_request.head.repo.full_name == github.repository`.
 #
 # This workflow reviews OTHER repos' PRs, so treat changes to it as review
-# infrastructure: callers should pin a commit SHA, not @main. The doc-tools
-# CLI version is resolved at run time from the workflow's OWN ref (the
-# package.json committed alongside this file), so the workflow and the CLI it
-# runs always come from the same commit: a caller pinned to a ref gets that
-# ref's CLI, and a reviewed change to this repo is the only way to change
-# what executes inside engineering repos. doc_tools_package remains as an
-# explicit override for callers that need a different version.
+# infrastructure: callers should pin the commit a `v<version>` tag points
+# at, not @main and not an arbitrary commit. The doc-tools CLI version is
+# resolved at run time from the package.json committed alongside this file.
+# At a release commit that is the version released from that commit, so the
+# workflow and the CLI match. Between releases, package.json still names the
+# PREVIOUS release (release-please bumps it only in the release PR), so a
+# caller pinned to an untagged commit runs this commit's workflow with the
+# previous release's CLI. doc_tools_package remains as an explicit override
+# for callers that need a different version.
 name: doc-strings-review (reusable)
 on:
   workflow_call:
@@ -284,14 +286,14 @@ jobs:
           python-version: '3.12'
       # Resolve which doc-tools version to run. The version is read from the
       # package.json at this workflow's OWN ref (github.job_workflow_sha names
-      # the reusable workflow's commit; workflow_sha covers a same-repo run),
-      # so a caller pinned to any ref runs the CLI released from that exact
-      # commit: lockstep is structural, not a hand-maintained default that
-      # every release bump has to edit. Fail-open order when resolution cannot
-      # complete, after three attempts at the read: @latest with a warning,
-      # matching the workflow's posture -- in the publish window right after a
-      # merge, the resolved version is not on npm yet and @latest is simply
-      # the previous release.
+      # the reusable workflow's commit; workflow_sha covers a same-repo run).
+      # For a caller pinned to a release commit, that is the CLI released from
+      # that exact commit, with no hand-maintained default to edit. For an
+      # untagged commit it is the last release before it (see the header).
+      # Fail-open order when resolution cannot complete, after three attempts
+      # at the read: @latest with a warning, matching the workflow's posture --
+      # in the publish window right after a release PR merges, the resolved
+      # version is not on npm yet and @latest is simply the previous release.
       - name: Resolve the doc-tools package
         id: pkg
         env:
