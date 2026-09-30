@@ -321,6 +321,8 @@ Pull requests are squash-merged with the PR title as the commit subject and the 
 |No release
 |===
 
+release-please parses the PR description too. In the description, don't start a line with a commit type such as `fix:`, and don't add a `BREAKING CHANGE:` or `Release-As:` footer. Either one changes the release, even on a `docs:` pull request.
+
 A change to a reusable workflow in `.github/workflows/` needs a release as much as a code change does. Other repositories pin the workflows and actions in this repository to a `v<version>` tag, or better, to the commit that tag points at, so callers only receive a workflow change once a tag contains it. Title those pull requests `ci:` or `fix:`.
 
 === Cutting a release

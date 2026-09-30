@@ -65,8 +65,8 @@ jobs:
           parse-json-secrets: true
       # The bot token, not GITHUB_TOKEN: a PR opened or updated with
       # GITHUB_TOKEN triggers no workflows, so test.yaml would never run on
-      # the release PR. Pinned to a commit because this action holds
-      # contents: write.
+      # the release PR. Pinned to a commit because this action holds a
+      # write-capable token.
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         with:
