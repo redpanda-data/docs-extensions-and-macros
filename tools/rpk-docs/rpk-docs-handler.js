@@ -1137,15 +1137,21 @@ const WHATS_NEW_EXCLUDED_SUBTREES = ['rpk ai']
 
 /**
  * Return a copy of diffData without entries under the excluded subtrees.
+ * Commands marked asPartial in the overrides are dropped too: they render
+ * only as partials single-sourced into another component (for example,
+ * rpk sql for Redpanda SQL in Cloud), so they are not Self-Managed changes.
  * Only the published What's-new block filters; diff reports and PR
  * summaries keep the full picture.
  * @param {Object} diffData - Diff from generateRpkDiff
  * @param {string[]} [excluded] - Command-path prefixes to drop
+ * @param {Object} [overridesData] - rpk overrides; asPartial subtrees are dropped
  * @returns {Object} Filtered copy
  */
-function filterDiffForWhatsNew(diffData, excluded = WHATS_NEW_EXCLUDED_SUBTREES) {
+function filterDiffForWhatsNew(diffData, excluded = WHATS_NEW_EXCLUDED_SUBTREES, overridesData = null) {
+  const resolved = overridesData ? resolveReferences(overridesData, overridesData) : null
   const outside = (cmdPath) => !excluded.some(prefix =>
-    cmdPath === prefix || (typeof cmdPath === 'string' && cmdPath.startsWith(prefix + ' ')))
+    cmdPath === prefix || (typeof cmdPath === 'string' && cmdPath.startsWith(prefix + ' '))) &&
+    !(resolved && typeof cmdPath === 'string' && shouldUsePartialDir(resolved, cmdPath))
   const details = diffData.details || {}
   const filteredDetails = { ...details }
   for (const key of ['newCommands', 'newlyDeprecatedCommands', 'removedCommands', 'descriptionChanges']) {
@@ -2145,7 +2151,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
           // Update what's-new file if requested
           if (whatsNewPath) {
-            updateWhatsNewFile(filterDiffForWhatsNew(diffData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
+            updateWhatsNewFile(filterDiffForWhatsNew(diffData, WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
           }
         } else {
           console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
@@ -2467,7 +2473,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
         // Update what's-new file if requested
         if (whatsNewPath) {
-          updateWhatsNewFile(filterDiffForWhatsNew(diffData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
+          updateWhatsNewFile(filterDiffForWhatsNew(diffData, WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
         }
       } else {
         console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
