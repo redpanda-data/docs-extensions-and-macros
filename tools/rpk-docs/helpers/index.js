@@ -315,7 +315,7 @@ function sectionTitle(name) {
   // Acronyms that should remain ALL CAPS
   const acronyms = new Set([
     'id', 'ip', 'api', 'url', 'uri', 'cpu', 'gpu', 'ram', 'io',
-    'tls', 'ssl', 'mtls', 'sasl', 'oauth', 'oidc', 'jwt',
+    'tls', 'ssl', 'mtls', 'sasl', 'sso', 'oauth', 'oidc', 'jwt',
     'json', 'yaml', 'xml', 'csv', 'http', 'https', 'grpc', 'rpc',
     'aws', 'gcp', 'azure', 's3', 'eos'
   ])
