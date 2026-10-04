@@ -83,4 +83,39 @@ describe('generator with writePartials false', () => {
     expect(page).toContain('include::connect:components:partial$descriptions/outputs/sql_raw.adoc[tag=body]');
     expect(page).toContain('include::connect:components:partial$fields/outputs/sql_raw.adoc[]');
   });
+
+  // Drafts are never regenerated, so a draft that freezes reference facts
+  // drifts as soon as the source changes them. With the connect partials the
+  // draft takes them from generated data instead.
+  const draft = async (writePartials) => {
+    const data = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    data.outputs[0].categories = ['Services'];
+    fs.writeFileSync(dataFile, JSON.stringify({ outputs: data.outputs }), 'utf8');
+    await run({ writeFullDrafts: true, writePartials, cgoOnly: [{ type: 'outputs', name: 'sql_raw' }], csvMetadata: [{ type: 'output', name: 'sql_raw', support: 'certified' }] });
+    return fs.readFileSync(path.join(tmpDir, 'modules', 'components', 'pages', 'outputs', 'sql_raw.adoc'), 'utf8');
+  };
+
+  test('a draft from the connect partials freezes no type, categories, support, or cgo note', async () => {
+    const page = await draft(false);
+    expect(page).not.toMatch(/^:type:/m);
+    expect(page).not.toMatch(/^:categories:/m);
+    expect(page).not.toMatch(/^:support:/m);
+    expect(page).not.toContain('== Requirements');
+    expect(page).not.toContain('cgo-enabled');
+    expect(page).toContain('include::connect:components:partial$descriptions/outputs/sql_raw.adoc[tag=meta]');
+    expect(page).toContain('include::connect:components:partial$availability/outputs/sql_raw.adoc[opts=optional]');
+    expect(page).toContain('include::connect:components:partial$descriptions/outputs/sql_raw.adoc[tag=footnotes]');
+    // Header stays one block: no blank line before the meta include
+    const header = page.split('\n\n')[0];
+    expect(header).toContain('[tag=meta]');
+  });
+
+  test('control: a draft with DEM-written partials keeps categories and the cgo note', async () => {
+    const page = await draft(true);
+    expect(page).not.toMatch(/^:type:/m);
+    expect(page).toMatch(/^:categories: \[Services\]$/m);
+    expect(page).toContain('== Requirements');
+    expect(page).not.toContain('partial$availability/');
+    expect(page).not.toContain('[tag=footnotes]');
+  });
 });

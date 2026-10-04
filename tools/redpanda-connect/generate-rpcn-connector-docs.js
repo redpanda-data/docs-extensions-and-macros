@@ -737,6 +737,11 @@ async function generateRpcnConnectorDocs(options) {
 
         // typeDir is already computed at the beginning of the loop
 
+        // When the connect repo publishes the partials, the draft includes
+        // its availability, footnotes, and catalog data instead of freezing
+        // categories and the cgo requirement into the page.
+        item.connectPartials = !writePartials;
+
         let content;
         try {
           content = compiledTemplate(item);
