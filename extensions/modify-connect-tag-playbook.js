@@ -19,25 +19,20 @@
 //    partial, so this makes it safe to add the source to a playbook before or
 //    after rp-connect-docs stops committing its own generated copies, and it
 //    ignores the full pages that older connect tags still carry.
+//
+// It also shares the tag it resolves (util/connect-catalog), so
+// generate-rp-connect-info reads info.csv from the same ref as the reference
+// content.
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const getLatestConnectTag = require('./version-fetcher/get-latest-connect')
 const { getGitHubApiToken } = require('../cli-utils/github-token')
+const { isConnectSource, isConnectOrigin, setResolvedConnectRef } = require('./util/connect-catalog')
 
 const OWNER = 'redpanda-data'
 const REPO = 'connect'
 const COMPONENT = 'connect'
 const KEPT_PATHS = ['modules/components/partials/', 'modules/components/examples/']
-
-// Matches the GitHub URL (with or without .git) and a local clone whose
-// directory is named connect, which is how the source looks in local builds.
-function isConnectSource (url) {
-  return typeof url === 'string' && /(^|[/:])(redpanda-data\/)?connect(\.git)?\/?$/.test(url)
-}
-
-function isConnectOrigin (origin) {
-  return !!origin && (isConnectSource(origin.url) || isConnectSource(origin.worktree))
-}
 
 function isRemote (url) {
   return /^https?:\/\//.test(url || '')
@@ -137,6 +132,8 @@ module.exports.register = function () {
 
   this.on('contextStarted', async ({ playbook }) => {
     const sources = (playbook && playbook.content && playbook.content.sources) || []
+    // Clear a ref left over from an earlier build in the same process.
+    setResolvedConnectRef(null)
     const source = sources.find(wantsLatest)
     if (!source) return
     let tag = null
@@ -163,6 +160,7 @@ module.exports.register = function () {
       throw new Error('Could not resolve the latest Redpanda Connect release tag for the connect content source. Set a GitHub token or check network access.')
     }
     pinConnectSource(playbook, tag)
+    setResolvedConnectRef(tag)
     this.updateVariables({ playbook })
     logger.info(`Sourcing Redpanda Connect reference content from ${tag}`)
   })
