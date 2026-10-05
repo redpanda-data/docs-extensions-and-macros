@@ -474,6 +474,56 @@ jobs:
             ''|*[!0-9]*) removals=0 ;;
           esac
           echo "removals=$removals" >> "$GITHUB_OUTPUT"
+      # The review reads the diff from a file, not `gh pr diff`: the API
+      # refuses a diff over 300 files with HTTP 406, which regenerated-docs
+      # PRs exceed routinely, and the model then lost all diff context
+      # without saying so. The local diff is the same merge-base diff the
+      # lint ran on, filtered to source: generated docs, lockfiles, vendored
+      # code and test data are left out, and listed by name at the top so
+      # the model knows they exist.
+      - name: Save the source diff for the review
+        if: steps.lint.outputs.declarations != '0' || steps.lint.outputs.removals != '0'
+        continue-on-error: true
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          EXCLUDE=(
+            ':(exclude,glob)docs/modules/**'
+            ':(exclude,glob)**/*.adoc'
+            ':(exclude,glob)**/testdata/**'
+            ':(exclude,glob)**/vendor/**'
+            ':(exclude,glob)**/node_modules/**'
+            ':(exclude)go.sum'
+            ':(exclude,glob)**/go.sum'
+            ':(exclude,glob)**/package-lock.json'
+            ':(exclude,glob)**/*.lock'
+          )
+          left_out=$(git diff --name-only "$BASE"...HEAD | grep -cvxFf <(git diff --name-only "$BASE"...HEAD -- . "${EXCLUDE[@]}") || true)
+          status=0
+          {
+            echo "# Source diff of this PR against its merge base."
+            echo "# Left out (generated docs, lockfiles, vendored code, test data): ${left_out:-0} file(s)."
+            echo
+            git diff --no-color --no-ext-diff "$BASE"...HEAD -- . "${EXCLUDE[@]}"
+          } > pr-diff.full 2> pr-diff.err || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::could not compute the source diff (exit $status); the review runs without it."
+            sed -n '1,20p' pr-diff.err >&2 || true
+            rm -f pr-diff.full pr-diff.err pr-diff.patch
+            exit 0
+          fi
+          # Cap what the model reads. The declarations it reviews come from
+          # lint-findings.json either way; the diff is supporting context.
+          limit=$((1536 * 1024))
+          if [ "$(wc -c < pr-diff.full)" -gt "$limit" ]; then
+            head -c "$limit" pr-diff.full > pr-diff.patch
+            printf '\n# Diff truncated at %s bytes. Read the changed files directly for the rest.\n' "$limit" >> pr-diff.patch
+          else
+            mv pr-diff.full pr-diff.patch
+          fi
+          rm -f pr-diff.full pr-diff.err
+          echo "Saved pr-diff.patch: $(wc -c < pr-diff.patch) bytes, ${left_out:-0} file(s) left out."
       # The lint report is the fallback when no model runs (no credentials,
       # mint failure, nothing new to review), so it has to land somewhere a
       # person can read it: the job summary, not a file on the runner.
@@ -489,6 +539,12 @@ jobs:
             "",
             "New or changed declarations to review: \(.summary.totalDeclarations // 0). Already reviewed on an earlier push: \(.summary.alreadyReviewed // 0). Flagged: \(.summary.flaggedDeclarations // 0).",
             "",
+            (if (.summary.unverifiableDeclarations // 0) > 0
+             then "Declarations with text the extractor could not fully evaluate (exact-text rules skipped, the review still sees them): \(.summary.unverifiableDeclarations).\n"
+             else empty end),
+            (if ((.summary.skippedDeclarations // []) | length) > 0
+             then "Doc-method calls the extractor could not attribute, so nothing reviewed them:\n\n" + ([.summary.skippedDeclarations[] | "- \(.file | cell):\(.line) `.\(.method)()`: \(.reason | cell)"] | join("\n")) + "\n"
+             else empty end),
             (if ((.summary.removedDeclarations // []) | length) > 0
              then "Removed or renamed: " + ([.summary.removedDeclarations[] | "`\(.name)` (\(.surface))"] | join(", ")) + "\n"
              else empty end),
@@ -713,8 +769,9 @@ jobs:
               mcp__redpanda-docs__search_api_reference,
               mcp__redpanda-docs__ask_redpanda_question,
               mcp__redpanda-docs__get_api_reference_content,
+              Read,
               Write,
-              Bash(gh pr diff *),
+              Bash(cat pr-diff.patch),
               Bash(gh pr view *),
               Bash(cat lint-findings.json),
               Bash(cat embedded-reference-strings.md),
@@ -726,7 +783,15 @@ jobs:
             You are reviewing user-facing doc strings only: strings that doc
             generators publish verbatim (config property descriptions, metric
             help, rpk cobra help, Helm values comments, CRD field comments,
-            connector fields). lint-findings.json holds:
+            Redpanda Connect component specs, fields, Bloblang plugins and
+            `rpk connect` help). The PR's source diff is in pr-diff.patch
+            (generated docs, lockfiles and vendored code are left out; never
+            use gh pr diff). Read it with the Read tool, and page through a
+            large file with offset and limit until you reach the end:
+            cat output is cut off long before the end of a big diff. Read
+            lint-findings.json the same way. When pr-diff.patch is
+            absent, review from lint-findings.json and the checked-out
+            files. lint-findings.json holds:
             - declarations: the doc-string declarations this push adds or
               changes that no earlier push of this PR has reviewed. This is
               the COMPLETE list of what you review. Any other string in the
@@ -769,10 +834,50 @@ jobs:
               take NO terminal period; cobra Short stays one capitalized line
               with no period; CRD comments describe the json: tag key (never
               the Go field name) and keep +kubebuilder marker lines
-              byte-identical; Helm comments keep the # -- marker conventions.
+              byte-identical; Helm comments keep the # -- marker conventions;
+              connect strings follow CONNECT STRINGS below.
             - ends with this line, exactly, using the declaration's
               fingerprint from lint-findings.json:
               <sub>doc-strings-review:fp=FINGERPRINT</sub>
+
+            CONNECT STRINGS (surface connect): each declaration's detail
+            names its kind and, for component text, the components that
+            publish it with their internal/plugins/info.csv row: support
+            level, cloud (it runs in Redpanda Cloud) and cloud_ai (it runs in
+            Cloud GPU pipelines).
+            - Spec and field strings are AsciiDoc page bodies; AsciiDoc
+              headings, tables and links in them are legitimate. A Go raw
+              string cannot hold a backtick, so inline code inside one uses
+              the idiom `text ` + "`code`" + ` text`. Keep the string's
+              existing raw or interpreted form and every byte outside the
+              change; in an interpreted string escape quotes and newlines.
+            - Every xref names its module: xref:components:...,
+              xref:configuration:... or xref:guides:..., or a
+              component:module:page xref. A module-less xref breaks when
+              Cloud includes the same text into its own pages.
+            - Never put ifdef::env-cloud[], ifndef::env-cloud[] or any other
+              AsciiDoc conditional in a Go string, and never write Cloud or
+              cgo availability as prose. The generator renders those notes
+              from info.csv and the build lists; point to info.csv instead.
+            - When a component has cloud true, the same string ships on its
+              Cloud page: flag wording that holds only for self-managed
+              deployments (local file paths, installing binaries, process
+              restarts, command-line flags).
+            - ShortDescription (kind field-short) shows as plain text in
+              form-based editors: one plain sentence, no backticks, links or
+              markup.
+            - A declaration with detail.template comes from a helper called
+              once per component, and detail.call_site names the call. The
+              fix goes in the helper, so it must read correctly for every
+              caller. A {{unresolved:N}} placeholder is text the extractor
+              could not evaluate; never rewrite across it.
+            - CLI help (kinds cli-*) is `rpk connect` help: Usage is a
+              one-line label with no terminal period, and Description is
+              plain text, not AsciiDoc.
+            - End every connect suggestion comment, on the line before the
+              fingerprint line, with exactly: After you apply this
+              suggestion, run `CGO_ENABLED=1 TAGS=x_benthos_extra task docs`
+              and commit the regenerated docs, or the docs check fails.
 
             REVIEW IN CONTEXT: judge each string as the reader of its page,
             not on its own. Read it together with its context entries and
@@ -839,14 +944,17 @@ jobs:
             PUBLISHED-CONTENT IMPACT: consider only the entries in
             declarations and summary.removedDeclarations, and use at most 4
             redpanda-docs MCP calls in total. HIGH-IMPACT means a published
-            page OTHER than the generated property, metric, or rpk reference
-            states something this PR makes wrong (a removed or renamed
+            page OTHER than the generated property, metric, rpk, connector
+            (Redpanda Connect component pages) or Bloblang function and
+            method reference states something this PR makes wrong (a removed or renamed
             surface, a changed behavior or unit, a changed default that a
             page quotes in prose), or a new user-facing feature with no
             coverage beyond those generated references. These are NOT high
             impact: a changed default the generated reference renders from
             structured data, a new property, metric or flag the generated
-            reference picks up when it is regenerated, and anything you
+            reference picks up when it is regenerated, a changed connector
+            summary, description, field or Bloblang text, which the connect
+            docs regenerate from source, and anything you
             cannot verify from the diff (binary assets, code outside it). If
             any high-impact entries exist, Write doc-impact.json:
             {"findings":[{"surface","name","change_kind","affected_pages":

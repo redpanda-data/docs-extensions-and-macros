@@ -94,6 +94,8 @@ function lintStrings (options) {
   const pending = []
   let alreadyReviewed = 0
   let removal = { rawFiles: [], declarations: [] }
+  const skipped = []
+  let unverifiable = 0
 
   if (diffBase) {
     const { changed, removed } = getDiffLines(repoPath, diffBase)
@@ -137,9 +139,18 @@ function lintStrings (options) {
           continue
         }
         declarations.push(decl)
-        pending.push({ ...pendingEntry(decl), context: pageContext(decl, everything || head) })
+        if (decl.meta && decl.meta.unverifiable) unverifiable++
+        const detail = surface.reviewContext ? surface.reviewContext(decl) : null
+        pending.push({ ...pendingEntry(decl), ...(detail ? { detail } : {}), context: pageContext(decl, everything || head) })
       }
       results.push(runRules(declarations, rulesFor(surface), { skipRules, onlyRules }))
+      // Doc-method calls the extractor saw but could not trace, in the
+      // lines this diff changed. Reported so a gap is never silent.
+      const skippedHere = (everything ? everything.skipped : head.skipped) || []
+      for (const entry of skippedHere) {
+        const lines = files.get(entry.file)
+        if (lines && lines.has(entry.line)) skipped.push(entry)
+      }
     }
 
     removal = collectRemovals({ repoPath, diffBase, removed: removedBySurface, surfaces, requested, headBySurface, log })
@@ -151,7 +162,11 @@ function lintStrings (options) {
       const surface = SURFACES[surfaceName]
       log(`[${surfaceName}] extracting declarations from ${repoPath}...`)
       const declarations = surface.extract({ repo: repoPath, log })
-      for (const decl of declarations) decl.in_pr_diff = false
+      for (const decl of declarations) {
+        decl.in_pr_diff = false
+        if (decl.meta && decl.meta.unverifiable) unverifiable++
+      }
+      skipped.push(...(declarations.skipped || []))
       results.push(runRules(declarations, rulesFor(surface), { skipRules, onlyRules }))
     }
   }
@@ -168,6 +183,11 @@ function lintStrings (options) {
     merged.summary.alreadyReviewed = alreadyReviewed
   }
   merged.summary.removedDeclarations = removal.declarations.map(pendingEntry)
+  // Declarations whose text has gaps the extractor could not evaluate
+  // (rules that judge exact text skip them), and doc-method calls it could
+  // not attribute at all. Both are counted so a gap is never silent.
+  merged.summary.unverifiableDeclarations = unverifiable
+  merged.summary.skippedDeclarations = skipped
   const removedSurfaceFiles = [...removal.rawFiles, ...removedFilesFor(removal.declarations)]
     .sort((a, b) => a.surface.localeCompare(b.surface) || a.file.localeCompare(b.file))
   merged.summary.removedSurfaceFiles = removedSurfaceFiles
@@ -454,6 +474,12 @@ function formatHuman (result) {
   if (summary.removedSurfaceLines && !(summary.removedDeclarations || []).length) {
     lines.push(`Lines deleted from doc-string surfaces: ${summary.removedSurfaceLines} ` +
       `(${summary.removedSurfaceFiles.length} file(s) with no extractor, so every deleted line counts)`)
+  }
+  if (summary.unverifiableDeclarations) {
+    lines.push(`Declarations with text the extractor could not fully evaluate: ${summary.unverifiableDeclarations} (exact-text rules skipped)`)
+  }
+  for (const entry of summary.skippedDeclarations || []) {
+    lines.push(`Not extracted: ${entry.file}:${entry.line} .${entry.method}() (${entry.surface}): ${entry.reason}`)
   }
   lines.push(`Errors: ${summary.errors}  Warnings: ${summary.warnings}  Info: ${summary.info}`)
   if (Object.keys(summary.byRule).length > 0) {

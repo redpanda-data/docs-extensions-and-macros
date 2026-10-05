@@ -468,6 +468,78 @@ esac
   })
 })
 
+describe('doc-strings-review workflow: source diff (executed)', () => {
+  const step = stepNamed('Save the source diff for the review')
+  let repo
+  let base
+  const git = (...args) => {
+    const r = spawnSync('git', args, { cwd: repo, encoding: 'utf8' })
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`)
+    return r.stdout.trim()
+  }
+  const run = (env) => spawnSync('/bin/bash', ['-e', '-c', step.run], { cwd: repo, encoding: 'utf8', env: { ...process.env, ...env } })
+
+  beforeAll(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'dsr-diff-'))
+    git('init', '--quiet')
+    git('config', 'user.email', 'dsr-test@example.invalid')
+    git('config', 'user.name', 'dsr test')
+    fs.mkdirSync(path.join(repo, 'internal/impl/kafka'), { recursive: true })
+    fs.writeFileSync(path.join(repo, 'internal/impl/kafka/input.go'), 'package kafka\n\nconst d = "old"\n')
+    git('add', '.')
+    git('commit', '--quiet', '-m', 'base')
+    base = git('rev-parse', 'HEAD')
+    // A regenerated-docs PR: more files than the PR diff API serves. The 320
+    // partials, the example config, and go.sum make 322 left-out files.
+    fs.writeFileSync(path.join(repo, 'internal/impl/kafka/input.go'), 'package kafka\n\nconst d = "new"\n')
+    const gen = path.join(repo, 'docs/modules/components/partials/fields/inputs')
+    fs.mkdirSync(gen, { recursive: true })
+    for (let i = 0; i < 320; i++) fs.writeFileSync(path.join(gen, `c${i}.adoc`), `= C${i}\n`)
+    const examples = path.join(repo, 'docs/modules/components/examples/common/inputs')
+    fs.mkdirSync(examples, { recursive: true })
+    fs.writeFileSync(path.join(examples, 'kafka.yaml'), 'input:\n  kafka: {}\n')
+    fs.writeFileSync(path.join(repo, 'go.sum'), 'x v1 h1:y\n')
+    git('add', '.')
+    git('commit', '--quiet', '-m', 'change')
+  })
+
+  afterAll(() => fs.rmSync(repo, { recursive: true, force: true }))
+
+  test('a PR over 300 files yields the source diff, with generated files counted, not included', () => {
+    const r = run({ BASE: base })
+    expect(r.status).toBe(0)
+    const patch = fs.readFileSync(path.join(repo, 'pr-diff.patch'), 'utf8')
+    expect(patch).toContain('+const d = "new"')
+    expect(patch).not.toContain('docs/modules/')
+    expect(patch).not.toContain('go.sum')
+    expect(patch).toMatch(/Left out \(generated docs, lockfiles, vendored code, test data\): 322 file\(s\)/)
+    expect(fs.existsSync(path.join(repo, 'pr-diff.err'))).toBe(false)
+  })
+
+  test('a bad base leaves no diff file and still succeeds under bash -e', () => {
+    fs.writeFileSync(path.join(repo, 'pr-diff.patch'), 'stale')
+    const r = run({ BASE: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' })
+    expect(r.status).toBe(0)
+    expect(r.stdout + r.stderr).toMatch(/::warning::could not compute the source diff/)
+    expect(fs.existsSync(path.join(repo, 'pr-diff.patch'))).toBe(false)
+    expect(fs.existsSync(path.join(repo, 'pr-diff.err'))).toBe(false)
+  })
+
+  test('the review reads the saved diff, never gh pr diff', () => {
+    const review = stepNamed('Claude review with suggestions')
+    expect(review.with.claude_args).toContain('Bash(cat pr-diff.patch)')
+    expect(review.with.claude_args).not.toContain('gh pr diff')
+  })
+
+  // Bash output is cut off far below the diff cap, so a large diff only
+  // reaches the model in full when it can page through it with Read.
+  test('the review can page through a large diff with Read', () => {
+    const review = stepNamed('Claude review with suggestions')
+    expect(review.with.claude_args).toMatch(/--allowed-tools "[^"]*\bRead,/)
+    expect(review.with.prompt).toMatch(/offset and limit/)
+  })
+})
+
 describe('doc-strings-review workflow: writing-standard fetch (executed)', () => {
   const step = stepNamed('Fetch the writing standard')
   const STANDARD = 'embedded-reference-strings.md'
@@ -1005,6 +1077,22 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(row.split(/(?<!\\)\|/).length - 2).toBe(4)
     })
 
+    test('lists unattributed doc-method calls and counts partly evaluated text, so no gap is silent', () => {
+      const lint = {
+        findings: [],
+        summary: {
+          totalDeclarations: 1,
+          unverifiableDeclarations: 2,
+          skippedDeclarations: [{ surface: 'connect', file: 'internal/impl/x/y.go', line: 12, method: 'Description', reason: 'receiver d does not trace to a benthos spec' }]
+        }
+      }
+      const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' }, files: { 'lint-findings.json': JSON.stringify(lint) } })
+      expect(r.status).toBe(0)
+      const out = r.read('summary.md')
+      expect(out).toMatch(/could not fully evaluate .*: 2\./)
+      expect(out).toMatch(/could not attribute, so nothing reviewed them:\n\n- internal\/impl\/x\/y\.go:12 `\.Description\(\)`: receiver d does not trace to a benthos spec/)
+    })
+
     test('no report file is said plainly rather than failing', () => {
       const r = execRun(step, { env: { GITHUB_STEP_SUMMARY: 'summary.md' } })
       expect(r.status).toBe(0)
@@ -1101,6 +1189,22 @@ if [ -n "$filter" ]; then printf '%s' "$payload" | ${JSON.stringify(JQ)} -r "$fi
       expect(review.with.prompt).toMatch(/<sub>doc-strings-review:fp=FINGERPRINT<\/sub>/)
       expect(review.with.prompt).not.toMatch(/<!-- doc-strings-review:fp/)
       expect(review.with.prompt).not.toMatch(/Finish with one summary comment/)
+    })
+
+    test('the prompt carries the connect suggestion rules and the regeneration footer', () => {
+      const prompt = review.with.prompt
+      expect(prompt).toMatch(/CONNECT STRINGS/)
+      expect(prompt).toContain('`text ` + "`code`" + ` text`')
+      expect(prompt).toMatch(/Every xref names its module/)
+      expect(prompt).toMatch(/Never put ifdef::env-cloud\[\]/)
+      expect(prompt).toMatch(/cloud_ai/)
+      expect(prompt).toContain('`CGO_ENABLED=1 TAGS=x_benthos_extra task docs`')
+    })
+
+    test('the impact check leaves out the regenerated connector and Bloblang references', () => {
+      const prompt = review.with.prompt
+      expect(prompt).toMatch(/OTHER than the generated property, metric, rpk, connector\s+\(Redpanda Connect component pages\) or Bloblang function and\s+method reference/)
+      expect(prompt).toMatch(/a changed connector\s+summary, description, field or Bloblang text/)
     })
 
     test('the prompt reviews strings in their page context and keeps articles', () => {
