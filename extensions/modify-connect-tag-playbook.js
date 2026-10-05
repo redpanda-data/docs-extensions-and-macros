@@ -27,15 +27,31 @@
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const getLatestConnectTag = require('./version-fetcher/get-latest-connect')
 const { getGitHubApiToken } = require('../cli-utils/github-token')
-const { isConnectSource, isConnectOrigin, setResolvedConnectRef } = require('./util/connect-catalog')
+const { isConnectSource, isConnectOrigin, githubRepoOf, setResolvedConnectRef } = require('./util/connect-catalog')
 
 const OWNER = 'redpanda-data'
 const REPO = 'connect'
 const COMPONENT = 'connect'
 const KEPT_PATHS = ['modules/components/partials/', 'modules/components/examples/']
 
+// HTTPS, SSH (ssh://), and scp-style (git@host:owner/repo) URLs are all
+// remote content sources in Antora.
 function isRemote (url) {
-  return /^https?:\/\//.test(url || '')
+  return /^(https?|ssh):\/\//.test(url || '') || /^[\w.-]+@[\w.-]+:/.test(url || '')
+}
+
+// Only the redpanda-data/connect remote resolves to its own latest release.
+// A fork with the same repo name would otherwise be pinned to a tag looked up
+// on redpanda-data/connect.
+function isUpstreamConnect (url) {
+  const repo = githubRepoOf(url)
+  return !!repo && repo.owner === OWNER && repo.repo === REPO
+}
+
+// Removes user info from every URL in the text, so credentials embedded in a
+// content-source URL never reach the build log.
+function redact (text) {
+  return String(text || '').replace(/([a-z][a-z+.-]*:\/\/)[^@/\s]*@/gi, '$1')
 }
 
 // Highest stable vX.Y.Z tag from `git ls-remote` output. Used when the GitHub
@@ -62,13 +78,14 @@ function toTag (tagName) {
   return tagName.startsWith('v') ? tagName : `v${tagName}`
 }
 
-// A remote connect source asks to be pinned with `tags: latest`. A source
-// with any other refs, such as a fork or a PR branch used to preview a
-// connect change, keeps what the playbook says.
+// The upstream connect source asks to be pinned with `tags: latest` as its
+// only ref. A source with any other refs, such as a fork or a PR branch used
+// to preview a connect change, keeps what the playbook says.
 function wantsLatest (source) {
-  if (!isRemote(source.url) || !isConnectSource(source.url)) return false
+  if (!isRemote(source.url) || !isConnectSource(source.url) || !isUpstreamConnect(source.url)) return false
   const tags = Array.isArray(source.tags) ? source.tags : [source.tags]
-  return tags.includes('latest')
+  const branches = source.branches == null ? [] : [].concat(source.branches)
+  return tags.length === 1 && tags[0] === 'latest' && branches.length === 0
 }
 
 // Rewrites the connect content sources that ask for the latest release to
@@ -151,7 +168,7 @@ module.exports.register = function () {
         tag = latestTagFromGit(source.url)
         if (tag) logger.info(`Resolved the latest Redpanda Connect release from git tags: ${tag}`)
       } catch (error) {
-        logger.warn(`git ls-remote of ${source.url} failed: ${error.message}`)
+        logger.warn(redact(`git ls-remote of ${source.url} failed: ${error.message}`))
       }
     }
     if (!tag) {
@@ -175,4 +192,4 @@ module.exports.register = function () {
   })
 }
 
-module.exports._internal = { isConnectSource, isConnectOrigin, toTag, highestStableTag, wantsLatest, pinConnectSource, filterConnectContent }
+module.exports._internal = { isRemote, isUpstreamConnect, redact, isConnectSource, isConnectOrigin, toTag, highestStableTag, wantsLatest, pinConnectSource, filterConnectContent }

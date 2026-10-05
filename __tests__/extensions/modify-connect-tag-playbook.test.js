@@ -1,7 +1,7 @@
 const { describe, it, expect } = require('@jest/globals')
 const { _internal } = require('../../extensions/modify-connect-tag-playbook.js')
 
-const { isConnectSource, toTag, pinConnectSource, filterConnectContent } = _internal
+const { isConnectSource, isRemote, redact, wantsLatest, toTag, pinConnectSource, filterConnectContent } = _internal
 
 const connectOrigin = { url: 'https://github.com/redpanda-data/connect', startPath: 'docs' }
 const docsOrigin = { url: 'https://github.com/redpanda-data/rp-connect-docs', startPath: '' }
@@ -18,6 +18,41 @@ describe('modify-connect-tag-playbook', () => {
       expect(isConnectSource('https://github.com/redpanda-data/rp-connect-docs')).toBe(false)
       expect(isConnectSource('https://github.com/redpanda-data/connect-plugins')).toBe(false)
       expect(isConnectSource(undefined)).toBe(false)
+    })
+  })
+
+  describe('wantsLatest', () => {
+    const latest = (url, extra = {}) => wantsLatest({ url, tags: 'latest', ...extra })
+    it('accepts the upstream repo over HTTPS and SSH', () => {
+      expect(latest('https://github.com/redpanda-data/connect')).toBe(true)
+      expect(latest('git@github.com:redpanda-data/connect.git')).toBe(true)
+      expect(latest('ssh://git@github.com/redpanda-data/connect')).toBe(true)
+    })
+    it('rejects a fork, which has no releases of its own to pin to', () => {
+      expect(latest('https://github.com/someone/connect')).toBe(false)
+    })
+    it('rejects latest combined with other refs', () => {
+      expect(latest('https://github.com/redpanda-data/connect', { branches: ['docs/preview'] })).toBe(false)
+      expect(wantsLatest({ url: 'https://github.com/redpanda-data/connect', tags: ['latest', 'v4.110.0'] })).toBe(false)
+      expect(latest('https://github.com/redpanda-data/connect', { branches: [] })).toBe(true)
+    })
+  })
+
+  describe('isRemote', () => {
+    it('treats HTTPS, SSH, and scp-style URLs as remote and paths as local', () => {
+      expect(isRemote('https://github.com/redpanda-data/connect')).toBe(true)
+      expect(isRemote('ssh://git@github.com/redpanda-data/connect')).toBe(true)
+      expect(isRemote('git@github.com:redpanda-data/connect')).toBe(true)
+      expect(isRemote('/Users/me/repos/connect')).toBe(false)
+      expect(isRemote('./connect')).toBe(false)
+    })
+  })
+
+  describe('redact', () => {
+    it('removes credentials from every URL in a message', () => {
+      const msg = 'git ls-remote of https://x-access-token:s3cret@github.com/redpanda-data/connect failed: fatal: https://x-access-token:s3cret@github.com/redpanda-data/connect not found'
+      expect(redact(msg)).not.toMatch(/s3cret/)
+      expect(redact(msg)).toContain('https://github.com/redpanda-data/connect')
     })
   })
 

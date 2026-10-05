@@ -19,6 +19,9 @@ describe('assertConnectReferencePresent', () => {
     expect(() => assertConnectReferencePresent(catalog([page('inputs/kafka.adoc'), partial('secret_warning.adoc')])))
       .toThrow(/no generated field partials/)
   })
+  it('ignores overview pages, which include no field partials', () => {
+    expect(() => assertConnectReferencePresent(catalog([page('about.adoc')]))).not.toThrow()
+  })
   it('skips playbooks without the connect component or its pages', () => {
     expect(() => assertConnectReferencePresent(catalog([], ['streaming']))).not.toThrow()
     expect(() => assertConnectReferencePresent(catalog([partial('secret_warning.adoc')]))).not.toThrow()

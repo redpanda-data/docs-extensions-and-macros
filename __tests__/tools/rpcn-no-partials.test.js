@@ -13,8 +13,11 @@ describe('generator with writePartials false', () => {
   const tmpDir = path.join(__dirname, 'tmp-rpcn-no-partials');
   let originalCwd, dataFile;
 
-  const listFiles = (dir) => (fs.existsSync(dir)
-    ? fs.readdirSync(dir, { recursive: true }).filter((f) => fs.statSync(path.join(dir, f)).isFile())
+  // readdirSync's recursive option needs Node.js 18.17, and the package supports 18.0.
+  const listFiles = (dir, prefix = '') => (fs.existsSync(dir)
+    ? fs.readdirSync(dir).flatMap((f) => (fs.statSync(path.join(dir, f)).isDirectory()
+      ? listFiles(path.join(dir, f), path.join(prefix, f))
+      : [path.join(prefix, f)]))
     : []);
 
   beforeEach(() => {

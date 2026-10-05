@@ -21,7 +21,10 @@ const DEFAULTS = {
 function assertConnectReferencePresent (contentCatalog) {
   const component = contentCatalog.getComponents().find((c) => c.name === 'connect')
   if (!component) return
+  // Only connector pages (inputs/kafka.adoc and so on) include field
+  // partials. Overview pages at the module root don't.
   const pages = contentCatalog.findBy({ component: 'connect', module: 'components', family: 'page' })
+    .filter((p) => p.src.relative.includes('/'))
   if (!pages.length) return
   const fields = contentCatalog.findBy({ component: 'connect', module: 'components', family: 'partial' })
     .filter((f) => f.src.relative.startsWith('fields/'))
