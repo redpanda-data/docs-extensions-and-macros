@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.53.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.52.0...v5.53.0) (2026-10-05)
+
+
+### Features
+
+* **release-notes:** add doc-tools generate redpanda-release-notes command (DOC-2468) ([#337](https://github.com/redpanda-data/docs-extensions-and-macros/issues/337)) ([0a88545](https://github.com/redpanda-data/docs-extensions-and-macros/commit/0a885450afd68e4faf7efab3333ba1892d58f684))
+
 ## [5.52.0](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.51.2...v5.52.0) (2026-10-05)
 
 
