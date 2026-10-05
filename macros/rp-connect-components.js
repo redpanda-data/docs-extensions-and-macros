@@ -1,6 +1,7 @@
 'use strict';
 const { posix: path } = require('path')
 const logger = require('@antora/logger')('rp-connect-components-macro')
+const { isCloudAvailable, typeFromRelative } = require('../extensions/util/connect-catalog')
 
 /**
  * Registers macros for use in Redpanda Connect contexts in the Redpanda documentation.
@@ -220,8 +221,9 @@ module.exports.register = function (registry, context) {
    */
   function processConnectors(parsedData) {
     return parsedData.data.reduce((connectors, row) => {
-      const { connector, commercial_name, type, support_level, is_cloud_supported, is_licensed, redpandaConnectUrl, redpandaCloudUrl } = row;
-      const isCloudSupported = is_cloud_supported === 'y';
+      const { connector, commercial_name, type, support_level, is_licensed, redpandaConnectUrl, redpandaCloudUrl } = row;
+      // Available in standard or GPU Cloud pipelines
+      const isCloudSupported = isCloudAvailable(row);
 
       // Initialize the connector if it's not already in the map
       if (!connectors[connector]) {
@@ -245,7 +247,9 @@ module.exports.register = function (registry, context) {
             redpandaCloudUrl: redpandaCloudUrl || ''
           },
           supportLevel: support_level,
-          isCloudSupported: isCloudSupported
+          isCloudSupported: isCloudSupported,
+          gpuOnly: row.gpu_only === 'y',
+          noGpu: row.no_gpu === 'y'
         };
       }
 
@@ -301,8 +305,8 @@ module.exports.register = function (registry, context) {
     };
 
     parsedData.data.forEach(row => {
-      const { connector: driverName, commercial_name, support_level, is_cloud_supported } = row;
-      const isCloudSupported = is_cloud_supported === 'y';
+      const { connector: driverName, commercial_name, support_level } = row;
+      const isCloudSupported = isCloudAvailable(row);
       const supportLevel = support_level.toLowerCase();
 
       // Only process SQL drivers
@@ -463,10 +467,20 @@ module.exports.register = function (registry, context) {
         const firstCloudSupportedType = Array.from(types.entries())
           .map(([_, commercialNames]) => Object.values(commercialNames).find(({ isCloudSupported }) => isCloudSupported))
           .find(entry => entry);
+        // Say which Cloud pipelines when every Cloud-available type agrees:
+        // the ollama processors run only in GPU pipelines, and jira only outside them.
+        const cloudEntries = Array.from(types.values())
+          .flatMap(commercialNames => Object.values(commercialNames))
+          .filter(({ isCloudSupported }) => isCloudSupported);
+        const pipelineNote = cloudEntries.length && cloudEntries.every(e => e.gpuOnly)
+          ? ' (GPU pipelines only)'
+          : cloudEntries.length && cloudEntries.every(e => e.noGpu)
+            ? ' (not in GPU pipelines)'
+            : '';
         const cloudLinkDisplay = firstCloudSupportedType
           ? firstCloudSupportedType.urls.redpandaCloudUrl
-            ? `<a href="${firstCloudSupportedType.urls.redpandaCloudUrl}">Yes</a>`
-          : `Yes`
+            ? `<a href="${firstCloudSupportedType.urls.redpandaCloudUrl}">Yes</a>${pipelineNote}`
+          : `Yes${pipelineNote}`
         : 'No';
 
         const firstUrl = getFirstUrlFromTypesArray(Array.from(types.entries()), isCloud);
@@ -1018,7 +1032,8 @@ module.exports.register = function (registry, context) {
       const attributes = parent.getDocument().getAttributes();
       const component = attributes['page-component-title'];  // Current component (for example, 'Redpanda Cloud' or 'Redpanda Connect')
       const name = attributes['doctitle'];
-      const type = attributes['type'];
+      // Drafted pages no longer freeze :type:, so fall back to the page's directory.
+      const type = attributes['type'] || typeFromRelative(attributes['page-relative-src-path']);
       if (!name || !type) {
         return self.createBlock(parent, 'pass', '');
       }

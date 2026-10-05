@@ -46,6 +46,11 @@ content:
     start_paths: [docs,'*/docs']
   - url: https://github.com/redpanda-data/rp-connect-docs
     branches: main
+  # Generated reference partials. modify-connect-tag-playbook pins this to the
+  # latest Connect release and keeps only the generated partials and examples.
+  - url: https://github.com/redpanda-data/connect
+    tags: latest
+    start_path: docs
   # WIP: this branch has the prop: calls in Cloud prose, so it exercises the
   # cloud_supported gate. Swap for jake/property-source-attributes to test the
   # declarations on Cloud's own pages instead.
@@ -75,6 +80,7 @@ antora:
   - require: './extensions/add-global-attributes'
   - './extensions/version-fetcher/set-latest-version'
   - './extensions/algolia-indexer/index'
+  - require: './extensions/modify-connect-tag-playbook'
   - require: './extensions/generate-rp-connect-info'
   - require: './extensions/collect-bloblang-samples'
   - require: './extensions/generate-rp-connect-categories'

@@ -1,6 +1,65 @@
 'use strict'
 
 const { raiseListenerLimit } = require('./util/raise-listener-limit')
+const { normalizeType, typeFromRelative } = require('./util/connect-catalog')
+
+// Page :type: values for each data type. Pages use metrics where the data says metric.
+const PAGE_TYPE = { metric: 'metrics' }
+
+/**
+ * Indexes translated catalog rows (from generate-rp-connect-info) by
+ * `name:type`. Names are not unique across types: parquet is a certified input
+ * and a community processor, and sql is a certified cache and a community
+ * output, so a name-only key lets one type's row overwrite another's.
+ */
+function buildRowLookup (rows) {
+  const lookup = new Map()
+  for (const row of rows || []) {
+    const name = String(row.connector || '').trim()
+    const type = normalizeType(row.type)
+    if (name && type) lookup.set(`${name}:${type}`, row)
+  }
+  return lookup
+}
+
+/**
+ * The catalog facts for one connector page, from its data row when there is
+ * one and from the page's own attributes otherwise.
+ * - type: the page's :type:, or the type its directory implies when the data
+ *   has a row for that name and type (drafts no longer write :type:)
+ * - deprecated: the data row's deprecated flag (info.csv deprecated column, or
+ *   catalog.json status), so a hand-kept :status: cannot hide a live component
+ *   or list a deprecated one. Pages without a data row fall back to :status:.
+ * - categories: catalog.json categories when the row has them, else :categories:
+ */
+function resolveComponent ({ name, relative, pageType, pageStatus, pageCategories }, lookup) {
+  const dirType = typeFromRelative(relative)
+  const key = (t) => `${name}:${normalizeType(t)}`
+  let type = pageType || null
+  let row = type ? lookup.get(key(type)) : undefined
+  if (!type && dirType && lookup.has(key(dirType))) {
+    row = lookup.get(key(dirType))
+    type = PAGE_TYPE[dirType] || dirType
+  }
+  if (!type) return null
+  const deprecated = row
+    ? row.deprecated === 'y' || row.status === 'deprecated'
+    : pageStatus === 'deprecated'
+  const categories = row && Array.isArray(row.categories) && row.categories.length
+    ? row.categories.join(', ')
+    : pageCategories
+  return {
+    type,
+    row,
+    deprecated,
+    categories,
+    supportLevel: row ? (row.support_level || 'community').toLowerCase() : null,
+    isEnterprise: row ? row.is_licensed === 'Yes' : false
+  }
+}
+
+module.exports.buildRowLookup = buildRowLookup
+module.exports.resolveComponent = resolveComponent
 
 /**
  * Redpanda Connect Category Aggregation Extension
@@ -38,19 +97,9 @@ module.exports.register = function ({ config }) {
       return
     }
 
-    // Build lookup maps from CSV data
-    const supportLookup = new Map()
-    for (const row of csvData.data) {
-      const connector = row.connector
-      if (connector) {
-        supportLookup.set(connector, {
-          supportLevel: (row.support_level || 'community').toLowerCase(),
-          isEnterprise: row.is_licensed === 'Yes'
-        })
-      }
-    }
+    const rowLookup = buildRowLookup(csvData.data)
 
-    logger.info(`Loaded support data for ${supportLookup.size} connectors from CSV`)
+    logger.info(`Loaded support data for ${rowLookup.size} connectors from CSV`)
 
     const connectCategoriesData = {}
     const flatComponentsData = []
@@ -71,8 +120,6 @@ module.exports.register = function ({ config }) {
         const attrs = file.asciidoc?.attributes || {}
 
         // Get attributes - prefer API, fallback to content parsing
-        const fileType = attrs.type || extractAttribute(file, 'type')
-        const categories = attrs.categories || extractAttribute(file, 'categories')
         const status = attrs.status || extractAttribute(file, 'status')
         const driverSupport = attrs['driver-support'] || extractAttribute(file, 'driver-support')
         const cacheSupport = attrs['cache-support'] || extractAttribute(file, 'cache-support')
@@ -81,23 +128,27 @@ module.exports.register = function ({ config }) {
         const pubUrl = file.pub.url
         const name = file.src.stem
 
-        if (!fileType) continue
+        const resolved = resolveComponent({
+          name,
+          relative: file.src.relative,
+          pageType: attrs.type || extractAttribute(file, 'type'),
+          pageStatus: status,
+          pageCategories: attrs.categories || extractAttribute(file, 'categories')
+        }, rowLookup)
+        if (!resolved) continue
+        const { type: fileType, categories, isEnterprise } = resolved
+
+        // Skip deprecated components
+        if (resolved.deprecated) continue
 
         let componentStatus = status || 'community'
 
-        // Skip deprecated components
-        if (componentStatus === 'deprecated') continue
-
-        // Get support level from CSV data
-        const csvInfo = supportLookup.get(name)
-        const isEnterprise = csvInfo?.isEnterprise || false
-
-        // Determine status from CSV support level (CSV takes precedence)
-        if (csvInfo) {
-          if (csvInfo.supportLevel === 'certified' || csvInfo.supportLevel === 'enterprise') {
+        // Determine status from the data row's support level (data takes precedence)
+        if (resolved.supportLevel) {
+          if (resolved.supportLevel === 'certified' || resolved.supportLevel === 'enterprise') {
             componentStatus = 'certified'
           } else {
-            componentStatus = csvInfo.supportLevel
+            componentStatus = resolved.supportLevel
           }
         }
 

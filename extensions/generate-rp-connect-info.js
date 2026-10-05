@@ -4,6 +4,7 @@ const { raiseListenerLimit } = require('./util/raise-listener-limit')
 const fs = require('fs')
 const path = require('path')
 const Papa = require('papaparse')
+const catalogUtil = require('./util/connect-catalog')
 
 // Default configuration - can be overridden via playbook config
 const DEFAULTS = {
@@ -11,6 +12,31 @@ const DEFAULTS = {
   githubOwner: 'redpanda-data',
   githubRepo: 'connect'
 }
+
+// Connector pages include the generated field reference from the connect repo
+// (see the modify-connect-tag-playbook extension). If a playbook has the
+// Connect pages but none of those partials, every connector page would publish
+// without its fields, and Antora only logs the missing includes. Fail the
+// build instead so the playbook gets fixed before anything is published.
+function assertConnectReferencePresent (contentCatalog) {
+  const component = contentCatalog.getComponents().find((c) => c.name === 'connect')
+  if (!component) return
+  // Only connector pages (inputs/kafka.adoc and so on) include field
+  // partials. Overview pages at the module root don't.
+  const pages = contentCatalog.findBy({ component: 'connect', module: 'components', family: 'page' })
+    .filter((p) => p.src.relative.includes('/'))
+  if (!pages.length) return
+  const fields = contentCatalog.findBy({ component: 'connect', module: 'components', family: 'partial' })
+    .filter((f) => f.src.relative.startsWith('fields/'))
+  if (fields.length) return
+  throw new Error(
+    'The connect component has connector pages but no generated field partials (components:partial$fields/*). ' +
+    'Add the connect repository as a content source (url: https://github.com/redpanda-data/connect, tags: latest, start_path: docs) ' +
+    'and register the modify-connect-tag-playbook extension, or check that the latest Connect release includes docs/modules/components.'
+  )
+}
+
+module.exports.assertConnectReferencePresent = assertConnectReferencePresent
 
 module.exports.register = function ({ config }) {
   raiseListenerLimit(this)
@@ -38,6 +64,7 @@ module.exports.register = function ({ config }) {
 
   // Use 'on' and return the promise so Antora waits for async completion
   this.on('contentClassified', ({ contentCatalog }) => {
+    assertConnectReferencePresent(contentCatalog)
     return processContent(contentCatalog)
   })
 
@@ -65,12 +92,8 @@ module.exports.register = function ({ config }) {
     const pages = contentCatalog.getPages()
 
     try {
-      // Get the Connect version from antora.yml
-      const connectVersion = getAntoraValue('asciidoc.attributes.latest-connect-version')
-
-      // Fetch CSV data (from local file first, then GitHub as fallback)
-      const csvData = await fetchCSV(localCsvPath, connectVersion, logger)
-      const parsedData = Papa.parse(csvData, { header: true, skipEmptyLines: true })
+      const rawRows = await loadCatalogRows(contentCatalog)
+      const parsedData = { data: rawRows }
       const enrichedData = translateCsvData(parsedData, pages, logger)
       parsedData.data = enrichedData
       translatedRows = enrichedData
@@ -107,8 +130,46 @@ module.exports.register = function ({ config }) {
     }
   }
 
+  // Raw catalog rows (info.csv column names) for this build.
+  //
+  // The generated partials/platforms/catalog.json from the connect content
+  // source comes first: it is pinned to the same ref as the reference content
+  // and carries status, categories, and cgo data that info.csv lacks. info.csv
+  // still supplies the SQL driver rows, which are not components and so are
+  // not in the catalog. Without catalog.json, info.csv supplies every row.
+  async function loadCatalogRows (contentCatalog) {
+    const catalogFile = catalogUtil.findConnectCatalogFile(contentCatalog)
+    let catalogRows = null
+    if (catalogFile) {
+      try {
+        catalogRows = catalogUtil.catalogEntriesToCsvRows(JSON.parse(catalogFile.contents.toString('utf8')))
+        logger.info(`Loaded ${catalogRows.length} components from ${describeFile(catalogFile)}`)
+      } catch (error) {
+        logger.warn(`Could not read ${describeFile(catalogFile)}, so falling back to info.csv: ${error.message}`)
+      }
+    }
+
+    let csvRows = []
+    try {
+      const csvText = await fetchCSV(localCsvPath, contentCatalog)
+      csvRows = Papa.parse(csvText, { header: true, skipEmptyLines: true }).data
+    } catch (error) {
+      if (!catalogRows) throw error
+      logger.warn(`Could not fetch info.csv for the SQL driver rows, so the SQL driver support list is empty: ${error.message}`)
+    }
+    if (!catalogRows) return csvRows
+    const isDriver = (row) => String(row.type || '').trim().toLowerCase() === 'sql_driver'
+    return [...catalogRows, ...csvRows.filter(isDriver)]
+  }
+
+  function describeFile (file) {
+    const origin = file.src.origin || {}
+    const ref = origin.tag || origin.branch || origin.refname
+    return `${file.src.component}:${file.src.module}:partial$${file.src.relative}${ref ? ` (${ref})` : ''}`
+  }
+
   // Fetch CSV from GitHub or local file (local file for testing/override only)
-  async function fetchCSV (localPath, connectVersion, logger) {
+  async function fetchCSV (localPath, contentCatalog) {
     // Priority 1: Use explicitly provided CSV path (for testing/override)
     if (localPath && fs.existsSync(localPath)) {
       if (path.extname(localPath).toLowerCase() !== '.csv') {
@@ -118,29 +179,50 @@ module.exports.register = function ({ config }) {
       return fs.readFileSync(localPath, 'utf8')
     }
 
-    // Priority 2: Fetch from GitHub using the version tag
-    logger.info(`Fetching CSV from GitHub (version: ${connectVersion || 'main'})...`)
-    return fetchCsvFromGitHub(connectVersion)
+    // Priority 2: Fetch from GitHub at the connect ref of this build
+    const target = resolveCsvRef(contentCatalog)
+    logger.info(`Fetching ${csvPath} from ${target.owner}/${target.repo} at ${target.ref} (${target.source})`)
+    return fetchCsvFromGitHub(target)
+  }
+
+  // The ref to read info.csv from, in order:
+  // 1. the tag modify-connect-tag-playbook resolved for the connect content source
+  // 2. the ref of the connect content source in the content catalog
+  // 3. latest-connect-version in antora.yml in the working directory
+  // 4. main, with a warning, because the catalog can then disagree with the
+  //    reference content
+  function resolveCsvRef (contentCatalog) {
+    const base = { owner: githubOwner, repo: githubRepo }
+    const shared = catalogUtil.getResolvedConnectRef()
+    if (shared) return { ...base, ref: shared, source: 'the tag modify-connect-tag-playbook resolved' }
+    const origin = catalogUtil.connectOriginRef(contentCatalog)
+    if (origin && origin.ref) return { ...base, ...origin, source: 'the connect content source' }
+    const connectVersion = getAntoraValue('asciidoc.attributes.latest-connect-version')
+    const normalizedVersion = connectVersion ? String(connectVersion).trim().replace(/^v/, '') : ''
+    if (normalizedVersion) return { ...base, ref: `v${normalizedVersion}`, source: 'latest-connect-version in antora.yml' }
+    logger.warn(
+      'No connect content source or latest-connect-version found, so info.csv is read from connect main. ' +
+      'Catalog badges can then disagree with the reference content. Add the connect content source and the ' +
+      'modify-connect-tag-playbook extension to the playbook.'
+    )
+    return { ...base, ref: 'main', source: 'fallback' }
   }
 
   // Fetch CSV data from GitHub
-  async function fetchCsvFromGitHub (connectVersion) {
+  async function fetchCsvFromGitHub ({ owner, repo, ref }) {
     const octokit = await loadOctokit()
-    // Normalize version: trim whitespace and remove leading 'v' if present
-    const normalizedVersion = connectVersion ? connectVersion.trim().replace(/^v/, '') : ''
-    // Use version tag if valid, otherwise fallback to main branch
-    const ref = normalizedVersion ? `v${normalizedVersion}` : 'main'
-
     try {
       const { data: fileContent } = await octokit.rest.repos.getContent({
-        owner: githubOwner,
-        repo: githubRepo,
+        owner,
+        repo,
         path: csvPath,
-        ref: ref
+        ref
       })
       return Buffer.from(fileContent.content, 'base64').toString('utf8')
     } catch (error) {
-      logger.error(`Error fetching Redpanda Connect catalog from GitHub (ref: ${ref}): ${error.message}`)
+      // The caller decides how loud this is: fatal to the catalog without
+      // catalog.json, a warning with it.
+      error.message = `${owner}/${repo} ${csvPath} at ${ref}: ${error.message}`
       throw error
     }
   }
@@ -206,8 +288,9 @@ module.exports.register = function ({ config }) {
 
     return parsedData.data.map(row => {
       // Create a new object with trimmed keys and values
+      // Rows from catalog.json also carry arrays (categories, commercial_names)
       const trimmedRow = Object.fromEntries(
-        Object.entries(row).map(([key, value]) => [key.trim(), (value || '').trim()])
+        Object.entries(row).map(([key, value]) => [key.trim(), typeof value === 'string' || value == null ? (value || '').trim() : value])
       )
 
       // Map fields from the trimmed row to the desired output
@@ -216,8 +299,13 @@ module.exports.register = function ({ config }) {
       const commercialName = trimmedRow.commercial_name
       const availableConnectVersion = trimmedRow.version
       const deprecated = (trimmedRow.deprecated || '').toLowerCase() === 'y' ? 'y' : 'n'
+      // is_cloud_supported is the standard Cloud pipeline flag and cloud_ai the
+      // GPU pipeline flag. A component in either one is available in Cloud
+      // (catalogUtil.isCloudAvailable); gpu_only and no_gpu say which.
       const isCloudSupported = (trimmedRow.cloud || '').toLowerCase() === 'y' ? 'y' : 'n'
       const cloudAi = (trimmedRow.cloud_with_gpu || '').toLowerCase() === 'y' ? 'y' : 'n'
+      const cloudAvailable = isCloudSupported === 'y' || cloudAi === 'y'
+      const { gpu_only: gpuOnly, no_gpu: noGpu } = catalogUtil.gpuFlags(isCloudSupported, cloudAi)
 
       // Handle enterprise to certified conversion and set enterprise license flag
       const originalSupport = (trimmedRow.support || '').toLowerCase()
@@ -239,13 +327,13 @@ module.exports.register = function ({ config }) {
         // - Only run in Redpanda Cloud (not in self-managed rpk connect)
         // - Have docs in cloud-docs repo but not in rp-connect-docs pages
         // - Are marked with cloud: y in CSV but don't ship with OSS binary
-        const isCloudOnly = isCloudSupported === 'y' && !redpandaConnectUrl && redpandaCloudUrl
+        const isCloudOnly = cloudAvailable && !redpandaConnectUrl && redpandaCloudUrl
 
         // Only warn about missing self-managed docs if it's NOT cloud-only
         if (!redpandaConnectUrl && !isCloudOnly) {
           logger.warn(`Self-Managed docs missing for: ${connector} of type: ${type}`)
         }
-        if (isCloudSupported === 'y' && !redpandaCloudUrl && redpandaConnectUrl) {
+        if (cloudAvailable && !redpandaCloudUrl && redpandaConnectUrl) {
           logger.warn(`Cloud docs missing for: ${connector} of type: ${type}`)
         }
       }
@@ -259,7 +347,14 @@ module.exports.register = function ({ config }) {
         deprecated,
         is_cloud_supported: isCloudSupported,
         cloud_ai: cloudAi,
+        gpu_only: gpuOnly,
+        no_gpu: noGpu,
         is_licensed: isLicensed,
+        // From catalog.json only; empty or absent for info.csv rows
+        status: trimmedRow.status || (deprecated === 'y' ? 'deprecated' : ''),
+        categories: Array.isArray(trimmedRow.categories) ? trimmedRow.categories : undefined,
+        commercial_names: Array.isArray(trimmedRow.commercial_names) ? trimmedRow.commercial_names : undefined,
+        cgo_only: trimmedRow.cgo_only === 'y' ? 'y' : 'n',
         redpandaConnectUrl,
         redpandaCloudUrl
       }
@@ -274,20 +369,23 @@ module.exports.register = function ({ config }) {
     const csvCommercialNames = new Map()
 
     for (const row of parsedData.data) {
-      const { connector, commercial_name: commercialName } = row
-      if (!connector || !commercialName) continue
+      const { connector, commercial_name: commercialName, commercial_names: commercialNames } = row
+      if (!connector) continue
+      // catalog.json rows list every commercial name; info.csv rows have one
+      const names = Array.isArray(commercialNames) && commercialNames.length ? commercialNames : [commercialName]
+      for (const name of names) {
+        // Skip N/A and empty values
+        const trimmedName = String(name || '').trim()
+        if (trimmedName.toLowerCase() === 'n/a' || trimmedName === '') continue
 
-      // Skip N/A and empty values
-      const trimmedName = commercialName.trim()
-      if (trimmedName.toLowerCase() === 'n/a' || trimmedName === '') continue
+        if (!csvCommercialNames.has(connector)) {
+          csvCommercialNames.set(connector, new Set())
+        }
 
-      if (!csvCommercialNames.has(connector)) {
-        csvCommercialNames.set(connector, new Set())
-      }
-
-      // Add the commercial name if it's different from the connector name
-      if (trimmedName.toLowerCase() !== connector.toLowerCase()) {
-        csvCommercialNames.get(connector).add(trimmedName)
+        // Add the commercial name if it's different from the connector name
+        if (trimmedName.toLowerCase() !== connector.toLowerCase()) {
+          csvCommercialNames.get(connector).add(trimmedName)
+        }
       }
     }
 
@@ -370,7 +468,13 @@ module.exports.register = function ({ config }) {
    * - page-cloud-available + page-cloud-available-url: on Self-Managed pages with a Cloud variant
    * - page-self-managed-available + page-self-managed-available-url: on Cloud pages with a
    *   Self-Managed variant
-   * - page-self-managed-only: on Self-Managed pages with no Cloud variant
+   * - page-self-managed-only: on Self-Managed pages whose type is not available in Cloud
+   * - page-cloud-gpu-only: on both variants when the type runs only in Cloud GPU pipelines
+   * - page-cloud-no-gpu: on both variants when the type runs in Cloud, but not in GPU pipelines
+   *
+   * Availability is decided per row (name and type), not per connector: the http_server
+   * input runs in Cloud and the http_server output does not. Only the Type dropdown is
+   * built from all of the connector's rows.
    */
   function setStickyBarPageAttributes (contentCatalog, rows, logger) {
     const pagesByUrl = new Map()
@@ -388,9 +492,13 @@ module.exports.register = function ({ config }) {
     }
 
     let decoratedCount = 0
+    const setGpuFlags = (attrs, row) => {
+      if (row.gpu_only === 'y') attrs['page-cloud-gpu-only'] = 'true'
+      if (row.no_gpu === 'y') attrs['page-cloud-no-gpu'] = 'true'
+    }
     for (const connectorRows of rowsByConnector.values()) {
-      const isCloudSupported = connectorRows.some((row) => row.is_cloud_supported === 'y')
       for (const row of connectorRows) {
+        const isCloudAvailable = catalogUtil.isCloudAvailable(row)
         // Self-Managed (Connect) variant of this connector page
         const connectPage = row.redpandaConnectUrl && pagesByUrl.get(row.redpandaConnectUrl)
         if (connectPage) {
@@ -398,10 +506,11 @@ module.exports.register = function ({ config }) {
           if (connectorRows.length > 1) {
             attrs['page-context-switcher'] = buildContextSwitcher(connectorRows, row, 'connect')
           }
-          if (isCloudSupported && row.redpandaCloudUrl) {
+          if (isCloudAvailable && row.redpandaCloudUrl) {
             attrs['page-cloud-available'] = 'true'
             attrs['page-cloud-available-url'] = row.redpandaCloudUrl
-          } else if (!isCloudSupported) {
+            setGpuFlags(attrs, row)
+          } else if (!isCloudAvailable) {
             attrs['page-self-managed-only'] = 'true'
           }
           decoratedCount++
@@ -417,6 +526,7 @@ module.exports.register = function ({ config }) {
             attrs['page-self-managed-available'] = 'true'
             attrs['page-self-managed-available-url'] = row.redpandaConnectUrl
           }
+          setGpuFlags(attrs, row)
           decoratedCount++
         }
       }
