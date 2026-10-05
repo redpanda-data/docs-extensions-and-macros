@@ -23,6 +23,7 @@ const {
   formatDefault,
   hasDefaultValue,
   parentPath,
+  sectionTitle,
   isPluginCommand
 } = require('../../../tools/rpk-docs/helpers/index.js')
 
@@ -319,6 +320,22 @@ describe('rpk Docs Helpers', () => {
     test('handles empty/null', () => {
       expect(parentPath('')).toBe('')
       expect(parentPath(null)).toBe('')
+    })
+  })
+
+  describe('sectionTitle', () => {
+    test('capitalizes the first word and title-cases the rest', () => {
+      expect(sectionTitle('CLIENT CREDENTIALS')).toBe('Client Credentials')
+    })
+
+    test('keeps acronyms upper case, including SSO', () => {
+      expect(sectionTitle('SSO')).toBe('SSO')
+      expect(sectionTitle('TLS SETTINGS')).toBe('TLS Settings')
+      expect(sectionTitle('PRODUCER ID & EPOCH')).toBe('Producer ID & Epoch')
+    })
+
+    test('returns an empty string for no name', () => {
+      expect(sectionTitle('')).toBe('')
     })
   })
 
