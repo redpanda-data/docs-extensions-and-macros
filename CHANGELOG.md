@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.51.2](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.51.1...v5.51.2) (2026-10-05)
+
+
+### Bug fixes
+
+* **rpk-docs:** keep SSO upper case in section titles ([#351](https://github.com/redpanda-data/docs-extensions-and-macros/issues/351)) ([48f6642](https://github.com/redpanda-data/docs-extensions-and-macros/commit/48f66422d96e5686a69134ce944e6a048555a06a))
+
 ## [5.51.1](https://github.com/redpanda-data/docs-extensions-and-macros/compare/v5.51.0...v5.51.1) (2026-10-05)
 
 
