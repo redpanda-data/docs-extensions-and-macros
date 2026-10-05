@@ -1137,15 +1137,21 @@ const WHATS_NEW_EXCLUDED_SUBTREES = ['rpk ai']
 
 /**
  * Return a copy of diffData without entries under the excluded subtrees.
+ * Commands marked asPartial in the overrides are dropped too: they render
+ * only as partials single-sourced into another component (for example,
+ * rpk sql for Redpanda SQL in Cloud), so they are not Self-Managed changes.
  * Only the published What's-new block filters; diff reports and PR
  * summaries keep the full picture.
  * @param {Object} diffData - Diff from generateRpkDiff
  * @param {string[]} [excluded] - Command-path prefixes to drop
+ * @param {Object} [overridesData] - rpk overrides; asPartial subtrees are dropped
  * @returns {Object} Filtered copy
  */
-function filterDiffForWhatsNew(diffData, excluded = WHATS_NEW_EXCLUDED_SUBTREES) {
+function filterDiffForWhatsNew(diffData, excluded = WHATS_NEW_EXCLUDED_SUBTREES, overridesData = null) {
+  const resolved = overridesData ? resolveReferences(overridesData, overridesData) : null
   const outside = (cmdPath) => !excluded.some(prefix =>
-    cmdPath === prefix || (typeof cmdPath === 'string' && cmdPath.startsWith(prefix + ' ')))
+    cmdPath === prefix || (typeof cmdPath === 'string' && cmdPath.startsWith(prefix + ' '))) &&
+    !(resolved && typeof cmdPath === 'string' && shouldUsePartialDir(resolved, cmdPath))
   const details = diffData.details || {}
   const filteredDetails = { ...details }
   for (const key of ['newCommands', 'newlyDeprecatedCommands', 'removedCommands', 'descriptionChanges']) {
@@ -1167,7 +1173,28 @@ function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
     ...options
   })
 
+  const startMarker = `// AUTOGEN-RPK-CHANGES ${version} START`
+  const endMarker = `// AUTOGEN-RPK-CHANGES ${version} END`
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
   if (!whatsNewContent) {
+    // A re-run for a version that now has nothing to publish (for example,
+    // every change was filtered out as asPartial) must remove that version's
+    // earlier block, or the page keeps publishing what the filter excluded.
+    if (fs.existsSync(whatsNewPath)) {
+      const existing = fs.readFileSync(whatsNewPath, 'utf8')
+      if (existing.includes(startMarker)) {
+        const blockRe = new RegExp(`\\n*${escapeRe(startMarker)}[\\s\\S]*?${escapeRe(endMarker)}\\n*`)
+        let updated = existing.replace(blockRe, '\n\n')
+        // Drop the section heading too if the block was all it held, so no
+        // empty heading is left on the page.
+        const emptySectionRe = new RegExp(`^${escapeRe(sectionHeading)}[^\\n]*\\n\\s*(?=^== |(?![\\s\\S]))`, 'm')
+        updated = updated.replace(emptySectionRe, '')
+        fs.writeFileSync(whatsNewPath, updated.replace(/\s*$/, '\n'), 'utf8')
+        console.log(`Removed ${version} block from what's-new file (no changes left to publish): ${whatsNewPath}`)
+        return
+      }
+    }
     console.log('No Redpanda CLI changes to add to what\'s new')
     return
   }
@@ -1187,11 +1214,8 @@ function updateWhatsNewFile(diffData, whatsNewPath, version, options = {}) {
   // Redpanda CLI section instead of being dropped. Writers can edit or
   // remove blocks freely; the automation only ever touches content between
   // its own markers for the same version label.
-  const startMarker = `// AUTOGEN-RPK-CHANGES ${version} START`
-  const endMarker = `// AUTOGEN-RPK-CHANGES ${version} END`
   const sectionBody = whatsNewContent.replace(/^== [^\n]*\n+/, '')
   const block = `${startMarker}\n${sectionBody.trimEnd()}\n${endMarker}`
-  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
   if (existingContent.includes(startMarker)) {
     // Replace this version's existing block (idempotent re-runs)
@@ -2145,7 +2169,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
           // Update what's-new file if requested
           if (whatsNewPath) {
-            updateWhatsNewFile(filterDiffForWhatsNew(diffData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
+            updateWhatsNewFile(filterDiffForWhatsNew(diffData, WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
           }
         } else {
           console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
@@ -2467,7 +2491,7 @@ async function handleRpkDocsGeneration(options = {}) {
 
         // Update what's-new file if requested
         if (whatsNewPath) {
-          updateWhatsNewFile(filterDiffForWhatsNew(diffData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
+          updateWhatsNewFile(filterDiffForWhatsNew(diffData, WHATS_NEW_EXCLUDED_SUBTREES, overridesData), whatsNewPath, rpkVersion, { linkable: makeLinkablePredicate(overridesData), hasSubcommands: makeSubcommandPredicate(tree) })
         }
       } else {
         console.warn(`Warning: Could not load previous version ${diffVersion} for diff`)
