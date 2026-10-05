@@ -852,7 +852,10 @@ jobs:
             {"findings":[{"surface","name","change_kind","affected_pages":
             ["url"],"summary"}],"proposed_ticket":{"title","body"}}. Every
             affected_pages entry must be an absolute
-            https://docs.redpanda.com/ URL. Only high-impact entries,
+            https://docs.redpanda.com/ URL. In proposed_ticket.body and each
+            summary, put code identifiers in backticks, start bullet lines
+            with "- ", and write links as bare URLs; Jira renders only those
+            three, so use no other Markdown. Only high-impact entries,
             maximum 10; write NO file when there are none. A report that
             does not match that shape is discarded before dispatch.
 
@@ -937,6 +940,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.actions_bot_token }}
           DISPATCH_REPO: ${{ inputs.dispatch_repo }}
+          # The router tells the assignee the PR is unmerged and, when the base
+          # is not the default branch, that it is stacked on another PR.
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           # The OIDC path stashes the token in a temp file (see the scrub
@@ -974,5 +981,7 @@ jobs:
             --arg repo "${{ github.repository }}" \
             --arg pr "${{ github.event.pull_request.number }}" \
             --arg url "${{ github.event.pull_request.html_url }}" \
-            '{event_type: "doc-impact", client_payload: {source_repo: $repo, pr_number: $pr, pr_url: $url, impact: $impact[0]}}' \
+            --arg base "${BASE_REF:-}" \
+            --arg default "${DEFAULT_BRANCH:-}" \
+            '{event_type: "doc-impact", client_payload: {source_repo: $repo, pr_number: $pr, pr_url: $url, base_ref: $base, default_branch: $default, impact: $impact[0]}}' \
           | gh api "repos/$DISPATCH_REPO/dispatches" --input -
