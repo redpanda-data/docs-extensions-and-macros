@@ -171,6 +171,51 @@ describe('overrides-audit adapters', () => {
       expect(byKey['rpk topic create --partitions|flags.description'].note).toContain('TODO')
     })
 
+    test('UPSTREAMABLE rows carry source_file/source_line when --locations resolves one', () => {
+      const result = runAudit({
+        overrides: writeFixture('rpk-overrides-diff.json', {
+          commands: {
+            'rpk topic create': {
+              description: 'Create one or more topics.',
+              flags: { partitions: { description: 'How many partitions to create.' } }
+            }
+          }
+        }),
+        extracted: writeFixture('rpk-extracted.json', rpkExtracted),
+        locations: writeFixture('rpk-locations.json', {
+          'rpk topic create': {
+            description: { file: 'pkg/cli/topic/create.go', line: 40 },
+            flags: { partitions: { file: 'pkg/cli/topic/create.go', line: 141 } }
+          }
+        }),
+        surface: 'rpk'
+      })
+      const byKey = Object.fromEntries(result.manifest.map((row) => [`${row.name}|${row.field}`, row]))
+      const desc = byKey['rpk topic create|description']
+      expect(desc.class).toBe(CLASSES.UPSTREAMABLE)
+      expect(desc.source_file).toBe('pkg/cli/topic/create.go')
+      expect(desc.source_line).toBe(40)
+      const flag = byKey['rpk topic create --partitions|flags.description']
+      expect(flag.class).toBe(CLASSES.UPSTREAMABLE)
+      expect(flag.source_file).toBe('pkg/cli/topic/create.go')
+      expect(flag.source_line).toBe(141)
+    })
+
+    test('UPSTREAMABLE row with no matching location gets an explanatory note, not a guess', () => {
+      const result = runAudit({
+        overrides: writeFixture('rpk-overrides-diff2.json', {
+          commands: { 'rpk topic create': { description: 'Create one or more topics.' } }
+        }),
+        extracted: writeFixture('rpk-extracted.json', rpkExtracted),
+        locations: writeFixture('rpk-locations-empty.json', {}),
+        surface: 'rpk'
+      })
+      const row = result.manifest[0]
+      expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+      expect(row.source_file).toBeUndefined()
+      expect(row.note).toContain('No static source location was found')
+    })
+
     test('flag not found on an otherwise-found command stays REVIEW', () => {
       const result = runAudit({
         overrides: writeFixture('rpk-overrides-stale-flag.json', {
@@ -220,6 +265,77 @@ describe('overrides-audit adapters', () => {
         })
         return result.manifest.find((row) => row.name === 'rpk widget' && row.field === 'description')
       }
+
+      describe('override that also replaces source sections (rpk cloud login shape)', () => {
+        const sourceLong = [
+          'Log in to the Redpanda cloud',
+          '',
+          'This command checks for an existing Redpanda Cloud API token.',
+          '',
+          'SSO',
+          '',
+          'This will automatically launch your default web browser.',
+          '',
+          'CLIENT CREDENTIALS',
+          '',
+          'Cloud client credentials can be used to login to Redpanda.'
+        ].join('\n')
+
+        function auditLogin (content) {
+          const overrides = {
+            textTransformations: { replacements: [] },
+            commands: {
+              'rpk cloud login': {
+                description: 'Log in to Redpanda Cloud.\n\nThis command checks for an existing Redpanda Cloud API token and, if there is one, confirms that it is still valid.',
+                content
+              }
+            }
+          }
+          const extracted = {
+            tree: {
+              name: 'rpk',
+              commands: [{ name: 'cloud', commands: [{ name: 'login', description: sourceLong }] }]
+            }
+          }
+          const result = runAudit({
+            overrides: writeFixture('overrides.json', overrides),
+            extracted: writeFixture('extracted.json', extracted),
+            surface: 'rpk'
+          })
+          return result.manifest.find((row) => row.name === 'rpk cloud login' && row.field === 'description')
+        }
+
+        test('marks the description candidate for hand upstreaming, naming the matched sections', () => {
+          const row = auditLogin([
+            { type: 'section', id: 'SSO', exclude: true },
+            { type: 'section', id: 'CLIENT CREDENTIALS', exclude: true },
+            { type: 'section', id: 'sso-login', title: 'SSO', position: 'after_usage', content: 'With SSO, rpk opens your browser.' }
+          ])
+          expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+          expect(row.hand_upstream).toMatch(/^SECTIONED:/)
+          expect(row.hand_upstream).toContain('SSO, CLIENT CREDENTIALS')
+          expect(row.hand_upstream).not.toContain('sso-login')
+          expect(row.note).toContain(row.hand_upstream)
+          expect(row.source_sections).toEqual(['SSO', 'CLIENT CREDENTIALS'])
+        })
+
+        test('leaves the candidate alone when no content item matches a source section', () => {
+          const row = auditLogin([
+            { type: 'section', id: 'sso-login', title: 'SSO', position: 'after_usage', content: 'With SSO, rpk opens your browser.' }
+          ])
+          expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+          expect(row.hand_upstream).toBeUndefined()
+          expect(row.source_sections).toEqual(['SSO', 'CLIENT CREDENTIALS'])
+        })
+
+        test('sets no source_sections when the source Long has no sections', () => {
+          const row = auditDescription({
+            overrideDescription: 'Creates one or more topics with the given configuration.',
+            sourceDescription: 'Create topics.'
+          })
+          expect(row.source_sections).toBeUndefined()
+        })
+      })
 
       test('command description matching source after normalization is REDUNDANT', () => {
         const row = auditDescription({
