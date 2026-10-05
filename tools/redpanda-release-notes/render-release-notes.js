@@ -1,7 +1,7 @@
 // Render a parsed release model into a candidate AsciiDoc release-notes section.
 //
-// Output is a `== vX.Y.Z (date)` section with `=== Features` / `=== Improvements`
-// / `=== Bug fixes` subsections of plain `*` bullets. Entries are emitted as
+// Output is a `== vX.Y.Z (date)` section with `=== Features` / `=== Bug fixes`
+// / `=== Improvements` subsections of plain `*` bullets. Entries are emitted as
 // bullets carrying the de-noised source prose verbatim: this is a CANDIDATE for
 // the curation step, which rewrites voice, converts bullets to `Area::`
 // definition-list items, normalizes units, and phrases CVEs. This renderer adds

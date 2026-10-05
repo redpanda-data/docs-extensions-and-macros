@@ -132,7 +132,7 @@ function escapeAsciiDocBraces(text) {
  *
  * @param {string} body - The raw GitHub Release body markdown.
  * @return {{sections: Array<{kind: string, title: string, entries: string[]}>}}
- *   Sections in page order (Features, Improvements, Bug fixes); a category with
+ *   Sections in page order (Features, Bug fixes, Improvements); a category with
  *   no entries is omitted.
  */
 function parseReleaseBody(body) {
