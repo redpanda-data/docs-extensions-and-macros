@@ -305,9 +305,9 @@ function isPluginCommand(commandPath, pluginVersions) {
 }
 
 /**
- * Convert ALL CAPS section name to title case for display
+ * Convert ALL CAPS section name to sentence case for display
  * @param {string} name - ALL CAPS section name
- * @returns {string} Title case name
+ * @returns {string} Sentence case name
  */
 function sectionTitle(name) {
   if (!name) return ''
@@ -315,19 +315,42 @@ function sectionTitle(name) {
   // Acronyms that should remain ALL CAPS
   const acronyms = new Set([
     'id', 'ip', 'api', 'url', 'uri', 'cpu', 'gpu', 'ram', 'io',
-    'tls', 'ssl', 'mtls', 'sasl', 'oauth', 'oidc', 'jwt',
+    'tls', 'ssl', 'mtls', 'sasl', 'sso', 'oauth', 'oidc', 'jwt',
     'json', 'yaml', 'xml', 'csv', 'http', 'https', 'grpc', 'rpc',
-    'aws', 'gcp', 'azure', 's3', 'eos'
+    'aws', 'gcp', 's3', 'eos'
   ])
 
-  // Product names that should be title cased
+  // Proper nouns that keep their initial capital
   const properNouns = new Set([
-    'redpanda', 'kafka', 'kubernetes', 'schema', 'registry'
+    'redpanda', 'kafka', 'kubernetes', 'azure'
   ])
+
+  // Multi-word proper nouns, capitalized only as the full phrase
+  // ("SCHEMA REGISTRY" -> "Schema Registry", but "SCHEMA FORMAT" -> "Schema format")
+  const properPhrases = [['schema', 'registry']]
+
+  const capitalize = word => word.charAt(0).toUpperCase() + word.slice(1)
 
   // Split on spaces/hyphens but keep & as its own token
   // "PRODUCER ID & EPOCH" -> ["producer", "id", "&", "epoch"]
   const words = name.toLowerCase().split(/[\s-]+/)
+
+  const inPhrase = new Set()
+  for (const phrase of properPhrases) {
+    for (let i = 0; i + phrase.length <= words.length; i++) {
+      if (phrase.every((part, j) => words[i + j] === part)) {
+        phrase.forEach((_, j) => inPhrase.add(i + j))
+      }
+    }
+  }
+
+  // Sentence case: capitalize the first word, acronyms, and proper nouns;
+  // lowercase everything else
+  const formatPart = (part, isFirst, index) => {
+    if (acronyms.has(part)) return part.toUpperCase()
+    if (isFirst || properNouns.has(part) || inPhrase.has(index)) return capitalize(part)
+    return part
+  }
 
   return words.map((word, index) => {
     // Preserve ampersand as-is
@@ -337,38 +360,12 @@ function sectionTitle(name) {
 
     // Handle words with slashes (e.g., "enabled/disabled")
     if (word.includes('/')) {
-      const parts = word.split('/')
-      return parts.map((part, partIndex) => {
-        if (acronyms.has(part)) {
-          return part.toUpperCase()
-        }
-        if (index === 0 && partIndex === 0) {
-          return part.charAt(0).toUpperCase() + part.slice(1)
-        }
-        if (properNouns.has(part)) {
-          return part.charAt(0).toUpperCase() + part.slice(1)
-        }
-        return part
-      }).join('/')
+      return word.split('/')
+        .map((part, partIndex) => formatPart(part, index === 0 && partIndex === 0, index))
+        .join('/')
     }
 
-    // Acronyms: ALL CAPS
-    if (acronyms.has(word)) {
-      return word.toUpperCase()
-    }
-
-    // First word: always capitalize
-    if (index === 0) {
-      return word.charAt(0).toUpperCase() + word.slice(1)
-    }
-
-    // Proper nouns: capitalize
-    if (properNouns.has(word)) {
-      return word.charAt(0).toUpperCase() + word.slice(1)
-    }
-
-    // All other words in title: capitalize (standard title case)
-    return word.charAt(0).toUpperCase() + word.slice(1)
+    return formatPart(word, index === 0, index)
   }).join(' ')
 }
 
