@@ -258,9 +258,10 @@ function classifyProse (name, field, overrideText, formattedSource, upstreamRef,
  * @param {Object|null} textTransformations - rpk-overrides.json's top-level textTransformations.
  * @param {Object|undefined} location - This command's {file, line} from the
  *   source-string locator, or undefined when none was given/found.
+ * @param {Object[]|undefined} contentItems - The override's `content` array.
  * @returns {Object} Manifest row.
  */
-function commandDescriptionRow (commandName, text, upstreamRef, tree, node, textTransformations, location) {
+function commandDescriptionRow (commandName, text, upstreamRef, tree, node, textTransformations, location, contentItems) {
   if (!tree) return reviewRow(commandName, 'description', text, upstreamRef, NO_TREE_NOTE)
   if (!node) {
     return reviewRow(commandName, 'description', text, upstreamRef,
@@ -273,12 +274,52 @@ function commandDescriptionRow (commandName, text, upstreamRef, tree, node, text
       `Source has no Long or Short help text at all for '${commandName}'; nothing to compare the override against.`)
   }
 
-  const mainDescription = parseDescriptionSections(rawLong).mainDescription
+  const { mainDescription, sections } = parseDescriptionSections(rawLong)
   const formattedSource = mainDescription.trim()
     ? ensurePeriod(formatDescription(mainDescription, textTransformations))
     : ''
-  return attachLocation(classifyProse(commandName, 'description', text, formattedSource, upstreamRef,
+  const row = attachLocation(classifyProse(commandName, 'description', text, formattedSource, upstreamRef,
     `Source's main description for '${commandName}' is empty once section headers (FIELDS, USAGE, ...) are parsed out; nothing to compare the override against.`), location)
+  // The candidate covers only the intro before the first section header.
+  // Name the headers so the automated rewrite replaces only that intro.
+  const sourceSections = Object.keys(sections)
+  if (row.upstream_candidate_text !== undefined && sourceSections.length > 0) {
+    row.source_sections = sourceSections
+  }
+  return markSectioned(row, sections, contentItems)
+}
+
+/**
+ * Flag a command-description upstream candidate whose override also
+ * excludes or replaces sections of the source Long text (`content` items of
+ * type `section` whose `id` matches a source section header).
+ *
+ * The description candidate covers only the intro before the first section
+ * header, and the override's rewritten sections are not candidates at all.
+ * Upstreaming the intro alone leaves the old section text in source, so the
+ * override can never retire, and a rewrite of the whole Long literal would
+ * delete the sections from `--help`. Sets `hand_upstream`, which
+ * triage.js's triageCandidate turns into an AMBIGUOUS verdict, so the row
+ * reaches the ambiguous digest for a person instead of the automated
+ * source rewrite.
+ *
+ * @param {Object} row - Manifest row from commandDescriptionRow.
+ * @param {Object} sections - Source sections from parseDescriptionSections, keyed by header.
+ * @param {Object[]|undefined} contentItems - The override's `content` array.
+ * @returns {Object} The same row, mutated in place, for convenience.
+ */
+function markSectioned (row, sections, contentItems) {
+  const isUpstreamCandidate = row.class === classify.CLASSES.UPSTREAMABLE ||
+    (row.class === classify.CLASSES.KEEP_UNTIL_UPSTREAMED && typeof row.note === 'string' && row.note.startsWith('SPLIT:'))
+  if (!isUpstreamCandidate || !Array.isArray(contentItems)) return row
+  const ids = contentItems
+    .filter((item) => item && item.type === 'section' && typeof item.id === 'string' &&
+      Object.prototype.hasOwnProperty.call(sections, item.id))
+    .map((item) => item.id)
+  if (ids.length === 0) return row
+  row.hand_upstream = `SECTIONED: the override excludes or replaces source sections ${ids.join(', ')}. Upstream by hand so the Long text keeps its sections and the rewritten section text goes upstream too.`
+  row.note = `${row.note} ${row.hand_upstream}`
+  return row
 }
 
 /**
@@ -362,7 +403,7 @@ function audit ({ overridesPath, extractedPath, locationsPath }) {
     for (const [field, value] of Object.entries(entry)) {
       if (field === 'description') {
         manifest.push(commandDescriptionRow(commandName, value, entry.upstream_ref, tree, node, textTransformations,
-          commandLocation ? commandLocation.description : undefined))
+          commandLocation ? commandLocation.description : undefined, entry.content))
       } else if (field === 'flags' && value && typeof value === 'object') {
         for (const [flagName, flagEntry] of Object.entries(value)) {
           if (flagEntry && typeof flagEntry.description === 'string') {

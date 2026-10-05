@@ -266,6 +266,77 @@ describe('overrides-audit adapters', () => {
         return result.manifest.find((row) => row.name === 'rpk widget' && row.field === 'description')
       }
 
+      describe('override that also replaces source sections (rpk cloud login shape)', () => {
+        const sourceLong = [
+          'Log in to the Redpanda cloud',
+          '',
+          'This command checks for an existing Redpanda Cloud API token.',
+          '',
+          'SSO',
+          '',
+          'This will automatically launch your default web browser.',
+          '',
+          'CLIENT CREDENTIALS',
+          '',
+          'Cloud client credentials can be used to login to Redpanda.'
+        ].join('\n')
+
+        function auditLogin (content) {
+          const overrides = {
+            textTransformations: { replacements: [] },
+            commands: {
+              'rpk cloud login': {
+                description: 'Log in to Redpanda Cloud.\n\nThis command checks for an existing Redpanda Cloud API token and, if there is one, confirms that it is still valid.',
+                content
+              }
+            }
+          }
+          const extracted = {
+            tree: {
+              name: 'rpk',
+              commands: [{ name: 'cloud', commands: [{ name: 'login', description: sourceLong }] }]
+            }
+          }
+          const result = runAudit({
+            overrides: writeFixture('overrides.json', overrides),
+            extracted: writeFixture('extracted.json', extracted),
+            surface: 'rpk'
+          })
+          return result.manifest.find((row) => row.name === 'rpk cloud login' && row.field === 'description')
+        }
+
+        test('marks the description candidate for hand upstreaming, naming the matched sections', () => {
+          const row = auditLogin([
+            { type: 'section', id: 'SSO', exclude: true },
+            { type: 'section', id: 'CLIENT CREDENTIALS', exclude: true },
+            { type: 'section', id: 'sso-login', title: 'SSO', position: 'after_usage', content: 'With SSO, rpk opens your browser.' }
+          ])
+          expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+          expect(row.hand_upstream).toMatch(/^SECTIONED:/)
+          expect(row.hand_upstream).toContain('SSO, CLIENT CREDENTIALS')
+          expect(row.hand_upstream).not.toContain('sso-login')
+          expect(row.note).toContain(row.hand_upstream)
+          expect(row.source_sections).toEqual(['SSO', 'CLIENT CREDENTIALS'])
+        })
+
+        test('leaves the candidate alone when no content item matches a source section', () => {
+          const row = auditLogin([
+            { type: 'section', id: 'sso-login', title: 'SSO', position: 'after_usage', content: 'With SSO, rpk opens your browser.' }
+          ])
+          expect(row.class).toBe(CLASSES.UPSTREAMABLE)
+          expect(row.hand_upstream).toBeUndefined()
+          expect(row.source_sections).toEqual(['SSO', 'CLIENT CREDENTIALS'])
+        })
+
+        test('sets no source_sections when the source Long has no sections', () => {
+          const row = auditDescription({
+            overrideDescription: 'Creates one or more topics with the given configuration.',
+            sourceDescription: 'Create topics.'
+          })
+          expect(row.source_sections).toBeUndefined()
+        })
+      })
+
       test('command description matching source after normalization is REDUNDANT', () => {
         const row = auditDescription({
           overrideDescription: 'Create  topics.',
