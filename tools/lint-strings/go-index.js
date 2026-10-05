@@ -908,13 +908,17 @@ class GoIndex {
     const parts = []
     let argIndex = 1
     let last = 0
-    const verbs = /%([-+# 0]*\d*(?:\.\d+)?)([svqdtx%])/g
+    // Match every verb, so one this parser can't render (%.2f, %w, %T, or an
+    // explicit argument index such as %[1]s) marks the whole string unresolved
+    // instead of staying as literal text and shifting the later arguments.
+    const verbs = /%(\[\d+\])?([-+# 0]*(?:\d+|\*)?(?:\.(?:\d+|\*)?)?)([a-zA-Z%])/g
     let m
     while ((m = verbs.exec(fmtText)) !== null) {
       parts.push({ text: fmtText.slice(last, m.index) })
       last = m.index + m[0].length
-      const [whole, flags, verb] = m
-      if (verb === '%') { parts.push({ text: '%' }); continue }
+      const [whole, explicitIndex, flags, verb] = m
+      if (verb === '%' && !explicitIndex && !flags) { parts.push({ text: '%' }); continue }
+      if (explicitIndex || !'svqdtx'.includes(verb)) return unresolved
       const arg = args[argIndex++]
       if (arg === undefined || flags) return unresolved
       const a = arg.trim()

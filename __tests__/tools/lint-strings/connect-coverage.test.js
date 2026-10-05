@@ -206,6 +206,44 @@ describe('connect parameter expansion and variadic helpers', () => {
     expect(r.parts).toEqual([{ text: 'After 4 retries.' }])
   })
 
+  test('fmt.Sprintf with a verb the parser cannot render is unresolved', () => {
+    const src = [
+      'package a',
+      'import "fmt"',
+      'const name = "rows"',
+      'var ok = fmt.Sprintf("100%% of %s.", name)',
+      'var float = fmt.Sprintf("%.1f%% of %s.", 0.5, name)',
+      'var wrapped = fmt.Sprintf("failed: %w", name)',
+      'var indexed = fmt.Sprintf("%[1]s and %[1]s.", name)',
+      ''
+    ].join('\n')
+    const root = path.join(path.sep, '__virtual_sprintf__')
+    const index = new GoIndex(root, { external: false, overlay: new Map([['a.go', src]]) })
+    const file = index.file(path.join(root, 'a.go'))
+    const ev = (n) => index.evalString(n, { file, depth: 0 })
+    expect(ev('ok').parts).toEqual([{ text: '100% of rows.' }])
+    for (const n of ['float', 'wrapped', 'indexed']) {
+      expect(ev(n).parts.some((p) => p.unresolved !== undefined)).toBe(true)
+    }
+  })
+
+  test('info.csv is parsed as CSV, so a quoted comma keeps the columns aligned', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'info-csv-'))
+    try {
+      fs.mkdirSync(path.join(repo, 'internal', 'plugins'), { recursive: true })
+      fs.writeFileSync(path.join(repo, 'internal', 'plugins', 'info.csv'), [
+        'name ,type ,commercial_name ,support ,deprecated ,cloud ,cloud_with_gpu ,cloud_unsupported_reason',
+        'acme ,input ,"Acme, Inc." ,certified ,n ,y ,n ,',
+        ''
+      ].join('\n'))
+      expect(connect.readInfoCsv(repo).get('input/acme')).toMatchObject({
+        commercial_name: 'Acme, Inc.', support: 'certified', cloud: true, cloud_ai: false
+      })
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true })
+    }
+  })
+
   test('statementEnd carries a chain across a blank line or a comment line', () => {
     const src = 'x := a.\n\tB().\n\n\t      \n\tC()\ny := 1'
     expect(src.slice(0, statementEnd(src, 0))).toBe('x := a.\n\tB().\n\n\t      \n\tC()')

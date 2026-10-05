@@ -2,6 +2,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const Papa = require('papaparse')
 
 const { SourceCache } = require('../source-text')
 const { splitTopLevelArgs, findBalancedClose, collectGoFiles } = require('../go-source')
@@ -132,11 +133,13 @@ function readInfoCsv (repo) {
   } catch {
     return rows
   }
-  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '')
-  if (lines.length === 0) return rows
-  const header = lines[0].split(',').map((h) => h.trim())
-  for (const line of lines.slice(1)) {
-    const cells = line.split(',').map((c) => c.trim())
+  // Parse as CSV, so a quoted comma in a commercial name can't shift the
+  // support and Cloud columns.
+  const { data } = Papa.parse(text, { skipEmptyLines: 'greedy' })
+  if (data.length === 0) return rows
+  const header = data[0].map((h) => h.trim())
+  for (const record of data.slice(1)) {
+    const cells = record.map((c) => c.trim())
     const get = (name) => (header.indexOf(name) === -1 ? '' : cells[header.indexOf(name)] || '')
     const name = get('name')
     const type = get('type')

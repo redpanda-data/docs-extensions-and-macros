@@ -769,6 +769,7 @@ jobs:
               mcp__redpanda-docs__search_api_reference,
               mcp__redpanda-docs__ask_redpanda_question,
               mcp__redpanda-docs__get_api_reference_content,
+              Read,
               Write,
               Bash(cat pr-diff.patch),
               Bash(gh pr view *),
@@ -784,8 +785,11 @@ jobs:
             help, rpk cobra help, Helm values comments, CRD field comments,
             Redpanda Connect component specs, fields, Bloblang plugins and
             `rpk connect` help). The PR's source diff is in pr-diff.patch
-            (generated docs, lockfiles and vendored code are left out; read
-            it with cat or Read, never gh pr diff). When pr-diff.patch is
+            (generated docs, lockfiles and vendored code are left out; never
+            use gh pr diff). Read it with the Read tool, and page through a
+            large file with offset and limit until you reach the end:
+            cat output is cut off long before the end of a big diff. Read
+            lint-findings.json the same way. When pr-diff.patch is
             absent, review from lint-findings.json and the checked-out
             files. lint-findings.json holds:
             - declarations: the doc-string declarations this push adds or

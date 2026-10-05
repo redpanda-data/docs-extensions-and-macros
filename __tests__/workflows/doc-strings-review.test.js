@@ -530,6 +530,14 @@ describe('doc-strings-review workflow: source diff (executed)', () => {
     expect(review.with.claude_args).toContain('Bash(cat pr-diff.patch)')
     expect(review.with.claude_args).not.toContain('gh pr diff')
   })
+
+  // Bash output is cut off far below the diff cap, so a large diff only
+  // reaches the model in full when it can page through it with Read.
+  test('the review can page through a large diff with Read', () => {
+    const review = stepNamed('Claude review with suggestions')
+    expect(review.with.claude_args).toMatch(/--allowed-tools "[^"]*\bRead,/)
+    expect(review.with.prompt).toMatch(/offset and limit/)
+  })
 })
 
 describe('doc-strings-review workflow: writing-standard fetch (executed)', () => {
