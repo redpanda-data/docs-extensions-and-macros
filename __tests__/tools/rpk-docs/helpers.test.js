@@ -324,14 +324,32 @@ describe('rpk Docs Helpers', () => {
   })
 
   describe('sectionTitle', () => {
-    test('capitalizes the first word and title-cases the rest', () => {
-      expect(sectionTitle('CLIENT CREDENTIALS')).toBe('Client Credentials')
+    test('uses sentence case: capitalizes only the first word', () => {
+      expect(sectionTitle('CLIENT CREDENTIALS')).toBe('Client credentials')
+      expect(sectionTitle('REALLOCATION FAILURE DETAILS')).toBe('Reallocation failure details')
     })
 
     test('keeps acronyms upper case, including SSO', () => {
       expect(sectionTitle('SSO')).toBe('SSO')
-      expect(sectionTitle('TLS SETTINGS')).toBe('TLS Settings')
-      expect(sectionTitle('PRODUCER ID & EPOCH')).toBe('Producer ID & Epoch')
+      expect(sectionTitle('TLS SETTINGS')).toBe('TLS settings')
+      expect(sectionTitle('PRODUCER ID & EPOCH')).toBe('Producer ID & epoch')
+      expect(sectionTitle('TRANSACTIONAL ID')).toBe('Transactional ID')
+    })
+
+    test('capitalizes proper nouns, and Azure is not an acronym', () => {
+      expect(sectionTitle('AZURE')).toBe('Azure')
+      expect(sectionTitle('USING KAFKA')).toBe('Using Kafka')
+    })
+
+    test('capitalizes Schema Registry only as the full phrase', () => {
+      expect(sectionTitle('SCHEMA REGISTRY')).toBe('Schema Registry')
+      expect(sectionTitle('USING SCHEMA REGISTRY')).toBe('Using Schema Registry')
+      expect(sectionTitle('SCHEMA FORMAT')).toBe('Schema format')
+      expect(sectionTitle('KEY SCHEMA')).toBe('Key schema')
+    })
+
+    test('handles slashes', () => {
+      expect(sectionTitle('ENABLED/DISABLED')).toBe('Enabled/disabled')
     })
 
     test('returns an empty string for no name', () => {
