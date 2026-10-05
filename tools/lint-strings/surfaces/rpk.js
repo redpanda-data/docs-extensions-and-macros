@@ -389,6 +389,7 @@ module.exports = {
   extract,
   scanFile,
   identity,
+  parseLiteralFields,
   rules: RULES,
   // Shorts and flag usages are one-liners by convention; the generic
   // too-short prose rule would flag nearly every conforming declaration.

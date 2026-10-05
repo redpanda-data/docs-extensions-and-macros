@@ -39,11 +39,17 @@ describe('connect scanner (scanFile)', () => {
     expect(seedBrokers.string).toBe('A list of broker addresses to connect to in order to establish the connection. When omitted the global block is referenced.')
   })
 
-  test('bare constructors with no Description are captured; composite helpers, Deprecated fields, and dynamic descriptions are not', () => {
+  test('bare constructors with no Description are captured; composite helpers and Deprecated fields are not', () => {
     expect(byKey.get('field:naked_field').meta.missing_description).toBe(true)
     expect(byKey.has('field:tls')).toBe(false) // NewTLSToggledField carries its own docs
     expect(byKey.has('field:old_token')).toBe(false) // Deprecated
-    expect(byKey.has('field:dynamic_field')).toBe(false) // dynamicDescription() call
+  })
+
+  test('a description that cannot be evaluated is reported with a placeholder, never dropped or guessed', () => {
+    const dynamic = byKey.get('field:dynamic_field')
+    expect(dynamic.string).toBe('{{unresolved:1}}')
+    expect(dynamic.meta.unverifiable).toBe(true)
+    expect(dynamic.meta.unresolved).toEqual(['dynamicDescription()'])
   })
 })
 

@@ -33,7 +33,10 @@ const SURFACE_ROUTES = [
   // console) and charts/<name>/values.yaml (connectors).
   { surface: 'helm', pattern: /^charts\/[^/]+\/(chart\/)?values\.yaml$/ },
   { surface: 'crd', pattern: /^operator\/api\// },
-  { surface: 'connect', pattern: /^internal\/impl\// },
+  // Redpanda Connect publishes strings from component packages, the helper
+  // packages they share (internal/httpclient, internal/retries, ...), the
+  // public schema and the `rpk connect` CLI, plus config templates.
+  { surface: 'connect', pattern: /^(?:internal|public|cmd)\/(?!(?:.*\/)?testdata\/)(?:.*(?<!_test)\.go|.*\.tmpl\.ya?ml)$/ },
   // API protos, whose comments and openapiv2 option strings reach readers as
   // OpenAPI descriptions. console holds the data plane and Console APIs under
   // proto/redpanda/api/; cloudv2's control plane lives under proto/public/.

@@ -53,7 +53,7 @@ func fixtureConfigFields() []*service.ConfigField {
 			Description("Poll interval."),
 		// Deprecated fields are exempt from the missing-description rule.
 		service.NewStringField("old_token").Deprecated().Default(""),
-		// Dynamic description: skipped silently, never guessed at.
+		// Dynamic description: reported with a placeholder, never guessed at.
 		service.NewStringField("dynamic_field").
 			Description(dynamicDescription()),
 	}

@@ -59,8 +59,9 @@ function isNameEcho (name, description) {
  * appear bare, so the inline-code rule only sees prose:
  *
  *   * backticked spans - already marked up, which is the whole point;
- *   * URLs and Markdown link targets - a path inside a link is part of the
- *     link, and backticking it would break the link;
+ *   * URLs, Markdown link targets, and AsciiDoc macro targets and anchor
+ *     ids - a path inside a link is part of the link, and backticking it
+ *     would break the link;
  *   * anything the declaration is named after, which name-echo owns.
  *
  * Replaced with spaces rather than removed so match indices stay meaningful.
@@ -74,6 +75,13 @@ function maskNonProse (text) {
   out = out.replace(/\[[^\]]*\]\([^)]*\)/g, blank)
   // Bare URLs, and AsciiDoc's url[text] form.
   out = out.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, blank)
+  // AsciiDoc macro targets and anchor ids: xref:components:processors/
+  // schema_registry_encode.adoc[...] names a page, <<avro_raw_json,...>>
+  // and [[field_paths]] name an anchor. Backticking either breaks the link.
+  // The label in brackets stays prose.
+  out = out.replace(/\b(?:xref|link|image|include|glossterm|config_ref|anchor):[^\s[]*(?=\[)/g, blank)
+  out = out.replace(/<<[^,>]*/g, blank)
+  out = out.replace(/\[\[[^\]]*\]\]|\[#[^\]]*\]/g, blank)
   return out
 }
 
