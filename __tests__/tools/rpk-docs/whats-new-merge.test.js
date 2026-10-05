@@ -163,6 +163,56 @@ describe('updateWhatsNewFile merge semantics', () => {
     expect(content).toContain('==== Deprecated commands')
     expect(content).toContain('rpk-cluster.adoc')
   })
+
+  describe('a re-run with nothing left to publish', () => {
+    const { filterDiffForWhatsNew } = require('../../../tools/rpk-docs/rpk-docs-handler.js')
+    const overrides = { commands: { 'rpk sql': { asPartial: true } } }
+
+    test('removes that version\'s earlier block and the section it created', () => {
+      fs.writeFileSync(whatsNewPath, '= What\'s New\n\n== Bug fixes\n\nStuff.\n')
+      updateWhatsNewFile(rcDiff('rpk sql debug bundle'), whatsNewPath, 'v2.0.1')
+      expect(fs.readFileSync(whatsNewPath, 'utf8')).toContain('`rpk sql debug bundle`')
+
+      // Same version, now with rpk sql marked asPartial: the filter empties the diff
+      updateWhatsNewFile(filterDiffForWhatsNew(rcDiff('rpk sql debug bundle'), [], overrides), whatsNewPath, 'v2.0.1')
+
+      const content = fs.readFileSync(whatsNewPath, 'utf8')
+      expect(content).not.toContain('AUTOGEN-RPK-CHANGES v2.0.1')
+      expect(content).not.toContain('rpk sql')
+      expect(content).not.toContain('== Redpanda CLI')
+      expect(content).toBe('= What\'s New\n\n== Bug fixes\n\nStuff.\n')
+    })
+
+    test('leaves other versions\' blocks and the section heading in place', () => {
+      fs.writeFileSync(whatsNewPath, '= What\'s New\n\n== Bug fixes\n\nStuff.\n')
+      updateWhatsNewFile(rcDiff('rpk sql debug bundle'), whatsNewPath, 'v2.0.1-rc1')
+      updateWhatsNewFile(rcDiff('rpk cluster newer'), whatsNewPath, 'v2.0.1-rc2')
+      updateWhatsNewFile(filterDiffForWhatsNew(rcDiff('rpk sql debug bundle'), [], overrides), whatsNewPath, 'v2.0.1-rc1')
+
+      const content = fs.readFileSync(whatsNewPath, 'utf8')
+      expect(content).not.toContain('AUTOGEN-RPK-CHANGES v2.0.1-rc1')
+      expect(content).toContain('AUTOGEN-RPK-CHANGES v2.0.1-rc2 START')
+      expect(content).toContain('`rpk cluster newer`')
+      expect(content.match(/== Redpanda CLI/g)).toHaveLength(1)
+      expect(content).toMatch(/== Redpanda CLI\n\n\/\/ AUTOGEN-RPK-CHANGES v2\.0\.1-rc2 START/)
+      expect(content).toMatch(/AUTOGEN-RPK-CHANGES v2\.0\.1-rc2 END\n\n== Bug fixes/)
+    })
+
+    test('keeps a hand-written section that still has content', () => {
+      fs.writeFileSync(whatsNewPath, '= What\'s New\n\n== Redpanda CLI (rpk)\n\nHand-written note.\n')
+      updateWhatsNewFile(rcDiff('rpk sql debug bundle'), whatsNewPath, 'v2.0.1')
+      updateWhatsNewFile(filterDiffForWhatsNew(rcDiff('rpk sql debug bundle'), [], overrides), whatsNewPath, 'v2.0.1')
+
+      expect(fs.readFileSync(whatsNewPath, 'utf8')).toBe('= What\'s New\n\n== Redpanda CLI (rpk)\n\nHand-written note.\n')
+    })
+
+    test('changes nothing when no earlier block exists', () => {
+      const original = '= What\'s New\n\n== Bug fixes\n\nStuff.\n'
+      fs.writeFileSync(whatsNewPath, original)
+      updateWhatsNewFile(diffWith({}), whatsNewPath, 'v2.0.1')
+      expect(fs.readFileSync(whatsNewPath, 'utf8')).toBe(original)
+    })
+  })
 })
 
 describe('linkable predicate coverage', () => {
@@ -213,5 +263,27 @@ describe('filterDiffForWhatsNew (rpk ai exclusion)', () => {
   test('custom exclusion list is honored', () => {
     const out = filterDiffForWhatsNew(diff, ['rpk check'])
     expect(out.details.newCommands.map(c => c.path)).toEqual(['rpk ai llm-provider create'])
+  })
+
+  test('drops asPartial subtrees from the overrides and keeps the rest', () => {
+    const sqlDiff = {
+      summary: {},
+      details: {
+        newCommands: [
+          { path: 'rpk sql', name: 'sql', description: 'x' },
+          { path: 'rpk sql debug bundle', name: 'bundle', description: 'x' },
+          { path: 'rpk sqlx', name: 'sqlx', description: 'prefix must respect word boundary' },
+          { path: 'rpk cloud byoc install', name: 'install', description: 'cloud is not asPartial' },
+        ],
+        newFlags: [
+          { commandPath: 'rpk sql debug bundle', flagName: 'admin-hosts' },
+          { commandPath: 'rpk topic produce', flagName: 'schema-context' },
+        ],
+      },
+    }
+    const overrides = { commands: { 'rpk sql': { asPartial: true } } }
+    const out = filterDiffForWhatsNew(sqlDiff, [], overrides)
+    expect(out.details.newCommands.map(c => c.path)).toEqual(['rpk sqlx', 'rpk cloud byoc install'])
+    expect(out.details.newFlags.map(f => f.commandPath)).toEqual(['rpk topic produce'])
   })
 })
