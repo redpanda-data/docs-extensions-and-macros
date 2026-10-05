@@ -1,5 +1,6 @@
 const {
   getGitHubToken,
+  getGitHubApiToken,
   getTokenFromGitCredentials,
   getAuthenticatedGitHubUrl
 } = require('../../cli-utils/github-token');
@@ -101,6 +102,48 @@ describe('github-token', () => {
 
     it('returns null when no source is set', () => {
       expect(getGitHubToken()).toBeNull();
+    });
+  });
+
+  describe('getGitHubApiToken', () => {
+    // The Netlify Antora sites set GIT_CREDENTIALS to a token that can only
+    // clone the docs content repos, and REDPANDA_GITHUB_TOKEN to one that can
+    // read streaming-enterprise. API calls must pick the second.
+    it('prefers REDPANDA_GITHUB_TOKEN over GIT_CREDENTIALS', () => {
+      process.env.GIT_CREDENTIALS = 'https://from-git-credentials:@github.com';
+      process.env.REDPANDA_GITHUB_TOKEN = 'from-redpanda-var';
+      expect(getGitHubApiToken()).toBe('from-redpanda-var');
+      // ...while git operations keep Antora's credential.
+      expect(getGitHubToken()).toBe('from-git-credentials');
+    });
+
+    it('prefers any explicitly named token variable over GIT_CREDENTIALS', () => {
+      process.env.GIT_CREDENTIALS = 'https://from-git-credentials:@github.com';
+      process.env.GH_TOKEN = 'from-gh-var';
+      expect(getGitHubApiToken()).toBe('from-gh-var');
+    });
+
+    it('keeps the same order as getGitHubToken among the named variables', () => {
+      process.env.GH_TOKEN = 'from-gh-var';
+      process.env.GITHUB_TOKEN = 'from-github-var';
+      process.env.ACTIONS_BOT_TOKEN = 'from-bot-var';
+      process.env.REDPANDA_GITHUB_TOKEN = 'from-redpanda-var';
+      expect(getGitHubApiToken()).toBe('from-redpanda-var');
+      delete process.env.REDPANDA_GITHUB_TOKEN;
+      expect(getGitHubApiToken()).toBe('from-bot-var');
+      delete process.env.ACTIONS_BOT_TOKEN;
+      expect(getGitHubApiToken()).toBe('from-github-var');
+      delete process.env.GITHUB_TOKEN;
+      expect(getGitHubApiToken()).toBe('from-gh-var');
+    });
+
+    it('falls back to GIT_CREDENTIALS when no named variable is set', () => {
+      process.env.GIT_CREDENTIALS = 'https://from-git-credentials:@github.com';
+      expect(getGitHubApiToken()).toBe('from-git-credentials');
+    });
+
+    it('returns null when no source is set', () => {
+      expect(getGitHubApiToken()).toBeNull();
     });
   });
 

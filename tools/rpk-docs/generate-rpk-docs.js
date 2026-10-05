@@ -1569,6 +1569,26 @@ function formatDescription(desc, customTransformations = null, options = {}) {
     return placeholder
   })
 
+  // Bare URLs become inline code: endpoints (http://localhost:9644) and links
+  // alike are code values, and an unformatted URL in help prose reads as
+  // broken markup. Not trailing sentence punctuation, and not a URL that is
+  // already an AsciiDoc link macro (url[text]), which backticks would break.
+  //
+  // Protected as a placeholder straight away, before any other pass runs.
+  // Every later pass matches inside a URL it does not know is one: the path
+  // passes backticked /tmp/file out of https://host/tmp/file, the short-flag
+  // pass took -a out of /foo-a/, and the issue-reference pass rewrote #NNNN
+  // anchors into link macros.
+  protectedDesc = protectedDesc.replace(/(?<![`\w/]|\]\()https?:\/\/[^\s`<>"'()[\]]+/g, (url, offset, whole) => {
+    if (whole[offset + url.length] === '[') return url // AsciiDoc link macro
+    const trail = url.match(/[.,;:!?]+$/)
+    const core = trail ? url.slice(0, -trail[0].length) : url
+    if (core.length <= 'https://'.length) return url
+    const placeholder = `__INLINE_CODE_${inlineCode.length}__`
+    inlineCode.push(`\`${decodeHtmlEntities(core)}\``)
+    return placeholder + (trail ? trail[0] : '')
+  })
+
   // Known top-level rpk subcommands (for accurate command detection)
   const rpkSubcommands = new Set([
     'ai', 'check', 'cloud', 'cluster', 'connect', 'container', 'debug',
@@ -1713,20 +1733,42 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   }).join('`')
   result = result.replace(/(?<!`|-)(-[a-zA-Z])(?![a-zA-Z-])/g, '`$1`')
 
+  // A bare command followed by its flags ("run rpk topic list -r") is one
+  // command, but the passes above wrap the command path and each flag
+  // separately. Merge flag spans into the command span before them:
+  // `rpk topic list` `-r` -> `rpk topic list -r`. The quoted form never
+  // splits, because its whole span is protected before flags are wrapped.
+  let merged
+  do {
+    merged = result
+    result = result.replace(/`(rpk(?: [a-z][-a-z0-9]*)+(?: -{1,2}[a-zA-Z][-a-zA-Z0-9]*)*)` `(-{1,2}[a-zA-Z][-a-zA-Z0-9]*)`/g, '`$1 $2`')
+  } while (result !== merged)
+
   // Add backticks around environment variables
   result = result.replace(/(?<!`)(\$[A-Z_][A-Z0-9_]*)/g, '`$1`')
 
   // Merge backticked environment variables with adjacent paths
   // e.g., `$HOME`/.local/bin → `$HOME/.local/bin`
-  result = result.replace(/`(\$[A-Z_][A-Z0-9_]*)`(\/[^\s`]+)/g, '`$1$2`')
+  // The continuation excludes a trailing ) . , ; : ! ? so sentence punctuation
+  // immediately after the path (no space) lands outside the code span instead
+  // of being swallowed into it, e.g. "...(defaults to `$HOME/.local/bin)`" or
+  // "...saved in `$HOME/.local/bin.` This" -- both published on
+  // rpk-plugin-install.adoc before this fix. The continuation past the slash
+  // is optional, so a bare trailing slash ($HOME/, $PWD/ -- both real in the
+  // rpk source) still merges into `$HOME/` instead of staying split as
+  // `$HOME`/.
+  result = result.replace(/`(\$[A-Z_][A-Z0-9_]*)`(\/(?:[^\s`]*[^\s`).,;:!?])?)/g, '`$1$2`')
 
   // Add backticks around file paths (but not if already backticked)
-  // Must check both the slash and the path aren't already inside backticks
-  result = result.replace(/(?<![`/])(\/(?:etc|var|usr|home|tmp)\/[^\s,)`]+)/g, '`$1`')
-  result = result.replace(/(?<![`/])((?:etc|var|usr|home|tmp)\/[^\s,)`]+)/g, '`$1`')
+  // Must check both the slash and the path aren't already inside backticks.
+  // Like the $HOME merge above, a path may not END in sentence punctuation,
+  // so "...in ~/.config/rpk/rpk.yaml." puts the period outside the span
+  // instead of publishing `~/.config/rpk/rpk.yaml.`.
+  result = result.replace(/(?<![`/])(\/(?:etc|var|usr|home|tmp)\/(?:[^\s,)`]*[^\s,)`.;:!?])?)/g, '`$1`')
+  result = result.replace(/(?<![`/])((?:etc|var|usr|home|tmp)\/(?:[^\s,)`]*[^\s,)`.;:!?])?)/g, '`$1`')
 
   // Add backticks around home directory paths (~/.bashrc, ~/.zshrc, ~/.config/...)
-  result = result.replace(/(?<![`\w])(~\/\.[^\s,;:)`]+)/g, '`$1`')
+  result = result.replace(/(?<![`\w])(~\/\.(?:[^\s,;:)`]*[^\s,;:)`.!?])?)/g, '`$1`')
 
   // Add backticks around common package names
   result = result.replace(/(?<![`\w-])(bash-completion)(?![`\w-])/g, '`$1`')
@@ -2806,14 +2848,20 @@ async function generateRpkDocs(options = {}) {
     // Build subcommands with correct xref paths
     // Filter out excluded and asPartial subcommands — excluded have no file,
     // asPartial ones live in the partials directory with no linkable xref.
+    // The exception is a parent that is itself asPartial: its partial is
+    // included by a stub in the component that publishes the whole subtree
+    // (rpk sql in cloud-docs, rpk ai in adp-docs), so relative xrefs to its
+    // children resolve there, the same way rpk cloud partials link.
     // rpk cloud and rpk security secret rows stay in the table: their pages
     // are routed to the cloud partials directory and published by
     // cloud-docs, so the xref below links across to the cloud component
     // instead of dropping the row (which hid the subcommand entirely).
+    const parentIsPartial = shouldUsePartialDir(resolvedOverrides, commandPath)
     const subcommands = (command.commands || [])
       .filter(sub => {
         const subPath = `${commandPath} ${sub.name}`
-        return !shouldExcludeCommand(resolvedOverrides, subPath) && !shouldUsePartialDir(resolvedOverrides, subPath)
+        return !shouldExcludeCommand(resolvedOverrides, subPath) &&
+          (parentIsPartial || !shouldUsePartialDir(resolvedOverrides, subPath))
       })
       .map(sub => {
         const subPath = `${commandPath} ${sub.name}`
@@ -3219,7 +3267,11 @@ function writeEnvVarsPartial (tree, partialsDir) {
     return { written: false }
   }
   const { renderPartial, keyToEnvVar } = require('./generate-x-env-partial.js')
-  const options = tree.x_options.map(o => ({ name: o.name, env: o.env || keyToEnvVar(o.name) }))
+  const options = tree.x_options.map(o => ({
+    name: o.name,
+    env: o.env || keyToEnvVar(o.name),
+    groupTitle: o.group_title || null
+  }))
   const output = path.join(partialsDir, 'rpk-env-vars.adoc')
   fs.mkdirSync(path.dirname(output), { recursive: true })
   fs.writeFileSync(output, renderPartial(options))

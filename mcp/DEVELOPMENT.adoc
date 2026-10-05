@@ -487,17 +487,13 @@ All CLI commands have:
 === Before releasing
 
 . Run all tests: `npm run test:mcp`
-. Update version in `package.json`
 . Update link:USER_GUIDE.adoc[USER_GUIDE.adoc] with any changes
 . Test manually with Claude Code
 . Check that setup command works: `npx doc-tools setup-mcp`
 
 === Publishing
 
-. Commit all changes
-. Tag the release: `git tag -a v1.2.3 -m "Release 1.2.3"`
-. Push with tags: `git push --tags`
-. Publish to npm: `npm publish`
+Do not change the version, tag, or run `npm publish` by hand. Give your pull request a conventional-commit title (`feat(mcp): ...` or `fix(mcp): ...`). After it merges, release-please adds it to the open release pull request, and merging that pull request tags and publishes the release. See the Releases section of link:../CONTRIBUTING.adoc[CONTRIBUTING.adoc].
 
 === After releasing
 

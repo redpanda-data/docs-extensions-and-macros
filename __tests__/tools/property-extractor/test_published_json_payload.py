@@ -144,7 +144,21 @@ class TestRawKeepsSpansPublishedDoesNot(unittest.TestCase):
                 for key, value in raw_prop.items()
                 if key not in TOOLING_ONLY_PROPERTY_FIELDS
             }
-            self.assertEqual(expected, self.enhanced[name])
+            enhanced_prop = self.enhanced[name]
+            # _ensure_category_fallback (property_extractor.py) stamps a
+            # category onto every property in the enhanced/published output,
+            # so none silently vanish from the category-tag pages that
+            # assemble docs from tag::category-X[] regions -- the raw output,
+            # read only by lint-strings/preview-string, is left exactly as
+            # extracted. A property with no category in the raw output is
+            # the one intentional divergence; everything else must still
+            # match exactly.
+            if "category" not in expected:
+                self.assertIn(
+                    "category", enhanced_prop, f"{name} has no category in the published output"
+                )
+                expected["category"] = enhanced_prop["category"]
+            self.assertEqual(expected, enhanced_prop)
 
     def test_the_published_file_is_smaller(self):
         self.assertLess(

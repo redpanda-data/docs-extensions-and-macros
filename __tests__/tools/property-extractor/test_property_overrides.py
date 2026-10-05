@@ -33,7 +33,10 @@ class TestPhantomStubTracking(unittest.TestCase):
         self.assertEqual(len(property_extractor.phantom_stub_entries), 1)
         entry = property_extractor.phantom_stub_entries[0]
         self.assertEqual(entry["name"], "ghost_property")
-        self.assertEqual(entry["config_scope"], "topic")
+        # Underscored name, so it is inferred as a cluster property rather than
+        # defaulted to topic.
+        self.assertEqual(entry["config_scope"], "cluster")
+        self.assertTrue(entry["scope_inferred"])
 
     def test_phantom_stub_records_override_scope(self):
         """The recorded scope reflects the override's config_scope, not just the default."""
@@ -43,6 +46,60 @@ class TestPhantomStubTracking(unittest.TestCase):
 
         self.assertEqual(len(property_extractor.phantom_stub_entries), 1)
         self.assertEqual(property_extractor.phantom_stub_entries[0]["config_scope"], "cluster")
+        self.assertFalse(property_extractor.phantom_stub_entries[0]["scope_inferred"])
+
+    def test_dotted_name_is_inferred_as_a_topic_property(self):
+        """A dot-separated name is a topic property, matching Redpanda's naming."""
+        apply_property_overrides({}, {"properties": {"ghost.topic.property": {}}})
+
+        entry = property_extractor.phantom_stub_entries[0]
+        self.assertEqual(entry["config_scope"], "topic")
+        self.assertTrue(entry["scope_inferred"])
+
+    def test_underscored_name_is_not_fabricated_as_a_topic_property(self):
+        """Regression: cloud_topics_l1_indexing_interval landed on the topic page.
+
+        The override was keyed on the C++ member name rather than the
+        registered cloud_topics_indexing_interval, so it matched nothing and
+        was fabricated. Defaulting every fabricated property to topic scope
+        put an underscored cluster-style name into topic-properties.adoc.
+        """
+        result = apply_property_overrides(
+            {}, {"properties": {"cloud_topics_l1_indexing_interval": {"version": "v26.1.1"}}}
+        )
+
+        prop = result["cloud_topics_l1_indexing_interval"]
+        self.assertEqual(prop["config_scope"], "cluster")
+        self.assertFalse(prop["is_topic_property"])
+
+    def test_explicit_scope_beats_the_name_shape(self):
+        """An override naming its own scope wins, even against the name shape."""
+        result = apply_property_overrides(
+            {}, {"properties": {"ghost.dotted.name": {"config_scope": "cluster"}}}
+        )
+
+        self.assertEqual(result["ghost.dotted.name"]["config_scope"], "cluster")
+        self.assertFalse(result["ghost.dotted.name"]["is_topic_property"])
+
+    def test_scope_inference_never_reaches_the_output(self):
+        """Whether the scope was inferred is reported beside the stub, never on it."""
+        result = apply_property_overrides({}, {"properties": {"ghost_property": {}}})
+
+        self.assertNotIn("_scope_inferred", result["ghost_property"])
+
+    def test_warning_says_whether_the_scope_was_guessed(self):
+        """The operator can tell an inferred scope from a declared one."""
+        apply_property_overrides({}, {"properties": {
+            "ghost_guessed": {},
+            "ghost_declared": {"config_scope": "broker"},
+        }})
+
+        with self.assertLogs(property_extractor.logger, level="WARNING") as captured:
+            report_phantom_stubs()
+
+        joined = "\n".join(captured.output)
+        self.assertIn("config_scope 'cluster' inferred from the name", joined)
+        self.assertIn("config_scope 'broker' from the override", joined)
 
     def test_no_phantom_stub_when_override_matches_property_key(self):
         """Overrides applied to an existing property key are not phantom stubs."""
@@ -96,7 +153,7 @@ class TestPhantomStubTracking(unittest.TestCase):
         output = "\n".join(captured.output)
         self.assertIn("matched no extracted property", output)
         self.assertIn("ghost_property", output)
-        self.assertIn("config_scope 'topic'", output)
+        self.assertIn("config_scope 'cluster'", output)
         self.assertIn("property-overrides.json", output)
 
     def test_report_logs_nothing_when_no_phantom_stubs(self):
@@ -210,6 +267,98 @@ class TestAdmonitionsOverride(unittest.TestCase):
             result = apply_property_overrides({}, overrides)
 
         self.assertNotIn("admonitions", result["ghost_property"])
+
+
+class TestLinksAndAudienceScopes(unittest.TestCase):
+    """Fields the generator turns into AsciiDoc must survive the Python stage.
+
+    `_apply_override_to_existing_property` is a flat list of explicit
+    assignments with no catch-all passthrough (only the phantom-stub path has
+    one), so a new override field reaches the generator only if it is named
+    there. `_normalize_admonitions` rebuilds each entry from scratch rather than
+    copying it, so the same applies to every admonition field.
+    """
+
+    def test_links_survive_on_an_existing_property(self):
+        properties = {"real_property": {"name": "real_property", "description": "src"}}
+        overrides = {"properties": {"real_property": {"links": {"`x`": "#x"}}}}
+
+        result = apply_property_overrides(properties, overrides)
+
+        self.assertEqual(result["real_property"]["links"], {"`x`": "#x"})
+
+    def test_links_survive_on_a_phantom_stub(self):
+        overrides = {"properties": {"ghost_property": {"links": {"`x`": "#x"}}}}
+
+        result = apply_property_overrides({}, overrides)
+
+        self.assertEqual(result["ghost_property"]["links"], {"`x`": "#x"})
+
+    def test_includes_survive_on_an_existing_property(self):
+        properties = {"real_property": {"name": "real_property", "description": "src"}}
+        overrides = {"properties": {"real_property": {
+            "includes": ["reference:partial$internal-use-property.adoc[]"],
+        }}}
+
+        result = apply_property_overrides(properties, overrides)
+
+        self.assertEqual(
+            result["real_property"]["includes"],
+            ["reference:partial$internal-use-property.adoc[]"],
+        )
+
+    def test_includes_survive_on_a_phantom_stub(self):
+        overrides = {"properties": {"ghost_property": {
+            "includes": ["reference:partial$internal-use-property.adoc[]"],
+        }}}
+
+        result = apply_property_overrides({}, overrides)
+
+        self.assertEqual(
+            result["ghost_property"]["includes"],
+            ["reference:partial$internal-use-property.adoc[]"],
+        )
+
+    def test_array_description_is_passed_through_unflattened(self):
+        """The generator flattens the array into AsciiDoc, so Python must not
+        stringify or reorder it."""
+        properties = {"real_property": {"name": "real_property", "description": "src"}}
+        overrides = {"properties": {"real_property": {
+            "description": ["One.", "cloud-only: Cloud bit."],
+        }}}
+
+        result = apply_property_overrides(properties, overrides)
+
+        self.assertEqual(result["real_property"]["description"],
+                         ["One.", "cloud-only: Cloud bit."])
+
+    def test_admonition_audience_scopes_survive_normalization(self):
+        self.assertEqual(
+            _normalize_admonitions([
+                {"type": "tip", "text": "cloud", "cloud_only": True},
+                {"type": "note", "text": "sm", "self_managed_only": True},
+            ]),
+            [
+                {"type": "TIP", "text": "cloud", "cloud_only": True},
+                {"type": "NOTE", "text": "sm", "self_managed_only": True},
+            ],
+        )
+
+    def test_deprecated_self_hosted_only_normalizes_to_self_managed_only(self):
+        """The old spelling keeps parsing, and comes out under the current
+        name so only one spelling ever reaches the templates."""
+        self.assertEqual(
+            _normalize_admonitions([{"type": "note", "text": "t", "self_hosted_only": True}]),
+            [{"type": "NOTE", "text": "t", "self_managed_only": True}],
+        )
+
+    def test_admonition_scope_that_is_not_true_is_not_carried(self):
+        """Only an exact True scopes the block; a truthy string would otherwise
+        hide an admonition from one build on a typo."""
+        self.assertEqual(
+            _normalize_admonitions([{"type": "note", "text": "t", "cloud_only": "yes"}]),
+            [{"type": "NOTE", "text": "t"}],
+        )
 
 
 if __name__ == "__main__":

@@ -74,7 +74,7 @@ function getRedpandaVersion(args = {}) {
       version,
       docker_tag: `docker.redpanda.com/redpandadata/${dockerRepo}:${version}`,
       is_beta: args.beta || false,
-      notes_url: `https://github.com/redpanda-data/redpanda/releases/tag/${version}`,
+      notes_url: `https://github.com/redpanda-data/streaming-enterprise/releases/tag/${version}`,
       _modelRecommendation: 'haiku'
     };
 

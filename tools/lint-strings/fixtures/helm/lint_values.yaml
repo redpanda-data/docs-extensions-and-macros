@@ -11,7 +11,8 @@ image:
   tag: latest
 
 # -- Service settings that were commented out wholesale. The nested markers
-# below are dead: no pipeline can attach them.
+# below are dead: they use the indented `#   -- ` form, which helm-docs does
+# not recognize as a marker at all, so no pipeline can attach them.
 # service:
 #   -- set service.name to override the default service name
 #   name: redpanda
@@ -20,8 +21,9 @@ image:
 #     annotations: {}
 
 
-# A marker separated from any key by a blank line is dead too:
-# -- This orphaned description attaches to nothing.
+# A marker separated from the next key by blank lines is NOT dead: helm-docs
+# ignores the gap and hands it to the next real key below, which is `resources`.
+# -- Orphaned marker; helm-docs attaches this to the next real key.
 
 # @doc external.domain -- Optional domain advertised to external clients.
 # @default -- `nil`
@@ -32,6 +34,17 @@ resources:
 
 # @ignored
 internalHiddenKey: {}
+
+misattached:
+  # -- Written for the commented-out key below, but with no blank line and no
+  # later marker, helm-docs hands this text to realKeyBelow instead.
+  # optionalKey:
+  realKeyBelow: value
+  # -- Written for the commented-out key below. The real key that follows has
+  # its own marker, so helm-docs uses that one and nothing is misattached.
+  # anotherOptional:
+  # -- The guarded key's own description.
+  guarded: value
 
 undocumentedTopLevel:
   child: value

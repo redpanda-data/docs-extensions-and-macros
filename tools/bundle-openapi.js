@@ -2,9 +2,10 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync, spawnSync } = require('child_process');
+const { execSync, execFileSync, spawnSync } = require('child_process');
 const yaml = require('yaml');
 const { getMajorMinor } = require('../cli-utils/version');
+const { gitAuthEnv, redactCredentials } = require('../cli-utils/git-credential-env');
 
 /**
  * Normalize a Git tag into a semantic version string.
@@ -585,7 +586,7 @@ function postProcessBundle(filePath, options, quiet = false) {
  * @param {string} [options.output] - Standalone output file path; when provided, used for the single output file.
  * @param {string} [options.outAdmin] - Output path for the admin API when integrating with doc-tools mode.
  * @param {string} [options.outConnect] - Output path for the connect API when integrating with doc-tools mode.
- * @param {string} [options.repo] - Repository URL to clone (defaults to https://github.com/redpanda-data/redpanda.git).
+ * @param {string} [options.repo] - Repository URL to clone (defaults to https://github.com/redpanda-data/streaming-enterprise.git, a private repo that requires a GitHub token).
  * @param {string} [options.adminMajor] - Admin API major version string used for metadata (for example, 'v2.0.0').
  * @param {boolean} [options.useAdminMajorVersion] - When true and processing the admin surface, use `adminMajor` for the bundle info.version.
  * @param {boolean} [options.quiet=false] - Suppress logging to stdout/stderr when true.
@@ -649,29 +650,39 @@ async function bundleOpenAPI(options) {
   try {
     // Clone repository (only once for all surfaces)
     if (!quiet) {
-      console.log('📥 Cloning redpanda repository...');
+      console.log('📥 Cloning streaming-enterprise repository...');
     }
 
-    const { getAuthenticatedGitHubUrl, hasGitHubToken } = require('../cli-utils/github-token');
+    const { getGitHubToken } = require('../cli-utils/github-token');
 
-    let repositoryUrl = repo || 'https://github.com/redpanda-data/redpanda.git';
+    const repositoryUrl = repo || 'https://github.com/redpanda-data/streaming-enterprise.git';
+    const usingDefaultRepo = !repo;
+    const token = getGitHubToken();
 
-    // Use token if available for better rate limits and reliability
-    if (hasGitHubToken() && repositoryUrl.includes('github.com')) {
-      repositoryUrl = getAuthenticatedGitHubUrl(repositoryUrl);
-      if (!quiet) {
-        console.log('🔑 Using authenticated clone (token provided)');
-      }
+    if (usingDefaultRepo && !token) {
+      throw new Error('redpanda-data/streaming-enterprise is a private repository: set GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN so the clone can authenticate.');
     }
+
+    // gitAuthEnv hands the token to git through a credential helper carried
+    // in the subprocess environment, so it cannot appear in this process's
+    // argv (visible to anything that can list processes) or in an exec
+    // error's command line, and is never embedded in the remote URL or
+    // persisted in the clone's .git/config.
+    const useToken = Boolean(token) && repositoryUrl.includes('github.com');
+    if (useToken && !quiet) {
+      console.log('🔑 Using authenticated clone (token provided)');
+    }
+    const gitEnv = gitAuthEnv(useToken ? token : null, { ...process.env });
 
     try {
-      execSync(`git clone --depth 1 --branch ${tag} ${repositoryUrl} redpanda`, {
+      execFileSync('git', ['clone', '--depth', '1', '--branch', tag, repositoryUrl, 'redpanda'], {
         cwd: tempDir,
+        env: gitEnv,
         stdio: quiet ? 'ignore' : 'inherit',
         timeout: 60000 // 1 minute timeout
       });
     } catch (cloneError) {
-      throw new Error(`Failed to clone repository: ${cloneError.message}`);
+      throw new Error(`Failed to clone repository: ${redactCredentials(cloneError.message)}`);
     }
 
     const repoDir = path.join(tempDir, 'redpanda');
@@ -825,7 +836,7 @@ if (require.main === module) {
     .option('-o, --output <path>', 'Output file path (defaults: admin/redpanda-admin-api.yaml or connect/redpanda-connect-api.yaml)')
     .option('--out-admin <path>', 'Output path for admin API', 'admin/redpanda-admin-api.yaml')
     .option('--out-connect <path>', 'Output path for connect API', 'connect/redpanda-connect-api.yaml')
-    .option('--repo <url>', 'Repository URL', 'https://github.com/redpanda-data/redpanda.git')
+    .option('--repo <url>', 'Repository URL. The default is a private repo, so requires a GitHub token (GH_TOKEN, GITHUB_TOKEN, or REDPANDA_GITHUB_TOKEN)', 'https://github.com/redpanda-data/streaming-enterprise.git')
     .option('--admin-major <string>', 'Admin API major version', 'v2.0.0')
     .option('--use-admin-major-version', 'Use admin major version for info.version instead of git tag', false)
     .option('-q, --quiet', 'Suppress output', false)

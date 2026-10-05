@@ -1,6 +1,10 @@
 = Prerelease fixtures
 
-Exercises the paths that only a prerelease branch reaches.
+Exercises the paths that only a prerelease branch reaches. This is version
+26.3 of the SAME `macro-fixtures` component as
+xref:26.2@macro-fixtures::index.adoc[the released fixtures] (26.2, no
+`prerelease` key). Build once, then flip the version selector on either page
+to see the other.
 
 == Property data comes from this series' release candidate
 
@@ -13,8 +17,20 @@ so it validates here and nowhere else:
 == An unreleased enterprise feature may be referenced here
 
 enterprise:Preview Unreleased Feature[] renders with an `unreleased` badge on
-this prerelease version. The same mention on a released version renders as
-plain text and warns.
+this prerelease version. The same mention on
+xref:26.2@macro-fixtures::index.adoc[a released version] renders as plain
+text and warns.
 
 enterprise:Preview Beta Feature[] renders with a `beta` badge everywhere,
 because a public beta is available to readers.
+
+== A since-gated feature has shipped as of this version
+
+enterprise:Preview Since-Gated Feature[] carries `since: '26.3'` -- no
+`status` key, so it is an ordinary shipped feature, but its `since` version
+is exactly this page's own version, so it renders fully styled with no badge
+at all, the same as any other GA feature. On
+xref:26.2@macro-fixtures::index.adoc[the released fixtures] (26.2), which
+predates 26.3, the identical mention renders as plain text and warns -- a
+different gate than the unreleased feature above, checked against a version
+number rather than against which branch the page lives on.

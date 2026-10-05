@@ -26,9 +26,33 @@
 No description available.
 
 {{/if}}
+{{#if includes}}
+{{#each includes}}
+
+{{#if cloud_only}}
+ifdef::env-cloud[]
+{{/if}}
+{{#if self_managed_only}}
+ifndef::env-cloud[]
+{{/if}}
+include::{{{target}}}
+{{#if cloud_only}}
+endif::[]
+{{/if}}
+{{#if self_managed_only}}
+endif::[]
+{{/if}}
+{{/each}}
+{{/if}}
 {{#if admonitions}}
 {{#each admonitions}}
 
+{{#if cloud_only}}
+ifdef::env-cloud[]
+{{/if}}
+{{#if self_managed_only}}
+ifndef::env-cloud[]
+{{/if}}
 {{#if title}}
 .{{{title}}}
 {{/if}}
@@ -36,6 +60,12 @@ No description available.
 ====
 {{{text}}}
 ====
+{{#if cloud_only}}
+endif::[]
+{{/if}}
+{{#if self_managed_only}}
+endif::[]
+{{/if}}
 {{/each}}
 {{/if}}
 {{#if is_enterprise}}
@@ -101,17 +131,17 @@ ifndef::env-cloud[]
 xref:reference:properties/{{#if cluster_property_doc_file}}{{cluster_property_doc_file}}{{else}}cluster-properties.adoc{{/if}}#{{corresponding_cluster_property}}[`{{corresponding_cluster_property}}`]
 endif::[]
 {{/if}}
-{{#if (and minimum maximum)}}
+{{#if (and (ne minimum undefined) (ne maximum undefined))}}
 
 | Range
 | [`{{minimum}}`, `{{maximum}}`]
 {{else}}
-{{#if minimum}}
+{{#if (ne minimum undefined)}}
 
 | Minimum
 | `{{minimum}}`
 {{/if}}
-{{#if maximum}}
+{{#if (ne maximum undefined)}}
 
 | Maximum
 | `{{maximum}}`
@@ -132,10 +162,13 @@ endif::[]
 | Nullable
 | {{#if nullable}}Yes{{else}}No{{/if}}
 
+{{#if (ne gets_restored undefined)}}
+
 ifndef::env-cloud[]
 | Restored on xref:manage:whole-cluster-restore.adoc[Whole Cluster Restore]
-| {{#if (ne gets_restored false)}}Yes{{else}}No{{/if}}
+| {{#if gets_restored}}Yes{{else}}No{{/if}}
 endif::[]
+{{/if}}
 {{#if example}}
 
 | Example
@@ -176,7 +209,7 @@ endif::[]
 ifdef::env-cloud[]
 * {{{content}}}
 endif::[]
-{{else if selfHostedOnly}}
+{{else if selfManagedOnly}}
 ifndef::env-cloud[]
 * {{{content}}}
 endif::[]
@@ -190,7 +223,7 @@ endif::[]
 ifdef::env-cloud[]
 {{{content}}}
 endif::[]
-{{else if selfHostedOnly}}
+{{else if selfManagedOnly}}
 ifndef::env-cloud[]
 {{{content}}}
 endif::[]

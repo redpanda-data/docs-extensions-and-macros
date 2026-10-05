@@ -43,7 +43,7 @@ npx doc-tools get-redpanda-version [--beta]
 ----
 REDPANDA_VERSION=v25.3.1
 REDPANDA_DOCKER_TAG=docker.redpanda.com/redpandadata/redpanda:v25.3.1
-REDPANDA_RELEASE_NOTES=https://github.com/redpanda-data/redpanda/releases/tag/v25.3.1
+REDPANDA_RELEASE_NOTES=https://github.com/redpanda-data/streaming-enterprise/releases/tag/v25.3.1
 ----
 
 *Flags:*
@@ -379,7 +379,7 @@ Test categories:
 If a breaking change to the CLI is necessary:
 
 . Update the CLI with the breaking change
-. Increment the major version in package.json
+. Mark the pull request as breaking with `!` after its type, for example `feat(cli)!: rename --tag to --ref`, so release-please cuts a major release
 . Update the MCP server to handle both old and new interfaces (if possible)
 . Update the CLI contract tests to verify the new interface
 . Update this document with the new contract

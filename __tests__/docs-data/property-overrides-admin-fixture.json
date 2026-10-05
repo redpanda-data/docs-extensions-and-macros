@@ -1,0 +1,27 @@
+{
+  "_comment": "Dedicated fixture for property-docs-overrides.test.js. Separate from property-overrides.json because that file is a faithful mirror of the docs repo's live overrides: it was previously doing double duty as this test's fixture, someone hand-edited an `admin` entry into it that never existed in the docs repo, and the file then sat three months and 114 entries behind the real one because refreshing it would have broken this test.",
+  "properties": {
+    "admin": {
+      "description": "Network addresses for Admin API servers with version info.",
+      "version": "v23.1.0",
+      "config_scope": "broker",
+      "category": "redpanda",
+      "example": [
+        ".Example",
+        "[,yaml]",
+        "----",
+        "redpanda:",
+        "  admin:",
+        "    - name: <admin-api-name>",
+        "      address: <external-broker-hostname>",
+        "      port: <admin-api-port>",
+        "----"
+      ]
+    },
+    "kafka_api": {
+      "description": "IP address and port of the Kafka API endpoint that handles requests.",
+      "config_scope": "broker",
+      "category": "redpanda"
+    }
+  }
+}

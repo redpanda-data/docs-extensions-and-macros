@@ -6,6 +6,7 @@ const { execSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 const { getGitHubToken } = require('../cli-utils/github-token')
+const { gitAuthEnv, redactCredentials } = require('../cli-utils/git-credential-env')
 
 /**
  * Configure Antora to use full git clones instead of shallow clones.
@@ -72,27 +73,21 @@ module.exports.register = function ({ config, playbook }) {
 
     // Private repos need credentials: the git CLI does not share Antora's
     // built-in credential manager, so resolve a token (GIT_CREDENTIALS first,
-    // then the common token env vars) and hand it to git through a credential
-    // helper. Both the config and the token travel via environment variables
-    // (GIT_CONFIG_* and GIT_FULL_CLONE_TOKEN), so nothing touches the command
-    // line, the remote URL, or the cached .git/config, and there is no shell
-    // quoting to break on other platforms. Config entry 0 clears any inherited
-    // helpers; entry 1 registers a helper scoped to github.com so no other
-    // host is ever offered the token.
+    // then the common token env vars) and hand it to git through gitAuthEnv's
+    // credential helper. Both the config and the token travel via environment
+    // variables, so nothing touches the command line, the remote URL, or the
+    // cached .git/config, and there is no shell quoting to break on other
+    // platforms.
     const token = getGitHubToken()
     const gitCommand = 'git fetch --unshallow'
-    const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
     if (token) {
       logger.info('  → Using GitHub token for unshallow fetches')
-      gitEnv.GIT_FULL_CLONE_TOKEN = token
-      gitEnv.GIT_CONFIG_COUNT = '2'
-      gitEnv.GIT_CONFIG_KEY_0 = 'credential.helper'
-      gitEnv.GIT_CONFIG_VALUE_0 = ''
-      gitEnv.GIT_CONFIG_KEY_1 = 'credential.https://github.com.helper'
-      gitEnv.GIT_CONFIG_VALUE_1 = '!f() { echo "username=x-access-token"; echo "password=$GIT_FULL_CLONE_TOKEN"; }; f'
     } else {
       logger.info('  → No GitHub token found; unshallow may fail for private repos')
     }
+    // GIT_TERMINAL_PROMPT=0 in both cases: a prompt in a build has no one to
+    // answer it, so fail fast instead of hanging.
+    const gitEnv = gitAuthEnv(token, { ...process.env, GIT_TERMINAL_PROMPT: '0' })
 
     for (const aggregate of contentAggregate) {
       for (const origin of aggregate.origins || []) {
@@ -123,7 +118,7 @@ module.exports.register = function ({ config, playbook }) {
             if (err.killed) {
               logger.warn(`    ✗ Unshallow timeout after ${duration}ms for ${path.basename(gitdir)} (increase unshallowTimeout if needed)`)
             } else {
-              logger.warn(`    ✗ Failed to unshallow ${path.basename(gitdir)}: ${err.message}`)
+              logger.warn(`    ✗ Failed to unshallow ${path.basename(gitdir)}: ${redactCredentials(err.message)}`)
             }
             logger.warn(`    ⚠️  Git dates may be inaccurate for this repo - consider using a pre-cloned cache`)
           }

@@ -20,13 +20,34 @@ const { spawnSync } = require('child_process')
  */
 const SURFACE_ROUTES = [
   { surface: 'properties', pattern: /^src\/v\/config\// },
-  { surface: 'metrics', pattern: /(^|\/)[^/]*probe\.cc$|^src\/v\/metrics\// },
+  // Metrics are registered wherever a component exposes them, not in files
+  // with a predictable name: raft/consensus.cc, cluster/rm_stm.cc and
+  // headers such as kafka/server/kafka_probe.h all call sm::description. So
+  // route every non-test C++ source under src/v (config/ has already matched
+  // properties above) and let the scanner, which skips any file with no
+  // description() call, decide what is a declaration. Test directories are
+  // excluded the same way the whole-repo scan excludes them.
+  { surface: 'metrics', pattern: /^src\/v\/(?!(?:.*\/)?tests?\/).*\.(?:cc|h)$/ },
   { surface: 'rpk', pattern: /^src\/go\/rpk\/pkg\/cli\// },
   // Both chart layouts ship: charts/<name>/chart/values.yaml (redpanda,
   // console) and charts/<name>/values.yaml (connectors).
   { surface: 'helm', pattern: /^charts\/[^/]+\/(chart\/)?values\.yaml$/ },
   { surface: 'crd', pattern: /^operator\/api\// },
-  { surface: 'connect', pattern: /^internal\/impl\// }
+  { surface: 'connect', pattern: /^internal\/impl\// },
+  // API protos, whose comments and openapiv2 option strings reach readers as
+  // OpenAPI descriptions. console holds the data plane and Console APIs under
+  // proto/redpanda/api/; cloudv2's control plane lives under proto/public/.
+  // Anchored on the api/ segment so cloudv2's proto/descriptors/ tree (private
+  // and internal) and every vendored proto/public/**/wellknown/ path stay out.
+  { surface: 'api', pattern: /^proto\/(?:redpanda\/api|public\/[^/]+\/redpanda\/api)\/.*\.proto$/ },
+  // Admin API v2, in the redpanda/streaming-enterprise repo. A different
+  // generator (protoc-gen-connect-openapi) and a third string form; see
+  // surfaces/api.js. These two directories are exactly what the api-docs
+  // bundler feeds into the published spec (tools/bundle-openapi.js):
+  // `admin/internal` and `core/testing` are excluded by that repo's buf.yaml
+  // and generate nothing, and `core/rest` generates a fragment that is never
+  // bundled, so none of them reach readers.
+  { surface: 'api', pattern: /^proto\/redpanda\/core\/(?:admin\/v2|common)\/.*\.proto$/ }
 ]
 
 /**

@@ -76,6 +76,11 @@ programCli
  * - Node.js and npm
  * - Python 3.9 or higher
  * - Docker (for some dependencies)
+ * - Network access to https://rpk.redpanda.com (rpk is downloaded from the
+ *   rpk distribution CDN and checksum-verified; no GitHub token needed).
+ *   Optional: RPK_VERSION=vX.Y.Z pins the rpk version. Without it, the
+ *   newest GA is resolved from streaming-enterprise tags when a GitHub token
+ *   is available, otherwise from latest/ on the CDN.
  */
 programCli
   .command('install-test-dependencies')
@@ -119,7 +124,12 @@ programCli
  *
  * @requirements
  * - Internet connection to access GitHub API
- * - GitHub API rate limits apply (60 requests/hour unauthenticated)
+ * - A GitHub token with access to redpanda-data/streaming-enterprise, which is
+ *   private. Redpanda releases are published there now, and the old public repo
+ *   is frozen, so this command exits rather than report a stale version when it
+ *   has no token. Resolved from REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN,
+ *   GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, GH_TOKEN, or GIT_CREDENTIALS, in that
+ *   priority order (an API call, so the git credential is the last resort)
  */
 programCli
   .command('get-redpanda-version')
@@ -548,7 +558,15 @@ programCli
  * copy is a strict superset of the destination; otherwise it reports which
  * keys only the destination has and leaves the file alone (status
  * 'diverged') unless --force is passed. --check never writes, for a CI
- * gate.
+ * gate. A schema is also only synced into a repo that is plausibly its
+ * home: one that already has the schema, or that has the *.json the schema
+ * documents. Anything else is reported as 'not for this repo' and skipped,
+ * and never counts as drift. kapa-source-groups.json is the reason: it is
+ * generated into this package and read from node_modules by an Antora
+ * extension, so it never lives in a content repo at all, and planting its
+ * schema in redpanda-data/docs would leave a file describing data that repo
+ * will never have, with --check reporting its absence as drift on every run
+ * afterwards.
  * @example
  * # Sync into ./docs-data (writes any missing or out-of-date schema)
  * npx doc-tools sync-schemas
@@ -594,8 +612,13 @@ programCli
           created: '+ created',
           updated: '↻ updated',
           diverged: options.force ? '↻ updated (forced)' : '⚠ diverged, left alone',
+          'not-applicable': '- not for this repo',
         }[status]
         console.log(`  ${label}  ${name}`)
+        if (status === 'not-applicable') {
+          // Said out loud, because a silently missing schema looks like a bug.
+          console.log(`      no ${name.replace(/\.schema\.json$/, '.json')} here, so this schema has no data file to document`)
+        }
         if (status === 'diverged' && !options.force) {
           hasUnresolvedDivergence = true
           for (const p of destOnlyPaths) console.log(`      only in the destination: ${p}`)
@@ -1057,8 +1080,10 @@ automation
  * @requirements
  * - Python 3.9 or higher
  * - Git
- * - Internet connection to clone Redpanda repository
- * - For --cloud-support: GitHub token with repo permissions (GITHUB_TOKEN env var)
+ * - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
+ *   access to redpanda-data/streaming-enterprise, which is private
+ * - Internet connection to clone the streaming-enterprise repository
+ * - For --cloud-support: GitHub token with repo permissions (same resolution chain)
  * - For --cloud-support: Python packages pyyaml and requests
  */
 automation
@@ -1073,7 +1098,9 @@ automation
   .option('--regenerate-old-baseline', 'Re-extract the --diff tag from source instead of using the committed attachments/redpanda-properties-<oldTag>.json baseline')
   .option('--overrides <path>', 'Optional JSON file with property description overrides', 'docs-data/property-overrides.json')
   .option('--output-dir <dir>', 'Where to write all generated files', 'modules/reference')
-  .option('--cloud-support', 'Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. Set the token as an environment variable using GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN', true)
+  .option('--cloud-support', 'Add AsciiDoc tags to generated property docs to indicate which ones are supported in Redpanda Cloud. This data is fetched from the cloudv2 repository so requires a GitHub token with repo permissions. The token is resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order', true)
+  .option('--no-cloud-support', 'Skip Cloud support tags, and the cloudv2 repository access they need. A GitHub token is still required either way: the extractor clones the private streaming-enterprise repo to read the source')
+  .option('--skip-rp-util', 'Keep cluster/broker scope Tree-sitter-only, skipping the rp_util merge step (default: use rp_util when available, falling back to Tree-sitter-only data if its schema cannot be obtained)')
   .option('--template-property <path>', 'Custom Handlebars template for individual property sections')
   .option('--template-topic-property <path>', 'Custom Handlebars template for topic property sections')
   .option('--template-topic-property-mappings <path>', 'Custom Handlebars template for topic property mappings table')
@@ -1091,17 +1118,35 @@ automation
 
     const newTag = options.tag || options.branch || 'dev'
 
-    if (options.cloudSupport) {
-      console.log('Validating cloud support dependencies...')
-      const { getGitHubToken } = require('../cli-utils/github-token')
-      const token = getGitHubToken()
-      if (!token) {
-        console.error('Error: Cloud support requires a GitHub token')
-        console.error('   Set: export GITHUB_TOKEN=your_token_here')
-        console.error('   Or disable cloud support with: --no-cloud-support')
-        process.exit(1)
+    // Resolved once, via the same priority chain every other GitHub-fetching
+    // command in this CLI already uses (cli-utils/github-token.js) --
+    // notably GIT_CREDENTIALS, which is the token Antora/Netlify builds
+    // actually populate, and which the Makefile's own narrower shell
+    // fallback (REDPANDA_GITHUB_TOKEN/GITHUB_TOKEN/GH_TOKEN only) can't see.
+    // Passed through as GH_TOKEN so the Makefile's clone step picks up
+    // whatever this resolved, private-repo access included, without having
+    // to duplicate the GIT_CREDENTIALS parsing logic in shell.
+    const { getGitHubToken } = require('../cli-utils/github-token')
+    const githubToken = getGitHubToken()
+
+    // A token is required whether or not Cloud metadata is: the extractor
+    // clones the private streaming-enterprise repo to read the source either
+    // way. --no-cloud-support only drops the extra cloudv2 read, so it is not
+    // a remedy for having no token, and pointing at it as one sent people
+    // into a run that got as far as the Makefile's clone step and died there.
+    if (!githubToken) {
+      console.error('Error: Generating property docs requires a GitHub token')
+      console.error('   The extractor reads Redpanda source from the private')
+      console.error('   redpanda-data/streaming-enterprise repository.')
+      console.error('   Set GH_TOKEN, REDPANDA_GITHUB_TOKEN, or GITHUB_TOKEN to a token with access.')
+      if (options.cloudSupport) {
+        console.error('   Cloud support tags (on by default) additionally read the cloudv2 repository;')
+        console.error('   --no-cloud-support skips those, but not the token requirement above.')
       }
-      console.log('Done: GitHub token validated')
+      process.exit(1)
+    }
+    if (options.cloudSupport) {
+      console.log('Done: GitHub token validated for source and cloudv2 access')
     }
 
     let oldTag = options.diff
@@ -1127,8 +1172,10 @@ automation
       console.log(`Building property docs for ${tag}…`)
       const args = ['build', `TAG=${tag}`]
       const env = { ...process.env }
+      if (githubToken) env.GH_TOKEN = githubToken
       if (overrides) env.OVERRIDES = path.resolve(overrides)
       if (options.cloudSupport) env.CLOUD_SUPPORT = '1'
+      if (options.skipRpUtil) env.SKIP_RP_UTIL = '1'
       if (templates.property) env.TEMPLATE_PROPERTY = path.resolve(templates.property)
       if (templates.topicProperty) env.TEMPLATE_TOPIC_PROPERTY = path.resolve(templates.topicProperty)
       if (templates.topicPropertyMappings) env.TEMPLATE_TOPIC_PROPERTY_MAPPINGS = path.resolve(templates.topicPropertyMappings)
@@ -1290,8 +1337,9 @@ automation
  *
  * @description
  * Generates comprehensive CLI reference documentation for rpk (Redpanda Keeper).
- * Clones the Redpanda source, builds rpk with Go, and parses `rpk --print-tree` JSON output.
- * Detects Linux-only commands by analyzing Go build tags in the source code.
+ * Clones the Redpanda source from streaming-enterprise (private), builds rpk
+ * with Go, and parses `rpk --print-tree` JSON output. Detects Linux-only
+ * commands by analyzing Go build tags in the source code.
  *
  * Key features:
  * - Clones source from GitHub (sparse checkout for speed)
@@ -1325,6 +1373,13 @@ automation
  * @requirements
  * - Go must be installed (https://go.dev/)
  * - Git must be installed (for cloning source)
+ * - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
+ *   access to redpanda-data/streaming-enterprise, which is private (not
+ *   needed when --from-source points at an existing local checkout)
+ * - --plugin refreshes need none of the above when the snapshot's rpk_version
+ *   is a published GA or RC tag: the rpk binary is downloaded from
+ *   https://rpk.redpanda.com and checksum-verified. Go, Git and the token are
+ *   only used as a fallback when the CDN has no build for that tag.
  */
 automation
   .command('rpk-docs')
@@ -1434,6 +1489,9 @@ automation
  * parsing `-X list` text for rpk versions that predate it. Hidden -X options
  * appear in neither source, so they are excluded automatically.
  *
+ * The table is sectioned by the API group rpk reports for each option, and is
+ * a single flat table on rpk versions that report no groups.
+ *
  * The main rpk-docs pipeline also writes this partial from the tree it
  * already holds; this standalone command is for targeted refreshes without
  * a full generation run.
@@ -1450,7 +1508,7 @@ automation
  */
 automation
   .command('rpk-env-partial')
-  .description('Generate the -X -> RPK_* env var mapping partial from rpk -X list output.')
+  .description('Generate the -X -> RPK_* env var mapping partial from rpk itself.')
   .option('-r, --ref <ref>', 'Git branch or tag to build rpk from (e.g., dev, v26.2.1). Clones from GitHub.')
   .option('--from-source <path>', 'Path to local rpk source (src/go/rpk directory)')
   .option('--rpk-bin <path>', 'Path to an existing rpk binary (skips clone and build)')
@@ -1875,7 +1933,7 @@ automation
  *
  * @requirements
  * - GitHub token with access to redpanda-data/cloudv2-infra repository
- * - Token must be set via GITHUB_TOKEN, GH_TOKEN, or REDPANDA_GITHUB_TOKEN environment variable
+ * - Token is resolved from REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, GH_TOKEN, or GIT_CREDENTIALS, in that priority order (an API call, so the git credential is the last resort)
  * - Internet connection to access GitHub API
  */
 automation
@@ -1892,7 +1950,7 @@ automation
   .option('--dry-run', 'Print output to stdout instead of writing file')
   .action(async (options, command) => {
     const { generateCloudRegions } = require('../tools/cloud-regions/generate-cloud-regions.js')
-    const { getGitHubToken } = require('../cli-utils/github-token')
+    const { getGitHubApiToken } = require('../cli-utils/github-token')
 
     try {
       // The default output path holds the unfiltered table, so a filtered run
@@ -1914,7 +1972,7 @@ automation
       const absOutput = options.dryRun
         ? undefined
         : resolveInsideRepo(repoRoot, options.output, '--output')
-      const token = getGitHubToken()
+      const token = getGitHubApiToken()
       if (!token) {
         throw new Error('GitHub token is required to fetch from private cloudv2-infra repo.')
       }
@@ -2169,7 +2227,9 @@ automation
  * npx doc-tools generate bundle-openapi --tag $VERSION --surface both
  *
  * @requirements
- * - Git to clone Redpanda repository
+ * - Git to clone the streaming-enterprise repository
+ * - A GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order) with
+ *   access to redpanda-data/streaming-enterprise, which is private
  * - Buf tool (automatically installed via npm)
  * - Redocly CLI or vacuum for OpenAPI bundling (automatically detected)
  * - Internet connection to clone repository
@@ -2180,7 +2240,7 @@ automation
   .description('Bundle Redpanda OpenAPI fragments for admin and connect APIs. Requires either --tag or --branch.')
   .option('-t, --tag <tag>', 'Git tag for released content')
   .option('-b, --branch <branch>', 'Branch name for in-progress content')
-  .option('--repo <url>', 'Repository URL', 'https://github.com/redpanda-data/redpanda.git')
+  .option('--repo <url>', 'Repository URL. The default is a private repo, so requires a GitHub token (resolved from GIT_CREDENTIALS, REDPANDA_GITHUB_TOKEN, ACTIONS_BOT_TOKEN, GITHUB_TOKEN, VBOT_GITHUB_API_TOKEN, or GH_TOKEN, in that priority order)', 'https://github.com/redpanda-data/streaming-enterprise.git')
   .addOption(new Option('-s, --surface <surface>', 'Which API surfaces to bundle').choices(['admin', 'connect', 'both']).makeOptionMandatory())
   .option('--out-admin <path>', 'Output path for admin API', 'admin/redpanda-admin-api.yaml')
   .option('--out-connect <path>', 'Output path for connect API', 'connect/redpanda-connect-api.yaml')
@@ -2273,6 +2333,107 @@ automation
       console.log('  2. Review and commit the changes')
     } catch (err) {
       console.error(`Error: Failed to update Connect version: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
+ * generate kapa-source-groups
+ *
+ * @description
+ * Reads the source-group tree and the per-source group assignments from Kapa's ingestion API
+ * and writes a mapping from each docs URL version segment to the Kapa source group that scopes
+ * retrieval to that version. Consumers pass the group id as `sourceGroupIdsInclude` (Agent SDK),
+ * `sourceGroupIDsInclude` (Chat SDK, note the capital ID) or `_meta.source_group_ids_include`
+ * (hosted MCP server).
+ *
+ * The mapping is keyed on the URL segment, not Antora's page.version, because the two disagree
+ * for the latest release: latest_version_segment: 'current' publishes 26.2 at
+ * /streaming/current/ while page.version reads 26.2.
+ *
+ * This command only ever reads from Kapa. Kapa publishes no write API ("we do not provide an API
+ * endpoint for uploading or managing sources"), so the groups and their source assignments are
+ * created by hand in the Kapa dashboard under Sources > Manage groups. Run this afterwards to
+ * record what is there.
+ *
+ * Refuses rather than writing a misleading mapping when: no groups exist, no group has children,
+ * any version group has no sources assigned, or --default-segment is not one of the groups. An
+ * empty version group is worse than no group, because scoping a query to it returns only the
+ * global sources and the reader silently gets no version-specific content.
+ *
+ * @why
+ * Kapa indexes one separately crawled source per published docs version. Without retrieval
+ * scoping a reader gets answers drawn from any of them: a measured call for "What is a Redpanda
+ * topic partition?" returned 12 sections, six of which were the same get-started/architecture
+ * page at six different versions. Source groups fix that at retrieval time, but the group UUIDs
+ * live in Kapa while the version list lives in Antora, so something has to join the two. Because
+ * a new docs version appears with no file change in docs-site (the playbook globs branches: v/*),
+ * a hand-maintained mapping goes stale silently; generating it and diff-checking the result in CI
+ * is what makes drift loud.
+ *
+ * @example
+ * # Write the mapping to its default location
+ * export KAPA_API_KEY=... KAPA_PROJECT_ID=...
+ * npx doc-tools generate kapa-source-groups
+ *
+ * # Preview without writing
+ * npx doc-tools generate kapa-source-groups --dry-run
+ *
+ * # Scope unversioned pages to something other than "current"
+ * npx doc-tools generate kapa-source-groups --default-segment 26.1
+ *
+ * # Disambiguate when more than one group has children
+ * npx doc-tools generate kapa-source-groups --parent-group Streaming
+ *
+ * @requirements
+ * - Kapa API key and project ID, set via KAPA_API_KEY and KAPA_PROJECT_ID
+ * - Create the key in the Kapa platform under Configuration > API Keys; the project ID is the
+ *   UUID in the dashboard URL (https://app.kapa.ai/<project-id>)
+ * - The parent group and its version sub groups must already exist in Kapa, with each version
+ *   group holding at least one source
+ * - Internet connection to reach https://api.kapa.ai
+ */
+automation
+  .command('kapa-source-groups')
+  .description('Generate the docs version segment to Kapa source group mapping from Kapa\'s ingestion API')
+  .option('--output <file>', 'Output file (relative to repo root, must stay inside the repository)', 'docs-data/kapa-source-groups.json')
+  .option('--default-segment <segment>', 'Segment used for pages with no version of their own', 'current')
+  .option('--parent-group <name>', 'Restrict to one parent group by name (default: the only group that has children)')
+  .option('--dry-run', 'Print output to stdout instead of writing file')
+  .action(async (options) => {
+    const { generateKapaSourceGroups } = require('../tools/kapa-source-groups/generate-kapa-source-groups.js')
+    const { requireKapaCredentials } = require('../cli-utils/kapa-credentials')
+
+    try {
+      const repoRoot = findRepoRoot()
+      // resolveInsideRepo for the same reason every other generator uses it: this
+      // command is reachable from the MCP server, where a write option that escapes
+      // the repo is a write-anywhere primitive.
+      const absOutput = options.dryRun ? undefined : resolveInsideRepo(repoRoot, options.output, '--output')
+
+      // Fail loud on a missing credential rather than emitting an empty mapping:
+      // unauthenticated would look identical to "Kapa has no source groups", and the
+      // drift check would then report false drift forever.
+      const { apiKey, projectId } = requireKapaCredentials()
+
+      const out = await generateKapaSourceGroups({
+        apiKey,
+        projectId,
+        defaultSegment: options.defaultSegment,
+        parentGroupName: options.parentGroup,
+      })
+
+      if (options.dryRun) {
+        process.stdout.write(out)
+        return
+      }
+
+      fs.mkdirSync(path.dirname(absOutput), { recursive: true })
+      fs.writeFileSync(absOutput, out, 'utf8')
+      const segments = Object.keys(JSON.parse(out).segments)
+      console.log(`Done: Wrote ${absOutput} (${segments.length} version segments: ${segments.join(', ')})`)
+    } catch (err) {
+      console.error(`Error: Failed to generate Kapa source groups: ${err.message}`)
       process.exit(1)
     }
   })
@@ -2482,7 +2643,7 @@ validation
  * Validates docs-data/property-overrides.json against its JSON Schema:
  * unknown keys (a typo that would otherwise be silently dropped by the
  * extractor), and the see_also shape (a plain string, or an object naming
- * exactly one of cloud_only/self_hosted_only).
+ * exactly one of cloud_only/self_managed_only).
  *
  * @why
  * property-overrides.json has no catch-all pass-through when an override
@@ -2587,14 +2748,66 @@ programCli
   .command('lint-strings')
   .description('Lint user-facing doc strings embedded in engineering source code (properties, metrics, ...)')
   .requiredOption('--repo <path>', 'Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned.')
-  .option('--surface <list>', 'Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect')
+  // Read off the registry rather than restated here: a hardcoded list silently
+  // went stale the moment a surface was added.
+  .option('--surface <list>', `Comma-separated surfaces to lint (default: all registered). Registered: ${Object.keys(require('../tools/lint-strings').SURFACES).join(', ')}`)
   .option('--diff <base>', 'Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD')
   .option('--format <format>', 'Output format: human or json', 'human')
   .option('--skip-rules <list>', 'Comma-separated rule ids to skip')
   .option('--only-rules <list>', 'Comma-separated rule ids to run exclusively')
+  .option('--reviewed <file>', 'Diff mode: skip declarations whose fingerprint is listed in <file> (already reviewed on an earlier push)')
   .option('--strict', 'Exit 1 when any error-severity finding exists (default: always exit 0 - suggest, never block)')
   .action((options) => {
     const { runCli } = require('../tools/lint-strings')
+    runCli(options)
+  })
+
+/**
+ * lint-screenshots
+ *
+ * @description
+ * Deterministic checks from the docs screenshot standard, run against the
+ * .adoc pages under modules/ in a docs repo: every image macro (block and
+ * inline) has alt text, the alt text is at most 125 characters, does not
+ * start with "screenshot of" / "image of" / "picture of", and has no
+ * unquoted comma (Asciidoctor would split it into width/height); the
+ * referenced image file exists and is at most 100KB. Those are errors and
+ * exit 1. Warnings (exit 0 unless --warnings-as-errors) cover the rest of
+ * the standard: images above the 50KB target, JPEG/WebP where PNG or SVG
+ * belongs, captures wider than 1920px, and - in --files mode - changed
+ * images nothing references. Commented-out macros are skipped.
+ *
+ * @why
+ * cloud-docs enforced these rules on every PR and its daily screenshot cron
+ * with a repo-local script; the other docs repos had nothing. One command
+ * in doc-tools lets every docs repo and the shared PR review pipeline run
+ * the same checks, so no two jobs disagree about the same 100KB limit.
+ *
+ * @example
+ * # Whole repo (from the docs repo root): what the cloud-docs PR check runs
+ * npx doc-tools lint-screenshots
+ *
+ * # PR mode: only pages changed in the PR, plus pages that use a changed image
+ * gh pr diff 123 --name-only > changed.txt
+ * npx doc-tools lint-screenshots --files changed.txt --format json --output review-output/screenshot-lint.json
+ *
+ * # Adopt the stricter items as blocking
+ * npx doc-tools lint-screenshots --warnings-as-errors
+ */
+programCli
+  .command('lint-screenshots')
+  .description('Lint image macros and image files in a docs repo against the screenshot standard (alt text, size, format, width)')
+  .option('--root <path>', 'Docs repo root, the directory that holds modules/ (default: current directory)')
+  .option('--files <path>', 'Changed-files list (one repo-relative path per line, for example from `gh pr diff --name-only`): lint only listed .adoc files and pages that reference a listed image')
+  .option('--format <format>', 'Output format: human or json', 'human')
+  .option('--output <path>', 'Also write the JSON result to this file')
+  .option('--max-alt-length <n>', 'Alt text character limit', String(require('../tools/lint-screenshots').DEFAULTS.maxAltLength))
+  .option('--max-bytes <n>', 'Image size ceiling in bytes (error above this)', String(require('../tools/lint-screenshots').DEFAULTS.maxBytes))
+  .option('--target-bytes <n>', 'Image size target in bytes (warning above this)', String(require('../tools/lint-screenshots').DEFAULTS.targetBytes))
+  .option('--max-width <n>', 'Intrinsic image width limit in pixels (warning above this)', String(require('../tools/lint-screenshots').DEFAULTS.maxWidth))
+  .option('--warnings-as-errors', 'Exit 1 on warnings too')
+  .action((options) => {
+    const { runCli } = require('../tools/lint-screenshots')
     runCli(options)
   })
 
@@ -2696,7 +2909,254 @@ overridesGroup
     }
   })
 
+/**
+ * @description Build the plain-text prompt an external LLM triage call
+ * should send for one UPSTREAMABLE or SPLIT KEEP_UNTIL_UPSTREAMED audit row.
+ * Reads a single candidate object (not an array) from --candidate. See
+ * tools/overrides-audit/triage.js for the prompt contract.
+ *
+ * @why Separated from the actual LLM call so the workflow that runs it can
+ * use whatever action/model it wants; this command only builds the prompt.
+ *
+ * @example
+ * npx doc-tools overrides triage-prompt --candidate candidate.json
+ */
+overridesGroup
+  .command('triage-prompt')
+  .description('Build the triage prompt for one UPSTREAMABLE/SPLIT candidate')
+  .requiredOption('--candidate <path>', 'Path to a single candidate row JSON file (one object, not an array)')
+  .action((options) => {
+    const { buildTriagePrompt } = require('../tools/overrides-audit/triage')
+    try {
+      const candidate = JSON.parse(fs.readFileSync(path.resolve(options.candidate), 'utf8'))
+      console.log(buildTriagePrompt(candidate))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
+/**
+ * @description Parse the raw text an LLM triage call returned for one
+ * candidate and merge it into that candidate's manifest row, adding
+ * agent_verdict / agent_reason / triage_failed. Any malformed, empty, or
+ * unexpected response degrades to a safe AMBIGUOUS verdict rather than
+ * throwing — a triage call failing is not a reason to fail the pipeline,
+ * it's a reason to ask a human. See tools/overrides-audit/triage.js.
+ *
+ * @example
+ * npx doc-tools overrides triage-parse --candidate candidate.json --response response.txt
+ */
+overridesGroup
+  .command('triage-parse')
+  .description('Merge an LLM triage response into a candidate row')
+  .requiredOption('--candidate <path>', 'Path to the candidate row JSON file this response answers')
+  .requiredOption('--response <path>', 'Path to the raw text file the LLM triage call returned')
+  .action((options) => {
+    const { triageCandidate } = require('../tools/overrides-audit/triage')
+    try {
+      const candidate = JSON.parse(fs.readFileSync(path.resolve(options.candidate), 'utf8'))
+      // A triage call that failed before writing its output leaves no
+      // response file. Treat that as an empty response so it reaches the
+      // AMBIGUOUS fallback instead of failing the command.
+      let rawResponse = ''
+      try {
+        rawResponse = fs.readFileSync(path.resolve(options.response), 'utf8')
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err
+      }
+      console.log(JSON.stringify(triageCandidate(candidate, rawResponse), null, 2))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
+/**
+ * @description Render one plain-English markdown report section from a
+ * batch of triaged candidate rows (rows already carrying agent_verdict from
+ * triage-parse). See tools/overrides-audit/report.js for what each section
+ * contains and what happens to rows outside the requested verdict.
+ *
+ * @example
+ * npx doc-tools overrides report --candidates triaged.json --section upstream
+ */
+overridesGroup
+  .command('report')
+  .description('Build a plain-English markdown report section from triaged candidates')
+  .requiredOption('--candidates <path>', 'Path to a JSON array of triaged candidate rows')
+  .addOption(new Option('--section <section>', 'Which report section to build').choices(['upstream', 'retirement', 'ambiguous']).makeOptionMandatory())
+  .action((options) => {
+    const { buildUpstreamSection, buildRetirementSection, buildAmbiguousDigest } = require('../tools/overrides-audit/report')
+    const BUILDERS = { upstream: buildUpstreamSection, retirement: buildRetirementSection, ambiguous: buildAmbiguousDigest }
+    try {
+      const candidates = JSON.parse(fs.readFileSync(path.resolve(options.candidates), 'utf8'))
+      console.log(BUILDERS[options.section](candidates))
+    } catch (err) {
+      fail(err.message)
+    }
+  })
+
 programCli.addCommand(automation)
+/**
+ * validate kapa-source-groups
+ *
+ * @description
+ * Checks that every streaming docs version currently published has a Kapa source, so Ask AI
+ * can scope answers to it. Exit status is meaningful: 0 every version is covered, 1 a version
+ * is missing, 2 the command itself failed (Kapa or the sitemap unreachable, bad credentials).
+ *
+ * A version counts as covered when Kapa has a source named `Documentation (X)` for it, that
+ * source is assigned to a source group, AND the committed mapping (docs-data/kapa-source-groups.json)
+ * has a segment for it whose group_id is a group that source actually sits in. Four gaps are
+ * reported, each with its own line:
+ *
+ * - missing: the version is published but Kapa has no `Documentation (X)` source.
+ * - unassigned: the source exists but is in no group, so it is global in Kapa and returned for
+ *   EVERY query on every version.
+ * - unmapped: Kapa has the grouped source but the committed mapping has no segment for it. Every
+ *   deployed surface reads the mapping, not Kapa, so readers on that version silently get the
+ *   default segment until the mapping is regenerated and released.
+ * - mismatched: the mapping has the segment but its group_id is not a group the version's source
+ *   sits in, which is what a group deleted and recreated in the dashboard, or a source moved into
+ *   another version's group, looks like. Every Ask AI query on that version is then scoped to a
+ *   group that no longer holds its docs, until the mapping is regenerated and released.
+ *
+ * The prerelease segment (/streaming/beta/) is ignored: a beta publishes there for the whole
+ * pre-GA cycle and is not expected to have a Kapa group of its own.
+ *
+ * @why
+ * The latest release always publishes at /streaming/current/, and the `Documentation (current)`
+ * crawl follows it, so latest is never the version that goes missing. The one that goes missing
+ * is the version that just got archived: when 26.3 ships, 26.2 moves to /streaming/26.2/ and
+ * needs a crawl of its own that nobody has made yet. Kapa has no write API, so that crawl is
+ * created by hand in the dashboard, and nothing else notices when it is forgotten. Readers on the
+ * archived version then silently fall back to the default segment.
+ *
+ * Run it on a schedule so the gap opens an issue rather than waiting for a bug report.
+ *
+ * @example
+ * export KAPA_API_KEY=... KAPA_PROJECT_ID=...
+ * npx doc-tools validate kapa-source-groups
+ *
+ * # Check a preview or staging site instead of production
+ * npx doc-tools validate kapa-source-groups --site-url https://deploy-preview-123--redpanda-documentation.netlify.app
+ *
+ * @requirements
+ * - Kapa API key and project ID, set via KAPA_API_KEY and KAPA_PROJECT_ID
+ * - Internet connection to reach https://api.kapa.ai and the docs site's sitemap
+ */
+validation
+  .command('kapa-source-groups')
+  .description('Check every published streaming version has a grouped Kapa source and the committed mapping points at that group (exit 0 in sync, 1 gap, 2 error)')
+  .option('--site-url <url>', 'Docs site whose sitemap says which versions are published', 'https://docs.redpanda.com')
+  .option('--mapping <file>', 'Committed mapping every surface reads', 'docs-data/kapa-source-groups.json')
+  .action(async (options) => {
+    const { fetchKapaSourceVersions } = require('../tools/kapa-source-groups/kapa-source-versions.js')
+    const { fetchPublishedSegments, isPrereleaseSegment } = require('../tools/kapa-source-groups/published-segments.js')
+    const { requireKapaCredentials } = require('../cli-utils/kapa-credentials')
+
+    // Printed only where a gap has actually been established, and required by
+    // kapa-source-groups-drift.sh before it files an issue. Exit 1 alone is not
+    // trustworthy: Commander exits 1 on a usage error and an uncaught throw
+    // exits 1 too, so without this a typo'd flag would file an issue quoting a
+    // stack trace as the report.
+    const SENTINEL = 'KAPA_DRIFT_CONFIRMED'
+
+    // Exit 2 is reserved for "could not find out", so the scheduled job can tell
+    // "a version is missing" apart from "Kapa was down" and not file a false issue.
+    let published, kapa
+    try {
+      const { apiKey, projectId } = requireKapaCredentials()
+      ;[published, kapa] = await Promise.all([
+        fetchPublishedSegments({ siteUrl: options.siteUrl }),
+        fetchKapaSourceVersions({ apiKey, projectId }),
+      ])
+    } catch (err) {
+      console.error(`Error: Could not check Kapa sources: ${err.message}`)
+      process.exit(2)
+    }
+
+    // The committed mapping is what every surface actually reads (the Antora
+    // extension, docs-ui, the /api/ proxy, the MCP server). Kapa having a
+    // grouped source is necessary but not sufficient: if nobody regenerated and
+    // released the mapping, readers on that version still get the default
+    // segment and nothing else would ever say so.
+    let mappedSegments, mappedGroupIds
+    try {
+      const mappingPath = path.resolve(options.mapping)
+      const mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'))
+      if (!mapping || typeof mapping.segments !== 'object' || mapping.segments === null) {
+        throw new Error('no segments object')
+      }
+      mappedSegments = new Set(Object.keys(mapping.segments))
+      mappedGroupIds = new Map(Object.entries(mapping.segments)
+        .map(([seg, entry]) => [seg, entry && entry.group_id != null ? String(entry.group_id) : null]))
+    } catch (err) {
+      console.error(`Error: Could not read the committed mapping at ${options.mapping}: ${err.message}`)
+      process.exit(2)
+    }
+
+    // A beta publishes at /streaming/beta/ for the whole pre-GA cycle and has no
+    // group of its own by design. Reporting it would file a false issue weekly.
+    const prerelease = published.filter(isPrereleaseSegment)
+    const versions = published.filter((v) => !isPrereleaseSegment(v))
+
+    const missing = versions.filter((v) => !kapa.covered.has(v) && !kapa.unassigned.has(v))
+    const unassigned = versions.filter((v) => kapa.unassigned.has(v))
+    const unmapped = versions.filter((v) => kapa.covered.has(v) && !mappedSegments.has(v))
+    // The mapping is what gets sent with every query, so its group_id has to be a
+    // group the version's source is in right now. A group deleted and recreated
+    // keeps its name and gets a new id; a source moved to another version's
+    // group leaves the old id pointing at a group without these docs. Kapa
+    // reports neither, and the three checks above pass in both cases.
+    const mismatched = versions.filter((v) => {
+      if (!kapa.covered.has(v) || !mappedSegments.has(v)) return false
+      const want = mappedGroupIds.get(v)
+      const have = kapa.groups.get(v) || new Set()
+      return !want || !have.has(want)
+    })
+
+    if (prerelease.length) {
+      console.log(`  (ignoring prerelease segment${prerelease.length > 1 ? 's' : ''} ${prerelease.join(', ')}, ` +
+        'which publishes for the pre-GA cycle and is not expected to have a Kapa group)')
+    }
+
+    if (missing.length === 0 && unassigned.length === 0 && unmapped.length === 0 && mismatched.length === 0) {
+      console.log(`✓ Every published streaming version (${versions.join(', ')}) has a Kapa source in a group, ` +
+        `and ${options.mapping} points each one at that group.`)
+      process.exit(0)
+    }
+
+    console.log('✗ Kapa and the committed mapping are out of sync for published streaming docs versions.\n')
+    for (const v of missing) {
+      console.log(`  - ${v}: published at /streaming/${v}/ but Kapa has no "Documentation (${v})" source. ` +
+        'Readers on this version fall back to the default segment.')
+    }
+    for (const v of unassigned) {
+      console.log(`  - ${v}: "Documentation (${v})" exists but is not in a source group, so it is global ` +
+        'and returned for every query on every version.')
+    }
+    for (const v of unmapped) {
+      console.log(`  - ${v}: Kapa has a grouped "Documentation (${v})" source, but ${options.mapping} has no ` +
+        `"${v}" segment. Readers on this version fall back to the default segment until the mapping is ` +
+        'regenerated and released.')
+    }
+    for (const v of mismatched) {
+      const want = mappedGroupIds.get(v)
+      const have = [...(kapa.groups.get(v) || [])]
+      console.log(`  - ${v}: ${options.mapping} scopes this version to group ${want || '(no group_id)'}, but Kapa has ` +
+        `"Documentation (${v})" in ${have.length === 1 ? 'group' : 'groups'} ${have.join(', ')}. Every Ask AI query on ` +
+        'this version is sent with a group that no longer holds its docs until the mapping is regenerated and released.')
+    }
+    if (missing.length || unassigned.length) {
+      console.log('\nIn the Kapa dashboard: Sources > Add source for the crawl, then assign it to the version ' +
+        'group under Sources > Manage groups. Then regenerate the mapping:\n  doc-tools generate kapa-source-groups')
+    } else {
+      console.log('\nRegenerate the mapping and release docs-extensions-and-macros:\n  doc-tools generate kapa-source-groups')
+    }
+    console.log(`\n${SENTINEL}`)
+    process.exit(1)
+  })
+
 programCli.addCommand(validation)
 programCli.addCommand(overridesGroup)
 programCli.parse(process.argv)

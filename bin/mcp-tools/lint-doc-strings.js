@@ -16,7 +16,8 @@ const DOC_TOOLS_BIN = path.resolve(__dirname, '..', 'doc-tools.js');
  * Lint user-facing doc strings embedded in engineering source code
  * @param {Object} args - Arguments
  * @param {string} args.repo - Path to the engineering checkout (required)
- * @param {string} [args.surface] - Comma-separated surfaces (properties, metrics, rpk, helm, crd, connect)
+ * @param {string} [args.surface] - Comma-separated surfaces; see the SURFACES
+ *   registry in tools/lint-strings/index.js for the current list
  * @param {string} [args.diff] - Base ref for declaration-anchored diff mode
  * @param {string} [args.skip_rules] - Comma-separated rule ids to skip
  * @param {string} [args.only_rules] - Comma-separated rule ids to run exclusively

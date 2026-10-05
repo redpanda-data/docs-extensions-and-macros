@@ -15,6 +15,7 @@ The tests also ensure that defaults are correctly extracted:
 These tests help prevent regressions in enterprise property detection logic.
 """
 
+import os
 import unittest
 import json
 from pathlib import Path
@@ -25,8 +26,14 @@ class EnterprisePropertyDetectionTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Load the generated properties JSON once for all tests"""
-        json_path = Path(__file__).parent.parent.parent.parent / "tools" / "property-extractor" / "gen" / "dev-properties.json"
+        """Load the generated properties JSON once for all tests.
+
+        PROPERTY_FIXTURE_TAG selects which generator output to read; it must
+        match the TAG the fixture step built (CI pins a release tag there so
+        these suites test the extractor against a deterministic input).
+        """
+        tag = os.environ.get("PROPERTY_FIXTURE_TAG", "dev")
+        json_path = Path(__file__).parent.parent.parent.parent / "tools" / "property-extractor" / "gen" / f"{tag}-properties.json"
         with open(json_path, "r") as f:
             data = json.load(f)
             cls.properties = data.get("properties", {})
@@ -113,20 +120,43 @@ class RestrictedOnlyTest(EnterprisePropertyDetectionTest):
         """Test http_authentication default is the Community value (BASIC)"""
         prop = self.properties.get("http_authentication")
         self.assertIsNotNone(prop)
-        self.assertEqual(
-            prop.get("default"),
-            ["BASIC"],
-            "http_authentication default should be ['BASIC'] (Community value), not ['OIDC']",
-        )
+        # Tree-sitter extraction keeps the C++ initializer's list shape
+        # (['BASIC']); the rp_util merge unwraps a single-element scalar list
+        # to its bare element for display (see rp_util_merge.py). Both mean
+        # the same default. What this test protects is the Community/
+        # Enterprise split: the default must be BASIC, never OIDC.
+        default = prop.get("default")
+        if isinstance(default, list):
+            self.assertEqual(
+                default,
+                ["BASIC"],
+                "http_authentication default should be ['BASIC'] (Community value), not ['OIDC']",
+            )
+        else:
+            self.assertEqual(
+                default,
+                "BASIC",
+                "http_authentication default should be 'BASIC' (Community value), not 'OIDC'",
+            )
 
     def test_sasl_mechanisms_classification(self):
-        """Test sasl_mechanisms is correctly classified as simple enterprise"""
+        """Test sasl_mechanisms carries a supported enterprise classification"""
         prop = self.properties.get("sasl_mechanisms")
         self.assertIsNotNone(prop, "sasl_mechanisms property not found")
-        self.assertEqual(
+        # 'simple' is what the C++-source crawler infers from the pre-#63
+        # per-element-validator shape (releases through v26.2.2);
+        # 'restricted_only' is what the compiled config object itself reports
+        # through rp_util after streaming-enterprise#63 converted the property
+        # to enterprise<enum_set_property<>>. Either is a correct reading of
+        # its source era; what must never come back is
+        # 'restricted_with_sanctioned', the misparse that fabricates
+        # unresolved iterator expressions as values.
+        self.assertIn(
             prop.get("enterprise_constructor"),
-            "simple",
-            "sasl_mechanisms should be simple (uses per-element validation)",
+            ("simple", "restricted_only"),
+            "sasl_mechanisms should be 'simple' (pre-#63 source) or "
+            "'restricted_only' (rp_util ground truth), never "
+            "'restricted_with_sanctioned'",
         )
 
     def test_sasl_mechanisms_restricted_values(self):
