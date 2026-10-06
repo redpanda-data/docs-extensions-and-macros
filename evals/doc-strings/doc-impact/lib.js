@@ -332,6 +332,61 @@ function buildRecording (item, mcpCalls, meta) {
   }
 }
 
+/**
+ * Merge a new recording into an existing one: keep every existing call and
+ * add each new call whose replay key the existing recording lacks. A
+ * recording then grows to cover the calls later runs actually make,
+ * instead of being replaced by whichever few calls the latest run made.
+ */
+function mergeRecording (existing, fresh) {
+  const calls = ((existing && existing.calls) || []).slice()
+  const have = new Set(calls.map((c) => replayKey(c.tool, c.arguments)))
+  let added = 0
+  for (const call of (fresh && fresh.calls) || []) {
+    const key = replayKey(call.tool, call.arguments)
+    if (have.has(key)) continue
+    have.add(key)
+    calls.push(call)
+    added++
+  }
+  const merged_from = [...((existing && existing.merged_from) || []), ...(existing ? [existing.recorded_at] : [])].filter(Boolean)
+  return { added, recording: { ...fresh, calls, ...(merged_from.length ? { merged_from } : {}) } }
+}
+
+// Error codes in the JSON body the docs server returns when it refuses a
+// tool call for its anonymous quota or its rate limit. The server sends
+// these as an ordinary tool result, not as an MCP error, so isError is no
+// signal and the body has to be read.
+const LIMIT_ERROR_CODE = /(quota|rate.?limit|too.?many|exhausted|unauthenticated|auth.?required)/i
+// Refusal wording for a server that answers with plain text and an MCP
+// error instead. Applied only to error results: a real docs answer can
+// mention quotas, rate limits or signing in.
+const LIMIT_ERROR_TEXT = /(tool[- ]call limit|rate.?limit|quota|too many requests|reconnect|sign in)/i
+
+/**
+ * The refusal text when the docs server refused this call for its quota or
+ * rate limit, otherwise null. `call` is a parsed call ({ content, isError })
+ * or a recording entry ({ content, is_error }).
+ */
+function limitRefusal (call) {
+  const blocks = contentBlocks(call && call.content)
+  for (const b of blocks) {
+    const text = String(b.text || '').trim()
+    if (!text.startsWith('{')) continue
+    let body
+    try { body = JSON.parse(text) } catch { continue }
+    if (body && typeof body.error === 'string' && LIMIT_ERROR_CODE.test(body.error)) return text
+  }
+  const isError = call && (call.isError != null ? call.isError : call.is_error)
+  const all = blocks.map((b) => b.text || '').join('\n')
+  return isError && LIMIT_ERROR_TEXT.test(all) ? all : null
+}
+
+/** Calls in a list of parsed calls or recording entries that were limit refusals. */
+function limitRefusals (calls) {
+  return (calls || []).filter((c) => limitRefusal(c) != null)
+}
+
 /** Arguments that carry the search text, compared for a nearest match. */
 const TEXT_ARGS = ['question', 'query', 'urls', 'url']
 
@@ -406,16 +461,26 @@ function harmonic (f, a) {
   return f + a === 0 ? 0 : (2 * f * a) / (f + a)
 }
 
+// Statuses that leave an item out of every score without being an error.
+// GATE_CLOSED: the frozen lint input has no declarations and no removals,
+// so the workflow would never run the pass; scoring it would credit the
+// lint gate, not the pass, with an abstention. REPLAY_INCOMPLETE: the run
+// asked for docs the recording does not hold, so its verdict was made
+// against "no recording" errors, not docs.
+const NOT_SCORED = ['GATE_CLOSED', 'REPLAY_INCOMPLETE']
+
 /**
  * Per-item outcome and the overall numbers.
  *
  * @param {Array} runs - [{ item, status, flagged, pages }] where status is
- *   'OK' for a completed run (anything else is excluded from every score),
- *   flagged means a doc-impact.json the dispatch gate accepts, and pages are
- *   the normalized affected_pages.
+ *   'OK' for a completed, scoreable run. Anything else is left out of every
+ *   score: GATE_CLOSED and REPLAY_INCOMPLETE are counted on their own, any
+ *   other status counts as an error. flagged means a doc-impact.json the
+ *   dispatch gate accepts, and pages are the normalized affected_pages.
  */
 function score (runs) {
   const done = runs.filter((r) => r.status === 'OK')
+  const tally = (status) => runs.filter((r) => r.status === status).length
   const pos = done.filter((r) => r.item.label === 'needs_docs')
   const neg = done.filter((r) => r.item.label === 'no_change')
   const F = ratio(pos.filter((r) => r.flagged).length, pos.length)
@@ -456,7 +521,15 @@ function score (runs) {
   const refused = pos.length === 0 || neg.length === 0
   return {
     perItem,
-    counts: { scored: done.length, needs_docs: pos.length, no_change: neg.length, excluded: runs.length - done.length },
+    counts: {
+      scored: done.length,
+      needs_docs: pos.length,
+      no_change: neg.length,
+      excluded: runs.length - done.length,
+      gate_closed: tally('GATE_CLOSED'),
+      replay_incomplete: tally('REPLAY_INCOMPLETE'),
+      errors: runs.filter((r) => r.status !== 'OK' && !NOT_SCORED.includes(r.status)).length
+    },
     flag_recall: F,
     abstention_recall: A,
     headline: refused ? null : harmonic(F, A),
@@ -488,6 +561,10 @@ module.exports = {
   canonical,
   replayKey,
   buildRecording,
+  mergeRecording,
+  limitRefusal,
+  limitRefusals,
+  NOT_SCORED,
   createReplayer,
   queryTokens,
   harmonic,

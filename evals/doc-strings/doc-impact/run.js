@@ -27,6 +27,10 @@ const CONTROLS = path.join(HERE, 'controls.json')
 const dataDirs = (itemsFile) => ({ fixtures: path.join(path.dirname(itemsFile), 'fixtures'), recordings: path.join(path.dirname(itemsFile), 'recordings') })
 let FIXTURES = path.join(HERE, 'fixtures')
 let RECORDINGS = path.join(HERE, 'recordings')
+/** Read frozen inputs and recordings from beside `itemsFile`. */
+function useItemsFile (itemsFile) {
+  ({ fixtures: FIXTURES, recordings: RECORDINGS } = dataDirs(itemsFile))
+}
 const TOOLS_SNAPSHOT = path.join(HERE, 'mcp-tools.json')
 const REPLAY_SERVER = path.join(HERE, 'replay-server.js')
 const RESULTS = path.join(HERE, '..', 'results')
@@ -40,6 +44,8 @@ const USAGE = `Usage: node evals/doc-strings/run-evals.js --doc-impact [options]
                           replay (default): serve recorded docs responses
                           record: call the live server and save recordings
                           live: call the live server, save nothing
+  --merge                 with --mcp record: add the new calls to the item's
+                          existing recording instead of replacing it
   --mcp-config <json|file>
                           MCP config for record/live (default: the workflow's)
   --include-unconfirmed   also run and score weak, unconfirmed items
@@ -50,7 +56,7 @@ const USAGE = `Usage: node evals/doc-strings/run-evals.js --doc-impact [options]
                           each item via gh and git (network), then exit`
 
 function parseArgs (argv) {
-  const o = { items: DEFAULT_ITEMS, controls: false, cases: null, mcp: 'replay', mcpConfig: null, includeUnconfirmed: false, model: 'sonnet', json: false, keepTemp: false, refresh: false }
+  const o = { items: DEFAULT_ITEMS, controls: false, cases: null, mcp: 'replay', mcpConfig: null, merge: false, includeUnconfirmed: false, model: 'sonnet', json: false, keepTemp: false, refresh: false }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--items') o.items = path.resolve(argv[++i])
@@ -58,6 +64,7 @@ function parseArgs (argv) {
     else if (a === '--case') o.cases = (o.cases || []).concat(argv[++i].split(','))
     else if (a === '--mcp') o.mcp = argv[++i]
     else if (a === '--mcp-config') o.mcpConfig = argv[++i]
+    else if (a === '--merge') o.merge = true
     else if (a === '--include-unconfirmed') o.includeUnconfirmed = true
     else if (a === '--model') o.model = argv[++i]
     else if (a === '--json') o.json = true
@@ -70,6 +77,10 @@ function parseArgs (argv) {
   }
   if (!['replay', 'record', 'live'].includes(o.mcp)) {
     console.error(`--mcp must be replay, record or live\n${USAGE}`)
+    process.exit(2)
+  }
+  if (o.merge && o.mcp !== 'record') {
+    console.error(`--merge needs --mcp record\n${USAGE}`)
     process.exit(2)
   }
   return o
@@ -290,15 +301,9 @@ function runClaude (prompt, { cwd, model, settings, mcpConfig, timeoutMs = 60000
   }
 }
 
-// The docs server's refusal text for its anonymous tool-call quota and its
-// HTTP rate limit. Matched loosely so a reworded refusal still stops a save.
-const QUOTA_REFUSAL = /(tool[- ]call limit|rate.?limit|quota|too many requests|reconnect|sign in)/i
-const blockText = (content) => lib.contentBlocks(content).map((b) => b.text || '').join('\n')
-
-/** MCP calls the server refused for its quota or rate limit. */
-function quotaRefusals (mcpCalls) {
-  return (mcpCalls || []).filter((c) => c.isError && QUOTA_REFUSAL.test(blockText(c.content)))
-}
+// A refusal from the docs server's anonymous quota or rate limit is not a
+// docs answer. See lib.limitRefusal for how one is recognized.
+const quotaRefusals = lib.limitRefusals
 
 function runItem (item, ctx) {
   const { options, prompts, settings, filter, caseDir } = ctx
@@ -314,8 +319,11 @@ function runItem (item, ctx) {
   const decls = (findings.summary && findings.summary.totalDeclarations) || 0
   const removals = (findings.summary && findings.summary.removedSurfaceLines) || 0
   if (decls === 0 && removals === 0) {
-    // The workflow skips the model entirely here, so the pass writes nothing.
-    ev.notes.push('lint gate closed (no declarations or removals): the workflow would not run the pass')
+    // The workflow skips the model entirely here, so the pass never runs.
+    // Not scored: a no_change item would earn an abstention the pass never
+    // made, and a needs_docs item could never be flagged.
+    ev.status = 'GATE_CLOSED'
+    ev.notes.push('lint gate closed (no declarations or removals): the workflow would not run the pass, so the item is not scored')
     return ev
   }
 
@@ -326,6 +334,10 @@ function runItem (item, ctx) {
     let mcpConfig
     if (options.mcp === 'replay') {
       if (!fs.existsSync(recordingFile)) return { ...ev, status: 'HARNESS_ERROR', notes: [`no recording at ${path.relative(process.cwd(), recordingFile)}; run --mcp record --case ${item.id}`] }
+      // A recording that holds a quota refusal would replay the refusal as
+      // the docs answer, so the run would grade the quota, not the pass.
+      const poisoned = quotaRefusals(JSON.parse(fs.readFileSync(recordingFile, 'utf8')).calls)
+      if (poisoned.length) return { ...ev, status: 'HARNESS_ERROR', notes: [`recording ${path.relative(process.cwd(), recordingFile)} holds ${poisoned.length} call(s) the docs server refused for its limit; delete it and re-record`] }
       mcpConfig = replayMcpConfig(recordingFile, replayLog)
     } else {
       mcpConfig = ctx.liveConfig
@@ -361,14 +373,20 @@ function runItem (item, ctx) {
     // docs answer. Saving it would replay the refusal on every later run,
     // and scoring it would grade the quota, not the pass.
     const refused = quotaRefusals(parsed.mcpCalls)
-    if (refused.length && options.mcp !== 'replay') {
-      return { ...ev, status: 'HARNESS_ERROR', notes: [`${refused.length} MCP call(s) refused by the server's limit${options.mcp === 'record' ? '; recording not saved' : ''}: ${blockText(refused[0].content).slice(0, 200)}`] }
+    if (refused.length) {
+      return { ...ev, status: 'HARNESS_ERROR', notes: [`${refused.length} MCP call(s) refused by the docs server's limit${options.mcp === 'record' ? '; recording not saved' : ''}: ${lib.limitRefusal(refused[0]).slice(0, 200)}`] }
     }
     if (options.mcp === 'record') {
       fs.mkdirSync(RECORDINGS, { recursive: true })
-      const rec = lib.buildRecording(item, parsed.mcpCalls, { recordedAt: new Date().toISOString(), serverUrl: (mcpConfig.mcpServers[lib.MCP_SERVER] || {}).url || null, model: options.model })
+      let rec = lib.buildRecording(item, parsed.mcpCalls, { recordedAt: new Date().toISOString(), serverUrl: (mcpConfig.mcpServers[lib.MCP_SERVER] || {}).url || null, model: options.model })
+      if (options.merge && fs.existsSync(recordingFile)) {
+        const merged = lib.mergeRecording(JSON.parse(fs.readFileSync(recordingFile, 'utf8')), rec)
+        rec = merged.recording
+        ev.notes.push(`merged ${merged.added} new MCP call(s) into the recording (${rec.calls.length} in all)`)
+      } else {
+        ev.notes.push(`recorded ${rec.calls.length} MCP call(s)`)
+      }
       fs.writeFileSync(recordingFile, JSON.stringify(rec, null, 2) + '\n')
-      ev.notes.push(`recorded ${rec.calls.length} MCP call(s)`)
     }
 
     const impactFile = path.join(work, 'doc-impact.json')
@@ -388,6 +406,10 @@ function runItem (item, ctx) {
           ev.notes.push(`doc-impact.json ${gate.detail}`)
         }
       }
+    }
+    if (ev.replay_misses) {
+      ev.status = 'REPLAY_INCOMPLETE'
+      ev.notes.push(`${ev.replay_misses} MCP call(s) had no recording, so the verdict was made without those docs; not scored. Re-record with --mcp record --merge --case ${item.id}`)
     }
     return ev
   } finally {
@@ -420,7 +442,7 @@ function printTable (runs, scored) {
 function printSummary (scored, runs) {
   const c = scored.counts
   const misses = runs.reduce((s, r) => s + r.replay_misses, 0)
-  process.stdout.write(`\nScored ${c.scored} item(s): ${c.needs_docs} needs_docs, ${c.no_change} no_change; ${c.excluded} excluded (errors).\n`)
+  process.stdout.write(`\nScored ${c.scored} item(s): ${c.needs_docs} needs_docs, ${c.no_change} no_change. Not scored: ${c.gate_closed} lint gate closed, ${c.replay_incomplete} replay incomplete, ${c.errors} error(s).\n`)
   process.stdout.write(`Flag recall F:        ${pct(scored.flag_recall)}\n`)
   process.stdout.write(`Abstention recall A:  ${pct(scored.abstention_recall)}\n`)
   process.stdout.write(`Headline 2FA/(F+A):   ${scored.headline_refused ? `refused: ${scored.headline_refused}` : num(scored.headline)}\n`)
@@ -429,7 +451,7 @@ function printSummary (scored, runs) {
   process.stdout.write(`Duplicate rate:       ${pct(scored.duplicate_rate)}${scored.duplicates.length ? ` (${scored.duplicates.join(', ')})` : ''}\n`)
   const nearest = runs.reduce((s, r) => s + (r.replay_nearest || 0), 0)
   if (nearest) process.stdout.write(`Replay nearest:       ${nearest} call(s) were answered with the closest recorded call (see each item's replay-log.jsonl).\n`)
-  if (misses) process.stdout.write(`Replay misses:        ${misses} call(s) had no recording; those items saw a "no recording" tool error. Re-record them.\n`)
+  if (misses) process.stdout.write(`Replay misses:        ${misses} call(s) had no recording; those items are REPLAY_INCOMPLETE and not scored. Re-record them with --merge.\n`)
 }
 
 /**
@@ -484,7 +506,7 @@ async function main (argv) {
     }
     items = items.filter((i) => options.cases.includes(i.id))
   }
-  if (!options.controls) ({ fixtures: FIXTURES, recordings: RECORDINGS } = dataDirs(options.items))
+  if (!options.controls) useItemsFile(options.items)
   const skipped = options.controls || options.includeUnconfirmed ? [] : items.filter((i) => !lib.isConfirmed(i))
   items = items.filter((i) => !skipped.includes(i))
 
@@ -581,7 +603,9 @@ async function main (argv) {
     out.write(controlProblems.length ? `CONTROLS FAILED:\n${controlProblems.map((p) => `  ${p}`).join('\n')}\n` : 'CONTROLS PASSED: the positive control flagged an expected page and the negative control stayed silent.\n')
     return controlProblems.length ? 1 : 0
   }
-  return runs.some((r) => r.status !== 'OK') ? 2 : 0
+  // A closed lint gate is a property of the item, not a failed run. Every
+  // other unscored item means the numbers above cover less than the set.
+  return runs.some((r) => r.status !== 'OK' && r.status !== 'GATE_CLOSED') ? 2 : 0
 }
 
-module.exports = { main, materializeControl, controlVerdict, callerSurfaces, parseSurfaces, quotaRefusals }
+module.exports = { main, runItem, useItemsFile, materializeControl, controlVerdict, callerSurfaces, parseSurfaces, quotaRefusals }

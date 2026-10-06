@@ -14,8 +14,8 @@ const path = require('path')
 const { spawn } = require('child_process')
 
 const lib = require('../../evals/doc-strings/doc-impact/lib')
-const { materializeControl, controlVerdict, parseSurfaces, quotaRefusals } = require('../../evals/doc-strings/doc-impact/run')
-const { toItems } = require('../../evals/doc-strings/doc-impact/mine-candidates')
+const { materializeControl, controlVerdict, parseSurfaces, quotaRefusals, runItem, useItemsFile } = require('../../evals/doc-strings/doc-impact/run')
+const { toItems, refPatterns, classifyTickets } = require('../../evals/doc-strings/doc-impact/mine-candidates')
 
 const DIR = path.join(__dirname, '../../evals/doc-strings/doc-impact')
 
@@ -144,11 +144,28 @@ describe('score', () => {
     expect(s.flag_recall).toBeCloseTo(0.5)
     expect(s.abstention_recall).toBeCloseTo(2 / 3)
     expect(s.headline).toBeCloseTo((2 * 0.5 * (2 / 3)) / (0.5 + 2 / 3))
-    expect(s.counts).toEqual({ scored: 5, needs_docs: 2, no_change: 3, excluded: 1 })
+    expect(s.counts).toEqual({ scored: 5, needs_docs: 2, no_change: 3, excluded: 1, gate_closed: 0, replay_incomplete: 0, errors: 1 })
     // Page scores only on the correctly flagged positive: 1 hit of 2 predicted, 2 expected.
     expect(s.page_precision).toBeCloseTo(0.5)
     expect(s.page_recall).toBeCloseTo(0.5)
     expect(s.perItem.find((p) => p.id === 'n4').correct).toBeUndefined()
+  })
+
+  test('a closed lint gate and an incomplete replay are left out of F and A, and counted apart from errors', () => {
+    const base = [
+      { item: pos('p1'), status: 'OK', flagged: true, pages: [P1] },
+      { item: neg('n1'), status: 'OK', flagged: true, pages: [P3] }
+    ]
+    const s = lib.score(base.concat([
+      // Both would raise A to 2/3 or 3/3 if they were scored as abstentions.
+      { item: neg('gate'), status: 'GATE_CLOSED', flagged: false, pages: [] },
+      { item: neg('miss'), status: 'REPLAY_INCOMPLETE', flagged: false, pages: [] },
+      { item: pos('gate-pos'), status: 'GATE_CLOSED', flagged: false, pages: [] }
+    ]))
+    expect(s.flag_recall).toBe(1)
+    expect(s.abstention_recall).toBe(0)
+    expect(s.counts).toEqual({ scored: 2, needs_docs: 1, no_change: 1, excluded: 3, gate_closed: 2, replay_incomplete: 1, errors: 0 })
+    expect(s.perItem.find((p) => p.id === 'gate').correct).toBeUndefined()
   })
 
   test('flag-everything and flag-nothing both score zero', () => {
@@ -341,12 +358,101 @@ describe('seeding and freezing', () => {
     expect(parseSurfaces('jobs:\n  review:\n    with:\n      model: x\n')).toBeNull()
   })
 
-  test('a quota refusal is detected; an ordinary tool error is not', () => {
+  // The docs server's anonymous-quota refusal, verbatim as it arrived in a
+  // recording run: an ordinary tool result (is_error false) whose text is a
+  // JSON error body.
+  const SERVER_REFUSAL = '{"error":"anonymous_quota_exhausted","message":"You have used your 10 free Redpanda docs tool calls for this 24-hour window. Connecting and listing tools are free; only tool calls count. For unlimited tool calls, reconnect this MCP server so your client runs its sign-in flow with a free Redpanda Cloud account. If your client does not prompt you, sign in at https://docs.redpanda.com/login in your default browser first, then reconnect.","limit":10,"resets_at":"2026-10-07T09:20:47.067Z","sign_in_url":"https://docs.redpanda.com/login"}'
+  const DOCS_ANSWER = JSON.stringify({ results: [{ source_url: 'https://docs.redpanda.com/current/manage/cluster-maintenance/manage-throughput/', content: 'Client quotas and the rate limit for produce requests. Sign in to Redpanda Cloud to reconnect.' }] })
+
+  test('the server\'s real quota refusal is detected although it is not an MCP error', () => {
     const calls = [
-      { tool: 'ask_redpanda_question', isError: true, content: [{ type: 'text', text: 'Anonymous tool-call limit reached. Reconnect to sign in.' }] },
+      { tool: 'ask_redpanda_question', isError: false, content: [{ type: 'text', text: SERVER_REFUSAL }] },
+      // Negative controls: real docs answers about quotas, rate limits and
+      // signing in, as JSON and as prose, and an ordinary argument error.
+      { tool: 'ask_redpanda_question', isError: false, content: [{ type: 'text', text: DOCS_ANSWER }] },
+      { tool: 'ask_redpanda_question', isError: false, content: [{ type: 'text', text: 'The rate limit for produce requests is set by client quotas. Reconnect after you sign in.' }] },
       { tool: 'ask_redpanda_question', isError: true, content: [{ type: 'text', text: 'Invalid arguments: question is required' }] },
-      { tool: 'ask_redpanda_question', isError: false, content: [{ type: 'text', text: 'The rate limit for produce requests is set by...' }] }
+      { tool: 'ask_redpanda_question', isError: false, content: [{ type: 'text', text: '{"error":"invalid_arguments","message":"question is required"}' }] },
+      // A server that refuses with an MCP error and plain text instead.
+      { tool: 'ask_redpanda_question', isError: true, content: [{ type: 'text', text: 'Anonymous tool-call limit reached. Reconnect to sign in.' }] }
     ]
-    expect(quotaRefusals(calls)).toEqual([calls[0]])
+    expect(quotaRefusals(calls)).toEqual([calls[0], calls[5]])
+    expect(lib.limitRefusal(calls[0])).toBe(SERVER_REFUSAL)
+    // Recording entries use is_error; the check reads them the same way.
+    const rec = lib.buildRecording({ id: 'x' }, calls, { recordedAt: 't', serverUrl: null, model: 'm' })
+    expect(lib.limitRefusals(rec.calls)).toEqual([rec.calls[0], rec.calls[5]])
+  })
+
+  describe('runItem before any model call', () => {
+    let dir
+    const seItem = (id, label) => item(id, label, { pr_url: 'https://github.com/r/r/pull/1', base_sha: 'a'.repeat(40), head_sha: 'b'.repeat(40) })
+    const findings = (decls) => JSON.stringify({ findings: [], declarations: [], summary: { totalDeclarations: decls, removedSurfaceLines: 0 } })
+    const ctx = () => ({ options: { mcp: 'replay', keepTemp: false, model: 'sonnet' }, prompts: { mcpBudget: 4 }, settings: {}, filter: '.', caseDir: dir })
+    beforeAll(() => {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-impact-runitem-'))
+      for (const [id, decls] of [['gate', 0], ['poisoned', 2]]) {
+        fs.mkdirSync(path.join(dir, 'fixtures', id), { recursive: true })
+        fs.writeFileSync(path.join(dir, 'fixtures', id, 'pr-diff.patch'), 'diff\n')
+        fs.writeFileSync(path.join(dir, 'fixtures', id, 'lint-findings.json'), findings(decls))
+      }
+      fs.mkdirSync(path.join(dir, 'recordings'))
+      fs.writeFileSync(path.join(dir, 'recordings', 'poisoned.json'), JSON.stringify({ item: 'poisoned', calls: [{ tool: 'ask_redpanda_question', arguments: { question: 'q' }, content: [{ type: 'text', text: SERVER_REFUSAL }], is_error: false }] }))
+      useItemsFile(path.join(dir, 'items.json'))
+    })
+    afterAll(() => {
+      useItemsFile(path.join(DIR, 'items.json'))
+      fs.rmSync(dir, { recursive: true, force: true })
+    })
+
+    test('a closed lint gate is GATE_CLOSED, not a free correct abstention', () => {
+      const ev = runItem(seItem('gate', 'no_change'), ctx())
+      expect(ev.status).toBe('GATE_CLOSED')
+      expect(lib.score([{ item: seItem('gate', 'no_change'), ...ev }]).abstention_recall).toBeNull()
+    })
+
+    test('a recording that holds a quota refusal is a harness error in replay', () => {
+      const ev = runItem(seItem('poisoned', 'needs_docs'), ctx())
+      expect(ev.status).toBe('HARNESS_ERROR')
+      expect(ev.notes[0]).toMatch(/refused for its limit; delete it and re-record/)
+    })
+  })
+
+  test('a merge recording keeps every recorded call and adds only new ones', () => {
+    const call = (q, text) => ({ tool: 'ask_redpanda_question', arguments: { question: q, context: 'why' }, content: [{ type: 'text', text }], is_error: false })
+    const old = { item: 'x', recorded_at: '2026-01-01', calls: [call('rack awareness', 'A')] }
+    const fresh = { item: 'x', recorded_at: '2026-02-01', calls: [call('  Rack   Awareness ', 'B'), call('topic properties', 'C')] }
+    const { added, recording } = lib.mergeRecording(old, fresh)
+    expect(added).toBe(1)
+    expect(recording.calls.map((c) => c.content[0].text)).toEqual(['A', 'C'])
+    expect(recording.recorded_at).toBe('2026-02-01')
+    expect(recording.merged_from).toEqual(['2026-01-01'])
+    expect(lib.mergeRecording(recording, { recorded_at: '2026-03-01', calls: [] }).recording.merged_from).toEqual(['2026-01-01', '2026-02-01'])
+  })
+
+  test('a ticket\'s verdict applies only to the PR its description names', () => {
+    const pats = refPatterns('redpanda-operator', 7)
+    const url = 'https://github.com/redpanda-data/redpanda-operator/pull/7'
+    const other = 'https://github.com/redpanda-data/redpanda-operator/pull/6'
+    const t = (key, status, resolution, description, comment, labels = ['auto-doc-impact']) => ({ key, status, resolution, labels, description, comments: comment ? [{ body: comment }] : [] })
+    const tickets = [
+      t('DOC-1', 'Will not implement', null, `Raised for ${url}`),
+      t('DOC-2', 'Will not implement', null, `Raised for ${other}`, `Also ${url}`),
+      t('DOC-3', 'Done', 'Done', `Raised for ${url}`),
+      t('DOC-4', 'Done', "Won't Do", `Raised for ${url}`),
+      t('DOC-5', 'Done', 'Duplicate', `Raised for ${url}`),
+      t('DOC-6', 'Done', 'Done', `Raised for ${other}`, `Also ${url}`)
+    ]
+    const { accepted, wni, pendingAuto } = classifyTickets(tickets, pats)
+    expect(accepted.map((x) => x.key)).toEqual(['DOC-3'])
+    expect(wni.map((x) => x.key)).toEqual(['DOC-1', 'DOC-4'])
+    // An accepted ticket this PR was only appended to is untriaged evidence
+    // for it, never a verdict; a closed one is neither.
+    expect(pendingAuto.map((x) => x.key)).toEqual(['DOC-6'])
+  })
+
+  test('items keep the head production last reviewed as provenance', () => {
+    const [it] = toItems([candidate('redpanda-operator-1', { reviewed_head_sha: 'd'.repeat(40) })], [])
+    expect(it.reviewed_head_sha).toBe('d'.repeat(40))
+    expect(toItems([candidate('redpanda-operator-1')], [])[0].reviewed_head_sha).toBeNull()
   })
 })

@@ -282,9 +282,13 @@ up, for the duplicate rate. A backport is stacked on its original.
 |===
 
 Seeded items also carry provenance the harness does not read:
-`merge_base_sha`, `state`, `backport`, `review_ran` (whether the review
-workflow ran on the PR at all), `production_dispatched` (whether the
-production pass opened or updated a ticket), and `evidence`.
+`merge_base_sha`, `reviewed_head_sha` (the head of the last production
+review that reached the model), `state`, `backport`, `review_ran` (whether
+the review workflow ran on the PR at all), `production_dispatched`
+(whether the production pass opened or updated a ticket), and `evidence`.
+A production run lints the range its own trigger hands it, which is not
+always the PR's merge-base diff, so `production_dispatched` is context for
+a reader, not a reference verdict.
 
 Only items with `label_strength: strong` or a `confirmed_by` value run and
 count by default. `--include-unconfirmed` runs and scores the rest.
@@ -348,6 +352,12 @@ because clones of the large repos take real disk space. The workflow can
 also skip declarations reviewed on earlier pushes; a frozen item always
 covers the whole PR.
 
+When an item's frozen `lint-findings.json` has no declarations and no
+removals, the workflow would never run the pass on it. The item reports
+`GATE_CLOSED` and is left out of every score: a `no_change` item would
+otherwise earn an abstention the pass never made, and a `needs_docs` item
+could never be flagged.
+
 === Recording and replaying the docs MCP server
 
 The pass makes up to four redpanda-docs MCP calls against
@@ -358,8 +368,9 @@ Runs therefore replay recorded responses by default.
   `--mcp-config`, or your own with `--mcp-config <json|file>`), saves the
   item's MCP calls and results from the transcript to
   `doc-impact/recordings/<id>.json`, and snapshots the server's tool list
-  to `doc-impact/mcp-tools.json`. Recording overwrites the item's previous
-  recording.
+  to `doc-impact/mcp-tools.json`. Recording replaces the item's previous
+  recording. Add `--merge` to keep the previous calls and add only the new
+  ones, so a recording grows to cover the calls later runs make.
 * `--mcp replay` (the default) registers `doc-impact/replay-server.js`, a
   small stdio MCP server, under the production server name. It serves the
   snapshot tool list and answers each call from the item's recording:
@@ -373,15 +384,21 @@ Runs therefore replay recorded responses by default.
 +
 Every call lands in the item's `replay-log.jsonl` with its match kind, and
 the table shows nearest and miss counts per item. A miss means the run did
-not see the docs it asked for: re-record that item. An item with no
-recording is a harness error in replay mode.
+not see the docs it asked for. An item with a miss reports
+`REPLAY_INCOMPLETE` and is left out of every score; re-record it with
+`--mcp record --merge`. An item with no recording is a harness error in
+replay mode.
 * `--mcp live` calls the live server and saves nothing.
 
-Anonymous access to the docs MCP server can be limited per network
-address. A recording run treats a tool call the server refused for its
-limit as a harness error and does not save that item's recording, so a
-refusal is never replayed as a docs answer. Re-record those items from a
-signed-in MCP config (`--mcp-config`) or later.
+Anonymous access to the docs MCP server is limited per network address.
+The server answers a call over its limit with an ordinary tool result
+whose JSON body carries an `error` code such as
+`anonymous_quota_exhausted`, not with an MCP error, so the harness reads
+the body of every result. In record and live mode, a refused call makes
+the item a harness error and its recording is not saved. In replay mode,
+a recording that holds a refused call is a harness error before the model
+runs. Record from a signed-in MCP config (`--mcp-config`), or record a
+set larger than the anonymous limit over several windows with `--case`.
 
 === Scoring
 
@@ -402,8 +419,11 @@ as a different URL.
 flagged: the share that repeat a page or a finding name of that item.
 |===
 
-Items with a harness or model error are excluded from every score and make
-the run exit `2`.
+Items with a harness or model error, and `REPLAY_INCOMPLETE` items, are
+left out of every score and make the run exit `2`, because the numbers
+then cover less than the item set. `GATE_CLOSED` items are left out too,
+but they are a property of the item, not a failed run, so they do not
+change the exit code. The summary counts each kind.
 
 === Baseline and prompt changes
 
@@ -428,10 +448,10 @@ nearest-match tier, so check the near and miss counts when you switch.
 
 Run the replay at least twice: the per-item flips between two runs of the
 same prompt are the noise floor, and a change smaller than that is not a
-result. The default run covers only `strong` items. While every `strong`
-item is `needs_docs`, it reports flag recall alone and refuses the
-headline; `--include-unconfirmed` adds the `no_change` items, scored on
-labels no writer has confirmed yet.
+result. The default run covers only `strong` items. When those are all
+one class, it reports that class's recall alone and refuses the headline.
+`--include-unconfirmed` adds every other item, scored on its proposed
+label whether or not a writer has confirmed it.
 
 A PR that changes the PUBLISHED-CONTENT IMPACT section of
 `doc-strings-review.yml` should run the controls and both baselines on its
@@ -464,5 +484,7 @@ after any change to the prompt, the harness, or the recordings.
 `claude` CLI. It covers prompt, tool and gate extraction from the live
 workflow, item validation, URL normalization, the scoring math (including
 flag-everything and flag-nothing scoring 0 and the one-class refusal),
-`stream-json` parsing, the replay server over stdio, and control
-materialization with the real lint.
+`stream-json` parsing, the replay server over stdio, recording merges,
+quota-refusal detection against the server's real refusal body, the
+`GATE_CLOSED` and poisoned-recording paths of an item run, the miner's
+ticket rules, and control materialization with the real lint.

@@ -71,9 +71,10 @@
  *
  * API responses are cached in --cache (default: <out>/cache) for
  * --cache-hours (default 12), so a rerun the same day is cheap but a mine a
- * day later sees new runs, merges and docs PRs. Job-log verdicts are kept
- * for good because a finished job's log never changes. Delete the cache to
- * re-mine from scratch.
+ * day later sees new runs, merges and docs PRs. A verdict read from a job
+ * log is kept for good because a finished job's log never changes; a log
+ * that could not be fetched is asked for again on the next mine. Delete
+ * the cache to re-mine from scratch.
  *
  * Labels, from the dataset table in the plan:
  *   needs_docs / strong  a merged docs or cloud-docs PR that references the
@@ -86,10 +87,12 @@
  *                        (To Do), or the PR was only appended to another
  *                        PR's ticket. The pass itself raised it, so it is
  *                        not ground truth until a writer accepts it
- *   no_change / strong   a ticket for the merged PR closed Will not
- *                        implement; the closing comment is the rationale
- *   needs_docs / weak    a ticket closed Will not implement only because the
- *                        PR never merged: the finding was right for the diff
+ *   no_change / strong   a ticket whose description names the merged PR
+ *                        closed Will not implement; the closing comment is
+ *                        the rationale
+ *   needs_docs / weak    such a ticket closed Will not implement only because
+ *                        the PR never merged: the finding was right for the
+ *                        diff
  *   no_change / weak     the review ran and touched declarations, the PR
  *                        merged at least --settle-days ago, and no DOC ticket
  *                        or docs PR references it
@@ -241,35 +244,40 @@ function jobSteps(repo, runId) {
 function dispatchOutcome(repo, jobId) {
   const key = `dispatch-outcome:v2:${repo}:${jobId}`;
   const f = cacheFile(key);
-  if (fs.existsSync(f)) return JSON.parse(fs.readFileSync(f, 'utf8'));
+  if (fs.existsSync(f)) {
+    const cached = JSON.parse(fs.readFileSync(f, 'utf8'));
+    // Older caches stored a failed fetch too; ask again for those.
+    if (cached.outcome !== 'log_unavailable') return cached;
+  }
   const log = ghRaw(['api', `repos/${ORG}/${repo}/actions/jobs/${jobId}/logs`], { allowFail: true });
-  let outcome = 'log_unavailable';
-  if (log) {
-    const lines = log.split('\n');
-    let groupStart = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (/##\[group\]Run /.test(lines[i])) groupStart = i;
-      if (/^\S+\s+DISPATCH_REPO:/.test(lines[i]) && groupStart >= 0) break;
-      if (i === lines.length - 1) groupStart = -1;
+  // No log, no verdict: a failed fetch (expired log, a non-retried gh
+  // error) is reported but never cached, so the next mine asks again.
+  if (!log) return { outcome: 'log_unavailable' };
+  let outcome;
+  const lines = log.split('\n');
+  let groupStart = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/##\[group\]Run /.test(lines[i])) groupStart = i;
+    if (/^\S+\s+DISPATCH_REPO:/.test(lines[i]) && groupStart >= 0) break;
+    if (i === lines.length - 1) groupStart = -1;
+  }
+  if (groupStart < 0) outcome = 'step_not_found';
+  else {
+    let i = groupStart;
+    while (i < lines.length && !/##\[endgroup\]/.test(lines[i])) i++;
+    const out = [];
+    for (i++; i < lines.length; i++) {
+      const l = lines[i];
+      if (/##\[group\]|Post job cleanup\./.test(l)) break;
+      if (l.includes('\u001b[36;1m')) continue;
+      out.push(l.replace(/^\S+Z\s?/, ''));
     }
-    if (groupStart < 0) outcome = 'step_not_found';
-    else {
-      let i = groupStart;
-      while (i < lines.length && !/##\[endgroup\]/.test(lines[i])) i++;
-      const out = [];
-      for (i++; i < lines.length; i++) {
-        const l = lines[i];
-        if (/##\[group\]|Post job cleanup\./.test(l)) break;
-        if (l.includes('\u001b[36;1m')) continue;
-        out.push(l.replace(/^\S+Z\s?/, ''));
-      }
-      const text = out.join('\n');
-      if (/No high-impact findings/.test(text)) outcome = 'no_findings';
-      else if (/No bot token; skipping dispatch/.test(text)) outcome = 'no_token';
-      else if (/does not match the expected schema/.test(text)) outcome = 'schema_rejected';
-      else if (/##\[error\]/.test(text)) outcome = 'dispatch_error';
-      else outcome = 'dispatched';
-    }
+    const text = out.join('\n');
+    if (/No high-impact findings/.test(text)) outcome = 'no_findings';
+    else if (/No bot token; skipping dispatch/.test(text)) outcome = 'no_token';
+    else if (/does not match the expected schema/.test(text)) outcome = 'schema_rejected';
+    else if (/##\[error\]/.test(text)) outcome = 'dispatch_error';
+    else outcome = 'dispatched';
   }
   const val = { outcome };
   fs.writeFileSync(f, JSON.stringify(val));
@@ -366,6 +374,25 @@ function isContent(file, learned) {
 }
 function mentions(text, pats) { return !!text && pats.some((re) => re.test(text)); }
 
+// Sort the DOC tickets that reference one engineering PR by what they say
+// about it. The router appends a later PR's findings to an existing ticket
+// as a comment, so a ticket's verdict (accepted, or closed Will not
+// implement) is a verdict on the PR named in its DESCRIPTION, not on every
+// PR appended to it: a stacked PR whose stale base showed its parent's
+// changes is appended this way. Only that originating PR takes the
+// ticket's verdict. A ticket closed Won't Do or Duplicate is never
+// accepted, whatever its status column says.
+const isWni = (t) => /will not implement|won't do|won't fix/i.test(`${t.status} ${t.resolution || ''}`);
+const isDup = (t) => /duplicate/i.test(`${t.status} ${t.resolution || ''}`);
+function classifyTickets(tickets, pats) {
+  const originates = (t) => mentions(t.description, pats);
+  const auto = (t) => (t.labels || []).includes('auto-doc-impact');
+  const accepted = tickets.filter((t) => auto(t) && !isWni(t) && !isDup(t) && /in review|done/i.test(t.status) && originates(t));
+  const wni = tickets.filter((t) => isWni(t) && originates(t));
+  const pendingAuto = tickets.filter((t) => auto(t) && !isWni(t) && !isDup(t) && !accepted.includes(t));
+  return { accepted, wni, pendingAuto };
+}
+
 // ---------- csv ----------
 function csvCell(v) {
   const s = v === null || v === undefined ? '' : Array.isArray(v) ? v.join(' ') : String(v);
@@ -415,6 +442,7 @@ function toItems(candidates, existing) {
       base_sha: c.base_sha,
       merge_base_sha: c.merge_base_sha,
       head_sha: c.head_sha,
+      reviewed_head_sha: c.reviewed_head_sha || null,
       state: c.state,
       backport: Boolean(c.backport),
       review_ran: c.review_ran,
@@ -587,16 +615,7 @@ function main() {
     const docsLinks = [...linkedDocs.values()].map(({ info, via }) => ({ ...info, via }));
     const authoredDocs = docsLinks.filter((d) => d.authored_files.length > 0 && d.state !== 'closed');
     const mergedAuthored = authoredDocs.filter((d) => d.state === 'merged');
-    const isWni = (t) => /will not implement|won't do|won't fix/i.test(`${t.status} ${t.resolution || ''}`);
-    const isDup = (t) => /duplicate/i.test(`${t.status} ${t.resolution || ''}`);
-    // The router appends a later PR's findings to an existing ticket as a
-    // comment. Accepting that ticket accepts the finding of the PR named in
-    // its description, not of every PR appended to it (a stacked PR whose
-    // stale base showed its parent's changes is appended this way), so only
-    // the originating PR gets strong from an accepted ticket.
-    const accepted = tickets.filter((t) => (t.labels || []).includes('auto-doc-impact') && /in review|done/i.test(t.status) && mentions(t.description, pats));
-    const wni = tickets.filter(isWni);
-    const pendingAuto = tickets.filter((t) => (t.labels || []).includes('auto-doc-impact') && !isWni(t) && !isDup(t) && !accepted.includes(t));
+    const { accepted, wni, pendingAuto } = classifyTickets(tickets, pats);
     const mergedAt = pr.merged_at ? Date.parse(pr.merged_at) : null;
     const settled = mergedAt && now - mergedAt >= args.settleDays * 86400000;
 
@@ -721,4 +740,4 @@ if (require.main === module) {
   try { main(); } catch (e) { console.error(e.stack || String(e)); process.exit(1); }
 }
 
-module.exports = { toItems, refPatterns, engRefs, isContent, adocToUrl, parseArgs };
+module.exports = { toItems, refPatterns, engRefs, isContent, adocToUrl, parseArgs, classifyTickets };
